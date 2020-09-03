@@ -111,6 +111,7 @@ var (
 		utils.StorageModeFlag,
 		utils.SnapshotModeFlag,
 		utils.NoSeedSnapshotsFlag,
+		utils.HddFlag,
 		utils.ArchiveSyncInterval,
 		utils.DatabaseFlag,
 		utils.LMDBMapSizeFlag,

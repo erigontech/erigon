@@ -127,7 +127,6 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, qui
 	headHeader := rawdb.ReadHeader(db, headHash, from)
 	pool.ResetHead(headHeader.GasLimit, from)
 	canonical := make([]common.Hash, to-from)
-	currentHeaderIdx := uint64(0)
 
 	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
@@ -138,20 +137,19 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, qui
 		if !dbutils.CheckCanonicalKey(k) {
 			return true, nil
 		}
+		blockNumber := binary.BigEndian.Uint64(k[:8])
 
-		if currentHeaderIdx >= to-from { // if header stage is ahead of body stage
+		if blockNumber > to {
 			return false, nil
 		}
 
-		copy(canonical[currentHeaderIdx][:], v)
-		currentHeaderIdx++
+		copy(canonical[blockNumber-from-1][:], v)
 		return true, nil
 	}); err != nil {
 		return err
 	}
 	log.Info("unwind TxPoolUpdate: Reading canonical hashes complete", "hashes", len(canonical))
 	senders := make([][]common.Address, to-from+1)
-	sendersIdx := uint64(0)
 	if err := db.Walk(dbutils.Senders, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
@@ -171,8 +169,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, qui
 		for i := 0; i < len(sendersArray); i++ {
 			copy(sendersArray[i][:], v[i*common.AddressLength:])
 		}
-		senders[sendersIdx] = sendersArray
-		sendersIdx++
+		senders[blockNumber-from-1] = sendersArray
 		return true, nil
 	}); err != nil {
 		log.Error("TxPoolUpdate: walking over sender", "error", err)

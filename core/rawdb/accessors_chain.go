@@ -592,6 +592,23 @@ func ReadBlockByHash(db DatabaseReader, hash common.Hash) *types.Block {
 	return ReadBlock(db, hash, *number)
 }
 
+func ReadHeaderByNumber(db DatabaseReader, number uint64) *types.Header {
+	hash := ReadCanonicalHash(db, number)
+	if hash == (common.Hash{}) {
+		return nil
+	}
+
+	return ReadHeader(db, hash, number)
+}
+
+func ReadHeaderByHash(db DatabaseReader, hash common.Hash) *types.Header {
+	number := ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil
+	}
+	return ReadHeader(db, hash, *number)
+}
+
 // FIXME: implement in Turbo-Geth
 // WriteAncientBlock writes entire block data into ancient store and returns the total written size.
 func WriteAncientBlock(db DatabaseWriter, block *types.Block, receipts types.Receipts, td *big.Int) int {

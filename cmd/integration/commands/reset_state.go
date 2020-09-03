@@ -3,12 +3,13 @@ package commands
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"os"
 	"path"
 	"sync"
 	"text/tabwriter"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -101,6 +102,9 @@ func resetState(_ context.Context) error {
 	if err := resetTxLookup(db); err != nil {
 		return err
 	}
+	if err := resetTxPool(db); err != nil {
+		return err
+	}
 
 	// set genesis after reset all buckets
 	if _, _, err := core.DefaultGenesisBlock().CommitGenesisState(db, false); err != nil {
@@ -139,6 +143,7 @@ func resetExec(db *ethdb.ObjectDatabase) error {
 		dbutils.PlainAccountChangeSetBucket,
 		dbutils.PlainStorageChangeSetBucket,
 		dbutils.PlainContractCodeBucket,
+		dbutils.BlockReceiptsPrefix,
 		dbutils.IncarnationMapBucket,
 		dbutils.CodeBucket,
 	); err != nil {
@@ -191,6 +196,18 @@ func resetTxLookup(db *ethdb.ObjectDatabase) error {
 
 	return nil
 }
+
+func resetTxPool(db ethdb.Putter) error {
+	if err := stages.SaveStageProgress(db, stages.TxPool, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.TxPool, 0, nil); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func printStages(db *ethdb.ObjectDatabase) error {
 	var err error
 	var progress uint64

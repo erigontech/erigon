@@ -164,6 +164,7 @@ type Downloader struct {
 	snapshotMode torrent.SnapshotMode
 
 	datadir     string
+	hdd         bool
 
 	headersState    *stagedsync.StageState
 	headersUnwinder stagedsync.Unwinder
@@ -283,6 +284,10 @@ func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 // DataDir sets the directory where download is allowed to create temporary files
 func (d *Downloader) SetDataDir(datadir string) {
 	d.datadir = datadir
+}
+
+func (d *Downloader) SetHdd(hdd bool) {
+	d.hdd = hdd
 }
 
 func (d *Downloader) SetChainConfig(chainConfig *params.ChainConfig) {
@@ -610,6 +615,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			p.id,
 			d.storageMode,
 			d.datadir,
+			d.hdd,
 			d.quitCh,
 			[]func() error{
 				func() error {
@@ -1573,28 +1579,30 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 		rollbackErr error
 		mode        = d.getMode()
 	)
-	defer func() {
-		if rollback > 0 {
-			lastHeader, lastFastBlock, lastBlock := d.lightchain.CurrentHeader().Number, common.Big0, common.Big0
-			if mode != LightSync && mode != StagedSync {
-				lastFastBlock = d.blockchain.CurrentFastBlock().Number()
-				lastBlock = d.blockchain.CurrentBlock().Number()
+	if mode != StagedSync {
+		defer func() {
+			if rollback > 0 {
+				lastHeader, lastFastBlock, lastBlock := d.lightchain.CurrentHeader().Number, common.Big0, common.Big0
+				if mode != LightSync && mode != StagedSync {
+					lastFastBlock = d.blockchain.CurrentFastBlock().Number()
+					lastBlock = d.blockchain.CurrentBlock().Number()
+				}
+				if err := d.lightchain.SetHead(rollback - 1); err != nil { // -1 to target the parent of the first uncertain block
+					// We're already unwinding the stack, only print the error to make it more visible
+					log.Error("Failed to roll back chain segment", "head", rollback-1, "err", err)
+				}
+				curFastBlock, curBlock := common.Big0, common.Big0
+				if mode != LightSync && mode != StagedSync {
+					curFastBlock = d.blockchain.CurrentFastBlock().Number()
+					curBlock = d.blockchain.CurrentBlock().Number()
+				}
+				log.Warn("Rolled back chain segment",
+					"header", fmt.Sprintf("%d->%d", lastHeader, d.lightchain.CurrentHeader().Number),
+					"fast", fmt.Sprintf("%d->%d", lastFastBlock, curFastBlock),
+					"block", fmt.Sprintf("%d->%d", lastBlock, curBlock), "reason", rollbackErr)
 			}
-			if err := d.lightchain.SetHead(rollback - 1); err != nil { // -1 to target the parent of the first uncertain block
-				// We're already unwinding the stack, only print the error to make it more visible
-				log.Error("Failed to roll back chain segment", "head", rollback-1, "err", err)
-			}
-			curFastBlock, curBlock := common.Big0, common.Big0
-			if mode != LightSync && mode != StagedSync {
-				curFastBlock = d.blockchain.CurrentFastBlock().Number()
-				curBlock = d.blockchain.CurrentBlock().Number()
-			}
-			log.Warn("Rolled back chain segment",
-				"header", fmt.Sprintf("%d->%d", lastHeader, d.lightchain.CurrentHeader().Number),
-				"fast", fmt.Sprintf("%d->%d", lastFastBlock, curFastBlock),
-				"block", fmt.Sprintf("%d->%d", lastBlock, curBlock), "reason", rollbackErr)
-		}
-	}()
+		}()
+	}
 	// Wait for batches of headers to process
 	gotHeaders := false
 
@@ -1634,6 +1642,10 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 						return errStallingPeer
 					}
 				}
+				if mode != StagedSync {
+					// Disable any rollback and return
+					rollback = 0
+				}
 				// If fast or light syncing, ensure promised headers are indeed delivered. This is
 				// needed to detect scenarios where an attacker feeds a bad pivot and then bails out
 				// of delivering the post-pivot blocks that would flag the invalid content.
@@ -1647,8 +1659,6 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 						return errStallingPeer
 					}
 				}
-				// Disable any rollback and return
-				rollback = 0
 				return nil
 			}
 			// Otherwise split the chunk of headers into batches and process them
@@ -1680,7 +1690,6 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
-
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
 								return fmt.Errorf("unwinding all stages to %d: %v", forkBlockNumber, err1)
 							}
@@ -1693,7 +1702,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
 					}
-					if err != nil {
+					if mode != StagedSync && err != nil {
 						// If some headers were inserted, add them too to the rollback list
 						if n > 0 && rollback == 0 {
 							rollback = chunk[0].Number.Uint64()
@@ -1703,11 +1712,13 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					}
 
 					// All verifications passed, track all headers within the alloted limits
-					head := chunk[len(chunk)-1].Number.Uint64()
-					if head-rollback > uint64(fsHeaderSafetyNet) {
-						rollback = head - uint64(fsHeaderSafetyNet)
-					} else {
-						rollback = 1
+					if mode != StagedSync {
+						head := chunk[len(chunk)-1].Number.Uint64()
+						if head-rollback > uint64(fsHeaderSafetyNet) {
+							rollback = head - uint64(fsHeaderSafetyNet)
+						} else {
+							rollback = 1
+						}
 					}
 				}
 				// Unless we're doing light chains, schedule the headers for associated content retrieval

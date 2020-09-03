@@ -14,6 +14,7 @@ type Backend interface {
 	TxPool() *TxPool
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
+	BloomIndexer() *ChainIndexer
 }
 
 func NewEthBackend(eth Backend) *EthBackend {
@@ -27,4 +28,8 @@ func (back *EthBackend) AddLocal(signedtx []byte) ([]byte, error) {
 	}
 
 	return tx.Hash().Bytes(), back.TxPool().AddLocal(tx)
+}
+
+func (back *EthBackend) BloomStatus() (uint64, uint64, common.Hash) {
+	return back.Backend.BloomIndexer().Sections()
 }

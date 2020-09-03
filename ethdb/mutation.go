@@ -3,12 +3,12 @@ package ethdb
 import (
 	"context"
 	"fmt"
-	"github.com/c2h5oh/datasize"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
@@ -92,6 +92,14 @@ func (m *mutation) DiskSize(ctx context.Context) (common.StorageSize, error) {
 }
 
 func (m *mutation) Put(bucket string, key []byte, value []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.puts.set(bucket, key, value)
+	return nil
+}
+
+func (m *mutation) Append(bucket string, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
