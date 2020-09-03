@@ -18,7 +18,7 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 	return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
 }
 
-func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, quit <-chan struct{}) error {
+func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, datadir string, quit <-chan struct{}) error {
 	headHash := rawdb.ReadHeadHeaderHash(stateDB)
 	headNumber := rawdb.ReadHeaderNumber(stateDB, headHash)
 	if s.BlockNumber == *headNumber {
@@ -34,7 +34,7 @@ func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, quit <-chan stru
 		stateDB,
 		dbutils.HeaderPrefix,
 		dbutils.HeaderNumberPrefix,
-		".",
+		datadir,
 		extractHeaders,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{

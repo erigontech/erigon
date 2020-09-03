@@ -69,7 +69,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.db, world.quitCh)
+						return SpawnBlockHashStage(s, world.db, world.datadir, world.quitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return u.Done(world.db)

@@ -34,7 +34,7 @@ func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, engine c
 	// Stage 2
 	if err := SpawnBlockHashStage(&StageState{
 		BlockNumber: num - 1,
-	}, db, nil); err != nil {
+	}, db, "", nil); err != nil {
 		return err
 	}
 
