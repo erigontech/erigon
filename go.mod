@@ -25,7 +25,7 @@ require (
 	github.com/emicklei/dot v0.11.0
 	github.com/ethereum/evmc/v7 v7.3.0
 	github.com/fatih/color v1.7.0
-	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f // indirect
+	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
 	github.com/gin-gonic/gin v1.6.2
 	github.com/go-ole/go-ole v1.2.4 // indirect
@@ -77,6 +77,7 @@ require (
 	golang.org/x/sys v0.0.0-20200615200032-f1bc736245b1
 	golang.org/x/text v0.3.2
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
+	golang.org/x/tools v0.0.0-20191126055441-b0650ceb63d9
 	google.golang.org/grpc v1.30.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v0.0.0-20200825174526-e13e057332a8
 	google.golang.org/protobuf v1.25.0
