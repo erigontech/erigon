@@ -92,18 +92,18 @@ Ethereum uses hexary (radix == 16) radix tree to guide the algorithm of computin
 illustrations, we will use trees with radix 4 (because radix 16 requires many more items for "interesting" features
 to appear). We start from a set of randomly looking keys, 2 bytes (or 8 quaternary digits) each.
 
-![prefix_groups_1](prefix_groups_1.dot.gd.png)
+![prefix_groups_1](prefix_groups_1.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_1`
 
 Next, we sort them in lexicographic order.
 
-![prefix_groups_2](prefix_groups_2.dot.gd.png)
+![prefix_groups_2](prefix_groups_2.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_2`
 
 Next, we introduce the notion of a prefix group. Collection of adjacent keys form a prefix group if these keys share
 the same prefix, and no other keys share this prefix. Here are the prefix groups for our example:
 
-![prefix_groups_3](prefix_groups_3.dot.gd.png)
+![prefix_groups_3](prefix_groups_3.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_3`
 
 The entire collection of keys form one implicit prefix group, with the empty prefix.
@@ -131,7 +131,7 @@ type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*shortNode` cas
 
 This is the illustration of resulting leaf nodes, branch nodes, and extension nodes for our example:
 
-![prefix_groups_4](prefix_groups_4.dot.gd.png)
+![prefix_groups_4](prefix_groups_4.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_4`
 
 ### Separation of keys and the structure
@@ -226,15 +226,15 @@ for the last `LEAF` opcode. If the next key started with the prefix `101` instea
 been `LEAF 4` (because leaves `7` and `8` would have formed a prefix group).
 
 After hashing the first chunk, the tree would look as follows.
-![prefix_groups_5](prefix_groups_5.dot.gd.png)
+![prefix_groups_5](prefix_groups_5.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_5`
 
 If we apply the same to produce the next chunk of 8 leaves, we will get to the following picture.
-![prefix_groups_6](prefix_groups_6.dot.gd.png)
+![prefix_groups_6](prefix_groups_6.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_6`
 
 And, after hashing the two remaining chunks.
-![prefix_groups_7](prefix_groups_7.dot.gd.png)
+![prefix_groups_7](prefix_groups_7.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_7`
 
 Now, if we were given the sequence of these hashes, we need to combine them to produce the root hash.
@@ -265,7 +265,7 @@ example, but we do not know any of the pairs themselves. And we ask someone to r
 the leaves `3`, `8`, `22` and `23`, and enough information to prove to us that the revealed keys and values
 indeed belong to the sequence. Here is the picture that gives the idea of which hashes need to be provided
 together with the selected key-value pairs.
-![prefix_groups_8](prefix_groups_8.dot.gd.png)
+![prefix_groups_8](prefix_groups_8.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_8`
 
 And here is the corresponding structural information:
@@ -299,7 +299,7 @@ We can think of a multiproof as the combination of 3 things:
 ### Generating the structural information from the sequence of keys
 
 In order to devise an algorithm for generating the structural information, we return to this picture
-![prefix_groups_3](prefix_groups_3.dot.gd.png)
+![prefix_groups_3](prefix_groups_3.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_3`
 
 It can then be readily observed that the first item in any prefix group has this property that its common prefix
@@ -453,7 +453,6 @@ pushing `nil` instead. The hash of would-be account leaf node is pushed onto the
 `EMPTYROOT` is a way of placing a special value signifying an empty node onto the node stack. It also pushes the
 corresponding hash onto the hash stack. This opcode is introduced because there is no way of achieving its semantics
 by means of other opcodes.
-
 
 ### Merkle trie root calculation
 

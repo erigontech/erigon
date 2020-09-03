@@ -161,6 +161,7 @@ type Downloader struct {
 
 	storageMode ethdb.StorageMode
 	datadir     string
+	hdd         bool
 
 	headersState    *stagedsync.StageState
 	headersUnwinder stagedsync.Unwinder
@@ -280,6 +281,10 @@ func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 // DataDir sets the directory where download is allowed to create temporary files
 func (d *Downloader) SetDataDir(datadir string) {
 	d.datadir = datadir
+}
+
+func (d *Downloader) SetHdd(hdd bool) {
+	d.hdd = hdd
 }
 
 func (d *Downloader) SetChainConfig(chainConfig *params.ChainConfig) {
@@ -598,6 +603,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			p.id,
 			d.storageMode,
 			d.datadir,
+			d.hdd,
 			d.quitCh,
 			fetchers,
 			txPool,

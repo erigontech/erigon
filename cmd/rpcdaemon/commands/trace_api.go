@@ -50,7 +50,6 @@ func NewTraceAPI(db ethdb.KV, dbReader ethdb.Getter, maxTraces uint64) *TraceAPI
 func retrieveHistory(tx ethdb.Tx, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
 	addrBytes := addr.Bytes()
 	ca := tx.Cursor(dbutils.AccountsHistoryBucket).Prefix(addrBytes)
-
 	var blockNumbers []uint64
 
 	for k, v, err := ca.First(); k != nil; k, v, err = ca.Next() {
@@ -63,18 +62,33 @@ func retrieveHistory(tx ethdb.Tx, addr *common.Address, fromBlock uint64, toBloc
 			return nil, err
 		}
 
-		if numbers[0] > toBlock {
-			break
-		}
+		blockNumbers = append(blockNumbers, numbers...)
+	}
 
-		if numbers[len(numbers)-1] < fromBlock {
+	// cleanup for invalid blocks
+	start := -1
+	end := -1
+	for i, b := range blockNumbers {
+		if b >= fromBlock && b <= toBlock && start == -1 {
+			start = i
 			continue
 		}
 
-		blockNumbers = append(blockNumbers, numbers...)
+		if b > toBlock {
+			end = i
+			break
+		}
+	}
+
+	if start == -1 {
+		return []uint64{}, nil
+	}
+
+	if end == -1 {
+		return blockNumbers[start:], nil
 	}
 	// Remove dublicates
-	return blockNumbers, nil
+	return blockNumbers[start:end], nil
 }
 
 func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
@@ -93,6 +107,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 	var filteredTransactionsHash []common.Hash
 	resp := []interface{}{}
 	var maxTracesCount uint64
+	var offset uint64
+	var skipped uint64
 
 	sort.Slice(req.FromAddress, func(i int, j int) bool {
 		return bytes.Compare(req.FromAddress[i].Bytes(), req.FromAddress[j].Bytes()) == -1
@@ -125,12 +141,12 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 		maxTracesCount = api.maxTraces
 	} else {
 		maxTracesCount = *req.Count
-		if req.After != nil {
-			maxTracesCount += *req.After
-		}
-		if maxTracesCount > api.maxTraces {
-			maxTracesCount = api.maxTraces
-		}
+	}
+
+	if req.After == nil {
+		offset = 0
+	} else {
+		offset = *req.After
 	}
 
 	if err := api.db.View(ctx, func(tx ethdb.Tx) error {
@@ -170,6 +186,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 						} else {
 							to = tx.To()
 						}
+
 						if isFromAddress {
 							if !isAddressInFilter(to, req.ToAddress) {
 								continue
@@ -178,6 +195,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 								filteredTransactionsHash = append(filteredTransactionsHash, tx.Hash())
 							}
 						} else if bytes.Equal(to.Bytes(), addrBytes) {
+							if skipped < offset {
+								skipped++
+								continue
+							}
 							filteredTransactionsHash = append(filteredTransactionsHash, tx.Hash())
 						}
 					}
@@ -194,6 +215,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 							return fmt.Errorf("too many traces found")
 						}
 						return nil
+					}
+					if skipped < offset {
+						skipped++
+						continue
 					}
 					filteredTransactionsHash = append(filteredTransactionsHash, tx.Hash())
 				}
