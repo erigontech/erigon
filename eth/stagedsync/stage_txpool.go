@@ -39,6 +39,8 @@ func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolSt
 			return err
 		}
 	}
+	pending, queued := pool.Stats()
+	log.Info("Transaction stats", "pending", pending, "queued", queued)
 	return s.DoneAndUpdate(db, to)
 }
 
