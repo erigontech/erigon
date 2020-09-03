@@ -112,7 +112,11 @@ func (opts snapshotOpts) For(bucket string) snapshotOpts {
 
 
 func (opts snapshotOpts) Open() KV {
-	snapshotDB,err:=NewLMDB().Path(opts.path).ReadOnly().Open()
+	snapshotDB,err:=NewLMDB().Path(opts.path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
+		}
+	}).Open()
 	if err!=nil {
 		log.Warn("Snapshot db has not opened", "err", err)
 	}
@@ -126,7 +130,7 @@ func (opts snapshotOpts) Open() KV {
 
 func (s *SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
 	if s.snapshotDB==nil {
-		snapshotDB,err:=NewLMDB().Path(s.snapshotPath).ReadOnly().Open()
+		snapshotDB,err:=NewLMDB().Path(s.snapshotPath).Open()
 		if err!=nil {
 			log.Warn("Snapshot db has not opened", "err", err)
 			return s.db.View(ctx, f)
