@@ -125,12 +125,9 @@ clean:
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
 
 devtools:
-	# See: ./cmd/hack/binary-deps/main.go
 	env GOBIN= go install golang.org/x/tools/cmd/stringer
 	env GOBIN= go install github.com/kevinburke/go-bindata/go-bindata
 	env GOBIN= go install github.com/fjl/gencodec
-	env GOBIN= go install google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
-	env GOBIN= go install google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	env GOBIN= go install ./cmd/abigen
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
@@ -140,6 +137,11 @@ bindings:
 	go generate ./tests/contracts/
 	go generate ./cmd/tester/contracts/
 	go generate ./core/state/contracts/
+
+grpc:
+	# See also: ./cmd/hack/binary-deps/main.go
+	env GOBIN= go install google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
+	env GOBIN= go install google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	go generate ./ethdb
 
 simulator-genesis:

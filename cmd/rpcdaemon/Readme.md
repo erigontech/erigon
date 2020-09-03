@@ -33,3 +33,7 @@ It should return something like this (depending on how far your turbo-geth node 
 ````
 {"jsonrpc":"2.0","id":1,"result":823909}
 ````
+
+### For Developers
+
+**Code generation**: `go.mod` stores right version of generators, use `mage grpc` to install it and generate code.
