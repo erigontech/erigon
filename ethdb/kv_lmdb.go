@@ -973,7 +973,6 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 		if err != nil {
 			return err
 		}
-		return c.put(key, value)
 	}
 
 	return c.put(key, value)
