@@ -198,11 +198,6 @@ func resetTxLookup(db *ethdb.ObjectDatabase) error {
 }
 
 func resetTxPool(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
-		dbutils.TxLookupPrefix,
-	); err != nil {
-		return err
-	}
 	if err := stages.SaveStageProgress(db, stages.TxPool, 0, nil); err != nil {
 		return err
 	}
