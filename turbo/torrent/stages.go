@@ -1,7 +1,6 @@
 package torrent
 
 import (
-	"context"
 	"fmt"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
@@ -10,89 +9,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"golang.org/x/sync/errgroup"
 	"time"
 )
 
-//only for mainnet
-const (
-	HeadersSnapshotName = "headers"
-	BodiesSnapshotName = "bodies"
-	StateSnapshotName = "state"
-	ReceiptsSnapshotName = "receipts"
-
-
-	HeadersSnapshotHash = "72a8b7fa55890b1b37b96d91b37adf3689795bf1" //11kk block 1mb chunk
-	BlocksSnapshotHash = "0fc6f416651385df347fe05eefae1c26469585a2" //11kk block 1mb chunk
-	StateSnapshotHash = ""
-	ReceiptsSnapshotHash = ""
-
-)
-
-//var (
-//	HeadersSnapshotHash =metainfo.NewHashFromHex(HeadersSnapshotHashHex)
-//)
-
-
-
-/*
-	{
-		ID:          stages.DownloadHeadersSnapshot,
-		Description: "Download headers snapshot",
-		ExecFunc: func(s *StageState, u Unwinder) error {
-			return SpawnHeadersSnapshotDownload(s,stateDB,datadir, quitCh )
-		},
-		UnwindFunc: func(u *UnwindState, s *StageState) error {
-			return u.Done(stateDB)
-		},
-		Disabled: !snapshotMode.Headers,
-		DisabledDescription: "Experimental stage",
-	},
-
-
-		{
-			ID:          stages.DownloadBodiesSnapshot,
-			Description: "Download bodies snapshot",
-			ExecFunc: func(s *StageState, u Unwinder) error {
-				return nil
-			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return u.Done(stateDB)
-			},
-			Disabled: !snapshotMode.Bodies,
-			DisabledDescription: "Experimental stage",
-		},
-
-		{
-			ID:          stages.DownloadStateStateSnapshot,
-			Description: "Download state snapshot",
-			ExecFunc: func(s *StageState, u Unwinder) error {
-				return nil
-			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return u.Done(stateDB)
-			},
-			Disabled: !snapshotMode.State,
-		},
-		{
-			ID:          stages.DownloadReceiptsSnapshot,
-			Description: "Download receipts snapshot",
-			ExecFunc: func(s *StageState, u Unwinder) error {
-				return nil
-			},
-			UnwindFunc: func(u *UnwindState, s *StageState) error {
-				return u.Done(stateDB)
-			},
-			Disabled: !snapshotMode.Receipts,
-		},
-
- */
-
-
-
 
 func (c *Client) DownloadHeadersSnapshot(db ethdb.Database) error  {
-	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/pieces/"+ HeadersSnapshotName)
+	pc,err:=storage.NewBoltPieceCompletion(c.snapshotsDir +"/pieces/"+ HeadersSnapshotName)
 	if err!=nil {
 		return err
 	}
@@ -106,7 +28,7 @@ func (c *Client) DownloadHeadersSnapshot(db ethdb.Database) error  {
 		Trackers:    Trackers,
 		InfoHash:    metainfo.NewHashFromHex(HeadersSnapshotHash),
 		DisplayName: HeadersSnapshotName,
-		Storage:     storage.NewFileWithCompletion(c.datadir+"/"+HeadersSnapshotName,pc),
+		Storage:     storage.NewFileWithCompletion(c.snapshotsDir+"/"+HeadersSnapshotName,pc),
 		InfoBytes:   infoBytes,
 	})
 
@@ -156,7 +78,7 @@ dwn:
 
 
 func (c *Client) DownloadBodiesSnapshot(db ethdb.Database) error  {
-	pc,err:=storage.NewBoltPieceCompletion(c.datadir+"/pieces/"+ BodiesSnapshotName)
+	pc,err:=storage.NewBoltPieceCompletion(c.snapshotsDir +"/pieces/"+ BodiesSnapshotName)
 	if err!=nil {
 		return err
 	}
@@ -171,7 +93,7 @@ func (c *Client) DownloadBodiesSnapshot(db ethdb.Database) error  {
 		InfoHash:    metainfo.NewHashFromHex(BlocksSnapshotHash),
 		DisplayName: BodiesSnapshotName,
 		ChunkSize:   DefaultChunkSize,
-		Storage:     storage.NewFileWithCompletion(c.datadir+"/"+BodiesSnapshotName,pc),
+		Storage:     storage.NewFileWithCompletion(c.snapshotsDir+"/"+BodiesSnapshotName,pc),
 		InfoBytes: infoBytes,
 	})
 	peerID:=c.cli.PeerID()
