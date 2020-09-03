@@ -197,7 +197,7 @@ func resetTxLookup(db *ethdb.ObjectDatabase) error {
 	return nil
 }
 
-func resetTxPool(db *ethdb.ObjectDatabase) error {
+func resetTxPool(db ethdb.Putter) error {
 	if err := stages.SaveStageProgress(db, stages.TxPool, 0, nil); err != nil {
 		return err
 	}
