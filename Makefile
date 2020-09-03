@@ -125,6 +125,7 @@ clean:
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
 
 devtools:
+	# See: ./cmd/hack/binary-deps/main.go
 	env GOBIN= go install golang.org/x/tools/cmd/stringer
 	env GOBIN= go install github.com/kevinburke/go-bindata/go-bindata
 	env GOBIN= go install github.com/fjl/gencodec
