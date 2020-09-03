@@ -63,18 +63,10 @@ var (
 	CurrentStateBucket     = "CST2"
 	CurrentStateBucketOld1 = "CST"
 
-	//current
-	//key - key + encoded timestamp(block number)
-	//value - account for storage(old/original value)
-	//layout experiment
 	//key - address hash
 	//value - list of block where it's changed
 	AccountsHistoryBucket = "hAT"
 
-	//current
-	//key - address hash + incarnation + storage key hash
-	//value - storage value(common.hash)
-	//layout experiment
 	//key - address hash
 	//value - list of block where it's changed
 	StorageHistoryBucket = "hST"

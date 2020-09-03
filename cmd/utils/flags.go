@@ -406,6 +406,10 @@ var (
 		Usage: "Which database software to use? Currently supported values: bolt & lmdb",
 		Value: "lmdb",
 	}
+	HddFlag = cli.BoolFlag{
+		Name:  "hdd",
+		Usage: "Perform warm up loop during transaction replay stage to reduce the impact of high latency of HDD",
+	}
 	PrivateApiAddr = cli.StringFlag{
 		Name:  "private.api.addr",
 		Usage: "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
@@ -1511,6 +1515,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	}
 
 	cfg.StorageMode = mode
+	cfg.Hdd = ctx.GlobalBool(HddFlag.Name)
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 
 	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheTrieFlag.Name) {

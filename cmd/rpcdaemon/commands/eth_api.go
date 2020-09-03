@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/turbo-geth/eth/filters"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -23,7 +25,7 @@ type EthAPI interface {
 	GetBlockByHash(ctx context.Context, hash common.Hash, fullTx bool) (map[string]interface{}, error)
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
@@ -83,18 +85,11 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 }
 
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
-	var blockNum uint64
-	if blockNr == rpc.LatestBlockNumber || blockNr == rpc.PendingBlockNumber {
-		var err error
-		blockNum, _, err = stages.GetStageProgress(api.dbReader, stages.Execution)
-		if err != nil {
-			return nil, fmt.Errorf("getting latest block number: %v", err)
-		}
-	} else if blockNr == rpc.EarliestBlockNumber {
-		blockNum = 0
-	} else {
-		blockNum = uint64(blockNr.Int64())
+	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+	if err != nil {
+		return nil, err
 	}
+
 	block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %d", blockNum)

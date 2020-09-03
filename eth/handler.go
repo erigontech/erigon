@@ -104,6 +104,7 @@ type ProtocolManager struct {
 
 	mode    downloader.SyncMode // Sync mode passed from the command line
 	datadir string
+	hdd     bool
 }
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
@@ -120,7 +121,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		chaindb:     chaindb,
 		peers:       newPeerSet(),
 		whitelist:   whitelist,
-		stagedSync:  stagedsync.New(),
+		stagedSync:  stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder()),
 		mode:        mode,
 		txsyncCh:    make(chan *txsync),
 		quitSync:    make(chan struct{}),
@@ -168,6 +169,13 @@ func (pm *ProtocolManager) SetDataDir(datadir string) {
 	}
 }
 
+func (pm *ProtocolManager) SetHdd(hdd bool) {
+	pm.hdd = hdd
+	if pm.downloader != nil {
+		pm.downloader.SetHdd(hdd)
+	}
+}
+
 func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase) {
 	sm, err := ethdb.GetStorageModeFromDB(chaindb)
 	if err != nil {
@@ -179,6 +187,7 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 	}
 	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
 	manager.downloader.SetDataDir(manager.datadir)
+	manager.downloader.SetHdd(manager.hdd)
 	manager.downloader.SetStagedSync(manager.stagedSync)
 
 	// Construct the fetcher (short sync)
