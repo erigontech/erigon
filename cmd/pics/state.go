@@ -75,6 +75,7 @@ func constructCodeMap(tds *state.TrieDbState) (map[common.Hash][]byte, error) {
 	if err := f.Close(); err != nil {
 		return nil, err
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
@@ -106,6 +107,7 @@ func keyTape(t *trie.Trie, number int) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
@@ -156,6 +158,7 @@ func hexPalette() error {
 	if err := f.Close(); err != nil {
 		return err
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
@@ -278,6 +281,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 	if err := f.Close(); err != nil {
 		return err
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
@@ -289,6 +293,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 		if err := f1.Close(); err != nil {
 			return err
 		}
+		//nolint:gosec
 		cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(f1.Name()), f1.Name())
 		if output, err := cmd.CombinedOutput(); err != nil {
 			fmt.Printf("error: %v, output: %s\n", err, output)

@@ -53,6 +53,7 @@ func prefixGroups1() {
 	if err := f.Close(); err != nil {
 		panic(err)
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
@@ -81,6 +82,7 @@ func prefixGroups2() {
 	if err := f.Close(); err != nil {
 		panic(err)
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
@@ -176,6 +178,7 @@ q_%x->q_%x;
 	if err := f.Close(); err != nil {
 		panic(err)
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
@@ -214,6 +217,7 @@ func prefixGroups4() {
 	if err := f.Close(); err != nil {
 		panic(err)
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
@@ -255,6 +259,7 @@ func prefixGroups5() {
 	if err := f.Close(); err != nil {
 		panic(err)
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
@@ -297,6 +302,7 @@ func prefixGroups6() {
 	if err := f.Close(); err != nil {
 		panic(err)
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
@@ -341,6 +347,7 @@ func prefixGroups7() {
 	if err := f.Close(); err != nil {
 		panic(err)
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
@@ -386,6 +393,7 @@ func prefixGroups8() {
 	if err := f.Close(); err != nil {
 		panic(err)
 	}
+	//nolint:gosec
 	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
