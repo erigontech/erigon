@@ -203,7 +203,5 @@ Real way how TurboGeth stores accounts value and accounts history is a bit diffe
  
 TurboGeth supports multiple typed cursors, see [AbstractKV.md](./../../ethdb/AbstractKV.md)
 
-Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break 
-long keys into sub-bucket-name and produce `keyAndValueJoinedTogether`. Configuration is in `bucket.go`.    
 
 

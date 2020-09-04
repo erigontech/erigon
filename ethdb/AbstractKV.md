@@ -64,7 +64,10 @@ type Tx interface {
 	// If bucket was created with lmdb.DupSort flag, then cursor with interface CursorDupSort created
 	// If bucket was created with lmdb.DupFixed flag, then cursor with interface CursorDupFixed created
 	// Otherwise - object of interface Cursor created
-	Cursor(bucket string) Cursor
+    //
+    // Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break
+    // long keys into DupSort key/values. See docs for `bucket.go:BucketConfigItem`
+    Cursor(bucket string) Cursor
 	CursorDupSort(bucket string) CursorDupSort   // CursorDupSort - can be used if bucket has lmdb.DupSort flag
 	CursorDupFixed(bucket string) CursorDupFixed // CursorDupSort - can be used if bucket has lmdb.DupFixed flag
 	Get(bucket string, key []byte) (val []byte, err error)
