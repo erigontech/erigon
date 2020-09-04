@@ -1,6 +1,7 @@
 package etl
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strconv"
@@ -50,7 +51,6 @@ func NewSortableBuffer(bufferOptimalSize int) *sortableBuffer {
 		entries:     make([]sortableBufferEntry, 0),
 		size:        0,
 		optimalSize: bufferOptimalSize,
-		comparator:  dbutils.DefaultCmpFunc,
 	}
 }
 
@@ -80,6 +80,9 @@ func (b *sortableBuffer) SetComparator(cmp dbutils.CmpFunc) {
 }
 
 func (b *sortableBuffer) Less(i, j int) bool {
+	if b.comparator == nil {
+		return bytes.Compare(b.entries[i].key, b.entries[j].key) < 0
+	}
 	return b.comparator(b.entries[i].key, b.entries[j].key, b.entries[i].value, b.entries[j].value) < 0
 	//return bytes.Compare(b.entries[i].key, b.entries[j].key) < 0
 }
@@ -97,7 +100,6 @@ func (b *sortableBuffer) Reset() {
 	b.size = 0
 }
 func (b *sortableBuffer) Sort() {
-	defer func(t time.Time) { fmt.Printf("buffers.go:100: %s\n", time.Since(t)) }(time.Now())
 	sort.Stable(b)
 }
 
