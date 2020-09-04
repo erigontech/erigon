@@ -38,6 +38,12 @@ func (d *Downloader) SpawnBodyDownloadStage(
 	// Figure out how many headers we have
 	currentNumber := origin + 1
 	var missingHeader uint64
+	if origin == 10793918 {
+		if err1 := u.UnwindTo(10762076, d.stateDB); err1 != nil {
+			return false, fmt.Errorf("resetting SyncStage Headers to missing header: %w", err1)
+		}
+		return false, nil
+	}
 	// Go over canonical headers and insert them into the queue
 	const N = 65536
 	var hashes [N]common.Hash                         // Canonical hashes of the blocks
