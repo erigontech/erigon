@@ -72,7 +72,7 @@ Then delete this account (SELFDESTRUCT).
 // It produces stream of values and send this stream to `defaultReceiver`
 // It skips storage with incorrect incarnations
 //
-// Each intermediate hash key firstly pass to RetainDecider, only if it returns "false" - such IH can be used.
+// Each intermediate hash key firstly pass to ihFilter, only if it returns "true" - such IH can be used.
 type FlatDBTrieLoader struct {
 	trace                    bool
 	itemPresent              bool
@@ -163,7 +163,7 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 			return err
 		}
 		if isIHSequence {
-			l.k = common.CopyBytes(l.ihK)
+			l.k = l.ihK
 			return nil
 		}
 		if l.k, l.v, err = c.Seek([]byte{}); err != nil {
@@ -294,7 +294,7 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 		l.hashValue = common.CopyBytes(l.ihV)
 	}
 
-	// skip subtree
+	// go to Next Sub-Tree
 	next, ok := dbutils.NextSubtree(l.ihK)
 	if !ok { // no siblings left
 		l.k, l.ihK, l.ihV = nil, nil, nil
@@ -308,7 +308,7 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 		return err
 	}
 	if isIHSequence {
-		l.k = common.CopyBytes(l.ihK)
+		l.k = l.ihK
 		return nil
 	}
 	if l.k, l.v, err = c.Seek(next); err != nil {
@@ -786,8 +786,7 @@ func (c *IHCursor) Seek(seek []byte) ([]byte, []byte, bool, error) {
 		return nil, nil, false, nil
 	}
 
-	//return k, v, isSequence(seek, k), nil
-	return k, v, false, nil
+	return k, v, isSequence(seek, k), nil
 }
 
 /*
@@ -872,12 +871,13 @@ type PrefixFilter struct {
 	keys     sortable
 }
 
-// NewRetainList creates new RetainList
+// NewPrefixFilter decide - can such prefix be used or not.
+// You must call .Sort() before filtering.
 func NewPrefixFilter() *PrefixFilter {
 	return &PrefixFilter{}
 }
 
-// AddKey adds a new key (in KEY encoding) to the list
+// Add adds a new key (in KEY encoding) to the list
 func (rl *PrefixFilter) Add(key []byte) {
 	rl.keys = append(rl.keys, key)
 }
