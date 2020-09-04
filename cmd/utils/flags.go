@@ -1247,12 +1247,6 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 		}
 	}
 	cfg.Bolt = strings.EqualFold(databaseFlag, "bolt") //case insensitive
-
-	snMode, err := torrent.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
-	if err != nil {
-		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-	}
-	cfg.SnapshotMode = snMode
 }
 
 func setSmartCard(ctx *cli.Context, cfg *node.Config) {
@@ -1535,6 +1529,12 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.StorageMode = mode
+	snMode, err := torrent.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
+	if err != nil {
+		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+	cfg.SnapshotMode = snMode
+
 	cfg.Hdd = ctx.GlobalBool(HddFlag.Name)
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 

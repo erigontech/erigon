@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -161,8 +160,6 @@ type Downloader struct {
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
 
 	storageMode  ethdb.StorageMode
-	snapshotMode torrent.SnapshotMode
-
 	datadir     string
 	hdd         bool
 
@@ -270,7 +267,6 @@ func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, c
 		receiptWakeCh: make(chan bool, 1),
 		headerProcCh:  make(chan []*types.Header, 1),
 		quitCh:        make(chan struct{}),
-		storageMode:   sm,
 	}
 	go dl.qosTuner()
 	return dl
@@ -494,27 +490,18 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		return err
 	}
 
-	var origin uint64
-
-	recalculateOrigin:=func() error {
-		origin, err = d.findAncestor(p, height)
-		if err != nil {
-			return err
-		}
-
-		syncStatsChainHeight := d.GetSyncStatsChainHeight()
-		d.syncStatsLock.Lock()
-		if syncStatsChainHeight <= origin || d.syncStatsChainOrigin > origin {
-			d.syncStatsChainOrigin = origin
-		}
-		d.syncStatsLock.Unlock()
-		d.SetSyncStatsChainHeight(height)
-		return nil
-	}
-	err = recalculateOrigin()
-	if err!=nil {
+	origin, err := d.findAncestor(p, height)
+	if err != nil {
 		return err
 	}
+
+	syncStatsChainHeight := d.GetSyncStatsChainHeight()
+	d.syncStatsLock.Lock()
+	if syncStatsChainHeight <= origin || d.syncStatsChainOrigin > origin {
+		d.syncStatsChainOrigin = origin
+	}
+	d.syncStatsLock.Unlock()
+	d.SetSyncStatsChainHeight(height)
 
 	// Ensure our origin point is below any fast sync pivot point
 	pivot := uint64(0)
@@ -617,22 +604,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			d.datadir,
 			d.hdd,
 			d.quitCh,
-			[]func() error{
-				func() error {
-					err = recalculateOrigin()
-					if err!=nil {
-						return err
-					}
-					return d.fetchHeaders(p, origin+1, pivot)
-				}, // Headers are always retrieved
-				func() error {
-					err = recalculateOrigin()
-					if err!=nil {
-						return err
-					}
-					return d.processHeaders(origin+1, pivot, blockNumber)
-				},
-			},
+			fetchers,
 			txPool,
 			poolStart,
 			nil,
@@ -1707,7 +1679,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 						if n > 0 && rollback == 0 {
 							rollback = chunk[0].Number.Uint64()
 						}
-						log.Warn("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
+						log.Debug("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
 						return fmt.Errorf("%w: %v", errInvalidChain, err)
 					}
 

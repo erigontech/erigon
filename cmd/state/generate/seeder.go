@@ -87,10 +87,8 @@ func Seed(pathes []string) error {
 		go func() {
 			tt:=time.Now()
 			peerID:=cl.PeerID()
-			fmt.Println(mi.Magnet("headers",mi.HashInfoBytes()).String())
 			for {
 				fmt.Println(common.Bytes2Hex(peerID[:]),torrents[i].Name(),torrents[i].InfoHash(), torrents[i].PeerConns(),"Swarm", len(torrents[i].KnownSwarm()), torrents[i].Seeding(), time.Since(tt))
-				//fmt.Println("magnet", mi.Magnet("headers",mi.HashInfoBytes()).String())
 				time.Sleep(time.Second*10)
 			}
 		}()
@@ -100,17 +98,4 @@ func Seed(pathes []string) error {
 	signal.Notify(c, os.Interrupt)
 	<-c
 	return nil
-}
-
-
-
-var trackers = [][]string{
-	{
-		"udp://tracker.openbittorrent.com:80",
-		"udp://tracker.publicbt.com:80",
-		"udp://coppersurfer.tk:6969/announce",
-		"udp://open.demonii.com:1337",
-		"udp://tracker.istole.it:6969",
-		"http://bttracker.crunchbanglinux.org:6969/announce",
-	},
 }

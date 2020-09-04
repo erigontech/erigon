@@ -28,17 +28,14 @@ import (
 )
 
 // SyncStage represents the stages of syncronisation in the SyncMode.StagedSync mode
-type SyncStage uint8
+type SyncStage byte
 
 const (
-	DownloadHeadersSnapshot				SyncStage = iota
-	Headers             				 // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+
+	Headers             				 SyncStage = iota // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 	BlockHashes                          // Headers Number are written, fills blockHash => number bucket
-	DownloadBodiesSnapshot
 	Bodies                               // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders                              // "From" recovered from signatures, bodies re-written
-	DownloadStateStateSnapshot
-	DownloadReceiptsSnapshot
 	Execution                            // Executing each block w/o buildinf a trie
 	IntermediateHashes                   // Generate intermediate hashes, calculate the state root hash
 	HashState                            // Apply Keccak256 to all the keys in the state
@@ -50,14 +47,10 @@ const (
 )
 
 var DBKeys = map[SyncStage][]byte{
-	DownloadHeadersSnapshot: []byte("DownloadHeadersSnapshot"),
 	Headers:             []byte("Headers"),
 	BlockHashes:         []byte("BlockHashes"),
-	DownloadBodiesSnapshot: []byte("DownloadBodiesSnapshot"),
 	Bodies:              []byte("Bodies"),
 	Senders:             []byte("Senders"),
-	DownloadStateStateSnapshot:           []byte("DownloadStateStateSnapshot"),
-	DownloadReceiptsSnapshot:           []byte("DownloadReceiptsSnapshot"),
 	Execution:           []byte("Execution"),
 	IntermediateHashes:  []byte("IntermediateHashes"),
 	HashState:           []byte("HashState"),

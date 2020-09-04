@@ -36,10 +36,7 @@ import (
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
 func ReadCanonicalHash(db DatabaseReader, number uint64) common.Hash {
-	data, err := db.Get(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number))
-	if err!=nil && debug.SnapshotDB()!="" {
-		fmt.Println(err)
-	}
+	data, _ := db.Get(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number))
 	if len(data) == 0 {
 		return common.Hash{}
 	}

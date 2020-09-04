@@ -159,9 +159,6 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 	_=torrentClient
 
-	//torrentCli:=torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
-	//t
-
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
 
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
