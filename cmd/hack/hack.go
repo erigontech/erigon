@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -1676,6 +1677,78 @@ func iterateOverCode(chaindata string) error {
 	return nil
 }
 
+func mint(chaindata string, block uint64) error {
+	f, err := os.Create("mint.csv")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	//chiTokenAddr = common.HexToAddress("0x0000000000004946c0e9F43F4Dee607b0eF1fA1c")
+	//mintFuncPrefix = common.FromHex("0xa0712d68")
+	var gwei uint256.Int
+	gwei.SetUint64(1000000000)
+	blockEncoded := dbutils.EncodeBlockNumber(block)
+	canonical := make(map[common.Hash]struct{})
+	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.HeaderPrefix)
+		// This is a mapping of contractAddress + incarnation => CodeHash
+		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			// Skip non relevant records
+			if !dbutils.CheckCanonicalKey(k) {
+				continue
+			}
+			canonical[common.BytesToHash(v)] = struct{}{}
+		}
+		c = tx.Cursor(dbutils.BlockBodyPrefix)
+		// This is a mapping of CodeHash => Byte code
+		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			blockNumber := binary.BigEndian.Uint64(k[:8])
+			blockHash := common.BytesToHash(k[8:])
+			if _, isCanonical := canonical[blockHash]; !isCanonical {
+				continue
+			}
+			bodyRlp, err := rawdb.DecompressBlockBody(v)
+			if err != nil {
+				return err
+			}
+			body := new(types.Body)
+			if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
+				return fmt.Errorf("invalid block body RLP: %w", err)
+			}
+			if len(body.Transactions) == 0 {
+				continue
+			}
+			var ethSpent uint256.Int
+			var ethSpentTotal uint256.Int
+			var totalGas uint256.Int
+			for _, tx := range body.Transactions {
+				ethSpent.SetUint64(tx.Gas())
+				totalGas.Add(&totalGas, &ethSpent)
+				ethSpent.Mul(&ethSpent, tx.GasPrice())
+				ethSpentTotal.Add(&ethSpentTotal, &ethSpent)
+			}
+			ethSpentTotal.Div(&ethSpentTotal, &totalGas)
+			ethSpentTotal.Div(&ethSpentTotal, &gwei)
+			gasPrice := ethSpentTotal.Uint64()
+			fmt.Fprintf(w, "%d, %d\n", blockNumber, gasPrice)
+		}
+		return nil
+	}); err1 != nil {
+		return err1
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -1815,6 +1888,11 @@ func main() {
 	}
 	if *action == "iterateOverCode" {
 		if err := iterateOverCode(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "mint" {
+		if err := mint(*chaindata, uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
