@@ -32,9 +32,10 @@ func TestManagedTx(t *testing.T) {
 	writeDBs, readDBs, closeAll := setupDatabases(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return map[string]dbutils.BucketConfigItem{
 			bucket1: {
-				Flags:      lmdb.DupSort,
-				DupToLen:   4,
-				DupFromLen: 6,
+				Flags:                     lmdb.DupSort,
+				AutoDupSortKeysConversion: true,
+				DupToLen:                  4,
+				DupFromLen:                6,
 			},
 			bucket2: {
 				Flags: 0,
@@ -74,9 +75,6 @@ func TestManagedTx(t *testing.T) {
 		db := db
 		msg := fmt.Sprintf("%T", db)
 
-		t.Run("NoValues iterator "+msg, func(t *testing.T) {
-			testNoValuesIterator(t, db, bucket1)
-		})
 		t.Run("ctx cancel "+msg, func(t *testing.T) {
 			t.Skip("probably need enable after go 1.4")
 			testCtxCancel(t, db, bucket1)
@@ -146,7 +144,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 string) {
 		assert.Equal(1, counter)
 
 		counter = 0
-		if err := ethdb.ForEach(c, func(_, _ []byte) (bool, error) {
+		if err := ethdb.ForEach(c, func(k, _ []byte) (bool, error) {
 			counter++
 			return true, nil
 		}); err != nil {
@@ -202,85 +200,6 @@ func testCtxCancel(t *testing.T, db ethdb.KV, bucket1 string) {
 		}
 	}); err != nil {
 		assert.True(errors.Is(context.DeadlineExceeded, err))
-	}
-}
-
-func testNoValuesIterator(t *testing.T, db ethdb.KV, bucket1 string) {
-	assert, ctx := assert.New(t), context.Background()
-
-	if err := db.View(ctx, func(tx ethdb.Tx) error {
-		c := tx.Cursor(bucket1)
-
-		k, _, err := c.First()
-		assert.NoError(err)
-		assert.Equal([]byte{0}, k)
-		k, _, err = c.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 0, 0, 0, 1}, k)
-		k, _, err = c.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 0, 0, 0, 2}, k)
-		k, _, err = c.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 1}, k)
-		k, _, err = c.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{1}, k)
-		k, _, err = c.Seek([]byte{0, 1})
-		assert.NoError(err)
-		assert.Equal([]byte{1}, k)
-		k, _, err = c.Seek([]byte{2})
-		assert.NoError(err)
-		assert.Equal([]byte{2}, k)
-		k, _, err = c.Seek([]byte{99})
-		assert.NoError(err)
-		assert.Nil(k)
-
-		k, _, err = c.First()
-		assert.NoError(err)
-		assert.Equal([]byte{0}, k)
-		k, _, err = c.Seek([]byte{0, 0, 0, 0})
-		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 0, 0, 0, 1}, k)
-		k, _, err = c.Seek([]byte{2})
-		assert.NoError(err)
-		assert.Equal([]byte{2}, k)
-		k, _, err = c.Seek([]byte{99})
-		assert.NoError(err)
-		assert.Nil(k)
-		c2 := tx.NoValuesCursor(bucket1)
-
-		k, _, err = c2.First()
-		assert.NoError(err)
-		assert.Equal([]byte{0}, k)
-		k, _, err = c2.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 0, 0, 0, 1}, k)
-		k, _, err = c2.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 0, 0, 0, 2}, k)
-		k, _, err = c2.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{0, 0, 1}, k)
-		k, _, err = c2.Next()
-		assert.NoError(err)
-		assert.Equal([]byte{1}, k)
-		k, _, err = c2.Seek([]byte{0, 1})
-		assert.NoError(err)
-		assert.Equal([]byte{1}, k)
-		k, _, err = c2.Seek([]byte{0})
-		assert.NoError(err)
-		assert.Equal([]byte{0}, k)
-		k, _, err = c.Seek([]byte{2})
-		assert.NoError(err)
-		assert.Equal([]byte{2}, k)
-		k, _, err = c.Seek([]byte{99})
-		assert.NoError(err)
-		assert.Nil(k)
-
-		return nil
-	}); err != nil {
-		assert.NoError(err)
 	}
 }
 

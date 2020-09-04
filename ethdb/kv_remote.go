@@ -65,10 +65,6 @@ type RemoteBackend struct {
 	log              log.Logger
 }
 
-type remoteNoValuesCursor struct {
-	*remoteCursor
-}
-
 func (opts remoteOpts) ReadOnly() remoteOpts {
 	return opts
 }
@@ -239,27 +235,31 @@ func (c *remoteCursor) SeekExact(key []byte) (val []byte, err error) {
 	return v, nil
 }
 
+func (c *remoteCursor) Prev() ([]byte, []byte, error) {
+	panic("not implemented")
+}
+
 func (tx *remoteTx) Cursor(bucket string) Cursor {
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket}
 	tx.cursors = append(tx.cursors, c)
 	return c
 }
 
-func (tx *remoteTx) NoValuesCursor(bucket string) NoValuesCursor {
-	return &remoteNoValuesCursor{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
-}
-
-func (c *remoteCursor) Put(key []byte, value []byte) error {
+func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
 	panic("not supported")
 }
 
-func (c *remoteCursor) Append(key []byte, value []byte) error {
+func (tx *remoteTx) CursorDupFixed(bucket string) CursorDupFixed {
 	panic("not supported")
 }
 
-func (c *remoteCursor) Delete(key []byte) error {
-	panic("not supported")
-}
+func (c *remoteCursor) Current() ([]byte, []byte, error)              { panic("not supported") }
+func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
+func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not supported") }
+func (c *remoteCursor) PutCurrent(key, value []byte) error            { panic("not supported") }
+func (c *remoteCursor) Append(key []byte, value []byte) error         { panic("not supported") }
+func (c *remoteCursor) Delete(key []byte) error                       { panic("not supported") }
+func (c *remoteCursor) DeleteCurrent() error                          { panic("not supported") }
 
 func (c *remoteCursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
@@ -316,28 +316,6 @@ func (c *remoteCursor) Next() ([]byte, []byte, error) {
 
 func (c *remoteCursor) Last() ([]byte, []byte, error) {
 	panic("not implemented yet")
-}
-
-func (c *remoteNoValuesCursor) First() ([]byte, uint32, error) {
-	return c.Seek(c.prefix)
-}
-
-func (c *remoteNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
-	k, v, err := c.remoteCursor.Seek(seek)
-	if err != nil {
-		return []byte{}, 0, err
-	}
-
-	return k, uint32(len(v)), err
-}
-
-func (c *remoteNoValuesCursor) Next() ([]byte, uint32, error) {
-	k, v, err := c.remoteCursor.Next()
-	if err != nil {
-		return []byte{}, 0, err
-	}
-
-	return k, uint32(len(v)), err
 }
 
 func (back *RemoteBackend) AddLocal(signedTx []byte) ([]byte, error) {
