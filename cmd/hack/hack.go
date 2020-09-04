@@ -1715,9 +1715,9 @@ func mint(chaindata string, block uint64) error {
 			blockNumber := binary.BigEndian.Uint64(k[:8])
 			blockHash := common.BytesToHash(k[8:])
 			if _, isCanonical := canonical[blockHash]; !isCanonical {
-				continue
+				//continue
 			}
-			if blockNumber != prevBlock+1 {
+			if blockNumber != prevBlock && blockNumber != prevBlock+1 {
 				fmt.Printf("Gap [%d-%d]\n", prevBlock, blockNumber-1)
 			}
 			prevBlock = blockNumber
