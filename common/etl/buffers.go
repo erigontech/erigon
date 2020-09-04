@@ -2,13 +2,10 @@ package etl
 
 import (
 	"bytes"
-	"fmt"
-	"sort"
-	"strconv"
-	"time"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"sort"
+	"strconv"
 )
 
 const (
@@ -80,11 +77,10 @@ func (b *sortableBuffer) SetComparator(cmp dbutils.CmpFunc) {
 }
 
 func (b *sortableBuffer) Less(i, j int) bool {
-	if b.comparator == nil {
-		return bytes.Compare(b.entries[i].key, b.entries[j].key) < 0
+	if b.comparator != nil {
+		return b.comparator(b.entries[i].key, b.entries[j].key, b.entries[i].value, b.entries[j].value) < 0
 	}
-	return b.comparator(b.entries[i].key, b.entries[j].key, b.entries[i].value, b.entries[j].value) < 0
-	//return bytes.Compare(b.entries[i].key, b.entries[j].key) < 0
+	return bytes.Compare(b.entries[i].key, b.entries[j].key) < 0
 }
 
 func (b *sortableBuffer) Swap(i, j int) {
@@ -100,7 +96,6 @@ func (b *sortableBuffer) Reset() {
 	b.size = 0
 }
 func (b *sortableBuffer) Sort() {
-	defer func(t time.Time) { fmt.Printf("buffers.go:103: %s\n", time.Since(t)) }(time.Now())
 	sort.Stable(b)
 }
 
@@ -117,7 +112,6 @@ func NewAppendBuffer(bufferOptimalSize int) *appendSortableBuffer {
 		entries:     make(map[string][]byte),
 		size:        0,
 		optimalSize: bufferOptimalSize,
-		comparator:  dbutils.DefaultCmpFunc,
 	}
 }
 
@@ -155,12 +149,14 @@ func (b *appendSortableBuffer) Sort() {
 	for i := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(i), value: b.entries[i]})
 	}
-	defer func(t time.Time) { fmt.Printf("buffers.go:155: %s\n", time.Since(t)) }(time.Now())
 	sort.Stable(b)
 }
 
 func (b *appendSortableBuffer) Less(i, j int) bool {
-	return b.comparator(b.sortedBuf[i].key, b.sortedBuf[j].key, b.sortedBuf[i].value, b.sortedBuf[j].value) < 0
+	if b.comparator != nil {
+		return b.comparator(b.sortedBuf[i].key, b.sortedBuf[j].key, b.sortedBuf[i].value, b.sortedBuf[j].value) < 0
+	}
+	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
 }
 
 func (b *appendSortableBuffer) Swap(i, j int) {
@@ -189,7 +185,6 @@ func NewOldestEntryBuffer(bufferOptimalSize int) *oldestEntrySortableBuffer {
 		entries:     make(map[string][]byte),
 		size:        0,
 		optimalSize: bufferOptimalSize,
-		comparator:  dbutils.DefaultCmpFunc,
 	}
 }
 
@@ -232,13 +227,14 @@ func (b *oldestEntrySortableBuffer) Sort() {
 	for k, v := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
 	}
-	defer func(t time.Time) { fmt.Printf("buffers.go:232: %s\n", time.Since(t)) }(time.Now())
 	sort.Stable(b)
 }
 
 func (b *oldestEntrySortableBuffer) Less(i, j int) bool {
-	return b.comparator(b.sortedBuf[i].key, b.sortedBuf[j].key, b.sortedBuf[i].value, b.sortedBuf[j].value) < 0
-	//return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
+	if b.comparator != nil {
+		return b.comparator(b.sortedBuf[i].key, b.sortedBuf[j].key, b.sortedBuf[i].value, b.sortedBuf[j].value) < 0
+	}
+	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
 }
 
 func (b *oldestEntrySortableBuffer) Swap(i, j int) {
@@ -248,7 +244,6 @@ func (b *oldestEntrySortableBuffer) Swap(i, j int) {
 func (b *oldestEntrySortableBuffer) Get(i int) sortableBufferEntry {
 	return b.sortedBuf[i]
 }
-
 func (b *oldestEntrySortableBuffer) Reset() {
 	b.sortedBuf = nil
 	b.entries = make(map[string][]byte)
