@@ -265,7 +265,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			var hashCollector func(keyHex []byte, hash []byte) error
 			var collector *etl.Collector
-			unfurl := trie.NewRetainList(0)
+			ihFilter := trie.NewPrefixFilter()
 			if intermediateHashes {
 				collector = etl.NewCollector("", etl.NewSortableBuffer(etl.BufferOptimalSize))
 				hashCollector = func(keyHex []byte, hash []byte) error {
@@ -282,18 +282,18 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 					return nil, nil, err1
 				}
 				for _, accountChange := range accountChangeSet.Changes {
-					unfurl.AddKey(accountChange.Key)
+					ihFilter.Add(accountChange.Key)
 				}
 				storageChangeSet, err2 := changeSetWriter.GetStorageChanges()
 				if err2 != nil {
 					return nil, nil, err2
 				}
 				for _, storageChange := range storageChangeSet.Changes {
-					unfurl.AddKey(storageChange.Key)
+					ihFilter.Add(storageChange.Key)
 				}
 			}
 			loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
-			if err := loader.Reset(unfurl, hashCollector, false); err != nil {
+			if err := loader.Reset(ihFilter, hashCollector, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
 			if hash, err := loader.CalcTrieRoot(dbCopy, nil); err == nil {

@@ -153,7 +153,7 @@ func (fstl *FlatDbSubTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 
 // iteration moves through the database buckets and creates at most
 // one stream item, which is indicated by setting the field fstl.itemPresent to true
-func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) error {
+func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor2, first bool) error {
 	var isIH, isIHSequence bool
 	var minKey []byte
 	var err error
@@ -618,7 +618,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 
 		return true, nil
 	}
-	ih := IH(Filter(filter, tx.CursorDupSort(dbutils.IntermediateTrieHashBucket)))
+	ih := NewIHCursor2(NewFilterCursor2(filter, tx.CursorDupSort(dbutils.IntermediateTrieHashBucket)))
 	if err := fstl.iteration(c, ih, true /* first */); err != nil {
 		return SubTries{}, err
 	}
@@ -822,4 +822,91 @@ func (dr *DefaultReceiver) saveValueAccount(isIH bool, v *accounts.Account, h []
 		}
 	}
 	return nil
+}
+
+// FilterCursor - call .filter() and if it returns false - skip element
+type FilterCursor2 struct {
+	c ethdb.Cursor
+
+	k, kHex, v []byte
+	filter     func(k []byte) (bool, error)
+}
+
+func NewFilterCursor2(filter func(k []byte) (bool, error), c ethdb.Cursor) *FilterCursor2 {
+	return &FilterCursor2{c: c, filter: filter}
+}
+
+func (c *FilterCursor2) _seek(seek []byte) (err error) {
+	c.k, c.v, err = c.c.Seek(seek)
+	if err != nil {
+		return err
+	}
+	if c.k == nil {
+		return nil
+	}
+
+	DecompressNibbles(c.k, &c.kHex)
+	if ok, err := c.filter(c.kHex); err != nil {
+		return err
+	} else if ok {
+		return nil
+	}
+
+	return c._next()
+}
+
+func (c *FilterCursor2) _next() (err error) {
+	c.k, c.v, err = c.c.Next()
+	if err != nil {
+		return err
+	}
+	for {
+		if c.k == nil {
+			return nil
+		}
+
+		DecompressNibbles(c.k, &c.kHex)
+		var ok bool
+		ok, err = c.filter(c.kHex)
+		if err != nil {
+			return err
+		} else if ok {
+			return nil
+		}
+
+		c.k, c.v, err = c.c.Next()
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func (c *FilterCursor2) Seek(seek []byte) ([]byte, []byte, error) {
+	if err := c._seek(seek); err != nil {
+		return []byte{}, nil, err
+	}
+
+	return c.k, c.v, nil
+}
+
+// IHCursor - holds logic related to iteration over IH bucket
+type IHCursor2 struct {
+	c *FilterCursor2
+}
+
+func NewIHCursor2(c *FilterCursor2) *IHCursor2 {
+	return &IHCursor2{c: c}
+}
+
+func (c *IHCursor2) Seek(seek []byte) ([]byte, []byte, bool, error) {
+	k, v, err := c.c.Seek(seek)
+	if err != nil {
+		return []byte{}, nil, false, err
+	}
+
+	if k == nil {
+		return k, v, false, nil
+	}
+
+	return k, v, isSequence(seek, k), nil
 }

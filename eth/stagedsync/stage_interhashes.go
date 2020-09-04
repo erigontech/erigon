@@ -1,10 +1,8 @@
 package stagedsync
 
 import (
-	"bytes"
 	"fmt"
 	"os"
-	"sort"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -82,7 +80,7 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		return collector.Collect(k, common.CopyBytes(hash))
 	}
 	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
-	if err := loader.Reset(trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
+	if err := loader.Reset(trie.NewPrefixFilter(), hashCollector /* HashCollector */, false); err != nil {
 		return err
 	}
 	t := time.Now()
@@ -216,9 +214,9 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, load 
 func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
-	var exclude [][]byte
+	ihFilter := trie.NewPrefixFilter()
 	collect := func(k []byte, _ []byte, _ etl.State, _ etl.LoadNextFunc) error {
-		exclude = append(exclude, k)
+		ihFilter.Add(k)
 		return nil
 	}
 	//collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
@@ -241,12 +239,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	if err := p.Promote(s, s.BlockNumber, to, true /* storage */, collect); err != nil {
 		return err
 	}
-	sort.Slice(exclude, func(i, j int) bool { return bytes.Compare(exclude[i], exclude[j]) < 0 })
-
-	unfurl := trie.NewRetainList(0)
-	for i := range exclude {
-		unfurl.AddKey(exclude[i])
-	}
+	ihFilter.Sort()
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	buf.SetComparator(tx.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket))
 	collector := etl.NewCollector(datadir, buf)
@@ -268,7 +261,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	}
 	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
+	if err := loader.Reset(ihFilter, hashCollector, false); err != nil {
 		return err
 	}
 	t := time.Now()
@@ -324,9 +317,9 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
-	var exclude [][]byte
+	ihFilter := trie.NewPrefixFilter()
 	collect := func(k []byte, _ []byte, _ etl.State, _ etl.LoadNextFunc) error {
-		exclude = append(exclude, k)
+		ihFilter.Add(k)
 		return nil
 	}
 	if err := p.Unwind(s, u, false /* storage */, collect); err != nil {
@@ -335,12 +328,8 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	if err := p.Unwind(s, u, true /* storage */, collect); err != nil {
 		return err
 	}
-	sort.Slice(exclude, func(i, j int) bool { return bytes.Compare(exclude[i], exclude[j]) < 0 })
+	ihFilter.Sort()
 
-	unfurl := trie.NewRetainList(0)
-	for i := range exclude {
-		unfurl.AddKey(exclude[i])
-	}
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -375,7 +364,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	}
 	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
+	if err := loader.Reset(ihFilter, hashCollector, false); err != nil {
 		return err
 	}
 	t := time.Now()

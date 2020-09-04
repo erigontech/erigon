@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -78,7 +79,7 @@ type FlatDBTrieLoader struct {
 	itemType                 StreamItem
 	stateBucket              string
 	intermediateHashesBucket string
-	rd                       RetainDecider
+	ihFilter                 *PrefixFilter
 	accAddrHashWithInc       [40]byte // Concatenation of addrHash of the currently build account with its incarnation encoding
 	nextAccountKey           [32]byte
 	k, v                     []byte
@@ -134,12 +135,12 @@ func NewFlatDBTrieLoader(stateBucket, intermediateHashesBucket string) *FlatDBTr
 }
 
 // Reset prepares the loader for reuse
-func (l *FlatDBTrieLoader) Reset(rd RetainDecider, hc HashCollector, trace bool) error {
+func (l *FlatDBTrieLoader) Reset(ihFilter *PrefixFilter, hc HashCollector, trace bool) error {
 	l.defaultReceiver.Reset(hc, trace)
 	l.hc = hc
 	l.receiver = l.defaultReceiver
 	l.trace = trace
-	l.rd = rd
+	l.ihFilter = ihFilter
 	l.itemPresent = false
 	if l.trace {
 		fmt.Printf("----------\n")
@@ -357,15 +358,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{})
 	}
 
 	c := tx.Cursor(l.stateBucket)
-	var filter = func(k []byte) (bool, error) {
-		if l.rd.Retain(k) {
-			return false, nil
-		}
-
-		return true, nil
-	}
-
-	ih := IH(Filter(filter, tx.CursorDupSort(l.intermediateHashesBucket)))
+	ih := IH(l.ihFilter.Filter, tx.CursorDupSort(l.intermediateHashesBucket))
 	if err := l.iteration(c, ih, true /* first */); err != nil {
 		return EmptyRoot, err
 	}
@@ -701,141 +694,96 @@ func (r *RootHashAggregator) saveValueAccount(isIH bool, v *accounts.Account, h 
 	return nil
 }
 
-// FilterCursor - call .filter() and if it returns false - skip element
-type FilterCursor struct {
-	c ethdb.CursorDupSort
+type Filter func([]byte) bool // returns false - if element must be skipped
 
-	k, kHex, v []byte
-	filter     func(k []byte) (bool, error)
+const IHDupKeyLen = common.HashLength + common.IncarnationLength
+
+// IHCursor - holds logic related to iteration over IH bucket
+type IHCursor struct {
+	c      ethdb.CursorDupSort
+	filter Filter
 }
 
-func Filter(filter func(k []byte) (bool, error), c ethdb.CursorDupSort) *FilterCursor {
-	return &FilterCursor{c: c, filter: filter}
+func IH(f Filter, c ethdb.CursorDupSort) *IHCursor {
+	return &IHCursor{c: c, filter: f}
 }
 
-func (c *FilterCursor) _seek(seek []byte) (err error) {
-	if len(seek) == 0 {
-		c.k, c.v, err = c.c.First()
+func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
+	if len(seek) > IHDupKeyLen {
+		k, v, err = c.c.SeekBothRange(seek[:IHDupKeyLen], seek[IHDupKeyLen:])
 		if err != nil {
-			return err
+			return []byte{}, nil, err
+		}
+		if k == nil {
+			k, v, err = c.c.Next()
+			if err != nil {
+				return []byte{}, nil, err
+			}
 		}
 	} else {
-		var seek1, seek2 []byte
-		if len(seek) > 40 {
-			seek1, seek2 = seek[:40], seek[40:]
-		} else {
-			seek1 = seek
-		}
-		c.k, c.v, err = c.c.Seek(seek1)
+		k, v, err = c.c.Seek(seek)
 		if err != nil {
-			return err
-		}
-		if c.k == nil {
-			return nil
-		}
-
-		if seek2 != nil && bytes.Equal(seek1, c.k) {
-			c.k, c.v, err = c.c.SeekBothRange(seek1, seek2)
-			//fmt.Printf("SeekBothRange %x %x -> %x %x\n", seek1, seek2, c.k, c.v)
-			if err != nil {
-				return err
-			}
-			if c.k == nil {
-				c.k, c.v, err = c.c.Next()
-				if err != nil {
-					return err
-				}
-				//fmt.Printf("Next %x %x\n", c.k, c.v)
-			}
+			return []byte{}, nil, err
 		}
 	}
-	if c.k == nil {
-		return nil
+	if k == nil {
+		return nil, nil, nil
 	}
 
-	if len(c.v) > common.HashLength {
-		keyPart := len(c.v) - common.HashLength
-		c.k = append(common.CopyBytes(c.k), c.v[:keyPart]...)
-		c.v = common.CopyBytes(c.v[keyPart:])
+	if len(v) > common.HashLength {
+		keyPart := len(v) - common.HashLength
+		k = append(k, v[:keyPart]...)
+		v = common.CopyBytes(v[keyPart:])
 	}
-	DecompressNibbles(c.k, &c.kHex)
-	ok, err := c.filter(c.kHex)
-	if err != nil {
-		return err
-	}
-	if ok {
-		//fmt.Printf("After %x -> %x %x\n", seek, c.k, c.v)
-		return nil
+	if c.filter(k) { // if filter allow us, return. otherwise delete and go ahead.
+		return k, v, nil
 	}
 	if err := c.c.DeleteCurrent(); err != nil {
-		return err
+		return []byte{}, nil, err
 	}
 
 	return c._next()
 }
 
-func (c *FilterCursor) _next() (err error) {
-	c.k, c.v, err = c.c.Next()
+func (c *IHCursor) _next() (k, v []byte, err error) {
+	k, v, err = c.c.Next()
 	if err != nil {
-		return err
+		return []byte{}, nil, err
 	}
 	for {
-		if c.k == nil {
-			return nil
+		if k == nil {
+			return nil, nil, nil
 		}
 
-		if len(c.v) > common.HashLength {
-			keyPart := len(c.v) - common.HashLength
-			c.k = append(common.CopyBytes(c.k), c.v[:keyPart]...)
-			c.v = common.CopyBytes(c.v[keyPart:])
+		if len(v) > common.HashLength {
+			keyPart := len(v) - common.HashLength
+			k = append(k, v[:keyPart]...)
+			v = v[keyPart:]
 		}
 
-		DecompressNibbles(c.k, &c.kHex)
-		var ok bool
-		ok, err = c.filter(c.kHex)
-		if err != nil {
-			return err
-		}
-		if ok {
-			return nil
+		if c.filter(k) { // if filter allow us, return. otherwise delete and go ahead.
+			return k, v, nil
 		}
 
 		if err := c.c.DeleteCurrent(); err != nil {
-			return err
+			return []byte{}, nil, err
 		}
 
-		c.k, c.v, err = c.c.Next()
+		k, v, err = c.c.Next()
 		if err != nil {
-			return err
+			return []byte{}, nil, err
 		}
 	}
-}
-
-func (c *FilterCursor) Seek(seek []byte) ([]byte, []byte, error) {
-	if err := c._seek(seek); err != nil {
-		return []byte{}, nil, err
-	}
-
-	return c.k, c.v, nil
-}
-
-// IHCursor - holds logic related to iteration over IH bucket
-type IHCursor struct {
-	c *FilterCursor
-}
-
-func IH(c *FilterCursor) *IHCursor {
-	return &IHCursor{c: c}
 }
 
 func (c *IHCursor) Seek(seek []byte) ([]byte, []byte, bool, error) {
-	k, v, err := c.c.Seek(seek)
+	k, v, err := c._seek(seek)
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
 
 	if k == nil {
-		return k, v, false, nil
+		return nil, nil, false, nil
 	}
 
 	//return k, v, isSequence(seek, k), nil
@@ -917,4 +865,52 @@ func keyIsBefore(k1, k2 []byte) bool {
 	default:
 		return false
 	}
+}
+
+type PrefixFilter struct {
+	lteIndex int // Index of the "LTE" key in the keys slice. Next one is "GT"
+	keys     sortable
+}
+
+// NewRetainList creates new RetainList
+func NewPrefixFilter() *PrefixFilter {
+	return &PrefixFilter{}
+}
+
+// AddKey adds a new key (in KEY encoding) to the list
+func (rl *PrefixFilter) Add(key []byte) {
+	rl.keys = append(rl.keys, key)
+}
+
+func (rl *PrefixFilter) Sort() {
+	sort.Sort(rl.keys)
+	rl.lteIndex = 0
+}
+
+func (rl *PrefixFilter) Filter(prefix []byte) bool {
+	// Adjust "GT" if necessary
+	var gtAdjusted bool
+	for rl.lteIndex < len(rl.keys)-1 && bytes.Compare(rl.keys[rl.lteIndex+1], prefix) <= 0 {
+		rl.lteIndex++
+		gtAdjusted = true
+	}
+	// Adjust "LTE" if necessary (normally will not be necessary)
+	for !gtAdjusted && rl.lteIndex > 0 && bytes.Compare(rl.keys[rl.lteIndex], prefix) > 0 {
+		rl.lteIndex--
+	}
+	if rl.lteIndex < len(rl.keys) {
+		if bytes.HasPrefix(rl.keys[rl.lteIndex], prefix) {
+			return false
+		}
+	}
+	if rl.lteIndex < len(rl.keys)-1 {
+		if bytes.HasPrefix(rl.keys[rl.lteIndex+1], prefix) {
+			return false
+		}
+	}
+	return true
+}
+
+func (rl *PrefixFilter) String() string {
+	return fmt.Sprintf("%x", rl.keys)
 }
