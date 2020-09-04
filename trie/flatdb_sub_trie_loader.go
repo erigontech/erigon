@@ -165,7 +165,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first b
 	dbPrefix := fstl.dbPrefixes[fstl.rangeIdx]
 	mask := fstl.masks[fstl.rangeIdx]
 	// Adjust rangeIdx if needed
-	var cmp int = -1
+	var cmp = -1
 	for cmp != 0 {
 		if minKey == nil {
 			if !first {
@@ -618,7 +618,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 
 		return true, nil
 	}
-	ih := IH(Filter(filter, tx.Cursor(dbutils.IntermediateTrieHashBucket)))
+	ih := IH(Filter(filter, tx.CursorDupSort(dbutils.IntermediateTrieHashBucket)))
 	if err := fstl.iteration(c, ih, true /* first */); err != nil {
 		return SubTries{}, err
 	}

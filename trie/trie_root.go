@@ -162,7 +162,7 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 			return err
 		}
 		if isIHSequence {
-			l.k = l.ihK
+			l.k = common.CopyBytes(l.ihK)
 			return nil
 		}
 		if l.k, l.v, err = c.Seek([]byte{}); err != nil {
@@ -282,15 +282,15 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 	if len(l.ihK) > common.HashLength {
 		l.itemType = SHashStreamItem
 		l.accountKey = nil
-		l.storageKey = l.ihK
-		l.hashValue = l.ihV
+		l.storageKey = common.CopyBytes(l.ihK)
+		l.hashValue = common.CopyBytes(l.ihV)
 		l.storageValue = nil
 	} else {
 		l.itemType = AHashStreamItem
-		l.accountKey = l.ihK
+		l.accountKey = common.CopyBytes(l.ihK)
 		l.storageKey = nil
 		l.storageValue = nil
-		l.hashValue = l.ihV
+		l.hashValue = common.CopyBytes(l.ihV)
 	}
 
 	// skip subtree
@@ -307,7 +307,7 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 		return err
 	}
 	if isIHSequence {
-		l.k = l.ihK
+		l.k = common.CopyBytes(l.ihK)
 		return nil
 	}
 	if l.k, l.v, err = c.Seek(next); err != nil {
@@ -359,17 +359,13 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{})
 	c := tx.Cursor(l.stateBucket)
 	var filter = func(k []byte) (bool, error) {
 		if l.rd.Retain(k) {
-			if l.hc != nil {
-				if err := l.hc(k, nil); err != nil {
-					return false, err
-				}
-			}
 			return false, nil
 		}
 
 		return true, nil
 	}
-	ih := IH(Filter(filter, tx.Cursor(l.intermediateHashesBucket)))
+
+	ih := IH(Filter(filter, tx.CursorDupSort(l.intermediateHashesBucket)))
 	if err := l.iteration(c, ih, true /* first */); err != nil {
 		return EmptyRoot, err
 	}
@@ -707,30 +703,72 @@ func (r *RootHashAggregator) saveValueAccount(isIH bool, v *accounts.Account, h 
 
 // FilterCursor - call .filter() and if it returns false - skip element
 type FilterCursor struct {
-	c ethdb.Cursor
+	c ethdb.CursorDupSort
 
 	k, kHex, v []byte
 	filter     func(k []byte) (bool, error)
 }
 
-func Filter(filter func(k []byte) (bool, error), c ethdb.Cursor) *FilterCursor {
+func Filter(filter func(k []byte) (bool, error), c ethdb.CursorDupSort) *FilterCursor {
 	return &FilterCursor{c: c, filter: filter}
 }
 
 func (c *FilterCursor) _seek(seek []byte) (err error) {
-	c.k, c.v, err = c.c.Seek(seek)
-	if err != nil {
-		return err
+	if len(seek) == 0 {
+		c.k, c.v, err = c.c.First()
+		if err != nil {
+			return err
+		}
+	} else {
+		var seek1, seek2 []byte
+		if len(seek) > 40 {
+			seek1, seek2 = seek[:40], seek[40:]
+		} else {
+			seek1 = seek
+		}
+		c.k, c.v, err = c.c.Seek(seek1)
+		if err != nil {
+			return err
+		}
+		if c.k == nil {
+			return nil
+		}
+
+		if seek2 != nil && bytes.Equal(seek1, c.k) {
+			c.k, c.v, err = c.c.SeekBothRange(seek1, seek2)
+			//fmt.Printf("SeekBothRange %x %x -> %x %x\n", seek1, seek2, c.k, c.v)
+			if err != nil {
+				return err
+			}
+			if c.k == nil {
+				c.k, c.v, err = c.c.Next()
+				if err != nil {
+					return err
+				}
+				//fmt.Printf("Next %x %x\n", c.k, c.v)
+			}
+		}
 	}
 	if c.k == nil {
 		return nil
 	}
 
+	if len(c.v) > common.HashLength {
+		keyPart := len(c.v) - common.HashLength
+		c.k = append(common.CopyBytes(c.k), c.v[:keyPart]...)
+		c.v = common.CopyBytes(c.v[keyPart:])
+	}
 	DecompressNibbles(c.k, &c.kHex)
-	if ok, err := c.filter(c.kHex); err != nil {
+	ok, err := c.filter(c.kHex)
+	if err != nil {
 		return err
-	} else if ok {
+	}
+	if ok {
+		//fmt.Printf("After %x -> %x %x\n", seek, c.k, c.v)
 		return nil
+	}
+	if err := c.c.DeleteCurrent(); err != nil {
+		return err
 	}
 
 	return c._next()
@@ -746,13 +784,24 @@ func (c *FilterCursor) _next() (err error) {
 			return nil
 		}
 
+		if len(c.v) > common.HashLength {
+			keyPart := len(c.v) - common.HashLength
+			c.k = append(common.CopyBytes(c.k), c.v[:keyPart]...)
+			c.v = common.CopyBytes(c.v[keyPart:])
+		}
+
 		DecompressNibbles(c.k, &c.kHex)
 		var ok bool
 		ok, err = c.filter(c.kHex)
 		if err != nil {
 			return err
-		} else if ok {
+		}
+		if ok {
 			return nil
+		}
+
+		if err := c.c.DeleteCurrent(); err != nil {
+			return err
 		}
 
 		c.k, c.v, err = c.c.Next()
@@ -789,7 +838,8 @@ func (c *IHCursor) Seek(seek []byte) ([]byte, []byte, bool, error) {
 		return k, v, false, nil
 	}
 
-	return k, v, isSequence(seek, k), nil
+	//return k, v, isSequence(seek, k), nil
+	return k, v, false, nil
 }
 
 /*

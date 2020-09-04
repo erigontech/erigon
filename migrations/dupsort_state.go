@@ -75,3 +75,33 @@ var dupSortPlainState = Migration{
 		return nil
 	},
 }
+
+var dupSortIH = Migration{
+	Name: "dupsort_ih_test3",
+	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
+			return err
+		}
+		extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+			if len(k) < 40 {
+				return next(k, k, v)
+			}
+
+			return next(k, k[:40], append(k[40:], v...))
+		}
+
+		if err := etl.Transform(
+			db,
+			dbutils.IntermediateTrieHashBucketOld1,
+			dbutils.IntermediateTrieHashBucket,
+			datadir,
+			extractFunc,
+			etl.IdentityLoadFunc,
+			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
+		); err != nil {
+			return err
+		}
+
+		return nil
+	},
+}

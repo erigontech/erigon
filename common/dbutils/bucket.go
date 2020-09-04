@@ -96,8 +96,8 @@ var (
 	StorageChangeSetBucket = "SCS"
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
-	IntermediateTrieHashBucket = "iTh"
-	//IntermediateTrieHashBucket2 = "iTh2"
+	IntermediateTrieHashBucket     = "iTh2"
+	IntermediateTrieHashBucketOld1 = "iTh"
 
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = "DBINFO"
@@ -184,6 +184,7 @@ var Buckets = []string{
 	AccountChangeSetBucket,
 	StorageChangeSetBucket,
 	IntermediateTrieHashBucket,
+	IntermediateTrieHashBucketOld1,
 	DatabaseVerisionKey,
 	HeaderPrefix,
 	HeaderNumberPrefix,
@@ -274,10 +275,10 @@ var BucketsConfigs = BucketsCfg{
 		DupFromLen:                60,
 		DupToLen:                  28,
 	},
-	//IntermediateTrieHashBucket: {
-	//	Flags:               lmdb.DupSort,
-	//	CustomDupComparator: DupCmpSuffix32,
-	//},
+	IntermediateTrieHashBucket: {
+		Flags:               lmdb.DupSort,
+		CustomDupComparator: DupCmpSuffix32,
+	},
 }
 
 func sortBuckets() {
