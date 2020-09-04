@@ -1,11 +1,11 @@
 package etl
 
 import (
-	"bytes"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"sort"
 	"strconv"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
 const (
@@ -48,6 +48,7 @@ func NewSortableBuffer(bufferOptimalSize int) *sortableBuffer {
 		entries:     make([]sortableBufferEntry, 0),
 		size:        0,
 		optimalSize: bufferOptimalSize,
+		comparator:  dbutils.DefaultCmpFunc,
 	}
 }
 
@@ -112,6 +113,7 @@ func NewAppendBuffer(bufferOptimalSize int) *appendSortableBuffer {
 		entries:     make(map[string][]byte),
 		size:        0,
 		optimalSize: bufferOptimalSize,
+		comparator:  dbutils.DefaultCmpFunc,
 	}
 }
 
@@ -156,7 +158,7 @@ func (b *appendSortableBuffer) Less(i, j int) bool {
 	if b.comparator != nil {
 		return b.comparator(b.sortedBuf[i].key, b.sortedBuf[j].key, b.sortedBuf[i].value, b.sortedBuf[j].value) < 0
 	}
-	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
+	return b.comparator(b.sortedBuf[i].key, b.sortedBuf[j].key, b.sortedBuf[i].value, b.sortedBuf[j].value) < 0
 }
 
 func (b *appendSortableBuffer) Swap(i, j int) {
@@ -185,6 +187,7 @@ func NewOldestEntryBuffer(bufferOptimalSize int) *oldestEntrySortableBuffer {
 		entries:     make(map[string][]byte),
 		size:        0,
 		optimalSize: bufferOptimalSize,
+		comparator:  dbutils.DefaultCmpFunc,
 	}
 }
 
