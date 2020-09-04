@@ -180,6 +180,10 @@ func (db *RemoteKV) Update(ctx context.Context, f func(tx Tx) error) (err error)
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
+func (tx *remoteTx) Comparator(bucket string) dbutils.CmpFunc { panic("not implemented yet") }
+func (tx *remoteTx) Cmp(bucket string, a, b []byte) int       { panic("not implemented yet") }
+func (tx *remoteTx) DCmp(bucket string, a, b []byte) int      { panic("not implemented yet") }
+
 func (tx *remoteTx) Commit(ctx context.Context) error {
 	panic("remote db is read-only")
 }

@@ -1,6 +1,7 @@
 package dbutils
 
 import (
+	"bytes"
 	"sort"
 	"strings"
 
@@ -222,8 +223,20 @@ var DeprecatedBuckets = []string{
 type CustomComparator string
 
 const (
+	DefaultCmp     CustomComparator = ""
 	DupCmpSuffix32 CustomComparator = "dup_cmp_suffix32"
 )
+
+type CmpFunc func(k1, k2, v1, v2 []byte) int
+
+func DefaultCmpFunc(k1, k2, v1, v2 []byte) int { return bytes.Compare(k1, k2) }
+func DefaultDupCmpFunc(k1, k2, v1, v2 []byte) int {
+	cmp := bytes.Compare(k1, k2)
+	if cmp == 0 {
+		cmp = bytes.Compare(v1, v2)
+	}
+	return cmp
+}
 
 type BucketsCfg map[string]BucketConfigItem
 type Bucket string
@@ -261,10 +274,9 @@ var BucketsConfigs = BucketsCfg{
 		DupFromLen:                60,
 		DupToLen:                  28,
 	},
-	//IntermediateTrieHashBucket2: {
-	//	Flags:               		lmdb.DupSort,
-	//	CustomDupComparator:	 	DupCmpSuffix32,
-	//	AutoDupSortKeysConversion:  false,
+	//IntermediateTrieHashBucket: {
+	//	Flags:               lmdb.DupSort,
+	//	CustomDupComparator: DupCmpSuffix32,
 	//},
 }
 
