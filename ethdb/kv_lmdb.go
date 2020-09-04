@@ -951,8 +951,11 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 			}
 			return err
 		}
+		if err := c.delCurrent(); err != nil {
+			return err
+		}
 
-		return c.putCurrent(key, value)
+		return c.put(key, value)
 	}
 
 	value = append(key[to:], value...)
@@ -966,9 +969,6 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	}
 
 	if bytes.Equal(v[:from-to], value[:from-to]) {
-		if len(v) == len(value) { // in DupSort case lmdb.Current works only with values of same length
-			return c.putCurrent(key, value)
-		}
 		err = c.delCurrent()
 		if err != nil {
 			return err
