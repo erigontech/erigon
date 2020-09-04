@@ -1,8 +1,10 @@
 package etl
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -95,6 +97,7 @@ func (b *sortableBuffer) Reset() {
 	b.size = 0
 }
 func (b *sortableBuffer) Sort() {
+	defer func(t time.Time) { fmt.Printf("buffers.go:100: %s\n", time.Since(t)) }(time.Now())
 	sort.Stable(b)
 }
 
@@ -149,6 +152,7 @@ func (b *appendSortableBuffer) Sort() {
 	for i := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(i), value: b.entries[i]})
 	}
+	defer func(t time.Time) { fmt.Printf("buffers.go:155: %s\n", time.Since(t)) }(time.Now())
 	sort.Stable(b)
 }
 
@@ -225,6 +229,7 @@ func (b *oldestEntrySortableBuffer) Sort() {
 	for k, v := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
 	}
+	defer func(t time.Time) { fmt.Printf("buffers.go:232: %s\n", time.Since(t)) }(time.Now())
 	sort.Stable(b)
 }
 
@@ -240,6 +245,7 @@ func (b *oldestEntrySortableBuffer) Swap(i, j int) {
 func (b *oldestEntrySortableBuffer) Get(i int) sortableBufferEntry {
 	return b.sortedBuf[i]
 }
+
 func (b *oldestEntrySortableBuffer) Reset() {
 	b.sortedBuf = nil
 	b.entries = make(map[string][]byte)
