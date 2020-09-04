@@ -1423,19 +1423,11 @@ func fixStages(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	var err error
-	var progress uint64
-	var list []uint64
-	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
-		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
-			return err
-		}
-		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
-		list = append(list, progress)
+	if err = stages.SaveStageProgress(db, stages.Headers, 10762076, nil); err != nil {
+		return err
 	}
-	for stage := stages.IntermediateHashes; stage < stages.HashState; stage++ {
-		if err = stages.SaveStageProgress(db, stage, list[int(stage)-1], nil); err != nil {
-			return err
-		}
+	if err = stages.SaveStageProgress(db, stages.BlockHashes, 10762076, nil); err != nil {
+		return err
 	}
 	return nil
 }
