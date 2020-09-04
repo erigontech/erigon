@@ -6,7 +6,7 @@ To build 1 key-value abstraction on top of LMDB and RemoteKV (our own read-only 
 - No internal copies/allocations. It means app must copy keys/values before put to database.  
 - Low-level API: as close to original LMDB as possible.
 - Expose concept of transaction - app-level code can Begin/Commit/Rollback 
-- Concept of DupSort see [/index.md] 
+- If your are not familiar with "DupSort" concept, please read [indices.md](./../docs/programmers_guide/indices.md) first.  
 
 ## Result interface:
 
