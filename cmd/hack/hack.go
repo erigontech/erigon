@@ -1707,7 +1707,7 @@ func mint(chaindata string, block uint64) error {
 			canonical[common.BytesToHash(v)] = struct{}{}
 		}
 		c = tx.Cursor(dbutils.BlockBodyPrefix)
-		// This is a mapping of CodeHash => Byte code
+		var prevBlock uint64
 		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -1717,6 +1717,10 @@ func mint(chaindata string, block uint64) error {
 			if _, isCanonical := canonical[blockHash]; !isCanonical {
 				continue
 			}
+			if blockNumber != prevBlock+1 {
+				fmt.Printf("Gap [%d-%d]\n", prevBlock, blockNumber-1)
+			}
+			prevBlock = blockNumber
 			bodyRlp, err := rawdb.DecompressBlockBody(v)
 			if err != nil {
 				return err
