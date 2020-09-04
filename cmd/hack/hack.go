@@ -1429,6 +1429,9 @@ func fixStages(chaindata string) error {
 	if err = stages.SaveStageProgress(db, stages.BlockHashes, 10762076, nil); err != nil {
 		return err
 	}
+	hash := rawdb.ReadCanonicalHash(db, 10762076)
+	rawdb.WriteHeadHeaderHash(db, hash)
+	rawdb.WriteHeadBlockHash(db, hash)
 	return nil
 }
 
