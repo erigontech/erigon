@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"math/big"
 	"os"
-	"runtime"
 	"testing"
 )
 
@@ -72,30 +71,6 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	}
 }
 
-func TestName22(t *testing.T) {
-	os.RemoveAll(os.TempDir()+"/tm1")
-	//os.RemoveAll(os.TempDir()+"/tm2")
-	db1:=ethdb.NewLMDB().Path(os.TempDir()+"/tm1").MustOpen()
-	db2:=ethdb.NewLMDB().Path(os.TempDir()+"/tm2").ReadOnly().MustOpen()
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	tx,err:=db1.Begin(context.Background(), nil, true)
-	if err!=nil {
-		t.Fatal(err)
-	}
-	tx2,err:=db2.Begin(context.Background(), nil, false)
-	if err!=nil {
-		t.Fatal(err)
-	}
-	c:=tx.Cursor(dbutils.HeaderPrefix)
-	c2:=tx2.Cursor(dbutils.HeaderPrefix)
-	_,_,err1:=c.Seek([]byte("sa"))
-	_,_,err2:=c2.Seek([]byte("sa"))
-	t.Log(err)
-	t.Log(err1)
-	t.Log(err2)
-
-}
 func generateHeaders(n int) []types.Header  {
 	headers:=make([]types.Header, n)
 	for i:=uint64(0);i<uint64(n); i++ {
