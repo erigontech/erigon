@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"

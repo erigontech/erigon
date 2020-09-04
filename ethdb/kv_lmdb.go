@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"runtime"
 	"sync"
 	"time"
 
@@ -240,10 +239,10 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 		return nil, fmt.Errorf("db closed")
 	}
 	isSubTx := parent != nil
-	if !isSubTx {
-		runtime.LockOSThread()
+	//if !isSubTx {
+	//	runtime.LockOSThread()
 		db.wg.Add(1)
-	}
+	//}
 
 	flags := uint(0)
 	if !writable {
@@ -255,9 +254,9 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 	}
 	tx, err := db.env.BeginTxn(parentTx, flags)
 	if err != nil {
-		if !isSubTx {
-			runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
-		}
+		//if !isSubTx {
+		//	runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
+		//}
 		return nil, err
 	}
 	tx.RawRead = true
@@ -431,10 +430,10 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 	}
 	defer func() {
 		tx.tx = nil
-		if !tx.isSubTx {
+		//if !tx.isSubTx {
 			tx.db.wg.Done()
-			runtime.UnlockOSThread()
-		}
+		//	runtime.UnlockOSThread()
+		//}
 	}()
 	tx.closeCursors()
 
@@ -469,10 +468,10 @@ func (tx *lmdbTx) Rollback() {
 	}
 	defer func() {
 		tx.tx = nil
-		if !tx.isSubTx {
+		//if !tx.isSubTx {
 			tx.db.wg.Done()
-			runtime.UnlockOSThread()
-		}
+			//runtime.UnlockOSThread()
+		//}
 	}()
 	tx.closeCursors()
 	tx.tx.Abort()
@@ -572,7 +571,7 @@ func (c *LmdbCursor) initCursor() error {
 	var err error
 	c.cursor, err = tx.tx.OpenCursor(c.tx.db.buckets[c.bucketName].DBI)
 	if err != nil {
-		panic("su-tx")
+		panic("su-tx"+err.Error())
 		return err
 	}
 

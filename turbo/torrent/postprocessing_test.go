@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"math/big"
 	"os"
+	"runtime"
 	"testing"
 )
 
@@ -72,8 +73,12 @@ func TestHeadersGenerateIndex(t *testing.T) {
 }
 
 func TestName22(t *testing.T) {
+	os.RemoveAll(os.TempDir()+"/tm1")
+	//os.RemoveAll(os.TempDir()+"/tm2")
 	db1:=ethdb.NewLMDB().Path(os.TempDir()+"/tm1").MustOpen()
 	db2:=ethdb.NewLMDB().Path(os.TempDir()+"/tm2").ReadOnly().MustOpen()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	tx,err:=db1.Begin(context.Background(), nil, true)
 	if err!=nil {
 		t.Fatal(err)
