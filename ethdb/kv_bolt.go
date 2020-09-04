@@ -196,6 +196,12 @@ func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	})
 }
 
+func (tx *boltTx) Comparator(bucket string) dbutils.CmpFunc {
+	panic("bolt doesn't support comparators")
+}
+func (tx *boltTx) Cmp(bucket string, a, b []byte) int  { panic("bolt doesn't support comparators") }
+func (tx *boltTx) DCmp(bucket string, a, b []byte) int { panic("bolt doesn't support comparators") }
+
 func (tx *boltTx) Commit(ctx context.Context) error {
 	if tx.bolt == nil {
 		return fmt.Errorf("db closed")

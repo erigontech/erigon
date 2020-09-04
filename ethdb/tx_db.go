@@ -21,7 +21,7 @@ type TxDb struct {
 	db       Database
 	tx       Tx
 	ParentTx Tx
-	cursors  map[string]*LmdbCursor
+	cursors  map[string]Cursor
 	len      uint64
 }
 
@@ -60,7 +60,12 @@ func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
 
 func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
-	return m.cursors[bucket].Append(key, value)
+	switch c := m.cursors[bucket].(type) {
+	case CursorDupSort:
+		return c.AppendDup(key, value)
+	default:
+		return c.Append(key, value)
+	}
 }
 
 func (m *TxDb) Delete(bucket string, key []byte) error {
@@ -82,12 +87,9 @@ func (m *TxDb) begin(parent Tx) error {
 	}
 	m.tx = tx
 	m.ParentTx = parent
-	m.cursors = make(map[string]*LmdbCursor, 16)
+	m.cursors = make(map[string]Cursor, 4)
 	for i := range dbutils.Buckets {
-		m.cursors[dbutils.Buckets[i]] = tx.Cursor(dbutils.Buckets[i]).(*LmdbCursor)
-		if err := m.cursors[dbutils.Buckets[i]].initCursor(); err != nil {
-			return err
-		}
+		m.cursors[dbutils.Buckets[i]] = tx.Cursor(dbutils.Buckets[i])
 	}
 	return nil
 }
@@ -224,7 +226,7 @@ func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([
 	return Walk(m.cursors[bucket], startkey, fixedbits, walker)
 }
 
-func Walk(c Cursor, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
+func Walk(c Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	k, v, err := c.Seek(startkey)
 	if err != nil {
@@ -246,7 +248,7 @@ func Walk(c Cursor, startkey []byte, fixedbits int, walker func([]byte, []byte) 
 	return nil
 }
 
-func ForEach(c Cursor, walker func([]byte, []byte) (bool, error)) error {
+func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err

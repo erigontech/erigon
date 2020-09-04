@@ -47,7 +47,7 @@ require (
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/ledgerwatch/bolt v1.4.6-0.20200605053542-69293d8f1d33
-	github.com/ledgerwatch/lmdb-go v1.13.1-0.20200829020305-221d50cfedab
+	github.com/ledgerwatch/lmdb-go v1.15.0
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mattn/go-colorable v0.1.2

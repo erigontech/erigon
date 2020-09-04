@@ -76,6 +76,10 @@ type Tx interface {
 	Rollback()                        // Rollback - abandon all the operations of the transaction instead of saving them.
 
 	BucketSize(name string) (uint64, error)
+
+	Comparator(bucket string) dbutils.CmpFunc
+	Cmp(bucket string, a, b []byte) int
+	DCmp(bucket string, a, b []byte) int
 }
 
 // Interface used for buckets migration, don't use it in usual app code
@@ -126,17 +130,23 @@ type Cursor interface {
 	// Reserve()
 
 	// PutCurrent - replace the item at the current cursor position.
+	// Warning! this method doesn't check order of keys, it means you can insert key in wrong place of bucket
 	//	The key parameter must still be provided, and must match it.
 	//	If using sorted duplicates (#MDB_DUPSORT) the data item must still
 	//	sort into the same place. This is intended to be used when the
 	//	new data is the same size as the old. Otherwise it will simply
 	//	perform a delete of the old record followed by an insert.
-	PutCurrent(key, value []byte) error
+	//
+	//PutCurrent(key, value []byte) error
+
+
 }
 
 type CursorDupSort interface {
 	Cursor
 
+	// SeekBothExact -
+	// second parameter can be nil only if searched key has no duplicates, or return error
 	SeekBothExact(key, value []byte) ([]byte, []byte, error)
 	SeekBothRange(key, value []byte) ([]byte, []byte, error)
 	FirstDup() ([]byte, error)          // FirstDup - position at first data item of current key
