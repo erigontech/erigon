@@ -2,8 +2,9 @@ package migrations
 
 import (
 	"errors"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -149,7 +150,7 @@ func TestMarshalStages(t *testing.T) {
 	require.NoError(err)
 
 	require.Equal(1, len(res))
-	v, ok := res[string(stages.DBKeys[stages.Execution])]
+	v, ok := res[string(stages.Execution)]
 	require.True(ok)
 	require.NotNil(v)
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/turbo/node"
 
 	turbocli "github.com/ledgerwatch/turbo-geth/turbo/cli"
@@ -57,5 +58,9 @@ func runTurboGeth(ctx *cli.Context) {
 	)
 
 	tg := node.New(ctx, sync)
-	tg.Serve()
+	err := tg.Serve()
+
+	if err != nil {
+		log.Error("error while serving a turbo-geth node", "err", err)
+	}
 }
