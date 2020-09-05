@@ -28,7 +28,7 @@ func main() {
 }
 
 func syncStages(ctx *cli.Context) stagedsync.StageBuilders {
-	return stagedsync.StageBuilders(append(
+	return append(
 		stagedsync.DefaultStages(),
 		stagedsync.StageBuilder{
 			ID: stages.SyncStage("0x0F_CUSTOM"),
@@ -48,7 +48,7 @@ func syncStages(ctx *cli.Context) stagedsync.StageBuilders {
 				}
 			},
 		},
-	))
+	)
 }
 
 func runTurboGeth(ctx *cli.Context) {
