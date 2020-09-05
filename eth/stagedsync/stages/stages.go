@@ -71,14 +71,14 @@ func GetStageProgress(db rawdb.DatabaseReader, stage SyncStage) (uint64, []byte,
 
 // SaveStageProgress saves the progress of the given stage in the database
 func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64, stageData []byte) error {
-	return db.Put(dbutils.SyncStageProgress, []byte(stage), marshalData(progress, stageData))
+	return db.Put(dbutils.SyncStageProgress, stage, marshalData(progress, stageData))
 }
 
 // GetStageUnwind retrieves the invalidation for the given stage
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
 func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
-	v, err := db.Get(dbutils.SyncStageUnwind, []byte(stage))
+	v, err := db.Get(dbutils.SyncStageUnwind, stage)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err
 	}
