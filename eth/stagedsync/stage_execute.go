@@ -105,9 +105,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			log.Info("Running a warmup...")
 			count := 0
 			stateCursor := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainStateBucket)
-			totalStateKeys, err := stateCursor.Count()
-			if err != nil {
-				return err
+			totalStateKeys, errCount := stateCursor.Count()
+			if errCount != nil {
+				return errCount
 			}
 			for k, _, err := stateCursor.First(); k != nil; k, _, err = stateCursor.Next() {
 				if err != nil {
@@ -126,9 +126,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 			count = 0
 			codeCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CodeBucket)
-			totalCodeKeys, err := codeCursor.Count()
-			if err != nil {
-				return err
+			totalCodeKeys, errCount := codeCursor.Count()
+			if errCount != nil {
+				return errCount
 			}
 			for k, _, err := codeCursor.First(); k != nil; k, _, err = codeCursor.Next() {
 				if err != nil {
