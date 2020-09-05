@@ -1703,6 +1703,7 @@ func mint(chaindata string, block uint64) error {
 		}
 		c = tx.Cursor(dbutils.BlockBodyPrefix)
 		var prevBlock uint64
+		var burntGas uint64
 		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -1724,22 +1725,29 @@ func mint(chaindata string, block uint64) error {
 			if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
 				return fmt.Errorf("invalid block body RLP: %w", err)
 			}
-			if len(body.Transactions) == 0 {
-				continue
-			}
+			header := rawdb.ReadHeader(db, blockHash, blockNumber)
+			senders := rawdb.ReadSenders(db, blockHash, blockNumber)
 			var ethSpent uint256.Int
 			var ethSpentTotal uint256.Int
 			var totalGas uint256.Int
-			for _, tx := range body.Transactions {
+			count := 0
+			for i, tx := range body.Transactions {
 				ethSpent.SetUint64(tx.Gas())
 				totalGas.Add(&totalGas, &ethSpent)
+				if senders[i] == header.Coinbase {
+					continue // Mining pool sending payout potentially with abnormally low fee, skip
+				}
 				ethSpent.Mul(&ethSpent, tx.GasPrice())
 				ethSpentTotal.Add(&ethSpentTotal, &ethSpent)
+				count++
 			}
-			ethSpentTotal.Div(&ethSpentTotal, &totalGas)
-			ethSpentTotal.Div(&ethSpentTotal, &gwei)
-			gasPrice := ethSpentTotal.Uint64()
-			fmt.Fprintf(w, "%d, %d\n", blockNumber, gasPrice)
+			if count > 0 {
+				ethSpentTotal.Div(&ethSpentTotal, &totalGas)
+				ethSpentTotal.Div(&ethSpentTotal, &gwei)
+				gasPrice := ethSpentTotal.Uint64()
+				burntGas += header.GasUsed
+				fmt.Fprintf(w, "%d, %d\n", burntGas, gasPrice)
+			}
 		}
 		return nil
 	}); err1 != nil {
