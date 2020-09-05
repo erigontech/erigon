@@ -1423,18 +1423,28 @@ func fixStages(chaindata string) error {
 	defer db.Close()
 	var err error
 	var progress uint64
-	var list []uint64
-	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
+	var progresses map[string]uint64
+	for _, stage := range stages.AllStages {
 		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
 		}
 		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
-		list = append(list, progress)
+		progresses[string(stage)] = progress
 	}
-	for stage := stages.IntermediateHashes; stage < stages.HashState; stage++ {
-		if err = stages.SaveStageProgress(db, stage, list[int(stage)-1], nil); err != nil {
-			return err
+
+	ihFound := false
+	var prevStage stages.SyncStage
+	for _, stage := range stages.AllStages {
+		if bytes.Equal(stage, stages.IntermediateHashes) {
+			ihFound = true
 		}
+		if ihFound {
+			if err = stages.SaveStageProgress(db, stage, progresses[string(prevStage)], nil); err != nil {
+				return err
+			}
+		}
+
+		prevStage = stage
 	}
 	return nil
 }
