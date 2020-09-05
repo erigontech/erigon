@@ -30,10 +30,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -1418,37 +1418,6 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func fixStages(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	var err error
-	var progress uint64
-	var progresses map[string]uint64
-	for _, stage := range stages.AllStages {
-		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
-			return err
-		}
-		fmt.Printf("Stage: %d, progress: %d\n", stage, progress)
-		progresses[string(stage)] = progress
-	}
-
-	ihFound := false
-	var prevStage stages.SyncStage
-	for _, stage := range stages.AllStages {
-		if bytes.Equal(stage, stages.IntermediateHashes) {
-			ihFound = true
-		}
-		if ihFound {
-			if err = stages.SaveStageProgress(db, stage, progresses[string(prevStage)], nil); err != nil {
-				return err
-			}
-		}
-
-		prevStage = stage
-	}
-	return nil
-}
-
 func changeSetStats(chaindata string, block1, block2 uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -1686,6 +1655,90 @@ func iterateOverCode(chaindata string) error {
 	return nil
 }
 
+func mint(chaindata string, block uint64) error {
+	f, err := os.Create("mint.csv")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	//chiTokenAddr = common.HexToAddress("0x0000000000004946c0e9F43F4Dee607b0eF1fA1c")
+	//mintFuncPrefix = common.FromHex("0xa0712d68")
+	var gwei uint256.Int
+	gwei.SetUint64(1000000000)
+	blockEncoded := dbutils.EncodeBlockNumber(block)
+	canonical := make(map[common.Hash]struct{})
+	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.HeaderPrefix)
+		// This is a mapping of contractAddress + incarnation => CodeHash
+		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			// Skip non relevant records
+			if !dbutils.CheckCanonicalKey(k) {
+				continue
+			}
+			canonical[common.BytesToHash(v)] = struct{}{}
+		}
+		c = tx.Cursor(dbutils.BlockBodyPrefix)
+		var prevBlock uint64
+		var burntGas uint64
+		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			blockNumber := binary.BigEndian.Uint64(k[:8])
+			blockHash := common.BytesToHash(k[8:])
+			if _, isCanonical := canonical[blockHash]; !isCanonical {
+				continue
+			}
+			if blockNumber != prevBlock && blockNumber != prevBlock+1 {
+				fmt.Printf("Gap [%d-%d]\n", prevBlock, blockNumber-1)
+			}
+			prevBlock = blockNumber
+			bodyRlp, err := rawdb.DecompressBlockBody(v)
+			if err != nil {
+				return err
+			}
+			body := new(types.Body)
+			if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
+				return fmt.Errorf("invalid block body RLP: %w", err)
+			}
+			header := rawdb.ReadHeader(db, blockHash, blockNumber)
+			senders := rawdb.ReadSenders(db, blockHash, blockNumber)
+			var ethSpent uint256.Int
+			var ethSpentTotal uint256.Int
+			var totalGas uint256.Int
+			count := 0
+			for i, tx := range body.Transactions {
+				ethSpent.SetUint64(tx.Gas())
+				totalGas.Add(&totalGas, &ethSpent)
+				if senders[i] == header.Coinbase {
+					continue // Mining pool sending payout potentially with abnormally low fee, skip
+				}
+				ethSpent.Mul(&ethSpent, tx.GasPrice())
+				ethSpentTotal.Add(&ethSpentTotal, &ethSpent)
+				count++
+			}
+			if count > 0 {
+				ethSpentTotal.Div(&ethSpentTotal, &totalGas)
+				ethSpentTotal.Div(&ethSpentTotal, &gwei)
+				gasPrice := ethSpentTotal.Uint64()
+				burntGas += header.GasUsed
+				fmt.Fprintf(w, "%d, %d\n", burntGas, gasPrice)
+			}
+		}
+		return nil
+	}); err1 != nil {
+		return err1
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -1803,11 +1856,6 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
-	if *action == "fixStages" {
-		if err := fixStages(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
 	if *action == "changeSetStats" {
 		if err := changeSetStats(*chaindata, uint64(*block), uint64(*block)+uint64(*rewind)); err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -1825,6 +1873,11 @@ func main() {
 	}
 	if *action == "iterateOverCode" {
 		if err := iterateOverCode(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "mint" {
+		if err := mint(*chaindata, uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
