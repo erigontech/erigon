@@ -54,6 +54,7 @@ type remoteCursor struct {
 	ctx                context.Context
 	prefix             []byte
 	stream             remote.KV_SeekClient
+	streamCancelFn     context.CancelFunc // this function needs to be called to close the stream
 	tx                 *remoteTx
 	bucketName         string
 }
@@ -186,7 +187,7 @@ func (tx *remoteTx) Commit(ctx context.Context) error {
 func (tx *remoteTx) Rollback() {
 	for _, c := range tx.cursors {
 		if c.stream != nil {
-			_ = c.stream.CloseSend()
+			c.streamCancelFn()
 			c.stream = nil
 		}
 	}
@@ -217,7 +218,7 @@ func (tx *remoteTx) Get(bucket string, key []byte) (val []byte, err error) {
 			if v.stream == nil {
 				return
 			}
-			_ = v.stream.CloseSend()
+			v.streamCancelFn()
 		}
 	}()
 
@@ -269,13 +270,15 @@ func (c *remoteCursor) First() ([]byte, []byte, error) {
 // .Next() - does request streaming (if configured by user)
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if c.stream != nil {
-		_ = c.stream.CloseSend()
+		c.streamCancelFn() // This will close the stream and free resources
 		c.stream = nil
 	}
 	c.initialized = true
 
 	var err error
-	c.stream, err = c.tx.db.remoteKV.Seek(c.ctx)
+	var streamCtx context.Context
+	streamCtx, c.streamCancelFn = context.WithCancel(c.ctx) // We create child context for the stream so we can cancel it to prevent leak
+	c.stream, err = c.tx.db.remoteKV.Seek(streamCtx)
 	if err != nil {
 		return []byte{}, nil, err
 	}
