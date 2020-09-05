@@ -16,7 +16,7 @@ type StageParameters struct {
 	chainConfig      *params.ChainConfig
 	chainContext     core.ChainContext
 	vmConfig         *vm.Config
-	db               ethdb.Database
+	DB               ethdb.Database
 	tx               ethdb.Database
 	pid              string
 	hdd              bool
@@ -57,7 +57,7 @@ func DefaultStages() StageBuilders {
 						return SpawnHeaderDownloadStage(s, u, world.d, world.headersFetchers)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						return u.Done(world.DB)
 					},
 				}
 			},
@@ -69,10 +69,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.db, world.datadir, world.quitCh)
+						return SpawnBlockHashStage(s, world.DB, world.datadir, world.quitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						return u.Done(world.DB)
 					},
 				}
 			},
@@ -87,7 +87,7 @@ func DefaultStages() StageBuilders {
 						return spawnBodyDownloadStage(s, u, world.d, world.pid, world.prefetchedBlocks)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return unwindBodyDownloadStage(u, world.db)
+						return unwindBodyDownloadStage(u, world.DB)
 					},
 				}
 			},
