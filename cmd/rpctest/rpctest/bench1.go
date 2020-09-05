@@ -128,34 +128,36 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool) {
 
 					}
 
-					for nextKeyG != nil {
-						var srGeth DebugStorageRange
-						res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKeyG), &srGeth)
-						resultsCh <- res
-						if res.Err != nil {
-							fmt.Printf("Could not get storageRange (geth): %s: %v\n", tx.Hash, res.Err)
+					if needCompare {
+						for nextKeyG != nil {
+							var srGeth DebugStorageRange
+							res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKeyG), &srGeth)
+							resultsCh <- res
+							if res.Err != nil {
+								fmt.Printf("Could not get storageRange (geth): %s: %v\n", tx.Hash, res.Err)
+								return
+							}
+							if srGeth.Error != nil {
+								fmt.Printf("Error getting storageRange (geth): %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
+								break
+							} else {
+								for k, v := range srGeth.Result.Storage {
+									smg[k] = v
+									if v.Key == nil {
+										fmt.Printf("%x: %x", k, v)
+									}
+								}
+								nextKeyG = srGeth.Result.NextKey
+							}
+						}
+						if !compareStorageRanges(sm, smg) {
+							fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smg))
+							fmt.Printf("================sm\n")
+							printStorageRange(sm)
+							fmt.Printf("================smg\n")
+							printStorageRange(smg)
 							return
 						}
-						if srGeth.Error != nil {
-							fmt.Printf("Error getting storageRange (geth): %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
-							break
-						} else {
-							for k, v := range srGeth.Result.Storage {
-								smg[k] = v
-								if v.Key == nil {
-									fmt.Printf("%x: %x", k, v)
-								}
-							}
-							nextKeyG = srGeth.Result.NextKey
-						}
-					}
-					if !compareStorageRanges(sm, smg) {
-						fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smg))
-						fmt.Printf("================sm\n")
-						printStorageRange(sm)
-						fmt.Printf("================smg\n")
-						printStorageRange(smg)
-						return
 					}
 				}
 			}
