@@ -30,10 +30,10 @@ func syncStages(ctx *cli.Context) stagedsync.StageBuilders {
 	return stagedsync.StageBuilders(append(
 		stagedsync.DefaultStages(),
 		stagedsync.StageBuilder{
-			ID: stages.SyncStage(0x0F),
+			ID: stages.SyncStage("0x0F_CUSTOM"),
 			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
 				return &stagedsync.Stage{
-					ID:          stages.SyncStage(0x0F),
+					ID:          stages.SyncStage("0x0F_CUSTOM"),
 					Description: "Custom Stage",
 					ExecFunc: func(s *stagedsync.StageState, _ stagedsync.Unwinder) error {
 						fmt.Println("hello from the custom stage", ctx.String(flag.Name))
