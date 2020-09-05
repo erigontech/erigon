@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"net/http"
 	"os"
 	"path"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 )
 
 var routes map[string]string

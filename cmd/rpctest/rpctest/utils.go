@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 func compareBlocks(b, bg *EthBlockByNumber) bool {
@@ -425,6 +426,7 @@ func print(client *http.Client, url, request string) {
 }
 
 func setRoutes(tgUrl, gethURL string) {
+	routes = make(map[string]string)
 	routes[TurboGeth] = tgUrl
 	routes[Geth] = gethURL
 }
