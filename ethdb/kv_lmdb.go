@@ -617,6 +617,14 @@ func (c *LmdbCursor) initCursor() error {
 	return nil
 }
 
+func (c *LmdbCursor) Count() (uint64, error) {
+	st, err := c.tx.tx.Stat(c.bucketCfg.DBI)
+	if err != nil {
+		return 0, err
+	}
+	return st.Entries, nil
+}
+
 func (c *LmdbCursor) First() ([]byte, []byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {

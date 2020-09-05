@@ -104,17 +104,45 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		if warmup {
 			log.Info("Running a warmup...")
 			count := 0
-			if err := stateDB.Walk(dbutils.PlainStateBucket, nil, 0, func(_, _ []byte) (bool, error) {
-				if err := common.Stopped(quit); err != nil {
-					return false, nil
+			stateCursor := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainStateBucket)
+			totalStateKeys, err := stateCursor.Count()
+			if err != nil {
+				return err
+			}
+			for k, _, err := stateCursor.First(); k != nil; k, _, err = stateCursor.Next() {
+				if err != nil {
+					return err
 				}
 				count++
-				if count%10000000 == 0 {
-					log.Info("Warmed up", "keys", count)
+
+				select {
+				default:
+				case <-quit:
+					return common.ErrStopped
+				case <-logEvery.C:
+					log.Info("Warmed up state", "progress", fmt.Sprintf("%.2fM/%.2fM", float64(count)/1_000_000, float64(totalStateKeys)/1_000_000))
 				}
-				return true, nil
-			}); err != nil {
+			}
+
+			count = 0
+			codeCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CodeBucket)
+			totalCodeKeys, err := codeCursor.Count()
+			if err != nil {
 				return err
+			}
+			for k, _, err := codeCursor.First(); k != nil; k, _, err = codeCursor.Next() {
+				if err != nil {
+					return err
+				}
+				count++
+
+				select {
+				default:
+				case <-quit:
+					return common.ErrStopped
+				case <-logEvery.C:
+					log.Info("Warmed up code", "progress", fmt.Sprintf("%.2fM/%.2fM", float64(count)/1_000_000, float64(totalCodeKeys)/1_000_000))
+				}
 			}
 			warmup = false
 			log.Info("Warm up done.")
