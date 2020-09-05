@@ -50,7 +50,9 @@ func (m *TxDb) Begin() (DbWithPendingMutations, error) {
 
 func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
 	if metrics.Enabled {
-		defer dbPutTimer.UpdateSince(time.Now())
+		if bucket == dbutils.PlainStateBucket {
+			defer dbPutTimer.UpdateSince(time.Now())
+		}
 	}
 	m.len += uint64(len(key) + len(value))
 	return m.cursors[bucket].Put(key, value)
