@@ -1,4 +1,4 @@
-package cli
+package node
 
 import (
 	"math"
@@ -19,12 +19,14 @@ import (
 	gopsutil "github.com/shirou/gopsutil/mem"
 )
 
-type TurboGeth struct {
+type CustomFlagHandler func(*eth.Config, *node.Config)
+
+type TurboGethNode struct {
 	stack   *node.Node
 	backend *eth.Ethereum
 }
 
-func (tg *TurboGeth) Serve() error {
+func (tg *TurboGethNode) Serve() error {
 	defer tg.stack.Close()
 
 	tg.run()
@@ -34,27 +36,33 @@ func (tg *TurboGeth) Serve() error {
 	return nil
 }
 
-func (tg *TurboGeth) run() {
+func (tg *TurboGethNode) run() {
 	utils.StartNode(tg.stack)
 	// we don't have accounts locally and we don't do mining
 	// so these parts are ignored
 	// see cmd/geth/main.go#startNode for full implementation
 }
 
-func New(ctx *cli.Context, sync *stagedsync.StagedSync) *TurboGeth {
+func New(ctx *cli.Context, sync *stagedsync.StagedSync) *TurboGethNode {
 	prepare(ctx)
-	node := makeConfigNode(ctx)
+	nodeConfig := makeNodeConfig(ctx)
+	node := makeConfigNode(nodeConfig)
+	ethConfig := makeEthConfig(ctx, node)
 
-	ethConfig := eth.DefaultConfig
-	utils.SetEthConfig(ctx, node, &ethConfig)
 	ethConfig.StagedSync = sync
 
-	ethereum := utils.RegisterEthService(node, &ethConfig)
+	ethereum := utils.RegisterEthService(node, ethConfig)
 
-	return &TurboGeth{stack: node, backend: ethereum}
+	return &TurboGethNode{stack: node, backend: ethereum}
 }
 
-func makeConfigNode(ctx *cli.Context) *node.Node {
+func makeEthConfig(ctx *cli.Context, node *node.Node) *eth.Config {
+	ethConfig := &eth.DefaultConfig
+	utils.SetEthConfig(ctx, node, ethConfig)
+	return ethConfig
+}
+
+func makeNodeConfig(ctx *cli.Context) *node.Config {
 	nodeConfig := node.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	nodeConfig.Version = params.Version
@@ -63,7 +71,11 @@ func makeConfigNode(ctx *cli.Context) *node.Node {
 
 	utils.SetNodeConfig(ctx, &nodeConfig)
 
-	stack, err := node.New(&nodeConfig)
+	return &nodeConfig
+}
+
+func makeConfigNode(config *node.Config) *node.Node {
+	stack, err := node.New(config)
 	if err != nil {
 		utils.Fatalf("Failed to create turbo-geth node: %v", err)
 	}
