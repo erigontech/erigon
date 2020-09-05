@@ -7,9 +7,25 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
+var dbKeys = []stages.SyncStage{
+	stages.Headers,
+	stages.BlockHashes,
+	stages.Bodies,
+	stages.Senders,
+	stages.Execution,
+	stages.IntermediateHashes,
+	stages.HashState,
+	stages.AccountHistoryIndex,
+	stages.StorageHistoryIndex,
+	stages.TxLookup,
+	stages.TxPool,
+	stages.Finish,
+}
+
 var stagesToUseNamedKeys = Migration{
 	Name: "stages_to_use_named_keys",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+
 		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
 			return err
 		} else if !exists {
@@ -21,10 +37,10 @@ var stagesToUseNamedKeys = Migration{
 		}
 
 		extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-			newKey, ok := stages.DBKeys[stages.SyncStage(k[0])]
-			if !ok {
-				return nil // nothing to do
+			if int(k[0]) >= len(dbKeys) || int(k[0]) < 0 {
+				return nil
 			}
+			newKey := dbKeys[int(k[0])]
 			// create new version of keys with same data
 			if err := next(k, newKey, v); err != nil {
 				return err
@@ -65,11 +81,10 @@ var unwindStagesToUseNamedKeys = Migration{
 		}
 
 		extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-			newKey, ok := stages.DBKeys[stages.SyncStage(k[0])]
-			if !ok {
-				return nil // nothing to do
-
+			if int(k[0]) >= len(dbKeys) || int(k[0]) < 0 {
+				return nil
 			}
+			newKey := dbKeys[int(k[0])]
 			// create new version of keys with same data
 			if err := next(k, newKey, v); err != nil {
 				return err

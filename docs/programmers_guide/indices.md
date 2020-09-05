@@ -112,10 +112,8 @@ for k, v := cursor.Seek(key); k != nil; k, v = cursor.Next() {
 Iterate over bucket with sub-buckets: 
 ```
 cursor := transaction.OpenCursor(bucketName)
-for k1, _ := cursor.First(); k1 != nil; k1, _ = cursor.Next() {
-    for k, v := cursor.FirstInSubBucket(); k != nil; k, v = cursor.NextInSubBucket() {
-        // logic works with 'k1', 'k' and 'v' variables
-    } 
+for k, _ := cursor.SeekDup(subBucketName, keyInSubBucket); k != nil; k, _ = cursor.Next() {
+    // logic works with 'k1', 'k' and 'v' variables
 } 
 ```
 
@@ -203,13 +201,7 @@ TurboGeth
 This article target is to show tricky concepts on simple examples. 
 Real way how TurboGeth stores accounts value and accounts history is a bit different and described [here](./db_walkthrough.MD#bucket-history-of-accounts)    
  
+TurboGeth supports multiple typed cursors, see [AbstractKV.md](./../../ethdb/AbstractKV.md)
 
-`kv_abstract.go` - has abstraction over LMDB library. It has different cursor types:
-- Cursor - provides only simple methods which are used for normal (not DupSort buckets)
-- DupSortCursor - provides methods to iterate over DupSort buckets  
-- DupFixedCursor - provides methods to iterate over DupFixed buckets
-
-Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break 
-long keys into sub-bucket-name and produce `keyAndValueJoinedTogether`. Configuration is in `bucket.go`.    
 
 

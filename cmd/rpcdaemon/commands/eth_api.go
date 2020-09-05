@@ -3,8 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
+	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -32,6 +35,8 @@ type EthAPI interface {
 	Syncing(ctx context.Context) (interface{}, error)
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
+	GetTransactionByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
+	GetStorageAt(ctx context.Context, address common.Address, index *hexutil.Uint64, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -105,4 +110,63 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 	n := hexutil.Uint(len(block.Transactions()))
 	return &n, nil
+}
+
+func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
+	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, hash)
+
+	if tx == nil {
+		return nil, fmt.Errorf("transaction %#x not found", hash)
+	}
+
+	from := rawdb.ReadSenders(api.dbReader, blockHash, blockNumber)[txIndex]
+
+	v, r, s := tx.RawSignatureValues()
+
+	fields := map[string]interface{}{
+		"hash":             tx.Hash(),
+		"nonce":            tx.Nonce(),
+		"blockHash":        blockHash,
+		"blockNumber":      hexutil.EncodeUint64(blockNumber),
+		"from":             from,
+		"to":               tx.To(),
+		"value":            tx.Value(),
+		"gasPrice":         tx.GasPrice(),
+		"gas":              hexutil.EncodeUint64(tx.Gas()),
+		"input":            hexutil.Encode(tx.Data()),
+		"v":                v,
+		"s":                s,
+		"r":                r,
+		"transactionIndex": txIndex,
+	}
+	return fields, nil
+}
+
+func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index *hexutil.Uint64, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
+	if err != nil {
+		return "", err
+	}
+
+	i := uint64(*index)
+
+	reader := adapter.NewStateReader(api.db, blockNumber)
+	acc, err := reader.ReadAccountData(address)
+	if err != nil {
+		return "", err
+	}
+
+	if acc == nil {
+		return "", fmt.Errorf("account not found")
+	}
+
+	var location common.Hash
+
+	location.SetBytes(big.NewInt(int64(i)).Bytes())
+	res, err := reader.ReadAccountStorage(address, acc.Nonce, &location)
+	if err != nil {
+		return "", err
+	}
+
+	return hexutil.Encode(res), nil
 }

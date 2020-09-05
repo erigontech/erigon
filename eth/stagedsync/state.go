@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"fmt"
 	"runtime"
 	"time"
@@ -17,9 +18,9 @@ type State struct {
 	unwindOrder  []*Stage
 	currentStage uint
 
-	beforeStageRun    map[stages.SyncStage]func() error
+	beforeStageRun    map[string]func() error
 	onBeforeUnwind    func(stages.SyncStage) error
-	beforeStageUnwind map[stages.SyncStage]func() error
+	beforeStageUnwind map[string]func() error
 }
 
 func (s *State) Len() int {
@@ -31,6 +32,40 @@ func (s *State) NextStage() {
 		return
 	}
 	s.currentStage++
+}
+
+// IsBefore returns true if stage1 goes before stage2 in staged sync
+func (s *State) IsBefore(stage1, stage2 stages.SyncStage) bool {
+	idx1 := -1
+	idx2 := -1
+	for i, stage := range s.stages {
+		if bytes.Equal(stage.ID, stage1) {
+			idx1 = i
+		}
+
+		if bytes.Equal(stage.ID, stage2) {
+			idx2 = i
+		}
+	}
+
+	return idx1 < idx2
+}
+
+// IsAfter returns true if stage1 goes after stage2 in staged sync
+func (s *State) IsAfter(stage1, stage2 stages.SyncStage) bool {
+	idx1 := -1
+	idx2 := -1
+	for i, stage := range s.stages {
+		if bytes.Equal(stage.ID, stage1) {
+			idx1 = i
+		}
+
+		if bytes.Equal(stage.ID, stage2) {
+			idx2 = i
+		}
+	}
+
+	return idx1 > idx2
 }
 
 func (s *State) GetLocalHeight(db ethdb.Getter) (uint64, error) {
@@ -61,7 +96,7 @@ func (s *State) CurrentStage() (uint, *Stage) {
 
 func (s *State) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
-		if stage.ID == id {
+		if bytes.Equal(stage.ID, id) {
 			s.currentStage = uint(i)
 			return nil
 		}
@@ -71,7 +106,7 @@ func (s *State) SetCurrentStage(id stages.SyncStage) error {
 
 func (s *State) StageByID(id stages.SyncStage) (*Stage, error) {
 	for _, stage := range s.stages {
-		if stage.ID == id {
+		if bytes.Equal(stage.ID, id) {
 			return stage, nil
 		}
 	}
@@ -83,8 +118,8 @@ func NewState(stagesList []*Stage) *State {
 		stages:            stagesList,
 		currentStage:      0,
 		unwindStack:       NewPersistentUnwindStack(),
-		beforeStageRun:    make(map[stages.SyncStage]func() error),
-		beforeStageUnwind: make(map[stages.SyncStage]func() error),
+		beforeStageRun:    make(map[string]func() error),
+		beforeStageUnwind: make(map[string]func() error),
 	}
 }
 
@@ -114,7 +149,7 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 						return err
 					}
 				}
-				if hook, ok := s.beforeStageUnwind[unwind.Stage]; ok {
+				if hook, ok := s.beforeStageUnwind[string(unwind.Stage)]; ok {
 					if err := hook(); err != nil {
 						return err
 					}
@@ -123,14 +158,14 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 					return err
 				}
 			}
-			if err := s.SetCurrentStage(0); err != nil {
+			if err := s.SetCurrentStage(stages.Headers); err != nil {
 				return err
 			}
 		}
 
 		index, stage := s.CurrentStage()
 
-		if hook, ok := s.beforeStageRun[stage.ID]; ok {
+		if hook, ok := s.beforeStageRun[string(stage.ID)]; ok {
 			if err := hook(); err != nil {
 				return err
 			}
@@ -191,7 +226,7 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb
 		db = tx
 	}
 	start := time.Now()
-	log.Info("Unwinding...", "stage", string(stages.DBKeys[unwind.Stage]))
+	log.Info("Unwinding...", "stage", string(unwind.Stage))
 	stage, err := s.StageByID(unwind.Stage)
 	if err != nil {
 		return err
@@ -226,7 +261,7 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb
 func (s *State) DisableStages(ids ...stages.SyncStage) {
 	for i := range s.stages {
 		for _, id := range ids {
-			if s.stages[i].ID != id {
+			if !bytes.Equal(s.stages[i].ID, id) {
 				continue
 			}
 			s.stages[i].Disabled = true
@@ -236,18 +271,18 @@ func (s *State) DisableStages(ids ...stages.SyncStage) {
 
 func (s *State) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 	for i := range s.stages {
-		if s.stages[i].ID == id {
+		if bytes.Equal(s.stages[i].ID, id) {
 			s.stages[i].ExecFunc = f
 		}
 	}
 }
 
 func (s *State) BeforeStageRun(id stages.SyncStage, f func() error) {
-	s.beforeStageRun[id] = f
+	s.beforeStageRun[string(id)] = f
 }
 
 func (s *State) BeforeStageUnwind(id stages.SyncStage, f func() error) {
-	s.beforeStageUnwind[id] = f
+	s.beforeStageUnwind[string(id)] = f
 }
 
 func (s *State) OnBeforeUnwind(f func(id stages.SyncStage) error) {

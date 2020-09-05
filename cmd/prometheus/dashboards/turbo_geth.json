@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1596351084305,
+  "iteration": 1599279783773,
   "links": [],
   "panels": [
     {
@@ -252,7 +252,7 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "Prometheus",
+      "datasource": null,
       "fieldConfig": {
         "defaults": {
           "custom": {}
@@ -268,7 +268,7 @@
         "y": 9
       },
       "hiddenSeries": false,
-      "id": 131,
+      "id": 141,
       "legend": {
         "avg": false,
         "current": false,
@@ -292,25 +292,17 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "db_commit_big_batch{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "instant": false,
+          "expr": "increase(db_commit_big_batch_count{instance=~\"$instance\"}[1m])",
           "interval": "",
-          "legendFormat": "commit_big_batch: {{quantile}}, {{instance}}",
+          "legendFormat": "get/sec: {{instance}}",
           "refId": "A"
-        },
-        {
-          "expr": "db_commit_small_batch{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "instant": false,
-          "interval": "",
-          "legendFormat": "commit_small_batch: {{quantile}}, {{instance}}",
-          "refId": "B"
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Commit",
+      "title": "Commit event marker",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -326,7 +318,7 @@
       },
       "yaxes": [
         {
-          "format": "ns",
+          "format": "short",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -339,7 +331,7 @@
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": false
+          "show": true
         }
       ],
       "yaxis": {
@@ -492,7 +484,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(db_get_count{instance=~\"$instance\"}[5m])",
+          "expr": "rate(db_get_count{instance=~\"$instance\"}[1m])",
           "interval": "",
           "legendFormat": "get/sec: {{instance}}",
           "refId": "A"
@@ -2431,7 +2423,7 @@
       }
     }
   ],
-  "refresh": false,
+  "refresh": "30s",
   "schemaVersion": 26,
   "style": "dark",
   "tags": [],
@@ -2492,8 +2484,8 @@
         "allValue": null,
         "current": {
           "selected": true,
-          "text": "0.75",
-          "value": "0.75"
+          "text": "0.5",
+          "value": "0.5"
         },
         "hide": 0,
         "includeAll": false,
@@ -2502,12 +2494,12 @@
         "name": "quantile",
         "options": [
           {
-            "selected": false,
+            "selected": true,
             "text": "0.5",
             "value": "0.5"
           },
           {
-            "selected": true,
+            "selected": false,
             "text": "0.75",
             "value": "0.75"
           },
@@ -2540,7 +2532,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
+          "selected": false,
           "text": "host.docker.internal:6060",
           "value": [
             "host.docker.internal:6060"
@@ -2598,5 +2590,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 4
+  "version": 8
 }
