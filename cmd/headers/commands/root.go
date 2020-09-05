@@ -13,8 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var ()
-
 func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 }

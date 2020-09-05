@@ -26,7 +26,7 @@ func makeP2PServer(ctx context.Context, protocols []string) (*p2p.Server, error)
 
 	serverKey, err1 := crypto.GenerateKey()
 	if err1 != nil {
-		return nil, fmt.Errorf("Failed to generate server key: %v", err1)
+		return nil, fmt.Errorf("generate server key: %v", err1)
 	}
 
 	p2pConfig := p2p.Config{}
