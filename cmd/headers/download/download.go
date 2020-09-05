@@ -3,10 +3,14 @@ package download
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -15,7 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-func makeP2PServer(ctx context.Context, protocols []string) (*p2p.Server, error) {
+func makeP2PServer(protocols []string) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
 	dns := params.KnownDNSNetwork(params.MainnetGenesisHash, "all")
@@ -44,7 +48,9 @@ func makeP2PServer(ctx context.Context, protocols []string) (*p2p.Server, error)
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				fmt.Printf("Run protocol on peer %s\n", peer.ID())
-				return nil
+				genesis := core.DefaultGenesisBlock()
+				forkId := forkid.NewID(params.MainnetChainConfig, params.MainnetGenesisHash, 0)
+				return runPeer(peer, rw, eth.ProtocolVersions[0], eth.DefaultConfig.NetworkID, genesis.Difficulty, params.MainnetGenesisHash, forkId)
 			},
 		},
 	}
@@ -53,6 +59,20 @@ func makeP2PServer(ctx context.Context, protocols []string) (*p2p.Server, error)
 		p2pConfig.Protocols = append(p2pConfig.Protocols, pMap[protocolName])
 	}
 	return &p2p.Server{Config: p2pConfig}, nil
+}
+
+func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint64, td *big.Int, genesisHash common.Hash, forkId forkid.ID) error {
+	if err := p2p.Send(rw, eth.StatusMsg, &eth.StatusData{
+		ProtocolVersion: uint32(version),
+		NetworkID:       networkID,
+		TD:              td,
+		Head:            genesisHash, // For now we always start unsyched
+		Genesis:         genesisHash,
+		ForkID:          forkId,
+	}); err != nil {
+		return fmt.Errorf("handshake to peer %d: %v", peer.ID(), err)
+	}
+	return nil
 }
 
 func rootContext() context.Context {
@@ -75,7 +95,7 @@ func rootContext() context.Context {
 
 func Download() error {
 	ctx := rootContext()
-	server, err := makeP2PServer(ctx, []string{eth.ProtocolName})
+	server, err := makeP2PServer([]string{eth.ProtocolName})
 	if err != nil {
 		return err
 	}
