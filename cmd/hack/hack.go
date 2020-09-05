@@ -34,7 +34,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
@@ -1419,22 +1418,6 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func fixStages(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	var err error
-	if err = stages.SaveStageProgress(db, stages.Headers, 10762076, nil); err != nil {
-		return err
-	}
-	if err = stages.SaveStageProgress(db, stages.BlockHashes, 10762076, nil); err != nil {
-		return err
-	}
-	hash := rawdb.ReadCanonicalHash(db, 10762076)
-	rawdb.WriteHeadHeaderHash(db, hash)
-	rawdb.WriteHeadBlockHash(db, hash)
-	return nil
-}
-
 func changeSetStats(chaindata string, block1, block2 uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -1870,11 +1853,6 @@ func main() {
 	}
 	if *action == "searchStorageChangeSet" {
 		if err := searchStorageChangeSet(*chaindata, common.FromHex(*hash), uint64(*block)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "fixStages" {
-		if err := fixStages(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
