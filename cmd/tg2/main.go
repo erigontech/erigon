@@ -37,6 +37,7 @@ func syncStages(ctx *cli.Context) stagedsync.StageBuilders {
 					Description: "Custom Stage",
 					ExecFunc: func(s *stagedsync.StageState, _ stagedsync.Unwinder) error {
 						fmt.Println("hello from the custom stage", ctx.String(flag.Name))
+						s.Done()
 						return nil
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
