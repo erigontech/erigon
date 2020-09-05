@@ -329,6 +329,10 @@ func (m *TxDb) CommitAndBegin() error {
 }
 
 func (m *TxDb) Commit() (uint64, error) {
+	if metrics.Enabled {
+		defer dbCommitBigBatchTimer.UpdateSince(time.Now())
+	}
+
 	if m.tx == nil {
 		return 0, fmt.Errorf("second call .Commit() on same transaction")
 	}
