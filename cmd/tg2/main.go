@@ -46,7 +46,7 @@ func syncStages() stagedsync.StageBuilders {
 
 func runTurboGeth(ctx *cli.Context) {
 	sync := stagedsync.New(
-		stagedsync.DefaultStages(),
+		syncStages(),
 		stagedsync.DefaultUnwindOrder(),
 	)
 
