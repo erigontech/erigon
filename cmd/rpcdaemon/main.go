@@ -1,16 +1,24 @@
 package main
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"os"
+
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
+
+	//nolint:gosec
+	"net/http"
+	_ "net/http/pprof"
 )
 
 func main() {
+	go func() {
+		log.Info("HTTP", "error", http.ListenAndServe("localhost:6060", nil))
+	}()
 	cmd, cfg := cli.RootCommand()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		db, backend, err := cli.OpenDB(*cfg)
