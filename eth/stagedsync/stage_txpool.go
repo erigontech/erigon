@@ -38,9 +38,9 @@ func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolSt
 		if err := incrementalTxPoolUpdate(s.BlockNumber, to, pool, db, quitCh); err != nil {
 			return err
 		}
+		pending, queued := pool.Stats()
+		log.Info("Transaction stats", "pending", pending, "queued", queued)
 	}
-	pending, queued := pool.Stats()
-	log.Info("Transaction stats", "pending", pending, "queued", queued)
 	return s.DoneAndUpdate(db, to)
 }
 
