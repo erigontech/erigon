@@ -117,9 +117,9 @@ func unwindTxPool(u *UnwindState, s *StageState, db ethdb.GetterPutter, pool *co
 		if err := unwindTxPoolUpdate(u.UnwindPoint, s.BlockNumber, pool, db, quitCh); err != nil {
 			return err
 		}
+		pending, queued := pool.Stats()
+		log.Info("Transaction stats", "pending", pending, "queued", queued)
 	}
-	pending, queued := pool.Stats()
-	log.Info("Transaction stats", "pending", pending, "queued", queued)
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind Backend: reset: %w", err)
 	}
