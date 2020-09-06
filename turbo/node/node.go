@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -42,11 +43,17 @@ func (tg *TurboGethNode) run() {
 }
 
 type Params struct {
-	GitDate   string
-	GitCommit string
+	GitDate       string
+	GitCommit     string
+	CustomBuckets dbutils.BucketsCfg
 }
 
-func New(ctx *cli.Context, sync *stagedsync.StagedSync, p Params) *TurboGethNode {
+func New(
+	ctx *cli.Context,
+	sync *stagedsync.StagedSync,
+	p Params,
+) *TurboGethNode {
+	prepareBuckets(p.CustomBuckets)
 	prepare(ctx)
 	nodeConfig := makeNodeConfig(ctx, p)
 	node := makeConfigNode(nodeConfig)
