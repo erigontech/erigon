@@ -4,7 +4,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -41,8 +40,6 @@ func (stagedSync *StagedSync) Prepare(
 	poolStart func() error,
 	changeSetHook ChangeSetHook,
 ) (*State, error) {
-	defer log.Info("Staged sync finished")
-
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
 			d:                d,
