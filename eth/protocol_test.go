@@ -69,19 +69,19 @@ func TestStatusMsgErrors64(t *testing.T) {
 			wantError: errResp(ErrNoStatusMsg, "first msg has code 2 (!= 0)"),
 		},
 		{
-			code: StatusMsg, data: statusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrProtocolVersionMismatch, "10 (!= %d)", 64),
 		},
 		{
-			code: StatusMsg, data: statusData{64, 999, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{64, 999, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkID),
 		},
 		{
-			code: StatusMsg, data: statusData{64, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
+			code: StatusMsg, data: StatusData{64, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
 			wantError: errResp(ErrGenesisMismatch, "0300000000000000000000000000000000000000000000000000000000000000 (!= %x)", genesis.Hash()),
 		},
 		{
-			code: StatusMsg, data: statusData{64, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
+			code: StatusMsg, data: StatusData{64, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
 			wantError: errResp(ErrForkIDRejected, forkid.ErrLocalIncompatibleOrStale.Error()),
 		},
 	}
@@ -125,19 +125,19 @@ func TestStatusMsgErrors65(t *testing.T) {
 			wantError: errResp(ErrNoStatusMsg, "first msg has code 2 (!= 0)"),
 		},
 		{
-			code: StatusMsg, data: statusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrProtocolVersionMismatch, "10 (!= %d)", 65),
 		},
 		{
-			code: StatusMsg, data: statusData{65, 999, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{65, 999, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkID),
 		},
 		{
-			code: StatusMsg, data: statusData{65, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
+			code: StatusMsg, data: StatusData{65, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
 			wantError: errResp(ErrGenesisMismatch, "0300000000000000000000000000000000000000000000000000000000000000 (!= %x)", genesis.Hash()),
 		},
 		{
-			code: StatusMsg, data: statusData{65, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
+			code: StatusMsg, data: StatusData{65, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
 			wantError: errResp(ErrForkIDRejected, forkid.ErrLocalIncompatibleOrStale.Error()),
 		},
 	}

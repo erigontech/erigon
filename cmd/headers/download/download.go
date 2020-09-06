@@ -49,8 +49,7 @@ func makeP2PServer(protocols []string) (*p2p.Server, error) {
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				fmt.Printf("Run protocol on peer %s\n", peer.ID())
 				genesis := core.DefaultGenesisBlock()
-				forkId := forkid.NewID(params.MainnetChainConfig, params.MainnetGenesisHash, 0)
-				return runPeer(peer, rw, eth.ProtocolVersions[0], eth.DefaultConfig.NetworkID, genesis.Difficulty, params.MainnetGenesisHash, forkId)
+				return runPeer(peer, rw, eth.ProtocolVersions[0], eth.DefaultConfig.NetworkID, genesis.Difficulty, params.MainnetGenesisHash, params.MainnetChainConfig, 0 /* head */)
 			},
 		},
 	}
@@ -61,7 +60,13 @@ func makeP2PServer(protocols []string) (*p2p.Server, error) {
 	return &p2p.Server{Config: p2pConfig}, nil
 }
 
-func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint64, td *big.Int, genesisHash common.Hash, forkId forkid.ID) error {
+func errResp(code int, format string, v ...interface{}) error {
+	return fmt.Errorf("%v - %v", code, fmt.Sprintf(format, v...))
+}
+
+func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint64, td *big.Int, genesisHash common.Hash, chainConfig *params.ChainConfig, head uint64) error {
+	forkId := forkid.NewID(chainConfig, genesisHash, head)
+	// Send handshake message
 	if err := p2p.Send(rw, eth.StatusMsg, &eth.StatusData{
 		ProtocolVersion: uint32(version),
 		NetworkID:       networkID,
@@ -71,6 +76,35 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 		ForkID:          forkId,
 	}); err != nil {
 		return fmt.Errorf("handshake to peer %d: %v", peer.ID(), err)
+	}
+	// Read handshake message
+	msg, err := rw.ReadMsg()
+	if err != nil {
+		return err
+	}
+	if msg.Code != eth.StatusMsg {
+		return errResp(eth.ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
+	}
+	if msg.Size > eth.ProtocolMaxMsgSize {
+		return errResp(eth.ErrMsgTooLarge, "%v > %v", msg.Size, eth.ProtocolMaxMsgSize)
+	}
+	// Decode the handshake and make sure everything matches
+	var status eth.StatusData
+	if err := msg.Decode(&status); err != nil {
+		return errResp(eth.ErrDecode, "msg %v: %v", msg, err)
+	}
+	if status.NetworkID != networkID {
+		return errResp(eth.ErrNetworkIDMismatch, "%d (!= %d)", status.NetworkID, networkID)
+	}
+	if uint(status.ProtocolVersion) != version {
+		return errResp(eth.ErrProtocolVersionMismatch, "%d (!= %d)", status.ProtocolVersion, version)
+	}
+	if status.Genesis != genesisHash {
+		return errResp(eth.ErrGenesisMismatch, "%x (!= %x)", status.Genesis, genesisHash)
+	}
+	forkFilter := forkid.NewFilter(chainConfig, genesisHash, head)
+	if err := forkFilter(status.ForkID); err != nil {
+		return errResp(eth.ErrForkIDRejected, "%v", err)
 	}
 	return nil
 }

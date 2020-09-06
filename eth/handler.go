@@ -113,7 +113,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 	// Create the protocol manager with the base fields
 	manager := &ProtocolManager{
 		networkID:   networkID,
-		forkFilter:  forkid.NewFilter(blockchain),
+		forkFilter:  forkid.NewFilter(config, blockchain.Genesis().Hash(), blockchain.CurrentHeader().Number.Uint64()),
 		eventMux:    mux,
 		txpool:      txpool,
 		chainConfig: config,
