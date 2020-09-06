@@ -75,6 +75,7 @@ func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
 	}
 	nodeConfig.IPCPath = "tg.ipc"
 	nodeConfig.Name = "turbo-geth"
+	nodeConfig.NoUSB = true
 
 	utils.SetNodeConfig(ctx, &nodeConfig)
 
