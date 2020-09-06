@@ -2,6 +2,7 @@ package download
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -98,7 +99,7 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 	}
 	// Decode the handshake and make sure everything matches
 	var status eth.StatusData
-	if err := msg.Decode(&status); err != nil {
+	if err = msg.Decode(&status); err != nil {
 		msg.Discard()
 		return errResp(eth.ErrDecode, "decode message %v: %v", msg, err)
 	}
@@ -113,7 +114,7 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 		return errResp(eth.ErrGenesisMismatch, "genesis hash does not match: theirs %x, ours %x", status.Genesis, genesisHash)
 	}
 	forkFilter := forkid.NewFilter(chainConfig, genesisHash, head)
-	if err := forkFilter(status.ForkID); err != nil {
+	if err = forkFilter(status.ForkID); err != nil {
 		return errResp(eth.ErrForkIDRejected, "%v", err)
 	}
 	fmt.Printf("Received status mesage OK from %s\n", peer.ID())
@@ -155,7 +156,7 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 			var hashesStr strings.Builder
 			for {
 				// Retrieve the hash of the next block
-				if err = msgStream.Decode(&hash); err == rlp.EOL {
+				if err = msgStream.Decode(&hash); errors.Is(err, rlp.EOL) {
 					break
 				} else if err != nil {
 					return errResp(eth.ErrDecode, "decode hash for GetBlockBodiesMsg %v: %v", msg, err)
@@ -191,7 +192,6 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 		}
 		msg.Discard()
 	}
-	return nil
 }
 
 func rootContext() context.Context {
