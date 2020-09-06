@@ -530,21 +530,21 @@ func (p *peer) SendReceiptsRLP(receipts []rlp.RawValue) error {
 // single header. It is used solely by the fetcher.
 func (p *peer) RequestOneHeader(hash common.Hash) error {
 	p.Log().Debug("Fetching single header", "hash", hash)
-	return p2p.Send(p.rw, GetBlockHeadersMsg, &getBlockHeadersData{Origin: hashOrNumber{Hash: hash}, Amount: uint64(1), Skip: uint64(0), Reverse: false})
+	return p2p.Send(p.rw, GetBlockHeadersMsg, &GetBlockHeadersData{Origin: hashOrNumber{Hash: hash}, Amount: uint64(1), Skip: uint64(0), Reverse: false})
 }
 
 // RequestHeadersByHash fetches a batch of blocks' headers corresponding to the
 // specified header query, based on the hash of an origin block.
 func (p *peer) RequestHeadersByHash(origin common.Hash, amount int, skip int, reverse bool) error {
 	p.Log().Debug("Fetching batch of headers", "count", amount, "fromhash", origin, "skip", skip, "reverse", reverse)
-	return p2p.Send(p.rw, GetBlockHeadersMsg, &getBlockHeadersData{Origin: hashOrNumber{Hash: origin}, Amount: uint64(amount), Skip: uint64(skip), Reverse: reverse})
+	return p2p.Send(p.rw, GetBlockHeadersMsg, &GetBlockHeadersData{Origin: hashOrNumber{Hash: origin}, Amount: uint64(amount), Skip: uint64(skip), Reverse: reverse})
 }
 
 // RequestHeadersByNumber fetches a batch of blocks' headers corresponding to the
 // specified header query, based on the number of an origin block.
 func (p *peer) RequestHeadersByNumber(origin uint64, amount int, skip int, reverse bool) error {
 	p.Log().Debug("Fetching batch of headers", "count", amount, "fromnum", origin, "skip", skip, "reverse", reverse)
-	return p2p.Send(p.rw, GetBlockHeadersMsg, &getBlockHeadersData{Origin: hashOrNumber{Number: origin}, Amount: uint64(amount), Skip: uint64(skip), Reverse: reverse})
+	return p2p.Send(p.rw, GetBlockHeadersMsg, &GetBlockHeadersData{Origin: hashOrNumber{Number: origin}, Amount: uint64(amount), Skip: uint64(skip), Reverse: reverse})
 }
 
 // RequestBodies fetches a batch of blocks' bodies corresponding to the hashes

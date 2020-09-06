@@ -6,17 +6,20 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 func makeP2PServer(protocols []string) (*p2p.Server, error) {
@@ -86,16 +89,20 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 		return err
 	}
 	if msg.Code != eth.StatusMsg {
+		msg.Discard()
 		return errResp(eth.ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
 	}
 	if msg.Size > eth.ProtocolMaxMsgSize {
+		msg.Discard()
 		return errResp(eth.ErrMsgTooLarge, "message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
 	}
 	// Decode the handshake and make sure everything matches
 	var status eth.StatusData
 	if err := msg.Decode(&status); err != nil {
+		msg.Discard()
 		return errResp(eth.ErrDecode, "decode message %v: %v", msg, err)
 	}
+	msg.Discard()
 	if status.NetworkID != networkID {
 		return errResp(eth.ErrNetworkIDMismatch, "network id does not match: theirs %d, ours %d", status.NetworkID, networkID)
 	}
@@ -110,6 +117,80 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 		return errResp(eth.ErrForkIDRejected, "%v", err)
 	}
 	fmt.Printf("Received status mesage OK from %s\n", peer.ID())
+
+	for {
+		msg, err = rw.ReadMsg()
+		if err != nil {
+			return fmt.Errorf("reading message: %v", err)
+		}
+		if msg.Size > eth.ProtocolMaxMsgSize {
+			msg.Discard()
+			return errResp(eth.ErrMsgTooLarge, "message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
+		}
+		switch msg.Code {
+		case eth.StatusMsg:
+			msg.Discard()
+			// Status messages should never arrive after the handshake
+			return errResp(eth.ErrExtraStatusMsg, "uncontrolled status message")
+		case eth.GetBlockHeadersMsg:
+			var query eth.GetBlockHeadersData
+			if err = msg.Decode(&query); err != nil {
+				return errResp(eth.ErrDecode, "decoding %v: %v", msg, err)
+			}
+			fmt.Printf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t}\n", peer.ID(), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse)
+			var headers []*types.Header
+			if err = p2p.Send(rw, eth.BlockHeadersMsg, headers); err != nil {
+				return fmt.Errorf("send empty headers reply: %v", err)
+			}
+		case eth.BlockHeadersMsg:
+			fmt.Printf("[%s] BlockHeadersMsg\n", peer.ID())
+		case eth.GetBlockBodiesMsg:
+			// Decode the retrieval message
+			msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+			if _, err = msgStream.List(); err != nil {
+				return fmt.Errorf("getting list from RLP stream for GetBlockBodiesMsg: %v", err)
+			}
+			// Gather blocks until the fetch or network limits is reached
+			var hash common.Hash
+			var hashesStr strings.Builder
+			for {
+				// Retrieve the hash of the next block
+				if err = msgStream.Decode(&hash); err == rlp.EOL {
+					break
+				} else if err != nil {
+					return errResp(eth.ErrDecode, "decode hash for GetBlockBodiesMsg %v: %v", msg, err)
+				}
+				if hashesStr.Len() > 0 {
+					hashesStr.WriteString(",")
+				}
+				hashesStr.WriteString(fmt.Sprintf("%x", hash))
+			}
+			fmt.Printf("[%s] GetBlockBodiesMsg {%s}\n", peer.ID(), hashesStr.String())
+		case eth.BlockBodiesMsg:
+			fmt.Printf("[%s] BlockBodiesMsg\n", peer.ID())
+		case eth.GetNodeDataMsg:
+			fmt.Printf("[%s] GetNodeData\n", peer.ID())
+		case eth.GetReceiptsMsg:
+			fmt.Printf("[%s] GetReceiptsMsg\n", peer.ID())
+		case eth.ReceiptsMsg:
+			fmt.Printf("[%s] ReceiptsMsg\n", peer.ID())
+		case eth.NewBlockHashesMsg:
+			fmt.Printf("[%s] NewBlockHashesMsg\n", peer.ID())
+		case eth.NewBlockMsg:
+			fmt.Printf("[%s] NewBlockMsg\n", peer.ID())
+		case eth.NewPooledTransactionHashesMsg:
+			fmt.Printf("[%s] NewPooledTransactionHashesMsg\n", peer.ID())
+		case eth.GetPooledTransactionsMsg:
+			fmt.Printf("[%s] GetPooledTransactionsMsg\n", peer.ID())
+		case eth.TransactionMsg:
+			fmt.Printf("[%s] TransactionMsg\n", peer.ID())
+		case eth.PooledTransactionsMsg:
+			fmt.Printf("[%s] PooledTransactionsMsg\n", peer.ID())
+		default:
+			fmt.Printf("[%s] Unknown message code: %d\n", peer.ID(), msg.Code)
+		}
+		msg.Discard()
+	}
 	return nil
 }
 
