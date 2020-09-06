@@ -1,6 +1,7 @@
 package node
 
 import (
+	"fmt"
 	"math"
 	"runtime/debug"
 	"strconv"
@@ -17,6 +18,11 @@ import (
 	"github.com/urfave/cli"
 
 	gopsutil "github.com/shirou/gopsutil/mem"
+)
+
+const (
+	GitCommitFlag = "gitCommit"
+	GitDateFlag   = "gitDate"
 )
 
 type CustomFlagHandler func(*eth.Config, *node.Config)
@@ -65,7 +71,12 @@ func makeEthConfig(ctx *cli.Context, node *node.Node) *eth.Config {
 func makeNodeConfig(ctx *cli.Context) *node.Config {
 	nodeConfig := node.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
-	nodeConfig.Version = params.Version
+	if commit, date := ctx.String(GitCommitFlag), ctx.String(GitDateFlag); commit != "" && date != "" {
+		fmt.Println("commit, date", commit, date)
+		nodeConfig.Version = params.VersionWithCommit(commit, date)
+	} else {
+		nodeConfig.Version = params.Version
+	}
 	nodeConfig.IPCPath = "tg.ipc"
 	nodeConfig.Name = "turbo-geth"
 
