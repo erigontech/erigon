@@ -53,4 +53,5 @@ var DefaultFlags = []cli.Flag{
 	utils.MetricsEnabledExpensiveFlag,
 	utils.MetricsHTTPFlag,
 	utils.MetricsPortFlag,
+	utils.IdentityFlag,
 }
