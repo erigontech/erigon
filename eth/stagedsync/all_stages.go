@@ -33,12 +33,9 @@ func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, engine c
 	}
 	// Stage 2
 	if err := SpawnBlockHashStage(&StageState{
+		Stage:       stages.BlockHashes,
 		BlockNumber: num - 1,
 	}, db, "", nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.BlockHashes, num, nil); err != nil {
 		return err
 	}
 
@@ -66,75 +63,56 @@ func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, engine c
 		Now:             time.Now(),
 	}
 	if err := SpawnRecoverSendersStage(cfg, &StageState{
+		Stage:       stages.Senders,
 		BlockNumber: num - 1,
 	}, db, config, 0, "", nil); err != nil {
 		return err
 	}
 
-	if err := stages.SaveStageProgress(db, stages.Senders, num, nil); err != nil {
-		return err
-	}
 	// Stage 5
 	if err := SpawnExecuteBlocksStage(&StageState{
+		Stage:       stages.Execution,
 		BlockNumber: num - 1,
 	}, db, config, bc, bc.GetVMConfig(), 0, nil, true, false, nil); err != nil {
 		return err
 	}
 
-	if err := stages.SaveStageProgress(db, stages.Execution, num, nil); err != nil {
-		return err
-	}
-
 	// Stage 6
 	if err := SpawnHashStateStage(&StageState{
+		Stage:       stages.HashState,
 		BlockNumber: num - 1,
 	}, db, "", nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.HashState, num, nil); err != nil {
 		return err
 	}
 
 	// Stage 7
 	if err := SpawnIntermediateHashesStage(&StageState{
+		Stage:       stages.IntermediateHashes,
 		BlockNumber: num - 1,
 	}, db, "", nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.IntermediateHashes, num, nil); err != nil {
 		return err
 	}
 
 	// Stage 8
 	if err := SpawnAccountHistoryIndex(&StageState{
+		Stage:       stages.AccountHistoryIndex,
 		BlockNumber: num - 1,
 	}, db, "", nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, num, nil); err != nil {
 		return err
 	}
 
 	// Stage 9
 	if err := SpawnStorageHistoryIndex(&StageState{
+		Stage:       stages.StorageHistoryIndex,
 		BlockNumber: num - 1,
 	}, db, "", nil); err != nil {
 		return err
 	}
 
-	if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, num, nil); err != nil {
-		return err
-	}
-
 	// Stage 10
-	if err := SpawnTxLookup(&StageState{}, db, "", nil); err != nil {
-		return err
-	}
-
-	if err := stages.SaveStageProgress(db, stages.TxLookup, num, nil); err != nil {
+	if err := SpawnTxLookup(&StageState{
+		Stage: stages.TxLookup,
+	}, db, "", nil); err != nil {
 		return err
 	}
 

@@ -5,7 +5,7 @@ services:
   turbo-geth:
     image: turbo-geth:latest
     build: .
-    command: tg --nousb --metrics --pprof.addr="0.0.0.0" --pprof.port="6060" --private.api.addr="0.0.0.0:9090" --ipcdisable
+    command: tg --metrics --pprof.addr="0.0.0.0" --pprof.port="6060" --private.api.addr="0.0.0.0:9090" --ipcdisable
     volumes:
       - ${XDG_DATA_HOME:-~/.local/share}/turbogeth:/root/.local/share/turbogeth
     ports:

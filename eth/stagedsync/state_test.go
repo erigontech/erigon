@@ -764,5 +764,5 @@ func TestStateSyncInterruptLongStage(t *testing.T) {
 }
 
 func unwindOf(s stages.SyncStage) stages.SyncStage {
-	return 0xF0 + s
+	return append(s, 0xF0)
 }

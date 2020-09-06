@@ -193,8 +193,8 @@ func TestForkIDSplit(t *testing.T) {
 		blocksNoFork, _, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil, false /* intermediateHashes */)
 		blocksProFork, _, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil, false /* intermediateHashes */)
 
-		ethNoFork, _  = NewProtocolManager(configNoFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainNoFork, dbNoFork, nil)
-		ethProFork, _ = NewProtocolManager(configProFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainProFork, dbProFork, nil)
+		ethNoFork, _  = NewProtocolManager(configNoFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainNoFork, dbNoFork, nil, nil)
+		ethProFork, _ = NewProtocolManager(configProFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainProFork, dbProFork, nil, nil)
 	)
 
 	defer func() {

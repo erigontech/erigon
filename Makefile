@@ -7,6 +7,8 @@ ifeq ($(LATEST_COMMIT),)
 LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
 endif
 
+GIT_COMMIT=$(shell git rev-list -1 HEAD)
+
 all: tg hack tester rpctest state restapi pics rpcdaemon integration
 
 docker:
@@ -19,12 +21,12 @@ docker-compose:
 	docker-compose up
 
 geth:
-	$(GOBUILD) -o $(GOBIN)/tg ./cmd/geth 
+	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.GitCommit=${GIT_COMMIT} -X main.GitDate=$(shell date +%Y.%m.%d.%H%M%S)" ./cmd/tg 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 tg:
-	$(GOBUILD) -o $(GOBIN)/tg ./cmd/geth 
+	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.GitCommit=${GIT_COMMIT} -X main.GitDate=$(shell date +%Y.%m.%d.%H%M%S)" ./cmd/tg 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 

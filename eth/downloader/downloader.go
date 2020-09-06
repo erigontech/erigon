@@ -630,7 +630,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
-			if id <= stages.Bodies || id > stages.TxPool {
+			if d.stagedSyncState.IsBefore(id, stages.Bodies) || d.stagedSyncState.IsAfter(id, stages.TxPool) {
 				return nil
 			}
 			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -662,8 +662,11 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				return nil
 			}
 
-			log.Info("Commit blocks")
+			commitStart := time.Now()
 			_, errTx := tx.Commit()
+			if errTx == nil {
+				log.Info("Commit blocks", "in", time.Since(commitStart))
+			}
 			return errTx
 		}
 
