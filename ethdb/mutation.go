@@ -3,14 +3,12 @@ package ethdb
 import (
 	"context"
 	"fmt"
-	"sort"
-	"sync"
-	"sync/atomic"
-	"time"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"sort"
+	"sync"
+	"sync/atomic"
 )
 
 var (
@@ -153,13 +151,6 @@ func (m *mutation) CommitAndBegin() error {
 }
 
 func (m *mutation) Commit() (uint64, error) {
-	if metrics.Enabled {
-		if m.puts.Size() >= m.IdealBatchSize() {
-			defer dbCommitBigBatchTimer.UpdateSince(time.Now())
-		} else if m.puts.Len() < m.IdealBatchSize()/4 {
-			defer dbCommitSmallBatchTimer.UpdateSince(time.Now())
-		}
-	}
 	if m.db == nil {
 		return 0, nil
 	}

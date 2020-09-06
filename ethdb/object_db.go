@@ -22,15 +22,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"time"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"strings"
 )
 
 var (
@@ -85,10 +83,6 @@ func Open(path string) (*ObjectDatabase, error) {
 
 // Put inserts or updates a single entry.
 func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
-	if metrics.Enabled {
-		defer dbPutTimer.UpdateSince(time.Now())
-	}
-
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		return tx.Cursor(bucket).Put(key, value)
 	})
@@ -97,10 +91,6 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 
 // Append appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error {
-	if metrics.Enabled {
-		defer dbPutTimer.UpdateSince(time.Now())
-	}
-
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		return tx.Cursor(bucket).Append(key, value)
 	})

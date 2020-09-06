@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -48,6 +49,11 @@ func (m *TxDb) Begin() (DbWithPendingMutations, error) {
 }
 
 func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
+	if metrics.Enabled {
+		if bucket == dbutils.PlainStateBucket {
+			defer dbPutTimer.UpdateSince(time.Now())
+		}
+	}
 	m.len += uint64(len(key) + len(value))
 	return m.cursors[bucket].Put(key, value)
 }
@@ -100,6 +106,10 @@ func (m *TxDb) Last(bucket string) ([]byte, []byte, error) {
 }
 
 func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
+	if metrics.Enabled {
+		defer dbGetTimer.UpdateSince(time.Now())
+	}
+
 	v, err := m.cursors[bucket].SeekExact(key)
 	if err != nil {
 		return nil, err
@@ -321,6 +331,10 @@ func (m *TxDb) CommitAndBegin() error {
 }
 
 func (m *TxDb) Commit() (uint64, error) {
+	if metrics.Enabled {
+		defer dbCommitBigBatchTimer.UpdateSince(time.Now())
+	}
+
 	if m.tx == nil {
 		return 0, fmt.Errorf("second call .Commit() on same transaction")
 	}

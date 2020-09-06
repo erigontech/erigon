@@ -22,8 +22,8 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
-	u := &UnwindState{UnwindPoint: 50}
-	s := &StageState{BlockNumber: 100}
+	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
+	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
 	err = UnwindExecutionStage(u, s, mutation, true)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
@@ -46,8 +46,8 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 		t.Errorf("error while saving progress: %v", err)
 	}
 	core.UsePlainStateExecution = true
-	u := &UnwindState{UnwindPoint: 50}
-	s := &StageState{BlockNumber: 100}
+	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
+	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
 	err = UnwindExecutionStage(u, s, mutation, true)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
@@ -70,8 +70,8 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
-	u := &UnwindState{UnwindPoint: 50}
-	s := &StageState{BlockNumber: 100}
+	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
+	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
 	err = UnwindExecutionStage(u, s, mutation, true)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)

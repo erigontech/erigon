@@ -268,10 +268,35 @@ var BucketsConfigs = BucketsCfg{
 	//},
 }
 
-func init() {
+func sortBuckets() {
 	sort.SliceStable(Buckets, func(i, j int) bool {
 		return strings.Compare(Buckets[i], Buckets[j]) < 0
 	})
+}
+
+func DefaultBuckets() BucketsCfg {
+	return BucketsConfigs
+}
+
+func UpdateBucketsList(newBucketCfg BucketsCfg) {
+	newBuckets := make([]string, 0)
+	for k, v := range newBucketCfg {
+		if !v.IsDeprecated {
+			newBuckets = append(newBuckets, k)
+		}
+	}
+	Buckets = newBuckets
+	BucketsConfigs = newBucketCfg
+
+	reinit()
+}
+
+func init() {
+	reinit()
+}
+
+func reinit() {
+	sortBuckets()
 
 	for _, name := range Buckets {
 		_, ok := BucketsConfigs[name]

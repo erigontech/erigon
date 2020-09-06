@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"os"
+
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
