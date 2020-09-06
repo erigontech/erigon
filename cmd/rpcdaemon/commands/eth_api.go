@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
@@ -36,7 +35,7 @@ type EthAPI interface {
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
 	GetTransactionByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	GetStorageAt(ctx context.Context, address common.Address, index *hexutil.Uint64, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
+	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -142,13 +141,11 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	return fields, nil
 }
 
-func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index *hexutil.Uint64, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
+func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
 	if err != nil {
 		return "", err
 	}
-
-	i := uint64(*index)
 
 	reader := adapter.NewStateReader(api.db, blockNumber)
 	acc, err := reader.ReadAccountData(address)
@@ -160,10 +157,9 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 		return "", fmt.Errorf("account not found")
 	}
 
-	var location common.Hash
+	location := common.HexToHash(index)
 
-	location.SetBytes(big.NewInt(int64(i)).Bytes())
-	res, err := reader.ReadAccountStorage(address, acc.Nonce, &location)
+	res, err := reader.ReadAccountStorage(address, acc.Incarnation, &location)
 	if err != nil {
 		return "", err
 	}
