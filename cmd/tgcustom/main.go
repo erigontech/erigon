@@ -57,7 +57,7 @@ func runTurboGeth(ctx *cli.Context) {
 		stagedsync.DefaultUnwindOrder(),
 	)
 
-	tg := node.New(ctx, sync)
+	tg := node.New(ctx, sync, node.Params{})
 	err := tg.Serve()
 
 	if err != nil {
