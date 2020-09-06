@@ -845,7 +845,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 
 	case msg.Code == NewBlockMsg:
 		// Retrieve and decode the propagated block
-		var request newBlockData
+		var request NewBlockData
 		if err := msg.Decode(&request); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
 		}

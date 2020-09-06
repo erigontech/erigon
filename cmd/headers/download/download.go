@@ -2,6 +2,7 @@ package download
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"math/big"
@@ -23,6 +24,22 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
+func nodeKey() *ecdsa.PrivateKey {
+	keyfile := "nodekey"
+	if key, err := crypto.LoadECDSA(keyfile); err == nil {
+		return key
+	}
+	// No persistent key found, generate and store a new one.
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		log.Crit(fmt.Sprintf("Failed to generate node key: %v", err))
+	}
+	if err := crypto.SaveECDSA(keyfile, key); err != nil {
+		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
+	}
+	return key
+}
+
 func makeP2PServer(protocols []string) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
@@ -32,10 +49,7 @@ func makeP2PServer(protocols []string) (*p2p.Server, error) {
 		return nil, fmt.Errorf("create discovery candidates: %v", err)
 	}
 
-	serverKey, err1 := crypto.GenerateKey()
-	if err1 != nil {
-		return nil, fmt.Errorf("generate server key: %v", err1)
-	}
+	serverKey := nodeKey()
 
 	p2pConfig := p2p.Config{}
 	p2pConfig.PrivateKey = serverKey
@@ -178,7 +192,11 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 		case eth.NewBlockHashesMsg:
 			fmt.Printf("[%s] NewBlockHashesMsg\n", peer.ID())
 		case eth.NewBlockMsg:
-			fmt.Printf("[%s] NewBlockMsg\n", peer.ID())
+			var request eth.NewBlockData
+			if err = msg.Decode(&request); err != nil {
+				return errResp(eth.ErrDecode, "decode NewBlockMsg %v: %v", msg, err)
+			}
+			fmt.Printf("[%s] NewBlockMsg{blockNumber: %d}\n", peer.ID(), request.Block.NumberU64())
 		case eth.NewPooledTransactionHashesMsg:
 			fmt.Printf("[%s] NewPooledTransactionHashesMsg\n", peer.ID())
 		case eth.GetPooledTransactionsMsg:

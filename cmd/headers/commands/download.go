@@ -1,8 +1,6 @@
 package commands
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/turbo-geth/cmd/headers/download"
 	"github.com/spf13/cobra"
 )
@@ -22,7 +20,6 @@ var downloadCmd = &cobra.Command{
 	Use:   "download",
 	Short: "Download headers backwards",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Printf("Download hello world!\n")
 		return download.Download()
 	},
 }
