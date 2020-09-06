@@ -1,7 +1,6 @@
 package dbutils
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
@@ -293,13 +292,11 @@ func UpdateBucketsList(newBucketCfg BucketsCfg) {
 }
 
 func init() {
-	fmt.Println("init")
 	reinit()
 }
 
 func reinit() {
 	sortBuckets()
-	fmt.Println("reinit", Buckets)
 
 	for _, name := range Buckets {
 		_, ok := BucketsConfigs[name]
