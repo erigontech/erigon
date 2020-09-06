@@ -49,7 +49,10 @@ func makeP2PServer(protocols []string) (*p2p.Server, error) {
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				fmt.Printf("Run protocol on peer %s\n", peer.ID())
 				genesis := core.DefaultGenesisBlock()
-				return runPeer(peer, rw, eth.ProtocolVersions[0], eth.DefaultConfig.NetworkID, genesis.Difficulty, params.MainnetGenesisHash, params.MainnetChainConfig, 0 /* head */)
+				if err := runPeer(peer, rw, eth.ProtocolVersions[0], eth.DefaultConfig.NetworkID, genesis.Difficulty, params.MainnetGenesisHash, params.MainnetChainConfig, 0 /* head */); err != nil {
+					fmt.Printf("Error while running peer %s: %v\n", peer.ID(), err)
+				}
+				return nil
 			},
 		},
 	}
@@ -86,26 +89,27 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 		return errResp(eth.ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
 	}
 	if msg.Size > eth.ProtocolMaxMsgSize {
-		return errResp(eth.ErrMsgTooLarge, "%v > %v", msg.Size, eth.ProtocolMaxMsgSize)
+		return errResp(eth.ErrMsgTooLarge, "message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
 	}
 	// Decode the handshake and make sure everything matches
 	var status eth.StatusData
 	if err := msg.Decode(&status); err != nil {
-		return errResp(eth.ErrDecode, "msg %v: %v", msg, err)
+		return errResp(eth.ErrDecode, "decode message %v: %v", msg, err)
 	}
 	if status.NetworkID != networkID {
-		return errResp(eth.ErrNetworkIDMismatch, "%d (!= %d)", status.NetworkID, networkID)
+		return errResp(eth.ErrNetworkIDMismatch, "network id does not match: theirs %d, ours %d", status.NetworkID, networkID)
 	}
 	if uint(status.ProtocolVersion) != version {
-		return errResp(eth.ErrProtocolVersionMismatch, "%d (!= %d)", status.ProtocolVersion, version)
+		return errResp(eth.ErrProtocolVersionMismatch, "version does not match: theirs %d, ours %d", status.ProtocolVersion, version)
 	}
 	if status.Genesis != genesisHash {
-		return errResp(eth.ErrGenesisMismatch, "%x (!= %x)", status.Genesis, genesisHash)
+		return errResp(eth.ErrGenesisMismatch, "genesis hash does not match: theirs %x, ours %x", status.Genesis, genesisHash)
 	}
 	forkFilter := forkid.NewFilter(chainConfig, genesisHash, head)
 	if err := forkFilter(status.ForkID); err != nil {
 		return errResp(eth.ErrForkIDRejected, "%v", err)
 	}
+	fmt.Printf("Received status mesage OK from %s\n", peer.ID())
 	return nil
 }
 
