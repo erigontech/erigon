@@ -1,7 +1,6 @@
 package node
 
 import (
-	"fmt"
 	"math"
 	"runtime/debug"
 	"strconv"
@@ -19,13 +18,6 @@ import (
 
 	gopsutil "github.com/shirou/gopsutil/mem"
 )
-
-const (
-	GitCommitFlag = "gitCommit"
-	GitDateFlag   = "gitDate"
-)
-
-type CustomFlagHandler func(*eth.Config, *node.Config)
 
 type TurboGethNode struct {
 	stack   *node.Node
@@ -49,9 +41,14 @@ func (tg *TurboGethNode) run() {
 	// see cmd/geth/main.go#startNode for full implementation
 }
 
-func New(ctx *cli.Context, sync *stagedsync.StagedSync) *TurboGethNode {
+type Params struct {
+	GitDate   string
+	GitCommit string
+}
+
+func New(ctx *cli.Context, sync *stagedsync.StagedSync, p Params) *TurboGethNode {
 	prepare(ctx)
-	nodeConfig := makeNodeConfig(ctx)
+	nodeConfig := makeNodeConfig(ctx, p)
 	node := makeConfigNode(nodeConfig)
 	ethConfig := makeEthConfig(ctx, node)
 
@@ -68,11 +65,10 @@ func makeEthConfig(ctx *cli.Context, node *node.Node) *eth.Config {
 	return ethConfig
 }
 
-func makeNodeConfig(ctx *cli.Context) *node.Config {
+func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
 	nodeConfig := node.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
-	if commit, date := ctx.String(GitCommitFlag), ctx.String(GitDateFlag); commit != "" && date != "" {
-		fmt.Println("commit, date", commit, date)
+	if commit, date := p.GitCommit, p.GitDate; commit != "" && date != "" {
 		nodeConfig.Version = params.VersionWithCommit(commit, date)
 	} else {
 		nodeConfig.Version = params.Version
