@@ -1,6 +1,7 @@
 package dbutils
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -280,8 +281,10 @@ func DefaultBuckets() BucketsCfg {
 
 func UpdateBucketsList(newBucketCfg BucketsCfg) {
 	newBuckets := make([]string, 0)
-	for k, _ := range newBucketCfg {
-		newBuckets = append(newBuckets, k)
+	for k, v := range newBucketCfg {
+		if !v.IsDeprecated {
+			newBuckets = append(newBuckets, k)
+		}
 	}
 	Buckets = newBuckets
 	BucketsConfigs = newBucketCfg
@@ -290,11 +293,13 @@ func UpdateBucketsList(newBucketCfg BucketsCfg) {
 }
 
 func init() {
+	fmt.Println("init")
 	reinit()
 }
 
 func reinit() {
 	sortBuckets()
+	fmt.Println("reinit", Buckets)
 
 	for _, name := range Buckets {
 		_, ok := BucketsConfigs[name]

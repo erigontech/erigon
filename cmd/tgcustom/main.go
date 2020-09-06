@@ -21,7 +21,7 @@ var flag = cli.StringFlag{
 }
 
 const (
-	customBucketName = "0x0F_CUSTOM_BUCKET"
+	customBucketName = "ZZZ_0x0F_CUSTOM_BUCKET"
 )
 
 func main() {
