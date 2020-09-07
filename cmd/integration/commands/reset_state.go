@@ -57,6 +57,27 @@ var cmdClearUnwindStack = &cobra.Command{
 	},
 }
 
+var cmdUnwindTo = &cobra.Command{
+	Use:   "unwind_to",
+	Short: "Call UnwindTo func",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		db := ethdb.MustOpen(chaindata)
+		defer db.Close()
+
+		bc, st, _ := newSync(ctx.Done(), db, db, nil)
+		defer bc.Stop()
+
+		err := st.UnwindTo(block, db)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(cmdResetState)
 	withCompact(cmdResetState)
@@ -66,6 +87,11 @@ func init() {
 	withChaindata(cmdClearUnwindStack)
 
 	rootCmd.AddCommand(cmdClearUnwindStack)
+
+	withChaindata(cmdUnwindTo)
+	withBlock(cmdUnwindTo)
+
+	rootCmd.AddCommand(cmdUnwindTo)
 }
 
 func clearUnwindStack(_ context.Context) error {
