@@ -86,12 +86,12 @@ func NewID(config *params.ChainConfig, genesis common.Hash, head uint64) ID {
 
 // NewFilter creates a filter that returns if a fork ID should be rejected or not
 // based on the local chain's status.
-func NewFilter(chain Blockchain) Filter {
+func NewFilter(config *params.ChainConfig, genesis common.Hash, head uint64) Filter {
 	return newFilter(
-		chain.Config(),
-		chain.Genesis().Hash(),
+		config,
+		genesis,
 		func() uint64 {
-			return chain.CurrentHeader().Number.Uint64()
+			return head
 		},
 	)
 }
