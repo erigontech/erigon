@@ -738,7 +738,10 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 
 	if len(v) > common.HashLength {
 		keyPart := len(v) - common.HashLength
+
+		fmt.Printf("Pointer: %p\n", k)
 		k = append(k, v[:keyPart]...)
+		fmt.Printf("Pointer after: %p\n", k)
 		v = v[keyPart:]
 	}
 	if c.filter(k) { // if filter allow us, return. otherwise delete and go ahead.
