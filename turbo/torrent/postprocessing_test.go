@@ -2,145 +2,15 @@ package torrent
 
 import (
 	"context"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"io"
-	"io/ioutil"
 	"math/big"
 	"os"
-	"runtime"
 	"testing"
 )
-
-func Test1(t *testing.T) {
-	path:=os.TempDir()+"/a"
-	path2:=os.TempDir()+"/b"
-	//fmt.Println(path, path2)
-	var cl1, cl2 io.Closer
-	{
-		env, err := lmdb.NewEnv()
-		if err != nil {
-			panic(err)
-		}
-		err = env.SetMaxDBs(100)
-		if err != nil {
-			panic(err)
-		}
-
-		err = env.Open(path, 0, 0664)
-		if err != nil {
-			panic(err)
-		}
-
-		tx, err := env.BeginTxn(nil, 0)
-		if err != nil {
-			panic(err)
-		}
-
-		dbi, err := tx.OpenDBI("alex", lmdb.Create)
-		if err != nil {
-			panic(err)
-		}
-		err = tx.Put(dbi, []byte{1}, []byte{1}, 0)
-		if err != nil {
-			panic(err)
-		}
-
-		err = tx.Commit()
-		if err != nil {
-			panic(err)
-		}
-		cl1=env
-	}
-
-	{
-		env, err := lmdb.NewEnv()
-		if err != nil {
-			panic(err)
-		}
-		err = env.SetMaxDBs(100)
-		if err != nil {
-			panic(err)
-		}
-		err = env.Open(path2, lmdb.Readonly, 0664)
-		if err != nil {
-			panic(err)
-		}
-
-		tx, err := env.BeginTxn(nil, lmdb.Readonly)
-		if err != nil {
-			panic(err)
-		}
-		dbi, err := tx.OpenDBI("alex", 0)
-		if err != nil {
-			panic(err)
-		}
-
-		c, err := tx.OpenCursor(dbi)
-		if err != nil {
-			panic(err)
-		}
-		_, _, err = c.Get([]byte{0}, nil, lmdb.SetRange)
-		if err != nil {
-			panic(err)
-		}
-
-		err = tx.Commit()
-		if err != nil {
-			panic(err)
-		}
-		cl2=env
-	}
-	err := cl1.Close()
-	if err != nil {
-		panic(err)
-	}
-	err = cl2.Close()
-	if err != nil {
-		panic(err)
-	}
-
-}
-
-func Test2(t *testing.T) {
-	path,_:=ioutil.TempDir(os.TempDir(), "c")
-	{
-		kv := ethdb.NewLMDB().Path(path).MustOpen()
-		tx, err := kv.Begin(context.Background(), nil, true)
-		if err != nil {
-			panic(err)
-		}
-		c := tx.Cursor(dbutils.HeaderPrefix)
-		err = c.Put([]byte{1}, []byte{1})
-		if err != nil {
-			panic(err)
-		}
-		err = tx.Commit(context.Background())
-		if err != nil {
-			panic(err)
-		}
-		kv.Close()
-	}
-
-	{
-		kv := ethdb.NewLMDB().Path(path).ReadOnly().MustOpen()
-		tx, err := kv.Begin(context.Background(), nil, false)
-		if err != nil {
-			panic(err)
-		}
-		c := tx.Cursor(dbutils.HeaderPrefix)
-		_, _, err = c.Seek([]byte{0})
-		if err != nil {
-			panic(err)
-		}
-		tx.Rollback()
-		kv.Close()
-	}
-}
 
 func TestHeadersGenerateIndex(t *testing.T) {
 	snPath := os.TempDir() + "/sn"
@@ -153,7 +23,6 @@ func TestHeadersGenerateIndex(t *testing.T) {
 			if err != nil {
 				panic(err)
 			}
-			//fmt.Println("Put", header.Number, common.Bytes2Hex(dbutils.HeaderKey(header.Number.Uint64(), header.Hash())), len(headerBytes))
 			err = tx.Cursor(dbutils.HeaderPrefix).Put(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
 			if err != nil {
 				panic(err)
@@ -168,7 +37,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 
 	//ethdb.NewLMDB().WithBucketsConfig()
 	db := ethdb.NewLMDB().InMem().WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
-	snKV := ethdb.NewSnapshotKV().For(dbutils.HeaderPrefix).Path(snPath).DB(db).Open()
+	snKV := ethdb.NewSnapshotKV().For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).Path(snPath).DB(db).MustOpen()
 	err = GenerateHeaderIndexes(context.Background(), ethdb.NewObjectDatabase(snKV))
 	if err != nil {
 		t.Fatal(err)
@@ -200,30 +69,6 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	}
 }
 
-func TestName22(t *testing.T) {
-	os.RemoveAll(os.TempDir() + "/tm1")
-	//os.RemoveAll(os.TempDir()+"/tm2")
-	db1 := ethdb.NewLMDB().Path(os.TempDir() + "/tm1").MustOpen()
-	db2 := ethdb.NewLMDB().Path(os.TempDir() + "/tm2").ReadOnly().MustOpen()
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	tx, err := db1.Begin(context.Background(), nil, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tx2, err := db2.Begin(context.Background(), nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := tx.Cursor(dbutils.HeaderPrefix)
-	c2 := tx2.Cursor(dbutils.HeaderPrefix)
-	_, _, err1 := c.Seek([]byte("sa"))
-	_, _, err2 := c2.Seek([]byte("sa"))
-	t.Log(err)
-	t.Log(err1)
-	t.Log(err2)
-
-}
 func generateHeaders(n int) []types.Header {
 	headers := make([]types.Header, n)
 	for i := uint64(0); i < uint64(n); i++ {

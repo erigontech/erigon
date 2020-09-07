@@ -107,6 +107,7 @@ func (cli *Client) Run(db ethdb.Database) error  {
 	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(time.Minute*10))
 	defer cancel()
 	eg:=errgroup.Group{}
+	//todo remove
 	db.Delete(dbutils.SnapshotInfoBucket, []byte(HeadersSnapshotName))
 	db.Delete(dbutils.SnapshotInfoBucket, []byte(BodiesSnapshotName))
 

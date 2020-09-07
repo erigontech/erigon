@@ -114,19 +114,20 @@ func (opts lmdbOpts) Open() (KV, error) {
 
 	// Open or create buckets
 	if opts.readOnly {
-		fmt.Println("ethdb/kv_lmdb.go:117 Readonly")
-		if err := db.View(context.Background(), func(tx Tx) error {
-			for name, cfg := range db.buckets {
-				fmt.Println("ethdb/kv_lmdb.go:120 View", name)
-				if cfg.IsDeprecated {
-					continue
-				}
-				if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
-					return err
-				}
+		tx, err:=db.Begin(context.Background(), nil, false)
+		if err != nil {
+			return nil, err
+		}
+		for name, cfg := range db.buckets {
+			if cfg.IsDeprecated {
+				continue
 			}
-			return nil
-		}); err != nil {
+			if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
+				return nil, err
+			}
+		}
+		err = tx.Commit(context.Background())
+		if err != nil {
 			return nil, err
 		}
 	} else {
@@ -257,9 +258,9 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 	}
 	tx, err := db.env.BeginTxn(parentTx, flags)
 	if err != nil {
-		//if !isSubTx {
-		//	runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
-		//}
+		if !isSubTx {
+			runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
+		}
 		return nil, err
 	}
 	tx.RawRead = true
@@ -315,7 +316,7 @@ func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 		return nil, err
 	}
 	c, err := rawTx.OpenCursor(root)
-	fmt.Println("ethdb/kv_lmdb.go:318 Open cursor", c)
+	fmt.Println("ethdb/kv_lmdb.go:318 Open cursor", c,err)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +334,6 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	db.wg.Add(1)
 	defer db.wg.Done()
 
-	fmt.Println("ethdb/kv_lmdb.go:332 LmdbKV")
 	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
 	tx, err := db.Begin(ctx, nil, false)
 	if err != nil {
@@ -373,7 +373,6 @@ func (tx *lmdbTx) CreateBucket(name string) error {
 		flags |= lmdb.Create
 	}
 	dbi, err := tx.tx.OpenDBI(name, flags)
-	fmt.Println("ethdb/kv_lmdb.go:373 Create, opendbi", name, dbi)
 	if err != nil {
 		return err
 	}
@@ -437,10 +436,10 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 	}
 	defer func() {
 		tx.tx = nil
-		//if !tx.isSubTx {
+		if !tx.isSubTx {
 			tx.db.wg.Done()
-		//	runtime.UnlockOSThread()
-		//}
+			runtime.UnlockOSThread()
+		}
 	}()
 	tx.closeCursors()
 
@@ -467,7 +466,6 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 }
 
 func (tx *lmdbTx) Rollback() {
-	fmt.Println("ethdb/kv_lmdb.go:465 Rollback")
 	if tx.db.env == nil {
 		return
 	}
@@ -476,10 +474,10 @@ func (tx *lmdbTx) Rollback() {
 	}
 	defer func() {
 		tx.tx = nil
-		//if !tx.isSubTx {
+		if !tx.isSubTx {
 			tx.db.wg.Done()
-			//runtime.UnlockOSThread()
-		//}
+			runtime.UnlockOSThread()
+		}
 	}()
 	tx.closeCursors()
 	tx.tx.Abort()
@@ -490,10 +488,8 @@ func (tx *lmdbTx) get(dbi lmdb.DBI, key []byte) ([]byte, error) {
 }
 
 func (tx *lmdbTx) closeCursors() {
-	fmt.Println("close cursors", len(tx.cursors))
 	for _, c := range tx.cursors {
 		if c != nil {
-			fmt.Println("close", c)
 			c.Close()
 		}
 	}
@@ -579,10 +575,7 @@ func (c *LmdbCursor) initCursor() error {
 	tx := c.tx
 
 	var err error
-	fmt.Println("init", c.tx.db.buckets[c.bucketName].DBI, c.bucketName, c.tx.db.buckets[c.bucketName])
 	c.cursor, err = tx.tx.OpenCursor(c.tx.db.buckets[c.bucketName].DBI)
-	fmt.Println("db, tx",c.tx.db, c.tx.tx)
-	fmt.Println("ethdb/kv_lmdb.go:583 Open cursor", c.bucketName,c.tx.db.buckets[c.bucketName].DBI, err)
 	if err != nil {
 		panic("su-tx"+err.Error())
 		return err

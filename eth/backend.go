@@ -18,8 +18,11 @@
 package eth
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"os"
@@ -154,6 +157,16 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		err:=torrentClient.Run(chainDb)
 		if err!=nil {
 			return nil, err
+		}
+
+		snapshotKV:=chainDb.KV()
+		snapshotKV=ethdb.NewSnapshotKV().Path("/media/b00ris/nvme/snapshotsync/tg/snapshots/bodies/bodies_11").For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).DB(snapshotKV).MustOpen()
+		snapshotKV=ethdb.NewSnapshotKV().Path("/media/b00ris/nvme/snapshotsync/tg/snapshots/headers/headers_11").For(dbutils.HeaderPrefix,dbutils.BucketConfigItem{}).DB(snapshotKV).MustOpen()
+		chainDb.SetKV(snapshotKV)
+		err=torrent.GenerateHeaderIndexes(context.Background(), chainDb)
+		if err!=nil {
+			spew.Dump(err)
+			panic(err.Error())
 		}
 		panic(config.SnapshotMode.ToString())
 	}

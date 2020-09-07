@@ -83,9 +83,9 @@ func Open(path string, snapshotsOpts ...SnapshotUsageOpt) (*ObjectDatabase, erro
 		fmt.Println("Wrapped by", snPath.Path)
 		opts:=NewSnapshotKV().DB(kv).Path(snPath.Path)
 		for bucket:=range snPath.ForBuckets  {
-			opts = opts.For(bucket)
+			opts = opts.For(bucket, dbutils.BucketConfigItem{})
 		}
-		kv = opts.Open()
+		kv = opts.MustOpen()
 	}
 
 	if err != nil {
@@ -325,6 +325,10 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 
 func (db *ObjectDatabase) KV() KV {
 	return db.kv
+}
+
+func (db *ObjectDatabase) SetKV(kv KV) {
+	db.kv = kv
 }
 
 func (db *ObjectDatabase) MemCopy() *ObjectDatabase {

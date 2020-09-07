@@ -78,9 +78,12 @@ func (m *TxDb) begin(parent Tx) error {
 	m.ParentTx = parent
 	m.cursors = make(map[string]*LmdbCursor, 16)
 	for i := range dbutils.Buckets {
-		m.cursors[dbutils.Buckets[i]] = tx.Cursor(dbutils.Buckets[i]).(*LmdbCursor)
-		if err := m.cursors[dbutils.Buckets[i]].initCursor(); err != nil {
-			return err
+		v,ok:= tx.Cursor(dbutils.Buckets[i]).(*LmdbCursor)
+		if ok {
+			m.cursors[dbutils.Buckets[i]] = v
+			if err := m.cursors[dbutils.Buckets[i]].initCursor(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -77,7 +77,7 @@ type SnapshotUsageOpt struct{
 
 func NewSnapshotKV() snapshotOpts {
 	return snapshotOpts{
-		forBuckets: make(map[string]struct{}),
+		forBuckets: make(map[string]dbutils.BucketConfigItem),
 	}
 }
 
@@ -86,13 +86,13 @@ type SnapshotKV struct {
 	db KV
 	snapshotDB KV
 	snapshotPath string
-	forBuckets map[string]struct{}
+	forBuckets map[string]dbutils.BucketConfigItem
 }
 
 type snapshotOpts struct {
 	path     string
 	db     KV
-	forBuckets map[string]struct{}
+	forBuckets map[string]dbutils.BucketConfigItem
 }
 
 func (opts snapshotOpts) Path(path string) snapshotOpts {
@@ -105,20 +105,19 @@ func (opts snapshotOpts) DB(db KV) snapshotOpts {
 	return opts
 }
 
-func (opts snapshotOpts) For(bucket string) snapshotOpts {
-	opts.forBuckets[bucket] = struct{}{}
+func (opts snapshotOpts) For(bucket string, config dbutils.BucketConfigItem) snapshotOpts {
+	opts.forBuckets[bucket] = config
 	return opts
 }
 
 
-func (opts snapshotOpts) Open() KV {
+func (opts snapshotOpts) MustOpen() KV {
 	snapshotDB,err:=NewLMDB().Path(opts.path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
-		}
+		return opts.forBuckets
 	}).ReadOnly().Open()
 	if err!=nil {
 		log.Warn("Snapshot db has not opened", "err", err)
+		panic(err)
 	}
 	return &SnapshotKV{
 		snapshotDB: snapshotDB,
@@ -166,6 +165,9 @@ func (s *SnapshotKV) Close() {
 }
 
 func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx, error) {
+	if writable {
+		return s.db.Begin(ctx, parentTx, writable)
+	}
 	if s.snapshotDB==nil {
 		snapshotDB,err:=NewLMDB().Path(s.snapshotPath).ReadOnly().Open()
 		if err!=nil {
@@ -189,7 +191,7 @@ func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx,
 	return t, nil
 }
 
-func newVirtualTx(construct func() (Tx, error), forBucket map[string]struct{}) *lazyTx {
+func newVirtualTx(construct func() (Tx, error), forBucket map[string]dbutils.BucketConfigItem) *lazyTx {
 	return &lazyTx{
 		construct: construct,
 		forBuckets: forBucket,
@@ -199,7 +201,7 @@ var ErrNotSnapshotBucket = errors.New("not snapshot bucket")
 //lazyTx is used for lazy transaction creation.
 type lazyTx struct {
 	construct func() (Tx,error)
-	forBuckets map[string]struct{}
+	forBuckets map[string]dbutils.BucketConfigItem
 	tx Tx
 	sync.Mutex
 }

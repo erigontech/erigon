@@ -22,7 +22,7 @@ func (c *Client) DownloadHeadersSnapshot(db ethdb.Database) error  {
 	if err!=nil && err!=ethdb.ErrKeyNotFound {
 		return err
 	}
-	fmt.Println("Info bytes", common.Bytes2Hex(infoBytes))
+	//fmt.Println("Info bytes", common.Bytes2Hex(infoBytes))
 
 	t, _, err:=c.cli.AddTorrentSpec(&torrent.TorrentSpec{
 		Trackers:    Trackers,
@@ -42,8 +42,8 @@ gi:
 		select {
 		case <-t.GotInfo():
 			log.Info("Snapshot information collected", "t", time.Since(tm))
-			fmt.Println(t.Info().PieceLength)
-			fmt.Println(t.Info().Length)
+			//fmt.Println(t.Info().PieceLength)
+			//fmt.Println(t.Info().Length)
 			//fmt.Println(t.Metainfo().)
 			break gi
 		default:
