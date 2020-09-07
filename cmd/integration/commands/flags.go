@@ -48,7 +48,7 @@ func withUnwind(cmd *cobra.Command) {
 }
 
 func withUnwindEvery(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&unwindEvery, "unwind_every", 100, "each iteration test will move forward `--unwind_every` blocks, then unwind `--unwind` blocks")
+	cmd.Flags().Uint64Var(&unwindEvery, "unwind_every", 0, "each iteration test will move forward `--unwind_every` blocks, then unwind `--unwind` blocks")
 }
 
 func withReset(cmd *cobra.Command) {

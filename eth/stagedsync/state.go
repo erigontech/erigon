@@ -79,6 +79,7 @@ func (s *State) UnwindTo(blockNumber uint64, db ethdb.Database) error {
 		if stage.Disabled {
 			continue
 		}
+		fmt.Printf("stack: %s\n", stage.Description)
 		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber, nil}, db); err != nil {
 			return err
 		}
