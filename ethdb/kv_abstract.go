@@ -139,7 +139,6 @@ type Cursor interface {
 	//
 	//PutCurrent(key, value []byte) error
 
-
 }
 
 type CursorDupSort interface {
