@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -227,13 +228,44 @@ func testCfgCodes(chaindata string) error {
 	return nil
 }
 
+func testCfgByUsed() error {
+	file, err := os.Open("used_contracts.txt")
+
+	if err != nil {
+		log.Fatalf("failed opening file: %s", err)
+	}
+
+	var bytecodes [][]byte
+	scanner := bufio.NewScanner(file)
+	scanner.Split(bufio.ScanLines)
+
+	for scanner.Scan() {
+		code, _ := hex.DecodeString(scanner.Text()[2:])
+		bytecodes = append(bytecodes, code)
+	}
+
+	eval := CfgEval{numPrograms: len(bytecodes)}
+	for _, code := range bytecodes {
+		eval.run(code, 1)
+
+		if eval.numProgramsAnalyzed % 10 == 0 {
+			eval.printStats()
+		}
+	}
+
+	file.Close()
+
+	return nil
+}
+
 func percent(n int, d int) string {
 	return fmt.Sprintf("%v%v", n*1000/d/10, "%")
 }
 
 func testGenCfg() {
 	//export("codes")
-	_ = testCfgByImpact("codes")
+	//_ = testCfgByImpact("codes")
+	_ = testCfgByUsed()
 	if true {
 		return
 	}
