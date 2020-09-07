@@ -526,7 +526,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 	sim := NewSimulatedBackend(core.GenesisAlloc{addr: {Balance: big.NewInt(params.Ether*2 + 2e17)}}, 10000000)
 	defer sim.Close()
 
-	receipant := common.HexToAddress("deadbeef")
+	recipient := common.HexToAddress("deadbeef")
 	var cases = []struct {
 		name        string
 		message     ethereum.CallMsg
@@ -535,7 +535,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 	}{
 		{"EstimateWithoutPrice", ethereum.CallMsg{
 			From:     addr,
-			To:       &receipant,
+			To:       &recipient,
 			Gas:      0,
 			GasPrice: uint256.NewInt(),
 			Value:    uint256.NewInt().SetUint64(1000),
@@ -544,7 +544,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 
 		{"EstimateWithPrice", ethereum.CallMsg{
 			From:     addr,
-			To:       &receipant,
+			To:       &recipient,
 			Gas:      0,
 			GasPrice: uint256.NewInt().SetUint64(1000),
 			Value:    uint256.NewInt().SetUint64(1000),
@@ -553,7 +553,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 
 		{"EstimateWithVeryHighPrice", ethereum.CallMsg{
 			From:     addr,
-			To:       &receipant,
+			To:       &recipient,
 			Gas:      0,
 			GasPrice: uint256.NewInt().SetUint64(1e14), // gascost = 2.1ether
 			Value:    uint256.NewInt().SetUint64(1e17), // the remaining balance for fee is 2.1ether
@@ -562,7 +562,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 
 		{"EstimateWithSuperhighPrice", ethereum.CallMsg{
 			From:     addr,
-			To:       &receipant,
+			To:       &recipient,
 			Gas:      0,
 			GasPrice: uint256.NewInt().SetUint64(2e14), // gascost = 4.2ether
 			Value:    uint256.NewInt().SetUint64(1000),
@@ -1091,12 +1091,12 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 				t.Errorf("result from %v was not nil: %v", key, res)
 			}
 			if val != nil {
-				rerr, ok := err.(*revertError)
+				rErr, ok := err.(*revertError)
 				if !ok {
 					t.Errorf("expect revert error")
 				}
-				if rerr.Error() != "execution reverted: "+val.(string) {
-					t.Errorf("error was malformed: got %v want %v", rerr.Error(), val)
+				if rErr.Error() != "execution reverted: "+val.(string) {
+					t.Errorf("error was malformed: got %v want %v", rErr.Error(), val)
 				}
 			} else {
 				// revert(0x0,0x0)
