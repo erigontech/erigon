@@ -178,7 +178,7 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 				if hashesStr.Len() > 0 {
 					hashesStr.WriteString(",")
 				}
-				hashesStr.WriteString(fmt.Sprintf("%x", hash))
+				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
 			}
 			log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}", peer.ID(), hashesStr.String()))
 		case eth.BlockBodiesMsg:
@@ -191,17 +191,17 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 			log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peer.ID()))
 		case eth.NewBlockHashesMsg:
 			var announces eth.NewBlockHashesData
-			if err := msg.Decode(&announces); err != nil {
+			if err = msg.Decode(&announces); err != nil {
 				return errResp(eth.ErrDecode, "decode NewBlockHashesData %v: %v", msg, err)
 			}
-			var hashesStr strings.Builder
+			var numStr strings.Builder
 			for _, announce := range announces {
-				if hashesStr.Len() > 0 {
-					hashesStr.WriteString(",")
+				if numStr.Len() > 0 {
+					numStr.WriteString(",")
 				}
-				hashesStr.WriteString(fmt.Sprintf("%d", announce.Number))
+				numStr.WriteString(fmt.Sprintf("%d", announce.Number))
 			}
-			log.Info(fmt.Sprintf("[%s] NewBlockHashesMsg {%s}", peer.ID(), hashesStr.String()))
+			log.Info(fmt.Sprintf("[%s] NewBlockHashesMsg {%s}", peer.ID(), numStr.String()))
 		case eth.NewBlockMsg:
 			var request eth.NewBlockData
 			if err = msg.Decode(&request); err != nil {
@@ -209,11 +209,34 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 			}
 			log.Info(fmt.Sprintf("[%s] NewBlockMsg{blockNumber: %d}", peer.ID(), request.Block.NumberU64()))
 		case eth.NewPooledTransactionHashesMsg:
-			log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg", peer.ID()))
+			var hashes []common.Hash
+			if err := msg.Decode(&hashes); err != nil {
+				return errResp(eth.ErrDecode, "decode NewPooledTransactionHashesMsg %v: %v", msg, err)
+			}
+			var hashesStr strings.Builder
+			for _, hash := range hashes {
+				if hashesStr.Len() > 0 {
+					hashesStr.WriteString(",")
+				}
+				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
+			}
+			log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg {%s}", peer.ID(), hashesStr.String()))
 		case eth.GetPooledTransactionsMsg:
 			log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg", peer.ID()))
 		case eth.TransactionMsg:
-			log.Info(fmt.Sprintf("[%s] TransactionMsg", peer.ID()))
+			var txs []*types.Transaction
+			if err := msg.Decode(&txs); err != nil {
+				return errResp(eth.ErrDecode, "decode TransactionMsg %v: %v", msg, err)
+			}
+			var hashesStr strings.Builder
+			for _, tx := range txs {
+				if hashesStr.Len() > 0 {
+					hashesStr.WriteString(",")
+				}
+				hash := tx.Hash()
+				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
+			}
+			log.Info(fmt.Sprintf("[%s] TransactionMsg {%s}", peer.ID(), hashesStr.String()))
 		case eth.PooledTransactionsMsg:
 			log.Info(fmt.Sprintf("[%s] PooledTransactionsMsg", peer.ID()))
 		default:
