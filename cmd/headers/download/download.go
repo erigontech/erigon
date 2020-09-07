@@ -65,7 +65,7 @@ func makeP2PServer(protocols []string) (*p2p.Server, error) {
 			Length:         eth.ProtocolLengths[eth.ProtocolVersions[0]],
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-				log.Info(fmt.Sprintf("[%s] Start with peer %s", peer.ID()))
+				log.Info(fmt.Sprintf("[%s] Start with peer", peer.ID()))
 				genesis := core.DefaultGenesisBlock()
 				if err := runPeer(peer, rw, eth.ProtocolVersions[0], eth.DefaultConfig.NetworkID, genesis.Difficulty, params.MainnetGenesisHash, params.MainnetChainConfig, 0 /* head */); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peer.ID(), err))
@@ -158,7 +158,7 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 				return fmt.Errorf("send empty headers reply: %v", err)
 			}
 		case eth.BlockHeadersMsg:
-			log.Info(fmt.Sprintf("[%s] BlockHeadersMsg\n", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] BlockHeadersMsg", peer.ID()))
 		case eth.GetBlockBodiesMsg:
 			// Decode the retrieval message
 			msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
@@ -180,33 +180,33 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 				}
 				hashesStr.WriteString(fmt.Sprintf("%x", hash))
 			}
-			log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}\n", peer.ID(), hashesStr.String()))
+			log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}", peer.ID(), hashesStr.String()))
 		case eth.BlockBodiesMsg:
-			log.Info(fmt.Sprintf("[%s] BlockBodiesMsg\n", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peer.ID()))
 		case eth.GetNodeDataMsg:
-			log.Info(fmt.Sprintf("[%s] GetNodeData\n", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] GetNodeData", peer.ID()))
 		case eth.GetReceiptsMsg:
-			log.Info(fmt.Sprintf("[%s] GetReceiptsMsg\n", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peer.ID()))
 		case eth.ReceiptsMsg:
-			log.Info(fmt.Sprintf("[%s] ReceiptsMsg\n", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peer.ID()))
 		case eth.NewBlockHashesMsg:
-			log.Info(fmt.Sprintf("[%s] NewBlockHashesMsg\n", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] NewBlockHashesMsg", peer.ID()))
 		case eth.NewBlockMsg:
 			var request eth.NewBlockData
 			if err = msg.Decode(&request); err != nil {
 				return errResp(eth.ErrDecode, "decode NewBlockMsg %v: %v", msg, err)
 			}
-			log.Info(fmt.Sprintf("[%s] NewBlockMsg{blockNumber: %d}\n", peer.ID(), request.Block.NumberU64()))
+			log.Info(fmt.Sprintf("[%s] NewBlockMsg{blockNumber: %d}", peer.ID(), request.Block.NumberU64()))
 		case eth.NewPooledTransactionHashesMsg:
-			log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg\n", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg", peer.ID()))
 		case eth.GetPooledTransactionsMsg:
-			log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg\n", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg", peer.ID()))
 		case eth.TransactionMsg:
-			log.Info(fmt.Sprintf("[%s] TransactionMsg\n", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] TransactionMsg", peer.ID()))
 		case eth.PooledTransactionsMsg:
-			log.Info(fmt.Sprintf("[%s] PooledTransactionsMsg\n", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] PooledTransactionsMsg", peer.ID()))
 		default:
-			log.Error(fmt.Sprintf("[%s] Unknown message code: %d\n", peer.ID(), msg.Code))
+			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peer.ID(), msg.Code))
 		}
 		msg.Discard()
 	}
