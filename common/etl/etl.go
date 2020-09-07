@@ -3,6 +3,7 @@ package etl
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"io"
 	"reflect"
 	"runtime"
@@ -71,6 +72,8 @@ type TransformArgs struct {
 
 	LogDetailsExtract AdditionalLogArguments
 	LogDetailsLoad    AdditionalLogArguments
+
+	Comparator dbutils.CmpFunc
 }
 
 func Transform(

@@ -83,7 +83,8 @@ func (c *Collector) Load(db ethdb.Database, toBucket string, loadFunc LoadFunc, 
 func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
-	h := &Heap{}
+
+	h := &Heap{comparator: args.Comparator}
 	heap.Init(h)
 	for i, provider := range providers {
 		if key, value, err := provider.Next(decoder); err == nil {

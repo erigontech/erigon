@@ -395,7 +395,9 @@ func (l *FlatDBTrieLoader) logProgress() {
 	var k string
 	if l.accountKey != nil {
 		k = makeCurrentKeyStr(l.accountKey)
-	} else {
+	} else if l.storageKey != nil {
+		k = makeCurrentKeyStr(l.storageKey)
+	} else if l.ihK != nil {
 		k = makeCurrentKeyStr(l.ihK)
 	}
 	log.Info("Calculating Merkle root", "current key", k)
@@ -733,7 +735,7 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 	if len(v) > common.HashLength {
 		keyPart := len(v) - common.HashLength
 		k = append(k, v[:keyPart]...)
-		v = common.CopyBytes(v[keyPart:])
+		v = v[keyPart:]
 	}
 	if c.filter(k) { // if filter allow us, return. otherwise delete and go ahead.
 		return k, v, nil
@@ -765,7 +767,8 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return k, v, nil
 		}
 
-		if err := c.c.DeleteCurrent(); err != nil {
+		err = c.c.DeleteCurrent()
+		if err != nil {
 			return []byte{}, nil, err
 		}
 

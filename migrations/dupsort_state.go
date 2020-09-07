@@ -77,8 +77,14 @@ var dupSortPlainState = Migration{
 }
 
 var dupSortIH = Migration{
-	Name: "dupsort_ih_test3",
+	Name: "dupsort_intermediate_hashes",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.IntermediateTrieHashBucketOld1); err != nil {
+			return err
+		} else if !exists {
+			return OnLoadCommit(db, nil, true)
+		}
+
 		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
 			return err
 		}
@@ -99,6 +105,10 @@ var dupSortIH = Migration{
 			etl.IdentityLoadFunc,
 			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
 		); err != nil {
+			return err
+		}
+
+		if err := db.(ethdb.NonTransactional).DropBuckets(dbutils.IntermediateTrieHashBucketOld1); err != nil {
 			return err
 		}
 

@@ -219,6 +219,7 @@ var DeprecatedBuckets = []string{
 	SyncStageUnwindOld1,
 	CurrentStateBucketOld1,
 	PlainStateBucketOld1,
+	IntermediateTrieHashBucketOld1,
 }
 
 type CustomComparator string
