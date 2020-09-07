@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
-const MaxTxTTL = time.Minute
+const MaxTxTTL = 30 * time.Second
 
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -95,8 +95,8 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 
 	c := tx.Cursor(bucketName).Prefix(prefix)
 
-	t := time.Now()
-	i := 0
+	txTicket := time.NewTicker(MaxTxTTL)
+
 	// send all items to client, if k==nil - stil send it to client and break loop
 	for k, v, err := c.Seek(in.SeekKey); ; k, v, err = c.Next() {
 		if err != nil {
@@ -122,9 +122,10 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 			}
 		}
 
-		//TODO: protect against stale client
-		i++
-		if i%128 == 0 && time.Since(t) > MaxTxTTL {
+		//TODO: protect against client - which doesn't send any requests
+		select {
+		default:
+		case <-txTicket.C:
 			tx.Rollback()
 			tx, err = s.kv.Begin(context.Background(), nil, false)
 			if err != nil {
