@@ -8,12 +8,19 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"io"
+	"io/ioutil"
 	"math/big"
 	"os"
+	"runtime"
 	"testing"
 )
 
 func Test1(t *testing.T) {
+	path:=os.TempDir()+"/a"
+	path2:=os.TempDir()+"/b"
+	//fmt.Println(path, path2)
+	var cl1, cl2 io.Closer
 	{
 		env, err := lmdb.NewEnv()
 		if err != nil {
@@ -24,7 +31,7 @@ func Test1(t *testing.T) {
 			panic(err)
 		}
 
-		err = env.Open("./a", 0, 0664)
+		err = env.Open(path, 0, 0664)
 		if err != nil {
 			panic(err)
 		}
@@ -47,10 +54,7 @@ func Test1(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		err = env.Close()
-		if err != nil {
-			panic(err)
-		}
+		cl1=env
 	}
 
 	{
@@ -62,7 +66,7 @@ func Test1(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		err = env.Open("./a", lmdb.Readonly, 0664)
+		err = env.Open(path2, lmdb.Readonly, 0664)
 		if err != nil {
 			panic(err)
 		}
@@ -89,16 +93,23 @@ func Test1(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		err = env.Close()
-		if err != nil {
-			panic(err)
-		}
+		cl2=env
 	}
+	err := cl1.Close()
+	if err != nil {
+		panic(err)
+	}
+	err = cl2.Close()
+	if err != nil {
+		panic(err)
+	}
+
 }
 
 func Test2(t *testing.T) {
+	path,_:=ioutil.TempDir(os.TempDir(), "c")
 	{
-		kv := ethdb.NewLMDB().Path("./c").MustOpen()
+		kv := ethdb.NewLMDB().Path(path).MustOpen()
 		tx, err := kv.Begin(context.Background(), nil, true)
 		if err != nil {
 			panic(err)
@@ -116,7 +127,7 @@ func Test2(t *testing.T) {
 	}
 
 	{
-		kv := ethdb.NewLMDB().Path("./c").ReadOnly().MustOpen()
+		kv := ethdb.NewLMDB().Path(path).ReadOnly().MustOpen()
 		tx, err := kv.Begin(context.Background(), nil, false)
 		if err != nil {
 			panic(err)

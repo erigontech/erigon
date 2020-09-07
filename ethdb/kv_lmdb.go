@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"runtime"
 	"sync"
 	"time"
 
@@ -113,8 +114,10 @@ func (opts lmdbOpts) Open() (KV, error) {
 
 	// Open or create buckets
 	if opts.readOnly {
+		fmt.Println("ethdb/kv_lmdb.go:117 Readonly")
 		if err := db.View(context.Background(), func(tx Tx) error {
 			for name, cfg := range db.buckets {
+				fmt.Println("ethdb/kv_lmdb.go:120 View", name)
 				if cfg.IsDeprecated {
 					continue
 				}
@@ -239,10 +242,10 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 		return nil, fmt.Errorf("db closed")
 	}
 	isSubTx := parent != nil
-	//if !isSubTx {
-	//	runtime.LockOSThread()
+	if !isSubTx {
+		runtime.LockOSThread()
 		db.wg.Add(1)
-	//}
+	}
 
 	flags := uint(0)
 	if !writable {
@@ -312,12 +315,14 @@ func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 		return nil, err
 	}
 	c, err := rawTx.OpenCursor(root)
+	fmt.Println("ethdb/kv_lmdb.go:318 Open cursor", c)
 	if err != nil {
 		return nil, err
 	}
 	for k, _, _ := c.Get(nil, nil, lmdb.First); k != nil; k, _, _ = c.Get(nil, nil, lmdb.Next) {
 		res = append(res, string(k))
 	}
+	c.Close()
 	return res, nil
 }
 
@@ -328,6 +333,7 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	db.wg.Add(1)
 	defer db.wg.Done()
 
+	fmt.Println("ethdb/kv_lmdb.go:332 LmdbKV")
 	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
 	tx, err := db.Begin(ctx, nil, false)
 	if err != nil {
@@ -367,6 +373,7 @@ func (tx *lmdbTx) CreateBucket(name string) error {
 		flags |= lmdb.Create
 	}
 	dbi, err := tx.tx.OpenDBI(name, flags)
+	fmt.Println("ethdb/kv_lmdb.go:373 Create, opendbi", name, dbi)
 	if err != nil {
 		return err
 	}
@@ -460,6 +467,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 }
 
 func (tx *lmdbTx) Rollback() {
+	fmt.Println("ethdb/kv_lmdb.go:465 Rollback")
 	if tx.db.env == nil {
 		return
 	}
@@ -482,8 +490,10 @@ func (tx *lmdbTx) get(dbi lmdb.DBI, key []byte) ([]byte, error) {
 }
 
 func (tx *lmdbTx) closeCursors() {
+	fmt.Println("close cursors", len(tx.cursors))
 	for _, c := range tx.cursors {
 		if c != nil {
+			fmt.Println("close", c)
 			c.Close()
 		}
 	}
@@ -569,7 +579,10 @@ func (c *LmdbCursor) initCursor() error {
 	tx := c.tx
 
 	var err error
+	fmt.Println("init", c.tx.db.buckets[c.bucketName].DBI, c.bucketName, c.tx.db.buckets[c.bucketName])
 	c.cursor, err = tx.tx.OpenCursor(c.tx.db.buckets[c.bucketName].DBI)
+	fmt.Println("db, tx",c.tx.db, c.tx.tx)
+	fmt.Println("ethdb/kv_lmdb.go:583 Open cursor", c.bucketName,c.tx.db.buckets[c.bucketName].DBI, err)
 	if err != nil {
 		panic("su-tx"+err.Error())
 		return err

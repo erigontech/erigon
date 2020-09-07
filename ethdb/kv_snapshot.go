@@ -116,7 +116,7 @@ func (opts snapshotOpts) Open() KV {
 		return dbutils.BucketsCfg{
 			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
 		}
-	}).Open()
+	}).ReadOnly().Open()
 	if err!=nil {
 		log.Warn("Snapshot db has not opened", "err", err)
 	}
