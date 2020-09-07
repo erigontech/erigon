@@ -284,17 +284,15 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 	if len(l.ihK) > common.HashLength {
 		l.itemType = SHashStreamItem
 		l.accountKey = nil
-		l.storageKey = common.CopyBytes(l.ihK)
-		l.hashValue = common.CopyBytes(l.ihV)
+		l.storageKey = l.ihK
+		l.hashValue = l.ihV
 		l.storageValue = nil
 	} else {
 		l.itemType = AHashStreamItem
-		fmt.Printf("l.ihK: %p %x\n", l.ihK, l.ihK)
-		fmt.Printf("l.accountKey: %p %x\n", l.accountKey, l.accountKey)
-		l.accountKey = common.CopyBytes(l.ihK)
+		l.accountKey = l.ihK
 		l.storageKey = nil
 		l.storageValue = nil
-		l.hashValue = common.CopyBytes(l.ihV)
+		l.hashValue = l.ihV
 	}
 
 	// go to Next Sub-Tree
@@ -310,6 +308,7 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 	if l.ihK, l.ihV, isIHSequence, err = ih.Seek(next); err != nil {
 		return err
 	}
+
 	if isIHSequence {
 		l.k = l.ihK
 		return nil
@@ -796,7 +795,7 @@ func (c *IHCursor) Seek(seek []byte) ([]byte, []byte, bool, error) {
 		return nil, nil, false, nil
 	}
 
-	return k, v, isSequence(seek, k), nil
+	return common.CopyBytes(k), common.CopyBytes(v), isSequence(seek, k), nil
 }
 
 /*
