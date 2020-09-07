@@ -388,7 +388,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{})
 			l.logProgress()
 		}
 	}
-	fmt.Printf("Counters: ih=%d, iteration=%d\n", ih, iteration)
+	fmt.Printf("Counters: ih=%d, iteration=%d\n", ihCounter, iteration)
 	return l.receiver.Root(), nil
 }
 
@@ -711,7 +711,7 @@ func IH(f Filter, c ethdb.CursorDupSort) *IHCursor {
 	return &IHCursor{c: c, filter: f}
 }
 
-var ih uint
+var ihCounter uint
 var iteration uint
 
 func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
@@ -784,7 +784,7 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 }
 
 func (c *IHCursor) Seek(seek []byte) ([]byte, []byte, bool, error) {
-	ih++
+	ihCounter++
 	k, v, err := c._seek(seek)
 	if err != nil {
 		return []byte{}, nil, false, err
