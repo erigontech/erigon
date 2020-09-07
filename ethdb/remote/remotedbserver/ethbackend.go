@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -54,4 +55,10 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 		return &remote.NetVersionReply{}, err
 	}
 	return &remote.NetVersionReply{Id: id}, nil
+}
+
+func (s *EthBackendServer) BloomStatus(_ context.Context, _ *remote.BloomStatusRequest) (*remote.BloomStatusReply, error) {
+	sections, _, _ := s.eth.BloomIndexer().Sections()
+
+	return &remote.BloomStatusReply{Size: params.BloomBitsBlocks, Sections: sections}, nil
 }

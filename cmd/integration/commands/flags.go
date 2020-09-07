@@ -12,6 +12,7 @@ var (
 	block              uint64
 	unwind             uint64
 	unwindEvery        uint64
+	hdd                bool
 	reset              bool
 	bucket             string
 	datadir            string
@@ -60,4 +61,8 @@ func withBucket(cmd *cobra.Command) {
 
 func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", node.DefaultDataDir(), "data directory for temporary ELT files")
+}
+
+func withHDD(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&hdd, "hdd", false, "optimizations valuable for HDD")
 }

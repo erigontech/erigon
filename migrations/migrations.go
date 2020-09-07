@@ -156,21 +156,21 @@ func MarshalMigrationPayload(db ethdb.Getter) ([]byte, error) {
 	buf := bytes.NewBuffer(nil)
 	encoder := codec.NewEncoder(buf, &codec.CborHandle{})
 
-	for i := range stages.DBKeys {
-		v, err := db.Get(dbutils.SyncStageProgress, stages.DBKeys[i])
+	for _, stage := range stages.AllStages {
+		v, err := db.Get(dbutils.SyncStageProgress, stage)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return nil, err
 		}
 		if len(v) > 0 {
-			s[string(stages.DBKeys[i])] = common.CopyBytes(v)
+			s[string(stage)] = common.CopyBytes(v)
 		}
 
-		v, err = db.Get(dbutils.SyncStageUnwind, stages.DBKeys[i])
+		v, err = db.Get(dbutils.SyncStageUnwind, stage)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return nil, err
 		}
 		if len(v) > 0 {
-			s["unwind_"+string(stages.DBKeys[i])] = common.CopyBytes(v)
+			s["unwind_"+string(stage)] = common.CopyBytes(v)
 		}
 	}
 

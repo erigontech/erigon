@@ -3,8 +3,10 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -50,6 +52,7 @@ func init() {
 	withUnwind(stateStags)
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
+	withHDD(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 }
@@ -119,7 +122,8 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 
 		// All stages forward to `execStage + unwindEvery` block
-		execToBlock := progress(stages.Execution).BlockNumber + unwindEvery
+		execAtBlock := progress(stages.Execution).BlockNumber
+		execToBlock := execAtBlock + unwindEvery
 		if execToBlock > stopAt {
 			execToBlock = stopAt + 1
 			unwind = 0
@@ -127,7 +131,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		// set block limit of execute stage
 		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-			if err := stagedsync.SpawnExecuteBlocksStage(stageState, tx, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, false, changeSetHook); err != nil {
+			if err := stagedsync.SpawnExecuteBlocksStage(stageState, tx, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, false, hdd, changeSetHook); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 			return nil
@@ -143,6 +147,13 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 			}
 			delete(expectedAccountChanges, blockN)
 			delete(expectedStorageChanges, blockN)
+		}
+
+		if err := checkHistory(tx, dbutils.AccountChangeSetBucket, execAtBlock); err != nil {
+			return err
+		}
+		if err := checkHistory(tx, dbutils.StorageChangeSetBucket, execAtBlock); err != nil {
+			return err
 		}
 
 		// Unwind all stages to `execStage - unwind` block
@@ -245,6 +256,50 @@ func checkChangeSet(db ethdb.Getter, blockNum uint64, expectedAccountChanges []b
 			return err
 		}
 		return fmt.Errorf("check change set failed")
+	}
+	return nil
+}
+
+func checkHistory(db ethdb.Getter, changeSetBucket string, blockNum uint64) error {
+	currentKey := dbutils.EncodeTimestamp(blockNum)
+
+	var walker func([]byte) changeset.Walker
+	if dbutils.AccountChangeSetBucket == changeSetBucket {
+		walker = func(cs []byte) changeset.Walker {
+			return changeset.AccountChangeSetBytes(cs)
+		}
+	}
+
+	if dbutils.StorageChangeSetBucket == changeSetBucket {
+		walker = func(cs []byte) changeset.Walker {
+			return changeset.StorageChangeSetBytes(cs)
+		}
+	}
+
+	vv, ok := changeset.Mapper[changeSetBucket]
+	if !ok {
+		return errors.New("unknown bucket type")
+	}
+
+	if err := db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
+		blockNum, _ := dbutils.DecodeTimestamp(k)
+		if err := walker(v).Walk(func(key, val []byte) error {
+			indexBytes, innerErr := db.GetIndexChunk(vv.IndexBucket, key, blockNum)
+			if innerErr != nil {
+				return innerErr
+			}
+
+			index := dbutils.WrapHistoryIndex(indexBytes)
+			if findVal, _, ok := index.Search(blockNum); !ok {
+				return fmt.Errorf("%v,%v,%v", blockNum, findVal, common.Bytes2Hex(key))
+			}
+			return nil
+		}); err != nil {
+			return false, err
+		}
+		return true, nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }

@@ -7,6 +7,8 @@ ifeq ($(LATEST_COMMIT),)
 LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
 endif
 
+GIT_COMMIT=$(shell git rev-list -1 HEAD)
+
 all: tg hack tester rpctest state restapi pics rpcdaemon integration
 
 docker:
@@ -19,12 +21,12 @@ docker-compose:
 	docker-compose up
 
 geth:
-	$(GOBUILD) -o $(GOBIN)/tg ./cmd/geth 
+	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.GitCommit=${GIT_COMMIT} -X main.GitDate=$(shell date +%Y.%m.%d.%H%M%S)" ./cmd/tg 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 tg:
-	$(GOBUILD) -o $(GOBIN)/tg ./cmd/geth 
+	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.GitCommit=${GIT_COMMIT} -X main.GitDate=$(shell date +%Y.%m.%d.%H%M%S)" ./cmd/tg 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
@@ -128,8 +130,6 @@ devtools:
 	env GOBIN= go install golang.org/x/tools/cmd/stringer
 	env GOBIN= go install github.com/kevinburke/go-bindata/go-bindata
 	env GOBIN= go install github.com/fjl/gencodec
-	env GOBIN= go install google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
-	env GOBIN= go install google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	env GOBIN= go install ./cmd/abigen
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
@@ -139,6 +139,11 @@ bindings:
 	go generate ./tests/contracts/
 	go generate ./cmd/tester/contracts/
 	go generate ./core/state/contracts/
+
+grpc:
+	# See also: ./cmd/hack/binary-deps/main.go
+	env GOBIN= go install google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
+	env GOBIN= go install google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	go generate ./ethdb
 
 simulator-genesis:

@@ -86,7 +86,7 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 		return nil, nil, err
 	}
 	cht := &params.TrustedCheckpoint{}
-	pm, err := NewProtocolManager(gspec.Config, cht, mode, DefaultConfig.NetworkID, evmux, &testTxPool{added: newtx, pool: make(map[common.Hash]*types.Transaction)}, engine, blockchain, db, nil)
+	pm, err := NewProtocolManager(gspec.Config, cht, mode, DefaultConfig.NetworkID, evmux, &testTxPool{added: newtx, pool: make(map[common.Hash]*types.Transaction)}, engine, blockchain, db, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}

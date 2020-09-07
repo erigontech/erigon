@@ -54,6 +54,7 @@ type remoteCursor struct {
 	ctx                context.Context
 	prefix             []byte
 	stream             remote.KV_SeekClient
+	streamCancelFn     context.CancelFunc // this function needs to be called to close the stream
 	tx                 *remoteTx
 	bucketName         string
 }
@@ -63,10 +64,6 @@ type RemoteBackend struct {
 	remoteEthBackend remote.ETHBACKENDClient
 	conn             *grpc.ClientConn
 	log              log.Logger
-}
-
-type remoteNoValuesCursor struct {
-	*remoteCursor
 }
 
 func (opts remoteOpts) ReadOnly() remoteOpts {
@@ -190,7 +187,7 @@ func (tx *remoteTx) Commit(ctx context.Context) error {
 func (tx *remoteTx) Rollback() {
 	for _, c := range tx.cursors {
 		if c.stream != nil {
-			_ = c.stream.CloseSend()
+			c.streamCancelFn()
 			c.stream = nil
 		}
 	}
@@ -221,7 +218,7 @@ func (tx *remoteTx) Get(bucket string, key []byte) (val []byte, err error) {
 			if v.stream == nil {
 				return
 			}
-			_ = v.stream.CloseSend()
+			v.streamCancelFn()
 		}
 	}()
 
@@ -239,27 +236,31 @@ func (c *remoteCursor) SeekExact(key []byte) (val []byte, err error) {
 	return v, nil
 }
 
+func (c *remoteCursor) Prev() ([]byte, []byte, error) {
+	panic("not implemented")
+}
+
 func (tx *remoteTx) Cursor(bucket string) Cursor {
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket}
 	tx.cursors = append(tx.cursors, c)
 	return c
 }
 
-func (tx *remoteTx) NoValuesCursor(bucket string) NoValuesCursor {
-	return &remoteNoValuesCursor{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
-}
-
-func (c *remoteCursor) Put(key []byte, value []byte) error {
+func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
 	panic("not supported")
 }
 
-func (c *remoteCursor) Append(key []byte, value []byte) error {
+func (tx *remoteTx) CursorDupFixed(bucket string) CursorDupFixed {
 	panic("not supported")
 }
 
-func (c *remoteCursor) Delete(key []byte) error {
-	panic("not supported")
-}
+func (c *remoteCursor) Current() ([]byte, []byte, error)              { panic("not supported") }
+func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
+func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not supported") }
+func (c *remoteCursor) PutCurrent(key, value []byte) error            { panic("not supported") }
+func (c *remoteCursor) Append(key []byte, value []byte) error         { panic("not supported") }
+func (c *remoteCursor) Delete(key []byte) error                       { panic("not supported") }
+func (c *remoteCursor) DeleteCurrent() error                          { panic("not supported") }
 
 func (c *remoteCursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)
@@ -269,13 +270,15 @@ func (c *remoteCursor) First() ([]byte, []byte, error) {
 // .Next() - does request streaming (if configured by user)
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if c.stream != nil {
-		_ = c.stream.CloseSend()
+		c.streamCancelFn() // This will close the stream and free resources
 		c.stream = nil
 	}
 	c.initialized = true
 
 	var err error
-	c.stream, err = c.tx.db.remoteKV.Seek(c.ctx)
+	var streamCtx context.Context
+	streamCtx, c.streamCancelFn = context.WithCancel(c.ctx) // We create child context for the stream so we can cancel it to prevent leak
+	c.stream, err = c.tx.db.remoteKV.Seek(streamCtx)
 	if err != nil {
 		return []byte{}, nil, err
 	}
@@ -318,28 +321,6 @@ func (c *remoteCursor) Last() ([]byte, []byte, error) {
 	panic("not implemented yet")
 }
 
-func (c *remoteNoValuesCursor) First() ([]byte, uint32, error) {
-	return c.Seek(c.prefix)
-}
-
-func (c *remoteNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
-	k, v, err := c.remoteCursor.Seek(seek)
-	if err != nil {
-		return []byte{}, 0, err
-	}
-
-	return k, uint32(len(v)), err
-}
-
-func (c *remoteNoValuesCursor) Next() ([]byte, uint32, error) {
-	k, v, err := c.remoteCursor.Next()
-	if err != nil {
-		return []byte{}, 0, err
-	}
-
-	return k, uint32(len(v)), err
-}
-
 func (back *RemoteBackend) AddLocal(signedTx []byte) ([]byte, error) {
 	res, err := back.remoteEthBackend.Add(context.Background(), &remote.TxRequest{Signedtx: signedTx})
 	if err != nil {
@@ -364,4 +345,9 @@ func (back *RemoteBackend) NetVersion() (uint64, error) {
 	}
 
 	return res.Id, nil
+}
+
+func (back *RemoteBackend) BloomStatus() (uint64, uint64, common.Hash) {
+	res, _ := back.remoteEthBackend.BloomStatus(context.Background(), &remote.BloomStatusRequest{})
+	return res.Size, res.Sections, common.BytesToHash(res.Hash)
 }

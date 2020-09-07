@@ -63,18 +63,10 @@ var (
 	CurrentStateBucket     = "CST2"
 	CurrentStateBucketOld1 = "CST"
 
-	//current
-	//key - key + encoded timestamp(block number)
-	//value - account for storage(old/original value)
-	//layout experiment
 	//key - address hash
 	//value - list of block where it's changed
 	AccountsHistoryBucket = "hAT"
 
-	//current
-	//key - address hash + incarnation + storage key hash
-	//value - storage value(common.hash)
-	//layout experiment
 	//key - address hash
 	//value - list of block where it's changed
 	StorageHistoryBucket = "hST"
@@ -237,11 +229,20 @@ type BucketsCfg map[string]BucketConfigItem
 type Bucket string
 
 type BucketConfigItem struct {
-	Flags               uint
-	IsDeprecated        bool
-	DBI                 lmdb.DBI
-	DupToLen            int
+	Flags uint
+	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
+	// Use it wisely - it helps to do experiments with DB format faster, but better reduce amount of Magic in app.
+	// If good DB format found, push app code to accept this format and then disable this property.
+	AutoDupSortKeysConversion bool
+	IsDeprecated              bool
+	DBI                       lmdb.DBI
+	// DupFromLen - if user provide key of this length, then next transformation applied:
+	// v = append(k[DupToLen:], v...)
+	// k = k[:DupToLen]
+	// And opposite at retrieval
+	// Works only if AutoDupSortKeysConversion enabled
 	DupFromLen          int
+	DupToLen            int
 	DupFixedSize        int
 	CustomComparator    CustomComparator
 	CustomDupComparator CustomComparator
@@ -249,25 +250,53 @@ type BucketConfigItem struct {
 
 var BucketsConfigs = BucketsCfg{
 	CurrentStateBucket: {
-		Flags:      lmdb.DupSort,
-		DupToLen:   40,
-		DupFromLen: 72,
+		Flags:                     lmdb.DupSort,
+		AutoDupSortKeysConversion: true,
+		DupFromLen:                72,
+		DupToLen:                  40,
 	},
 	PlainStateBucket: {
-		Flags:      lmdb.DupSort,
-		DupToLen:   28,
-		DupFromLen: 60,
+		Flags:                     lmdb.DupSort,
+		AutoDupSortKeysConversion: true,
+		DupFromLen:                60,
+		DupToLen:                  28,
 	},
 	//IntermediateTrieHashBucket2: {
-	//	Flags:               lmdb.DupSort,
-	//	CustomDupComparator: DupCmpSuffix32,
+	//	Flags:               		lmdb.DupSort,
+	//	CustomDupComparator:	 	DupCmpSuffix32,
+	//	AutoDupSortKeysConversion:  false,
 	//},
 }
 
-func init() {
+func sortBuckets() {
 	sort.SliceStable(Buckets, func(i, j int) bool {
 		return strings.Compare(Buckets[i], Buckets[j]) < 0
 	})
+}
+
+func DefaultBuckets() BucketsCfg {
+	return BucketsConfigs
+}
+
+func UpdateBucketsList(newBucketCfg BucketsCfg) {
+	newBuckets := make([]string, 0)
+	for k, v := range newBucketCfg {
+		if !v.IsDeprecated {
+			newBuckets = append(newBuckets, k)
+		}
+	}
+	Buckets = newBuckets
+	BucketsConfigs = newBucketCfg
+
+	reinit()
+}
+
+func init() {
+	reinit()
+}
+
+func reinit() {
+	sortBuckets()
 
 	for _, name := range Buckets {
 		_, ok := BucketsConfigs[name]
