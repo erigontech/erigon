@@ -114,15 +114,15 @@ func (opts lmdbOpts) Open() (KV, error) {
 
 	// Open or create buckets
 	if opts.readOnly {
-		tx, err := db.Begin(context.Background(), nil, false)
-		if err != nil {
-			return nil, err
+		tx, innerErr := db.Begin(context.Background(), nil, false)
+		if innerErr != nil {
+			return nil, innerErr
 		}
 		for name, cfg := range db.buckets {
 			if cfg.IsDeprecated {
 				continue
 			}
-			if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
+			if err = tx.(BucketMigrator).CreateBucket(name); err != nil {
 				return nil, err
 			}
 		}
