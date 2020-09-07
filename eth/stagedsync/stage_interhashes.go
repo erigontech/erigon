@@ -223,6 +223,7 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, load 
 }
 
 func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+	defer func(t time.Time) { fmt.Printf("stage_interhashes.go:226: %s\n", time.Since(t)) }(time.Now())
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	ihFilter := trie.NewPrefixFilter()
