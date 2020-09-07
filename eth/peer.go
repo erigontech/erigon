@@ -449,7 +449,7 @@ func (p *peer) SendNewBlockHashes(hashes []common.Hash, numbers []uint64) error 
 	for _, hash := range hashes {
 		p.knownBlocks.Add(hash)
 	}
-	request := make(newBlockHashesData, len(hashes))
+	request := make(NewBlockHashesData, len(hashes))
 	for i := 0; i < len(hashes); i++ {
 		request[i].Hash = hashes[i]
 		request[i].Number = numbers[i]

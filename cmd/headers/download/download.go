@@ -190,7 +190,18 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 		case eth.ReceiptsMsg:
 			log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peer.ID()))
 		case eth.NewBlockHashesMsg:
-			log.Info(fmt.Sprintf("[%s] NewBlockHashesMsg", peer.ID()))
+			var announces eth.NewBlockHashesData
+			if err := msg.Decode(&announces); err != nil {
+				return errResp(eth.ErrDecode, "decode NewBlockHashesData %v: %v", msg, err)
+			}
+			var hashesStr strings.Builder
+			for _, announce := range announces {
+				if hashesStr.Len() > 0 {
+					hashesStr.WriteString(",")
+				}
+				hashesStr.WriteString(fmt.Sprintf("%d", announce.Number))
+			}
+			log.Info(fmt.Sprintf("[%s] NewBlockHashesMsg {%s}", peer.ID(), hashesStr.String()))
 		case eth.NewBlockMsg:
 			var request eth.NewBlockData
 			if err = msg.Decode(&request); err != nil {
