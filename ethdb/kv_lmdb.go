@@ -13,7 +13,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -433,7 +432,7 @@ func CustomCmpFunc(tx *lmdb.Txn, dbi lmdb.DBI) dbutils.CmpFunc {
 
 func CustomDupCmpFunc(tx *lmdb.Txn, dbi lmdb.DBI) dbutils.CmpFunc {
 	return func(k1, k2, v1, v2 []byte) int {
-		cmp := tx.Cmp(dbi, common.CopyBytes(k1), common.CopyBytes(k2))
+		cmp := tx.Cmp(dbi, k1, k2)
 		if cmp == 0 {
 			cmp = tx.DCmp(dbi, v1, v2)
 		}

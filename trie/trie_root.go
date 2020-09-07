@@ -289,7 +289,8 @@ func (l *FlatDBTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor, first bool) e
 		l.storageValue = nil
 	} else {
 		l.itemType = AHashStreamItem
-		fmt.Printf("PonterAccIHK: %p\n", l.ihK)
+		fmt.Printf("l.ihK: %p %x\n", l.ihK, l.ihK)
+		fmt.Printf("l.accountKey: %p %x\n", l.accountKey, l.accountKey)
 		l.accountKey = common.CopyBytes(l.ihK)
 		l.storageKey = nil
 		l.storageValue = nil
