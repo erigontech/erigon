@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
 func nodeKey() *ecdsa.PrivateKey {
@@ -40,7 +41,24 @@ func nodeKey() *ecdsa.PrivateKey {
 	return key
 }
 
-func makeP2PServer(protocols []string) (*p2p.Server, error) {
+// SentryMsg declares ID fields necessary for communicating with the sentry
+type SentryMsg struct {
+	sentryId  int
+	requestId int
+}
+
+// NewBlockFromSentry is a type of message sent from sentry to the downloader as a result of NewBlockMsg
+type NewBlockFromSentry struct {
+	SentryMsg
+	eth.NewBlockData
+}
+
+type PenaltyMsg struct {
+	SentryMsg
+	penalty headerdownload.Penalty
+}
+
+func makeP2PServer(protocols []string, newBlockCh chan NewBlockFromSentry, penaltyCh chan PenaltyMsg) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
 	dns := params.KnownDNSNetwork(params.MainnetGenesisHash, "all")
@@ -49,8 +67,8 @@ func makeP2PServer(protocols []string) (*p2p.Server, error) {
 		return nil, fmt.Errorf("create discovery candidates: %v", err)
 	}
 
+	genesis := core.DefaultGenesisBlock()
 	serverKey := nodeKey()
-
 	p2pConfig := p2p.Config{}
 	p2pConfig.PrivateKey = serverKey
 	p2pConfig.Name = "header downloader"
@@ -66,8 +84,7 @@ func makeP2PServer(protocols []string) (*p2p.Server, error) {
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				log.Info(fmt.Sprintf("[%s] Start with peer", peer.ID()))
-				genesis := core.DefaultGenesisBlock()
-				if err := runPeer(peer, rw, eth.ProtocolVersions[0], eth.DefaultConfig.NetworkID, genesis.Difficulty, params.MainnetGenesisHash, params.MainnetChainConfig, 0 /* head */); err != nil {
+				if err := runPeer(peer, rw, eth.ProtocolVersions[0], eth.DefaultConfig.NetworkID, genesis.Difficulty, params.MainnetGenesisHash, params.MainnetChainConfig, 0 /* head */, newBlockCh, penaltyCh); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peer.ID(), err))
 				}
 				return nil
@@ -85,7 +102,7 @@ func errResp(code int, format string, v ...interface{}) error {
 	return fmt.Errorf("%v - %v", code, fmt.Sprintf(format, v...))
 }
 
-func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint64, td *big.Int, genesisHash common.Hash, chainConfig *params.ChainConfig, head uint64) error {
+func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint64, td *big.Int, genesisHash common.Hash, chainConfig *params.ChainConfig, head uint64, newBlockCh chan NewBlockFromSentry, penaltyCh chan PenaltyMsg) error {
 	forkId := forkid.NewID(chainConfig, genesisHash, head)
 	// Send handshake message
 	if err := p2p.Send(rw, eth.StatusMsg, &eth.StatusData{
@@ -208,6 +225,7 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 				return errResp(eth.ErrDecode, "decode NewBlockMsg %v: %v", msg, err)
 			}
 			log.Info(fmt.Sprintf("[%s] NewBlockMsg{blockNumber: %d}", peer.ID(), request.Block.NumberU64()))
+			newBlockCh <- NewBlockFromSentry{SentryMsg: SentryMsg{sentryId: 0, requestId: 0}, NewBlockData: request}
 		case eth.NewPooledTransactionHashesMsg:
 			var hashes []common.Hash
 			if err := msg.Decode(&hashes); err != nil {
@@ -264,9 +282,11 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func Download() error {
+func Download(filesDir string) error {
 	ctx := rootContext()
-	server, err := makeP2PServer([]string{eth.ProtocolName})
+	newBlockCh := make(chan NewBlockFromSentry)
+	penaltyCh := make(chan PenaltyMsg)
+	server, err := makeP2PServer([]string{eth.ProtocolName}, newBlockCh, penaltyCh)
 	if err != nil {
 		return err
 	}
@@ -274,6 +294,7 @@ func Download() error {
 	if err = server.Start(); err != nil {
 		return fmt.Errorf("could not start server: %w", err)
 	}
+	go Downloader(ctx, filesDir, newBlockCh, penaltyCh)
 	<-ctx.Done()
 	return nil
 }

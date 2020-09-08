@@ -97,7 +97,7 @@ func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header) ([]*ChainSegme
 }
 
 // FindAnchors attempts to find anchors to which given chain segment can be attached to
-func (hd *HeaderDownload) FindAnchors(segment *ChainSegment) (found bool, start int, invalidAnchors []int) {
+func (hd *HeaderDownload) FindAnchors(segment *ChainSegment) (found bool, start int, anchorParent common.Hash, invalidAnchors []int) {
 	// Walk the segment from children towards parents
 	for i, header := range segment.headers {
 		headerHash := header.Hash()
@@ -109,10 +109,10 @@ func (hd *HeaderDownload) FindAnchors(segment *ChainSegment) (found bool, start 
 					invalidAnchors = append(invalidAnchors, anchorIdx)
 				}
 			}
-			return true, i, invalidAnchors
+			return true, i, headerHash, invalidAnchors
 		}
 	}
-	return false, 0, nil
+	return false, 0, common.Hash{}, nil
 }
 
 // InvalidateAnchors removes trees with given anchor hashes (belonging to the given anchor parent)
@@ -164,7 +164,7 @@ func (hd *HeaderDownload) FindTip(segment *ChainSegment) (found bool, end int, p
 	return false, len(segment.headers), NoPenalty
 }
 
-// VerifySeals verifies Proof Of Work for the part of the given chain segement
+// VerifySeals verifies Proof Of Work for the part of the given chain segment
 // It reports first verification error, or returns the powDepth that the anchor of this
 // chain segment should have, if created
 func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound bool, start, end int) (powDepth int, err error) {
