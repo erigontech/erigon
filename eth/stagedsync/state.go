@@ -198,7 +198,7 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Memory", "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
-	var logArs []interface{}
+	logArs := make([]interface{}, 0, len(timings)*2)
 	for name, val := range timings {
 		logArs = append(logArs, name, val)
 	}
