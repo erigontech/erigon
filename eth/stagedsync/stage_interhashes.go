@@ -332,7 +332,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 }
 
 func ResetHashState(db ethdb.Database) error {
-	if err := db.(ethdb.NonTransactional).ClearBuckets(
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.CurrentStateBucket,
 		dbutils.ContractCodeBucket,
 		dbutils.IntermediateTrieHashBucket,

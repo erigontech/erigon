@@ -150,7 +150,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 }
 
 func (ig *IndexGenerator) DropIndex(bucket string) error {
-	casted, ok := ig.db.(ethdb.NonTransactional)
+	casted, ok := ig.db.(ethdb.BucketsMigrator)
 	if !ok {
 		return errors.New("imposible to drop")
 	}

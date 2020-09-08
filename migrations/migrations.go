@@ -29,13 +29,13 @@ import (
 // - in the end:drop old bucket (not in defer!).
 //	Example:
 //	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-//		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
+//		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
 //			return err
 //		} else if !exists {
 //			return OnLoadCommit(db, nil, true)
 //		}
 //
-//		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageProgress); err != nil {
+//		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.SyncStageProgress); err != nil {
 //			return err
 //		}
 //
@@ -46,7 +46,7 @@ import (
 //			return err
 //		}
 //
-//		if err := db.(ethdb.NonTransactional).DropBuckets(dbutils.SyncStageProgressOld1); err != nil {  // clear old bucket
+//		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.SyncStageProgressOld1); err != nil {  // clear old bucket
 //			return err
 //		}
 //	},
@@ -114,6 +114,12 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		uniqueNameCheck[m.Migrations[i].Name] = true
 	}
 
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	for i := range m.Migrations {
 		v := m.Migrations[i]
 		if _, ok := applied[v.Name]; ok {
@@ -123,18 +129,22 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		commitFuncCalled := false // commit function must be called if no error, protection against people's mistake
 
 		log.Info("Apply migration", "name", v.Name)
-		if err := v.Up(db, datadir, func(putter ethdb.Putter, key []byte, isDone bool) error {
+		if err := v.Up(tx, datadir, func(putter ethdb.Putter, key []byte, isDone bool) error {
 			if !isDone {
 				return nil // don't save partial progress
 			}
 			commitFuncCalled = true
 
-			stagesProgress, err := MarshalMigrationPayload(db)
+			stagesProgress, err := MarshalMigrationPayload(tx)
 			if err != nil {
 				return err
 			}
 			err = putter.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
 			if err != nil {
+				return err
+			}
+
+			if err := tx.CommitAndBegin(); err != nil {
 				return err
 			}
 			return nil

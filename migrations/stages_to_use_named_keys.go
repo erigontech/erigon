@@ -26,13 +26,13 @@ var stagesToUseNamedKeys = Migration{
 	Name: "stages_to_use_named_keys",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 
-		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
+		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
 			return err
 		} else if !exists {
 			return OnLoadCommit(db, nil, true)
 		}
 
-		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageProgress); err != nil {
+		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.SyncStageProgress); err != nil {
 			return err
 		}
 
@@ -60,7 +60,7 @@ var stagesToUseNamedKeys = Migration{
 			return err
 		}
 
-		if err := db.(ethdb.NonTransactional).DropBuckets(dbutils.SyncStageProgressOld1); err != nil {
+		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.SyncStageProgressOld1); err != nil {
 			return err
 		}
 		return nil
@@ -70,13 +70,13 @@ var stagesToUseNamedKeys = Migration{
 var unwindStagesToUseNamedKeys = Migration{
 	Name: "unwind_stages_to_use_named_keys",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.SyncStageUnwindOld1); err != nil {
+		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.SyncStageUnwindOld1); err != nil {
 			return err
 		} else if !exists {
 			return OnLoadCommit(db, nil, true)
 		}
 
-		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.SyncStageUnwind); err != nil {
+		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.SyncStageUnwind); err != nil {
 			return err
 		}
 
@@ -104,7 +104,7 @@ var unwindStagesToUseNamedKeys = Migration{
 			return err
 		}
 
-		if err := db.(ethdb.NonTransactional).DropBuckets(dbutils.SyncStageUnwindOld1); err != nil {
+		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.SyncStageUnwindOld1); err != nil {
 			return err
 		}
 		return nil

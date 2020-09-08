@@ -9,13 +9,13 @@ import (
 var dupSortHashState = Migration{
 	Name: "dupsort_hash_state",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.CurrentStateBucketOld1); err != nil {
+		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.CurrentStateBucketOld1); err != nil {
 			return err
 		} else if !exists {
 			return OnLoadCommit(db, nil, true)
 		}
 
-		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.CurrentStateBucket); err != nil {
+		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.CurrentStateBucket); err != nil {
 			return err
 		}
 		extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
@@ -34,7 +34,7 @@ var dupSortHashState = Migration{
 			return err
 		}
 
-		if err := db.(ethdb.NonTransactional).DropBuckets(dbutils.CurrentStateBucketOld1); err != nil {
+		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.CurrentStateBucketOld1); err != nil {
 			return err
 		}
 		return nil
@@ -44,13 +44,13 @@ var dupSortHashState = Migration{
 var dupSortPlainState = Migration{
 	Name: "dupsort_plain_state",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.PlainStateBucketOld1); err != nil {
+		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.PlainStateBucketOld1); err != nil {
 			return err
 		} else if !exists {
 			return OnLoadCommit(db, nil, true)
 		}
 
-		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.PlainStateBucket); err != nil {
+		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.PlainStateBucket); err != nil {
 			return err
 		}
 		extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
@@ -69,7 +69,7 @@ var dupSortPlainState = Migration{
 			return err
 		}
 
-		if err := db.(ethdb.NonTransactional).DropBuckets(dbutils.PlainStateBucketOld1); err != nil {
+		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.PlainStateBucketOld1); err != nil {
 			return err
 		}
 		return nil
