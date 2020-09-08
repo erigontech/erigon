@@ -132,6 +132,8 @@ type Cursor interface {
 	//	new data is the same size as the old. Otherwise it will simply
 	//	perform a delete of the old record followed by an insert.
 	PutCurrent(key, value []byte) error
+
+	Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
 }
 
 type CursorDupSort interface {

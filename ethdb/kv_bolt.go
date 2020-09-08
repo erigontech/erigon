@@ -306,6 +306,7 @@ func (c *boltCursor) PutCurrent(key, value []byte) error            { panic("not
 func (c *boltCursor) Current() ([]byte, []byte, error)              { panic("not supported") }
 func (c *boltCursor) Last() (k, v []byte, err error)                { panic("not implemented yet") }
 func (c *boltCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not implemented yet") }
+func (c *boltCursor) Count() (uint64, error)                        { panic("not supported") }
 
 func (c *boltCursor) SeekExact(key []byte) (val []byte, err error) {
 	return c.bucket.Get(key)

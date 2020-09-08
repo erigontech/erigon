@@ -114,17 +114,20 @@ func (opts lmdbOpts) Open() (KV, error) {
 
 	// Open or create buckets
 	if opts.readOnly {
-		if err := db.View(context.Background(), func(tx Tx) error {
-			for name, cfg := range db.buckets {
-				if cfg.IsDeprecated {
-					continue
-				}
-				if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
-					return err
-				}
+		tx, innerErr := db.Begin(context.Background(), nil, false)
+		if innerErr != nil {
+			return nil, innerErr
+		}
+		for name, cfg := range db.buckets {
+			if cfg.IsDeprecated {
+				continue
 			}
-			return nil
-		}); err != nil {
+			if err = tx.(BucketMigrator).CreateBucket(name); err != nil {
+				return nil, err
+			}
+		}
+		err = tx.Commit(context.Background())
+		if err != nil {
 			return nil, err
 		}
 	} else {
@@ -612,6 +615,14 @@ func (c *LmdbCursor) initCursor() error {
 	}
 	tx.cursors = append(tx.cursors, c.c)
 	return nil
+}
+
+func (c *LmdbCursor) Count() (uint64, error) {
+	st, err := c.tx.tx.Stat(c.bucketCfg.DBI)
+	if err != nil {
+		return 0, err
+	}
+	return st.Entries, nil
 }
 
 func (c *LmdbCursor) First() ([]byte, []byte, error) {

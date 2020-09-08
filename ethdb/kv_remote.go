@@ -261,6 +261,7 @@ func (c *remoteCursor) PutCurrent(key, value []byte) error            { panic("n
 func (c *remoteCursor) Append(key []byte, value []byte) error         { panic("not supported") }
 func (c *remoteCursor) Delete(key []byte) error                       { panic("not supported") }
 func (c *remoteCursor) DeleteCurrent() error                          { panic("not supported") }
+func (c *remoteCursor) Count() (uint64, error)                        { panic("not supported") }
 
 func (c *remoteCursor) First() ([]byte, []byte, error) {
 	return c.Seek(c.prefix)

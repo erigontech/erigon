@@ -103,19 +103,14 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		if warmup {
 			log.Info("Running a warmup...")
-			count := 0
-			if err := stateDB.Walk(dbutils.PlainStateBucket, nil, 0, func(_, _ []byte) (bool, error) {
-				if err := common.Stopped(quit); err != nil {
-					return false, nil
-				}
-				count++
-				if count%10000000 == 0 {
-					log.Info("Warmed up", "keys", count)
-				}
-				return true, nil
-			}); err != nil {
+			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.PlainStateBucket, logEvery, quit); err != nil {
 				return err
 			}
+
+			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.CodeBucket, logEvery, quit); err != nil {
+				return err
+			}
+
 			warmup = false
 			log.Info("Warm up done.")
 		}
