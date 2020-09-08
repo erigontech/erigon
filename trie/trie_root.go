@@ -334,7 +334,6 @@ func (l *FlatDBTrieLoader) iteration(c *StateCursor, ih *IHCursor, first bool) e
 	if l.k, l.kHex, l.v, err = c.Seek(next2); err != nil {
 		return err
 	}
-	//0e0806090f0101080d090507070009040d07060608080a0e050c08000f020f0a0a0b0a050b09060e0004030c0a0c090207000701080501010703070b050b0908
 
 	// Skip wrong incarnation
 	if len(next2) <= common.HashLength && len(l.k) > common.HashLength {
