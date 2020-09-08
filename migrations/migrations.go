@@ -130,7 +130,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		commitFuncCalled := false // commit function must be called if no error, protection against people's mistake
 
 		log.Info("Apply migration", "name", v.Name)
-		if err := v.Up(tx, datadir, func(putter ethdb.Putter, key []byte, isDone bool) error {
+		if err := v.Up(tx, datadir, func(_ ethdb.Putter, key []byte, isDone bool) error {
 			if !isDone {
 				return nil // don't save partial progress
 			}
@@ -140,7 +140,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 			if err != nil {
 				return err
 			}
-			err = putter.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
+			err = tx.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
 			if err != nil {
 				return err
 			}

@@ -184,7 +184,6 @@ var Buckets = []string{
 	AccountChangeSetBucket,
 	StorageChangeSetBucket,
 	IntermediateTrieHashBucket,
-	IntermediateTrieHashBucketOld1,
 	DatabaseVerisionKey,
 	HeaderPrefix,
 	HeaderNumberPrefix,

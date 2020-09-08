@@ -1177,10 +1177,6 @@ func (c *LmdbDupSortCursor) initCursor() error {
 	return c.LmdbCursor.initCursor()
 }
 
-//func (c *LmdbDupSortCursor) Delete(key []byte) error {
-//	panic("use DeleteCurrent")
-//}
-
 // DeleteExact - does delete
 func (c *LmdbDupSortCursor) DeleteExact(k1, k2 []byte) error {
 	if c.c == nil {

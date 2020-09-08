@@ -1,9 +1,12 @@
 package migrations
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 var dupSortHashState = Migration{
@@ -77,41 +80,42 @@ var dupSortPlainState = Migration{
 }
 
 var dupSortIH = Migration{
-	Name: "dupsort_intermediate_hashes",
+	Name: "dupsort_intermediate_trie_hashes",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-		if exists, err := db.(ethdb.NonTransactional).BucketExists(dbutils.IntermediateTrieHashBucketOld1); err != nil {
-			return err
-		} else if !exists {
-			return OnLoadCommit(db, nil, true)
-		}
-
-		if err := db.(ethdb.NonTransactional).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
+		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
 			return err
 		}
-		extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-			if len(k) < 40 {
-				return next(k, k, v)
+		buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
+		comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
+		buf.SetComparator(comparator)
+		collector := etl.NewCollector(datadir, buf)
+		hashCollector := func(keyHex []byte, hash []byte) error {
+			if len(keyHex) == 0 {
+				return nil
 			}
-
-			return next(k, k[:40], append(k[40:], v...))
+			if len(keyHex) > trie.IHDupKeyLen {
+				return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
+			}
+			return collector.Collect(keyHex, hash)
 		}
-
-		if err := etl.Transform(
-			db,
-			dbutils.IntermediateTrieHashBucketOld1,
-			dbutils.IntermediateTrieHashBucket,
-			datadir,
-			extractFunc,
-			etl.IdentityLoadFunc,
-			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
-		); err != nil {
+		loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+		if err := loader.Reset(trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
 			return err
 		}
-
-		if err := db.(ethdb.NonTransactional).DropBuckets(dbutils.IntermediateTrieHashBucketOld1); err != nil {
+		if _, err := loader.CalcTrieRoot(db, nil); err != nil {
 			return err
 		}
+		if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+			Comparator: comparator,
+		}); err != nil {
+			return fmt.Errorf("gen ih stage: fail load data to bucket: %w", err)
+		}
 
-		return nil
+		// this Migration is empty, sync will regenerate IH bucket values automatically
+		// alternative is - to copy whole stage here
+		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.IntermediateTrieHashBucketOld1); err != nil {
+			return err
+		}
+		return OnLoadCommit(db, nil, true)
 	},
 }

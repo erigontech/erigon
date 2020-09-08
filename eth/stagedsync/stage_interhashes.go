@@ -1,8 +1,10 @@
 package stagedsync
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -78,22 +80,16 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 	buf.SetComparator(comparator)
 	collector := etl.NewCollector(datadir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
-		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
+		if len(keyHex) == 0 {
 			return nil
 		}
-		k := make([]byte, len(keyHex)/2)
-		trie.CompressNibbles(keyHex, &k)
-		if hash == nil {
-			return nil
+		if len(keyHex) > trie.IHDupKeyLen {
+			return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
 		}
-		if len(k) > 40 {
-			hash = append(k[40:], hash...)
-			k = k[:40]
-		}
-		return collector.Collect(k, common.CopyBytes(hash))
+		return collector.Collect(keyHex, hash)
 	}
 	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
-	if err := loader.Reset(trie.NewPrefixFilter(), hashCollector /* HashCollector */, false); err != nil {
+	if err := loader.Reset(trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
 		return err
 	}
 	t := time.Now()
@@ -223,12 +219,13 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, load 
 }
 
 func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
-	defer func(t time.Time) { fmt.Printf("stage_interhashes.go:226: %s\n", time.Since(t)) }(time.Now())
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
-	ihFilter := trie.NewPrefixFilter()
+	var exclude [][]byte
+	//ihFilter := trie.NewPrefixFilter()
 	collect := func(k []byte, _ []byte, _ etl.State, _ etl.LoadNextFunc) error {
-		ihFilter.Add(k)
+		exclude = append(exclude, k)
+		//ihFilter.Add(k)
 		return nil
 	}
 
@@ -238,30 +235,29 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	if err := p.Promote(s, s.BlockNumber, to, true /* storage */, collect); err != nil {
 		return err
 	}
-	ihFilter.Sort()
+	sort.Slice(exclude, func(i, j int) bool { return bytes.Compare(exclude[i], exclude[j]) < 0 })
+	unfurl := trie.NewRetainList(0)
+	for i := range exclude {
+		unfurl.AddKey(exclude[i])
+	}
+
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
 	buf.SetComparator(comparator)
 	collector := etl.NewCollector(datadir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
-		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
+		if len(keyHex) == 0 {
 			return nil
 		}
-		k := make([]byte, len(keyHex)/2)
-		trie.CompressNibbles(keyHex, &k)
-		if hash == nil {
-			return fmt.Errorf("IH cursor must call Delete by itself")
-		}
-		if len(k) > 40 {
-			hash = append(k[40:], hash...)
-			k = k[:40]
+		if len(keyHex) > trie.IHDupKeyLen {
+			return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
 		}
 
-		return collector.Collect(k, common.CopyBytes(hash))
+		return collector.Collect(keyHex, hash)
 	}
 	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(ihFilter, hashCollector, false); err != nil {
+	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 		return err
 	}
 	t := time.Now()
@@ -283,12 +279,6 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		etl.TransformArgs{
 			Quit:       quit,
 			Comparator: comparator,
-			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"progress", etl.ProgressFromKey(k)}
-			},
-			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
-			},
 		},
 	); err != nil {
 		return err
@@ -332,9 +322,9 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
-	ihFilter := trie.NewPrefixFilter()
+	var exclude [][]byte
 	collect := func(k []byte, _ []byte, _ etl.State, _ etl.LoadNextFunc) error {
-		ihFilter.Add(k)
+		exclude = append(exclude, k)
 		return nil
 	}
 	if err := p.Unwind(s, u, false /* storage */, collect); err != nil {
@@ -343,31 +333,28 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	if err := p.Unwind(s, u, true /* storage */, collect); err != nil {
 		return err
 	}
-	ihFilter.Sort()
+	sort.Slice(exclude, func(i, j int) bool { return bytes.Compare(exclude[i], exclude[j]) < 0 })
+	unfurl := trie.NewRetainList(0)
+	for i := range exclude {
+		unfurl.AddKey(exclude[i])
+	}
 
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
 	buf.SetComparator(comparator)
 	collector := etl.NewCollector(datadir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
-		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
+		if len(keyHex) == 0 {
 			return nil
 		}
-		k := make([]byte, len(keyHex)/2)
-		trie.CompressNibbles(keyHex, &k)
-		if hash == nil {
-			return fmt.Errorf("IH cursor must call Delete by itself")
+		if len(keyHex) > trie.IHDupKeyLen {
+			return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
 		}
-		if len(k) > 40 {
-			hash = append(k[40:], hash...)
-			k = k[:40]
-		}
-
-		return collector.Collect(k, common.CopyBytes(hash))
+		return collector.Collect(keyHex, hash)
 	}
 	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
-	if err := loader.Reset(ihFilter, hashCollector, false); err != nil {
+	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 		return err
 	}
 	t := time.Now()
@@ -389,12 +376,6 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		etl.TransformArgs{
 			Quit:       quit,
 			Comparator: comparator,
-			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"progress", etl.ProgressFromKey(k)}
-			},
-			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
-			},
 		},
 	); err != nil {
 		return err
