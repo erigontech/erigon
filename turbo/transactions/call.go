@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
-const callTimeout = 5 * time.Second
+const callTimeout = 5 * time.Minute
 
 func DoCall(ctx context.Context, args ethapi.CallArgs, kv ethdb.KV, dbReader rawdb.DatabaseReader, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
