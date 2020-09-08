@@ -139,7 +139,7 @@ type Cursor interface {
 	//
 	//PutCurrent(key, value []byte) error
 
-Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
+	Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
 }
 
 type CursorDupSort interface {

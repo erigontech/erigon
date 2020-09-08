@@ -103,8 +103,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		if warmup {
 			log.Info("Running a warmup...")
-			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.PlainStateBucket, logEvery,quit); err != nil {
-					return err
+			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.PlainStateBucket, logEvery, quit); err != nil {
+				return err
 			}
 
 			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.CodeBucket, logEvery, quit); err != nil {

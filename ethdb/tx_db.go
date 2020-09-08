@@ -87,7 +87,7 @@ func (m *TxDb) begin(parent Tx) error {
 	}
 	m.tx = tx
 	m.ParentTx = parent
-	m.cursors = make(map[string]Cursor, 4)
+	m.cursors = make(map[string]Cursor, 16)
 	for name := range m.db.(HasKV).KV().AllBuckets() {
 		m.cursors[name] = tx.Cursor(name)
 	}
