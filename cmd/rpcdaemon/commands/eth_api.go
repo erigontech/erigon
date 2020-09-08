@@ -35,6 +35,8 @@ type EthAPI interface {
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
 	GetTransactionByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
+	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (map[string]interface{}, error)
+	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNumber rpc.BlockNumber, txIndex hexutil.Uint64) (map[string]interface{}, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
 }
 
@@ -127,6 +129,77 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		"nonce":            tx.Nonce(),
 		"blockHash":        blockHash,
 		"blockNumber":      hexutil.EncodeUint64(blockNumber),
+		"from":             from,
+		"to":               tx.To(),
+		"value":            tx.Value(),
+		"gasPrice":         tx.GasPrice(),
+		"gas":              hexutil.EncodeUint64(tx.Gas()),
+		"input":            hexutil.Encode(tx.Data()),
+		"v":                v,
+		"s":                s,
+		"r":                r,
+		"transactionIndex": txIndex,
+	}
+	return fields, nil
+}
+
+//TODO(tjayrush): probably using the wrong types here
+func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (map[string]interface{}, error) {
+	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
+	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
+	if block == nil {
+		return nil, fmt.Errorf("block not found: %x", blockHash)
+	}
+	nTxs := hexutil.Uint64(len(block.Transactions()))
+	if txIndex >= nTxs {
+		return nil, fmt.Errorf("index %d greater than number of txs: %d", txIndex, nTxs)
+	}
+	tx := block.Transactions()[txIndex]
+
+	from := rawdb.ReadSenders(api.dbReader, blockHash, block.NumberU64())[txIndex]
+	v, r, s := tx.RawSignatureValues()
+	fields := map[string]interface{}{
+		"hash":             tx.Hash(),
+		"nonce":            tx.Nonce(),
+		"blockHash":        blockHash,
+		"blockNumber":      hexutil.EncodeUint64(block.NumberU64()),
+		"from":             from,
+		"to":               tx.To(),
+		"value":            tx.Value(),
+		"gasPrice":         tx.GasPrice(),
+		"gas":              hexutil.EncodeUint64(tx.Gas()),
+		"input":            hexutil.Encode(tx.Data()),
+		"v":                v,
+		"s":                s,
+		"r":                r,
+		"transactionIndex": txIndex,
+	}
+	return fields, nil
+}
+
+//TODO(tjayrush): probably using the wrong types here
+func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint64) (map[string]interface{}, error) {
+	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockNumberAndIndex
+	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+	if err != nil {
+		return nil, err
+	}
+	block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+	if block == nil {
+		return nil, fmt.Errorf("block not found: %d", blockNum)
+	}
+	nTxs := hexutil.Uint64(len(block.Transactions()))
+	if txIndex >= nTxs {
+		return nil, fmt.Errorf("index %d greater than number of txs: %d", txIndex, nTxs)
+	}
+	tx := block.Transactions()[txIndex]
+	from := rawdb.ReadSenders(api.dbReader, block.Hash(), block.NumberU64())[txIndex]
+	v, r, s := tx.RawSignatureValues()
+	fields := map[string]interface{}{
+		"hash":             tx.Hash(),
+		"nonce":            tx.Nonce(),
+		"blockHash":        block.Hash(),
+		"blockNumber":      hexutil.EncodeUint64(block.NumberU64()),
 		"from":             from,
 		"to":               tx.To(),
 		"value":            tx.Value(),
