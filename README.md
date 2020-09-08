@@ -140,6 +140,7 @@ eth_getBalance
 eth_getLogs
 eth_getStorageAt
 eth_getTransactionReceipt
+eth_getTransactionByHash
 eth_sendRawTransaction
 eth_syncing
 debug_accountRange
