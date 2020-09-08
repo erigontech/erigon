@@ -435,7 +435,7 @@ func (l *FlatDBTrieLoader) logProgress() {
 	log.Info("Calculating Merkle root", "current key", k)
 }
 
-func (r *RootHashAggregator) RetainNothing(prefix []byte) bool {
+func (r *RootHashAggregator) RetainNothing(_ []byte) bool {
 	return false
 }
 
@@ -819,7 +819,7 @@ func (c *IHCursor) Seek(seek []byte) ([]byte, []byte, bool, error) {
 		return nil, nil, false, nil
 	}
 
-	return k, v, isSequence(seek, k), nil
+	return common.CopyBytes(k), common.CopyBytes(v), isSequence(seek, k), nil
 }
 
 /*
