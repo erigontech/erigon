@@ -16,11 +16,6 @@ import (
 //////////////////////////////////////////////////
 type AbsValueKind int
 
-const (
-	absStackLen = 64
-)
-
-
 //////////////////////////
 
 // stmt is the representation of an executable instruction - extension of an opcode
@@ -459,7 +454,7 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 
 					if pc1 >= len(cfg.Program.Stmts) || cfg.Program.Stmts[pc1].operation == nil {
 						isBadJump = true
-						cfg.BadJumpInvalidOpcode = true
+						cfg.BadJumpInvalidOp = true
 					} else if cfg.Program.Stmts[pc1].opcode != JUMPDEST {
 						isBadJump = true
 						cfg.BadJumpInvalidJumpDest = true
@@ -468,6 +463,7 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 					}
 				} else {
 					isBadJump = true
+					cfg.BadJumpInvalidJumpDest = true
 				}
 			}
 		}
@@ -532,6 +528,10 @@ func post(cfg *Cfg, st0 *astate, edge edge) (*astate, error) {
 			stack1.values[opNum] = a
 
 			isStackTooShort = isStackTooShort || a.fromDeepStack || b.fromDeepStack
+		} else if stmt.opcode == PC {
+			v := uint256.NewInt()
+			v.SetUint64(uint64(stmt.pc))
+			stack1.Push(AbsValueConcrete(*v))
 		} else {
 			for i := 0; i < stmt.operation.numPop; i++ {
 				s := stack1.Pop(edge.pc0)
@@ -604,7 +604,6 @@ type Cfg struct {
 	BadJumpImprecision 		bool
 	BadJumpInvalidOp   		bool
 	BadJumpInvalidJumpDest 	bool
-	BadJumpInvalidOpcode	bool
 }
 
 type CfgCoverageStats struct {
@@ -616,6 +615,9 @@ type CfgCoverageStats struct {
 }
 
 func (cfg *Cfg) checkRep() {
+	if true {
+		return
+	}
 
 	for pc1, pc0s := range cfg.PrevEdgeMap {
 		for pc0 := range pc0s {
@@ -748,6 +750,34 @@ func (cfg *Cfg) PrintAnlyState() {
 	_ = w.Flush()
 }
 
+func (cfg *Cfg) GetBadJumpReason() string {
+	if cfg.Valid {
+		return ""
+	}
+
+	if cfg.BadJumpImprecision {
+		return "Imprecision"
+	}
+
+	if cfg.BadJumpInvalidJumpDest {
+		return "InvalidJumpDest"
+	}
+
+	if cfg.BadJumpInvalidOp {
+		return "InvalidOpcode"
+	}
+
+	if cfg.ShortStack {
+		return "ShortStack"
+	}
+
+	if cfg.Panic {
+		return "Panic"
+	}
+
+	return "Unknown"
+}
+
 func pushNewEdges(workList []edge, edges []edge) []edge {
 	for _, e := range edges {
 		inWorkList := false
@@ -840,7 +870,7 @@ func GenCfg(contract *Contract, anlyCounterLimit int, astackLen int) (cfg *Cfg, 
 	cov := cfg.GetCoverageStats()
 	if cov.Uncovered > cov.Epilogue {
 		cfg.LowCoverage = true
-		return cfg, errors.New("low coverage")
+		//return cfg, errors.New("low coverage")
 	}
 
 	cfg.Valid = true

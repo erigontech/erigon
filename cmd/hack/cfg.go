@@ -2,18 +2,16 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"encoding/hex"
 	"fmt"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"log"
 	"math/big"
 	"os"
-	"sort"
+	"runtime"
+	"strings"
 )
 
 type hashInfo struct {
@@ -23,6 +21,7 @@ type hashInfo struct {
 	code 	[]byte
 }
 
+/*
 func testCfgByImpact(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -87,7 +86,7 @@ func testCfgByImpact(chaindata string) error {
 		for _, v := range infos {
 			fmt.Printf("\n%v %v\n", v.count, v.hashHex)
 
-			cfg := eval.run(v.code, v.count)
+			cfg := eval.update(v.code, v.count)
 			if cfg != nil {
 				totalActualPass += v.count
 			}
@@ -106,7 +105,7 @@ func testCfgByImpact(chaindata string) error {
 	}
 	fmt.Printf("contractKeyTotalLength: %d, contractValTotalLength: %d, codeHashTotalLength: %d, codeTotalLength: %d\n", contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
 	return nil
-}
+}*/
 
 type CfgEval struct {
 	numProgramsPassed   int
@@ -145,14 +144,10 @@ func (eval *CfgEval) printStats() {
 		percent(eval.numLowCoverage,eval.numProgramsAnalyzed))
 }
 
-func (eval *CfgEval) run(code []byte, count int) *vm.Cfg {
+func (eval *CfgEval) update(cfg *vm.Cfg, count int)  {
 	eval.numProgramsAnalyzed++
 	eval.numAddressesAnalyzed += count
 
-	//fmt.Printf("CODE: %T %v\n",v , v)
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
-	contract.Code = code
-	cfg, _ := vm.GenCfg(contract, 10000, 32)
 	if cfg.Valid {
 		eval.numProgramsPassed++
 		eval.numAddressesPassed += count
@@ -181,10 +176,9 @@ func (eval *CfgEval) run(code []byte, count int) *vm.Cfg {
 	if cfg.BadJumpInvalidJumpDest {
 		eval.numInvalidJumpDest++
 	}
-
-	return cfg
 }
 
+/*
 func testCfgCodes(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -214,7 +208,7 @@ func testCfgCodes(chaindata string) error {
 				return err
 			}
 
-			eval.run(v, 1)
+			eval.update(v, 1)
 
 			if eval.numProgramsAnalyzed % 10 == 0 {
 				eval.printStats()
@@ -226,36 +220,86 @@ func testCfgCodes(chaindata string) error {
 	}
 	fmt.Printf("contractKeyTotalLength: %d, contractValTotalLength: %d, codeHashTotalLength: %d, codeTotalLength: %d\n", contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
 	return nil
-}
+}*/
+
 
 func testCfgByUsed() error {
-	file, err := os.Open("used_contracts.txt")
+	numWorkers := runtime.NumCPU()
+	fmt.Printf("Number of cores: %v\n", numWorkers)
 
-	if err != nil {
-		log.Fatalf("failed opening file: %s", err)
+	jobs := make(chan []byte)
+	results := make(chan *vm.Cfg)
+
+	for i := 0; i < numWorkers; i++ {
+		go func(id int) {
+			for bytecode := range jobs {
+				//fmt.Printf("[%v] Running on bytecode: %v\n", id, len(bytecode))
+				contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
+				contract.Code = bytecode
+				cfg, _ := vm.GenCfg(contract, 10000, 32)
+				results <- cfg
+			}
+		}(i)
 	}
 
-	var bytecodes [][]byte
-	scanner := bufio.NewScanner(file)
-	scanner.Split(bufio.ScanLines)
+	go func() {
+		file, err := os.Open("used_contracts.txt")
+		if err != nil {
+			log.Fatalf("failed opening file: %s", err)
+		}
+		scanner := bufio.NewScanner(file)
+		scanner.Split(bufio.ScanLines)
+		for scanner.Scan() {
+			code, _ := hex.DecodeString(scanner.Text()[2:])
+			jobs <- code
+		}
+		file.Close()
+		close(jobs)
+	}()
 
-	for scanner.Scan() {
-		code, _ := hex.DecodeString(scanner.Text()[2:])
-		bytecodes = append(bytecodes, code)
-	}
+	resultsFile, err := os.Create("results.csv")
+	check(err)
 
-	eval := CfgEval{numPrograms: len(bytecodes)}
-	for _, code := range bytecodes {
-		eval.run(code, 1)
+	headers := []string{	"BytecodeLen",
+							"Valid",
+							"BadJumpReason",
+							"Bytecode"}
 
-		if eval.numProgramsAnalyzed % 10 == 0 {
+	_, err = resultsFile.WriteString(strings.Join(headers, "|") + "\n")
+	check(err)
+
+	err = resultsFile.Sync()
+	check(err)
+
+	eval := CfgEval{numPrograms: 189395}
+	for cfg := range results {
+		line := []string{	si(len(cfg.Program.Contract.Code)),
+							sb(cfg.Valid),
+							cfg.GetBadJumpReason(),
+							hex.EncodeToString(cfg.Program.Contract.Code)}
+
+		_, err = resultsFile.WriteString(strings.Join(line,"|") + "\n")
+		check(err)
+
+		err = resultsFile.Sync()
+		check(err)
+
+		eval.update(cfg, 1)
+
+		if eval.numProgramsAnalyzed%10 == 0 {
 			eval.printStats()
 		}
 	}
 
-	file.Close()
-
 	return nil
+}
+
+func sb(b bool) string {
+	return fmt.Sprintf("%v", b)
+}
+
+func si(i int) string {
+	return fmt.Sprintf("%v", i)
 }
 
 func percent(n int, d int) string {
@@ -263,6 +307,11 @@ func percent(n int, d int) string {
 }
 
 func testGenCfg() {
+	absIntTestSmallImprecision()
+	absIntTestSmallInvalidJumpDest()
+	if true {
+		return
+	}
 	//export("codes")
 	//_ = testCfgByImpact("codes")
 	_ = testCfgByUsed()
@@ -355,6 +404,23 @@ func absIntTest3() {
 	vm.AbsIntCfgHarness(contract, 0, 64)
 }
 */
+
+func absIntTestSmallImprecision() {
+	const s = "5b7355173aca573ab872c570056d929d89f6babc3fb53156"
+	runCfgAnly("SmallImprecision", s)
+
+}
+
+func absIntTestSmallInvalidJumpDest() {
+	const s = "60606040526008565b600256"
+	runCfgAnly("SmallInvalidJumpDest", s)
+}
+
+func absIntTestSmall00() {
+	const s = "3360601c62c90bc318585733ff"
+	runCfgAnly("Small00", s)
+
+}
 
 func absIntTestPanic00() {
 
@@ -485,6 +551,8 @@ func runCfgAnly(testName string, code string) {
 	cfg.PrintAnlyState()
 	if !cfg.Valid || err != nil {
 		fmt.Printf("Test failed: %v %v\n", testName, err, )
+		fmt.Printf("Bad jump reason: %v\n", cfg.GetBadJumpReason())
+		fmt.Printf("# bad jumps: %v\n", len(cfg.BadJumps))
 	} else {
 		fmt.Printf("Test passed: %v Covered=%v Instructions=%v Uncovered=%v Epilogue=%v\n",
 			testName,
