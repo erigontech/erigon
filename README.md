@@ -141,6 +141,8 @@ eth_getLogs
 eth_getStorageAt
 eth_getTransactionReceipt
 eth_getTransactionByHash
+eth_getTransactionByBlockHashAndIndex
+eth_getTransactionByBlockNumberAndIndex
 eth_sendRawTransaction
 eth_syncing
 debug_accountRange
