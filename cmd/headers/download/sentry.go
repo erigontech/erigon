@@ -102,7 +102,7 @@ func errResp(code int, format string, v ...interface{}) error {
 	return fmt.Errorf("%v - %v", code, fmt.Sprintf(format, v...))
 }
 
-func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint64, td *big.Int, genesisHash common.Hash, chainConfig *params.ChainConfig, head uint64, newBlockCh chan NewBlockFromSentry, penaltyCh chan PenaltyMsg) error {
+func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint64, td *big.Int, genesisHash common.Hash, chainConfig *params.ChainConfig, head uint64, newBlockCh chan NewBlockFromSentry, _ chan PenaltyMsg) error {
 	forkId := forkid.NewID(chainConfig, genesisHash, head)
 	// Send handshake message
 	if err := p2p.Send(rw, eth.StatusMsg, &eth.StatusData{
