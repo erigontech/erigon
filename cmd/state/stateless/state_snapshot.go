@@ -120,6 +120,7 @@ func loadSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 	check(err)
 }
 
+//nolint
 func loadCodes(db ethdb.KV, codeDb ethdb.Database) error {
 	var account accounts.Account
 	err := db.Update(context.Background(), func(tx ethdb.Tx) error {
