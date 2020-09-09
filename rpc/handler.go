@@ -286,9 +286,6 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	}
 }
 
-const ok = "Ok"
-const er = "Er"
-
 // handleCallMsg executes a call message and returns the answer.
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage) *jsonrpcMessage {
 	start := time.Now()
