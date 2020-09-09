@@ -2,11 +2,11 @@ package commands
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"os"
 	"path"
 	"time"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/cmd/state/stateless"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/spf13/cobra"
@@ -19,10 +19,12 @@ func init() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			localDb, err := bolt.Open(file()+"_sg", 0600, &bolt.Options{})
-			if err != nil {
-				panic(err)
-			}
+			localDB := ethdb.NewLMDB().Path(file() + "_sg").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+				return dbutils.BucketsCfg{
+					stateless.MainHashesBucket:      {},
+					stateless.ReportsProgressBucket: {},
+				}
+			}).MustOpen()
 
 			remoteDB, _, err := ethdb.NewRemote().Path(privateApiAddr).Open()
 			if err != nil {
@@ -30,8 +32,8 @@ func init() {
 			}
 
 			fmt.Println("Processing started...")
-			stateless.NewStateGrowth1Reporter(ctx, remoteDB, localDb).StateGrowth1(ctx)
-			stateless.NewStateGrowth2Reporter(ctx, remoteDB, localDb).StateGrowth2(ctx)
+			stateless.NewStateGrowth1Reporter(ctx, remoteDB, localDB).StateGrowth1(ctx)
+			stateless.NewStateGrowth2Reporter(ctx, remoteDB, localDB).StateGrowth2(ctx)
 			return nil
 		},
 	}

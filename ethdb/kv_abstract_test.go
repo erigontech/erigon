@@ -90,7 +90,6 @@ func TestManagedTx(t *testing.T) {
 
 func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	writeDBs = []ethdb.KV{
-		ethdb.NewBolt().InMem().WithBucketsConfig(f).MustOpen(),
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(),
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
 	}

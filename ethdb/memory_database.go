@@ -22,8 +22,6 @@ import (
 
 func NewMemDatabase() *ObjectDatabase {
 	switch debug.TestDB() {
-	case "bolt":
-		return NewObjectDatabase(NewBolt().InMem().MustOpen())
 	case "lmdb":
 		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	default:

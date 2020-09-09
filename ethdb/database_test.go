@@ -33,26 +33,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestBoltDB() (Database, func()) {
-	db := NewObjectDatabase(NewBolt().InMem().MustOpen())
-	return db, func() {
-		db.Close()
-	}
-}
-
 func newTestLmdb() *ObjectDatabase {
 	return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 }
 
 var testBucket = dbutils.CurrentStateBucket
 var testValues = []string{"a", "1251", "\x00123\x00"}
-
-func TestBoltDB_PutGet(t *testing.T) {
-	db, remove := newTestBoltDB()
-	defer remove()
-	testPutGet(db, t)
-	testNoPanicAfterDbClosed(db, t)
-}
 
 func TestMemoryDB_PutGet(t *testing.T) {
 	db := NewMemDatabase()
@@ -186,12 +172,6 @@ func testNoPanicAfterDbClosed(db Database, t *testing.T) {
 	})
 }
 
-func TestBoltDB_ParallelPutGet(t *testing.T) {
-	db, remove := newTestBoltDB()
-	defer remove()
-	testParallelPutGet(db)
-}
-
 func TestMemoryDB_ParallelPutGet(t *testing.T) {
 	db := NewMemDatabase()
 	defer db.Close()
@@ -266,12 +246,6 @@ func TestMemoryDB_Walk(t *testing.T) {
 	testWalk(db, t)
 }
 
-func TestBoltDB_Walk(t *testing.T) {
-	db, remove := newTestBoltDB()
-	defer remove()
-	testWalk(db, t)
-}
-
 func TestLMDB_Walk(t *testing.T) {
 	db := newTestLmdb()
 	defer db.Close()
@@ -288,7 +262,7 @@ var hexEntries = map[string]string{
 }
 
 var startKey = common.FromHex("a0")
-var fixedBits int = 3
+var fixedBits = 3
 
 var keysInRange = [][]byte{common.FromHex("a8"), common.FromHex("bb"), common.FromHex("bd")}
 

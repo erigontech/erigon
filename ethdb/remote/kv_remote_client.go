@@ -39,7 +39,7 @@ var (
 // this constant needs to be increased
 const Version uint64 = 2
 
-// Command is the type of command in the boltdb remote protocol
+// Command is the type of command in the kv remote protocol
 type Command uint8
 type ResponseCode uint8
 
@@ -183,7 +183,7 @@ func defaultDialFunc(ctx context.Context, dialAddress string) (in io.Reader, out
 	return conn, conn, conn, err
 }
 
-// DB mimicks the interface of the bolt.DB,
+// DB mimicks the interface of the ethdb.KV,
 // but it works via a pair (Reader, Writer)
 type DB struct {
 	opts              DbOpts
@@ -361,7 +361,7 @@ func (db *DB) Close() error {
 	return nil
 }
 
-// Tx mimicks the interface of bolt.Tx
+// Tx mimicks the interface of ethdb.Tx
 type Tx struct {
 	ctx context.Context
 	in  io.Reader
@@ -484,7 +484,7 @@ func (db *DB) DiskSize(ctx context.Context) (uint64, error) {
 	return value, nil
 }
 
-// Bucket mimicks the interface of bolt.Bucket
+// Bucket mimicks the interface of ethdb.Bucket
 type Bucket struct {
 	ctx          context.Context
 	in           io.Reader
