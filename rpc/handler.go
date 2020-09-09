@@ -60,6 +60,7 @@ type handler struct {
 	cancelRoot     func()                         // cancel function for rootCtx
 	conn           jsonWriter                     // where responses will be sent
 	log            log.Logger
+	accessLog      log.Logger
 	allowSubscribe bool
 
 	subLock    sync.Mutex
@@ -71,7 +72,7 @@ type callProc struct {
 	notifiers []*Notifier
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry) *handler {
+func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, accessLog log.Logger) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	h := &handler{
 		reg:            reg,
@@ -84,6 +85,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		allowSubscribe: true,
 		serverSubs:     make(map[ID]*Subscription),
 		log:            log.Root(),
+		accessLog:      accessLog,
 	}
 	if conn.remoteAddr() != "" {
 		h.log = h.log.New("conn", conn.remoteAddr())
@@ -286,6 +288,9 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	}
 }
 
+const ok = "Ok"
+const er = "Er"
+
 // handleCallMsg executes a call message and returns the answer.
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage) *jsonrpcMessage {
 	start := time.Now()
@@ -293,6 +298,9 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage) *jsonrpcMess
 	case msg.isNotification():
 		h.handleCall(ctx, msg)
 		h.log.Debug("Served "+msg.Method, "t", time.Since(start))
+		if h.accessLog != nil {
+			h.accessLog.Info(ok, msg.ID, msg.Method, strings.ReplaceAll(string(msg.Params), "\n", ""))
+		}
 		return nil
 	case msg.isCall():
 		resp := h.handleCall(ctx, msg)
@@ -304,8 +312,14 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage) *jsonrpcMess
 				ctx = append(ctx, "errdata", resp.Error.Data)
 			}
 			h.log.Warn("Served "+msg.Method, ctx...)
+			if h.accessLog != nil {
+				h.accessLog.Info(er, msg.ID, msg.Method, strings.ReplaceAll(string(msg.Params), "\n", ""), resp.Error.Message)
+			}
 		} else {
 			h.log.Debug("Served "+msg.Method, ctx...)
+			if h.accessLog != nil {
+				h.accessLog.Info(ok, msg.ID, msg.Method, strings.ReplaceAll(string(msg.Params), "\n", ""), strings.ReplaceAll(string(resp.Result), "\n", ""))
+			}
 		}
 		return resp
 	case msg.hasValidID():
