@@ -185,7 +185,6 @@ type Backend interface {
 type DbProvider uint8
 
 const (
-	Bolt DbProvider = iota
-	Remote
+	Remote DbProvider = iota
 	Lmdb
 )

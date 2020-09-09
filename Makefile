@@ -143,6 +143,7 @@ bindings:
 	go generate ./tests/contracts/
 	go generate ./cmd/tester/contracts/
 	go generate ./core/state/contracts/
+	go generate ./ethdb/typedbucket
 
 grpc:
 	# See also: ./cmd/hack/binary-deps/main.go

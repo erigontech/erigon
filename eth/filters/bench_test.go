@@ -144,7 +144,7 @@ var bloomBitsPrefix = "BloomBits"
 
 func clearBloomBits(db ethdb.Database) {
 	fmt.Println("Clearing bloombits data...")
-	casted, ok := db.(ethdb.NonTransactional)
+	casted, ok := db.(ethdb.BucketsMigrator)
 	if !ok {
 		panic(fmt.Errorf("imposible to drop"))
 	}

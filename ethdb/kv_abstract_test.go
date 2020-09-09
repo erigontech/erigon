@@ -90,7 +90,6 @@ func TestManagedTx(t *testing.T) {
 
 func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	writeDBs = []ethdb.KV{
-		ethdb.NewBolt().InMem().WithBucketsConfig(f).MustOpen(),
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(),
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
 	}
@@ -106,7 +105,7 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []e
 
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[2]))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[1]))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}

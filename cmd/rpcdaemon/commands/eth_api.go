@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
@@ -34,7 +35,9 @@ type EthAPI interface {
 	Syncing(ctx context.Context) (interface{}, error)
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
-	GetTransactionByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
+	GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error)
+	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error)
+	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
 }
 
@@ -111,34 +114,102 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	return &n, nil
 }
 
-func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
-	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, hash)
+// RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
+// TODO(tjayrush): Copied from ./internal/ethapi/api.go - remove this comment
+type RPCTransaction struct {
+	BlockHash        *common.Hash    `json:"blockHash"`
+	BlockNumber      *hexutil.Big    `json:"blockNumber"`
+	From             common.Address  `json:"from"`
+	Gas              hexutil.Uint64  `json:"gas"`
+	GasPrice         *hexutil.Big    `json:"gasPrice"`
+	Hash             common.Hash     `json:"hash"`
+	Input            hexutil.Bytes   `json:"input"`
+	Nonce            hexutil.Uint64  `json:"nonce"`
+	To               *common.Address `json:"to"`
+	TransactionIndex *hexutil.Uint64 `json:"transactionIndex"`
+	Value            *hexutil.Big    `json:"value"`
+	V                *hexutil.Big    `json:"v"`
+	R                *hexutil.Big    `json:"r"`
+	S                *hexutil.Big    `json:"s"`
+}
 
+// newRPCTransaction returns a transaction that will serialize to the RPC
+// representation, with the given location metadata set (if available).
+// TODO(tjayrush): Copied from ./internal/ethapi/api.go - remove this comment
+func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
+	var signer types.Signer = types.FrontierSigner{}
+	if tx.Protected() {
+		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
+	}
+	from, _ := types.Sender(signer, tx)
+	v, r, s := tx.RawSignatureValues()
+
+	result := &RPCTransaction{
+		From:     from,
+		Gas:      hexutil.Uint64(tx.Gas()),
+		GasPrice: (*hexutil.Big)(tx.GasPrice().ToBig()),
+		Hash:     tx.Hash(),
+		Input:    hexutil.Bytes(tx.Data()),
+		Nonce:    hexutil.Uint64(tx.Nonce()),
+		To:       tx.To(),
+		Value:    (*hexutil.Big)(tx.Value().ToBig()),
+		V:        (*hexutil.Big)(v.ToBig()),
+		R:        (*hexutil.Big)(r.ToBig()),
+		S:        (*hexutil.Big)(s.ToBig()),
+	}
+	if blockHash != (common.Hash{}) {
+		result.BlockHash = &blockHash
+		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
+		result.TransactionIndex = (*hexutil.Uint64)(&index)
+	}
+	return result
+}
+
+// GetTransactionByHash returns the transaction for the given hash
+func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error) {
+	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
+	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, hash)
 	if tx == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
+	return newRPCTransaction(tx, blockHash, blockNumber, txIndex), nil
+}
 
-	from := rawdb.ReadSenders(api.dbReader, blockHash, blockNumber)[txIndex]
-
-	v, r, s := tx.RawSignatureValues()
-
-	fields := map[string]interface{}{
-		"hash":             tx.Hash(),
-		"nonce":            tx.Nonce(),
-		"blockHash":        blockHash,
-		"blockNumber":      hexutil.EncodeUint64(blockNumber),
-		"from":             from,
-		"to":               tx.To(),
-		"value":            tx.Value(),
-		"gasPrice":         tx.GasPrice(),
-		"gas":              hexutil.EncodeUint64(tx.Gas()),
-		"input":            hexutil.Encode(tx.Data()),
-		"v":                v,
-		"s":                s,
-		"r":                r,
-		"transactionIndex": txIndex,
+// GetTransactionByBlockHashAndIndex returns the transaction for the given block hash and index.
+func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error) {
+	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
+	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
+	if block == nil {
+		return nil, fmt.Errorf("block %#x not found", blockHash)
 	}
-	return fields, nil
+
+	txs := block.Transactions()
+	if uint64(txIndex) >= uint64(len(txs)) {
+		return nil, fmt.Errorf("txIndex (%d) out of range (nTxs: %d)", uint64(txIndex), uint64(len(txs)))
+	}
+
+	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex)), nil
+}
+
+// GetTransactionByBlockNumberAndIndex returns the transaction for the given block number and index.
+func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error) {
+	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockNumberAndIndex
+	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+	if err != nil {
+		return nil, err
+	}
+
+	block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+	if block == nil {
+		return nil, fmt.Errorf("block %d not found", blockNum)
+	}
+
+	txs := block.Transactions()
+	if uint64(txIndex) >= uint64(len(txs)) {
+		return nil, fmt.Errorf("txIndex (%d) out of range (nTxs: %d)", uint64(txIndex), uint64(len(txs)))
+	}
+
+	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex)), nil
 }
 
 func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
