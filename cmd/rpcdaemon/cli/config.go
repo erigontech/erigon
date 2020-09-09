@@ -109,9 +109,9 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	}
 
 	if cfg.AccessLog != "" {
-		f, err := os.OpenFile(cfg.AccessLog, os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.ModeAppend|0666)
-		if err != nil {
-			return err
+		f, errf := os.OpenFile(cfg.AccessLog, os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.ModeAppend|0666)
+		if errf != nil {
+			return errf
 		}
 		defer f.Close()
 
