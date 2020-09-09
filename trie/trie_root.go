@@ -760,10 +760,8 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 	if c.filter(k) { // if filter allow us, return. otherwise delete and go ahead.
 		return k, v, nil
 	}
-	if len(k) > IHDupKeyLen {
-		err = c.c.DeleteCurrent()
-		if err != nil {
-		}
+	err = c.c.DeleteCurrent()
+	if err != nil {
 		return []byte{}, nil, err
 	}
 
@@ -790,10 +788,8 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return k, v, nil
 		}
 
-		if len(k) > IHDupKeyLen {
-			err = c.c.DeleteCurrent()
-			if err != nil {
-			}
+		err = c.c.DeleteCurrent()
+		if err != nil {
 			return []byte{}, nil, err
 		}
 
