@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"math/big"
 	"os"
 	"sort"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -225,6 +225,10 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error 
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the tips from the attached anchors to it
 func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powDepth int, currentTime uint64) error {
+	var prevTopTime uint64
+	if hd.requestQueue.Len() > 0 {
+		prevTopTime = (*hd.requestQueue)[0].waitUntil
+	}
 	// Find attachement anchors again
 	anchorHeader := segment.headers[start]
 	if anchors, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
@@ -270,6 +274,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 	} else {
 		return fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
 	}
+	hd.resetRequestQueueTimer(prevTopTime, currentTime)
 	return nil
 }
 
@@ -315,6 +320,10 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
 }
 
 func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, currentTime uint64) (Penalty, error) {
+	var prevTopTime uint64
+	if hd.requestQueue.Len() > 0 {
+		prevTopTime = (*hd.requestQueue)[0].waitUntil
+	}
 	anchorHeader := segment.headers[end-1]
 	if anchorHeader.Time > currentTime+hd.newAnchorFutureLimit {
 		return TooFarFuturePenalty, nil
@@ -341,6 +350,7 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 			return NoPenalty, fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
+	hd.resetRequestQueueTimer(prevTopTime, currentTime)
 	return NoPenalty, nil
 }
 
@@ -391,7 +401,7 @@ func (h *Heap) Pop() interface{} {
 func (hd *HeaderDownload) RecoverFromFiles() error {
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	h := &Heap{}
 	heap.Init(h)
@@ -476,18 +486,40 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*Hea
 	if hd.requestQueue.Len() == 0 {
 		return nil
 	}
+	var prevTopTime uint64
+	if hd.requestQueue.Len() > 0 {
+		prevTopTime = (*hd.requestQueue)[0].waitUntil
+	}
 	var requests []*HeaderRequest
 	for peek := (*hd.requestQueue)[0]; hd.requestQueue.Len() > 0 && peek.waitUntil <= currentTime; peek = (*hd.requestQueue)[0] {
 		pop := heap.Pop(hd.requestQueue).(*RequestQueueItem)
-		if _, present := hd.anchors[pop.anchorParent]; present {
+		if anchors, present := hd.anchors[pop.anchorParent]; present {
 			// Anchor still exists after the timeout
 			//TODO: Figure out correct request length
-			requests = append(requests, &HeaderRequest{hash: pop.anchorParent, length: 16})
+			requests = append(requests, &HeaderRequest{Hash: pop.anchorParent, Number: anchors[0].blockHeight - 1, Length: 16})
 			pop.waitUntil = currentTime + timeout
 			heap.Push(hd.requestQueue, pop)
 		}
 	}
+	hd.resetRequestQueueTimer(prevTopTime, currentTime)
 	return requests
+}
+
+func (hd *HeaderDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64) {
+	var nextTopTime uint64
+	if hd.requestQueue.Len() > 0 {
+		nextTopTime = (*hd.requestQueue)[0].waitUntil
+	}
+	if nextTopTime == prevTopTime {
+		return // Nothing changed
+	}
+	if nextTopTime <= currentTime {
+		nextTopTime = currentTime
+	}
+	if !hd.RequestQueueTimer.Stop() {
+		<-hd.RequestQueueTimer.C
+	}
+	hd.RequestQueueTimer.Reset(time.Duration(nextTopTime-currentTime) * time.Second)
 }
 
 func (hd *HeaderDownload) FlushBuffer() error {

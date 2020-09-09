@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -58,7 +59,14 @@ type PenaltyMsg struct {
 	penalty headerdownload.Penalty
 }
 
-func makeP2PServer(protocols []string, newBlockCh chan NewBlockFromSentry, penaltyCh chan PenaltyMsg) (*p2p.Server, error) {
+func makeP2PServer(
+	ctx context.Context,
+	peerHeightMap *sync.Map,
+	peerRwMap *sync.Map,
+	protocols []string,
+	newBlockCh chan NewBlockFromSentry,
+	penaltyCh chan PenaltyMsg,
+) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
 	dns := params.KnownDNSNetwork(params.MainnetGenesisHash, "all")
@@ -84,9 +92,25 @@ func makeP2PServer(protocols []string, newBlockCh chan NewBlockFromSentry, penal
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				log.Info(fmt.Sprintf("[%s] Start with peer", peer.ID()))
-				if err := runPeer(peer, rw, eth.ProtocolVersions[0], eth.DefaultConfig.NetworkID, genesis.Difficulty, params.MainnetGenesisHash, params.MainnetChainConfig, 0 /* head */, newBlockCh, penaltyCh); err != nil {
+				peerRwMap.Store(peer.ID().String(), rw)
+				if err := runPeer(
+					ctx,
+					peerHeightMap,
+					peer,
+					rw,
+					eth.ProtocolVersions[0],
+					eth.DefaultConfig.NetworkID,
+					genesis.Difficulty,
+					params.MainnetGenesisHash,
+					params.MainnetChainConfig,
+					0, /* head */
+					newBlockCh,
+					penaltyCh,
+				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peer.ID(), err))
 				}
+				peerHeightMap.Delete(peer.ID().String())
+				peerRwMap.Delete(peer.ID().String())
 				return nil
 			},
 		},
@@ -102,7 +126,20 @@ func errResp(code int, format string, v ...interface{}) error {
 	return fmt.Errorf("%v - %v", code, fmt.Sprintf(format, v...))
 }
 
-func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint64, td *big.Int, genesisHash common.Hash, chainConfig *params.ChainConfig, head uint64, newBlockCh chan NewBlockFromSentry, _ chan PenaltyMsg) error {
+func runPeer(
+	ctx context.Context,
+	peerMap *sync.Map,
+	peer *p2p.Peer,
+	rw p2p.MsgReadWriter,
+	version uint,
+	networkID uint64,
+	td *big.Int,
+	genesisHash common.Hash,
+	chainConfig *params.ChainConfig,
+	head uint64,
+	newBlockCh chan NewBlockFromSentry,
+	_ chan PenaltyMsg,
+) error {
 	forkId := forkid.NewID(chainConfig, genesisHash, head)
 	// Send handshake message
 	if err := p2p.Send(rw, eth.StatusMsg, &eth.StatusData{
@@ -211,13 +248,19 @@ func runPeer(peer *p2p.Peer, rw p2p.MsgReadWriter, version uint, networkID uint6
 			if err = msg.Decode(&announces); err != nil {
 				return errResp(eth.ErrDecode, "decode NewBlockHashesData %v: %v", msg, err)
 			}
+			x, _ := peerMap.Load(peer.ID().String())
+			highestBlock := x.(uint64)
 			var numStr strings.Builder
 			for _, announce := range announces {
 				if numStr.Len() > 0 {
 					numStr.WriteString(",")
 				}
 				numStr.WriteString(fmt.Sprintf("%d", announce.Number))
+				if announce.Number > highestBlock {
+					highestBlock = announce.Number
+				}
 			}
+			peerMap.Store(peer.ID().String(), highestBlock)
 			log.Info(fmt.Sprintf("[%s] NewBlockHashesMsg {%s}", peer.ID(), numStr.String()))
 		case eth.NewBlockMsg:
 			var request eth.NewBlockData
@@ -286,7 +329,9 @@ func Download(filesDir string) error {
 	ctx := rootContext()
 	newBlockCh := make(chan NewBlockFromSentry)
 	penaltyCh := make(chan PenaltyMsg)
-	server, err := makeP2PServer([]string{eth.ProtocolName}, newBlockCh, penaltyCh)
+	reqHeadersCh := make(chan headerdownload.HeaderRequest)
+	var peerHeightMap, peerRwMap sync.Map
+	server, err := makeP2PServer(ctx, &peerHeightMap, &peerRwMap, []string{eth.ProtocolName}, newBlockCh, penaltyCh)
 	if err != nil {
 		return err
 	}
@@ -294,7 +339,20 @@ func Download(filesDir string) error {
 	if err = server.Start(); err != nil {
 		return fmt.Errorf("could not start server: %w", err)
 	}
-	go Downloader(ctx, filesDir, newBlockCh, penaltyCh)
+	go Downloader(ctx, filesDir, newBlockCh, penaltyCh, reqHeadersCh)
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case req := <-reqHeadersCh:
+				// Choose a peer that we can send this request to
+				fmt.Printf("Sending req for hash %x, blocknumber %d, length %d\n", req.Hash, req.Number, req.Length)
+			}
+		}
+	}()
+
 	<-ctx.Done()
 	return nil
 }

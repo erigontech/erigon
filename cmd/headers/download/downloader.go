@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
@@ -67,15 +66,15 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 }
 
 // Downloader needs to be run from a go-routine, and it is in the sole control of the HeaderDownloader object
-func Downloader(ctx context.Context, filesDir string, newBlockCh chan NewBlockFromSentry, penaltyCh chan PenaltyMsg) {
-	config := eth.DefaultConfig.Ethash
+func Downloader(ctx context.Context, filesDir string, newBlockCh chan NewBlockFromSentry, penaltyCh chan PenaltyMsg, reqHeadersCh chan headerdownload.HeaderRequest) {
+	//config := eth.DefaultConfig.Ethash
 	engine := ethash.New(ethash.Config{
-		CachesInMem:      config.CachesInMem,
-		CachesLockMmap:   config.CachesLockMmap,
-		DatasetDir:       config.DatasetDir,
-		DatasetsInMem:    config.DatasetsInMem,
-		DatasetsOnDisk:   config.DatasetsOnDisk,
-		DatasetsLockMmap: config.DatasetsLockMmap,
+		CachesInMem:      1,
+		CachesLockMmap:   false,
+		DatasetDir:       "ethash",
+		DatasetsInMem:    1,
+		DatasetsOnDisk:   0,
+		DatasetsLockMmap: false,
 	}, nil, false)
 	cr := chainReader{config: params.MainnetChainConfig}
 	calcDiffFunc := func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
@@ -112,6 +111,11 @@ func Downloader(ctx context.Context, filesDir string, newBlockCh chan NewBlockFr
 				continue
 			}
 			log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d}", newBlockReq.Block.NumberU64()))
+		case <-hd.RequestQueueTimer.C:
+			reqs := hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
+			for _, req := range reqs {
+				log.Info(fmt.Sprintf("Sending header request {hash: %x, length: %d}", req.Hash, req.Length))
+			}
 		case <-ctx.Done():
 			return
 		}

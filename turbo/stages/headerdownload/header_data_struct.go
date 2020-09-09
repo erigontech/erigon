@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -75,8 +76,9 @@ type RequestQueue []RequestQueueItem
 
 // Request for chain segment starting with hash and going to its parent, etc, with length headers in total
 type HeaderRequest struct {
-	hash   common.Hash
-	length int
+	Hash   common.Hash
+	Number uint64
+	Length int
 }
 
 type VerifySealFunc func(header *types.Header) error
@@ -99,6 +101,7 @@ type HeaderDownload struct {
 	requestQueue           *RequestQueue
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
+	RequestQueueTimer      *time.Timer
 }
 
 func (a *TipItem) Less(b llrb.Item) bool {
@@ -157,6 +160,7 @@ func NewHeaderDownload(filesDir string,
 		newAnchorPastLimit:   newAnchorPastLimit,
 	}
 	heap.Init(hd.requestQueue)
+	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd
 }
 
