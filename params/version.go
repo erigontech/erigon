@@ -22,10 +22,17 @@ import (
 
 // see https://calver.org
 const (
+<<<<<<< HEAD
 	VersionMajor    = 2020    // Major version component of the current release
 	VersionMinor    = 9       // Minor version component of the current release
 	VersionMicro    = 3       // Patch version component of the current release
 	VersionModifier = "alpha" // Patch version component of the current release
+=======
+	VersionMajor = 1        // Major version component of the current release
+	VersionMinor = 9        // Minor version component of the current release
+	VersionPatch = 21       // Patch version component of the current release
+	VersionMeta  = "stable" // Version metadata to append to the version string
+>>>>>>> 0287d5484... params: release Geth v1.9.21
 )
 
 func withModifier(vsn string) string {
