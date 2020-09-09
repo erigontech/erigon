@@ -463,24 +463,3 @@ Date:   Wed Sep 9 23:38:47 2020 +0800
     
     * eth: rename default price cap
 
-commit 3a98c6f6e6613f8fe5380971fd113917c7b1ed37
-Merge: d81c9d9b7 367f12f73
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Wed Sep 9 18:37:37 2020 +0300
-
-    Merge pull request #21537 from karalabe/les-reorg-fix
-    
-    eth/downloader: only roll back light sync if not fully validating
-
-commit d81c9d9b76f4255a258c1a6d93b3392ac0e8fd5f
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Wed Sep 9 15:21:20 2020 +0200
-
-    accounts/abi/bind/backends: reverted some stylistic changes (#21535)
-
-commit 367f12f73495b30c17c7d358cf71575f34f79757
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Wed Sep 9 14:06:32 2020 +0300
-
-    eth/downloader: only roll back light sync if not fully validating
-
