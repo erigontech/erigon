@@ -226,7 +226,11 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
 
 	if stack.Config().PrivateApiAddr != "" {
-		remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr)
+		if stack.Config().TLSConnection {
+			remotedbserver.StartGrpcWithTLS(chainDb.KV(), eth, stack.Config().PrivateApiAddr, stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+		} else {
+			remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr)
+		}
 	}
 
 	checkpoint := config.Checkpoint
