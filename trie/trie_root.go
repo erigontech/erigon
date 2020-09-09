@@ -380,15 +380,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{})
 
 	c := NewStateCursor(tx.Cursor(l.stateBucket))
 	var filter = func(k []byte) bool {
-		if l.rd.Retain(k) {
-			//if l.hc != nil {
-			//	if err := l.hc(k, nil); err != nil {
-			//		panic(err)
-			//	}
-			//}
-			return false
-		}
-		return true
+		return !l.rd.Retain(k)
 	}
 	ih := IH(filter, tx.CursorDupSort(l.intermediateHashesBucket))
 	if err := l.iteration(c, ih, true /* first */); err != nil {
@@ -768,8 +760,10 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 	if c.filter(k) { // if filter allow us, return. otherwise delete and go ahead.
 		return k, v, nil
 	}
-	err = c.c.DeleteCurrent()
-	if err != nil {
+	if len(k) > IHDupKeyLen {
+		err = c.c.DeleteCurrent()
+		if err != nil {
+		}
 		return []byte{}, nil, err
 	}
 
@@ -796,8 +790,10 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return k, v, nil
 		}
 
-		err = c.c.DeleteCurrent()
-		if err != nil {
+		if len(k) > IHDupKeyLen {
+			err = c.c.DeleteCurrent()
+			if err != nil {
+			}
 			return []byte{}, nil, err
 		}
 
