@@ -299,7 +299,8 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage) *jsonrpcMess
 		h.handleCall(ctx, msg)
 		h.log.Debug("Served "+msg.Method, "t", time.Since(start))
 		if h.accessLog != nil {
-			h.accessLog.Info(ok, msg.ID, msg.Method, strings.ReplaceAll(string(msg.Params), "\n", ""))
+			h.accessLog.Info(ok, msg.ID, msg.Method,
+				strings.ReplaceAll(strings.ReplaceAll(string(msg.Params), "\n", ""), " ", ""))
 		}
 		return nil
 	case msg.isCall():
@@ -313,12 +314,15 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage) *jsonrpcMess
 			}
 			h.log.Warn("Served "+msg.Method, ctx...)
 			if h.accessLog != nil {
-				h.accessLog.Info(er, msg.ID, msg.Method, strings.ReplaceAll(string(msg.Params), "\n", ""), resp.Error.Message)
+				h.accessLog.Info(er, msg.ID, msg.Method,
+					strings.ReplaceAll(strings.ReplaceAll(string(msg.Params), "\n", ""), " ", ""), resp.Error.Message)
 			}
 		} else {
 			h.log.Debug("Served "+msg.Method, ctx...)
 			if h.accessLog != nil {
-				h.accessLog.Info(ok, msg.ID, msg.Method, strings.ReplaceAll(string(msg.Params), "\n", ""), strings.ReplaceAll(string(resp.Result), "\n", ""))
+				h.accessLog.Info(ok, msg.ID, msg.Method,
+					strings.ReplaceAll(strings.ReplaceAll(string(msg.Params), "\n", ""), " ", ""),
+					strings.ReplaceAll(strings.ReplaceAll(string(resp.Result), "\n", ""), " ", ""))
 			}
 		}
 		return resp
