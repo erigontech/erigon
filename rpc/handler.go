@@ -60,7 +60,6 @@ type handler struct {
 	cancelRoot     func()                         // cancel function for rootCtx
 	conn           jsonWriter                     // where responses will be sent
 	log            log.Logger
-	accessLog      log.Logger
 	allowSubscribe bool
 
 	subLock    sync.Mutex
@@ -72,7 +71,7 @@ type callProc struct {
 	notifiers []*Notifier
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, accessLog log.Logger) *handler {
+func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	h := &handler{
 		reg:            reg,
@@ -85,7 +84,6 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		allowSubscribe: true,
 		serverSubs:     make(map[ID]*Subscription),
 		log:            log.Root(),
-		accessLog:      accessLog,
 	}
 	if conn.remoteAddr() != "" {
 		h.log = h.log.New("conn", conn.remoteAddr())

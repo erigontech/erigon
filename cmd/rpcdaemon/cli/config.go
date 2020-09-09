@@ -1,13 +1,8 @@
 package cli
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"os"
-
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
@@ -15,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/spf13/cobra"
+	"net/http"
 )
 
 type Flags struct {
@@ -28,7 +24,6 @@ type Flags struct {
 	Gascap            uint64
 	MaxTraces         uint64
 	WebsocketEnabled  bool
-	AccessLog         string
 }
 
 var rootCmd = &cobra.Command{
@@ -60,7 +55,6 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 0, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets")
-	rootCmd.PersistentFlags().StringVar(&cfg.AccessLog, "accesslog", "", "write request/response to this file. See http://httpd.apache.org/docs/2.2/logs.html#common for a description of format.")
 
 	return rootCmd, cfg
 }
@@ -106,35 +100,6 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
 		wsHandler = srv.WebsocketHandler([]string{"*"})
-	}
-
-	if cfg.AccessLog != "" {
-		f, errf := os.OpenFile(cfg.AccessLog, os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.ModeAppend|0666)
-		if errf != nil {
-			return errf
-		}
-		defer f.Close()
-
-		logger := log.New()
-		logger.SetHandler(log.StreamHandler(f, log.FormatFunc(func(r *log.Record) []byte {
-			var logs bytes.Buffer
-			logs.WriteString(r.Msg)
-			logs.WriteString("\t")
-			for i := 0; i < len(r.Ctx); i++ {
-				switch v := r.Ctx[i].(type) {
-				case string:
-					logs.WriteString(v)
-					logs.WriteString("\t")
-				case json.RawMessage:
-					logs.Write(v)
-					logs.WriteString("\t")
-				}
-			}
-			logs.WriteString("\n")
-			return logs.Bytes()
-		})))
-
-		srv.SetAccessLog(logger)
 	}
 
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

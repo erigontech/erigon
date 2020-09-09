@@ -42,11 +42,10 @@ const (
 
 // Server is an RPC server.
 type Server struct {
-	services  serviceRegistry
-	idgen     func() ID
-	run       int32
-	codecs    mapset.Set
-	accessLog log.Logger
+	services serviceRegistry
+	idgen    func() ID
+	run      int32
+	codecs   mapset.Set
 }
 
 // NewServer creates a new server instance with no registered handlers.
@@ -57,10 +56,6 @@ func NewServer() *Server {
 	rpcService := &RPCService{server}
 	server.RegisterName(MetadataApi, rpcService)
 	return server
-}
-
-func (s *Server) SetAccessLog(w log.Logger) {
-	s.accessLog = w
 }
 
 // RegisterName creates a service for the given receiver type under the given name. When no
@@ -102,7 +97,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 		return
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.accessLog)
+	h := newHandler(ctx, codec, s.idgen, &s.services)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 
