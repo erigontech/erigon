@@ -118,7 +118,7 @@ func newPersistentNodeDB(path string, version int, self NodeID) (*nodeDB, error)
 	}
 	if blob != nil && !bytes.Equal(blob, currentVer) {
 		db.Close()
-		if err := os.Remove(path); err != nil {
+		if err := os.RemoveAll(path); err != nil {
 			return nil, err
 		}
 		return newPersistentNodeDB(path, version, self)
