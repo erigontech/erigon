@@ -297,34 +297,20 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage) *jsonrpcMess
 	switch {
 	case msg.isNotification():
 		h.handleCall(ctx, msg)
-		h.log.Debug("Served "+msg.Method, "t", time.Since(start))
-		if h.accessLog != nil {
-			h.accessLog.Info(ok, msg.ID, msg.Method,
-				strings.ReplaceAll(strings.ReplaceAll(string(msg.Params), "\n", ""), " ", ""))
-		}
+		h.log.Debug("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
 		return nil
 	case msg.isCall():
 		resp := h.handleCall(ctx, msg)
 		var ctx []interface{}
-		ctx = append(ctx, "reqid", idForLog{msg.ID}, "t", time.Since(start))
+		ctx = append(ctx, "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start))
 		if resp.Error != nil {
 			ctx = append(ctx, "err", resp.Error.Message)
 			if resp.Error.Data != nil {
 				ctx = append(ctx, "errdata", resp.Error.Data)
 			}
-			h.log.Warn("Served "+msg.Method, ctx...)
-			if h.accessLog != nil {
-				h.accessLog.Info(er, msg.ID, msg.Method,
-					strings.ReplaceAll(strings.ReplaceAll(string(msg.Params), "\n", ""), " ", ""), resp.Error.Message)
-			}
-		} else {
-			h.log.Debug("Served "+msg.Method, ctx...)
-			if h.accessLog != nil {
-				h.accessLog.Info(ok, msg.ID, msg.Method,
-					strings.ReplaceAll(strings.ReplaceAll(string(msg.Params), "\n", ""), " ", ""),
-					strings.ReplaceAll(strings.ReplaceAll(string(resp.Result), "\n", ""), " ", ""))
-			}
+			h.log.Warn("Served", ctx...)
 		}
+		h.log.Debug("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
 		return resp
 	case msg.hasValidID():
 		return msg.errorResponse(&invalidRequestError{"invalid request"})
