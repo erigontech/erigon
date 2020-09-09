@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -306,13 +305,16 @@ func mychart() {
 	check(err)
 }
 
-func accountSavings(db *bolt.DB) (int, int) {
+//nolint
+func accountSavings(db ethdb.KV) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
-	check(db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(dbutils.CurrentStateBucket))
-		c := b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+	check(db.View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.CurrentStateBucket)
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if len(k) != 32 {
 				continue
 			}
@@ -333,21 +335,6 @@ func bucketStats(chaindata string) {
 	bucketList := dbutils.Buckets
 
 	switch t {
-	case ethdb.Bolt:
-		db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
-		check(err)
-
-		fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
-		_ = db.View(func(tx *bolt.Tx) error {
-			for _, bucket := range bucketList {
-				b := tx.Bucket([]byte(bucket))
-				bs := b.Stats()
-				fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
-					bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
-					bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
-			}
-			return nil
-		})
 	case ethdb.Lmdb:
 		env, err := lmdb.NewEnv()
 		check(err)
@@ -1016,7 +1003,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 	var found bool
 	var incarnationBytes [common.IncarnationLength]byte
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits int = 8 * common.HashLength
+	var fixedbits = 8 * common.HashLength
 	copy(startkey, addrHash[:])
 	if err := ethDb.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 		copy(incarnationBytes[:], k[common.HashLength:])
@@ -1815,7 +1802,6 @@ func main() {
 		nextIncarnation(*chaindata, common.HexToHash(*account))
 	}
 	//repairCurrent()
-	//testMemBolt()
 	//fmt.Printf("\u00b3\n")
 	if *action == "dumpStorage" {
 		dumpStorage()

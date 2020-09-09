@@ -2,8 +2,8 @@ package commands
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/cmd/state/stateless"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/spf13/cobra"
@@ -20,10 +20,12 @@ var gasLimitsCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		localDB, err := bolt.Open(file()+"_gl", 0600, &bolt.Options{})
-		if err != nil {
-			panic(err)
-		}
+		localDB := ethdb.NewLMDB().Path(file() + "_gl").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				stateless.MainHashesBucket:      {},
+				stateless.ReportsProgressBucket: {},
+			}
+		}).MustOpen()
 
 		remoteDB, _, err := ethdb.NewRemote().Path(privateApiAddr).Open()
 		if err != nil {

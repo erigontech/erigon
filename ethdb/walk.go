@@ -34,7 +34,7 @@ import (
 // functions `Seek` and `Next` deliver both
 // parts as well as the corresponding value
 type splitCursor struct {
-	c          Cursor // Unlerlying bolt cursor
+	c          Cursor // Unlerlying cursor
 	startkey   []byte // Starting key (also contains bits that need to be preserved)
 	matchBytes int
 	mask       uint8

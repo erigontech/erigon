@@ -243,7 +243,7 @@ func Walk(c Cursor, startkey []byte, fixedbits int, walker func([]byte, []byte) 
 	return nil
 }
 
-func ForEach(c Cursor, walker func([]byte, []byte) (bool, error)) error {
+func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
