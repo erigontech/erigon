@@ -1333,6 +1333,9 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config, light bool) {
 	if ctx.GlobalIsSet(GpoPercentileFlag.Name) {
 		cfg.Percentile = ctx.GlobalInt(GpoPercentileFlag.Name)
 	}
+	if ctx.GlobalIsSet(GpoMaxGasPriceFlag.Name) {
+		cfg.MaxPrice = big.NewInt(ctx.GlobalInt64(GpoMaxGasPriceFlag.Name))
+	}
 }
 
 func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
