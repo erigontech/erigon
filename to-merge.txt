@@ -484,8 +484,3 @@ Date:   Wed Sep 9 14:06:32 2020 +0300
 
     eth/downloader: only roll back light sync if not fully validating
 
-commit 8d35b1eb2b4b844b45cf504cc05704b1a3004e04
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Wed Sep 9 11:23:37 2020 +0300
-
-    params: begin v1.9.22 release cycle
