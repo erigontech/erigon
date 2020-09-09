@@ -450,10 +450,10 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		log.Info("Batch", "commit", commitTook)
 	}
 
-	if !tx.isSubTx { // call fsync only after main transaction commit
+	if !tx.isSubTx && !tx.db.opts.readOnly { // call fsync only after main transaction commit
 		fsyncTimer := time.Now()
 		if err := tx.db.env.Sync(true); err != nil {
-			log.Warn("fsync after commit failed: \n", err)
+			log.Warn("fsync after commit failed", "err", err)
 		}
 		fsyncTook := time.Since(fsyncTimer)
 		if fsyncTook > 20*time.Second {
