@@ -60,7 +60,6 @@ type PenaltyMsg struct {
 }
 
 func makeP2PServer(
-	ctx context.Context,
 	peerHeightMap *sync.Map,
 	peerRwMap *sync.Map,
 	protocols []string,
@@ -94,7 +93,6 @@ func makeP2PServer(
 				log.Info(fmt.Sprintf("[%s] Start with peer", peer.ID()))
 				peerRwMap.Store(peer.ID().String(), rw)
 				if err := runPeer(
-					ctx,
 					peerHeightMap,
 					peer,
 					rw,
@@ -127,7 +125,6 @@ func errResp(code int, format string, v ...interface{}) error {
 }
 
 func runPeer(
-	ctx context.Context,
 	peerMap *sync.Map,
 	peer *p2p.Peer,
 	rw p2p.MsgReadWriter,
@@ -331,7 +328,7 @@ func Download(filesDir string) error {
 	penaltyCh := make(chan PenaltyMsg)
 	reqHeadersCh := make(chan headerdownload.HeaderRequest)
 	var peerHeightMap, peerRwMap sync.Map
-	server, err := makeP2PServer(ctx, &peerHeightMap, &peerRwMap, []string{eth.ProtocolName}, newBlockCh, penaltyCh)
+	server, err := makeP2PServer(&peerHeightMap, &peerRwMap, []string{eth.ProtocolName}, newBlockCh, penaltyCh)
 	if err != nil {
 		return err
 	}
