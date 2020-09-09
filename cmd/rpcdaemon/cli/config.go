@@ -85,7 +85,7 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 			err = errOpen
 		}
 	} else {
-		return nil, nil, fmt.Errorf("either remote db or bolt db must be specified")
+		return nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
 	}
 
 	if err != nil {

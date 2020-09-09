@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -35,7 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
-	"github.com/ledgerwatch/turbo-geth/ethdb/typedbucket"
+	"github.com/ledgerwatch/turbo-geth/ethdb/typedcursor"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/wcharczuk/go-chart"
@@ -44,6 +43,11 @@ import (
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
+
+const (
+	ReportsProgressBucket = "reports_progress"
+	MainHashesBucket      = "gl_main_hashes"
+)
 
 const (
 	PrintMemStatsEvery = 1_000_000
@@ -114,9 +118,7 @@ func (isa IntSorterAddr) Swap(i, j int) {
 	isa.values[i], isa.values[j] = isa.values[j], isa.values[i]
 }
 
-var ReportsProgressBucket = []byte("reports_progress")
-
-func commit(k []byte, tx *bolt.Tx, data interface{}) {
+func commit(k []byte, tx ethdb.Tx, data interface{}) {
 	//defer func(t time.Time) { fmt.Println("Commit:", time.Since(t)) }(time.Now())
 	var buf bytes.Buffer
 
@@ -124,18 +126,16 @@ func commit(k []byte, tx *bolt.Tx, data interface{}) {
 	defer codecpool.Return(encoder)
 
 	encoder.MustEncode(data)
-	if err := tx.Bucket(ReportsProgressBucket).Put(k, buf.Bytes()); err != nil {
+	if err := tx.Cursor(ReportsProgressBucket).Put(k, buf.Bytes()); err != nil {
 		panic(err)
 	}
 }
 
-func restore(k []byte, tx *bolt.Tx, data interface{}) {
-	//defer func(t time.Time) { fmt.Println("Restore:", time.Since(t)) }(time.Now())
-	reportsProgress, err := tx.CreateBucketIfNotExists(ReportsProgressBucket, false)
+func restore(k []byte, tx ethdb.Tx, data interface{}) {
+	v, err := tx.Cursor(ReportsProgressBucket).SeekExact(k)
 	if err != nil {
 		panic(err)
 	}
-	v, _ := reportsProgress.Get(k)
 	if v == nil {
 		return
 	}
@@ -154,7 +154,7 @@ type StateGrowth1Reporter struct {
 	remoteDB         ethdb.KV `codec:"-"`
 }
 
-func NewStateGrowth1Reporter(ctx context.Context, remoteDB ethdb.KV, localDB *bolt.DB) *StateGrowth1Reporter {
+func NewStateGrowth1Reporter(ctx context.Context, remoteDB ethdb.KV, _ ethdb.KV) *StateGrowth1Reporter {
 
 	rep := &StateGrowth1Reporter{
 		remoteDB:         remoteDB,
@@ -289,7 +289,7 @@ type StateGrowth2Reporter struct {
 	remoteDB ethdb.KV `codec:"-"`
 }
 
-func NewStateGrowth2Reporter(ctx context.Context, remoteDB ethdb.KV, localDB *bolt.DB) *StateGrowth2Reporter {
+func NewStateGrowth2Reporter(ctx context.Context, remoteDB ethdb.KV, _ ethdb.KV) *StateGrowth2Reporter {
 	rep := &StateGrowth2Reporter{
 		remoteDB:         remoteDB,
 		HistoryKey:       []byte{},
@@ -423,24 +423,19 @@ type GasLimitReporter struct {
 	HeaderPrefixKey2       []byte
 
 	// map[common.Hash]uint64 - key is addrHash + hash
-	mainHashes *typedbucket.Uint64 // For each address hash, when was it last accounted
+	mainHashes *typedcursor.Uint64 // For each address hash, when was it last accounted
 
 	commit   func(ctx context.Context)
 	rollback func(ctx context.Context)
 }
 
-func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB *bolt.DB) *GasLimitReporter {
-	var MainHashesBucket = []byte("gl_main_hashes")
+func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB ethdb.KV) *GasLimitReporter {
 	var ProgressKey = []byte("gas_limit")
 
 	var err error
-	var localTx *bolt.Tx
-	var mainHashes *bolt.Bucket
+	var localTx ethdb.Tx
 
-	if localTx, err = localDB.Begin(true); err != nil {
-		panic(err)
-	}
-	if mainHashes, err = localTx.CreateBucketIfNotExists(MainHashesBucket, false); err != nil {
+	if localTx, err = localDB.Begin(ctx, nil, true); err != nil {
 		panic(err)
 	}
 
@@ -448,24 +443,22 @@ func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB *bolt.D
 		remoteDB:         remoteDB,
 		HeaderPrefixKey1: []byte{},
 		HeaderPrefixKey2: []byte{},
-		mainHashes:       typedbucket.NewUint64(mainHashes),
+		mainHashes:       typedcursor.NewUint64(localTx.Cursor(MainHashesBucket)),
 	}
 	rep.commit = func(ctx context.Context) {
 		commit(ProgressKey, localTx, rep)
-		if err = localTx.Commit(); err != nil {
+		if err = localTx.Commit(ctx); err != nil {
 			panic(err)
 		}
-		if localTx, err = localDB.Begin(true); err != nil {
+		if localTx, err = localDB.Begin(ctx, nil, true); err != nil {
 			panic(err)
 		}
 
-		rep.mainHashes = typedbucket.NewUint64(localTx.Bucket(MainHashesBucket))
+		rep.mainHashes = typedcursor.NewUint64(localTx.Cursor(MainHashesBucket))
 	}
 
 	rep.rollback = func(ctx context.Context) {
-		if err := localTx.Rollback(); err != nil {
-			panic(err)
-		}
+		localTx.Rollback()
 	}
 
 	restore(ProgressKey, localTx, rep)
@@ -1443,10 +1436,7 @@ func nonTokenUsage() {
 
 func oldStorage() {
 	startTime := time.Now()
-	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open("/Volumes/tb4/turbo-geth/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	check(err)
+	db := ethdb.MustOpen("/Volumes/tb4/turbo-geth/geth/chaindata").KV()
 	defer db.Close()
 	histKey := make([]byte, common.HashLength+len(ethdb.EndSuffix))
 	copy(histKey[common.HashLength:], ethdb.EndSuffix)
@@ -1454,13 +1444,12 @@ func oldStorage() {
 	var addr common.Address
 	itemsByAddress := make(map[common.Address]int)
 	count := 0
-	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(dbutils.CurrentStateBucket))
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.CurrentStateBucket)
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if len(k) == 32 {
 				continue
 			}
@@ -1472,19 +1461,19 @@ func oldStorage() {
 			}
 		}
 		return nil
-	})
-	check(err)
-	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(dbutils.AccountsHistoryBucket))
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
+	}); err != nil {
+		panic(err)
+	}
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.AccountsHistoryBucket)
 		for addr := range itemsByAddress {
 			addrHash := crypto.Keccak256(addr[:])
 			copy(histKey[:], addrHash)
-			c.Seek(histKey)
-			k, _ := c.Prev()
+			_, _, _ = c.Seek(histKey)
+			k, _, err := c.Prev()
+			if err != nil {
+				return err
+			}
 			if bytes.HasPrefix(k, addrHash[:]) {
 				timestamp, _ := dbutils.DecodeTimestamp(k[32:])
 				if timestamp > 4530000 {
@@ -1493,8 +1482,9 @@ func oldStorage() {
 			}
 		}
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	iba := NewIntSorterAddr(len(itemsByAddress))
 	idx := 0
@@ -1683,97 +1673,4 @@ func dustChartEOA() {
 	check(err)
 	err = ioutil.WriteFile("dust_eoa.png", buffer.Bytes(), 0644)
 	check(err)
-}
-
-//nolint:deadcode,unused
-func makeSha3Preimages(blockNum uint64) {
-	sigs := make(chan os.Signal, 1)
-	interruptCh := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigs
-		interruptCh <- true
-	}()
-
-	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb := ethdb.MustOpen("/Volumes/tb4/turbo-geth/geth/chaindata")
-	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	defer ethDb.Close()
-	f, err := bolt.Open("/Volumes/tb4/turbo-geth/sha3preimages", 0600, &bolt.Options{})
-	check(err)
-	defer f.Close()
-	bucket := []byte("sha3")
-	chainConfig := params.MainnetChainConfig
-	vmConfig := vm.Config{EnablePreimageRecording: true}
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, txCacher)
-	check(err)
-	defer bc.Stop()
-	interrupt := false
-	tx, err := f.Begin(true)
-	if err != nil {
-		panic(err)
-	}
-	b, err := tx.CreateBucketIfNotExists(bucket, false)
-	if err != nil {
-		panic(err)
-	}
-	for !interrupt {
-		block := bc.GetBlockByNumber(blockNum)
-		if block == nil {
-			break
-		}
-		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
-		statedb := state.New(dbstate)
-		signer := types.MakeSigner(chainConfig, block.Number())
-		for _, tx := range block.Transactions() {
-			// Assemble the transaction call message and return if the requested offset
-			msg, _ := tx.AsMessage(signer)
-			context := core.NewEVMContext(msg, block.Header(), bc, nil)
-			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-			if _, err = core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
-				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
-			}
-		}
-		pi := statedb.Preimages()
-		for hash, preimage := range pi {
-			var found bool
-			v, _ := b.Get(hash[:])
-			if v != nil {
-				found = true
-			}
-			if !found {
-				if err := b.Put(hash[:], preimage); err != nil {
-					panic(err)
-				}
-			}
-		}
-		blockNum++
-		if blockNum%100 == 0 {
-			fmt.Printf("Processed %dK blocks\n", blockNum/1000)
-			if err := tx.Commit(); err != nil {
-				panic(err)
-			}
-			tx, err = f.Begin(true)
-			if err != nil {
-				panic(err)
-			}
-			b, err = tx.CreateBucketIfNotExists(bucket, false)
-			if err != nil {
-				panic(err)
-			}
-		}
-		// Check for interrupts
-		select {
-		case interrupt = <-interruptCh:
-			fmt.Println("interrupted, please wait for cleanup...")
-		default:
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		panic(err)
-	}
-	fmt.Printf("Next time specify -block %d\n", blockNum)
 }

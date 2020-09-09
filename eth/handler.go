@@ -116,7 +116,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 	}
 	manager := &ProtocolManager{
 		networkID:   networkID,
-		forkFilter:  forkid.NewFilter(blockchain),
+		forkFilter:  forkid.NewFilter(config, blockchain.Genesis().Hash(), blockchain.CurrentHeader().Number.Uint64()),
 		eventMux:    mux,
 		txpool:      txpool,
 		chainConfig: config,
@@ -522,7 +522,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 	// Block header query, collect the requested headers and reply
 	case msg.Code == GetBlockHeadersMsg:
 		// Decode the complex header query
-		var query getBlockHeadersData
+		var query GetBlockHeadersData
 		if err := msg.Decode(&query); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
 		}
@@ -845,7 +845,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 
 	case msg.Code == NewBlockMsg:
 		// Retrieve and decode the propagated block
-		var request newBlockData
+		var request NewBlockData
 		if err := msg.Decode(&request); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
 		}

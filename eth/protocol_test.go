@@ -69,19 +69,19 @@ func TestStatusMsgErrors64(t *testing.T) {
 			wantError: errResp(ErrNoStatusMsg, "first msg has code 2 (!= 0)"),
 		},
 		{
-			code: StatusMsg, data: statusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrProtocolVersionMismatch, "10 (!= %d)", 64),
 		},
 		{
-			code: StatusMsg, data: statusData{64, 999, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{64, 999, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkID),
 		},
 		{
-			code: StatusMsg, data: statusData{64, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
+			code: StatusMsg, data: StatusData{64, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
 			wantError: errResp(ErrGenesisMismatch, "0300000000000000000000000000000000000000000000000000000000000000 (!= %x)", genesis.Hash()),
 		},
 		{
-			code: StatusMsg, data: statusData{64, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
+			code: StatusMsg, data: StatusData{64, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
 			wantError: errResp(ErrForkIDRejected, forkid.ErrLocalIncompatibleOrStale.Error()),
 		},
 	}
@@ -125,19 +125,19 @@ func TestStatusMsgErrors65(t *testing.T) {
 			wantError: errResp(ErrNoStatusMsg, "first msg has code 2 (!= 0)"),
 		},
 		{
-			code: StatusMsg, data: statusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrProtocolVersionMismatch, "10 (!= %d)", 65),
 		},
 		{
-			code: StatusMsg, data: statusData{65, 999, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{65, 999, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkID),
 		},
 		{
-			code: StatusMsg, data: statusData{65, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
+			code: StatusMsg, data: StatusData{65, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
 			wantError: errResp(ErrGenesisMismatch, "0300000000000000000000000000000000000000000000000000000000000000 (!= %x)", genesis.Hash()),
 		},
 		{
-			code: StatusMsg, data: statusData{65, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
+			code: StatusMsg, data: StatusData{65, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
 			wantError: errResp(ErrForkIDRejected, forkid.ErrLocalIncompatibleOrStale.Error()),
 		},
 	}
@@ -453,19 +453,19 @@ func TestGetBlockHeadersDataEncodeDecode(t *testing.T) {
 	}
 	// Assemble some table driven tests
 	tests := []struct {
-		packet *getBlockHeadersData
+		packet *GetBlockHeadersData
 		fail   bool
 	}{
 		// Providing the origin as either a hash or a number should both work
-		{fail: false, packet: &getBlockHeadersData{Origin: hashOrNumber{Number: 314}}},
-		{fail: false, packet: &getBlockHeadersData{Origin: hashOrNumber{Hash: hash}}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: hashOrNumber{Number: 314}}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: hashOrNumber{Hash: hash}}},
 
 		// Providing arbitrary query field should also work
-		{fail: false, packet: &getBlockHeadersData{Origin: hashOrNumber{Number: 314}, Amount: 314, Skip: 1, Reverse: true}},
-		{fail: false, packet: &getBlockHeadersData{Origin: hashOrNumber{Hash: hash}, Amount: 314, Skip: 1, Reverse: true}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: hashOrNumber{Number: 314}, Amount: 314, Skip: 1, Reverse: true}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: hashOrNumber{Hash: hash}, Amount: 314, Skip: 1, Reverse: true}},
 
 		// Providing both the origin hash and origin number must fail
-		{fail: true, packet: &getBlockHeadersData{Origin: hashOrNumber{Hash: hash, Number: 314}}},
+		{fail: true, packet: &GetBlockHeadersData{Origin: hashOrNumber{Hash: hash, Number: 314}}},
 	}
 	// Iterate over each of the tests and try to encode and then decode
 	for i, tt := range tests {
@@ -476,7 +476,7 @@ func TestGetBlockHeadersDataEncodeDecode(t *testing.T) {
 			t.Fatalf("test %d: encode should have failed", i)
 		}
 		if !tt.fail {
-			packet := new(getBlockHeadersData)
+			packet := new(GetBlockHeadersData)
 			if err := rlp.DecodeBytes(bytes, packet); err != nil {
 				t.Fatalf("test %d: failed to decode packet: %v", i, err)
 			}

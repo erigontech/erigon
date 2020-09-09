@@ -160,7 +160,7 @@ type HasNetInterface interface {
 	DB() Database
 }
 
-type NonTransactional interface {
+type BucketsMigrator interface {
 	BucketExists(bucket string) (bool, error) // makes them empty
 	ClearBuckets(buckets ...string) error     // makes them empty
 	DropBuckets(buckets ...string) error      // drops them, use of them after drop will panic

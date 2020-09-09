@@ -130,7 +130,7 @@ type txPool interface {
 }
 
 // statusData is the network packet for the status message for eth/64 and later.
-type statusData struct {
+type StatusData struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
 	TD              *big.Int
@@ -146,7 +146,7 @@ type newBlockHashesData []struct {
 }
 
 // getBlockHeadersData represents a block header query.
-type getBlockHeadersData struct {
+type GetBlockHeadersData struct {
 	Origin  hashOrNumber // Block from which to retrieve headers
 	Amount  uint64       // Maximum number of headers to retrieve
 	Skip    uint64       // Blocks to skip between consecutive headers
@@ -190,13 +190,13 @@ func (hn *hashOrNumber) DecodeRLP(s *rlp.Stream) error {
 }
 
 // newBlockData is the network packet for the block propagation message.
-type newBlockData struct {
+type NewBlockData struct {
 	Block *types.Block
 	TD    *big.Int
 }
 
 // sanityCheck verifies that the values are reasonable, as a DoS protection
-func (request *newBlockData) sanityCheck() error {
+func (request *NewBlockData) sanityCheck() error {
 	if err := request.Block.SanityCheck(); err != nil {
 		return err
 	}

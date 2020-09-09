@@ -130,22 +130,29 @@ Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./
 ```
 eth_coinbase
 eth_blockNumber
-eth_getBlockByNumber
-eth_getBlockByHash
-eth_getBalance
-eth_getTransactionReceipt
-eth_getLogs
 eth_call
 eth_estimateGas
+eth_getBlockByNumber
+eth_getBlockByHash
+eth_getBlockTransactionCountByHash
+eth_getBlockTransactionCountByNumber
+eth_getBalance
+eth_getLogs
+eth_getStorageAt
+eth_getTransactionReceipt
+eth_getTransactionByHash
+eth_getTransactionByBlockHashAndIndex
+eth_getTransactionByBlockNumberAndIndex
 eth_sendRawTransaction
 eth_syncing
-debug_storageRangeAt
-debug_traceTransaction
 debug_accountRange
 debug_getModifiedAccountsByNumber
 debug_getModifiedAccountsByHash
-net_version
+debug_storageRangeAt
+debug_traceTransaction
 net_peerCount*
+net_version
+trace_filter
 ```
 
 \* net_peerCount currently always returns a count of 25 as work continues on Sentry.

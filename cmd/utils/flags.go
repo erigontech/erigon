@@ -403,7 +403,7 @@ var (
 	}
 	DatabaseFlag = cli.StringFlag{
 		Name:  "database",
-		Usage: "Which database software to use? Currently supported values: bolt & lmdb",
+		Usage: "Which database software to use? Currently supported values: lmdb",
 		Value: "lmdb",
 	}
 	HddFlag = cli.BoolFlag{
@@ -1128,7 +1128,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 	setBootstrapNodesV5(ctx, cfg)
 
 	lightClient := false
-	lightServer := (ctx.GlobalInt(LegacyLightServFlag.Name) != 0 || ctx.GlobalInt(LightServeFlag.Name) != 0)
+	lightServer := ctx.GlobalInt(LegacyLightServFlag.Name) != 0 || ctx.GlobalInt(LightServeFlag.Name) != 0
 
 	lightPeers := ctx.GlobalInt(LegacyLightPeersFlag.Name)
 	if ctx.GlobalIsSet(LightMaxPeersFlag.Name) {
@@ -1259,7 +1259,6 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 			}
 		}
 	}
-	cfg.Bolt = strings.EqualFold(databaseFlag, "bolt") //case insensitive
 }
 
 func setSmartCard(ctx *cli.Context, cfg *node.Config) {

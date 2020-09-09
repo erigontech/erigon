@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/stretchr/testify/require"
+	"os"
 	"testing"
 )
 
@@ -70,5 +71,36 @@ func TestBucketCRUD(t *testing.T) {
 		_, ok := uniquness[bucketCfg.DBI]
 		require.False(ok)
 		uniquness[bucketCfg.DBI] = true
+	}
+}
+
+func TestReadOnlyMode(t *testing.T) {
+	path := os.TempDir() + "/tm1"
+	err := os.RemoveAll(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db1 := NewLMDB().Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
+		}
+	}).MustOpen()
+	db1.Close()
+
+	db2 := NewLMDB().Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
+		}
+	}).ReadOnly().MustOpen()
+
+	tx, err := db2.Begin(context.Background(), nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := tx.Cursor(dbutils.HeaderPrefix)
+	_, _, err = c.Seek([]byte("some prefix"))
+	if err != nil {
+		t.Fatal(err)
 	}
 }

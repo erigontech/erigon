@@ -84,6 +84,10 @@ integration:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
+headers:
+	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers 
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
 
 test: semantics/z3/build/libz3.a
 	$(GOTEST)
@@ -139,6 +143,7 @@ bindings:
 	go generate ./tests/contracts/
 	go generate ./cmd/tester/contracts/
 	go generate ./core/state/contracts/
+	go generate ./ethdb/typedbucket
 
 grpc:
 	# See also: ./cmd/hack/binary-deps/main.go

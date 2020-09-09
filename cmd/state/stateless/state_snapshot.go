@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -121,16 +120,17 @@ func loadSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 	check(err)
 }
 
-func loadCodes(db *bolt.DB, codeDb ethdb.Database) error {
+//nolint
+func loadCodes(db ethdb.KV, codeDb ethdb.Database) error {
 	var account accounts.Account
-	err := db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(dbutils.CurrentStateBucket))
-		cb, err := tx.CreateBucket([]byte(dbutils.CodeBucket), true)
-		if err != nil {
-			return err
-		}
-		c := b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+	err := db.Update(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.CurrentStateBucket)
+		cb := tx.Cursor(dbutils.CodeBucket)
+
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if len(k) != 32 {
 				continue
 			}

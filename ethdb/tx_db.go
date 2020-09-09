@@ -83,11 +83,8 @@ func (m *TxDb) begin(parent Tx) error {
 	m.tx = tx
 	m.ParentTx = parent
 	m.cursors = make(map[string]*LmdbCursor, 16)
-	for i := range dbutils.Buckets {
-		m.cursors[dbutils.Buckets[i]] = tx.Cursor(dbutils.Buckets[i]).(*LmdbCursor)
-		if err := m.cursors[dbutils.Buckets[i]].initCursor(); err != nil {
-			return err
-		}
+	for name := range m.db.(HasKV).KV().AllBuckets() {
+		m.cursors[name] = tx.Cursor(name).(*LmdbCursor)
 	}
 	return nil
 }
@@ -246,7 +243,7 @@ func Walk(c Cursor, startkey []byte, fixedbits int, walker func([]byte, []byte) 
 	return nil
 }
 
-func ForEach(c Cursor, walker func([]byte, []byte) (bool, error)) error {
+func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -382,4 +379,45 @@ func (m *TxDb) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (m *TxDb) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+func (m *TxDb) BucketExists(name string) (bool, error) {
+	exists := false
+	migrator, ok := m.tx.(BucketMigrator)
+	if !ok {
+		return false, fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
+	}
+	exists = migrator.ExistsBucket(name)
+	return exists, nil
+}
+
+func (m *TxDb) ClearBuckets(buckets ...string) error {
+	for i := range buckets {
+		name := buckets[i]
+
+		migrator, ok := m.tx.(BucketMigrator)
+		if !ok {
+			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
+		}
+		if err := migrator.ClearBucket(name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *TxDb) DropBuckets(buckets ...string) error {
+	for i := range buckets {
+		name := buckets[i]
+		log.Info("Dropping bucket", "name", name)
+		migrator, ok := m.tx.(BucketMigrator)
+		if !ok {
+			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
+		}
+		if err := migrator.DropBucket(name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
