@@ -336,7 +336,7 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 	if anchor, err = hd.addHeaderAsAnchor(anchorHeader, hd.initPowDepth, uint256.Int{}); err != nil {
 		return NoPenalty, err
 	}
-	heap.Push(hd.requestQueue, &RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
+	heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
 	cumulativeDifficulty := uint256.Int{}
 	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
 	for i := end - 1; i >= start; i-- {
