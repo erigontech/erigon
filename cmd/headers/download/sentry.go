@@ -147,7 +147,7 @@ func runPeer(
 		Genesis:         genesisHash,
 		ForkID:          forkId,
 	}); err != nil {
-		return fmt.Errorf("handshake to peer %d: %v", peer.ID(), err)
+		return fmt.Errorf("handshake to peer %s: %v", peer.ID().String(), err)
 	}
 	// Read handshake message
 	msg, err := rw.ReadMsg()
@@ -345,7 +345,36 @@ func Download(filesDir string) error {
 				return
 			case req := <-reqHeadersCh:
 				// Choose a peer that we can send this request to
-				fmt.Printf("Sending req for hash %x, blocknumber %d, length %d\n", req.Hash, req.Number, req.Length)
+				var peerID string
+				var found bool
+				peerHeightMap.Range(func(key, value interface{}) bool {
+					valUint, _ := value.(uint64)
+					if valUint >= req.Number {
+						peerID = key.(string)
+						found = true
+						return false
+					}
+					return true
+				})
+				if !found {
+					log.Warn(fmt.Sprintf("Could not find suitable peer to send GetBlockHeadersData request for block %d", req.Number))
+				} else {
+					log.Info(fmt.Sprintf("Sending req for hash %x, blocknumber %d, length %d to peer %s\n", req.Hash, req.Number, req.Length, peerID))
+					rwRaw, _ := peerRwMap.Load(peerID)
+					rw, _ := rwRaw.(p2p.MsgReadWriter)
+					if rw == nil {
+						log.Error(fmt.Sprintf("Could not find rw for peer %s", peerID))
+					} else {
+						if err := p2p.Send(rw, eth.GetBlockHeadersMsg, eth.GetBlockHeadersData{
+							Amount:  uint64(req.Length),
+							Reverse: true,
+							Skip:    0,
+							Origin:  eth.HashOrNumber{Hash: req.Hash},
+						}); err != nil {
+							log.Error(fmt.Sprintf("Failed to send to peer %s: %v", peerID, err))
+						}
+					}
+				}
 			}
 		}
 	}()
