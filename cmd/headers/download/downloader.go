@@ -112,6 +112,7 @@ func Downloader(ctx context.Context, filesDir string, newBlockCh chan NewBlockFr
 			}
 			log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d}", newBlockReq.Block.NumberU64()))
 		case <-hd.RequestQueueTimer.C:
+			fmt.Printf("RequestQueueTimer kicked\n")
 			reqs := hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
 			for _, req := range reqs {
 				log.Info(fmt.Sprintf("Sending header request {hash: %x, length: %d}", req.Hash, req.Length))

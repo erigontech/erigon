@@ -519,6 +519,7 @@ func (hd *HeaderDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64
 	if !hd.RequestQueueTimer.Stop() {
 		<-hd.RequestQueueTimer.C
 	}
+	fmt.Printf("Resetting RequestQueueTimer for delay %d seconds\n", nextTopTime-currentTime)
 	hd.RequestQueueTimer.Reset(time.Duration(nextTopTime-currentTime) * time.Second)
 }
 
