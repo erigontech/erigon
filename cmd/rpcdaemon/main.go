@@ -11,6 +11,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	gitCommit string
+	gitDate   string
+)
+
 func main() {
 	cmd, cfg := cli.RootCommand()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -24,6 +29,9 @@ func main() {
 		return cli.StartRpcServer(cmd.Context(), *cfg, apiList)
 	}
 
+
+	// Hacky way to get these strings into the commands package
+	commands.SetGitStrings(gitCommit, gitDate)
 	if err := cmd.ExecuteContext(utils.RootContext()); err != nil {
 		log.Error(err.Error())
 		os.Exit(1)
