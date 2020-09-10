@@ -80,7 +80,7 @@ func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
 	} else {
 		nodeConfig.Version = params.Version
 	}
-	nodeConfig.IPCPath = "tg.ipc"
+	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "turbo-geth"
 	nodeConfig.NoUSB = true
 
