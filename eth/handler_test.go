@@ -67,22 +67,22 @@ func testGetBlockHeaders(t *testing.T, protocol int) {
 	}{
 		// A single random block should be retrievable by hash and number too
 		{
-			&GetBlockHeadersData{Origin: hashOrNumber{Hash: pm.blockchain.GetBlockByNumber(limit / 2).Hash()}, Amount: 1},
+			&GetBlockHeadersData{Origin: HashOrNumber{Hash: pm.blockchain.GetBlockByNumber(limit / 2).Hash()}, Amount: 1},
 			[]common.Hash{pm.blockchain.GetBlockByNumber(limit / 2).Hash()},
 		}, {
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: limit / 2}, Amount: 1},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: limit / 2}, Amount: 1},
 			[]common.Hash{pm.blockchain.GetBlockByNumber(limit / 2).Hash()},
 		},
 		// Multiple headers should be retrievable in both directions
 		{
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: limit / 2}, Amount: 3},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: limit / 2}, Amount: 3},
 			[]common.Hash{
 				pm.blockchain.GetBlockByNumber(limit / 2).Hash(),
 				pm.blockchain.GetBlockByNumber(limit/2 + 1).Hash(),
 				pm.blockchain.GetBlockByNumber(limit/2 + 2).Hash(),
 			},
 		}, {
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: limit / 2}, Amount: 3, Reverse: true},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: limit / 2}, Amount: 3, Reverse: true},
 			[]common.Hash{
 				pm.blockchain.GetBlockByNumber(limit / 2).Hash(),
 				pm.blockchain.GetBlockByNumber(limit/2 - 1).Hash(),
@@ -91,14 +91,14 @@ func testGetBlockHeaders(t *testing.T, protocol int) {
 		},
 		// Multiple headers with skip lists should be retrievable
 		{
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: limit / 2}, Skip: 3, Amount: 3},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: limit / 2}, Skip: 3, Amount: 3},
 			[]common.Hash{
 				pm.blockchain.GetBlockByNumber(limit / 2).Hash(),
 				pm.blockchain.GetBlockByNumber(limit/2 + 4).Hash(),
 				pm.blockchain.GetBlockByNumber(limit/2 + 8).Hash(),
 			},
 		}, {
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: limit / 2}, Skip: 3, Amount: 3, Reverse: true},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: limit / 2}, Skip: 3, Amount: 3, Reverse: true},
 			[]common.Hash{
 				pm.blockchain.GetBlockByNumber(limit / 2).Hash(),
 				pm.blockchain.GetBlockByNumber(limit/2 - 4).Hash(),
@@ -107,26 +107,26 @@ func testGetBlockHeaders(t *testing.T, protocol int) {
 		},
 		// The chain endpoints should be retrievable
 		{
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: 0}, Amount: 1},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: 0}, Amount: 1},
 			[]common.Hash{pm.blockchain.GetBlockByNumber(0).Hash()},
 		}, {
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: pm.blockchain.CurrentBlock().NumberU64()}, Amount: 1},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: pm.blockchain.CurrentBlock().NumberU64()}, Amount: 1},
 			[]common.Hash{pm.blockchain.CurrentBlock().Hash()},
 		},
 		// Ensure protocol limits are honored
 		{
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: pm.blockchain.CurrentBlock().NumberU64() - 1}, Amount: limit + 10, Reverse: true},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: pm.blockchain.CurrentBlock().NumberU64() - 1}, Amount: limit + 10, Reverse: true},
 			pm.blockchain.GetBlockHashesFromHash(pm.blockchain.CurrentBlock().Hash(), limit),
 		},
 		// Check that requesting more than available is handled gracefully
 		{
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: pm.blockchain.CurrentBlock().NumberU64() - 4}, Skip: 3, Amount: 3},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: pm.blockchain.CurrentBlock().NumberU64() - 4}, Skip: 3, Amount: 3},
 			[]common.Hash{
 				pm.blockchain.GetBlockByNumber(pm.blockchain.CurrentBlock().NumberU64() - 4).Hash(),
 				pm.blockchain.GetBlockByNumber(pm.blockchain.CurrentBlock().NumberU64()).Hash(),
 			},
 		}, {
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: 4}, Skip: 3, Amount: 3, Reverse: true},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: 4}, Skip: 3, Amount: 3, Reverse: true},
 			[]common.Hash{
 				pm.blockchain.GetBlockByNumber(4).Hash(),
 				pm.blockchain.GetBlockByNumber(0).Hash(),
@@ -134,13 +134,13 @@ func testGetBlockHeaders(t *testing.T, protocol int) {
 		},
 		// Check that requesting more than available is handled gracefully, even if mid skip
 		{
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: pm.blockchain.CurrentBlock().NumberU64() - 4}, Skip: 2, Amount: 3},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: pm.blockchain.CurrentBlock().NumberU64() - 4}, Skip: 2, Amount: 3},
 			[]common.Hash{
 				pm.blockchain.GetBlockByNumber(pm.blockchain.CurrentBlock().NumberU64() - 4).Hash(),
 				pm.blockchain.GetBlockByNumber(pm.blockchain.CurrentBlock().NumberU64() - 1).Hash(),
 			},
 		}, {
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: 4}, Skip: 2, Amount: 3, Reverse: true},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: 4}, Skip: 2, Amount: 3, Reverse: true},
 			[]common.Hash{
 				pm.blockchain.GetBlockByNumber(4).Hash(),
 				pm.blockchain.GetBlockByNumber(1).Hash(),
@@ -148,7 +148,7 @@ func testGetBlockHeaders(t *testing.T, protocol int) {
 		},
 		// Check a corner case where requesting more can iterate past the endpoints
 		{
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: 2}, Amount: 5, Reverse: true},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: 2}, Amount: 5, Reverse: true},
 			[]common.Hash{
 				pm.blockchain.GetBlockByNumber(2).Hash(),
 				pm.blockchain.GetBlockByNumber(1).Hash(),
@@ -157,24 +157,24 @@ func testGetBlockHeaders(t *testing.T, protocol int) {
 		},
 		// Check a corner case where skipping overflow loops back into the chain start
 		{
-			&GetBlockHeadersData{Origin: hashOrNumber{Hash: pm.blockchain.GetBlockByNumber(3).Hash()}, Amount: 2, Reverse: false, Skip: math.MaxUint64 - 1},
+			&GetBlockHeadersData{Origin: HashOrNumber{Hash: pm.blockchain.GetBlockByNumber(3).Hash()}, Amount: 2, Reverse: false, Skip: math.MaxUint64 - 1},
 			[]common.Hash{
 				pm.blockchain.GetBlockByNumber(3).Hash(),
 			},
 		},
 		// Check a corner case where skipping overflow loops back to the same header
 		{
-			&GetBlockHeadersData{Origin: hashOrNumber{Hash: pm.blockchain.GetBlockByNumber(1).Hash()}, Amount: 2, Reverse: false, Skip: math.MaxUint64},
+			&GetBlockHeadersData{Origin: HashOrNumber{Hash: pm.blockchain.GetBlockByNumber(1).Hash()}, Amount: 2, Reverse: false, Skip: math.MaxUint64},
 			[]common.Hash{
 				pm.blockchain.GetBlockByNumber(1).Hash(),
 			},
 		},
 		// Check that non existing headers aren't returned
 		{
-			&GetBlockHeadersData{Origin: hashOrNumber{Hash: unknown}, Amount: 1},
+			&GetBlockHeadersData{Origin: HashOrNumber{Hash: unknown}, Amount: 1},
 			[]common.Hash{},
 		}, {
-			&GetBlockHeadersData{Origin: hashOrNumber{Number: pm.blockchain.CurrentBlock().NumberU64() + 1}, Amount: 1},
+			&GetBlockHeadersData{Origin: HashOrNumber{Number: pm.blockchain.CurrentBlock().NumberU64() + 1}, Amount: 1},
 			[]common.Hash{},
 		},
 	}
@@ -486,7 +486,7 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 
 	if checkpoint {
 		challenge := &GetBlockHeadersData{
-			Origin:  hashOrNumber{Number: response.Number.Uint64()},
+			Origin:  HashOrNumber{Number: response.Number.Uint64()},
 			Amount:  1,
 			Skip:    0,
 			Reverse: false,

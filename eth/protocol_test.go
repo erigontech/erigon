@@ -457,15 +457,15 @@ func TestGetBlockHeadersDataEncodeDecode(t *testing.T) {
 		fail   bool
 	}{
 		// Providing the origin as either a hash or a number should both work
-		{fail: false, packet: &GetBlockHeadersData{Origin: hashOrNumber{Number: 314}}},
-		{fail: false, packet: &GetBlockHeadersData{Origin: hashOrNumber{Hash: hash}}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: HashOrNumber{Number: 314}}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: HashOrNumber{Hash: hash}}},
 
 		// Providing arbitrary query field should also work
-		{fail: false, packet: &GetBlockHeadersData{Origin: hashOrNumber{Number: 314}, Amount: 314, Skip: 1, Reverse: true}},
-		{fail: false, packet: &GetBlockHeadersData{Origin: hashOrNumber{Hash: hash}, Amount: 314, Skip: 1, Reverse: true}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: HashOrNumber{Number: 314}, Amount: 314, Skip: 1, Reverse: true}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: HashOrNumber{Hash: hash}, Amount: 314, Skip: 1, Reverse: true}},
 
 		// Providing both the origin hash and origin number must fail
-		{fail: true, packet: &GetBlockHeadersData{Origin: hashOrNumber{Hash: hash, Number: 314}}},
+		{fail: true, packet: &GetBlockHeadersData{Origin: HashOrNumber{Hash: hash, Number: 314}}},
 	}
 	// Iterate over each of the tests and try to encode and then decode
 	for i, tt := range tests {

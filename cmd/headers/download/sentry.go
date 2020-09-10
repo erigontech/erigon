@@ -365,7 +365,7 @@ func Download(filesDir string) error {
 					if rw == nil {
 						log.Error(fmt.Sprintf("Could not find rw for peer %s", peerID))
 					} else {
-						if err := p2p.Send(rw, eth.GetBlockHeadersMsg, eth.GetBlockHeadersData{
+						if err := p2p.Send(rw, eth.GetBlockHeadersMsg, &eth.GetBlockHeadersData{
 							Amount:  uint64(req.Length),
 							Reverse: true,
 							Skip:    0,
