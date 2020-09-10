@@ -119,6 +119,7 @@ func Downloader(ctx context.Context, filesDir string, newBlockCh chan NewBlockFr
 		reqs := hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
 		for _, req := range reqs {
 			log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
+			reqHeadersCh <- *req
 		}
 	}
 }
