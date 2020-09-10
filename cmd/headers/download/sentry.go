@@ -210,7 +210,7 @@ func runPeer(
 			}
 		case eth.BlockHeadersMsg:
 			var headers []*types.Header
-			if err := msg.Decode(&headers); err != nil {
+			if err = msg.Decode(&headers); err != nil {
 				return errResp(eth.ErrDecode, "decoding BlockHeadersMsg %v: %v", msg, err)
 			}
 			var hashesStr strings.Builder
