@@ -492,7 +492,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*Hea
 	}
 	var requests []*HeaderRequest
 	for peek := (*hd.requestQueue)[0]; hd.requestQueue.Len() > 0 && peek.waitUntil <= currentTime; peek = (*hd.requestQueue)[0] {
-		pop := heap.Pop(hd.requestQueue).(*RequestQueueItem)
+		pop := heap.Pop(hd.requestQueue).(RequestQueueItem)
 		if anchors, present := hd.anchors[pop.anchorParent]; present {
 			// Anchor still exists after the timeout
 			//TODO: Figure out correct request length
