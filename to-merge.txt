@@ -426,12 +426,3 @@ Date:   Thu Sep 10 13:14:19 2020 +0000
     
     Co-authored-by: Martin Holst Swende <martin@swende.se>
 
-commit 116763952498d9c1b852fa94542df1b3f03e2812
-Author: Dan Sosedoff <dan.sosedoff@gmail.com>
-Date:   Thu Sep 10 07:24:21 2020 -0500
-
-    ethclient: add BlockNumber method (#21500)
-    
-    This adds a new client method BlockNumber to fetch the most recent
-    block number of the chain.
-
