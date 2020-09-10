@@ -516,11 +516,9 @@ func (hd *HeaderDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64
 	if nextTopTime <= currentTime {
 		nextTopTime = currentTime
 	}
-	if !hd.RequestQueueTimer.Stop() {
-		<-hd.RequestQueueTimer.C
-	}
-	fmt.Printf("Resetting RequestQueueTimer for delay %d seconds\n", nextTopTime-currentTime)
-	hd.RequestQueueTimer.Reset(time.Duration(nextTopTime-currentTime) * time.Second)
+	hd.RequestQueueTimer.Stop()
+	fmt.Printf("Recreating RequestQueueTimer for delay %d seconds\n", nextTopTime-currentTime)
+	hd.RequestQueueTimer = time.NewTimer(time.Duration(nextTopTime-currentTime) * time.Second)
 }
 
 func (hd *HeaderDownload) FlushBuffer() error {
