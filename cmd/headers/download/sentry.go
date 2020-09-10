@@ -246,7 +246,7 @@ func runPeer(
 				return errResp(eth.ErrDecode, "decode NewBlockHashesData %v: %v", msg, err)
 			}
 			x, _ := peerMap.Load(peer.ID().String())
-			highestBlock := x.(uint64)
+			highestBlock, _ := x.(uint64)
 			var numStr strings.Builder
 			for _, announce := range announces {
 				if numStr.Len() > 0 {
