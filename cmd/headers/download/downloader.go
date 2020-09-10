@@ -94,7 +94,6 @@ func Downloader(ctx context.Context, filesDir string, newBlockCh chan NewBlockFr
 	)
 	if err := hd.RecoverFromFiles(); err != nil {
 		log.Error("Recovery from file failed, downloader not started", "error", err)
-		return
 	}
 	for {
 		select {
