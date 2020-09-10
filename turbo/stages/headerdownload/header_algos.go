@@ -225,10 +225,6 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error 
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the tips from the attached anchors to it
 func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powDepth int, currentTime uint64) error {
-	var prevTopTime uint64
-	if hd.requestQueue.Len() > 0 {
-		prevTopTime = (*hd.requestQueue)[0].waitUntil
-	}
 	// Find attachement anchors again
 	anchorHeader := segment.headers[start]
 	if anchors, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
@@ -274,7 +270,6 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 	} else {
 		return fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
 	}
-	hd.resetRequestQueueTimer(prevTopTime, currentTime)
 	return nil
 }
 
@@ -320,10 +315,6 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
 }
 
 func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, currentTime uint64) (Penalty, error) {
-	var prevTopTime uint64
-	if hd.requestQueue.Len() > 0 {
-		prevTopTime = (*hd.requestQueue)[0].waitUntil
-	}
 	anchorHeader := segment.headers[end-1]
 	if anchorHeader.Time > currentTime+hd.newAnchorFutureLimit {
 		return TooFarFuturePenalty, nil
@@ -350,7 +341,6 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 			return NoPenalty, fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
-	hd.resetRequestQueueTimer(prevTopTime, currentTime)
 	return NoPenalty, nil
 }
 
