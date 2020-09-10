@@ -400,29 +400,4 @@ Date:   Fri Sep 11 18:17:09 2020 +0200
     
     Fixes a regression introduced in #21536
 
-commit 7cf56d6f064869cb62b1673f9ee437020c595391
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Thu Sep 10 19:27:42 2020 +0200
-
-    miner: use channels instead of atomics in update loop (#21536)
-    
-    This PR changes several different things:
-    
-    - Adds test cases for the miner loop
-    - Stops the worker if it wasn't already stopped in worker.Close()
-    - Uses channels instead of atomics in the miner.update() loop
-    
-    Co-authored-by: Felix Lange <fjl@twurst.com>
-
-commit d7f02b448a929d6c9e4934ebbee87355336aeeb1
-Author: Guillaume Ballet <gballet@gmail.com>
-Date:   Thu Sep 10 13:14:19 2020 +0000
-
-    cmd/geth: print warning when whisper config is present in toml (#21544)
-    
-    * cmd/geth: print warning when whisper config is present in toml
-    
-    * Update cmd/geth/config.go
-    
-    Co-authored-by: Martin Holst Swende <martin@swende.se>
 
