@@ -201,7 +201,7 @@ func runPeer(
 		case eth.GetBlockHeadersMsg:
 			var query eth.GetBlockHeadersData
 			if err = msg.Decode(&query); err != nil {
-				return errResp(eth.ErrDecode, "decoding %v: %v", msg, err)
+				return errResp(eth.ErrDecode, "decoding GetBlockHeadersMsg %v: %v", msg, err)
 			}
 			log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t}", peer.ID(), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse))
 			var headers []*types.Header
@@ -209,7 +209,19 @@ func runPeer(
 				return fmt.Errorf("send empty headers reply: %v", err)
 			}
 		case eth.BlockHeadersMsg:
-			log.Info(fmt.Sprintf("[%s] BlockHeadersMsg", peer.ID()))
+			var headers []*types.Header
+			if err := msg.Decode(&headers); err != nil {
+				return errResp(eth.ErrDecode, "decoding BlockHeadersMsg %v: %v", msg, err)
+			}
+			var hashesStr strings.Builder
+			for _, header := range headers {
+				if hashesStr.Len() > 0 {
+					hashesStr.WriteString(",")
+				}
+				hash := header.Hash()
+				hashesStr.WriteString(fmt.Sprintf("%x-%x(%d)", hash[:4], hash[28:], header.Number.Uint64()))
+			}
+			log.Info(fmt.Sprintf("[%s] BlockHeadersMsg{%s}", peer.ID().String(), hashesStr.String()))
 		case eth.GetBlockBodiesMsg:
 			// Decode the retrieval message
 			msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
@@ -343,6 +355,8 @@ func Download(filesDir string) error {
 			select {
 			case <-ctx.Done():
 				return
+			case req := <-penaltyCh:
+				log.Warn(fmt.Sprintf("Received penalty %s for peer %d req %d", req.penalty, req.SentryMsg.sentryId, req.SentryMsg.requestId))
 			case req := <-reqHeadersCh:
 				// Choose a peer that we can send this request to
 				var peerID string

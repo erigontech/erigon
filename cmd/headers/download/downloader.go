@@ -102,9 +102,8 @@ func Downloader(ctx context.Context, filesDir string, newBlockCh chan NewBlockFr
 				if penalty == headerdownload.NoPenalty {
 					processSegment(hd, segments[0]) // There is only one segment in this case
 				} else {
-					log.Warn(fmt.Sprintf("Penalty for NewBlock: %s", penalty))
 					// Send penalty back to the sentry
-					//penaltyCh <- PenaltyMsg{SentryMsg: newBlockReq.SentryMsg, penalty: penalty}
+					penaltyCh <- PenaltyMsg{SentryMsg: newBlockReq.SentryMsg, penalty: penalty}
 				}
 			} else {
 				log.Error("HandleNewBlockMsg failed", "error", err)
