@@ -435,31 +435,3 @@ Date:   Thu Sep 10 07:24:21 2020 -0500
     This adds a new client method BlockNumber to fetch the most recent
     block number of the chain.
 
-commit 4ea9737de6ec616ee9bc948b59e454cc211ca580
-Author: Shude Li <islishude@gmail.com>
-Date:   Thu Sep 10 20:21:51 2020 +0800
-
-    go.mod: remove golang.org/x/sync (#21541)
-
-commit a3cd8a040a4ffe04a7b455f11a6c049a9b29b1c5
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Thu Sep 10 09:19:30 2020 +0200
-
-    core/vm: fix benchmark overflow + prep for precompile repricings (#21530)
-    
-    * core/vm/testdata: add gascost expectations to testcases
-    
-    * core/vm: verify expected gas in tests for precompiles
-    
-    * core/vm: fix overflow flaw in gas/s calculation
-
-commit 328901c24cdcbfe57ad983248b2fd481f495db3d
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed Sep 9 23:38:47 2020 +0800
-
-    cmd, eth: offer maxprice flag for overwritting price cap (#21531)
-    
-    * cmd, eth: offer maxprice flag for overwritting price cap
-    
-    * eth: rename default price cap
-
