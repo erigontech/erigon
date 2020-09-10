@@ -1,6 +1,7 @@
 package dbutils
 
 import (
+	"bytes"
 	"sort"
 	"strings"
 
@@ -95,8 +96,8 @@ var (
 	StorageChangeSetBucket = "SCS"
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
-	IntermediateTrieHashBucket = "iTh"
-	//IntermediateTrieHashBucket2 = "iTh2"
+	IntermediateTrieHashBucket     = "iTh2"
+	IntermediateTrieHashBucketOld1 = "iTh"
 
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = "DBINFO"
@@ -217,13 +218,26 @@ var DeprecatedBuckets = []string{
 	SyncStageUnwindOld1,
 	CurrentStateBucketOld1,
 	PlainStateBucketOld1,
+	IntermediateTrieHashBucketOld1,
 }
 
 type CustomComparator string
 
 const (
+	DefaultCmp     CustomComparator = ""
 	DupCmpSuffix32 CustomComparator = "dup_cmp_suffix32"
 )
+
+type CmpFunc func(k1, k2, v1, v2 []byte) int
+
+func DefaultCmpFunc(k1, k2, v1, v2 []byte) int { return bytes.Compare(k1, k2) }
+func DefaultDupCmpFunc(k1, k2, v1, v2 []byte) int {
+	cmp := bytes.Compare(k1, k2)
+	if cmp == 0 {
+		cmp = bytes.Compare(v1, v2)
+	}
+	return cmp
+}
 
 type BucketsCfg map[string]BucketConfigItem
 type Bucket string
@@ -261,11 +275,10 @@ var BucketsConfigs = BucketsCfg{
 		DupFromLen:                60,
 		DupToLen:                  28,
 	},
-	//IntermediateTrieHashBucket2: {
-	//	Flags:               		lmdb.DupSort,
-	//	CustomDupComparator:	 	DupCmpSuffix32,
-	//	AutoDupSortKeysConversion:  false,
-	//},
+	IntermediateTrieHashBucket: {
+		Flags:               lmdb.DupSort,
+		CustomDupComparator: DupCmpSuffix32,
+	},
 }
 
 func sortBuckets() {
