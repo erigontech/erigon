@@ -115,7 +115,6 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 }
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
-// TODO(tjayrush): Copied from ./internal/ethapi/api.go - remove this comment
 type RPCTransaction struct {
 	BlockHash        *common.Hash    `json:"blockHash"`
 	BlockNumber      *hexutil.Big    `json:"blockNumber"`
@@ -135,7 +134,6 @@ type RPCTransaction struct {
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-// TODO(tjayrush): Copied from ./internal/ethapi/api.go - remove this comment
 func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
 	var signer types.Signer = types.FrontierSigner{}
 	if tx.Protected() {
