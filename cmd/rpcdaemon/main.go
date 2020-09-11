@@ -13,7 +13,6 @@ import (
 
 var (
 	gitCommit string
-	gitDate   string
 )
 
 func main() {
@@ -30,7 +29,8 @@ func main() {
 	}
 
 	// Hacky way to get these strings into the commands package
-	commands.SetGitStrings(gitCommit, gitDate)
+	commands.SetGitStrings(gitCommit)
+
 	if err := cmd.ExecuteContext(utils.RootContext()); err != nil {
 		log.Error(err.Error())
 		os.Exit(1)

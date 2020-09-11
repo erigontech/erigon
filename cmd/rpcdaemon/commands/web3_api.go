@@ -24,19 +24,7 @@ func NewWeb3APIImpl() *Web3APIImpl {
 // ClientVersion returns the node name
 func (api *Web3APIImpl) ClientVersion() (string, error) {
 	// https://infura.io/docs/ethereum/json-rpc/web3-clientVersion
-	return common.MakeName("TurboGeth", fullVersionStr()), nil
-}
-
-// New function so it always returns commit hash and date even if isRelease() is true
-func fullVersionStr() string {
-	vsn := params.VersionWithMeta
-	if len(gitCommit) > 0 {
-		vsn += "-" + gitCommit[:8]
-	}
-	if len(gitDate) > 0 {
-		vsn += "-" + gitDate[:11]
-	}
-	return vsn
+	return common.MakeName("TurboGeth", params.VersionWithCommit(gitCommit, "")), nil
 }
 
 // Sha3 applies the ethereum sha3 implementation on the input.
@@ -47,11 +35,9 @@ func (api *Web3APIImpl) Sha3(input hexutil.Bytes) hexutil.Bytes {
 
 var (
 	gitCommit string
-	gitDate   string
 )
 
 // SetGitStrings very hacky way to get these strings into this package
-func SetGitStrings(commit, date string) {
+func SetGitStrings(commit string) {
 	gitCommit = commit
-	gitDate = date
 }

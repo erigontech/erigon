@@ -65,16 +65,9 @@ pics:
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
 rpcdaemon:
-	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitDate=$(shell date +%Y%m%d.%H%M%S)" ./cmd/rpcdaemon 
-#	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X commands.gitCommit=${GIT_COMMIT} -X commands.gitDate=$(shell date +%Y%m%d.%H%M%S)" ./cmd/rpcdaemon 
+	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/rpcdaemon 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
-
-# TODO(tjayrush): remove this
-#rpcdaemon:
-#	$(GOBUILD) -o $(GOBIN)/rpcdaemon ./cmd/rpcdaemon 
-#	@echo "Done building."
-#	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
 semantics: semantics/z3/build/libz3.a
 	build/env.sh go run build/ci.go install ./cmd/semantics
