@@ -180,11 +180,16 @@ type Config struct {
 	// Logger is a custom logger to use with the p2p.Server.
 	Logger log.Logger `toml:",omitempty"`
 
+<<<<<<< HEAD
 	// Whether to use BoltDB or LMDB.
 	LMDB         bool
 	Bolt         bool
 	SnapshotMode torrent.SnapshotMode
 
+=======
+	// Whether to use LMDB.
+	LMDB bool
+>>>>>>> 3f18b9eaa325be88f5544a047a82e17b26e8dfd7
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener
@@ -222,9 +227,6 @@ func (c *Config) IPCEndpoint() string {
 
 // NodeDB returns the path to the discovery node database.
 func (c *Config) NodeDB() string {
-	if c.DataDir == "" {
-		return "" // ephemeral
-	}
 	return c.ResolvePath(datadirNodeDatabase)
 }
 

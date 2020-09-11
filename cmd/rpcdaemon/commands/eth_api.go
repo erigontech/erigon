@@ -3,8 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
+	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
+	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -32,6 +35,10 @@ type EthAPI interface {
 	Syncing(ctx context.Context) (interface{}, error)
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
+	GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error)
+	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error)
+	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
+	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -105,4 +112,126 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 	n := hexutil.Uint(len(block.Transactions()))
 	return &n, nil
+}
+
+// RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
+type RPCTransaction struct {
+	BlockHash        *common.Hash    `json:"blockHash"`
+	BlockNumber      *hexutil.Big    `json:"blockNumber"`
+	From             common.Address  `json:"from"`
+	Gas              hexutil.Uint64  `json:"gas"`
+	GasPrice         *hexutil.Big    `json:"gasPrice"`
+	Hash             common.Hash     `json:"hash"`
+	Input            hexutil.Bytes   `json:"input"`
+	Nonce            hexutil.Uint64  `json:"nonce"`
+	To               *common.Address `json:"to"`
+	TransactionIndex *hexutil.Uint64 `json:"transactionIndex"`
+	Value            *hexutil.Big    `json:"value"`
+	V                *hexutil.Big    `json:"v"`
+	R                *hexutil.Big    `json:"r"`
+	S                *hexutil.Big    `json:"s"`
+}
+
+// newRPCTransaction returns a transaction that will serialize to the RPC
+// representation, with the given location metadata set (if available).
+func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
+	var signer types.Signer = types.FrontierSigner{}
+	if tx.Protected() {
+		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
+	}
+	from, _ := types.Sender(signer, tx)
+	v, r, s := tx.RawSignatureValues()
+
+	result := &RPCTransaction{
+		From:     from,
+		Gas:      hexutil.Uint64(tx.Gas()),
+		GasPrice: (*hexutil.Big)(tx.GasPrice().ToBig()),
+		Hash:     tx.Hash(),
+		Input:    hexutil.Bytes(tx.Data()),
+		Nonce:    hexutil.Uint64(tx.Nonce()),
+		To:       tx.To(),
+		Value:    (*hexutil.Big)(tx.Value().ToBig()),
+		V:        (*hexutil.Big)(v.ToBig()),
+		R:        (*hexutil.Big)(r.ToBig()),
+		S:        (*hexutil.Big)(s.ToBig()),
+	}
+	if blockHash != (common.Hash{}) {
+		result.BlockHash = &blockHash
+		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
+		result.TransactionIndex = (*hexutil.Uint64)(&index)
+	}
+	return result
+}
+
+// GetTransactionByHash returns the transaction for the given hash
+func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error) {
+	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
+	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, hash)
+	if tx == nil {
+		return nil, fmt.Errorf("transaction %#x not found", hash)
+	}
+	return newRPCTransaction(tx, blockHash, blockNumber, txIndex), nil
+}
+
+// GetTransactionByBlockHashAndIndex returns the transaction for the given block hash and index.
+func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error) {
+	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
+	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
+	if block == nil {
+		return nil, fmt.Errorf("block %#x not found", blockHash)
+	}
+
+	txs := block.Transactions()
+	if uint64(txIndex) >= uint64(len(txs)) {
+		return nil, fmt.Errorf("txIndex (%d) out of range (nTxs: %d)", uint64(txIndex), uint64(len(txs)))
+	}
+
+	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex)), nil
+}
+
+// GetTransactionByBlockNumberAndIndex returns the transaction for the given block number and index.
+func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error) {
+	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockNumberAndIndex
+	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+	if err != nil {
+		return nil, err
+	}
+
+	block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+	if block == nil {
+		return nil, fmt.Errorf("block %d not found", blockNum)
+	}
+
+	txs := block.Transactions()
+	if uint64(txIndex) >= uint64(len(txs)) {
+		return nil, fmt.Errorf("txIndex (%d) out of range (nTxs: %d)", uint64(txIndex), uint64(len(txs)))
+	}
+
+	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex)), nil
+}
+
+func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
+	if err != nil {
+		return "", err
+	}
+
+	reader := adapter.NewStateReader(api.db, blockNumber)
+	acc, err := reader.ReadAccountData(address)
+	if err != nil {
+		return "", err
+	}
+
+	if acc == nil {
+		return "", fmt.Errorf("account not found")
+	}
+
+	location := common.HexToHash(index)
+
+	res, err := reader.ReadAccountStorage(address, acc.Incarnation, &location)
+	if err != nil {
+		return "", err
+	}
+
+	return hexutil.Encode(res), nil
 }

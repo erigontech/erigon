@@ -1,6 +1,7 @@
 package dbutils
 
 import (
+	"bytes"
 	"sort"
 	"strings"
 
@@ -95,8 +96,8 @@ var (
 	StorageChangeSetBucket = "SCS"
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
-	IntermediateTrieHashBucket = "iTh"
-	//IntermediateTrieHashBucket2 = "iTh2"
+	IntermediateTrieHashBucket     = "iTh2"
+	IntermediateTrieHashBucketOld1 = "iTh"
 
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = "DBINFO"
@@ -224,23 +225,45 @@ var DeprecatedBuckets = []string{
 	SyncStageUnwindOld1,
 	CurrentStateBucketOld1,
 	PlainStateBucketOld1,
+	IntermediateTrieHashBucketOld1,
 }
 
 type CustomComparator string
 
 const (
+	DefaultCmp     CustomComparator = ""
 	DupCmpSuffix32 CustomComparator = "dup_cmp_suffix32"
 )
+
+type CmpFunc func(k1, k2, v1, v2 []byte) int
+
+func DefaultCmpFunc(k1, k2, v1, v2 []byte) int { return bytes.Compare(k1, k2) }
+func DefaultDupCmpFunc(k1, k2, v1, v2 []byte) int {
+	cmp := bytes.Compare(k1, k2)
+	if cmp == 0 {
+		cmp = bytes.Compare(v1, v2)
+	}
+	return cmp
+}
 
 type BucketsCfg map[string]BucketConfigItem
 type Bucket string
 
 type BucketConfigItem struct {
-	Flags               uint
-	IsDeprecated        bool
-	DBI                 lmdb.DBI
-	DupToLen            int
+	Flags uint
+	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
+	// Use it wisely - it helps to do experiments with DB format faster, but better reduce amount of Magic in app.
+	// If good DB format found, push app code to accept this format and then disable this property.
+	AutoDupSortKeysConversion bool
+	IsDeprecated              bool
+	DBI                       lmdb.DBI
+	// DupFromLen - if user provide key of this length, then next transformation applied:
+	// v = append(k[DupToLen:], v...)
+	// k = k[:DupToLen]
+	// And opposite at retrieval
+	// Works only if AutoDupSortKeysConversion enabled
 	DupFromLen          int
+	DupToLen            int
 	DupFixedSize        int
 	CustomComparator    CustomComparator
 	CustomDupComparator CustomComparator
@@ -248,25 +271,52 @@ type BucketConfigItem struct {
 
 var BucketsConfigs = BucketsCfg{
 	CurrentStateBucket: {
-		Flags:      lmdb.DupSort,
-		DupToLen:   40,
-		DupFromLen: 72,
+		Flags:                     lmdb.DupSort,
+		AutoDupSortKeysConversion: true,
+		DupFromLen:                72,
+		DupToLen:                  40,
 	},
 	PlainStateBucket: {
-		Flags:      lmdb.DupSort,
-		DupToLen:   28,
-		DupFromLen: 60,
+		Flags:                     lmdb.DupSort,
+		AutoDupSortKeysConversion: true,
+		DupFromLen:                60,
+		DupToLen:                  28,
 	},
-	//IntermediateTrieHashBucket2: {
-	//	Flags:               lmdb.DupSort,
-	//	CustomDupComparator: DupCmpSuffix32,
-	//},
+	IntermediateTrieHashBucket: {
+		Flags:               lmdb.DupSort,
+		CustomDupComparator: DupCmpSuffix32,
+	},
 }
 
-func init() {
+func sortBuckets() {
 	sort.SliceStable(Buckets, func(i, j int) bool {
 		return strings.Compare(Buckets[i], Buckets[j]) < 0
 	})
+}
+
+func DefaultBuckets() BucketsCfg {
+	return BucketsConfigs
+}
+
+func UpdateBucketsList(newBucketCfg BucketsCfg) {
+	newBuckets := make([]string, 0)
+	for k, v := range newBucketCfg {
+		if !v.IsDeprecated {
+			newBuckets = append(newBuckets, k)
+		}
+	}
+	Buckets = newBuckets
+	BucketsConfigs = newBucketCfg
+
+	reinit()
+}
+
+func init() {
+	reinit()
+}
+
+func reinit() {
+	sortBuckets()
 
 	for _, name := range Buckets {
 		_, ok := BucketsConfigs[name]

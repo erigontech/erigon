@@ -3,8 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"net/http"
-
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
@@ -12,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/spf13/cobra"
+	"net/http"
 )
 
 type Flags struct {
@@ -76,7 +75,7 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 			err = errOpen
 		}
 	} else {
-		return nil, nil, fmt.Errorf("either remote db or bolt db must be specified")
+		return nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
 	}
 
 	if err != nil {
@@ -103,8 +102,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		wsHandler = srv.WebsocketHandler([]string{"*"})
 	}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
+	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if cfg.WebsocketEnabled && r.Method == "GET" {
 			wsHandler.ServeHTTP(w, r)
 		}

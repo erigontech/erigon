@@ -296,7 +296,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
-			if hash, err := loader.CalcTrieRoot(dbCopy); err == nil {
+			if hash, err := loader.CalcTrieRoot(dbCopy, nil); err == nil {
 				b.header.Root = hash
 			} else {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)

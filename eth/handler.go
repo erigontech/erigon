@@ -109,11 +109,14 @@ type ProtocolManager struct {
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
 // with the Ethereum network.
-func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase, whitelist map[uint64]common.Hash) (*ProtocolManager, error) {
+func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase, whitelist map[uint64]common.Hash, stagedSync *stagedsync.StagedSync) (*ProtocolManager, error) {
 	// Create the protocol manager with the base fields
+	if stagedSync == nil {
+		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder())
+	}
 	manager := &ProtocolManager{
 		networkID:   networkID,
-		forkFilter:  forkid.NewFilter(blockchain),
+		forkFilter:  forkid.NewFilter(config, blockchain.Genesis().Hash(), blockchain.CurrentHeader().Number.Uint64()),
 		eventMux:    mux,
 		txpool:      txpool,
 		chainConfig: config,
@@ -121,7 +124,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		chaindb:     chaindb,
 		peers:       newPeerSet(),
 		whitelist:   whitelist,
-		stagedSync:  stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder()),
+		stagedSync:  stagedSync,
 		mode:        mode,
 		txsyncCh:    make(chan *txsync),
 		quitSync:    make(chan struct{}),
@@ -519,7 +522,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 	// Block header query, collect the requested headers and reply
 	case msg.Code == GetBlockHeadersMsg:
 		// Decode the complex header query
-		var query getBlockHeadersData
+		var query GetBlockHeadersData
 		if err := msg.Decode(&query); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
 		}
@@ -821,7 +824,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 
 	case msg.Code == NewBlockHashesMsg:
-		var announces newBlockHashesData
+		var announces NewBlockHashesData
 		if err := msg.Decode(&announces); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
 		}
@@ -830,7 +833,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			p.MarkBlock(block.Hash)
 		}
 		// Schedule all the unknown hashes for retrieval
-		unknown := make(newBlockHashesData, 0, len(announces))
+		unknown := make(NewBlockHashesData, 0, len(announces))
 		for _, block := range announces {
 			if !pm.blockchain.HasBlock(block.Hash, block.Number) {
 				unknown = append(unknown, block)
@@ -842,7 +845,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 
 	case msg.Code == NewBlockMsg:
 		// Retrieve and decode the propagated block
-		var request newBlockData
+		var request NewBlockData
 		if err := msg.Decode(&request); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
 		}

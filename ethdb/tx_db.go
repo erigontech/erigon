@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -20,7 +21,7 @@ type TxDb struct {
 	db       Database
 	tx       Tx
 	ParentTx Tx
-	cursors  map[string]*LmdbCursor
+	cursors  map[string]Cursor
 	len      uint64
 }
 
@@ -48,13 +49,23 @@ func (m *TxDb) Begin() (DbWithPendingMutations, error) {
 }
 
 func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
+	if metrics.Enabled {
+		if bucket == dbutils.PlainStateBucket {
+			defer dbPutTimer.UpdateSince(time.Now())
+		}
+	}
 	m.len += uint64(len(key) + len(value))
 	return m.cursors[bucket].Put(key, value)
 }
 
 func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
-	return m.cursors[bucket].Append(key, value)
+	switch c := m.cursors[bucket].(type) {
+	case CursorDupSort:
+		return c.AppendDup(key, value)
+	default:
+		return c.Append(key, value)
+	}
 }
 
 func (m *TxDb) Delete(bucket string, key []byte) error {
@@ -76,15 +87,9 @@ func (m *TxDb) begin(parent Tx) error {
 	}
 	m.tx = tx
 	m.ParentTx = parent
-	m.cursors = make(map[string]*LmdbCursor, 16)
-	for i := range dbutils.Buckets {
-		v,ok:= tx.Cursor(dbutils.Buckets[i]).(*LmdbCursor)
-		if ok {
-			m.cursors[dbutils.Buckets[i]] = v
-			if err := m.cursors[dbutils.Buckets[i]].initCursor(); err != nil {
-				return err
-			}
-		}
+	m.cursors = make(map[string]Cursor, 16)
+	for name := range m.db.(HasKV).KV().AllBuckets() {
+		m.cursors[name] = tx.Cursor(name)
 	}
 	return nil
 }
@@ -103,6 +108,10 @@ func (m *TxDb) Last(bucket string) ([]byte, []byte, error) {
 }
 
 func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
+	if metrics.Enabled {
+		defer dbGetTimer.UpdateSince(time.Now())
+	}
+
 	v, err := m.cursors[bucket].SeekExact(key)
 	if err != nil {
 		return nil, err
@@ -217,7 +226,7 @@ func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([
 	return Walk(m.cursors[bucket], startkey, fixedbits, walker)
 }
 
-func Walk(c Cursor, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
+func Walk(c Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	k, v, err := c.Seek(startkey)
 	if err != nil {
@@ -239,7 +248,7 @@ func Walk(c Cursor, startkey []byte, fixedbits int, walker func([]byte, []byte) 
 	return nil
 }
 
-func ForEach(c Cursor, walker func([]byte, []byte) (bool, error)) error {
+func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -324,6 +333,10 @@ func (m *TxDb) CommitAndBegin() error {
 }
 
 func (m *TxDb) Commit() (uint64, error) {
+	if metrics.Enabled {
+		defer dbCommitBigBatchTimer.UpdateSince(time.Now())
+	}
+
 	if m.tx == nil {
 		return 0, fmt.Errorf("second call .Commit() on same transaction")
 	}
@@ -372,4 +385,45 @@ func (m *TxDb) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (m *TxDb) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+func (m *TxDb) BucketExists(name string) (bool, error) {
+	exists := false
+	migrator, ok := m.tx.(BucketMigrator)
+	if !ok {
+		return false, fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
+	}
+	exists = migrator.ExistsBucket(name)
+	return exists, nil
+}
+
+func (m *TxDb) ClearBuckets(buckets ...string) error {
+	for i := range buckets {
+		name := buckets[i]
+
+		migrator, ok := m.tx.(BucketMigrator)
+		if !ok {
+			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
+		}
+		if err := migrator.ClearBucket(name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *TxDb) DropBuckets(buckets ...string) error {
+	for i := range buckets {
+		name := buckets[i]
+		log.Info("Dropping bucket", "name", name)
+		migrator, ok := m.tx.(BucketMigrator)
+		if !ok {
+			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
+		}
+		if err := migrator.DropBucket(name); err != nil {
+			return err
+		}
+	}
+	return nil
 }

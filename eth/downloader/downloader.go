@@ -576,7 +576,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			return err
 		}
 
-		canRunCycleInOneTransaction := height-origin < 32 && height-hashStateStageProgress < 32
+		canRunCycleInOneTransaction := height-origin < 1024 && height-hashStateStageProgress < 1024
 
 		var writeDB ethdb.Database // on this variable will run sync cycle.
 
@@ -629,7 +629,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if !canRunCycleInOneTransaction {
 				return nil
 			}
-			if id <= stages.Bodies || id > stages.TxPool {
+			if d.stagedSyncState.IsBefore(id, stages.Bodies) || d.stagedSyncState.IsAfter(id, stages.TxPool) {
 				return nil
 			}
 			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -661,8 +661,11 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				return nil
 			}
 
-			log.Info("Commit blocks")
+			commitStart := time.Now()
 			_, errTx := tx.Commit()
+			if errTx == nil {
+				log.Info("Commit blocks", "in", time.Since(commitStart))
+			}
 			return errTx
 		}
 

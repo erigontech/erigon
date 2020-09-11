@@ -28,42 +28,41 @@ import (
 )
 
 // SyncStage represents the stages of syncronisation in the SyncMode.StagedSync mode
-type SyncStage byte
+type SyncStage []byte
 
-const (
-
-	Headers             				 SyncStage = iota // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
-	BlockHashes                          // Headers Number are written, fills blockHash => number bucket
-	Bodies                               // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders                              // "From" recovered from signatures, bodies re-written
-	Execution                            // Executing each block w/o buildinf a trie
-	IntermediateHashes                   // Generate intermediate hashes, calculate the state root hash
-	HashState                            // Apply Keccak256 to all the keys in the state
-	AccountHistoryIndex                  // Generating history index for accounts
-	StorageHistoryIndex                  // Generating history index for storage
-	TxLookup                             // Generating transactions lookup index
-	TxPool                               // Starts Backend
-	Finish                               // Nominal stage after all other stages
+var (
+	Headers             SyncStage = []byte("Headers")             // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	BlockHashes         SyncStage = []byte("BlockHashes")         // Headers Number are written, fills blockHash => number bucket
+	Bodies              SyncStage = []byte("Bodies")              // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders             SyncStage = []byte("Senders")             // "From" recovered from signatures, bodies re-written
+	Execution           SyncStage = []byte("Execution")           // Executing each block w/o buildinf a trie
+	IntermediateHashes  SyncStage = []byte("IntermediateHashes")  // Generate intermediate hashes, calculate the state root hash
+	HashState           SyncStage = []byte("HashState")           // Apply Keccak256 to all the keys in the state
+	AccountHistoryIndex SyncStage = []byte("AccountHistoryIndex") // Generating history index for accounts
+	StorageHistoryIndex SyncStage = []byte("StorageHistoryIndex") // Generating history index for storage
+	TxLookup            SyncStage = []byte("TxLookup")            // Generating transactions lookup index
+	TxPool              SyncStage = []byte("TxPool")              // Starts Backend
+	Finish              SyncStage = []byte("Finish")              // Nominal stage after all other stages
 )
 
-var DBKeys = map[SyncStage][]byte{
-	Headers:             []byte("Headers"),
-	BlockHashes:         []byte("BlockHashes"),
-	Bodies:              []byte("Bodies"),
-	Senders:             []byte("Senders"),
-	Execution:           []byte("Execution"),
-	IntermediateHashes:  []byte("IntermediateHashes"),
-	HashState:           []byte("HashState"),
-	AccountHistoryIndex: []byte("AccountHistoryIndex"),
-	StorageHistoryIndex: []byte("StorageHistoryIndex"),
-	TxLookup:            []byte("TxLookup"),
-	TxPool:              []byte("TxPool"),
-	Finish:              []byte("Finish"),
+var AllStages = []SyncStage{
+	Headers,
+	BlockHashes,
+	Bodies,
+	Senders,
+	Execution,
+	IntermediateHashes,
+	HashState,
+	AccountHistoryIndex,
+	StorageHistoryIndex,
+	TxLookup,
+	TxPool,
+	Finish,
 }
 
 // GetStageProgress retrieves saved progress of given sync stage from the database
 func GetStageProgress(db rawdb.DatabaseReader, stage SyncStage) (uint64, []byte, error) {
-	v, err := db.Get(dbutils.SyncStageProgress, DBKeys[stage])
+	v, err := db.Get(dbutils.SyncStageProgress, []byte(stage))
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err
 	}
@@ -72,14 +71,14 @@ func GetStageProgress(db rawdb.DatabaseReader, stage SyncStage) (uint64, []byte,
 
 // SaveStageProgress saves the progress of the given stage in the database
 func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64, stageData []byte) error {
-	return db.Put(dbutils.SyncStageProgress, DBKeys[stage], marshalData(progress, stageData))
+	return db.Put(dbutils.SyncStageProgress, stage, marshalData(progress, stageData))
 }
 
 // GetStageUnwind retrieves the invalidation for the given stage
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
 func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
-	v, err := db.Get(dbutils.SyncStageUnwind, DBKeys[stage])
+	v, err := db.Get(dbutils.SyncStageUnwind, stage)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err
 	}
@@ -88,7 +87,7 @@ func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
 
 // SaveStageUnwind saves the progress of the given stage in the database
 func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64, stageData []byte) error {
-	return db.Put(dbutils.SyncStageUnwind, DBKeys[stage], marshalData(invalidation, stageData))
+	return db.Put(dbutils.SyncStageUnwind, []byte(stage), marshalData(invalidation, stageData))
 }
 
 func marshalData(blockNumber uint64, stageData []byte) []byte {

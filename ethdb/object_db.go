@@ -22,15 +22,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"time"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"strings"
+	"time"
 )
 
 var (
@@ -73,8 +72,6 @@ func Open(path string, snapshotsOpts ...SnapshotUsageOpt) (*ObjectDatabase, erro
 	switch true {
 	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
 		kv, err = NewLMDB().Path(path).Open()
-	case testDB == "bolt" || strings.HasSuffix(path, "_bolt"):
-		kv, err = NewBolt().Path(path).Open()
 	default:
 		kv, err = NewLMDB().Path(path).Open()
 	}
@@ -87,10 +84,6 @@ func Open(path string, snapshotsOpts ...SnapshotUsageOpt) (*ObjectDatabase, erro
 
 // Put inserts or updates a single entry.
 func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
-	if metrics.Enabled {
-		defer dbPutTimer.UpdateSince(time.Now())
-	}
-
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		return tx.Cursor(bucket).Put(key, value)
 	})
@@ -99,10 +92,6 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 
 // Append appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error {
-	if metrics.Enabled {
-		defer dbPutTimer.UpdateSince(time.Now())
-	}
-
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		return tx.Cursor(bucket).Append(key, value)
 	})
@@ -328,8 +317,6 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	switch db.kv.(type) {
 	case *LmdbKV:
 		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen())
-	case *BoltKV:
-		mem = NewObjectDatabase(NewBolt().InMem().MustOpen())
 	}
 
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {
@@ -462,4 +449,29 @@ func InspectDatabase(db Database) error {
 func NewDatabaseWithFreezer(db *ObjectDatabase, dir, suffix string) (*ObjectDatabase, error) {
 	// FIXME: implement freezer in Turbo-Geth
 	return db, nil
+}
+
+func WarmUp(tx Tx, bucket string, logEvery *time.Ticker, quit <-chan struct{}) error {
+	count := 0
+	c := tx.Cursor(bucket)
+	totalKeys, errCount := c.Count()
+	if errCount != nil {
+		return errCount
+	}
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		count++
+
+		select {
+		default:
+		case <-quit:
+			return common.ErrStopped
+		case <-logEvery.C:
+			log.Info("Warmed up state", "progress", fmt.Sprintf("%.2fM/%.2fM", float64(count)/1_000_000, float64(totalKeys)/1_000_000))
+		}
+	}
+
+	return nil
 }

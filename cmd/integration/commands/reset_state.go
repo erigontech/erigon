@@ -72,8 +72,8 @@ func clearUnwindStack(_ context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	for i := stages.SyncStage(0); i < stages.Finish; i++ {
-		if err := stages.SaveStageUnwind(db, i, 0, nil); err != nil {
+	for _, stage := range stages.AllStages {
+		if err := stages.SaveStageUnwind(db, stage, 0, nil); err != nil {
 			return err
 		}
 	}
@@ -103,6 +103,9 @@ func resetState(_ context.Context) error {
 		return err
 	}
 	if err := resetTxPool(db); err != nil {
+		return err
+	}
+	if err := resetFinish(db); err != nil {
 		return err
 	}
 
@@ -208,17 +211,28 @@ func resetTxPool(db ethdb.Putter) error {
 	return nil
 }
 
+func resetFinish(db ethdb.Putter) error {
+	if err := stages.SaveStageProgress(db, stages.Finish, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.Finish, 0, nil); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func printStages(db *ethdb.ObjectDatabase) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
 	defer w.Flush()
 	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
-	for stage := stages.SyncStage(0); stage < stages.Finish; stage++ {
+	for _, stage := range stages.AllStages {
 		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "%s \t %d\n", string(stages.DBKeys[stage]), progress)
+		fmt.Fprintf(w, "%s \t %d\n", string(stage), progress)
 	}
 	return nil
 }
