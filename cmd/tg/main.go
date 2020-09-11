@@ -14,8 +14,7 @@ import (
 )
 
 var (
-	GitCommit string
-	GitDate   string
+	gitCommit string
 )
 
 func main() {
@@ -31,7 +30,7 @@ func runTurboGeth(ctx *cli.Context) {
 		stagedsync.DefaultUnwindOrder(),
 	)
 
-	tg := node.New(ctx, sync, node.Params{GitCommit: GitCommit, GitDate: GitDate})
+	tg := node.New(ctx, sync, node.Params{GitCommit: gitCommit})
 	err := tg.Serve()
 
 	if err != nil {
