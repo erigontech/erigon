@@ -108,7 +108,8 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 
 	c := tx.Cursor(bucketName).Prefix(prefix)
 
-	txTicket := time.NewTicker(MaxTxTTL)
+	txTicker := time.NewTicker(MaxTxTTL)
+	defer txTicker.Stop()
 
 	// send all items to client, if k==nil - stil send it to client and break loop
 	for k, v, err := c.Seek(in.SeekKey); ; k, v, err = c.Next() {
@@ -138,7 +139,7 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 		//TODO: protect against client - which doesn't send any requests
 		select {
 		default:
-		case <-txTicket.C:
+		case <-txTicker.C:
 			tx.Rollback()
 			tx, err = s.kv.Begin(context.Background(), nil, false)
 			if err != nil {
