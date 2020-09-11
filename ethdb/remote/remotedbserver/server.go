@@ -28,59 +28,7 @@ type KvServer struct {
 	kv ethdb.KV
 }
 
-func StartGrpcWithTLS(kv ethdb.KV, eth core.Backend, addr string, certFile string, keyFile string) {
-	log.Info("Starting private RPC server with TLS handshake", "on", addr)
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		log.Error("Could not create listener", "address", addr, "err", err)
-		return
-	}
-
-	kvSrv := NewKvServer(kv)
-	dbSrv := NewDBServer(kv)
-	ethBackendSrv := NewEthBackendServer(eth)
-	var (
-		streamInterceptors []grpc.StreamServerInterceptor
-		unaryInterceptors  []grpc.UnaryServerInterceptor
-	)
-	if metrics.Enabled {
-		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	}
-	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
-
-	creds, err := credentials.NewServerTLSFromFile(certFile, keyFile)
-
-	if err != nil {
-		log.Error("Could not establish TLS connection", "err", err)
-		return
-	}
-	grpcServer := grpc.NewServer(
-		grpc.NumStreamWorkers(20),  // reduce amount of goroutines
-		grpc.WriteBufferSize(1024), // reduce buffers to save mem
-		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
-		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
-		grpc.Creds(creds),
-	)
-	remote.RegisterKVServer(grpcServer, kvSrv)
-	remote.RegisterDBServer(grpcServer, dbSrv)
-	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
-
-	if metrics.Enabled {
-		grpc_prometheus.Register(grpcServer)
-	}
-
-	go func() {
-		if err := grpcServer.Serve(lis); err != nil {
-			log.Error("private RPC server fail", "err", err)
-		}
-	}()
-}
-
-func StartGrpc(kv ethdb.KV, eth core.Backend, addr string) {
+func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.TransportCredentials) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -101,15 +49,27 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string) {
 	}
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
-
-	grpcServer := grpc.NewServer(
-		grpc.NumStreamWorkers(20),  // reduce amount of goroutines
-		grpc.WriteBufferSize(1024), // reduce buffers to save mem
-		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
-		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
-	)
+	var grpcServer *grpc.Server
+	if creds == nil {
+		grpcServer = grpc.NewServer(
+			grpc.NumStreamWorkers(20),  // reduce amount of goroutines
+			grpc.WriteBufferSize(1024), // reduce buffers to save mem
+			grpc.ReadBufferSize(1024),
+			grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
+			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
+			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+		)
+	} else {
+		grpcServer = grpc.NewServer(
+			grpc.NumStreamWorkers(20),  // reduce amount of goroutines
+			grpc.WriteBufferSize(1024), // reduce buffers to save mem
+			grpc.ReadBufferSize(1024),
+			grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
+			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
+			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+			grpc.Creds(*creds),
+		)
+	}
 	remote.RegisterKVServer(grpcServer, kvSrv)
 	remote.RegisterDBServer(grpcServer, dbSrv)
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)

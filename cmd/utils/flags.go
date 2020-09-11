@@ -547,9 +547,9 @@ var (
 		Usage: "API's offered over the HTTP-RPC interface",
 		Value: "",
 	}
-	TLSFlag = cli.BoolFlag{
-		Name:  "tls",
-		Usage: "Enable TLS handshake",
+	NoTLSFlag = cli.BoolFlag{
+		Name:  "notls",
+		Usage: "Disable TLS handshake",
 	}
 	TLSCertFlag = cli.StringFlag{
 		Name:  "tls.cert",
@@ -985,11 +985,11 @@ func splitAndTrim(input string) (ret []string) {
 // read-only interface to the databae
 func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
-	if ctx.GlobalBool(TLSFlag.Name) {
+	if !ctx.GlobalBool(NoTLSFlag.Name) {
 		certFile := ctx.GlobalString(TLSCertFlag.Name)
 		keyFile := ctx.GlobalString(TLSKeyFlag.Name)
 		if certFile == "" {
-			log.Warn("Could not establish TLS grpc: missing certification")
+			log.Warn("Could not establish TLS grpc: missing certificate")
 			return
 		} else if keyFile == "" {
 			log.Warn("Could not establish TLS grpc: missing key file")

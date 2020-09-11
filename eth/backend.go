@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
+	"google.golang.org/grpc/credentials"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -227,9 +228,13 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
-			remotedbserver.StartGrpcWithTLS(chainDb.KV(), eth, stack.Config().PrivateApiAddr, stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+			creds, err := credentials.NewServerTLSFromFile(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+			if err != nil {
+				return nil, err
+			}
+			remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds)
 		} else {
-			remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr)
+			remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil)
 		}
 	}
 
