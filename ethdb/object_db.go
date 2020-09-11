@@ -79,15 +79,6 @@ func Open(path string, snapshotsOpts ...SnapshotUsageOpt) (*ObjectDatabase, erro
 		kv, err = NewLMDB().Path(path).Open()
 	}
 
-	for _,snPath:=range snapshotsOpts {
-		fmt.Println("Wrapped by", snPath.Path)
-		opts:=NewSnapshotKV().DB(kv).Path(snPath.Path)
-		for bucket:=range snPath.ForBuckets  {
-			opts = opts.For(bucket, dbutils.BucketConfigItem{})
-		}
-		kv = opts.MustOpen()
-	}
-
 	if err != nil {
 		return nil, err
 	}

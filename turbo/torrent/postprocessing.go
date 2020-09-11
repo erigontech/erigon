@@ -58,15 +58,20 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 			return innerErr
 		}
 
+		//canonical
 		return next(k, dbutils.HeaderHashKey(header.Number.Uint64()), header.Hash().Bytes())
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:              ctx.Done(),
+		//OnLoadCommit: func(db ethdb.Putter, key []byte, isDone bool) error {
+		//
+		//},
 	})
 	if err!=nil {
 		return err
 	}
+	rawdb.WriteHeadBlockHash(db, hash)
 	rawdb.WriteHeadHeaderHash(db, hash)
-	fmt.Println("Last processed block", number)
+	fmt.Println("Last processed block", number, hash.String())
 
 	return nil
 }

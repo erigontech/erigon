@@ -13,7 +13,7 @@ func init() {
 }
 
 var generateHeadersSnapshotCmd = &cobra.Command{
-	Use:   "headerSnapshot",
+	Use:   "headersSnapshot",
 	Short: "Generate  snapshot",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return generate.GenerateHeaderSnapshot(chaindata, snapshotFile, block)

@@ -71,7 +71,7 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotNa
 		Trackers:    Trackers,
 		InfoHash:    ts.InfoHash,
 		DisplayName: snapshotName,
-		Storage:     storage.NewFileWithCompletion(cli.snapshotsDir+"/"+snapshotName,pc),
+		Storage:     storage.NewFileWithCompletion(cli.snapshotsDir,pc),
 		InfoBytes: 	 ts.InfoBytes,
 	})
 	if err!=nil {
@@ -108,8 +108,8 @@ func (cli *Client) Run(db ethdb.Database) error  {
 	defer cancel()
 	eg:=errgroup.Group{}
 	//todo remove
-	db.Delete(dbutils.SnapshotInfoBucket, []byte(HeadersSnapshotName))
-	db.Delete(dbutils.SnapshotInfoBucket, []byte(BodiesSnapshotName))
+	//db.Delete(dbutils.SnapshotInfoBucket, []byte(HeadersSnapshotName))
+	//db.Delete(dbutils.SnapshotInfoBucket, []byte(BodiesSnapshotName))
 
 	if cli.snMode.Headers {
 		eg.Go(func() error {
@@ -146,6 +146,7 @@ func (cli *Client) Run(db ethdb.Database) error  {
 		dwn:
 			for {
 				if t.Info().TotalLength()-t.BytesCompleted()==0 {
+					fmt.Println("Downloaded", t.Name())
 					log.Info("Dowloaded", "snapshot", t.Name(), "t",time.Since(tt))
 					break dwn
 				} else {

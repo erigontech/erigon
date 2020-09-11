@@ -3,13 +3,17 @@ package torrent
 //only for mainnet
 const (
 	HeadersSnapshotName = "headers"
+	HeadersSnapshotHashKey = "headersSnapshotKey"
+	HeadersSnapshotInfoDataKey = "headersSnapshotInfoDataKey"
 	BodiesSnapshotName = "bodies"
+	BodiesSnapshotHashKey = "bodiesSnapshotKey"
+	BodiesSnapshotInfoDataKey = "bodiesSnapshotInfoDataKey"
 	StateSnapshotName = "state"
 	ReceiptsSnapshotName = "receipts"
 
 
-	HeadersSnapshotHash = "72a8b7fa55890b1b37b96d91b37adf3689795bf1" //11kk block 1mb chunk
-	BlocksSnapshotHash = "0fc6f416651385df347fe05eefae1c26469585a2" //11kk block 1mb chunk
+	HeadersSnapshotHash = "d999d1ce0d3225b8aff2e7edbf5b17f562616f59" //10kk block 1mb chunk
+	BlocksSnapshotHash = "ca9765284a344491f38416237f7d23e4367e7aba" //11kk block 1mb chunk
 	StateSnapshotHash = ""
 	ReceiptsSnapshotHash = ""
 

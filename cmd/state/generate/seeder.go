@@ -30,8 +30,8 @@ func Seed(pathes []string) error {
 	cfg.DataDir = "/media/b00ris/nvme/snapshots"
 
 	pathes=[]string{
-		cfg.DataDir+"/headers_11/",
-		cfg.DataDir+"/bodies_11/",
+		cfg.DataDir+"/headers/",
+		cfg.DataDir+"/bodies/",
 		//cfg.DataDir+"state/",
 		//cfg.DataDir+"receipts/",
 	}

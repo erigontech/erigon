@@ -43,12 +43,12 @@ func GenerateBodySnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 		}
 	}
 
-	err:=sndb.Put(dbutils.DatabaseInfoBucket, []byte(dbutils.SnapshotBodyHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
+	err:=sndb.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotBodyHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
 	if err!=nil {
 		log.Crit("SnapshotBodyHeadNumber error", "err", err)
 		return err
 	}
-	err=sndb.Put(dbutils.DatabaseInfoBucket, []byte(dbutils.SnapshotBodyHeadHash), hash.Bytes())
+	err=sndb.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotBodyHeadHash), hash.Bytes())
 	if err!=nil {
 		log.Crit("SnapshotBodyHeadHash error", "err", err)
 		return err

@@ -18,10 +18,8 @@
 package eth
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
@@ -151,24 +149,28 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	fmt.Println("-------------------------------------------------------------")
 	var torrentClient *torrent.Client
 	if config.SyncMode==downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID==params.MainnetChainConfig.ChainID.Uint64() {
-		//panic(stack.Config().ResolvePath("snapshots"))
-
 		torrentClient = torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
+		//panic(stack.Config().ResolvePath("snapshots"))
 		err:=torrentClient.Run(chainDb)
 		if err!=nil {
 			return nil, err
 		}
 
 		snapshotKV:=chainDb.KV()
-		snapshotKV=ethdb.NewSnapshotKV().Path("/media/b00ris/nvme/snapshotsync/tg/snapshots/bodies/bodies_11").For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).DB(snapshotKV).MustOpen()
-		snapshotKV=ethdb.NewSnapshotKV().Path("/media/b00ris/nvme/snapshotsync/tg/snapshots/headers/headers_11").For(dbutils.HeaderPrefix,dbutils.BucketConfigItem{}).DB(snapshotKV).MustOpen()
+		snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(stack.Config().ResolvePath("snapshots")+"/bodies").ReadOnly().MustOpen()).
+			For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).
+			For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
+			DB(snapshotKV).MustOpen()
+		snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(stack.Config().ResolvePath("snapshots")+"/headers").ReadOnly().MustOpen()).
+			For(dbutils.HeaderPrefix,dbutils.BucketConfigItem{}).
+			For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
+			DB(snapshotKV).MustOpen()
 		chainDb.SetKV(snapshotKV)
-		err=torrent.GenerateHeaderIndexes(context.Background(), chainDb)
-		if err!=nil {
-			spew.Dump(err)
-			panic(err.Error())
-		}
-		panic(config.SnapshotMode.ToString())
+		//err=torrent.GenerateHeaderIndexes(context.Background(), chainDb)
+		//if err!=nil {
+		//	spew.Dump(err)
+		//	panic(err.Error())
+		//}
 	}
 	_=torrentClient
 

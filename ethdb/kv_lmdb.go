@@ -126,6 +126,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 				return nil, err
 			}
 		}
+
 		err = tx.Commit(context.Background())
 		if err != nil {
 			return nil, err
@@ -316,7 +317,6 @@ func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 		return nil, err
 	}
 	c, err := rawTx.OpenCursor(root)
-	fmt.Println("ethdb/kv_lmdb.go:318 Open cursor", c,err)
 	if err != nil {
 		return nil, err
 	}
@@ -452,10 +452,10 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		log.Info("Batch", "commit", commitTook)
 	}
 
-	if !tx.isSubTx { // call fsync only after main transaction commit
+	if !tx.isSubTx && !tx.db.opts.readOnly { // call fsync only after main transaction commit
 		fsyncTimer := time.Now()
 		if err := tx.db.env.Sync(true); err != nil {
-			log.Warn("fsync after commit failed: \n", err)
+			log.Warn("fsync after commit failed: \n", "err",  err)
 		}
 		fsyncTook := time.Since(fsyncTimer)
 		if fsyncTook > 20*time.Second {

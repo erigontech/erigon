@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"errors"
 	"fmt"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
@@ -12,25 +13,39 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
-//"/Users/boris/tg/tg/chaindata"
-//""/Users/boris/snapshot/"
-//10400000
 
 func GenerateHeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
+	if snapshotPath=="" {
+		return errors.New("empty snapshot path")
+	}
+	err:=os.RemoveAll(snapshotPath)
+	if err!=nil {
+		return err
+	}
 	kv:=ethdb.NewLMDB().Path(dbPath).MustOpen()
 	snkv:=ethdb.NewLMDB().Path(snapshotPath).MustOpen()
 	db:=ethdb.NewObjectDatabase(kv)
 	sndb:=ethdb.NewObjectDatabase(snkv)
 
+	ch:=make(chan os.Signal)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	t:=time.Now()
 	chunkFile:=30000
 	tuples := make(ethdb.MultiPutTuples, 0, chunkFile*3)
 	var hash common.Hash
 	var header []byte
 	for i:=uint64(2); i<=toBlock; i++ {
+		select {
+		case <-ch:
+			return errors.New("interrupted")
+		default:
+
+		}
 		hash=rawdb.ReadCanonicalHash(db, i)
 		header=rawdb.ReadHeaderRLP(db,hash, i)
 		tuples=append(tuples, []byte(dbutils.HeaderPrefix), dbutils.HeaderKey(i, hash), header)
@@ -53,12 +68,12 @@ func GenerateHeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 		}
 	}
 	rawdb.WriteHeadBlockHash(sndb, hash)
-	err:=sndb.Put(dbutils.DatabaseInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
+	err=sndb.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
 	if err!=nil {
 		log.Crit("SnapshotHeadersHeadNumber error", "err", err)
 		return err
 	}
-	err=sndb.Put(dbutils.DatabaseInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash), hash.Bytes())
+	err=sndb.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash), hash.Bytes())
 	if err!=nil {
 		log.Crit("SnapshotHeadersHeadHash error", "err", err)
 		return err
@@ -78,14 +93,7 @@ func GenerateHeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 		Comment: "Snapshot of headers",
 	}
 
-	//mi.AnnounceList=builtinAnnounceList
-	info := metainfo.Info{PieceLength: torrent.DefaultChunkSize}
-	err = info.BuildFromFilePath(snapshotPath)
-	if err!=nil {
-		log.Warn("BuildFromFilePath", "err", err)
-		return err
-	}
-
+	info,err:=torrent.BuildInfoBytesForLMDBSnapshot(snapshotPath)
 	mi.InfoBytes, err = bencode.Marshal(info)
 	if err!=nil {
 		log.Warn("bencode.Marshal", "err", err)

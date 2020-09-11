@@ -11,11 +11,11 @@ import (
 )
 
 var (
-	_ KV = &SnapshotKV{}
+	_ KV             = &SnapshotKV{}
 	_ BucketMigrator = &snapshotTX{}
-	_ Tx = &snapshotTX{}
-	_ Tx = &lazyTx{}
-	_ Cursor = &snapshotCursor{}
+	_ Tx             = &snapshotTX{}
+	_ Tx             = &lazyTx{}
+	_ Cursor         = &snapshotCursor{}
 )
 
 func (v *lazyTx) NoValuesCursor(bucket string) NoValuesCursor {
@@ -31,7 +31,7 @@ func (s *SnapshotKV) AllBuckets() dbutils.BucketsCfg {
 }
 
 func (s *snapshotTX) DropBucket(bucket string) error {
-	db,ok:=s.dbTX.(BucketMigrator)
+	db, ok := s.dbTX.(BucketMigrator)
 	if !ok {
 		return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", s.dbTX)
 	}
@@ -39,7 +39,7 @@ func (s *snapshotTX) DropBucket(bucket string) error {
 }
 
 func (s *snapshotTX) CreateBucket(bucket string) error {
-	db,ok:=s.dbTX.(BucketMigrator)
+	db, ok := s.dbTX.(BucketMigrator)
 	if !ok {
 		return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", s.dbTX)
 	}
@@ -47,7 +47,7 @@ func (s *snapshotTX) CreateBucket(bucket string) error {
 }
 
 func (s *snapshotTX) ExistsBucket(bucket string) bool {
-	db,ok:=s.dbTX.(BucketMigrator)
+	db, ok := s.dbTX.(BucketMigrator)
 	if !ok {
 		return false
 	}
@@ -55,7 +55,7 @@ func (s *snapshotTX) ExistsBucket(bucket string) bool {
 }
 
 func (s *snapshotTX) ClearBucket(bucket string) error {
-	db,ok:=s.dbTX.(BucketMigrator)
+	db, ok := s.dbTX.(BucketMigrator)
 	if !ok {
 		return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", s.dbTX)
 	}
@@ -63,15 +63,15 @@ func (s *snapshotTX) ClearBucket(bucket string) error {
 }
 
 func (s *snapshotTX) ExistingBuckets() ([]string, error) {
-	db,ok:=s.dbTX.(BucketMigrator)
+	db, ok := s.dbTX.(BucketMigrator)
 	if !ok {
-		return []string{},fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", s.dbTX)
+		return []string{}, fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", s.dbTX)
 	}
 	return db.ExistingBuckets()
 }
 
-type SnapshotUsageOpt struct{
-	Path string
+type SnapshotUsageOpt struct {
+	Path       string
 	ForBuckets map[string]struct{}
 }
 
@@ -81,22 +81,21 @@ func NewSnapshotKV() snapshotOpts {
 	}
 }
 
-
 type SnapshotKV struct {
-	db KV
-	snapshotDB KV
+	db           KV
+	snapshotDB   KV
 	snapshotPath string
-	forBuckets map[string]dbutils.BucketConfigItem
+	forBuckets   map[string]dbutils.BucketConfigItem
 }
 
 type snapshotOpts struct {
-	path     string
-	db     KV
+	db         KV
+	snapshot   KV
 	forBuckets map[string]dbutils.BucketConfigItem
 }
 
-func (opts snapshotOpts) Path(path string) snapshotOpts {
-	opts.path = path
+func (opts snapshotOpts) SnapshotDB(db KV) snapshotOpts {
+	opts.snapshot = db
 	return opts
 }
 
@@ -110,48 +109,30 @@ func (opts snapshotOpts) For(bucket string, config dbutils.BucketConfigItem) sna
 	return opts
 }
 
-
 func (opts snapshotOpts) MustOpen() KV {
-	snapshotDB,err:=NewLMDB().Path(opts.path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return opts.forBuckets
-	}).ReadOnly().Open()
-	if err!=nil {
-		log.Warn("Snapshot db has not opened", "err", err)
-		panic(err)
-	}
 	return &SnapshotKV{
-		snapshotDB: snapshotDB,
-		db: opts.db,
-		snapshotPath: opts.path,
+		snapshotDB: opts.snapshot,
+		db:         opts.db,
 		forBuckets: opts.forBuckets,
 	}
 }
 
 func (s *SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
-	if s.snapshotDB==nil {
-		snapshotDB,err:=NewLMDB().Path(s.snapshotPath).Open()
-		if err!=nil {
-			log.Warn("Snapshot db has not opened", "err", err)
-			return s.db.View(ctx, f)
-		}
-		s.snapshotDB=snapshotDB
-	}
-
-	dbTx,err:=s.db.Begin(ctx, nil, false)
-	if err!=nil {
+	dbTx, err := s.db.Begin(ctx, nil, false)
+	if err != nil {
 		return err
 	}
 
-	t:=&snapshotTX{
+	t := &snapshotTX{
 		dbTX: dbTx,
 		snTX: newVirtualTx(func() (Tx, error) {
 			return s.snapshotDB.Begin(ctx, nil, false)
 		}, s.forBuckets),
+		forBuckets: s.forBuckets,
 	}
 	defer t.Rollback()
 	return f(t)
 }
-
 
 func (s *SnapshotKV) Update(ctx context.Context, f func(tx Tx) error) error {
 	return s.db.Update(ctx, f)
@@ -159,7 +140,7 @@ func (s *SnapshotKV) Update(ctx context.Context, f func(tx Tx) error) error {
 
 func (s *SnapshotKV) Close() {
 	defer s.db.Close()
-	if s.snapshotDB!=nil {
+	if s.snapshotDB != nil {
 		defer s.snapshotDB.Close()
 	}
 }
@@ -168,64 +149,59 @@ func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx,
 	if writable {
 		return s.db.Begin(ctx, parentTx, writable)
 	}
-	if s.snapshotDB==nil {
-		snapshotDB,err:=NewLMDB().Path(s.snapshotPath).ReadOnly().Open()
-		if err!=nil {
-			log.Warn("Snapshot db has not opened", "err", err)
-			return s.db.Begin(ctx, parentTx, writable)
-		}
-		s.snapshotDB=snapshotDB
-	}
 
-	dbTx,err:= s.db.Begin(ctx, parentTx, writable)
-	if err!=nil {
+	dbTx, err := s.db.Begin(ctx, parentTx, writable)
+	if err != nil {
 		return nil, err
 	}
 
-	t:=&snapshotTX{
+	t := &snapshotTX{
 		dbTX: dbTx,
 		snTX: newVirtualTx(func() (Tx, error) {
 			return s.snapshotDB.Begin(ctx, parentTx, false)
 		}, s.forBuckets),
+		forBuckets: s.forBuckets,
 	}
 	return t, nil
 }
 
 func newVirtualTx(construct func() (Tx, error), forBucket map[string]dbutils.BucketConfigItem) *lazyTx {
 	return &lazyTx{
-		construct: construct,
+		construct:  construct,
 		forBuckets: forBucket,
 	}
 }
+
 var ErrNotSnapshotBucket = errors.New("not snapshot bucket")
+
 //lazyTx is used for lazy transaction creation.
 type lazyTx struct {
-	construct func() (Tx,error)
+	construct  func() (Tx, error)
 	forBuckets map[string]dbutils.BucketConfigItem
-	tx Tx
+	tx         Tx
 	sync.Mutex
 }
 
-func (v *lazyTx) getTx() (Tx,error)  {
+func (v *lazyTx) getTx() (Tx, error) {
 	var err error
 	v.Lock()
 	defer v.Unlock()
-	if v.tx==nil {
-		v.tx,err=v.construct()
+	if v.tx == nil {
+		v.tx, err = v.construct()
 	}
 	return v.tx, err
 }
 
 func (v *lazyTx) Cursor(bucket string) Cursor {
-	if _,ok:=v.forBuckets[bucket]; !ok {
+	if _, ok := v.forBuckets[bucket]; !ok {
 		return nil
 	}
 
-	tx,err:=v.getTx()
-	if err!=nil {
+	tx, err := v.getTx()
+	if err != nil {
 		log.Error("Fail to create tx", "err", err)
 	}
-	if tx!=nil {
+	if tx != nil {
 		return tx.Cursor(bucket)
 	}
 	return nil
@@ -236,7 +212,7 @@ func (v *lazyTx) Get(bucket string, key []byte) (val []byte, err error) {
 		return nil, ErrNotSnapshotBucket
 	}
 	tx, err := v.getTx()
-	if err!=nil {
+	if err != nil {
 		return nil, err
 	}
 	return tx.Get(bucket, key)
@@ -249,26 +225,26 @@ func (v *lazyTx) Commit(ctx context.Context) error {
 func (v *lazyTx) Rollback() {
 	v.Lock()
 	defer v.Unlock()
-	if v.tx!=nil {
+	if v.tx != nil {
 		v.tx.Rollback()
 	}
 }
 
 func (v *lazyTx) BucketSize(bucket string) (uint64, error) {
-	if _,ok:=v.forBuckets[bucket]; !ok {
-		return 0,nil
+	if _, ok := v.forBuckets[bucket]; !ok {
+		return 0, nil
 	}
-	tx,err:=v.getTx()
-	if err !=nil {
+	tx, err := v.getTx()
+	if err != nil {
 		return 0, err
 	}
 	return tx.BucketSize(bucket)
 }
 
-
 type snapshotTX struct {
-	dbTX Tx
-	snTX Tx
+	dbTX       Tx
+	snTX       Tx
+	forBuckets map[string]dbutils.BucketConfigItem
 }
 
 func (s *snapshotTX) Commit(ctx context.Context) error {
@@ -282,52 +258,53 @@ func (s *snapshotTX) Rollback() {
 }
 
 func (s *snapshotTX) Cursor(bucket string) Cursor {
-	snCursor:=s.snTX.Cursor(bucket)
+	snCursor := s.snTX.Cursor(bucket)
 	//check snapshot bucket
-	if snCursor==nil {
+	if snCursor == nil {
 		return s.dbTX.Cursor(bucket)
 	}
 	return &snapshotCursor{
-				snCursor: snCursor,
-				dbCursor: s.dbTX.Cursor(bucket),
-			}
+		snCursor: snCursor,
+		dbCursor: s.dbTX.Cursor(bucket),
+	}
 }
 
 func (s *snapshotTX) Get(bucket string, key []byte) (val []byte, err error) {
-	v,err:=s.snTX.Get(bucket, key)
-	switch  {
-	case err==ErrNotSnapshotBucket:
+	_, ok := s.forBuckets[bucket]
+	if !ok {
 		return s.dbTX.Get(bucket, key)
-	case err==nil && v!=nil:
+	}
+	v, err := s.dbTX.Get(bucket, key)
+	switch {
+	case err == nil && v != nil:
 		return v, nil
-	case err!=nil && err!=ErrKeyNotFound:
+	case err != nil && err != ErrKeyNotFound:
 		return nil, err
 	}
-	return s.dbTX.Get(bucket, key)
+	return s.snTX.Get(bucket, key)
 }
 
 func (s *snapshotTX) BucketSize(name string) (uint64, error) {
-	dbSize,err:=s.snTX.BucketSize(name)
-	if err!=nil {
+	dbSize, err := s.snTX.BucketSize(name)
+	if err != nil {
 		return 0, fmt.Errorf("db err %w", err)
 	}
-	snSize,err:=s.dbTX.BucketSize(name)
-	if err!=nil {
+	snSize, err := s.dbTX.BucketSize(name)
+	if err != nil {
 		return 0, fmt.Errorf("Snapshot db err %w", err)
 	}
-	return dbSize+snSize, nil
+	return dbSize + snSize, nil
 }
 
 type snapshotCursor struct {
 	snCursor Cursor
 	dbCursor Cursor
 
-	lastDBKey []byte
+	lastDBKey   []byte
 	lastSNDBKey []byte
-	lastDBVal []byte
+	lastDBVal   []byte
 	lastSNDBVal []byte
-	keyCmp int
-
+	keyCmp      int
 }
 
 func (s *snapshotCursor) Prefix(v []byte) Cursor {
@@ -349,20 +326,20 @@ func (s *snapshotCursor) NoValues() NoValuesCursor {
 func (s *snapshotCursor) First() ([]byte, []byte, error) {
 	var err error
 	s.lastSNDBKey, s.lastSNDBVal, err = s.snCursor.First()
-	if err!=nil {
+	if err != nil {
 		return nil, nil, err
 	}
 	s.lastDBKey, s.lastDBVal, err = s.dbCursor.First()
-	if err!=nil {
+	if err != nil {
 		return nil, nil, err
 	}
-	cmp, br:=common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
+	cmp, br := common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
 	if br {
-		return nil,nil,nil
+		return nil, nil, nil
 	}
 
-	s.keyCmp=cmp
-	if cmp <=0 {
+	s.keyCmp = cmp
+	if cmp <= 0 {
 		return s.lastDBKey, s.lastDBVal, nil
 	} else {
 		return s.lastSNDBKey, s.lastSNDBVal, nil
@@ -372,20 +349,20 @@ func (s *snapshotCursor) First() ([]byte, []byte, error) {
 func (s *snapshotCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	var err error
 	s.lastSNDBKey, s.lastSNDBVal, err = s.snCursor.Seek(seek)
-	if err!=nil {
+	if err != nil {
 		return nil, nil, err
 	}
 	s.lastDBKey, s.lastDBVal, err = s.dbCursor.Seek(seek)
-	if err!=nil {
+	if err != nil {
 		return nil, nil, err
 	}
-	cmp, br:=common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
+	cmp, br := common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
 	if br {
-		return nil,nil,nil
+		return nil, nil, nil
 	}
 
-	s.keyCmp=cmp
-	if cmp <=0 {
+	s.keyCmp = cmp
+	if cmp <= 0 {
 		return s.lastDBKey, s.lastDBVal, nil
 	} else {
 		return s.lastSNDBKey, s.lastSNDBVal, nil
@@ -398,26 +375,26 @@ func (s *snapshotCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
 
 func (s *snapshotCursor) Next() ([]byte, []byte, error) {
 	var err error
-	if s.keyCmp>=0 {
+	if s.keyCmp >= 0 {
 		s.lastSNDBKey, s.lastSNDBVal, err = s.snCursor.Next()
 	}
-	if err!=nil {
+	if err != nil {
 		return nil, nil, err
 	}
-	if s.keyCmp<=0 {
+	if s.keyCmp <= 0 {
 		s.lastDBKey, s.lastDBVal, err = s.dbCursor.Next()
 	}
-	if err!=nil {
+	if err != nil {
 		return nil, nil, err
 	}
 
-	cmp, br:=common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
+	cmp, br := common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
 	if br {
-		return nil,nil,nil
+		return nil, nil, nil
 	}
 
-	s.keyCmp=cmp
-	if cmp <=0 {
+	s.keyCmp = cmp
+	if cmp <= 0 {
 		return s.lastDBKey, s.lastDBVal, nil
 	} else {
 		return s.lastSNDBKey, s.lastSNDBVal, nil
@@ -446,27 +423,26 @@ func (s *snapshotCursor) SeekExact(key []byte) ([]byte, error) {
 
 func (s *snapshotCursor) Last() ([]byte, []byte, error) {
 	var err error
-	s.lastSNDBKey, s.lastSNDBVal, err = s.snCursor.First()
-	if err!=nil {
+	s.lastSNDBKey, s.lastSNDBVal, err = s.snCursor.Last()
+	if err != nil {
 		return nil, nil, err
 	}
-	s.lastDBKey, s.lastDBVal, err = s.dbCursor.First()
-	if err!=nil {
+	s.lastDBKey, s.lastDBVal, err = s.dbCursor.Last()
+	if err != nil {
 		return nil, nil, err
 	}
-	cmp, br:=common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
+	cmp, br := common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
 	if br {
-		return nil,nil,nil
+		return nil, nil, nil
 	}
 
-	s.keyCmp=cmp
-	if cmp >=0 {
+	s.keyCmp = cmp
+	if cmp >= 0 {
 		return s.lastDBKey, s.lastDBVal, nil
 	} else {
 		return s.lastSNDBKey, s.lastSNDBVal, nil
 	}
 }
-
 
 /*
 number=10487424
