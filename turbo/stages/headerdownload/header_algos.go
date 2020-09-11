@@ -241,7 +241,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 			blockHeight: newAnchorHeader.Number.Uint64(),
 		}
 		hd.anchors[newAnchorHeader.ParentHash] = append(hd.anchors[newAnchorHeader.ParentHash], newAnchor)
-		heap.Push(hd.requestQueue, &RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime})
+		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime})
 
 		// Add all headers in the segments as tips to this anchor
 		// Iterate in reverse order to be able to compute cumulative difficulty along the way
