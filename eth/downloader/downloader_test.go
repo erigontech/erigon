@@ -40,17 +40,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const OwerwriteBlockCacheItems = 1024
-const OwerwriteMaxForkAncestry = 3000
+const OverwriteBlockCacheItems = 1024
+const OverwriteMaxForkAncestry = 3000
 
 // Reduce some of the parameters to make the tester faster.
 func init() {
-	blockCacheItems = OwerwriteBlockCacheItems
+	blockCacheMaxItems = OverwriteBlockCacheItems
 	fsHeaderSafetyNet = 256
 	fsHeaderContCheck = 50 * time.Millisecond
-	fullMaxForkAncestry = 10000
-	lightMaxForkAncestry = 10000
-	blockCacheMaxItems = 1024
+	fullMaxForkAncestry = OverwriteMaxForkAncestry
 	fsHeaderContCheck = 500 * time.Millisecond
 }
 
@@ -1277,7 +1275,7 @@ func testFailedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 	defer tester.terminate()
 	defer tester.peerDb.Close()
 
-	chain := testChainBase.shorten(blockCacheItems - 15)
+	chain := testChainBase.shorten(blockCacheMaxItems - 15)
 
 	// Set a sync init hook to catch progress changes
 	starting := make(chan struct{})
