@@ -630,8 +630,12 @@ func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, 
 // (excluding Proof Of Work validity)
 func (hd *HeaderDownload) anchorParentValid(anchor *Anchor, parent *types.Header) bool {
 	if anchor.blockHeight+1 != parent.Number.Uint64() {
+		fmt.Printf("anchor.blockHeight(%d)+1 != parent.Number(%d)\n", anchor.blockHeight+1, parent.Number.Uint64())
 		return false
 	}
 	childDifficulty := hd.calcDifficultyFunc(anchor.timestamp, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
+	if anchor.difficulty.ToBig().Cmp(childDifficulty) != 0 {
+		fmt.Printf("anchor.difficulty (%s) != childDifficulty (%s)\n", anchor.difficulty.ToBig(), childDifficulty)
+	}
 	return anchor.difficulty.ToBig().Cmp(childDifficulty) == 0
 }
