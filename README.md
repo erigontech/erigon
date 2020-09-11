@@ -152,6 +152,8 @@ debug_storageRangeAt
 debug_traceTransaction
 net_peerCount*
 net_version
+web3_clientVersion
+web3_sha3
 trace_filter
 ```
 
