@@ -103,7 +103,7 @@ func dummyPeer(id string) *peerConnection {
 }
 
 func TestBasics(t *testing.T) {
-	q := newQueue(10)
+	q := newQueue(10, 10)
 	if !q.Idle() {
 		t.Errorf("new queue should be idle")
 	}
@@ -180,7 +180,7 @@ func TestBasics(t *testing.T) {
 }
 
 func TestEmptyBlocks(t *testing.T) {
-	q := newQueue(10)
+	q := newQueue(10, 10)
 
 	q.Prepare(1, FastSync)
 	// Schedule a batch of headers
@@ -250,7 +250,7 @@ func XTestDelivery(t *testing.T) {
 		log.Root().SetHandler(log.StdoutHandler)
 
 	}
-	q := newQueue(10)
+	q := newQueue(10, 10)
 	var wg sync.WaitGroup
 	q.Prepare(1, FastSync)
 	wg.Add(1)
