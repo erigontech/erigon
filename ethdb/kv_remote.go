@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -85,10 +86,24 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open() (KV, Backend, error) {
-	var dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
-		grpc.WithInsecure(),
+func (opts remoteOpts) Open(certFile string) (KV, Backend, error) {
+	var dialOpts []grpc.DialOption
+	if certFile == "" {
+		dialOpts = []grpc.DialOption{
+			grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
+			grpc.WithInsecure(),
+		}
+	} else {
+		creds, err := credentials.NewClientTLSFromFile(certFile, "")
+
+		if err != nil {
+			return nil, nil, err
+		}
+
+		dialOpts = []grpc.DialOption{
+			grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
+			grpc.WithTransportCredentials(creds),
+		}
 	}
 
 	if opts.inMemConn != nil {
@@ -129,7 +144,7 @@ func (opts remoteOpts) Open() (KV, Backend, error) {
 }
 
 func (opts remoteOpts) MustOpen() (KV, Backend) {
-	db, txPool, err := opts.Open()
+	db, txPool, err := opts.Open("")
 	if err != nil {
 		panic(err)
 	}
