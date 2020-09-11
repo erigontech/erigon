@@ -85,7 +85,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		// This will cause the sync return to the header stage
 		return false, nil
 	}
-	d.queue.Reset(blockCacheItems)
+	d.queue.Reset(blockCacheMaxItems, blockCacheInitialItems)
 	if hashCount == 0 {
 		// No more bodies to download
 		return false, nil
