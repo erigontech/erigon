@@ -43,7 +43,7 @@ var (
 )
 
 // The common prefix of all test chains:
-var testChainBase = newTestChain(OwerwriteBlockCacheItems+200, testDb, testGenesis)
+var testChainBase = newTestChain(OverwriteBlockCacheItems+200, testDb, testGenesis)
 
 // Different forks on top of the base chain:
 var testChainForkLightA, testChainForkLightB, testChainForkHeavy *testChain

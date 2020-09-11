@@ -62,6 +62,11 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		panic(err)
+	}
+
 	ch := ctx.Done()
 
 	expectedAccountChanges := make(map[uint64][]byte)
@@ -110,7 +115,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		stopAt = block
 	}
 
-	for progress(stages.Execution).BlockNumber < stopAt {
+	for progress(stages.Execution).BlockNumber < stopAt || (unwind <= unwindEvery) {
 		select {
 		case <-ctx.Done():
 			return nil
@@ -123,7 +128,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		// All stages forward to `execStage + unwindEvery` block
 		execAtBlock := progress(stages.Execution).BlockNumber
-		execToBlock := execAtBlock + unwindEvery
+		execToBlock := execAtBlock - unwind + unwindEvery
 		if execToBlock > stopAt {
 			execToBlock = stopAt + 1
 			unwind = 0
@@ -131,7 +136,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		// set block limit of execute stage
 		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-			if err := stagedsync.SpawnExecuteBlocksStage(stageState, tx, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, false, hdd, changeSetHook); err != nil {
+			if err := stagedsync.SpawnExecuteBlocksStage(stageState, tx, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, sm.Receipts, hdd, changeSetHook); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 			return nil

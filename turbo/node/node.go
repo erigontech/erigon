@@ -43,7 +43,6 @@ func (tg *TurboGethNode) run() {
 }
 
 type Params struct {
-	GitDate       string
 	GitCommit     string
 	CustomBuckets dbutils.BucketsCfg
 }
@@ -75,12 +74,12 @@ func makeEthConfig(ctx *cli.Context, node *node.Node) *eth.Config {
 func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
 	nodeConfig := node.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
-	if commit, date := p.GitCommit, p.GitDate; commit != "" && date != "" {
-		nodeConfig.Version = params.VersionWithCommit(commit, date)
+	if commit := p.GitCommit; commit != "" {
+		nodeConfig.Version = params.VersionWithCommit(commit, "")
 	} else {
 		nodeConfig.Version = params.Version
 	}
-	nodeConfig.IPCPath = "tg.ipc"
+	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "turbo-geth"
 	nodeConfig.NoUSB = true
 

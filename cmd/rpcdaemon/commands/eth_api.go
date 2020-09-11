@@ -39,6 +39,7 @@ type EthAPI interface {
 	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error)
 	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
+	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -115,7 +116,6 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 }
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
-// TODO(tjayrush): Copied from ./internal/ethapi/api.go - remove this comment
 type RPCTransaction struct {
 	BlockHash        *common.Hash    `json:"blockHash"`
 	BlockNumber      *hexutil.Big    `json:"blockNumber"`
@@ -135,7 +135,6 @@ type RPCTransaction struct {
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-// TODO(tjayrush): Copied from ./internal/ethapi/api.go - remove this comment
 func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
 	var signer types.Signer = types.FrontierSigner{}
 	if tx.Protected() {
@@ -236,4 +235,29 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 
 	return hexutil.Encode(res), nil
+}
+
+// GetCode returns the code stored at the given address in the state for the given block number.
+func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
+	if err != nil {
+		return nil, err
+	}
+
+	reader := adapter.NewStateReader(api.db, blockNumber)
+	acc, err := reader.ReadAccountData(address)
+	if err != nil {
+		return nil, err
+	}
+
+	if acc == nil {
+		return nil, fmt.Errorf("account %s not found", address)
+	}
+
+	res, err := reader.ReadAccountCode(address, acc.CodeHash)
+	if err != nil {
+		return nil, err
+	}
+
+	return res, nil
 }

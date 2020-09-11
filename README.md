@@ -137,6 +137,7 @@ eth_getBlockByHash
 eth_getBlockTransactionCountByHash
 eth_getBlockTransactionCountByNumber
 eth_getBalance
+eth_getCode
 eth_getLogs
 eth_getStorageAt
 eth_getTransactionReceipt
@@ -152,6 +153,8 @@ debug_storageRangeAt
 debug_traceTransaction
 net_peerCount*
 net_version
+web3_clientVersion
+web3_sha3
 trace_filter
 ```
 

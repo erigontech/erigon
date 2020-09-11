@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
 const (
@@ -29,6 +30,7 @@ type Buffer interface {
 	GetEntries() []sortableBufferEntry
 	Sort()
 	CheckFlushSize() bool
+	SetComparator(cmp dbutils.CmpFunc)
 }
 
 type sortableBufferEntry struct {
@@ -54,6 +56,7 @@ type sortableBuffer struct {
 	entries     []sortableBufferEntry
 	size        int
 	optimalSize int
+	comparator  dbutils.CmpFunc
 }
 
 func (b *sortableBuffer) Put(k, v []byte) {
@@ -70,7 +73,14 @@ func (b *sortableBuffer) Len() int {
 	return len(b.entries)
 }
 
+func (b *sortableBuffer) SetComparator(cmp dbutils.CmpFunc) {
+	b.comparator = cmp
+}
+
 func (b *sortableBuffer) Less(i, j int) bool {
+	if b.comparator != nil {
+		return b.comparator(b.entries[i].key, b.entries[j].key, b.entries[i].value, b.entries[j].value) < 0
+	}
 	return bytes.Compare(b.entries[i].key, b.entries[j].key) < 0
 }
 
@@ -111,6 +121,7 @@ type appendSortableBuffer struct {
 	size        int
 	optimalSize int
 	sortedBuf   []sortableBufferEntry
+	comparator  dbutils.CmpFunc
 }
 
 func (b *appendSortableBuffer) Put(k, v []byte) {
@@ -122,6 +133,10 @@ func (b *appendSortableBuffer) Put(k, v []byte) {
 	b.size += len(v)
 	stored = append(stored, v...)
 	b.entries[ks] = stored
+}
+
+func (b *appendSortableBuffer) SetComparator(cmp dbutils.CmpFunc) {
+	b.comparator = cmp
 }
 
 func (b *appendSortableBuffer) Size() int {
@@ -139,6 +154,9 @@ func (b *appendSortableBuffer) Sort() {
 }
 
 func (b *appendSortableBuffer) Less(i, j int) bool {
+	if b.comparator != nil {
+		return b.comparator(b.sortedBuf[i].key, b.sortedBuf[j].key, b.sortedBuf[i].value, b.sortedBuf[j].value) < 0
+	}
 	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
 }
 
@@ -176,6 +194,11 @@ type oldestEntrySortableBuffer struct {
 	size        int
 	optimalSize int
 	sortedBuf   []sortableBufferEntry
+	comparator  dbutils.CmpFunc
+}
+
+func (b *oldestEntrySortableBuffer) SetComparator(cmp dbutils.CmpFunc) {
+	b.comparator = cmp
 }
 
 func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
@@ -209,6 +232,9 @@ func (b *oldestEntrySortableBuffer) Sort() {
 }
 
 func (b *oldestEntrySortableBuffer) Less(i, j int) bool {
+	if b.comparator != nil {
+		return b.comparator(b.sortedBuf[i].key, b.sortedBuf[j].key, b.sortedBuf[i].value, b.sortedBuf[j].value) < 0
+	}
 	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
 }
 

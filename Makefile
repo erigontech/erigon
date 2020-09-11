@@ -21,12 +21,12 @@ docker-compose:
 	docker-compose up
 
 geth:
-	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.GitCommit=${GIT_COMMIT} -X main.GitDate=$(shell date +%Y.%m.%d.%H%M%S)" ./cmd/tg 
+	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 tg:
-	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.GitCommit=${GIT_COMMIT} -X main.GitDate=$(shell date +%Y.%m.%d.%H%M%S)" ./cmd/tg 
+	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
@@ -65,7 +65,7 @@ pics:
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
 rpcdaemon:
-	$(GOBUILD) -o $(GOBIN)/rpcdaemon ./cmd/rpcdaemon 
+	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/rpcdaemon 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
