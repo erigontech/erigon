@@ -547,7 +547,7 @@ var (
 		Usage: "API's offered over the HTTP-RPC interface",
 		Value: "",
 	}
-	NoTLSFlag = cli.BoolFlag{
+	NoTLSFlag = cli.BoolTFlag{
 		Name:  "notls",
 		Usage: "Disable TLS handshake",
 	}
