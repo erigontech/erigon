@@ -18,11 +18,59 @@ var (
 	_ Cursor         = &snapshotCursor{}
 )
 
-func (v *lazyTx) NoValuesCursor(bucket string) NoValuesCursor {
+func (s *snapshotTX) CursorDupSort(bucket string) CursorDupSort {
 	panic("implement me")
 }
 
-func (s *snapshotTX) NoValuesCursor(bucket string) NoValuesCursor {
+func (s *snapshotTX) CursorDupFixed(bucket string) CursorDupFixed {
+	panic("implement me")
+}
+
+func (s *snapshotTX) Comparator(bucket string) dbutils.CmpFunc {
+	panic("implement me")
+}
+
+func (s *snapshotTX) Cmp(bucket string, a, b []byte) int {
+	panic("implement me")
+}
+
+func (s *snapshotTX) DCmp(bucket string, a, b []byte) int {
+	panic("implement me")
+}
+
+func (v *lazyTx) CursorDupSort(bucket string) CursorDupSort {
+	panic("implement me")
+}
+
+func (v *lazyTx) CursorDupFixed(bucket string) CursorDupFixed {
+	panic("implement me")
+}
+
+func (v *lazyTx) Comparator(bucket string) dbutils.CmpFunc {
+	panic("implement me")
+}
+
+func (v *lazyTx) Cmp(bucket string, a, b []byte) int {
+	panic("implement me")
+}
+
+func (v *lazyTx) DCmp(bucket string, a, b []byte) int {
+	panic("implement me")
+}
+
+func (s *snapshotCursor) Prev() ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (s *snapshotCursor) Current() ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (s *snapshotCursor) DeleteCurrent() error {
+	panic("implement me")
+}
+
+func (s *snapshotCursor) Count() (uint64, error) {
 	panic("implement me")
 }
 
@@ -316,10 +364,6 @@ func (s *snapshotCursor) MatchBits(u uint) Cursor {
 }
 
 func (s *snapshotCursor) Prefetch(v uint) Cursor {
-	panic("implement me")
-}
-
-func (s *snapshotCursor) NoValues() NoValuesCursor {
 	panic("implement me")
 }
 
