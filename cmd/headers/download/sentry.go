@@ -54,6 +54,11 @@ type NewBlockFromSentry struct {
 	eth.NewBlockData
 }
 
+type BlockHeadersFromSentry struct {
+	SentryMsg
+	headers []*types.Header
+}
+
 type PenaltyMsg struct {
 	SentryMsg
 	penalty headerdownload.Penalty
@@ -64,6 +69,7 @@ func makeP2PServer(
 	peerRwMap *sync.Map,
 	protocols []string,
 	newBlockCh chan NewBlockFromSentry,
+	headersCh chan BlockHeadersFromSentry,
 	penaltyCh chan PenaltyMsg,
 ) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
@@ -103,6 +109,7 @@ func makeP2PServer(
 					params.MainnetChainConfig,
 					0, /* head */
 					newBlockCh,
+					headersCh,
 					penaltyCh,
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peer.ID(), err))
@@ -135,6 +142,7 @@ func runPeer(
 	chainConfig *params.ChainConfig,
 	head uint64,
 	newBlockCh chan NewBlockFromSentry,
+	headersCh chan BlockHeadersFromSentry,
 	_ chan PenaltyMsg,
 ) error {
 	forkId := forkid.NewID(chainConfig, genesisHash, head)
@@ -222,6 +230,7 @@ func runPeer(
 				hashesStr.WriteString(fmt.Sprintf("%x-%x(%d)", hash[:4], hash[28:], header.Number.Uint64()))
 			}
 			log.Info(fmt.Sprintf("[%s] BlockHeadersMsg{%s}", peer.ID().String(), hashesStr.String()))
+			headersCh <- BlockHeadersFromSentry{SentryMsg: SentryMsg{sentryId: 0, requestId: 0}, headers: headers}
 		case eth.GetBlockBodiesMsg:
 			// Decode the retrieval message
 			msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
@@ -339,8 +348,9 @@ func Download(filesDir string) error {
 	newBlockCh := make(chan NewBlockFromSentry)
 	penaltyCh := make(chan PenaltyMsg)
 	reqHeadersCh := make(chan headerdownload.HeaderRequest)
+	headersCh := make(chan BlockHeadersFromSentry)
 	var peerHeightMap, peerRwMap sync.Map
-	server, err := makeP2PServer(&peerHeightMap, &peerRwMap, []string{eth.ProtocolName}, newBlockCh, penaltyCh)
+	server, err := makeP2PServer(&peerHeightMap, &peerRwMap, []string{eth.ProtocolName}, newBlockCh, headersCh, penaltyCh)
 	if err != nil {
 		return err
 	}
@@ -348,7 +358,7 @@ func Download(filesDir string) error {
 	if err = server.Start(); err != nil {
 		return fmt.Errorf("could not start server: %w", err)
 	}
-	go Downloader(ctx, filesDir, newBlockCh, penaltyCh, reqHeadersCh)
+	go Downloader(ctx, filesDir, newBlockCh, headersCh, penaltyCh, reqHeadersCh)
 
 	go func() {
 		for {

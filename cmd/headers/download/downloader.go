@@ -66,7 +66,14 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 }
 
 // Downloader needs to be run from a go-routine, and it is in the sole control of the HeaderDownloader object
-func Downloader(ctx context.Context, filesDir string, newBlockCh chan NewBlockFromSentry, penaltyCh chan PenaltyMsg, reqHeadersCh chan headerdownload.HeaderRequest) {
+func Downloader(
+	ctx context.Context,
+	filesDir string,
+	newBlockCh chan NewBlockFromSentry,
+	headersCh chan BlockHeadersFromSentry,
+	penaltyCh chan PenaltyMsg,
+	reqHeadersCh chan headerdownload.HeaderRequest,
+) {
 	//config := eth.DefaultConfig.Ethash
 	engine := ethash.New(ethash.Config{
 		CachesInMem:      1,
@@ -110,6 +117,19 @@ func Downloader(ctx context.Context, filesDir string, newBlockCh chan NewBlockFr
 				continue
 			}
 			log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d}", newBlockReq.Block.NumberU64()))
+		case headersReq := <-headersCh:
+			if segments, penalty, err := hd.HandleHeadersMsg(headersReq.headers); err == nil {
+				if penalty == headerdownload.NoPenalty {
+					for _, segment := range segments {
+						processSegment(hd, segment)
+					}
+				} else {
+					penaltyCh <- PenaltyMsg{SentryMsg: headersReq.SentryMsg, penalty: penalty}
+				}
+			} else {
+				log.Error("HandleHeadersMsg failed", "error", err)
+			}
+			log.Info(fmt.Sprintf("HeadersMsg processed"))
 		case <-hd.RequestQueueTimer.C:
 			fmt.Printf("RequestQueueTimer ticked\n")
 		case <-ctx.Done():
