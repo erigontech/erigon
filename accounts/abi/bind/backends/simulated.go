@@ -194,10 +194,6 @@ func (b *SimulatedBackend) Rollback() {
 	b.emptyPendingBlock()
 }
 
-func (b *SimulatedBackend) rollback() {
-	blocks, _ := core.GenerateChain(b.config, b.blockchain.CurrentBlock(), ethash.NewFaker(), b.database, 1, func(int, *core.BlockGen) {})
-	stateDB, _ := b.blockchain.State()
-
 func (b *SimulatedBackend) emptyPendingBlock() {
 	blocks, receipts, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
 	b.pendingBlock = blocks[0]
@@ -267,7 +263,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 		return nil, err
 	}
 	var val uint256.Int
-	statedb.GetState(contract, &key, &val)
+	stateDB.GetState(contract, &key, &val)
 	return val.Bytes(), nil
 }
 
@@ -625,7 +621,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	evmContext := core.NewEVMContext(msg, block.Header(), b.blockchain, nil)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
-	vmEnv := vm.NewEVM(evmContext, stateDB, b.config, vm.Config{})
+	vmEnv := vm.NewEVM(evmContext, statedb, b.config, vm.Config{})
 	gasPool := new(core.GasPool).AddGas(math.MaxUint64)
 
 	return core.NewStateTransition(vmEnv, msg, gasPool).TransitionDb()
@@ -803,14 +799,14 @@ type callMsg struct {
 	ethereum.CallMsg
 }
 
-func (m callmsg) From() common.Address   { return m.CallMsg.From }
-func (m callmsg) Nonce() uint64          { return 0 }
-func (m callmsg) CheckNonce() bool       { return false }
-func (m callmsg) To() *common.Address    { return m.CallMsg.To }
-func (m callmsg) GasPrice() *uint256.Int { return m.CallMsg.GasPrice }
-func (m callmsg) Gas() uint64            { return m.CallMsg.Gas }
-func (m callmsg) Value() *uint256.Int    { return m.CallMsg.Value }
-func (m callmsg) Data() []byte           { return m.CallMsg.Data }
+func (m callMsg) From() common.Address   { return m.CallMsg.From }
+func (m callMsg) Nonce() uint64          { return 0 }
+func (m callMsg) CheckNonce() bool       { return false }
+func (m callMsg) To() *common.Address    { return m.CallMsg.To }
+func (m callMsg) GasPrice() *uint256.Int { return m.CallMsg.GasPrice }
+func (m callMsg) Gas() uint64            { return m.CallMsg.Gas }
+func (m callMsg) Value() *uint256.Int    { return m.CallMsg.Value }
+func (m callMsg) Data() []byte           { return m.CallMsg.Data }
 
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.
@@ -822,7 +818,7 @@ type filterBackend struct {
 func (fb *filterBackend) ChainDb() ethdb.Database  { return fb.db }
 func (fb *filterBackend) EventMux() *event.TypeMux { panic("not supported") }
 
-func (fb *filterBackend) HeaderByNumber(_ context.Context, block rpc.BlockNumber) (*types.Header, error) {
+func (fb *filterBackend) HeaderByNumber(ctx context.Context, block rpc.BlockNumber) (*types.Header, error) {
 	if block == rpc.LatestBlockNumber {
 		return fb.b.HeaderByNumber(ctx, nil)
 	}
