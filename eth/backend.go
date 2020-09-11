@@ -228,7 +228,8 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
-			creds, err := credentials.NewServerTLSFromFile(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+			var creds credentials.TransportCredentials
+			creds, err = credentials.NewServerTLSFromFile(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
 			if err != nil {
 				return nil, err
 			}
