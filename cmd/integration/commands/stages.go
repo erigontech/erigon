@@ -205,11 +205,6 @@ func stageExec(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	sm, err := ethdb.GetStorageModeFromDB(db)
-	if err != nil {
-		panic(err)
-	}
-
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
@@ -224,7 +219,7 @@ func stageExec(ctx context.Context) error {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
 		return stagedsync.UnwindExecutionStage(u, stage4, db, false)
 	}
-	return stagedsync.SpawnExecuteBlocksStage(stage4, db, bc.Config(), bc, bc.GetVMConfig(), block, ch, sm.Receipts, hdd, nil)
+	return stagedsync.SpawnExecuteBlocksStage(stage4, db, bc.Config(), bc, bc.GetVMConfig(), block, ch, false, hdd, nil)
 }
 
 func stageIHash(ctx context.Context) error {
