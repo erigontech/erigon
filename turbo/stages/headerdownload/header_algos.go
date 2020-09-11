@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"math/big"
 	"os"
 	"sort"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -97,7 +97,7 @@ func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header) ([]*ChainSegme
 }
 
 // FindAnchors attempts to find anchors to which given chain segment can be attached to
-func (hd *HeaderDownload) FindAnchors(segment *ChainSegment) (found bool, start int, invalidAnchors []int) {
+func (hd *HeaderDownload) FindAnchors(segment *ChainSegment) (found bool, start int, anchorParent common.Hash, invalidAnchors []int) {
 	// Walk the segment from children towards parents
 	for i, header := range segment.headers {
 		headerHash := header.Hash()
@@ -109,10 +109,10 @@ func (hd *HeaderDownload) FindAnchors(segment *ChainSegment) (found bool, start 
 					invalidAnchors = append(invalidAnchors, anchorIdx)
 				}
 			}
-			return true, i, invalidAnchors
+			return true, i, headerHash, invalidAnchors
 		}
 	}
-	return false, 0, nil
+	return false, 0, common.Hash{}, nil
 }
 
 // InvalidateAnchors removes trees with given anchor hashes (belonging to the given anchor parent)
@@ -164,7 +164,7 @@ func (hd *HeaderDownload) FindTip(segment *ChainSegment) (found bool, end int, p
 	return false, len(segment.headers), NoPenalty
 }
 
-// VerifySeals verifies Proof Of Work for the part of the given chain segement
+// VerifySeals verifies Proof Of Work for the part of the given chain segment
 // It reports first verification error, or returns the powDepth that the anchor of this
 // chain segment should have, if created
 func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound bool, start, end int) (powDepth int, err error) {
@@ -327,7 +327,7 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 	if anchor, err = hd.addHeaderAsAnchor(anchorHeader, hd.initPowDepth, uint256.Int{}); err != nil {
 		return NoPenalty, err
 	}
-	heap.Push(hd.requestQueue, &RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
+	heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
 	cumulativeDifficulty := uint256.Int{}
 	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
 	for i := end - 1; i >= start; i-- {
@@ -391,7 +391,7 @@ func (h *Heap) Pop() interface{} {
 func (hd *HeaderDownload) RecoverFromFiles() error {
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	h := &Heap{}
 	heap.Init(h)
@@ -476,18 +476,39 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*Hea
 	if hd.requestQueue.Len() == 0 {
 		return nil
 	}
+	var prevTopTime uint64
+	if hd.requestQueue.Len() > 0 {
+		prevTopTime = (*hd.requestQueue)[0].waitUntil
+	}
 	var requests []*HeaderRequest
 	for peek := (*hd.requestQueue)[0]; hd.requestQueue.Len() > 0 && peek.waitUntil <= currentTime; peek = (*hd.requestQueue)[0] {
-		pop := heap.Pop(hd.requestQueue).(*RequestQueueItem)
-		if _, present := hd.anchors[pop.anchorParent]; present {
+		pop := heap.Pop(hd.requestQueue).(RequestQueueItem)
+		if anchors, present := hd.anchors[pop.anchorParent]; present {
 			// Anchor still exists after the timeout
 			//TODO: Figure out correct request length
-			requests = append(requests, &HeaderRequest{hash: pop.anchorParent, length: 16})
+			requests = append(requests, &HeaderRequest{Hash: pop.anchorParent, Number: anchors[0].blockHeight - 1, Length: 16})
 			pop.waitUntil = currentTime + timeout
 			heap.Push(hd.requestQueue, pop)
 		}
 	}
+	hd.resetRequestQueueTimer(prevTopTime, currentTime)
 	return requests
+}
+
+func (hd *HeaderDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64) {
+	var nextTopTime uint64
+	if hd.requestQueue.Len() > 0 {
+		nextTopTime = (*hd.requestQueue)[0].waitUntil
+	}
+	if nextTopTime == prevTopTime {
+		return // Nothing changed
+	}
+	if nextTopTime <= currentTime {
+		nextTopTime = currentTime
+	}
+	hd.RequestQueueTimer.Stop()
+	fmt.Printf("Recreating RequestQueueTimer for delay %d seconds\n", nextTopTime-currentTime)
+	hd.RequestQueueTimer = time.NewTimer(time.Duration(nextTopTime-currentTime) * time.Second)
 }
 
 func (hd *HeaderDownload) FlushBuffer() error {
