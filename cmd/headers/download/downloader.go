@@ -30,6 +30,7 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 		if _, err1 := hd.InvalidateAnchors(anchorParent, invalidAnchors); err1 != nil {
 			log.Error("Invalidation of anchor failed", "error", err1)
 		}
+		log.Warn(fmt.Sprintf("Invalidated anchors %v for %x", invalidAnchors, anchorParent))
 	}
 	foundTip, end, _ := hd.FindTip(segment) // We ignore penalty because we will check it as part of PoW check
 	var powDepth int
@@ -129,7 +130,7 @@ func Downloader(
 			} else {
 				log.Error("HandleHeadersMsg failed", "error", err)
 			}
-			log.Info(fmt.Sprintf("HeadersMsg processed"))
+			log.Info("HeadersMsg processed")
 		case <-hd.RequestQueueTimer.C:
 			fmt.Printf("RequestQueueTimer ticked\n")
 		case <-ctx.Done():

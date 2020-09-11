@@ -481,7 +481,8 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*Hea
 		prevTopTime = (*hd.requestQueue)[0].waitUntil
 	}
 	var requests []*HeaderRequest
-	for peek := (*hd.requestQueue)[0]; hd.requestQueue.Len() > 0 && peek.waitUntil <= currentTime; peek = (*hd.requestQueue)[0] {
+	peek := (*hd.requestQueue)[0]
+	for hd.requestQueue.Len() > 0 && peek.waitUntil <= currentTime {
 		pop := heap.Pop(hd.requestQueue).(RequestQueueItem)
 		if anchors, present := hd.anchors[pop.anchorParent]; present {
 			// Anchor still exists after the timeout
@@ -489,6 +490,9 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*Hea
 			requests = append(requests, &HeaderRequest{Hash: pop.anchorParent, Number: anchors[0].blockHeight - 1, Length: 16})
 			pop.waitUntil = currentTime + timeout
 			heap.Push(hd.requestQueue, pop)
+		}
+		if hd.requestQueue.Len() > 0 {
+			peek = (*hd.requestQueue)[0]
 		}
 	}
 	hd.resetRequestQueueTimer(prevTopTime, currentTime)
