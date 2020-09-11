@@ -29,7 +29,6 @@ func main() {
 		return cli.StartRpcServer(cmd.Context(), *cfg, apiList)
 	}
 
-
 	// Hacky way to get these strings into the commands package
 	commands.SetGitStrings(gitCommit, gitDate)
 	if err := cmd.ExecuteContext(utils.RootContext()); err != nil {
