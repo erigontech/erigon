@@ -169,7 +169,7 @@ func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
 	}
-	sim.SendTransaction(context.Background(), signedTx)
+	sim.SendTransaction(context.Background(), signedTx) //nolint:errcheck
 	// AdjustTime should fail on non-empty block
 	if err := sim.AdjustTime(time.Second); err == nil {
 		t.Error("Expected adjust time to error on non-empty block")
@@ -192,7 +192,7 @@ func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
 	}
-	sim.SendTransaction(context.Background(), signedTx2)
+	sim.SendTransaction(context.Background(), signedTx2) //nolint:errcheck
 	sim.Commit()
 	newTime = sim.pendingBlock.Time()
 	if newTime-prevTime >= uint64(time.Minute.Seconds()) {

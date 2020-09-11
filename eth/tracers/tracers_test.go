@@ -302,12 +302,12 @@ func jsonEqual(x, y interface{}) bool {
 	xTrace := new(callTrace)
 	yTrace := new(callTrace)
 	if xj, err := json.Marshal(x); err == nil {
-		json.Unmarshal(xj, xTrace)
+		json.Unmarshal(xj, xTrace) //nolint: errcheck
 	} else {
 		return false
 	}
 	if yj, err := json.Marshal(y); err == nil {
-		json.Unmarshal(yj, yTrace)
+		json.Unmarshal(yj, yTrace) //nolint: errcheck
 	} else {
 		return false
 	}
