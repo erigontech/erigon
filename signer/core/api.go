@@ -354,7 +354,7 @@ func (api *SignerAPI) startUSBListener() {
 					copy(nextPath[:], base[:])
 
 					for i := 0; i < numToDerive; i++ {
-						acc, err := event.Wallet.Derive(nextPath, true)
+						acc, err := event.Wallet.Derive(nextPath, true) //nolint:scopelint
 						if err != nil {
 							log.Warn("Account derivation failed", "error", err)
 						} else {
