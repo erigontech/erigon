@@ -1,0 +1,238 @@
+commit 0287d54847d3297f3ced62cd83a4c95ccbe0045b
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Sep 9 11:22:11 2020 +0300
+
+    params: release Geth v1.9.21
+
+commit 24562d9b0c9ef1d92388d727bb08c8aa90359ea2
+Merge: 86bcbb0d7 dc681fc1f
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Sep 9 10:34:53 2020 +0300
+
+    Merge pull request #21534 from karalabe/cht-1.9.21
+    
+    params: update CHTs for v1.9.21 release
+
+commit dc681fc1f6a183a476446167695e5e6fa0e5d4f8
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Sep 9 10:33:20 2020 +0300
+
+    params: update CHTs for v1.9.21 release
+
+commit 86bcbb0d79859266d4ce69ee99408aaff6018830
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Tue Sep 8 20:02:14 2020 +0000
+
+    .github: remove whisper from CODEOWNERS (#21527)
+
+commit 066c75531d5668366dc0cf9a8a2d9cb2addbc487
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Tue Sep 8 14:13:48 2020 +0000
+
+    build: remove wnode from the list of packages binaries (#21526)
+
+commit 8327d1fdfc42b0d73520fe1af1e875b960f03ee1
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Sep 8 13:07:55 2020 +0200
+
+    accounts/usbwallet, signer/core: show accounts from ledger legacy derivation paths (#21517)
+    
+    * accounts/usbwallet, signer/core: un-hide accounts from ledger legacy derivation paths
+    
+    * Update accounts/usbwallet/wallet.go
+    
+    * Update signer/core/api.go
+    
+    * Update signer/core/api.go
+
+commit d54f2f2e5e393741ff887a364877c0fddd5571a5
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Tue Sep 8 08:47:48 2020 +0000
+
+    whisper: remove whisper (#21487)
+    
+    * whisper: remove whisper
+    
+    * Update cmd/geth/config.go
+    
+    Co-authored-by: Marius van der Wijden <m.vanderwijden@live.de>
+    
+    * cmd/geth: warn on enabling whisper + remove more whisper deps
+    
+    * mobile: remove all whisper references
+    
+    Co-authored-by: Marius van der Wijden <m.vanderwijden@live.de>
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+
+commit c5d28f0b2765e65f1b5cd733d7190d36a7410e32
+Author: Osoro Bironga <fanosoro@gmail.com>
+Date:   Mon Sep 7 14:07:15 2020 +0300
+
+    accounts: abi/bid/backends; cleaned doc errors, camelCase refactors and anonymous variable assignments (#21514)
+    
+    Co-authored-by: Osoro Bironga <osoro@doctaroo.com>
+
+commit de971cc8457601691e97045f30e1419ecc2ac103
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Mon Sep 7 10:52:01 2020 +0200
+
+    eth: added trace_call to trace on top of arbitrary blocks (#21338)
+    
+    * eth: Added TraceTransactionPending
+    
+    * eth: Implement Trace_Call, remove traceTxPending
+    
+    * eth: debug_call -> debug_traceCall, recompute tx environment if pruned
+    
+    * eth: fix nil panic
+    
+    * eth: improve block retrieving logic in tracers
+    
+    * internal/web3ext: add debug_traceCall to console
+
+commit f86324edb7897b539cd44ce9710095d570e27699
+Merge: 3010f9fc7 eeaf19163
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Sep 2 13:52:51 2020 +0300
+
+    Merge pull request #21504 from karalabe/trie-path-sync
+    
+    core, eth, trie: prepare trie sync for path based operation
+
+commit eeaf1916330720d2b1c7071086a7fd6070e9eb67
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Fri Aug 28 10:50:37 2020 +0300
+
+    core, eth, trie: prepare trie sync for path based operation
+
+commit 3010f9fc759a9f461dfeba229622352f65186aaf
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Wed Sep 2 11:01:46 2020 +0200
+
+    eth/downloader: change intial download size (#21366)
+    
+    This changes how the downloader works, a little bit. Previously, when block sync started,
+    we immediately started filling up to 8192 blocks. Usually this is fine, blocks are small
+    in the early numbers. The threshold then is lowered as we measure the size of the blocks
+    that are filled.
+    
+    However, if the node is shut down and restarts syncing while we're in a heavy segment,
+    that might be bad. This PR introduces a more conservative initial threshold of 2K blocks
+    instead.
+
+commit d90bbce954eb43bf8bb76e3e9b694b8c7953bb47
+Author: ucwong <ucwong@126.com>
+Date:   Tue Sep 1 18:56:22 2020 +0800
+
+    go.mod : update goja dependency (#21432)
+
+commit 5cdb476dd19096bdf63085638bec9a58416c5bcd
+Author: Giuseppe Bertone <bertone.giuseppe@gmail.com>
+Date:   Tue Sep 1 11:02:12 2020 +0200
+
+    "Downloader queue stats" is now provided once per minute (#21455)
+    
+    * "Downloader queue stats" is now a DEBUG information
+    
+    I think this info is more a DEBUG related information then an INFO. If it must remains an INFO, maybe it can be slow down to one time every 5 minutes or so.
+    
+    * Update queue.go
+    
+    "Downloader queue stats" information is now provided once every minute instead of once every 10 seconds.
+
+commit ff23e265cd2ff13f33e145071b317fc25f0a2b23
+Author: Hanjiang Yu <delacroix.yu@gmail.com>
+Date:   Tue Sep 1 16:23:04 2020 +0800
+
+    internal: fix personal.sign() (#21503)
+
+commit 12d8570322aa44833a7b42d042da2bd69b2bb22d
+Author: Fuyang Deng <dengfuyang@outlook.com>
+Date:   Tue Sep 1 15:29:54 2020 +0800
+
+    accounts/abi: fix a bug in getTypeSize method (#21501)
+    
+    * accounts/abi: fix a bug in getTypeSize method
+    
+    e.g. for "Tuple[2]" type, the element of the array is a tuple type and the size of the tuple may not be 32.
+    
+    * accounts/abi: add unit test of getTypeSize method
+
+commit 5883afb3ef1e121e8625c2e1f4e929f333a65dd5
+Author: Felix Lange <fjl@twurst.com>
+Date:   Fri Aug 28 16:27:58 2020 +0200
+
+    rpc: fix issue with null JSON-RPC messages (#21497)
+
+commit 05280a7ae3f47adc8aeb9130c7f5404a42fb3a55
+Author: libotony <liboliqi@gmail.com>
+Date:   Thu Aug 27 17:33:45 2020 +0800
+
+    eth/tracers: revert reason in call_tracer + error for failed internal calls (#21387)
+    
+    * tests: add testdata of call tracer
+    
+    * eth/tracers: return revert reason in call_tracer
+    
+    * eth/tracers: regenerate assets
+    
+    * eth/tracers: add error message even if no exec occurrs, fixes #21438
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+
+commit d97e0063d53ccbc8717499eb166f43b0b1d12eed
+Merge: 856307d8b d8da0b3d8
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Aug 27 11:24:28 2020 +0300
+
+    Merge pull request #21491 from karalabe/state-sync-leak-fix
+    
+    core/state, eth, trie: stabilize memory use, fix memory leak
+
+commit 856307d8bbbe20e6d45f4a2a017233a5543b30f7
+Author: ucwong <ucwong@126.com>
+Date:   Wed Aug 26 21:53:12 2020 +0800
+
+    go.mod | goleveldb latest update (#21448)
+    
+    * go.mod | goleveldb latest update
+    
+    * go.mod update
+    
+    * leveldb options
+    
+    * go.mod: double check
+    
+    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
+
+commit 16d7eae1c8390576057a859ea4330fba895dca40
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Aug 26 12:20:12 2020 +0200
+
+    eth: updated comments (#21490)
+
+commit d8da0b3d81d6623e0e500de11f50c2858e1fb9e7
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Aug 26 13:05:06 2020 +0300
+
+    core/state, eth, trie: stabilize memory use, fix memory leak
+
+commit 92b12ee6c6ebf32507a2834b2913bd557a416209
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Aug 26 09:37:00 2020 +0200
+
+    accounts/abi/bind/backends: Disallow AdjustTime for non-empty blocks (#21334)
+    
+    * accounts/abi/bind/backends: Disallow timeshift for non-empty blocks
+    
+    * accounts/abi/bind/backends: added tests for adjust time
+    
+    * accounts/abi/bind/simulated: added comments, fixed test for AdjustTime
+    
+    * accounts/abi/bind/backends: updated comment
+
+commit fc20680b95da65f952012f3370e5d316f0ba237d
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Aug 25 16:21:41 2020 +0200
+
+    params: begin v1.9.21 release cycle
