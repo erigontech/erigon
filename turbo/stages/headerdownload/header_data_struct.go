@@ -1,17 +1,16 @@
 package headerdownload
 
 import (
-	"bytes"
 	"container/heap"
 	"encoding/binary"
 	"fmt"
 	"math/big"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/petar/GoLLRB/llrb"
 )
 
 type Anchor struct {
@@ -32,11 +31,6 @@ type Tip struct {
 	blockHeight          uint64
 	uncleHash            common.Hash
 	noPrepend            bool
-}
-
-type TipItem struct {
-	tipHash              common.Hash
-	cumulativeDifficulty uint256.Int
 }
 
 // First item in ChainSegment is the anchor
@@ -91,9 +85,7 @@ type HeaderDownload struct {
 	//currentFileWriter      io.Writer
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
-	tips                   map[common.Hash]*Tip
-	tipLimiter             *llrb.LLRB
-	tipLimit               int
+	tips                   *lru.Cache
 	initPowDepth           int    // powDepth assigned to the newly inserted anchor
 	newAnchorFutureLimit   uint64 // How far in the future (relative to current time) the new anchors are allowed to be
 	newAnchorPastLimit     uint64 // How far in the past (relative to current time) the new anchors are allowed to be
@@ -102,15 +94,6 @@ type HeaderDownload struct {
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
 	RequestQueueTimer      *time.Timer
-}
-
-func (a *TipItem) Less(b llrb.Item) bool {
-	bi := b.(*TipItem)
-	if a.cumulativeDifficulty.Eq(&bi.cumulativeDifficulty) {
-		// hash is unique and it breaks the ties
-		return bytes.Compare(a.tipHash[:], bi.tipHash[:]) < 0
-	}
-	return a.cumulativeDifficulty.Lt(&bi.cumulativeDifficulty)
 }
 
 func (rq RequestQueue) Len() int {
@@ -149,9 +132,6 @@ func NewHeaderDownload(filesDir string,
 		filesDir:             filesDir,
 		badHeaders:           make(map[common.Hash]struct{}),
 		anchors:              make(map[common.Hash][]*Anchor),
-		tips:                 make(map[common.Hash]*Tip),
-		tipLimiter:           llrb.New(),
-		tipLimit:             tipLimit,
 		initPowDepth:         initPowDepth,
 		requestQueue:         &RequestQueue{},
 		calcDifficultyFunc:   calcDifficultyFunc,
@@ -159,6 +139,7 @@ func NewHeaderDownload(filesDir string,
 		newAnchorFutureLimit: newAnchorFutureLimit,
 		newAnchorPastLimit:   newAnchorPastLimit,
 	}
+	hd.tips, _ = lru.New(tipLimit)
 	heap.Init(hd.requestQueue)
 	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd
