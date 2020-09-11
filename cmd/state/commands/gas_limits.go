@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/state/stateless"
@@ -27,7 +28,7 @@ var gasLimitsCmd = &cobra.Command{
 			}
 		}).MustOpen()
 
-		remoteDB, _, err := ethdb.NewRemote().Path(privateApiAddr).Open()
+		remoteDB, _, err := ethdb.NewRemote().Path(privateApiAddr).Open("")
 		if err != nil {
 			return err
 		}

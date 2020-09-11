@@ -67,16 +67,9 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 	var txPool ethdb.Backend
 	var err error
 	if cfg.PrivateApiAddr != "" {
-		if cfg.TLSCertfile != "" {
-			db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).OpenWithTls(cfg.TLSCertfile)
-			if err != nil {
-				return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
-			}
-		} else {
-			db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open()
-			if err != nil {
-				return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
-			}
+		db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
 		}
 	} else if cfg.Chaindata != "" {
 		if database, errOpen := ethdb.Open(cfg.Chaindata); errOpen == nil {

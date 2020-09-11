@@ -86,59 +86,24 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open() (KV, Backend, error) {
-	var dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
-		grpc.WithInsecure(),
-	}
+func (opts remoteOpts) Open(certFile string) (KV, Backend, error) {
+	var dialOpts []grpc.DialOption
+	if certFile == "" {
+		dialOpts = []grpc.DialOption{
+			grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
+			grpc.WithInsecure(),
+		}
+	} else {
+		creds, err := credentials.NewClientTLSFromFile(certFile, "")
 
-	if opts.inMemConn != nil {
-		dialOpts = append(dialOpts, grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) {
-			return opts.inMemConn.Dial()
-		}))
-	}
+		if err != nil {
+			return nil, nil, err
+		}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(ctx, opts.DialAddress, dialOpts...)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	db := &RemoteKV{
-		opts:     opts,
-		conn:     conn,
-		remoteKV: remote.NewKVClient(conn),
-		remoteDB: remote.NewDBClient(conn),
-		log:      log.New("remote_db", opts.DialAddress),
-		buckets:  dbutils.BucketsCfg{},
-	}
-	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
-	for name, cfg := range customBuckets { // copy map to avoid changing global variable
-		db.buckets[name] = cfg
-	}
-
-	eth := &RemoteBackend{
-		opts:             opts,
-		remoteEthBackend: remote.NewETHBACKENDClient(conn),
-		conn:             conn,
-		log:              log.New("remote_db", opts.DialAddress),
-	}
-
-	return db, eth, nil
-}
-
-func (opts remoteOpts) OpenWithTls(certFile string) (KV, Backend, error) {
-	creds, err := credentials.NewClientTLSFromFile(certFile, "")
-
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
-		grpc.WithTransportCredentials(creds),
+		dialOpts = []grpc.DialOption{
+			grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
+			grpc.WithTransportCredentials(creds),
+		}
 	}
 
 	if opts.inMemConn != nil {
@@ -179,7 +144,7 @@ func (opts remoteOpts) OpenWithTls(certFile string) (KV, Backend, error) {
 }
 
 func (opts remoteOpts) MustOpen() (KV, Backend) {
-	db, txPool, err := opts.Open()
+	db, txPool, err := opts.Open("")
 	if err != nil {
 		panic(err)
 	}
