@@ -771,7 +771,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	defer b.mu.Unlock()
 
 	if len(b.pendingBlock.Transactions()) != 0 {
-		return errors.New("Could not adjust time on non-empty block")
+		return errors.New("could not adjust time on non-empty block")
 	}
 
 	blocks, _, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
