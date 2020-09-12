@@ -2,10 +2,11 @@ package commands
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"os"
 	"path"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/state/stateless"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -26,7 +27,7 @@ func init() {
 				}
 			}).MustOpen()
 
-			remoteDB, _, err := ethdb.NewRemote().Path(privateApiAddr).Open()
+			remoteDB, _, err := ethdb.NewRemote().Path(privateApiAddr).Open("")
 			if err != nil {
 				return err
 			}

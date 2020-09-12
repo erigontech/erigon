@@ -89,6 +89,7 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.
 	netImpl := NewNetAPIImpl(eth)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader)
 	traceAPIImpl := NewTraceAPI(db, dbReader, cfg.MaxTraces)
+	web3Impl := NewWeb3APIImpl()
 
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
@@ -111,6 +112,13 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.
 				Namespace: "net",
 				Public:    true,
 				Service:   NetAPI(netImpl),
+				Version:   "1.0",
+			})
+		case "web3":
+			defaultAPIList = append(defaultAPIList, rpc.API{
+				Namespace: "web3",
+				Public:    true,
+				Service:   Web3API(web3Impl),
 				Version:   "1.0",
 			})
 		case "trace":

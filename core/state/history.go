@@ -102,57 +102,7 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 		}
 	} else {
 		//fmt.Printf("Not Found changeSetBlock in [%s]\n", index)
-		var lastChangesetBlock, lastIndexBlock uint64
-		v1, err1 := tx.Get(dbutils.SyncStageProgress, stages.Execution)
-		if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
-			return nil, err1
-		}
-		if len(v1) > 0 {
-			lastChangesetBlock = binary.BigEndian.Uint64(v1[:8])
-		}
-		if storage {
-			v1, err1 = tx.Get(dbutils.SyncStageProgress, stages.AccountHistoryIndex)
-		} else {
-			v1, err1 = tx.Get(dbutils.SyncStageProgress, stages.StorageHistoryIndex)
-		}
-		if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
-			return nil, err1
-		}
-		if len(v1) > 0 {
-			lastIndexBlock = binary.BigEndian.Uint64(v1[:8])
-		}
-		//fmt.Printf("lastChangesetBlock=%d, lastIndexBlock=%d\n", lastChangesetBlock, lastIndexBlock)
-		if lastChangesetBlock > lastIndexBlock {
-			// iterate over changeset to compensate for lacking of the history index
-			csBucket := dbutils.ChangeSetByIndexBucket(storage)
-			c := tx.Cursor(csBucket)
-			var startTimestamp uint64
-			if timestamp < lastIndexBlock {
-				startTimestamp = lastIndexBlock + 1
-			} else {
-				startTimestamp = timestamp + 1
-			}
-			startKey := dbutils.EncodeTimestamp(startTimestamp)
-			var err error
-			for k, v, err1 := c.Seek(startKey); k != nil && err1 == nil; k, v, err1 = c.Next() {
-				if storage {
-					data, err = changeset.StorageChangeSetPlainBytes(v).Find(key)
-				} else {
-					data, err = changeset.AccountChangeSetPlainBytes(v).Find(key)
-				}
-				if err == nil {
-					break
-				}
-				if !errors.Is(err, changeset.ErrNotFound) {
-					return nil, fmt.Errorf("finding %x in the changeset %d: %w", key, changeSetBlock, err)
-				}
-			}
-			if err != nil {
-				return nil, ethdb.ErrKeyNotFound
-			}
-		} else {
-			return nil, ethdb.ErrKeyNotFound
-		}
+		return nil, ethdb.ErrKeyNotFound
 	}
 
 	//restore codehash

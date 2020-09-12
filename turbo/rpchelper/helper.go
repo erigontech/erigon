@@ -23,8 +23,13 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader rawdb.Database
 			if err != nil {
 				return 0, common.Hash{}, fmt.Errorf("getting latest block number: %v", err)
 			}
-		} else if number == rpc.PendingBlockNumber || number == rpc.EarliestBlockNumber {
-			return 0, common.Hash{}, fmt.Errorf("pending and earliest blocks are not supported")
+
+		} else if number == rpc.EarliestBlockNumber {
+			blockNumber = 0
+
+		} else if number == rpc.PendingBlockNumber {
+			return 0, common.Hash{}, fmt.Errorf("pending blocks are not supported")
+
 		} else {
 			blockNumber = uint64(number.Int64())
 		}

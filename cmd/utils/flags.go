@@ -547,6 +547,20 @@ var (
 		Usage: "API's offered over the HTTP-RPC interface",
 		Value: "",
 	}
+	NoTLSFlag = cli.BoolTFlag{
+		Name:  "notls",
+		Usage: "Disable TLS handshake",
+	}
+	TLSCertFlag = cli.StringFlag{
+		Name:  "tls.cert",
+		Usage: "Specify certification file",
+		Value: "",
+	}
+	TLSKeyFlag = cli.StringFlag{
+		Name:  "tls.key",
+		Usage: "Specify key file",
+		Value: "",
+	}
 	GraphQLEnabledFlag = cli.BoolFlag{
 		Name:  "graphql",
 		Usage: "Enable GraphQL on the HTTP-RPC server. Note that GraphQL can only be started if an HTTP server is started as well.",
@@ -971,6 +985,20 @@ func splitAndTrim(input string) (ret []string) {
 // read-only interface to the databae
 func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
+	if !ctx.GlobalBool(NoTLSFlag.Name) {
+		certFile := ctx.GlobalString(TLSCertFlag.Name)
+		keyFile := ctx.GlobalString(TLSKeyFlag.Name)
+		if certFile == "" {
+			log.Warn("Could not establish TLS grpc: missing certificate")
+			return
+		} else if keyFile == "" {
+			log.Warn("Could not establish TLS grpc: missing key file")
+			return
+		}
+		cfg.TLSConnection = true
+		cfg.TLSCertFile = certFile
+		cfg.TLSKeyFile = keyFile
+	}
 }
 
 // setIPC creates an IPC path configuration from the set command line flags,
