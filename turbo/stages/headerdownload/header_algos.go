@@ -346,6 +346,15 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 	return NoPenalty, nil
 }
 
+func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty uint256.Int) error {
+	if anchor, err := hd.addHeaderAsAnchor(header, 0 /* powDepth */, totalDifficulty); err == nil {
+		hd.addHardCodedTip(header.Number.Uint64(), header.Time, header.Hash(), anchor, totalDifficulty)
+	} else {
+		return err
+	}
+	return nil
+}
+
 func (hd *HeaderDownload) AddToBuffer(segment *ChainSegment, start, end int) {
 	var serBuffer [HeaderSerLength]byte
 	for _, header := range segment.headers[start:end] {

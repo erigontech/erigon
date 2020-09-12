@@ -2,10 +2,14 @@ package download
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"math/big"
+	"os"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -101,8 +105,31 @@ func Downloader(
 		3600, /* newAnchor future limit */
 		3600, /* newAnchor past limit */
 	)
-	if err := hd.RecoverFromFiles(); err != nil {
-		log.Error("Recovery from file failed, downloader not started", "error", err)
+	//if err := hd.RecoverFromFiles(); err != nil {
+	//	log.Error("Recovery from file failed, downloader not started", "error", err)
+	//}
+	// Insert hard-coded headers if present
+	if _, err := os.Stat("hard-coded-headers.dat"); err == nil {
+		if f, err1 := os.Open("hard-coded-headers.dat"); err1 == nil {
+			var hBuffer [headerdownload.HeaderSerLength]byte
+			var dBuffer [32]byte
+			for {
+				var h types.Header
+				var d uint256.Int
+				if _, err2 := io.ReadFull(f, hBuffer[:]); err2 == nil {
+					headerdownload.DeserialiseHeader(&h, hBuffer[:])
+				} else {
+					log.Error("Failed to read hard coded headers", "error", err2)
+				}
+				if _, err2 := io.ReadFull(f, dBuffer[:]); err2 == nil {
+					d.SetBytes(dBuffer[:])
+				} else if errors.Is(err2, io.EOF) {
+					break
+				} else {
+					log.Error("Failed to read hard coded headers", "error", err2)
+				}
+			}
+		}
 	}
 	for {
 		select {
