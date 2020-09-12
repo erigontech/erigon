@@ -660,6 +660,7 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 		noPrepend:            true,
 	}
 	hd.hardTips[hash] = tip
+	anchor.tips = append(anchor.tips, hash)
 }
 
 func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, totalDifficulty uint256.Int) (*Anchor, error) {
