@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -65,7 +66,7 @@ func (hd *HeaderDownload) HandleHeadersMsg(msg []*types.Header) ([]*ChainSegment
 			segmentIdx = len(segments)
 			segments = append(segments, &ChainSegment{})
 		}
-		segments[segmentIdx].headers = append(segments[segmentIdx].headers, header)
+		segments[segmentIdx].Headers = append(segments[segmentIdx].Headers, header)
 		segmentMap[header.ParentHash] = segmentIdx
 		siblings := childrenMap[header.ParentHash]
 		siblings = append(siblings, header)
@@ -93,13 +94,13 @@ func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header) ([]*ChainSegme
 	if _, bad := hd.badHeaders[headerHash]; bad {
 		return nil, BadBlockPenalty, nil
 	}
-	return []*ChainSegment{{headers: []*types.Header{header}}}, NoPenalty, nil
+	return []*ChainSegment{{Headers: []*types.Header{header}}}, NoPenalty, nil
 }
 
 // FindAnchors attempts to find anchors to which given chain segment can be attached to
 func (hd *HeaderDownload) FindAnchors(segment *ChainSegment) (found bool, start int, anchorParent common.Hash, invalidAnchors []int) {
 	// Walk the segment from children towards parents
-	for i, header := range segment.headers {
+	for i, header := range segment.Headers {
 		headerHash := header.Hash()
 		// Check if the header can be attached to an anchor of a working tree
 		if anchors, attaching := hd.anchors[headerHash]; attaching {
@@ -149,7 +150,7 @@ func (hd *HeaderDownload) InvalidateAnchors(anchorParent common.Hash, invalidAnc
 // the given chain segment may be found invalid relative to a working tree, in this case penalty for peer is returned
 func (hd *HeaderDownload) FindTip(segment *ChainSegment) (found bool, end int, penalty Penalty) {
 	// Walk the segment from children towards parents
-	for i, header := range segment.headers {
+	for i, header := range segment.Headers {
 		// Check if the header can be attached to any tips
 		if tip, attaching := hd.getTip(header.ParentHash); attaching {
 			// Before attaching, we must check the parent-child relationship
@@ -159,7 +160,7 @@ func (hd *HeaderDownload) FindTip(segment *ChainSegment) (found bool, end int, p
 			return true, i + 1, NoPenalty
 		}
 	}
-	return false, len(segment.headers), NoPenalty
+	return false, len(segment.Headers), NoPenalty
 }
 
 // VerifySeals verifies Proof Of Work for the part of the given chain segment
@@ -168,7 +169,7 @@ func (hd *HeaderDownload) FindTip(segment *ChainSegment) (found bool, end int, p
 func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound bool, start, end int) (powDepth int, err error) {
 	var powDepthSet bool
 	if anchorFound {
-		if anchors, ok := hd.anchors[segment.headers[start].Hash()]; ok {
+		if anchors, ok := hd.anchors[segment.Headers[start].Hash()]; ok {
 			for _, anchor := range anchors {
 				if !powDepthSet || anchor.powDepth < powDepth {
 					powDepth = anchor.powDepth
@@ -176,10 +177,10 @@ func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound bool, s
 				}
 			}
 		} else {
-			return 0, fmt.Errorf("verifySeals anchors were not found for %x", segment.headers[start].Hash())
+			return 0, fmt.Errorf("verifySeals anchors were not found for %x", segment.Headers[start].Hash())
 		}
 	}
-	for _, header := range segment.headers[start:end] {
+	for _, header := range segment.Headers[start:end] {
 		if !anchorFound || powDepth > 0 {
 			if err := hd.verifySealFunc(header); err != nil {
 				return powDepth, err
@@ -195,7 +196,7 @@ func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound bool, s
 // ExtendUp extends a working tree up from the tip, using given chain segment
 func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error {
 	// Find attachment tip again
-	tipHeader := segment.headers[end-1]
+	tipHeader := segment.Headers[end-1]
 	if attachmentTip, attaching := hd.getTip(tipHeader.ParentHash); attaching {
 		if attachmentTip.noPrepend {
 			return fmt.Errorf("extendUp attachment tip had noPrepend flag on for %x", tipHeader.ParentHash)
@@ -204,7 +205,7 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error 
 		cumulativeDifficulty := attachmentTip.cumulativeDifficulty
 		// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
 		for i := end - 1; i >= start; i-- {
-			header := segment.headers[i]
+			header := segment.Headers[i]
 			diff, overflow := uint256.FromBig(header.Difficulty)
 			if overflow {
 				return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
@@ -224,9 +225,9 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error 
 // it creates a new anchor and collects all the tips from the attached anchors to it
 func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powDepth int, currentTime uint64) error {
 	// Find attachement anchors again
-	anchorHeader := segment.headers[start]
+	anchorHeader := segment.Headers[start]
 	if anchors, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
-		newAnchorHeader := segment.headers[end-1]
+		newAnchorHeader := segment.Headers[end-1]
 		diff, overflow := uint256.FromBig(newAnchorHeader.Difficulty)
 		if overflow {
 			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", newAnchorHeader.Difficulty)
@@ -245,7 +246,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 		// Iterate in reverse order to be able to compute cumulative difficulty along the way
 		var cumulativeDifficulty uint256.Int
 		for i := end - 1; i >= start; i-- {
-			header := segment.headers[i]
+			header := segment.Headers[i]
 			diff, overflow := uint256.FromBig(header.Difficulty)
 			if overflow {
 				return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
@@ -275,9 +276,9 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 // Connect connects some working trees using anchors of some, and a tip of another
 func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
 	// Find attachment tip again
-	tipHeader := segment.headers[end-1]
+	tipHeader := segment.Headers[end-1]
 	// Find attachement anchors again
-	anchorHeader := segment.headers[start]
+	anchorHeader := segment.Headers[start]
 	attachmentTip, ok1 := hd.getTip(tipHeader.ParentHash)
 	if !ok1 {
 		return fmt.Errorf("connect attachment tip not found for %x", tipHeader.ParentHash)
@@ -290,7 +291,7 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
 	cumulativeDifficulty := attachmentTip.cumulativeDifficulty
 	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
 	for i := end - 1; i >= start; i-- {
-		header := segment.headers[i]
+		header := segment.Headers[i]
 		diff, overflow := uint256.FromBig(header.Difficulty)
 		if overflow {
 			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
@@ -315,7 +316,7 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
 }
 
 func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, currentTime uint64) (Penalty, error) {
-	anchorHeader := segment.headers[end-1]
+	anchorHeader := segment.Headers[end-1]
 	if anchorHeader.Time > currentTime+hd.newAnchorFutureLimit {
 		return TooFarFuturePenalty, nil
 	}
@@ -333,7 +334,7 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 	cumulativeDifficulty := uint256.Int{}
 	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
 	for i := end - 1; i >= start; i-- {
-		header := segment.headers[i]
+		header := segment.Headers[i]
 		diff, overflow := uint256.FromBig(header.Difficulty)
 		if overflow {
 			return NoPenalty, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
@@ -360,10 +361,36 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty 
 
 func (hd *HeaderDownload) AddToBuffer(segment *ChainSegment, start, end int) {
 	var serBuffer [HeaderSerLength]byte
-	for _, header := range segment.headers[start:end] {
+	for _, header := range segment.Headers[start:end] {
 		SerialiseHeader(header, serBuffer[:])
 		hd.buffer = append(hd.buffer, serBuffer[:]...)
 	}
+}
+
+func (hd *HeaderDownload) AnchorState() string {
+	var sb strings.Builder
+	for anchorParent, anchors := range hd.anchors {
+		sb.WriteString(fmt.Sprintf("%x<=[", anchorParent))
+		for i, anchor := range anchors {
+			if i > 0 {
+				sb.WriteString("; ")
+			}
+			sb.WriteString(fmt.Sprintf("{%d-", anchor.blockHeight))
+			var end uint64
+			var count int
+			for _, tipHash := range anchor.tips {
+				if tip, ok := hd.getTip(tipHash); ok {
+					if tip.blockHeight > end {
+						end = tip.blockHeight
+					}
+					count++
+				}
+			}
+			sb.WriteString(fmt.Sprintf("%d tips=%d}", end, count))
+		}
+		sb.WriteString("]\n")
+	}
+	return sb.String()
 }
 
 // Heap element for merging together header files
@@ -552,7 +579,7 @@ func (hd *HeaderDownload) FlushBuffer() error {
 // associated with this tip equals to pre-set value (0x00..00 for genesis)
 func (hd *HeaderDownload) CheckInitiation(segment *ChainSegment, initialHash common.Hash) bool {
 	// Find attachment tip again
-	tip, exists := hd.getTip(segment.headers[0].Hash())
+	tip, exists := hd.getTip(segment.Headers[0].Hash())
 	if !exists {
 		return false
 	}

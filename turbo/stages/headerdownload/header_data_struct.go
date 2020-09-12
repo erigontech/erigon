@@ -36,7 +36,7 @@ type Tip struct {
 // First item in ChainSegment is the anchor
 // ChainSegment must be contigous and must not include bad headers
 type ChainSegment struct {
-	headers []*types.Header
+	Headers []*types.Header
 }
 
 type PeerHandle int // This is int just for the PoC phase - will be replaced by more appropriate type to find a peer

@@ -29,6 +29,8 @@ func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header           {
 func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header          { panic("") }
 
 func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
+	log.Info(hd.AnchorState())
+	log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	foundAnchor, start, anchorParent, invalidAnchors := hd.FindAnchors(segment)
 	if len(invalidAnchors) > 0 {
 		if _, err1 := hd.InvalidateAnchors(anchorParent, invalidAnchors); err1 != nil {
