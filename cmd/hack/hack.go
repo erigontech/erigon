@@ -1731,6 +1731,13 @@ func extracHeaders(chaindata string, block uint64) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	b := uint64(0)
+	f, err := os.Create("hard-coded-headers.dat")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
 	var buffer [headerdownload.HeaderSerLength]byte
 	for {
 		hash := rawdb.ReadCanonicalHash(db, b)
@@ -1739,6 +1746,9 @@ func extracHeaders(chaindata string, block uint64) error {
 		}
 		h := rawdb.ReadHeader(db, hash, b)
 		headerdownload.SerialiseHeader(h, buffer[:])
+		if _, err := w.Write(buffer[:]); err != nil {
+			return err
+		}
 		b += block
 	}
 	fmt.Printf("Last block is %d\n", b)
