@@ -346,9 +346,12 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 	return NoPenalty, nil
 }
 
-func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty uint256.Int) error {
+func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty uint256.Int, currentTime uint64) error {
 	if anchor, err := hd.addHeaderAsAnchor(header, 0 /* powDepth */, totalDifficulty); err == nil {
 		hd.addHardCodedTip(header.Number.Uint64(), header.Time, header.Hash(), anchor, totalDifficulty)
+		if header.ParentHash != (common.Hash{}) {
+			heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime})
+		}
 	} else {
 		return err
 	}

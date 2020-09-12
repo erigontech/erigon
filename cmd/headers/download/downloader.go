@@ -119,19 +119,19 @@ func Downloader(
 				var d uint256.Int
 				if _, err2 := io.ReadFull(f, hBuffer[:]); err2 == nil {
 					headerdownload.DeserialiseHeader(&h, hBuffer[:])
+				} else if errors.Is(err2, io.EOF) {
+					break
 				} else {
 					log.Error("Failed to read hard coded header", "i", i, "error", err2)
 					break
 				}
 				if _, err2 := io.ReadFull(f, dBuffer[:]); err2 == nil {
 					d.SetBytes(dBuffer[:])
-				} else if errors.Is(err2, io.EOF) {
-					break
 				} else {
 					log.Error("Failed to read hard coded difficulty", "i", i, "error", err2)
 					break
 				}
-				if err2 := hd.HardCodedHeader(&h, d); err2 != nil {
+				if err2 := hd.HardCodedHeader(&h, d, uint64(time.Now().Unix())); err2 != nil {
 					log.Error("Failed to insert hard coded header", "i", i, "block", h.Number.Uint64(), "error", err2)
 				}
 				i++
