@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
+	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
@@ -70,6 +71,7 @@ type PenaltyMsg struct {
 }
 
 func makeP2PServer(
+	natSetting string,
 	peerHeightMap *sync.Map,
 	peerRwMap *sync.Map,
 	protocols []string,
@@ -89,6 +91,11 @@ func makeP2PServer(
 	genesis := core.DefaultGenesisBlock()
 	serverKey := nodeKey()
 	p2pConfig := p2p.Config{}
+	natif, err := nat.Parse(natSetting)
+	if err != nil {
+		return nil, fmt.Errorf("invalid nat option %s: %v", natSetting, err)
+	}
+	p2pConfig.NAT = natif
 	p2pConfig.PrivateKey = serverKey
 	p2pConfig.Name = "header downloader"
 	p2pConfig.Logger = log.New()
@@ -352,7 +359,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func Download(filesDir string) error {
+func Download(natSetting string, filesDir string) error {
 	ctx := rootContext()
 	newBlockCh := make(chan NewBlockFromSentry)
 	newBlockHashCh := make(chan NewBlockHashFromSentry)
@@ -360,7 +367,7 @@ func Download(filesDir string) error {
 	reqHeadersCh := make(chan headerdownload.HeaderRequest)
 	headersCh := make(chan BlockHeadersFromSentry)
 	var peerHeightMap, peerRwMap sync.Map
-	server, err := makeP2PServer(&peerHeightMap, &peerRwMap, []string{eth.ProtocolName}, newBlockCh, newBlockHashCh, headersCh, penaltyCh)
+	server, err := makeP2PServer(natSetting, &peerHeightMap, &peerRwMap, []string{eth.ProtocolName}, newBlockCh, newBlockHashCh, headersCh, penaltyCh)
 	if err != nil {
 		return err
 	}

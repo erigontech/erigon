@@ -140,7 +140,7 @@ func NewHeaderDownload(filesDir string,
 		newAnchorFutureLimit: newAnchorFutureLimit,
 		newAnchorPastLimit:   newAnchorPastLimit,
 	}
-	hd.tips, _ = lru.New(tipLimit)
+	hd.tips, _ = lru.NewWithEvict(tipLimit, hd.tipEvicted)
 	hd.hardTips = make(map[common.Hash]*Tip)
 	heap.Init(hd.requestQueue)
 	hd.RequestQueueTimer = time.NewTimer(time.Hour)

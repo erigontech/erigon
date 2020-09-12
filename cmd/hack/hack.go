@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 )
@@ -1726,6 +1727,24 @@ func mint(chaindata string, block uint64) error {
 	return nil
 }
 
+func extracHeaders(chaindata string, block uint64) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	b := uint64(0)
+	var buffer [headerdownload.HeaderSerLength]byte
+	for {
+		hash := rawdb.ReadCanonicalHash(db, b)
+		if hash == (common.Hash{}) {
+			break
+		}
+		h := rawdb.ReadHeader(db, hash, b)
+		headerdownload.SerialiseHeader(h, buffer[:])
+		b += block
+	}
+	fmt.Printf("Last block is %d\n", b)
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -1864,6 +1883,11 @@ func main() {
 	}
 	if *action == "mint" {
 		if err := mint(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "extractHeaders" {
+		if err := extracHeaders(*chaindata, uint64(*block)); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

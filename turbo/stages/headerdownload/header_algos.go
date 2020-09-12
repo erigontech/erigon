@@ -327,7 +327,9 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 	if anchor, err = hd.addHeaderAsAnchor(anchorHeader, hd.initPowDepth, uint256.Int{}); err != nil {
 		return NoPenalty, err
 	}
-	heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
+	if anchorHeader.ParentHash != (common.Hash{}) {
+		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
+	}
 	cumulativeDifficulty := uint256.Int{}
 	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
 	for i := end - 1; i >= start; i-- {
@@ -574,6 +576,19 @@ func (hd *HeaderDownload) getTip(tipHash common.Hash) (*Tip, bool) {
 		return tip, true
 	}
 	return nil, false
+}
+
+func (hd *HeaderDownload) tipEvicted(key interface{}, value interface{}) {
+	tipHash := key.(common.Hash)
+	tip := value.(*Tip)
+	anchor := tip.anchor
+	var newTips []common.Hash
+	for _, anchorTipHash := range anchor.tips {
+		if anchorTipHash != tipHash {
+			newTips = append(newTips, anchorTipHash)
+		}
+	}
+	anchor.tips = newTips
 }
 
 // addHeaderAsTip adds given header as a tip belonging to a given anchorParent
