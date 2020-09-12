@@ -113,13 +113,14 @@ func Downloader(
 		if f, err1 := os.Open("hard-coded-headers.dat"); err1 == nil {
 			var hBuffer [headerdownload.HeaderSerLength]byte
 			var dBuffer [32]byte
+			i := 0
 			for {
 				var h types.Header
 				var d uint256.Int
 				if _, err2 := io.ReadFull(f, hBuffer[:]); err2 == nil {
 					headerdownload.DeserialiseHeader(&h, hBuffer[:])
 				} else {
-					log.Error("Failed to read hard coded headers", "error", err2)
+					log.Error("Failed to read hard coded header", "i", i, "error", err2)
 					break
 				}
 				if _, err2 := io.ReadFull(f, dBuffer[:]); err2 == nil {
@@ -127,12 +128,13 @@ func Downloader(
 				} else if errors.Is(err2, io.EOF) {
 					break
 				} else {
-					log.Error("Failed to read hard coded headers", "error", err2)
+					log.Error("Failed to read hard coded difficulty", "i", i, "error", err2)
 					break
 				}
 				if err2 := hd.HardCodedHeader(&h, d); err2 != nil {
-					log.Error("Failed to insert hard coded header", "block", h.Number.Uint64(), "error", err2)
+					log.Error("Failed to insert hard coded header", "i", i, "block", h.Number.Uint64(), "error", err2)
 				}
+				i++
 			}
 		}
 	}
