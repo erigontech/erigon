@@ -386,7 +386,7 @@ func (hd *HeaderDownload) AnchorState() string {
 					count++
 				}
 			}
-			sb.WriteString(fmt.Sprintf("%d tips=%d}", end, count))
+			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d}", end, end-anchor.blockHeight, count))
 		}
 		sb.WriteString("]\n")
 	}
