@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -73,6 +74,7 @@ type PenaltyMsg struct {
 func makeP2PServer(
 	natSetting string,
 	peerHeightMap *sync.Map,
+	peerTimeMap *sync.Map,
 	peerRwMap *sync.Map,
 	protocols []string,
 	newBlockCh chan NewBlockFromSentry,
@@ -129,6 +131,7 @@ func makeP2PServer(
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peer.ID(), err))
 				}
 				peerHeightMap.Delete(peer.ID().String())
+				peerTimeMap.Delete(peer.ID().String())
 				peerRwMap.Delete(peer.ID().String())
 				return nil
 			},
@@ -366,8 +369,8 @@ func Download(natSetting string, filesDir string) error {
 	penaltyCh := make(chan PenaltyMsg)
 	reqHeadersCh := make(chan headerdownload.HeaderRequest)
 	headersCh := make(chan BlockHeadersFromSentry)
-	var peerHeightMap, peerRwMap sync.Map
-	server, err := makeP2PServer(natSetting, &peerHeightMap, &peerRwMap, []string{eth.ProtocolName}, newBlockCh, newBlockHashCh, headersCh, penaltyCh)
+	var peerHeightMap, peerRwMap, peerTimeMap sync.Map
+	server, err := makeP2PServer(natSetting, &peerHeightMap, &peerTimeMap, &peerRwMap, []string{eth.ProtocolName}, newBlockCh, newBlockHashCh, headersCh, penaltyCh)
 	if err != nil {
 		return err
 	}
@@ -392,8 +395,13 @@ func Download(natSetting string, filesDir string) error {
 					valUint, _ := value.(uint64)
 					if valUint >= req.Number {
 						peerID = key.(string)
-						found = true
-						return false
+						timeRaw, _ := peerTimeMap.Load(peerID)
+						t, _ := timeRaw.(int64)
+						// If request is large, we give 2 second pause to the peer before sending another request
+						if req.Length == 1 || t+2 < time.Now().Unix() {
+							found = true
+							return false
+						}
 					}
 					return true
 				})
@@ -414,6 +422,7 @@ func Download(natSetting string, filesDir string) error {
 						}); err != nil {
 							log.Error(fmt.Sprintf("Failed to send to peer %s: %v", peerID, err))
 						}
+						peerTimeMap.Store(peerID, time.Now().Unix())
 					}
 				}
 			}
