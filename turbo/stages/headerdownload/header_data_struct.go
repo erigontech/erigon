@@ -86,9 +86,10 @@ type HeaderDownload struct {
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
 	tips                   *lru.Cache
-	initPowDepth           int    // powDepth assigned to the newly inserted anchor
-	newAnchorFutureLimit   uint64 // How far in the future (relative to current time) the new anchors are allowed to be
-	newAnchorPastLimit     uint64 // How far in the past (relative to current time) the new anchors are allowed to be
+	hardTips               map[common.Hash]*Tip // Hard-coded tips
+	initPowDepth           int                  // powDepth assigned to the newly inserted anchor
+	newAnchorFutureLimit   uint64               // How far in the future (relative to current time) the new anchors are allowed to be
+	newAnchorPastLimit     uint64               // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
 	requestQueue           *RequestQueue
 	calcDifficultyFunc     CalcDifficultyFunc
@@ -140,6 +141,7 @@ func NewHeaderDownload(filesDir string,
 		newAnchorPastLimit:   newAnchorPastLimit,
 	}
 	hd.tips, _ = lru.New(tipLimit)
+	hd.hardTips = make(map[common.Hash]*Tip)
 	heap.Init(hd.requestQueue)
 	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd

@@ -71,6 +71,7 @@ func Downloader(
 	ctx context.Context,
 	filesDir string,
 	newBlockCh chan NewBlockFromSentry,
+	newBlockHashCh chan NewBlockHashFromSentry,
 	headersCh chan BlockHeadersFromSentry,
 	penaltyCh chan PenaltyMsg,
 	reqHeadersCh chan headerdownload.HeaderRequest,
@@ -118,6 +119,15 @@ func Downloader(
 				continue
 			}
 			log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d}", newBlockReq.Block.NumberU64()))
+		case newBlockHashReq := <-newBlockHashCh:
+			for _, announce := range newBlockHashReq.NewBlockHashesData {
+				log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
+				reqHeadersCh <- headerdownload.HeaderRequest{
+					Hash:   announce.Hash,
+					Number: announce.Number,
+					Length: 1,
+				}
+			}
 		case headersReq := <-headersCh:
 			if segments, penalty, err := hd.HandleHeadersMsg(headersReq.headers); err == nil {
 				if penalty == headerdownload.NoPenalty {

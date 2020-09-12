@@ -151,8 +151,7 @@ func (hd *HeaderDownload) FindTip(segment *ChainSegment) (found bool, end int, p
 	// Walk the segment from children towards parents
 	for i, header := range segment.headers {
 		// Check if the header can be attached to any tips
-		if tipRaw, attaching := hd.tips.Get(header.ParentHash); attaching {
-			tip := tipRaw.(*Tip)
+		if tip, attaching := hd.getTip(header.ParentHash); attaching {
 			// Before attaching, we must check the parent-child relationship
 			if valid, penalty := hd.childTipValid(header, header.ParentHash, tip); !valid {
 				return true, i + 1, penalty
@@ -197,8 +196,7 @@ func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound bool, s
 func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error {
 	// Find attachment tip again
 	tipHeader := segment.headers[end-1]
-	if attachmentTipRaw, attaching := hd.tips.Get(tipHeader.ParentHash); attaching {
-		attachmentTip := attachmentTipRaw.(*Tip)
+	if attachmentTip, attaching := hd.getTip(tipHeader.ParentHash); attaching {
 		if attachmentTip.noPrepend {
 			return fmt.Errorf("extendUp attachment tip had noPrepend flag on for %x", tipHeader.ParentHash)
 		}
@@ -260,8 +258,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 		// Go over tips of the anchors we are replacing, bump their cumulative difficulty, and add them to the new anchor
 		for _, anchor := range anchors {
 			for _, tipHash := range anchor.tips {
-				if tipRaw, ok := hd.tips.Get(tipHash); ok {
-					tip := tipRaw.(*Tip)
+				if tip, ok := hd.getTip(tipHash); ok {
 					tip.cumulativeDifficulty.Add(&tip.cumulativeDifficulty, &cumulativeDifficulty)
 					tip.anchor = newAnchor
 					newAnchor.tips = append(newAnchor.tips, tipHash)
@@ -281,11 +278,10 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
 	tipHeader := segment.headers[end-1]
 	// Find attachement anchors again
 	anchorHeader := segment.headers[start]
-	attachmentTipRaw, ok1 := hd.tips.Get(tipHeader.ParentHash)
+	attachmentTip, ok1 := hd.getTip(tipHeader.ParentHash)
 	if !ok1 {
 		return fmt.Errorf("connect attachment tip not found for %x", tipHeader.ParentHash)
 	}
-	attachmentTip := attachmentTipRaw.(*Tip)
 	anchors, ok2 := hd.anchors[anchorHeader.Hash()]
 	if !ok2 {
 		return fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
@@ -307,8 +303,7 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
 	// Go over tips of the anchors we are replacing, bump their cumulative difficulty, and add them to the new anchor
 	for _, anchor := range anchors {
 		for _, tipHash := range anchor.tips {
-			if tipRaw, ok := hd.tips.Get(tipHash); ok {
-				tip := tipRaw.(*Tip)
+			if tip, ok := hd.getTip(tipHash); ok {
 				tip.cumulativeDifficulty.Add(&tip.cumulativeDifficulty, &cumulativeDifficulty)
 				tip.anchor = newAnchor
 				newAnchor.tips = append(newAnchor.tips, tipHash)
@@ -543,11 +538,10 @@ func (hd *HeaderDownload) FlushBuffer() error {
 // associated with this tip equals to pre-set value (0x00..00 for genesis)
 func (hd *HeaderDownload) CheckInitiation(segment *ChainSegment, initialHash common.Hash) bool {
 	// Find attachment tip again
-	tipRaw, exists := hd.tips.Get(segment.headers[0].Hash())
+	tip, exists := hd.getTip(segment.headers[0].Hash())
 	if !exists {
 		return false
 	}
-	tip := tipRaw.(*Tip)
 	if tip.anchor.hash != initialHash {
 		return false
 	}
@@ -569,6 +563,17 @@ func (hd *HeaderDownload) childTipValid(child *types.Header, tipHash common.Hash
 		return false, WrongChildDifficultyPenalty
 	}
 	return true, NoPenalty
+}
+
+func (hd *HeaderDownload) getTip(tipHash common.Hash) (*Tip, bool) {
+	if hardTip, ok := hd.hardTips[tipHash]; ok {
+		return hardTip, true
+	}
+	if tipRaw, ok := hd.tips.Get(tipHash); ok {
+		tip := tipRaw.(*Tip)
+		return tip, true
+	}
+	return nil, false
 }
 
 // addHeaderAsTip adds given header as a tip belonging to a given anchorParent
@@ -600,7 +605,7 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 		blockHeight:          blockHeight,
 		noPrepend:            true,
 	}
-	hd.tips.Add(hash, tip) // TODO add to the tips that cannot be removed
+	hd.hardTips[hash] = tip
 }
 
 func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, totalDifficulty uint256.Int) (*Anchor, error) {
