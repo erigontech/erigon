@@ -100,8 +100,8 @@ func Downloader(
 	}
 	hd := headerdownload.NewHeaderDownload(
 		filesDir,
-		1024, /* tipLimit */
-		1024, /* initPowDepth */
+		16*1024, /* tipLimit */
+		1024,    /* initPowDepth */
 		calcDiffFunc,
 		verifySealFunc,
 		3600, /* newAnchor future limit */
