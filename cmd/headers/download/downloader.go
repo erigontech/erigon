@@ -38,7 +38,7 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 		}
 		log.Warn(fmt.Sprintf("Invalidated anchors %v for %x", invalidAnchors, anchorParent))
 	}
-	foundTip, end, _ := hd.FindTip(segment) // We ignore penalty because we will check it as part of PoW check
+	foundTip, end, _ := hd.FindTip(segment, start) // We ignore penalty because we will check it as part of PoW check
 	var powDepth int
 	if powDepth1, err1 := hd.VerifySeals(segment, foundAnchor, start, end); err1 == nil {
 		powDepth = powDepth1
