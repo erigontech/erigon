@@ -386,18 +386,3 @@ Date:   Mon Sep 14 04:25:15 2020 +0800
 
     Dockerfile: unexpose port 8547 as GraphQL was merged into HTTP endpoint (#21556)
 
-commit 4e2641319be2fd33a8cd61f0258456b7cef07957
-Author: Guillaume Ballet <gballet@gmail.com>
-Date:   Fri Sep 11 18:35:38 2020 +0000
-
-    p2p/discover: fix typo in comments (#21554)
-
-commit df219e23df94008a168f1c7cc539c41320527c39
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Fri Sep 11 18:17:09 2020 +0200
-
-    miner: fix regression, add test for starting while download (#21547)
-    
-    Fixes a regression introduced in #21536
-
-
