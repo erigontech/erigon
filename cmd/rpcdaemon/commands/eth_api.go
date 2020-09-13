@@ -246,18 +246,12 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 
 	reader := adapter.NewStateReader(api.db, blockNumber)
 	acc, err := reader.ReadAccountData(address)
-	if err != nil {
-		return nil, err
+	if acc == nil || err != nil {
+		return hexutil.Bytes(""), nil
 	}
-
-	if acc == nil {
-		return nil, fmt.Errorf("account %s not found", address)
-	}
-
 	res, err := reader.ReadAccountCode(address, acc.CodeHash)
-	if err != nil {
-		return nil, err
+	if res == nil {
+		return hexutil.Bytes(""), nil
 	}
-
 	return res, nil
 }
