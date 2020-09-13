@@ -208,7 +208,7 @@ func runPeer(
 	if err = forkFilter(status.ForkID); err != nil {
 		return errResp(eth.ErrForkIDRejected, "%v", err)
 	}
-	log.Info(fmt.Sprintf("[%s] Received status message OK", peer.ID()))
+	log.Info(fmt.Sprintf("[%s] Received status message OK", peer.ID()), "name", peer.Name())
 
 	for {
 		msg, err = rw.ReadMsg()
@@ -395,13 +395,13 @@ func Download(natSetting string, filesDir string) error {
 					valUint, _ := value.(uint64)
 					if valUint >= req.Number {
 						peerID = key.(string)
-						//timeRaw, _ := peerTimeMap.Load(peerID)
-						//t, _ := timeRaw.(int64)
+						timeRaw, _ := peerTimeMap.Load(peerID)
+						t, _ := timeRaw.(int64)
 						// If request is large, we give 2 second pause to the peer before sending another request
-						//if req.Length == 1 || t+2 < time.Now().Unix() {
-						found = true
-						return false
-						//}
+						if req.Length == 1 || t+2 < time.Now().Unix() {
+							found = true
+							return false
+						}
 					}
 					return true
 				})
