@@ -368,29 +368,36 @@ func (hd *HeaderDownload) AddToBuffer(segment *ChainSegment, start, end int) {
 }
 
 func (hd *HeaderDownload) AnchorState() string {
-	var sb strings.Builder
+	var ss []string
 	for anchorParent, anchors := range hd.anchors {
-		sb.WriteString(fmt.Sprintf("%x<=[", anchorParent))
+		var sb strings.Builder
 		for i, anchor := range anchors {
 			if i > 0 {
 				sb.WriteString("; ")
 			}
-			sb.WriteString(fmt.Sprintf("{%d-", anchor.blockHeight))
+			sb.WriteString(fmt.Sprintf("{%8d-", anchor.blockHeight))
 			var end uint64
+			var endTipHash common.Hash
 			var count int
 			for _, tipHash := range anchor.tips {
 				if tip, ok := hd.getTip(tipHash, false); ok {
 					if tip.blockHeight > end {
 						end = tip.blockHeight
+						endTipHash = tipHash
 					}
 					count++
 				}
 			}
+			if end != 0 {
+				hd.getTip(endTipHash, true) // Hacky way to keep at least one tip in the LRU cache
+			}
 			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d}", end, end-anchor.blockHeight, count))
 		}
-		sb.WriteString("]\n")
+		sb.WriteString(fmt.Sprintf(" => %x\n", anchorParent))
+		ss = append(ss, sb.String())
 	}
-	return sb.String()
+	sort.Strings(ss)
+	return strings.Join(ss, "\n")
 }
 
 // Heap element for merging together header files
