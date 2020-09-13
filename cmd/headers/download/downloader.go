@@ -45,27 +45,28 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 	} else {
 		log.Error("VerifySeals", "error", err1)
 	}
+	currentTime := uint64(time.Now().Unix())
 	// There are 4 cases
 	if foundAnchor {
 		if foundTip {
 			// Connect
-			if err1 := hd.Connect(segment, start, end); err1 != nil {
+			if err1 := hd.Connect(segment, start, end, currentTime); err1 != nil {
 				log.Error("Connect failed", "error", err1)
 			}
 		} else {
 			// ExtendDown
-			if err1 := hd.ExtendDown(segment, start, end, powDepth, uint64(time.Now().Unix())); err1 != nil {
+			if err1 := hd.ExtendDown(segment, start, end, powDepth, currentTime); err1 != nil {
 				log.Error("ExtendDown failed", "error", err1)
 			}
 		}
 	} else if foundTip {
 		// ExtendUp
-		if err1 := hd.ExtendUp(segment, start, end); err1 != nil {
+		if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
 			log.Error("ExtendUp failed", "error", err1)
 		}
 	} else {
 		// NewAnchor
-		if _, err1 := hd.NewAnchor(segment, start, end, uint64(time.Now().Unix())); err1 != nil {
+		if _, err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
 			log.Error("NewAnchor failed", "error", err1)
 		}
 	}

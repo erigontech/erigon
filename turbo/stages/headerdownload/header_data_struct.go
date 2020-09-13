@@ -61,13 +61,6 @@ type PeerPenalty struct {
 	err        error // Underlying error if available
 }
 
-type RequestQueueItem struct {
-	anchorParent common.Hash
-	waitUntil    uint64
-}
-
-type RequestQueue []RequestQueueItem
-
 // Request for chain segment starting with hash and going to its parent, etc, with length headers in total
 type HeaderRequest struct {
 	Hash   common.Hash
@@ -87,6 +80,7 @@ type HeaderDownload struct {
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
 	tips                   *lru.Cache
 	hardTips               map[common.Hash]*Tip // Hard-coded tips
+	tipQueue               *TipQueue            // Tips that are within the newAnchorPastLimit from current time
 	initPowDepth           int                  // powDepth assigned to the newly inserted anchor
 	newAnchorFutureLimit   uint64               // How far in the future (relative to current time) the new anchors are allowed to be
 	newAnchorPastLimit     uint64               // How far in the past (relative to current time) the new anchors are allowed to be
@@ -96,6 +90,46 @@ type HeaderDownload struct {
 	verifySealFunc         VerifySealFunc
 	RequestQueueTimer      *time.Timer
 }
+
+type TipQueueItem struct {
+	tip     *Tip
+	tipHash common.Hash
+}
+
+type TipQueue []TipQueueItem
+
+func (tq TipQueue) Len() int {
+	return len(tq)
+}
+
+func (tq TipQueue) Less(i, j int) bool {
+	return tq[i].tip.timestamp < tq[j].tip.timestamp
+}
+
+func (tq TipQueue) Swap(i, j int) {
+	tq[i], tq[j] = tq[j], tq[i]
+}
+
+func (tq *TipQueue) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	*tq = append(*tq, x.(TipQueueItem))
+}
+
+func (tq *TipQueue) Pop() interface{} {
+	old := *tq
+	n := len(old)
+	x := old[n-1]
+	*tq = old[0 : n-1]
+	return x
+}
+
+type RequestQueueItem struct {
+	anchorParent common.Hash
+	waitUntil    uint64
+}
+
+type RequestQueue []RequestQueueItem
 
 func (rq RequestQueue) Len() int {
 	return len(rq)
@@ -135,6 +169,7 @@ func NewHeaderDownload(filesDir string,
 		anchors:              make(map[common.Hash][]*Anchor),
 		initPowDepth:         initPowDepth,
 		requestQueue:         &RequestQueue{},
+		tipQueue:             &TipQueue{},
 		calcDifficultyFunc:   calcDifficultyFunc,
 		verifySealFunc:       verifySealFunc,
 		newAnchorFutureLimit: newAnchorFutureLimit,
@@ -143,6 +178,7 @@ func NewHeaderDownload(filesDir string,
 	hd.tips, _ = lru.NewWithEvict(tipLimit, hd.tipEvicted)
 	hd.hardTips = make(map[common.Hash]*Tip)
 	heap.Init(hd.requestQueue)
+	heap.Init(hd.tipQueue)
 	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd
 }

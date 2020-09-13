@@ -115,6 +115,7 @@ func makeP2PServer(
 				peerRwMap.Store(peer.ID().String(), rw)
 				if err := runPeer(
 					peerHeightMap,
+					peerTimeMap,
 					peer,
 					rw,
 					eth.ProtocolVersions[0],
@@ -150,6 +151,7 @@ func errResp(code int, format string, v ...interface{}) error {
 
 func runPeer(
 	peerMap *sync.Map,
+	peerTimeMap *sync.Map,
 	peer *p2p.Peer,
 	rw p2p.MsgReadWriter,
 	version uint,
@@ -180,6 +182,9 @@ func runPeer(
 	if err != nil {
 		return err
 	}
+
+	// Peer responded or sent message - reset the "back off" timer
+	peerTimeMap.Store(peer.ID().String(), time.Now().Unix())
 	if msg.Code != eth.StatusMsg {
 		msg.Discard()
 		return errResp(eth.ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
@@ -397,8 +402,8 @@ func Download(natSetting string, filesDir string) error {
 						peerID = key.(string)
 						timeRaw, _ := peerTimeMap.Load(peerID)
 						t, _ := timeRaw.(int64)
-						// If request is large, we give 2 second pause to the peer before sending another request
-						if req.Length == 1 || t+2 < time.Now().Unix() {
+						// If request is large, we give 5 second pause to the peer before sending another request, unless it responded
+						if req.Length == 1 || t <= time.Now().Unix() {
 							found = true
 							return false
 						}
@@ -422,7 +427,7 @@ func Download(natSetting string, filesDir string) error {
 						}); err != nil {
 							log.Error(fmt.Sprintf("Failed to send to peer %s: %v", peerID, err))
 						}
-						peerTimeMap.Store(peerID, time.Now().Unix())
+						peerTimeMap.Store(peerID, time.Now().Unix()+5)
 					}
 				}
 			}

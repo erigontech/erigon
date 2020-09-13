@@ -194,7 +194,7 @@ func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound bool, s
 }
 
 // ExtendUp extends a working tree up from the tip, using given chain segment
-func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error {
+func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int, currentTime uint64) error {
 	// Find attachment tip again
 	tipHeader := segment.Headers[end-1]
 	if attachmentTip, attaching := hd.getTip(tipHeader.ParentHash, true); attaching {
@@ -211,7 +211,7 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int) error 
 				return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 			}
 			cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty); err != nil {
+			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, currentTime); err != nil {
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
@@ -252,7 +252,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 				return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 			}
 			cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty); err != nil {
+			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, currentTime); err != nil {
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
@@ -274,7 +274,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 }
 
 // Connect connects some working trees using anchors of some, and a tip of another
-func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
+func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, currentTime uint64) error {
 	// Find attachment tip again
 	tipHeader := segment.Headers[end-1]
 	// Find attachement anchors again
@@ -297,7 +297,7 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int) error {
 			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 		}
 		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-		if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty); err != nil {
+		if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, currentTime); err != nil {
 			return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
@@ -340,7 +340,7 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 			return NoPenalty, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 		}
 		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-		if err = hd.addHeaderAsTip(header, anchor, cumulativeDifficulty); err != nil {
+		if err = hd.addHeaderAsTip(header, anchor, cumulativeDifficulty, currentTime); err != nil {
 			return NoPenalty, fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
@@ -377,20 +377,20 @@ func (hd *HeaderDownload) AnchorState() string {
 			}
 			sb.WriteString(fmt.Sprintf("{%8d-", anchor.blockHeight))
 			var end uint64
-			var endTipHash common.Hash
+			//var endTipHash common.Hash
 			var count int
 			for _, tipHash := range anchor.tips {
 				if tip, ok := hd.getTip(tipHash, false); ok {
 					if tip.blockHeight > end {
 						end = tip.blockHeight
-						endTipHash = tipHash
+						//endTipHash = tipHash
 					}
 					count++
 				}
 			}
-			if end != 0 {
-				hd.getTip(endTipHash, true) // Hacky way to keep at least one tip in the LRU cache
-			}
+			//if end != 0 {
+			//	hd.getTip(endTipHash, true) // Hacky way to keep at least one tip in the LRU cache
+			//}
 			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d}", end, end-anchor.blockHeight, count))
 		}
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
@@ -436,7 +436,7 @@ func (h *Heap) Pop() interface{} {
 	return x
 }
 
-func (hd *HeaderDownload) RecoverFromFiles() error {
+func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) error {
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
 		return err
@@ -490,7 +490,7 @@ func (hd *HeaderDownload) RecoverFromFiles() error {
 		if parentAnchor, found := parentAnchors[he.header.ParentHash]; found {
 			parentDiff := parentDiffs[he.header.ParentHash]
 			cumulativeDiff := headerDiff.Add(headerDiff, parentDiff)
-			if err = hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff); err != nil {
+			if err = hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff, currentTime); err != nil {
 				return fmt.Errorf("add header as tip: %v", err)
 			}
 		} else {
@@ -645,11 +645,12 @@ func (hd *HeaderDownload) tipEvicted(key interface{}, value interface{}) {
 }
 
 // addHeaderAsTip adds given header as a tip belonging to a given anchorParent
-func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, cumulativeDifficulty uint256.Int) error {
+func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, cumulativeDifficulty uint256.Int, currentTime uint64) error {
 	diff, overflow := uint256.FromBig(header.Difficulty)
 	if overflow {
 		return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 	}
+	tipHash := header.Hash()
 	tip := &Tip{
 		anchor:               anchor,
 		cumulativeDifficulty: cumulativeDifficulty,
@@ -659,8 +660,23 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 		uncleHash:            header.UncleHash,
 		noPrepend:            false,
 	}
-	hd.tips.Add(header.Hash(), tip)
-	anchor.tips = append(anchor.tips, header.Hash())
+	// Move expired items from protected map to the LRU cache
+	for hd.tipQueue.Len() > 0 {
+		if peek := (*hd.tipQueue)[0]; peek.tip.timestamp+hd.newAnchorPastLimit < currentTime {
+			p := (hd.tipQueue.Pop()).(TipQueueItem)
+			delete(hd.hardTips, p.tipHash)
+			hd.tips.Add(tipHash, tip)
+		} else {
+			break
+		}
+	}
+	if tip.timestamp+hd.newAnchorPastLimit >= currentTime {
+		hd.tipQueue.Push(TipQueueItem{tip: tip, tipHash: tipHash})
+		hd.hardTips[tipHash] = tip
+	} else {
+		hd.tips.Add(tipHash, tip)
+	}
+	anchor.tips = append(anchor.tips, tipHash)
 	return nil
 }
 
