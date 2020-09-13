@@ -211,30 +211,27 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex)), nil
 }
 
+// GetStorageAt returns a 32-byte long, zero-left-padded value at storage location 'index' of address 'address'. Returns '0x' if no value
 func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
+	var empty []byte
+
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
 	if err != nil {
-		return "", err
+		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
 	}
 
 	reader := adapter.NewStateReader(api.db, blockNumber)
 	acc, err := reader.ReadAccountData(address)
-	if err != nil {
-		return "", err
-	}
-
-	if acc == nil {
-		return "", fmt.Errorf("account not found")
+	if acc == nil || err != nil {
+		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
 	}
 
 	location := common.HexToHash(index)
-
 	res, err := reader.ReadAccountStorage(address, acc.Incarnation, &location)
 	if err != nil {
-		return "", err
+		res = empty
 	}
-
-	return hexutil.Encode(res), nil
+	return hexutil.Encode(common.LeftPadBytes(res[:], 32)), err
 }
 
 // GetCode returns the code stored at the given address in the state for the given block number.
