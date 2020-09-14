@@ -115,11 +115,12 @@ type intervalAdjust struct {
 // worker is the main object which takes care of submitting new work to consensus engine
 // and gathering the sealing result.
 type worker struct {
-	config      *Config
-	chainConfig *params.ChainConfig
-	engine      consensus.Engine
-	eth         Backend
-	chain       *core.BlockChain
+	config        *Config
+	chainConfig   *params.ChainConfig
+	engine        consensus.Engine
+	engineProcess consensus.EngineProcess
+	eth           Backend
+	chain         *core.BlockChain
 
 	// Feeds
 	pendingLogsFeed event.Feed
@@ -187,6 +188,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		config:             config,
 		chainConfig:        chainConfig,
 		engine:             engine,
+		engineProcess:      consensus.ConsensusEngine{eth.BlockChain(), engine},
 		eth:                eth,
 		mux:                mux,
 		chain:              eth.BlockChain(),
@@ -654,7 +656,7 @@ func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt tim
 		log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealHash, "hash", block.Hash(),
 			"elapsed", common.PrettyDuration(time.Since(createdAt)), "difficulty", block.Difficulty())
 	} else {
-		if err := stagedsync.InsertBlockInStages(w.chain.ChainDb(), w.chain.Config(), w.chain.Engine(), block, w.chain); err != nil {
+		if err := stagedsync.InsertBlockInStages(w.chain.ChainDb(), w.chain.Config(), w.engineProcess, block, w.chain); err != nil {
 			log.Error("Failed writing block to chain", "err", err)
 			return
 		}

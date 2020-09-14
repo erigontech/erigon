@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/pics/contracts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -499,8 +500,8 @@ func initialState1() error {
 
 	// BLOCK 1
 	snapshotDB = db.MemCopy()
-
-	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[0], blockchain); err != nil {
+	eng := consensus.ConsensusEngine{stagedsync.NewChainReader(gspec.Config, db), engine}
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, eng, blocks[0], blockchain); err != nil {
 		return err
 	}
 
@@ -514,7 +515,7 @@ func initialState1() error {
 
 	// BLOCK 2
 	snapshotDB = db.MemCopy()
-	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[1], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, eng, blocks[1], blockchain); err != nil {
 		return err
 	}
 
@@ -528,7 +529,7 @@ func initialState1() error {
 	// BLOCK 3
 	snapshotDB = db.MemCopy()
 
-	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[2], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, eng, blocks[2], blockchain); err != nil {
 		return err
 	}
 
@@ -550,7 +551,7 @@ func initialState1() error {
 	// BLOCK 4
 	snapshotDB = db.MemCopy()
 
-	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[3], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, eng, blocks[3], blockchain); err != nil {
 		return err
 	}
 
@@ -565,7 +566,7 @@ func initialState1() error {
 	// BLOCK 5
 	snapshotDB = db.MemCopy()
 
-	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[4], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, eng, blocks[4], blockchain); err != nil {
 		return err
 	}
 
@@ -582,7 +583,7 @@ func initialState1() error {
 	// BLOCK 6
 	snapshotDB = db.MemCopy()
 
-	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[5], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, eng, blocks[5], blockchain); err != nil {
 		return err
 	}
 
@@ -603,7 +604,7 @@ func initialState1() error {
 	// BLOCK 7
 	snapshotDB = db.MemCopy()
 
-	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[6], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, eng, blocks[6], blockchain); err != nil {
 		return err
 	}
 
@@ -620,7 +621,7 @@ func initialState1() error {
 	// BLOCK 8
 	snapshotDB = db.MemCopy()
 
-	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[7], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, eng, blocks[7], blockchain); err != nil {
 		return err
 	}
 

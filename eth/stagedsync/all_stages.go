@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, blocks []*types.Block, bc *core.BlockChain) (int, error) {
+func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.EngineProcess, blocks []*types.Block, bc *core.BlockChain) (int, error) {
 	for i, block := range blocks {
 		if err := InsertBlockInStages(db, config, engine, block, bc); err != nil {
 			return i, err
@@ -22,10 +22,10 @@ func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, engine 
 	return len(blocks), nil
 }
 
-func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, block *types.Block, bc *core.BlockChain) error {
+func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.EngineProcess, block *types.Block, bc *core.BlockChain) error {
 	num := block.Number().Uint64()
 	// Stage 1
-	if _, _, err := InsertHeaderChain(db, []*types.Header{block.Header()}, config, engine, 1); err != nil {
+	if _, _, err := InsertHeaderChain(db, []*types.Header{block.Header()}, engine, 1); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(db, stages.Headers, num, nil); err != nil {

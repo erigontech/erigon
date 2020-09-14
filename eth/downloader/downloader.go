@@ -1662,7 +1662,9 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					if mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
+						eng := consensus.ConsensusEngine{stagedsync.NewChainReader(d.chainConfig, d.stateDB), d.blockchain.Engine()}
+
+						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, eng, frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {

@@ -49,6 +49,10 @@ type ChainReader struct {
 	db     ethdb.Database
 }
 
+func NewChainReader(config *params.ChainConfig, db ethdb.Database) ChainReader {
+	return ChainReader{config, db}
+}
+
 // Config retrieves the blockchain's chain configuration.
 func (cr ChainReader) Config() *params.ChainConfig {
 	return cr.config
@@ -83,7 +87,7 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlock(cr.db, hash, number)
 }
 
-func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) (bool, uint64, error) {
+func InsertHeaderChain(db ethdb.Database, headers []*types.Header, engine consensus.EngineProcess, checkFreq int) (bool, uint64, error) {
 	start := time.Now()
 
 	// ignore headers that we already have
@@ -142,16 +146,35 @@ Error: %v
 		seals[len(seals)-1] = true
 	}
 
-	cancel, results := engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
-	defer cancel()
-
-	// Iterate over the headers and ensure they all check out
+	var requests []consensus.VerifyHeaderRequest
 	for i := 0; i < len(headers); i++ {
-		// Otherwise wait for headers checks and ensure they pass
-		if err := <-results; err != nil {
-			return false, 0, err
+		requests = append(requests, consensus.VerifyHeaderRequest{headers[i], seals[i]})
+	}
+
+	results := make([]consensus.VerifyHeaderResponse, 0, len(requests))
+	idx := 0
+	done := 0
+loop:
+	for {
+		select {
+		case engine.VerifyHeader() <- requests[idx]:
+			idx++
+		case result := <-engine.GetVerifyHeader():
+			if result.Err != nil {
+				return false, 0, result.Err
+			}
+			results = append(results, result)
+
+			done++
+			if done == len(headers) {
+				break loop
+			}
+		case result := <-engine.HeaderRequest():
+			h := rawdb.ReadHeaderByHash(db, result.Hash)
+			engine.HeaderResponse() <- consensus.HeaderResponse{h, result.Hash}
 		}
 	}
+
 	headHash := rawdb.ReadHeadHeaderHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
 	localTd := rawdb.ReadTd(db, headHash, *headNumber)

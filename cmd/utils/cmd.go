@@ -33,6 +33,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -134,6 +135,7 @@ func ImportChain(chain *core.BlockChain, fn string) error {
 	// Run actual the import.
 	blocks := make(types.Blocks, importBatchSize)
 	n := 0
+	eng := consensus.ConsensusEngine{chain, chain.Engine()}
 	for batch := 0; ; batch++ {
 		// Load a batch of RLP blocks.
 		if checkInterrupt() {
@@ -167,7 +169,7 @@ func ImportChain(chain *core.BlockChain, fn string) error {
 			log.Info("Skipping batch as all blocks present", "batch", batch, "first", blocks[0].Hash(), "last", blocks[i-1].Hash())
 			continue
 		}
-		if _, err := stagedsync.InsertBlocksInStages(chain.ChainDb(), chain.Config(), chain.Engine(), missing, chain); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(chain.ChainDb(), chain.Config(), eng, missing, chain); err != nil {
 			return fmt.Errorf("invalid block %d: %v", n, err)
 		}
 	}
