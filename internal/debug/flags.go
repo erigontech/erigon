@@ -266,8 +266,6 @@ func Setup(ctx *cli.Context) error {
 		}
 	}
 
-	fmt.Printf("ctx.GlobalBool(pprofFlag.Name): %v\n", ctx.GlobalBool(pprofFlag.Name))
-
 	if metrics.Enabled {
 		go metrics.CollectProcessMetrics(3 * time.Second) // Start system runtime metrics collection
 	}
