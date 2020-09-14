@@ -330,11 +330,4 @@ Date:   Mon Sep 14 22:44:20 2020 +0200
     
     Co-authored-by: rjl493456442 <garyrong0905@gmail.com>
 
-commit f7112cc182ec9ec43ff56d4ff3c84d2518aa30ff
-Author: Felix Lange <fjl@twurst.com>
-Date:   Mon Sep 14 19:23:01 2020 +0200
-
-    rlp: add SplitUint64 (#21563)
-    
-    This can be useful when working with raw RLP data.
 
