@@ -1758,6 +1758,10 @@ func extracHeaders(chaindata string, block uint64) error {
 		b += block
 	}
 	fmt.Printf("Last block is %d\n", b)
+
+	hash := rawdb.ReadHeadHeaderHash(db)
+	h := rawdb.ReadHeaderByHash(db, hash)
+	fmt.Printf("Latest header timestamp: %d, current time: %d\n", h.Time, uint64(time.Now().Unix()))
 	return nil
 }
 
