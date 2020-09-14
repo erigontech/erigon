@@ -24,7 +24,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
+	"github.com/ledgerwatch/turbo-geth/turbo/rlphacks"
 )
 
 // StreamItem is an enum type for values that help distinguish different

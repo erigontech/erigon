@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 type statsColumn struct {
