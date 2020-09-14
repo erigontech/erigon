@@ -3,7 +3,10 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"time"
 
@@ -86,7 +89,7 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open(certFile string) (KV, Backend, error) {
+func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, error) {
 	var dialOpts []grpc.DialOption
 	if certFile == "" {
 		dialOpts = []grpc.DialOption{
@@ -94,10 +97,33 @@ func (opts remoteOpts) Open(certFile string) (KV, Backend, error) {
 			grpc.WithInsecure(),
 		}
 	} else {
-		creds, err := credentials.NewClientTLSFromFile(certFile, "")
+		var creds credentials.TransportCredentials
+		var err error
+		if caCert == "" {
+			creds, err = credentials.NewClientTLSFromFile(certFile, "")
 
-		if err != nil {
-			return nil, nil, err
+			if err != nil {
+				return nil, nil, err
+			}
+		} else {
+			// load peer cert/key, ca cert
+			peerCert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err != nil {
+				log.Error("load peer cert/key error:%v", err)
+				return nil, nil, err
+			}
+			caCert, err := ioutil.ReadFile(caCert)
+			if err != nil {
+				log.Error("read ca cert file error:%v", err)
+				return nil, nil, err
+			}
+			caCertPool := x509.NewCertPool()
+			caCertPool.AppendCertsFromPEM(caCert)
+			creds = credentials.NewTLS(&tls.Config{
+				Certificates: []tls.Certificate{peerCert},
+				ClientCAs:    caCertPool,
+				ClientAuth:   tls.RequireAndVerifyClientCert,
+			})
 		}
 
 		dialOpts = []grpc.DialOption{
@@ -144,7 +170,7 @@ func (opts remoteOpts) Open(certFile string) (KV, Backend, error) {
 }
 
 func (opts remoteOpts) MustOpen() (KV, Backend) {
-	db, txPool, err := opts.Open("")
+	db, txPool, err := opts.Open("", "", "")
 	if err != nil {
 		panic(err)
 	}

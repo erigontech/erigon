@@ -235,7 +235,9 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			var creds credentials.TransportCredentials
 
 			if stack.Config().TLSCACert != "" {
-				peerCert, err := tls.LoadX509KeyPair(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+				var peerCert tls.Certificate
+
+				peerCert, err = tls.LoadX509KeyPair(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
 				if err != nil {
 					log.Error("load peer cert/key error:%v", err)
 					return nil, err
