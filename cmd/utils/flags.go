@@ -553,12 +553,17 @@ var (
 	}
 	TLSCertFlag = cli.StringFlag{
 		Name:  "tls.cert",
-		Usage: "Specify certification file",
+		Usage: "Specify certificate",
 		Value: "",
 	}
 	TLSKeyFlag = cli.StringFlag{
 		Name:  "tls.key",
 		Usage: "Specify key file",
+		Value: "",
+	}
+	TLSCACertFlag = cli.StringFlag{
+		Name:  "tls.cacert",
+		Usage: "Specify certificate authority",
 		Value: "",
 	}
 	GraphQLEnabledFlag = cli.BoolFlag{
@@ -998,6 +1003,7 @@ func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 		cfg.TLSConnection = true
 		cfg.TLSCertFile = certFile
 		cfg.TLSKeyFile = keyFile
+		cfg.TLSCACert = ctx.GlobalString(TLSCACertFlag.Name)
 	}
 }
 

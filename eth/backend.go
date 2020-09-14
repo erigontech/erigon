@@ -18,8 +18,11 @@
 package eth
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/big"
 	"os"
 	"reflect"
@@ -228,8 +231,31 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
+			// load peer cert/key, ca cert
 			var creds credentials.TransportCredentials
-			creds, err = credentials.NewServerTLSFromFile(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+
+			if stack.Config().TLSCACert != "" {
+				peerCert, err := tls.LoadX509KeyPair(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+				if err != nil {
+					log.Error("load peer cert/key error:%v", err)
+					return nil, err
+				}
+				caCert, err := ioutil.ReadFile(stack.Config().TLSCACert)
+				if err != nil {
+					log.Error("read ca cert file error:%v", err)
+					return nil, err
+				}
+				caCertPool := x509.NewCertPool()
+				caCertPool.AppendCertsFromPEM(caCert)
+				creds = credentials.NewTLS(&tls.Config{
+					Certificates: []tls.Certificate{peerCert},
+					ClientCAs:    caCertPool,
+					ClientAuth:   tls.RequireAndVerifyClientCert,
+				})
+			} else {
+				creds, err = credentials.NewServerTLSFromFile(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+			}
+
 			if err != nil {
 				return nil, err
 			}
