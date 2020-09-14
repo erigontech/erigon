@@ -40,6 +40,11 @@ type EthAPI interface {
 	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
 	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
+	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
+	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error)
+	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error)
+	GetUncleCountByBlockNumber(ctx context.Context, blockNr rpc.BlockNumber) *hexutil.Uint
+	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) *hexutil.Uint
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -211,30 +216,27 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex)), nil
 }
 
+// GetStorageAt returns a 32-byte long, zero-left-padded value at storage location 'index' of address 'address'. Returns '0x' if no value
 func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
+	var empty []byte
+
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
 	if err != nil {
-		return "", err
+		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
 	}
 
 	reader := adapter.NewStateReader(api.db, blockNumber)
 	acc, err := reader.ReadAccountData(address)
-	if err != nil {
-		return "", err
-	}
-
-	if acc == nil {
-		return "", fmt.Errorf("account not found")
+	if acc == nil || err != nil {
+		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
 	}
 
 	location := common.HexToHash(index)
-
 	res, err := reader.ReadAccountStorage(address, acc.Incarnation, &location)
 	if err != nil {
-		return "", err
+		res = empty
 	}
-
-	return hexutil.Encode(res), nil
+	return hexutil.Encode(common.LeftPadBytes(res[:], 32)), err
 }
 
 // GetCode returns the code stored at the given address in the state for the given block number.
@@ -254,4 +256,19 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return hexutil.Bytes(""), nil
 	}
 	return res, nil
+}
+
+// GetTransactionCount returns the number of transactions the given address has sent for the given block number
+func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
+	if err != nil {
+		return nil, err
+	}
+	nonce := hexutil.Uint64(0)
+	reader := adapter.NewStateReader(api.db, blockNumber)
+	acc, err := reader.ReadAccountData(address)
+	if acc == nil || err != nil {
+		return &nonce, err
+	}
+	return (*hexutil.Uint64)(&acc.Nonce), err
 }
