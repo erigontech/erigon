@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
+	"github.com/ledgerwatch/turbo-geth/turbo/rlphacks"
 )
 
 /*

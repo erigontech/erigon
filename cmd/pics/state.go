@@ -29,7 +29,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 

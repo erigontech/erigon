@@ -43,7 +43,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 // Tests that block headers can be retrieved from a remote chain based on user queries.
