@@ -10,6 +10,7 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -27,7 +28,7 @@ type KvServer struct {
 	kv ethdb.KV
 }
 
-func StartGrpc(kv ethdb.KV, eth core.Backend, addr string) {
+func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.TransportCredentials) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -48,15 +49,27 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string) {
 	}
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
-
-	grpcServer := grpc.NewServer(
-		grpc.NumStreamWorkers(20),  // reduce amount of goroutines
-		grpc.WriteBufferSize(1024), // reduce buffers to save mem
-		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
-		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
-	)
+	var grpcServer *grpc.Server
+	if creds == nil {
+		grpcServer = grpc.NewServer(
+			grpc.NumStreamWorkers(20),  // reduce amount of goroutines
+			grpc.WriteBufferSize(1024), // reduce buffers to save mem
+			grpc.ReadBufferSize(1024),
+			grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
+			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
+			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+		)
+	} else {
+		grpcServer = grpc.NewServer(
+			grpc.NumStreamWorkers(20),  // reduce amount of goroutines
+			grpc.WriteBufferSize(1024), // reduce buffers to save mem
+			grpc.ReadBufferSize(1024),
+			grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
+			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
+			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+			grpc.Creds(*creds),
+		)
+	}
 	remote.RegisterKVServer(grpcServer, kvSrv)
 	remote.RegisterDBServer(grpcServer, dbSrv)
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
@@ -95,7 +108,8 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 
 	c := tx.Cursor(bucketName).Prefix(prefix)
 
-	txTicket := time.NewTicker(MaxTxTTL)
+	txTicker := time.NewTicker(MaxTxTTL)
+	defer txTicker.Stop()
 
 	// send all items to client, if k==nil - stil send it to client and break loop
 	for k, v, err := c.Seek(in.SeekKey); ; k, v, err = c.Next() {
@@ -125,7 +139,7 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 		//TODO: protect against client - which doesn't send any requests
 		select {
 		default:
-		case <-txTicket.C:
+		case <-txTicker.C:
 			tx.Rollback()
 			tx, err = s.kv.Begin(context.Background(), nil, false)
 			if err != nil {

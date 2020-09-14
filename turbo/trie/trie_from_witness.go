@@ -5,7 +5,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
+	"github.com/ledgerwatch/turbo-geth/turbo/rlphacks"
 )
 
 func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, error) {

@@ -14,16 +14,18 @@ require (
 	github.com/cespare/cp v1.1.1
 	github.com/cloudflare/cloudflare-go v0.13.2
 	github.com/davecgh/go-spew v1.1.1
-	github.com/deckarep/golang-set v1.7.1
-	github.com/dlclark/regexp2 v1.2.1 // indirect
-	github.com/docker/docker v1.13.1
-	github.com/dop251/goja v0.0.0-20200831102558-9af81ddcf0e1
+	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
+	github.com/dlclark/regexp2 v1.2.0 // indirect
+	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
+	github.com/dop251/goja v0.0.0-20200721192441-a695b0cdd498
 	github.com/edsrzf/mmap-go v1.0.0
-	github.com/emicklei/dot v0.14.0
-	github.com/ethereum/evmc/v7 v7.4.0
-	github.com/fatih/color v1.9.0
-	github.com/gballet/go-libpcsclite v0.0.0-20191108122812-4678299bea08
-	github.com/gin-gonic/gin v1.6.3
+	github.com/emicklei/dot v0.11.0
+	github.com/ethereum/evmc/v7 v7.3.0
+	github.com/fatih/color v1.7.0
+	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
+	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
+	github.com/gin-gonic/gin v1.6.2
+	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.0
 	github.com/golang/protobuf v1.4.2

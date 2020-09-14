@@ -21,12 +21,12 @@ docker-compose:
 	docker-compose up
 
 geth:
-	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.GitCommit=${GIT_COMMIT} -X main.GitDate=$(shell date +%Y.%m.%d.%H%M%S)" ./cmd/tg 
+	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 tg:
-	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.GitCommit=${GIT_COMMIT} -X main.GitDate=$(shell date +%Y.%m.%d.%H%M%S)" ./cmd/tg 
+	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 

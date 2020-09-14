@@ -63,6 +63,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, hash common.Hash, fullTx
 	return response, err
 }
 
+// GetHeaderByNumber returns a block's header by number
 func (api *APIImpl) GetHeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error) {
 	header := rawdb.ReadHeaderByNumber(api.dbReader, uint64(number.Int64()))
 	if header == nil {
@@ -72,6 +73,7 @@ func (api *APIImpl) GetHeaderByNumber(_ context.Context, number rpc.BlockNumber)
 	return header, nil
 }
 
+// GetHeaderByHash returns a block's header by hash
 func (api *APIImpl) GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error) {
 	header := rawdb.ReadHeaderByHash(api.dbReader, hash)
 	if header == nil {

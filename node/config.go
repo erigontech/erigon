@@ -191,6 +191,10 @@ type Config struct {
 	staticNodesWarning     bool
 	trustedNodesWarning    bool
 	oldGethResourceWarning bool
+
+	TLSConnection bool
+	TLSCertFile   string
+	TLSKeyFile    string
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into
