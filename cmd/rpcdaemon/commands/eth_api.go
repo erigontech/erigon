@@ -40,6 +40,7 @@ type EthAPI interface {
 	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
 	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
+	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleCountByBlockNumber(ctx context.Context, blockNr rpc.BlockNumber) *hexutil.Uint
@@ -255,4 +256,19 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return hexutil.Bytes(""), nil
 	}
 	return res, nil
+}
+
+// GetTransactionCount returns the number of transactions the given address has sent for the given block number
+func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
+	if err != nil {
+		return nil, err
+	}
+	nonce := hexutil.Uint64(0)
+	reader := adapter.NewStateReader(api.db, blockNumber)
+	acc, err := reader.ReadAccountData(address)
+	if acc == nil || err != nil {
+		return &nonce, err
+	}
+	return (*hexutil.Uint64)(&acc.Nonce), err
 }

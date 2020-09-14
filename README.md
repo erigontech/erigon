@@ -138,6 +138,7 @@ eth_getBlockTransactionCountByHash
 eth_getBlockTransactionCountByNumber
 eth_getBalance
 eth_getCode
+eth_GetTransactionCount
 eth_GetUncleByBlockNumberAndIndex
 eth_GetUncleByBlockHashAndIndex
 eth_GetUncleCountByBlockNumber
