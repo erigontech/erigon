@@ -125,7 +125,9 @@ Run RPC daemon
 > ./build/bin/rpcdaemon --private.api.addr=localhost:9090
 ```
 
-Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go)):
+Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):
+
+For a more detailed status, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
 
 ```
 eth_coinbase
