@@ -45,6 +45,24 @@ It should return something like this (depending on how far your turbo-geth node 
 
 ### RPC Implementation Status
 
+eth_getBalance
+eth_getCode
+eth_getTransactionCount
+eth_getStorageAt
+eth_call
+When requests are made that act on the state of ethereum, the last default block parameter determines the height of the block.
+
+The following options are possible for the defaultBlock parameter:
+
+HEX String - an integer block number
+String "earliest" for the earliest/genesis block
+String "latest" - for the latest mined block
+String "pending" - for the pending state/transactions
+Curl Examples Explained
+The curl options below might return a response where the node complains about the content type, this is because the --data option sets the content type to application/x-www-form-urlencoded . If your node does complain, manually set the header by placing -H “Content-Type: application/json” at the start of the call.
+
+The examples also do not include the URL/IP & port combination which must be the last argument given to curl e.x. 127.0.0.1:8545
+
 | Command                                       | Available | Notes                                             |
 | --------------------------------------------- | --------- | ------------------------------------------------- |
 | _**------------ Web3 ------------**_          |           |
@@ -124,3 +142,25 @@ It should return something like this (depending on how far your turbo-geth node 
 |                                               |           |
 | _\*\*------------ trace_ ------------\*\*\_   |           |
 | trace_filter                                  | Y         |
+|                                               |           |
+| _\*\*------------ Retired ------------\*\*\_  |           |
+| eth_getCompilers                              | N         |
+| eth_compileLLL                                | N         |
+| eth_compileSolidity                           | N         |
+| eth_compileSerpent                            | N         |
+|                                               |           |
+| db_putString                                  | N         |
+| db_getString                                  | N         |
+| db_putHex                                     | N         |
+| db_getHex                                     | N         |
+|                                               |           |
+| shh_post                                      | N         |
+| shh_version                                   | N         |
+| shh_newIdentity                               | N         |
+| shh_hasIdentity                               | N         |
+| shh_newGroup                                  | N         |
+| shh_addToGroup                                | N         |
+| shh_newFilter                                 | N         |
+| shh_uninstallFilter                           | N         |
+| shh_getFilterChanges                          | N         |
+| shh_getMessages                               | N         |
