@@ -340,7 +340,6 @@ func (m *TxDb) Commit() (uint64, error) {
 	if m.tx == nil {
 		return 0, fmt.Errorf("second call .Commit() on same transaction")
 	}
-	fmt.Println("ethdb/tx_db.go:331")
 	if err := m.tx.Commit(context.Background()); err != nil {
 		return 0, err
 	}

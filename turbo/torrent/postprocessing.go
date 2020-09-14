@@ -2,6 +2,7 @@ package torrent
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -9,7 +10,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"io"
 	"math/big"
@@ -18,66 +21,172 @@ import (
 	"strings"
 )
 
+var (
+	HeaderNumber = stages.SyncStage("snapshot_header_number")
+	HeaderCanonical = stages.SyncStage("snapshot_canonical")
+)
 
-func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
-	td := big.NewInt(0)
-	var hash common.Hash
-	var number uint64
-
-	err := etl.Transform(db, dbutils.HeaderPrefix,dbutils.HeaderNumberPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-		if len(k)!=8+common.HashLength {
-			return nil
-		}
-		return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
-	}, etl.IdentityLoadFunc, etl.TransformArgs{
-		Quit:              ctx.Done(),
-	})
-	if err!=nil {
-		return err
-	}
-
-	err = etl.Transform(db, dbutils.HeaderPrefix,dbutils.HeaderPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-		if len(k)!=8+common.HashLength {
-			return nil
-		}
-		header:=&types.Header{}
-		err:=rlp.DecodeBytes(v,header)
+func PostProcessing(db ethdb.Database, mode SnapshotMode) error  {
+	if mode.Headers {
+		err:=GenerateHeaderIndexes(context.Background(), db)
 		if err!=nil {
 			return err
 		}
-		number=header.Number.Uint64()
-		hash=header.Hash()
-		td = td.Add(td, header.Difficulty)
-		tdBytes, innerErr := rlp.EncodeToBytes(td)
-		if innerErr != nil {
-			return innerErr
+	}
+	if mode.Bodies {
+		err:=PostProcessBodies(db)
+		if err!=nil {
+			return err
 		}
+	}
+	return nil
+}
 
-		innerErr = next(k, dbutils.HeaderTDKey(header.Number.Uint64(), header.Hash()), tdBytes)
-		if innerErr!=nil {
-			return innerErr
-		}
-
-		//canonical
-		return next(k, dbutils.HeaderHashKey(header.Number.Uint64()), header.Hash().Bytes())
-	}, etl.IdentityLoadFunc, etl.TransformArgs{
-		Quit:              ctx.Done(),
-		//OnLoadCommit: func(db ethdb.Putter, key []byte, isDone bool) error {
-		//
-		//},
-	})
+func PostProcessBodies(db ethdb.Database) error {
+	v, _, err:=stages.GetStageProgress(db, stages.Bodies)
 	if err!=nil {
 		return err
 	}
-	rawdb.WriteHeadBlockHash(db, hash)
-	rawdb.WriteHeadHeaderHash(db, hash)
-	fmt.Println("Last processed block", number, hash.String())
+
+	if v>0 {
+		return nil
+	}
+
+	k, body, err:=db.Last(dbutils.BlockBodyPrefix)
+	if err!=nil {
+		return err
+	}
+
+	if body==nil {
+		return fmt.Errorf("empty body for key", common.Bytes2Hex(k))
+	}
+
+	number:=binary.BigEndian.Uint64(k[:8])
+	err=stages.SaveStageProgress(db, stages.Bodies, number, nil)
+	if err!=nil {
+		return err
+	}
+	err=stages.SaveStageProgress(db, stages.Senders, number, nil)
+	if err!=nil {
+		return err
+	}
+	return nil
+}
+
+func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
+	h:=rawdb.ReadHeaderByNumber(db, 0)
+	td := h.Difficulty
+	var hash common.Hash
+	var number uint64
+
+	v, _, err:=stages.GetStageProgress(db, HeaderNumber)
+	if err!=nil {
+		return err
+	}
+
+	_=v
+	//if true {
+	if v==0 {
+		log.Info("Generate headers hash to number index")
+		headHashBytes,err:=db.Get(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash))
+		if err!=nil {
+			return err
+		}
+
+		headNumberBytes,err:=db.Get(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber))
+		if err!=nil {
+			return err
+		}
+		headNumber:=big.NewInt(0).SetBytes(headNumberBytes).Uint64()
+		headHash:=common.BytesToHash(headHashBytes)
+
+		err = etl.Transform(db, dbutils.HeaderPrefix,dbutils.HeaderNumberPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+			if len(k)!=8+common.HashLength {
+				return nil
+			}
+			return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
+		}, etl.IdentityLoadFunc, etl.TransformArgs{
+			Quit:              ctx.Done(),
+			OnLoadCommit: func(db ethdb.Putter, key []byte, isDone bool) error {
+				if !isDone {
+					return nil
+				}
+				return stages.SaveStageProgress(db, HeaderNumber,1, nil)
+			},
+			ExtractEndKey: dbutils.HeaderKey(headNumber, headHash),
+		})
+		if err!=nil {
+			return err
+		}
+	}
+
+	v, _, err=stages.GetStageProgress(db, HeaderCanonical)
+	if err!=nil {
+		return err
+	}
+	if v==0  {
+		log.Info("Generate TD index & canonical")
+		err = etl.Transform(db, dbutils.HeaderPrefix,dbutils.HeaderPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+			if len(k)!=8+common.HashLength {
+				return nil
+			}
+			header:=&types.Header{}
+			err:=rlp.DecodeBytes(v,header)
+			if err!=nil {
+				return err
+			}
+			number=header.Number.Uint64()
+			hash=header.Hash()
+			td = td.Add(td, header.Difficulty)
+			tdBytes, innerErr := rlp.EncodeToBytes(td)
+			if innerErr != nil {
+				return innerErr
+			}
+
+			innerErr = next(k, dbutils.HeaderTDKey(header.Number.Uint64(), header.Hash()), tdBytes)
+			if innerErr!=nil {
+				return innerErr
+			}
+
+			//canonical
+			return next(k, dbutils.HeaderHashKey(header.Number.Uint64()), header.Hash().Bytes())
+		}, etl.IdentityLoadFunc, etl.TransformArgs{
+			Quit:              ctx.Done(),
+			OnLoadCommit: func(db ethdb.Putter, key []byte, isDone bool) error {
+				if !isDone {
+					return nil
+				}
+
+				rawdb.WriteHeadHeaderHash(db, hash)
+				rawdb.WriteHeaderNumber(db, hash, number)
+				err=stages.SaveStageProgress(db, stages.Headers, number, nil)
+				if err!=nil {
+					return err
+				}
+				err=stages.SaveStageProgress(db, stages.BlockHashes, number, nil)
+				if err!=nil {
+					return err
+				}
+				rawdb.WriteHeadBlockHash(db, hash)
+				return stages.SaveStageProgress(db, HeaderCanonical,number, nil)
+			},
+		})
+		if err!=nil {
+			return err
+		}
+		fmt.Println("Last processed block", number, hash.String())
+	}
+
 
 	return nil
 }
 
 
 
+/*headNumberBytes
+WARN [09-14|13:48:49.341] Header broke chain ancestry              peer=d52c7eeb2c2f2cf1 number=10355298 hash="219219…5dc387"
+
+ */
 
 
 func BuildInfoBytesForLMDBSnapshot(root string) (metainfo.Info, error) {

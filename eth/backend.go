@@ -144,9 +144,14 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	fmt.Println("-------------------------------------------------------------")
-	fmt.Println(config.SyncMode, config.SnapshotMode.ToString(), config.NetworkID)
-	fmt.Println("-------------------------------------------------------------")
+
+	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
+
+	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
+		return nil, genesisErr
+	}
+	log.Info("Initialised chain configuration", "config", chainConfig)
+
 	var torrentClient *torrent.Client
 	if config.SyncMode==downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID==params.MainnetChainConfig.ChainID.Uint64() {
 		torrentClient = torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
@@ -157,29 +162,31 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		}
 
 		snapshotKV:=chainDb.KV()
-		snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(stack.Config().ResolvePath("snapshots")+"/bodies").ReadOnly().MustOpen()).
+		snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(stack.Config().ResolvePath("snapshots")+"/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.BlockBodyPrefix:dbutils.BucketConfigItem{},
+				dbutils.SnapshotInfoBucket:dbutils.BucketConfigItem{},
+			}
+		}).ReadOnly().MustOpen()).
 			For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).
 			For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
 			DB(snapshotKV).MustOpen()
-		snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(stack.Config().ResolvePath("snapshots")+"/headers").ReadOnly().MustOpen()).
+		snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(stack.Config().ResolvePath("snapshots")+"/headers").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.HeaderPrefix:dbutils.BucketConfigItem{},
+				dbutils.SnapshotInfoBucket:dbutils.BucketConfigItem{},
+			}
+		}).MustOpen()).
 			For(dbutils.HeaderPrefix,dbutils.BucketConfigItem{}).
 			For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
 			DB(snapshotKV).MustOpen()
 		chainDb.SetKV(snapshotKV)
-		//err=torrent.GenerateHeaderIndexes(context.Background(), chainDb)
-		//if err!=nil {
-		//	spew.Dump(err)
-		//	panic(err.Error())
-		//}
+		err = torrent.PostProcessing(chainDb, config.SnapshotMode)
+		if err!=nil {
+			panic(err)
+			return nil, err
+		}
 	}
-	_=torrentClient
-
-	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
-
-	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
-		return nil, genesisErr
-	}
-	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	eth := &Ethereum{
 		config:            config,
@@ -195,6 +202,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		bloomRequests:     make(chan chan *bloombits.Retrieval),
 		bloomIndexer:      NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
 		p2pServer:         stack.Server(),
+		torrentClient: torrentClient,
 	}
 
 	log.Info("Initialising Ethereum protocol", "versions", ProtocolVersions, "network", config.NetworkID)

@@ -39,7 +39,7 @@ func GenerateHeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 	tuples := make(ethdb.MultiPutTuples, 0, chunkFile*3)
 	var hash common.Hash
 	var header []byte
-	for i:=uint64(2); i<=toBlock; i++ {
+	for i:=uint64(1); i<=toBlock; i++ {
 		select {
 		case <-ch:
 			return errors.New("interrupted")

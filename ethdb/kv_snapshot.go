@@ -75,7 +75,7 @@ func (s *snapshotCursor) Count() (uint64, error) {
 }
 
 func (s *SnapshotKV) AllBuckets() dbutils.BucketsCfg {
-	panic("implement me")
+	return s.db.AllBuckets()
 }
 
 func (s *snapshotTX) DropBucket(bucket string) error {
@@ -194,10 +194,6 @@ func (s *SnapshotKV) Close() {
 }
 
 func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx, error) {
-	if writable {
-		return s.db.Begin(ctx, parentTx, writable)
-	}
-
 	dbTx, err := s.db.Begin(ctx, parentTx, writable)
 	if err != nil {
 		return nil, err
@@ -293,6 +289,7 @@ type snapshotTX struct {
 	dbTX       Tx
 	snTX       Tx
 	forBuckets map[string]dbutils.BucketConfigItem
+	writable bool
 }
 
 func (s *snapshotTX) Commit(ctx context.Context) error {
@@ -462,7 +459,14 @@ func (s *snapshotCursor) Append(key []byte, value []byte) error {
 }
 
 func (s *snapshotCursor) SeekExact(key []byte) ([]byte, error) {
-	panic("implement me")
+	v,err := s.dbCursor.SeekExact(key)
+	if err!=nil {
+		return nil, err
+	}
+	if v==nil {
+		return s.snCursor.SeekExact(key)
+	}
+	return v, err
 }
 
 func (s *snapshotCursor) Last() ([]byte, []byte, error) {

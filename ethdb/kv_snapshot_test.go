@@ -166,3 +166,100 @@ func TestSnapshotGet(t *testing.T) {
 		t.Fatal(k, v)
 	}
 }
+
+
+func TestSnapshotWritableTxAndGet(t *testing.T) {
+	sn1 := NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
+		}
+	}).InMem().MustOpen()
+	err := sn1.Update(context.Background(), func(tx Tx) error {
+		bucket := tx.Cursor(dbutils.HeaderPrefix)
+		innerErr := bucket.Put(dbutils.HeaderKey(1, common.Hash{1}), []byte{1})
+		if innerErr != nil {
+			return innerErr
+		}
+		innerErr = bucket.Put(dbutils.HeaderKey(2, common.Hash{2}), []byte{2})
+		if innerErr != nil {
+			return innerErr
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sn2 := NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.BlockBodyPrefix: dbutils.BucketConfigItem{},
+		}
+	}).InMem().MustOpen()
+	err = sn2.Update(context.Background(), func(tx Tx) error {
+		bucket := tx.Cursor(dbutils.BlockBodyPrefix)
+		innerErr := bucket.Put(dbutils.BlockBodyKey(1, common.Hash{1}), []byte{1})
+		if innerErr != nil {
+			return innerErr
+		}
+		innerErr = bucket.Put(dbutils.BlockBodyKey(2, common.Hash{2}), []byte{2})
+		if innerErr != nil {
+			return innerErr
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainDB := NewLMDB().InMem().MustOpen()
+
+	kv := NewSnapshotKV().For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).SnapshotDB(sn1).DB(mainDB).MustOpen()
+	kv = NewSnapshotKV().For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).SnapshotDB(sn2).DB(kv).MustOpen()
+
+	tx, err := kv.Begin(context.Background(), nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v, err := tx.Get(dbutils.HeaderPrefix, dbutils.HeaderKey(1, common.Hash{1}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(v, []byte{1}) {
+		t.Fatal(v)
+	}
+
+	v, err = tx.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(1, common.Hash{1}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(v, []byte{1}) {
+		t.Fatal(v)
+	}
+
+	err = tx.Cursor(dbutils.BlockBodyPrefix).Put(dbutils.BlockBodyKey(4, common.Hash{4}), []byte{2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tx.Cursor(dbutils.HeaderPrefix).Put(dbutils.HeaderKey(4, common.Hash{4}), []byte{2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tx.Commit(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err = kv.Begin(context.Background(), nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := tx.Cursor(dbutils.HeaderPrefix)
+	t.Log(c.First())
+	t.Log(c.Next())
+	t.Log(c.Next())
+	t.Log(c.Next())
+	t.Log(c.Next())
+	t.Log(c.Next())
+}
