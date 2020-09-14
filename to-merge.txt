@@ -338,9 +338,3 @@ Date:   Mon Sep 14 19:23:01 2020 +0200
     
     This can be useful when working with raw RLP data.
 
-commit 71c37d82adaa2b69ea98ce0c5505489d6b711c1e
-Author: Julian Koh <jk2698@cornell.edu>
-Date:   Mon Sep 14 13:57:28 2020 +0100
-
-    js/tracers: make calltracer report value in selfdestructs  (#21549)
-
