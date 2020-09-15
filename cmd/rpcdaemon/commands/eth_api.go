@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
@@ -22,6 +23,8 @@ import (
 
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
+	ChainId(ctx context.Context) (hexutil.Uint64, error)
+	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	Coinbase(ctx context.Context) (common.Address, error)
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
@@ -118,6 +121,17 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 	n := hexutil.Uint(len(block.Transactions()))
 	return &n, nil
+}
+
+// ChainId returns the chain id from the config
+func (api *APIImpl) ChainId(_ context.Context) (hexutil.Uint64, error) {
+	chainConfig := getChainConfig(api.dbReader)
+	return hexutil.Uint64(chainConfig.ChainID.Uint64()), nil
+}
+
+// ProtocolVersion returns the chain id from the config
+func (api *APIImpl) ProtocolVersion(_ context.Context) (hexutil.Uint, error) {
+	return hexutil.Uint(eth.ProtocolVersions[0]), nil
 }
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
