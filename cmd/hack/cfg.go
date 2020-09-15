@@ -277,7 +277,7 @@ func testCfgByUsed() error {
 				//fmt.Printf("[%v] Running on bytecode: %v\n", id, len(bytecode))
 				contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 				contract.Code = job.code
-				cfg, _ := vm.GenCfg(contract, 10000, 32)
+				cfg, _ := vm.GenCfg(contract, 10000, 64)
 				results <- &cfgJobResult{job, cfg}
 
 				/*

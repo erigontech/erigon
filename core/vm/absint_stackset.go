@@ -566,6 +566,17 @@ func post(cfg *Cfg, st0 *astate, edge edge) (*astate, error) {
 			stack1.values[opNum] = a
 
 			isStackTooShort = isStackTooShort || a.fromDeepStack || b.fromDeepStack
+		}  else if stmt.opcode == AND {
+			a := stack1.Pop(edge.pc0)
+			b := stack1.Pop(edge.pc0)
+
+			if a.kind == ConcreteValue && b.kind == ConcreteValue {
+				v := uint256.NewInt()
+				v.And(&a.value, &b.value)
+				stack1.Push(AbsValueConcrete(*v))
+			} else {
+				stack1.Push(AbsValueTop(edge.pc0, false))
+			}
 		} else if stmt.opcode == PC {
 			v := uint256.NewInt()
 			v.SetUint64(uint64(stmt.pc))
