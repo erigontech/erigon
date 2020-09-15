@@ -57,6 +57,8 @@ func getReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.Chain
 	return receipts, nil
 }
 
+// GetLogsByHash non-standard RPC that returns all logs in a block
+// TODO(tjayrush): Since this is non-standard we could rename it to GetLogsByBlockHash to be more consistent and avoid confusion
 func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
 	number := rawdb.ReadHeaderNumber(api.dbReader, hash)
 	if number == nil {
