@@ -48,6 +48,10 @@ type EthAPI interface {
 	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleCountByBlockNumber(ctx context.Context, blockNr rpc.BlockNumber) *hexutil.Uint
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) *hexutil.Uint
+	// These three commands worked anyway, but were not in this interface. Temporarily adding them for discussion
+	GetHeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error)
+	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
+	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -69,6 +73,7 @@ func NewAPI(db ethdb.KV, dbReader ethdb.Getter, eth ethdb.Backend, gascap uint64
 	}
 }
 
+// BlockNumber returns the latest block number of the chain
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
 	if err != nil {
@@ -100,6 +105,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 	}, nil
 }
 
+// GetBlockTransactionCountByNumber returns the number of transactions in the block
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
 	blockNum, err := getBlockNumber(blockNr, api.dbReader)
 	if err != nil {
@@ -114,6 +120,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	return &n, nil
 }
 
+// GetBlockTransactionCountByHash returns the number of transactions in the block
 func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
 	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
 	if block == nil {
@@ -144,12 +151,12 @@ type RPCTransaction struct {
 	Hash             common.Hash     `json:"hash"`
 	Input            hexutil.Bytes   `json:"input"`
 	Nonce            hexutil.Uint64  `json:"nonce"`
-	To               *common.Address `json:"to"`
-	TransactionIndex *hexutil.Uint64 `json:"transactionIndex"`
-	Value            *hexutil.Big    `json:"value"`
-	V                *hexutil.Big    `json:"v"`
 	R                *hexutil.Big    `json:"r"`
 	S                *hexutil.Big    `json:"s"`
+	To               *common.Address `json:"to"`
+	TransactionIndex *hexutil.Uint64 `json:"transactionIndex"`
+	V                *hexutil.Big    `json:"v"`
+	Value            *hexutil.Big    `json:"value"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
