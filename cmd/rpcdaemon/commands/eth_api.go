@@ -25,6 +25,7 @@ import (
 type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error)
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
+	// GasPrice(_ context.Context) (*hexutil.Big, error)
 	Coinbase(ctx context.Context) (common.Address, error)
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
@@ -141,6 +142,14 @@ func (api *APIImpl) ProtocolVersion(_ context.Context) (hexutil.Uint, error) {
 	return hexutil.Uint(eth.ProtocolVersions[0]), nil
 }
 
+/*
+// GasPrice returns a suggestion for a gas price.
+func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
+	price, err := eth.SuggestPrice(ctx)
+	return (*hexutil.Big)(price), err
+}
+*/
+
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
 	BlockHash        *common.Hash    `json:"blockHash"`
@@ -176,11 +185,11 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 		Hash:     tx.Hash(),
 		Input:    hexutil.Bytes(tx.Data()),
 		Nonce:    hexutil.Uint64(tx.Nonce()),
-		To:       tx.To(),
-		Value:    (*hexutil.Big)(tx.Value().ToBig()),
-		V:        (*hexutil.Big)(v.ToBig()),
 		R:        (*hexutil.Big)(r.ToBig()),
 		S:        (*hexutil.Big)(s.ToBig()),
+		To:       tx.To(),
+		V:        (*hexutil.Big)(v.ToBig()),
+		Value:    (*hexutil.Big)(tx.Value().ToBig()),
 	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
