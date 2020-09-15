@@ -33,7 +33,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -135,7 +135,7 @@ func ImportChain(chain *core.BlockChain, fn string) error {
 	// Run actual the import.
 	blocks := make(types.Blocks, importBatchSize)
 	n := 0
-	eng := consensus.ConsensusEngine{chain, chain.Engine()}
+	eng := process.NewConsensusProcess(chain.Engine(), chain)
 	for batch := 0; ; batch++ {
 		// Load a batch of RLP blocks.
 		if checkInterrupt() {

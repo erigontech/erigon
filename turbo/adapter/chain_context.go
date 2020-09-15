@@ -69,6 +69,18 @@ func (c *powEngine) Author(header *types.Header) (common.Address, error) {
 	return header.Coinbase, nil
 }
 
+func (c *powEngine) Verify(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, uncle bool, seal bool) error {
+	panic("must not be called")
+}
+
+func (c *powEngine) NeededForVerification(header *types.Header) int {
+	panic("must not be called")
+}
+
+func (c *powEngine) IsFake() bool {
+	panic("must not be called")
+}
+
 func (c *chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
 	return rawdb.ReadHeader(c.db, hash, number)
 }

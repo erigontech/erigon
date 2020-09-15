@@ -14,13 +14,14 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/cmd/pics/contracts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -500,7 +501,7 @@ func initialState1() error {
 
 	// BLOCK 1
 	snapshotDB = db.MemCopy()
-	eng := consensus.ConsensusEngine{stagedsync.NewChainReader(gspec.Config, db), engine}
+	eng := process.NewConsensusProcess(engine, stagedsync.NewChainReader(gspec.Config, db))
 	if err = stagedsync.InsertBlockInStages(db, gspec.Config, eng, blocks[0], blockchain); err != nil {
 		return err
 	}

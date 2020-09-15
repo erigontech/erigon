@@ -29,6 +29,7 @@ import (
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -1662,7 +1663,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					if mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
-						eng := consensus.ConsensusEngine{stagedsync.NewChainReader(d.chainConfig, d.stateDB), d.blockchain.Engine()}
+						eng := process.NewConsensusProcess(d.blockchain.Engine(), stagedsync.NewChainReader(d.chainConfig, d.stateDB))
 
 						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, eng, frequency)
 						if reorg && d.headersUnwinder != nil {

@@ -119,6 +119,8 @@ type Engine interface {
 
 	// Close terminates any background threads maintained by the consensus engine.
 	Close() error
+
+	Verifier
 }
 
 // PoW is a consensus engine based on proof-of-work.
@@ -127,4 +129,10 @@ type PoW interface {
 
 	// Hashrate returns the current mining hashrate of a PoW consensus engine.
 	Hashrate() float64
+}
+
+type Verifier interface {
+	Verify(chain ChainHeaderReader, header *types.Header, parents []*types.Header, uncle bool, seal bool) error
+	NeededForVerification(header *types.Header) int
+	IsFake() bool
 }

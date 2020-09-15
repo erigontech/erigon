@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -188,7 +189,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		config:             config,
 		chainConfig:        chainConfig,
 		engine:             engine,
-		engineProcess:      consensus.ConsensusEngine{eth.BlockChain(), engine},
+		engineProcess:      process.NewConsensusProcess(engine, eth.BlockChain()),
 		eth:                eth,
 		mux:                mux,
 		chain:              eth.BlockChain(),

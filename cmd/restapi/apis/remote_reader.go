@@ -79,6 +79,18 @@ func (c *powEngine) Author(header *types.Header) (common.Address, error) {
 	return header.Coinbase, nil
 }
 
+func (c *powEngine) Verify(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, uncle bool, seal bool) error {
+	panic("not implemented")
+}
+
+func (c *powEngine) NeededForVerification(header *types.Header) int {
+	panic("not implemented")
+}
+
+func (c *powEngine) IsFake() bool {
+	panic("not implemented")
+}
+
 func NewRemoteReader(db ethdb.KV, blockNr uint64) *RemoteReader {
 	return &RemoteReader{
 		accountReads: make(map[common.Address]struct{}),
