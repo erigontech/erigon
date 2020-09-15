@@ -1,166 +1,179 @@
-In turbo-geth RPC calls are extracted out of the main binary into a separate daemon.
-This daemon can use both local or remote DBs. That means, that this RPC daemon
-doesn't have to be running on the same machine as the main turbo-geth binary or
-it can run from a snapshot of a database for read-only calls. [Docs](./cmd/rpcdaemon/Readme.md)
+## Introduction
 
-### Get started
-**For local DB**
+turbo-geth's `rpcdaemon` runs in its own seperate process.
 
-```
-> make rpcdaemon
-> ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug,net
-```
-**For remote DB**
+This brings many benefits including easier development, the ability to run multiple daemons at once, and the ability to run the daemon remotely. It is possible to run the daemon locally as well (read-only) if both processes have access to the data folder.
 
-Run turbo-geth in one terminal window
+## Getting Started
 
-```
-> ./build/bin/tg --private.api.addr=localhost:9090
+The `rpcdaemon` gets built as part of the main `turbo-geth` build process, but you can build it directly with this command:
+
+```[bash]
+make rpcdaemon
 ```
 
-Run RPC daemon
-```
-> ./build/bin/rpcdaemon --private.api.addr=localhost:9090
-```
+### Running locally
 
-### Test
+If you have direct access to turbo-geth's database folder, you may run the `rpcdaemon` locally. This may provide faster results.
 
-Try `eth_blockNumber` call. In another console/tab, use `curl` to make RPC call:
+After building, run this command to start the daemon locally:
 
-```
-curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber", "params": [], "id":1}' localhost:8545
+```[bash]
+./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug,net,web3
 ```
 
-It should return something like this (depending on how far your turbo-geth node has synced):
+Note that we've also specified which RPC commands to enable in the above command.
 
+### Running remotely
+
+To start the daemon remotely, build it as described above, then run `turbo-geth` in one terminal window:
+
+```[bash]
+./build/bin/tg --private.api.addr=localhost:9090
 ```
-{"jsonrpc":"2.0","id":1,"result":823909}
+
+In another terminal window, start the daemon with the same `--private-api` setting:
+
+```[bash]
+./build/bin/rpcdaemon --private.api.addr=localhost:9090
 ```
 
-### For Developers
+The daemon should respond with something like:
 
-**Code generation**: `go.mod` stores right version of generators, use `mage grpc` to install it and generate code.
+```[bash]
+INFO [date-time] HTTP endpoint opened url=localhost:8545...
+```
 
-`protoc` version not managed but recommended version is 3.x, [install instruction](https://grpc.io/docs/protoc-installation/)
+## Testing
 
-### RPC Implementation Status
+By default, the `rpcdaemon` serves data from `localhost:8545`. You may send `curl` commands to see if things are working.
 
-eth_getBalance
-eth_getCode
-eth_getTransactionCount
-eth_getStorageAt
-eth_call
-When requests are made that act on the state of ethereum, the last default block parameter determines the height of the block.
+Try `eth_blockNumber` for example. In a third terminal window enter this command:
 
-The following options are possible for the defaultBlock parameter:
+```[bash]
+curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id":1}' localhost:8545
+```
 
-HEX String - an integer block number
-String "earliest" for the earliest/genesis block
-String "latest" - for the latest mined block
-String "pending" - for the pending state/transactions
-Curl Examples Explained
-The curl options below might return a response where the node complains about the content type, this is because the --data option sets the content type to application/x-www-form-urlencoded . If your node does complain, manually set the header by placing -H “Content-Type: application/json” at the start of the call.
+This should return something along the lines of this (depending on how far your turbo-geth node has synced):
 
-The examples also do not include the URL/IP & port combination which must be the last argument given to curl e.x. 127.0.0.1:8545
+```[bash]
+{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result":" 0xa5b9ba"
+}
+```
 
-| Command                                       | Available | Notes                                             |
-| --------------------------------------------- | --------- | ------------------------------------------------- |
-| _**------------ Web3 ------------**_          |           |
-| web3_clientVersion                            | Y         |
-| web3_sha3                                     | Y         |
-|                                               |           |
-| _**------------ Net ------------**_           |           |
-| net_listening                                 | -         |
-| net_peerCount\*                               | Y         | Returns a count of 25 as work continues on Sentry |
-| net_version                                   | Y         |
-|                                               |           |
-| _**------------ System ------------**_        |           |
-| eth_blockNumber                               | Y         |
-| eth_chainID                                   | -         |
-| eth_protocolVersion                           | -         |
-| eth_syncing                                   | Y         |
-| eth_estimateGas                               | Y         |
-| eth_gasPrice                                  | -         |
-|                                               |           |
-| _**------------ Blocks/Uncles ------------**_ |           |
-| eth_getBlockByHash                            | Y         |
-| eth_getBlockByNumber                          | Y         |
-| eth_getBlockTransactionCountByHash            | Y         |
-| eth_getBlockTransactionCountByNumber          | Y         |
-| eth_getUncleByBlockHashAndIndex               | Y         |
-| eth_getUncleByBlockNumberAndIndex             | Y         |
-| eth_getUncleCountByBlockHash                  | Y         |
-| eth_getUncleCountByBlockNumber                | Y         |
-|                                               |           |
-| _**------------ Transactions ------------**_  |           |
-| eth_getTransactionByHash                      | Y         |
-| eth_getTransactionByBlockHashAndIndex         | Y         |
-| eth_getTransactionByBlockNumberAndIndex       | Y         |
-| eth_getTransactionReceipt                     | Y         |
-| eth_getLogs                                   | Y         |
-|                                               |           |
-| _**------------ State ------------**_         |           |
-| eth_getBalance                                | Y         |
-| eth_getCode                                   | Y         |
-| eth_getStorageAt                              | Y         |
-|                                               |           |
-| _**------------ Filters ------------**_       |           |
-| eth_newFilter                                 | -         |
-| eth_newBlockFilter                            | -         |
-| eth_newPendingTransactionFilter               | -         |
-| eth_getFilterChanges                          | -         |
-| eth_getFilterLogs                             | -         |
-| eth_uninstallFilter                           | -         |
-|                                               |           |
-| _**------------ Accounts ------------**_      |           |
-| eth_accounts                                  |           |
-| eth_call                                      | Y         |
-| eth_getTransactionCount                       | Y         |
-| eth_sendRawTransaction                        | Y         |
-| eth_sendTransaction                           | -         |
-| eth_sign                                      | -         |
-| eth_signTransaction                           | -         |
-| eth_signTypedData                             | -         |
-|                                               |           |
-| _**------------ ????? ------------**_         |           |
-| eth_getProof                                  | -         |
-|                                               |           |
-| _**------------ Mining ------------**_        |           |
-| eth_mining                                    | -         |
-| eth_coinbase                                  | Y         |
-| eth_hashrate                                  | -         |
-| eth_submitHashrate                            | -         |
-| eth_getWork                                   | -         |
-| eth_submitWork                                | -         |
-|                                               |           |
-| _**------------ Debug ------------**_         |           |
-| debug_accountRange                            | Y         |
-| debug_getModifiedAccountsByNumber             | Y         |
-| debug_getModifiedAccountsByHash               | Y         |
-| debug_storageRangeAt                          | Y         |
-| debug_traceTransaction                        | Y         |
-|                                               |           |
-| _\*\*------------ trace_ ------------\*\*\_   |           |
-| trace_filter                                  | Y         |
-|                                               |           |
-| _\*\*------------ Retired ------------\*\*\_  |           |
-| eth_getCompilers                              | N         |
-| eth_compileLLL                                | N         |
-| eth_compileSolidity                           | N         |
-| eth_compileSerpent                            | N         |
-|                                               |           |
-| db_putString                                  | N         |
-| db_getString                                  | N         |
-| db_putHex                                     | N         |
-| db_getHex                                     | N         |
-|                                               |           |
-| shh_post                                      | N         |
-| shh_version                                   | N         |
-| shh_newIdentity                               | N         |
-| shh_hasIdentity                               | N         |
-| shh_newGroup                                  | N         |
-| shh_addToGroup                                | N         |
-| shh_newFilter                                 | N         |
-| shh_uninstallFilter                           | N         |
-| shh_getFilterChanges                          | N         |
-| shh_getMessages                               | N         |
+## RPC Implementation Status
+
+The following table shows the current implementation status of turbo-geth's RPC daemon.
+
+| Command                                 | Avail | Notes                                      |
+| --------------------------------------- | ----- | ------------------------------------------ |
+| web3_clientVersion                      | Yes   |                                            |
+| web3_sha3                               | Yes   |                                            |
+|                                         |       |                                            |
+| net_listening                           | HC    | (hard coded returns true)                  |
+| net_peerCount                           | HC    | (hard coded 25 - work continues on Sentry) |
+| net_version                             | Yes   |                                            |
+|                                         |       |                                            |
+| eth_blockNumber                         | Yes   |                                            |
+| eth_chainID                             | Yes   |                                            |
+| eth_protocolVersion                     | Yes   |                                            |
+| eth_syncing                             | Yes   |                                            |
+| eth_gasPrice                            | -     |                                            |
+|                                         |       |                                            |
+| eth_getBlockByHash                      | Yes   |                                            |
+| eth_getBlockByNumber                    | Yes   |                                            |
+| eth_getBlockTransactionCountByHash      | Yes   |                                            |
+| eth_getBlockTransactionCountByNumber    | Yes   |                                            |
+| eth_getHeaderByHash                     | Yes   | turbo-geth only                            |
+| eth_getHeaderByNumber                   | Yes   | turbo-geth only                            |
+| eth_getUncleByBlockHashAndIndex         | Yes   |                                            |
+| eth_getUncleByBlockNumberAndIndex       | Yes   |                                            |
+| eth_getUncleCountByBlockHash            | Yes   |                                            |
+| eth_getUncleCountByBlockNumber          | Yes   |                                            |
+|                                         |       |                                            |
+| eth_getTransactionByHash                | Yes   |                                            |
+| eth_getTransactionByBlockHashAndIndex   | Yes   |                                            |
+| eth_getTransactionByBlockNumberAndIndex | Yes   |                                            |
+| eth_getTransactionReceipt               | Yes   |                                            |
+| eth_getLogsByHash                       | Yes   | turbo-geth only (all logs in block)        |
+|                                         |       |                                            |
+| eth_estimateGas                         | Yes   |                                            |
+| eth_getBalance                          | Yes   |                                            |
+| eth_getCode                             | Yes   |                                            |
+| eth_getTransactionCount                 | Yes   |                                            |
+| eth_getStorageAt                        | Yes   |                                            |
+| eth_call                                | Yes   |                                            |
+|                                         |       |                                            |
+| eth_newFilter                           | -     |                                            |
+| eth_newBlockFilter                      | -     |                                            |
+| eth_newPendingTransactionFilter         | -     |                                            |
+| eth_getFilterChanges                    | -     |                                            |
+| eth_getFilterLogs                       | -     |                                            |
+| eth_uninstallFilter                     | -     |                                            |
+| eth_getLogs                             | Yes   |                                            |
+|                                         |       |                                            |
+| eth_accounts                            | -     |                                            |
+| eth_sendRawTransaction                  | Yes   |                                            |
+| eth_sendTransaction                     | -     |                                            |
+| eth_sign                                | -     |                                            |
+| eth_signTransaction                     | -     |                                            |
+| eth_signTypedData                       | -     |                                            |
+|                                         |       |                                            |
+| eth_getProof                            | -     |                                            |
+|                                         |       |                                            |
+| eth_mining                              | -     |                                            |
+| eth_coinbase                            | Yes   |                                            |
+| eth_hashrate                            | -     |                                            |
+| eth_submitHashrate                      | -     |                                            |
+| eth_getWork                             | -     |                                            |
+| eth_submitWork                          | -     |                                            |
+|                                         |       |                                            |
+| debug_accountRange                      | Yes   | Private turbo-geth debug module            |
+| debug_getModifiedAccountsByNumber       | Yes   |                                            |
+| debug_getModifiedAccountsByHash         | Yes   |                                            |
+| debug_storageRangeAt                    | Yes   |                                            |
+| debug_traceTransaction                  | Yes   |                                            |
+|                                         |       |                                            |
+| trace_call                              | -     | From OpenEthereum trace module             |
+| trace_callMany                          | -     |                                            |
+| trace_rawTransaction                    | -     |                                            |
+| trace_replayBlockTransactions           | -     |                                            |
+| trace_replayTransaction                 | -     |                                            |
+| trace_block                             | -     |                                            |
+| trace_filter                            | Yes   |                                            |
+| trace_get                               | -     |                                            |
+| trace_transaction                       | -     |                                            |
+|                                         |       |                                            |
+| eth_getCompilers                        | No    | retired                                    |
+| eth_compileLLL                          | No    | retired                                    |
+| eth_compileSolidity                     | No    | retired                                    |
+| eth_compileSerpent                      | No    | retired                                    |
+|                                         |       |                                            |
+| db_putString                            | No    | retired                                    |
+| db_getString                            | No    | retired                                    |
+| db_putHex                               | No    | retired                                    |
+| db_getHex                               | No    | retired                                    |
+|                                         |       |                                            |
+| shh_post                                | No    | retired                                    |
+| shh_version                             | No    | retired                                    |
+| shh_newIdentity                         | No    | retired                                    |
+| shh_hasIdentity                         | No    | retired                                    |
+| shh_newGroup                            | No    | retired                                    |
+| shh_addToGroup                          | No    | retired                                    |
+| shh_newFilter                           | No    | retired                                    |
+| shh_uninstallFilter                     | No    | retired                                    |
+| shh_getFilterChanges                    | No    | retired                                    |
+| shh_getMessages                         | No    | retired                                    |
+
+This table is constantly updated. Please visit again.
+
+## For Developers
+
+### Code generation
+
+`go.mod` stores right version of generators, use `make grpc` to install it and generate code.
+
+Recommended `protoc` version is 3.x. [Installation instructions](https://grpc.io/docs/protoc-installation/)
