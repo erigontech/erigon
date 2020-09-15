@@ -9,10 +9,10 @@ func (c *Clique) Verify(chain consensus.ChainHeaderReader, header *types.Header,
 	panic("not implemented")
 }
 
-func (c Clique) NeededForVerification(header *types.Header) int {
+func (c *Clique) NeededForVerification(header *types.Header) int {
 	panic("not implemented")
 }
 
-func (c Clique) IsFake() bool {
+func (c *Clique) IsFake() bool {
 	panic("not implemented")
 }

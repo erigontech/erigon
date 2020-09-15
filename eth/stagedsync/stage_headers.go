@@ -151,7 +151,6 @@ Error: %v
 		requests = append(requests, consensus.VerifyHeaderRequest{headers[i], seals[i]})
 	}
 
-	results := make([]consensus.VerifyHeaderResponse, 0, len(requests))
 	idx := 0
 	done := 0
 loop:
@@ -163,7 +162,6 @@ loop:
 			if result.Err != nil {
 				return false, 0, result.Err
 			}
-			results = append(results, result)
 
 			done++
 			if done == len(headers) {

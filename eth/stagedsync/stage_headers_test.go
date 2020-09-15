@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -85,14 +86,16 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
 	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
 
-	reorg, _, err := InsertHeaderChain(db, headers1, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	eng1 := process.NewConsensusProcess(ethash.NewFaker(), NewChainReader(params.AllEthashProtocolChanges, db))
+	reorg, _, err := InsertHeaderChain(db, headers1, eng1, 0)
 	assert.NoError(t, err)
 	assert.False(t, reorg)
 
 	td := rawdb.ReadTd(db, lastHeader1.Hash(), lastHeader1.Number.Uint64())
 	assert.Equal(t, expectedTdBlock3, td)
 
-	reorg, _, err = InsertHeaderChain(db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	eng2 := process.NewConsensusProcess(ethash.NewFaker(), NewChainReader(params.AllEthashProtocolChanges, db))
+	reorg, _, err = InsertHeaderChain(db, headers2, eng2, 0)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 
@@ -100,7 +103,8 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 
 	assert.Equal(t, expectedTdBlock4, td)
 
-	reorg, _, err = InsertHeaderChain(db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	eng3 := process.NewConsensusProcess(ethash.NewFaker(), NewChainReader(params.AllEthashProtocolChanges, db))
+	reorg, _, err = InsertHeaderChain(db, headers2, eng3, 0)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 
