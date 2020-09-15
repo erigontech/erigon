@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type hashInfo struct {
@@ -237,8 +238,38 @@ func testCfgByUsed() error {
 	numWorkers := runtime.NumCPU()
 	fmt.Printf("Number of cores: %v\n", numWorkers)
 
-	jobs := make(chan *cfgJob)
-	results := make(chan *cfgJobResult)
+	file, err := os.Open("absintdata/contract_bytecode_txcnt.csv")
+	//file, err := os.Open("/Users/suhabebugrara/absintdata/small_imprecision.csv")
+	if err != nil {
+		log.Fatalf("failed opening file: %s", err)
+	}
+	scanner := bufio.NewScanner(file)
+	scanner.Split(bufio.ScanLines)
+	scanner.Scan() //remove header
+	jobList := make([]*cfgJob, 0)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(strings.TrimSpace(line)) == 0 {
+			continue
+		}
+		row := strings.Split(line, ",")
+		txcnt, perr := strconv.ParseInt(row[0], 10, 64)
+		check(perr)
+
+		code, _ := hex.DecodeString(row[1][2:])
+		jobList = append(jobList, &cfgJob{int(txcnt),code})
+	}
+	file.Close()
+	fmt.Printf("Finished parsing %v jobs\n", len(jobList))
+
+	jobs := make(chan *cfgJob, len(jobList))
+	results := make(chan *cfgJobResult, len(jobList))
+
+	for j := 0; j < len(jobList); j++ {
+		jobs <- jobList[j]
+	}
+	close(jobs)
+	fmt.Printf("Closing jobs\n")
 
 	for i := 0; i < numWorkers; i++ {
 		go func(id int) {
@@ -250,52 +281,28 @@ func testCfgByUsed() error {
 				results <- &cfgJobResult{job, cfg}
 
 			}
-
 		}(i)
 	}
 
-	go func() {
-		//file, err := os.Open("absintdata/contract_bytecode_txcnt.csv")
-		file, err := os.Open("/Users/suhabebugrara/absintdata/small_imprecision.csv")
-		if err != nil {
-			log.Fatalf("failed opening file: %s", err)
-		}
-		scanner := bufio.NewScanner(file)
-		scanner.Split(bufio.ScanLines)
-		scanner.Scan() //remove header
-		for scanner.Scan() {
-			line := scanner.Text()
-			if len(strings.TrimSpace(line)) == 0 {
-				continue
-			}
-			row := strings.Split(line, ",")
-			txcnt, perr := strconv.ParseInt(row[0], 10, 64)
-			check(perr)
-
-			code, _ := hex.DecodeString(row[1][2:])
-			jobs <- &cfgJob{int(txcnt),code}
-		}
-		file.Close()
-		close(jobs)
-	}()
-
-	resultsFile, err := os.Create("results.csv")
+	current := time.Now()
+	timestamp := current.Format("2006-01-02_15-04-05")
+	filename := fmt.Sprintf("results_%v.csv", timestamp)
+	fmt.Printf("Writing results to %v\n", filename)
+	resultsFile, err := os.Create(filename)
 	check(err)
-
 	headers := []string{	"TxCount",
 							"BytecodeLen",
 							"Valid",
 							"BadJumpReason",
 							"Bytecode"}
-
 	_, err = resultsFile.WriteString(strings.Join(headers, "|") + "\n")
 	check(err)
-
 	err = resultsFile.Sync()
 	check(err)
 
 	eval := CfgEval{numPrograms: 189395}
-	for result := range results {
+	for j := 0; j < len(jobList); j++ {
+		result := <- results
 		line := []string{	si(result.job.txcnt),
 							si(len(result.cfg.Program.Contract.Code)),
 							sb(result.cfg.Valid),
