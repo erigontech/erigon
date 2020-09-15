@@ -274,23 +274,3 @@ Author: Giuseppe Bertone <bertone.giuseppe@gmail.com>
 Date:   Tue Sep 15 10:37:01 2020 +0200
 
     core/rawdb: single point of maintenance for writing and deleting tx lookup indexes (#21480)
-
-commit 4764b2f0be91b05395f6c25b0f74bd8d65aaa590
-Author: Kirill Elagin <kirelagin@gmail.com>
-Date:   Tue Sep 15 02:27:17 2020 -0400
-
-    COYPING: restore the full text text of GPL (#21568)
-    
-    When the license was added to the repository, its text was changed (some
-    sections at the end removed) and, worse, the authors of go-ethereum
-    tried to claim copyright on the license text.
-    
-    The correct way to apply GPL to a project is to copy it verbatim.
-    This change reverts the text of the GPL to the original.
-
-commit b65c3841815ed4d12a6904d18efe39bbff5eb676
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Tue Sep 15 08:22:47 2020 +0200
-
-    eth/tracers: regenerate assets from #21549 (#21564)
-
