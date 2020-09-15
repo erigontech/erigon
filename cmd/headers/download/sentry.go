@@ -323,9 +323,9 @@ func runPeer(
 				}
 				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
 			}
-			log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg {%s}", peer.ID(), hashesStr.String()))
+			//log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg {%s}", peer.ID(), hashesStr.String()))
 		case eth.GetPooledTransactionsMsg:
-			log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg", peer.ID()))
+			//log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg", peer.ID()))
 		case eth.TransactionMsg:
 			var txs []*types.Transaction
 			if err := msg.Decode(&txs); err != nil {
@@ -339,9 +339,9 @@ func runPeer(
 				hash := tx.Hash()
 				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
 			}
-			log.Info(fmt.Sprintf("[%s] TransactionMsg {%s}", peer.ID(), hashesStr.String()))
+			//log.Info(fmt.Sprintf("[%s] TransactionMsg {%s}", peer.ID(), hashesStr.String()))
 		case eth.PooledTransactionsMsg:
-			log.Info(fmt.Sprintf("[%s] PooledTransactionsMsg", peer.ID()))
+			//log.Info(fmt.Sprintf("[%s] PooledTransactionsMsg", peer.ID()))
 		default:
 			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peer.ID(), msg.Code))
 		}
@@ -411,7 +411,7 @@ func Download(natSetting string, filesDir string) error {
 					return true
 				})
 				if !found {
-					log.Warn(fmt.Sprintf("Could not find suitable peer to send GetBlockHeadersData request for block %d", req.Number))
+					//log.Warn(fmt.Sprintf("Could not find suitable peer to send GetBlockHeadersData request for block %d", req.Number))
 				} else {
 					log.Info(fmt.Sprintf("Sending req for hash %x, blocknumber %d, length %d to peer %s\n", req.Hash, req.Number, req.Length, peerID))
 					rwRaw, _ := peerRwMap.Load(peerID)

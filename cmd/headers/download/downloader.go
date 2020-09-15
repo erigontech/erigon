@@ -38,7 +38,11 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 		}
 		log.Warn(fmt.Sprintf("Invalidated anchors %v for %x", invalidAnchors, anchorParent))
 	}
-	foundTip, end, _ := hd.FindTip(segment, start) // We ignore penalty because we will check it as part of PoW check
+	foundTip, end, penalty := hd.FindTip(segment, start) // We ignore penalty because we will check it as part of PoW check
+	if penalty != headerdownload.NoPenalty {
+		log.Error(fmt.Sprintf("FindTip penalty %d", penalty))
+		return
+	}
 	var powDepth int
 	if powDepth1, err1 := hd.VerifySeals(segment, foundAnchor, start, end); err1 == nil {
 		powDepth = powDepth1
@@ -52,22 +56,30 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			// Connect
 			if err1 := hd.Connect(segment, start, end, currentTime); err1 != nil {
 				log.Error("Connect failed", "error", err1)
+			} else {
+				log.Info("Connected", "start", start, "end", end)
 			}
 		} else {
 			// ExtendDown
 			if err1 := hd.ExtendDown(segment, start, end, powDepth, currentTime); err1 != nil {
 				log.Error("ExtendDown failed", "error", err1)
+			} else {
+				log.Info("Extended Down", "start", start, "end", end)
 			}
 		}
 	} else if foundTip {
 		// ExtendUp
 		if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
 			log.Error("ExtendUp failed", "error", err1)
+		} else {
+			log.Info("Extended Up", "start", start, "end", end)
 		}
 	} else {
 		// NewAnchor
 		if _, err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
 			log.Error("NewAnchor failed", "error", err1)
+		} else {
+			log.Info("NewAnchor", "start", start, "end", end)
 		}
 	}
 
