@@ -429,6 +429,8 @@ type ResolveResult struct {
 // destination (in this case, attrubute resolved will be false), or returns one (for a non-JUMPI) or two (for JUMPI)
 // edges that contain program counters of destinations where the executions can possibly come next
 func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
+	isStackTooShort := false
+
 	st0 := cfg.D[pc0]
 
 	stmt := cfg.Program.Stmts[pc0]
@@ -449,6 +451,7 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 			if jumpDest.kind == TopValue {
 				isBadJump = true
 				cfg.BadJumpImprecision = true
+				isStackTooShort = isStackTooShort || jumpDest.fromDeepStack
 			} else if jumpDest.kind == ConcreteValue {
 				if jumpDest.value.IsUint64() {
 					pc1 := int(jumpDest.value.Uint64())
@@ -485,6 +488,11 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 
 		cfg.Program.Stmts[e.pc0].covered = true
 		cfg.Program.Stmts[e.pc1].covered = true
+	}
+
+	if isStackTooShort {
+		cfg.ShortStack = true
+		return nil, errors.New("abstract stack too short: reached unmodelled depth")
 	}
 
 	if isBadJump {
@@ -785,6 +793,10 @@ func (cfg *Cfg) GetBadJumpReason() string {
 		return ""
 	}
 
+	if cfg.ShortStack {
+		return "ShortStack"
+	}
+
 	if cfg.AnlyCounterLimit {
 		return "AnlyCounterLimit"
 	}
@@ -801,9 +813,6 @@ func (cfg *Cfg) GetBadJumpReason() string {
 		return "InvalidOpcode"
 	}
 
-	if cfg.ShortStack {
-		return "ShortStack"
-	}
 
 	if cfg.Panic {
 		return "Panic"
