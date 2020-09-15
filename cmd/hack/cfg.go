@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -222,36 +223,57 @@ func testCfgCodes(chaindata string) error {
 	return nil
 }*/
 
+type cfgJob struct {
+	txcnt int
+	code []byte
+}
+
+type cfgJobResult struct {
+	job *cfgJob
+	cfg *vm.Cfg
+}
 
 func testCfgByUsed() error {
 	numWorkers := runtime.NumCPU()
 	fmt.Printf("Number of cores: %v\n", numWorkers)
 
-	jobs := make(chan []byte)
-	results := make(chan *vm.Cfg)
+	jobs := make(chan *cfgJob)
+	results := make(chan *cfgJobResult)
 
 	for i := 0; i < numWorkers; i++ {
 		go func(id int) {
-			for bytecode := range jobs {
+			for job := range jobs {
 				//fmt.Printf("[%v] Running on bytecode: %v\n", id, len(bytecode))
 				contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
-				contract.Code = bytecode
+				contract.Code = job.code
 				cfg, _ := vm.GenCfg(contract, 10000, 32)
-				results <- cfg
+				results <- &cfgJobResult{job, cfg}
+
 			}
+
 		}(i)
 	}
 
 	go func() {
-		file, err := os.Open("used_contracts.txt")
+		//file, err := os.Open("absintdata/contract_bytecode_txcnt.csv")
+		file, err := os.Open("/Users/suhabebugrara/absintdata/small_imprecision.csv")
 		if err != nil {
 			log.Fatalf("failed opening file: %s", err)
 		}
 		scanner := bufio.NewScanner(file)
 		scanner.Split(bufio.ScanLines)
+		scanner.Scan() //remove header
 		for scanner.Scan() {
-			code, _ := hex.DecodeString(scanner.Text()[2:])
-			jobs <- code
+			line := scanner.Text()
+			if len(strings.TrimSpace(line)) == 0 {
+				continue
+			}
+			row := strings.Split(line, ",")
+			txcnt, perr := strconv.ParseInt(row[0], 10, 64)
+			check(perr)
+
+			code, _ := hex.DecodeString(row[1][2:])
+			jobs <- &cfgJob{int(txcnt),code}
 		}
 		file.Close()
 		close(jobs)
@@ -260,7 +282,8 @@ func testCfgByUsed() error {
 	resultsFile, err := os.Create("results.csv")
 	check(err)
 
-	headers := []string{	"BytecodeLen",
+	headers := []string{	"TxCount",
+							"BytecodeLen",
 							"Valid",
 							"BadJumpReason",
 							"Bytecode"}
@@ -272,11 +295,12 @@ func testCfgByUsed() error {
 	check(err)
 
 	eval := CfgEval{numPrograms: 189395}
-	for cfg := range results {
-		line := []string{	si(len(cfg.Program.Contract.Code)),
-							sb(cfg.Valid),
-							cfg.GetBadJumpReason(),
-							hex.EncodeToString(cfg.Program.Contract.Code)}
+	for result := range results {
+		line := []string{	si(result.job.txcnt),
+							si(len(result.cfg.Program.Contract.Code)),
+							sb(result.cfg.Valid),
+							result.cfg.GetBadJumpReason(),
+							hex.EncodeToString(result.cfg.Program.Contract.Code)}
 
 		_, err = resultsFile.WriteString(strings.Join(line,"|") + "\n")
 		check(err)
@@ -284,7 +308,7 @@ func testCfgByUsed() error {
 		err = resultsFile.Sync()
 		check(err)
 
-		eval.update(cfg, 1)
+		eval.update(result.cfg, 1)
 
 		if eval.numProgramsAnalyzed%10 == 0 {
 			eval.printStats()
@@ -307,18 +331,6 @@ func percent(n int, d int) string {
 }
 
 func testGenCfg() {
-	absIntTestSmallImprecision()
-	absIntTestSmallInvalidJumpDest()
-	if true {
-		return
-	}
-	//export("codes")
-	//_ = testCfgByImpact("codes")
-	_ = testCfgByUsed()
-	if true {
-		return
-	}
-
 	args := os.Args
 	if len(args) == 4 {
 		fmt.Printf("%v\n", args[3])
@@ -326,6 +338,12 @@ func testGenCfg() {
 		print("Finished running on program from command line.")
 		return
 	}
+
+	_ = testCfgByUsed()
+	if true {
+		return
+	}
+
 
 	/*absIntTestSimple00()
 	absIntTestRequires00()
@@ -338,8 +356,11 @@ func testGenCfg() {
 	absIntTestPrivateFunction02()
 	absIntTestStaticLoop01()
 	absIntTestDepositContract()
-	absIntTestDepositContract2()*/
+	absIntTestDepositContract2()
 	absIntTestPanic00()
+	absIntTestSmallImprecision()
+	absIntTestSmallInvalidJumpDest()*/
+	absIntTestSmallImprecision2()
 }
 
 /*
@@ -405,9 +426,15 @@ func absIntTest3() {
 }
 */
 
+//17891 transactions, 588 bytecode len
+func absIntTestSmallImprecision2() {
+	const s = "6080604052600436106100405763ffffffff7c010000000000000000000000000000000000000000000000000000000060003504166393e84cd98114610045575b600080fd5b34801561005157600080fd5b5061005a61005c565b005b60008060008060008060008060008060008060008073a62142888aba8370742be823c1782d17a0389da173ffffffffffffffffffffffffffffffffffffffff1663747dff426040518163ffffffff167c01000000000000000000000000000000000000000000000000000000000281526004016101c060405180830381600087803b1580156100ea57600080fd5b505af11580156100fe573d6000803e3d6000fd5b505050506040513d6101c081101561011557600080fd5b8101908080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291905050509d509d509d509d509d509d509d509d509d509d509d509d509d509d508673ffffffffffffffffffffffffffffffffffffffff167318a0451ea56fd4ff58f59837e9ec30f346ffdca573ffffffffffffffffffffffffffffffffffffffff161415151561021057fe5b50505050505050505050505050505600a165627a7a72305820ec5e1703d3b74688c3350622a2bcfc097615733fa5f8df7adf51d66ebf42d0260029"
+	runCfgAnly("SmallImprecision02", s)
+}
+
 func absIntTestSmallImprecision() {
 	const s = "5b7355173aca573ab872c570056d929d89f6babc3fb53156"
-	runCfgAnly("SmallImprecision", s)
+	runCfgAnly("SmallImprecision01", s)
 
 }
 

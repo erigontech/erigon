@@ -9,6 +9,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/logrusorgru/aurora"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -453,17 +454,17 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 					pc1 := int(jumpDest.value.Uint64())
 
 					if pc1 >= len(cfg.Program.Stmts) || cfg.Program.Stmts[pc1].operation == nil {
-						isBadJump = true
-						cfg.BadJumpInvalidOp = true
+						//isBadJump = true
+						//cfg.BadJumpInvalidOp = true
 					} else if cfg.Program.Stmts[pc1].opcode != JUMPDEST {
-						isBadJump = true
-						cfg.BadJumpInvalidJumpDest = true
+						//isBadJump = true
+						//cfg.BadJumpInvalidJumpDest = true
 					} else {
 						edges = append(edges, edge{pc0, stmt, pc1, true})
 					}
 				} else {
-					isBadJump = true
-					cfg.BadJumpInvalidJumpDest = true
+					//isBadJump = true
+					//cfg.BadJumpInvalidJumpDest = true
 				}
 			}
 		}
@@ -490,11 +491,40 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 		cfg.BadJumps[stmt.pc] = true
 		cfg.Unresolved = true
 		cfg.checkRep()
-		return edges, errors.New("unresolvable jumps found")
+		return nil, errors.New("unresolvable jumps found")
 	}
+
+	edges = sortAndUnique(edges)
 
 	cfg.checkRep()
 	return edges, nil
+}
+
+type edgeKey struct {
+	pc0 int
+	pc1 int
+}
+
+func sortAndUnique(edges []edge) []edge {
+	uedges := make([]edge, 0)
+
+	edgeMap := make(map[edgeKey]bool)
+	for i := 0; i < len(edges); i++ {
+		e := edges[i]
+		ek := edgeKey{e.pc0,e.pc1}
+		if edgeMap[ek] {
+			continue
+		}
+
+		edgeMap[ek] = true
+		uedges = append(uedges, e)
+	}
+
+	sort.SliceStable(uedges, func(i, j int) bool {
+		return uedges[i].pc0 < uedges[j].pc1
+	})
+
+	return uedges
 }
 
 func post(cfg *Cfg, st0 *astate, edge edge) (*astate, error) {
@@ -753,6 +783,10 @@ func (cfg *Cfg) PrintAnlyState() {
 func (cfg *Cfg) GetBadJumpReason() string {
 	if cfg.Valid {
 		return ""
+	}
+
+	if cfg.AnlyCounterLimit {
+		return "AnlyCounterLimit"
 	}
 
 	if cfg.BadJumpImprecision {
