@@ -641,6 +641,7 @@ func (hd *HeaderDownload) tipEvicted(key interface{}, value interface{}) {
 			newTips = append(newTips, anchorTipHash)
 		}
 	}
+	fmt.Printf("Tip %d [%x] evicted\n", tip.blockHeight, tipHash)
 	anchor.tips = newTips
 }
 
@@ -666,6 +667,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 			p := (hd.tipQueue.Pop()).(TipQueueItem)
 			delete(hd.hardTips, p.tipHash)
 			hd.tips.Add(tipHash, tip)
+			fmt.Printf("Moved tip %d [%x] from hard to soft %d+%d < %d\n", tip.blockHeight, tipHash, tip.timestamp, hd.newAnchorPastLimit, currentTime)
 		} else {
 			break
 		}
