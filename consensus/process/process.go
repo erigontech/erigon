@@ -14,49 +14,54 @@ type Consensus struct {
 }
 
 func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader) *Consensus {
-	return &Consensus{
+	c := &Consensus{
 		Verifier: v,
 		Process:  consensus.NewProcess(chain),
 	}
-}
 
-func (eth *Consensus) VerifyHeader() chan<- consensus.VerifyHeaderRequest {
 	go func() {
 		// fixme how to close/cancel the goroutine
 		// fixme remove records from VerifiedHeaders
-		req := <-eth.VerifyHeaderRequests
+		for req := range c.VerifyHeaderRequests {
+			// If we're running a full engine faking, accept any input as valid
+			if c.IsFake() {
+				c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), nil}
+				continue
+			}
 
-		// If we're running a full engine faking, accept any input as valid
-		if eth.IsFake() {
-			eth.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), nil}
-			return
+			// Short circuit if the header is known
+			if _, ok := c.GetVerifiedBlocks(req.Header.Hash()); ok {
+				c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), nil}
+				continue
+			}
+
+			parent, exit := c.waitParentHeaders(req)
+			if exit {
+				continue
+			}
+
+			err := c.Verify(c.Process.Chain, req.Header, parent, false, req.Seal)
+			c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), err}
+			if err == nil {
+				c.AddVerifiedBlocks(req.Header, req.Header.Hash())
+			}
 		}
-
-		// Short circuit if the header is known
-		if _, ok := eth.GetVerifiedBlocks(req.Header.Hash()); ok {
-			eth.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), nil}
-			return
-		}
-
-		parent, exit := eth.waitParentHeaders(req)
-		if exit {
-			return
-		}
-
-		err := eth.Verify(eth.Process.Chain, req.Header, parent, false, req.Seal)
-		eth.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), err}
 	}()
 
-	return eth.VerifyHeaderRequests
+	return c
 }
 
-func (eth *Consensus) waitParentHeaders(req consensus.VerifyHeaderRequest) ([]*types.Header, bool) {
-	parentsToGet := eth.NeededForVerification(req.Header)
+func (c *Consensus) VerifyHeader() chan<- consensus.VerifyHeaderRequest {
+	return c.VerifyHeaderRequests
+}
+
+func (c *Consensus) waitParentHeaders(req consensus.VerifyHeaderRequest) ([]*types.Header, bool) {
+	parentsToGet := c.NeededForVerification(req.Header)
 	parents := make([]*types.Header, 0, parentsToGet)
 	header := req.Header
 
 	for i := 0; i < parentsToGet; i++ {
-		parent, exit := eth.waitHeader(header.Hash(), header.ParentHash)
+		parent, exit := c.waitHeader(header.Hash(), header.ParentHash)
 		if exit {
 			return nil, true
 		}
@@ -68,15 +73,15 @@ func (eth *Consensus) waitParentHeaders(req consensus.VerifyHeaderRequest) ([]*t
 	return parents, false
 }
 
-func (eth *Consensus) waitHeader(blockHash, parentHash common.Hash) (*types.Header, bool) {
-	parent, ok := eth.GetVerifiedBlocks(parentHash)
+func (c *Consensus) waitHeader(blockHash, parentHash common.Hash) (*types.Header, bool) {
+	parent, ok := c.GetVerifiedBlocks(parentHash)
 	if ok && parent == nil {
-		eth.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
+		c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
 		return nil, true
 	}
 
 	if !ok {
-		eth.HeadersRequests <- consensus.HeadersRequest{parentHash}
+		c.HeadersRequests <- consensus.HeadersRequest{parentHash}
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 
@@ -84,14 +89,14 @@ func (eth *Consensus) waitHeader(blockHash, parentHash common.Hash) (*types.Head
 		for {
 			select {
 
-			case parentResp := <-eth.HeaderResponses:
+			case parentResp := <-c.HeaderResponses:
 				if parentResp.Header != nil {
-					eth.AddVerifiedBlocks(parentResp.Header, parentResp.Header.Hash())
+					c.AddVerifiedBlocks(parentResp.Header, parentResp.Header.Hash())
 				}
 
-				parent, ok = eth.GetVerifiedBlocks(parentHash)
+				parent, ok = c.GetVerifiedBlocks(parentHash)
 				if ok && parent == nil {
-					eth.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
+					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
 					return nil, true
 				} else if ok {
 					break loop
@@ -99,7 +104,7 @@ func (eth *Consensus) waitHeader(blockHash, parentHash common.Hash) (*types.Head
 
 				if parentResp.Hash == blockHash {
 					if parentResp.Header == nil {
-						eth.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
+						c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
 						return nil, true
 					}
 
@@ -107,12 +112,12 @@ func (eth *Consensus) waitHeader(blockHash, parentHash common.Hash) (*types.Head
 					break loop
 				}
 			case <-ticker.C:
-				parent, ok = eth.GetVerifiedBlocks(parentHash)
+				parent, ok = c.GetVerifiedBlocks(parentHash)
 				if !ok {
 					continue
 				}
 				if parent == nil {
-					eth.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
+					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
 					return nil, true
 				}
 				break loop
@@ -122,14 +127,14 @@ func (eth *Consensus) waitHeader(blockHash, parentHash common.Hash) (*types.Head
 	return parent, false
 }
 
-func (eth *Consensus) GetVerifyHeader() <-chan consensus.VerifyHeaderResponse {
-	return eth.VerifyHeaderResponses
+func (c *Consensus) VerifyHeaderResults() <-chan consensus.VerifyHeaderResponse {
+	return c.VerifyHeaderResponses
 }
 
-func (eth *Consensus) HeaderRequest() <-chan consensus.HeadersRequest {
-	return eth.HeadersRequests
+func (c *Consensus) HeaderRequest() <-chan consensus.HeadersRequest {
+	return c.HeadersRequests
 }
 
-func (eth *Consensus) HeaderResponse() chan<- consensus.HeaderResponse {
-	return eth.HeaderResponses
+func (c *Consensus) HeaderResponse() chan<- consensus.HeaderResponse {
+	return c.HeaderResponses
 }

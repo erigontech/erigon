@@ -146,31 +146,8 @@ Error: %v
 		seals[len(seals)-1] = true
 	}
 
-	var requests []consensus.VerifyHeaderRequest
-	for i := 0; i < len(headers); i++ {
-		requests = append(requests, consensus.VerifyHeaderRequest{headers[i], seals[i]})
-	}
-
-	idx := 0
-	done := 0
-loop:
-	for {
-		select {
-		case engine.VerifyHeader() <- requests[idx]:
-			idx++
-		case result := <-engine.GetVerifyHeader():
-			if result.Err != nil {
-				return false, 0, result.Err
-			}
-
-			done++
-			if done == len(headers) {
-				break loop
-			}
-		case result := <-engine.HeaderRequest():
-			h := rawdb.ReadHeaderByHash(db, result.Hash)
-			engine.HeaderResponse() <- consensus.HeaderResponse{h, result.Hash}
-		}
+	if err := verifyHeaders(db, headers, engine, seals); err != nil {
+		return false, 0, err
 	}
 
 	headHash := rawdb.ReadHeadHeaderHash(db)
@@ -273,4 +250,33 @@ loop:
 	}
 	log.Info("Imported new block headers", ctx...)
 	return reorg, forkBlockNumber, nil
+}
+
+func verifyHeaders(db ethdb.Database, headers []*types.Header, engine consensus.EngineProcess, seals []bool) error {
+	if len(headers) == 0 {
+		return nil
+	}
+
+	requests := make(chan consensus.VerifyHeaderRequest, len(headers))
+	for i := 0; i < len(headers); i++ {
+		requests <- consensus.VerifyHeaderRequest{headers[i], seals[i]}
+	}
+
+	for {
+		select {
+		case req := <-requests:
+			engine.VerifyHeader() <- req
+		case result := <-engine.VerifyHeaderResults():
+			if result.Err != nil {
+				return result.Err
+			}
+
+			if len(requests) == 0 {
+				return nil
+			}
+		case result := <-engine.HeaderRequest():
+			h := rawdb.ReadHeaderByHash(db, result.Hash)
+			engine.HeaderResponse() <- consensus.HeaderResponse{h, result.Hash}
+		}
+	}
 }
