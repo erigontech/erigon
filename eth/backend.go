@@ -236,13 +236,13 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 			if stack.Config().TLSCACert != "" {
 				var peerCert tls.Certificate
-
+				var caCert []byte
 				peerCert, err = tls.LoadX509KeyPair(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
 				if err != nil {
 					log.Error("load peer cert/key error:%v", err)
 					return nil, err
 				}
-				caCert, err := ioutil.ReadFile(stack.Config().TLSCACert)
+				caCert, err = ioutil.ReadFile(stack.Config().TLSCACert)
 				if err != nil {
 					log.Error("read ca cert file error:%v", err)
 					return nil, err

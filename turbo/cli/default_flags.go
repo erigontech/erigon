@@ -26,7 +26,7 @@ var DefaultFlags = []cli.Flag{
 	utils.HddFlag,
 	utils.DatabaseFlag,
 	utils.LMDBMapSizeFlag,
-	utils.NoTLSFlag,
+	utils.TLSFlag,
 	utils.TLSCertFlag,
 	utils.TLSKeyFlag,
 	utils.PrivateApiAddr,
