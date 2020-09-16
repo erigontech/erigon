@@ -664,7 +664,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 	// Move expired items from protected map to the LRU cache
 	for hd.tipQueue.Len() > 0 {
 		if peek := (*hd.tipQueue)[0]; peek.tip.timestamp+hd.newAnchorPastLimit < currentTime {
-			p := (hd.tipQueue.Pop()).(TipQueueItem)
+			p := heap.Pop(hd.tipQueue).(TipQueueItem)
 			delete(hd.hardTips, p.tipHash)
 			hd.tips.Add(tipHash, tip)
 			fmt.Printf("Moved tip %d [%x] from hard to soft %d+%d < %d\n", tip.blockHeight, tipHash, tip.timestamp, hd.newAnchorPastLimit, currentTime)
