@@ -673,7 +673,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 		}
 	}
 	if tip.timestamp+hd.newAnchorPastLimit >= currentTime {
-		hd.tipQueue.Push(TipQueueItem{tip: tip, tipHash: tipHash})
+		heap.Push(hd.tipQueue, TipQueueItem{tip: tip, tipHash: tipHash})
 		hd.hardTips[tipHash] = tip
 	} else {
 		hd.tips.Add(tipHash, tip)
