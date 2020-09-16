@@ -240,9 +240,3 @@ Date:   Wed Sep 16 13:15:22 2020 +0200
     
     * tests/fuzzers/abi: comment out false positives
 
-commit 93f047023f8569e95b767cd000c7c95640dfcad7
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed Sep 16 17:51:16 2020 +0800
-
-    les/lespay/server: bump database version (#21571)
-
