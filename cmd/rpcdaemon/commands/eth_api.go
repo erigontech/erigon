@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
@@ -22,6 +23,9 @@ import (
 
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
+	ChainId(ctx context.Context) (hexutil.Uint64, error)
+	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
+	// GasPrice(_ context.Context) (*hexutil.Big, error)
 	Coinbase(ctx context.Context) (common.Address, error)
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
@@ -45,6 +49,10 @@ type EthAPI interface {
 	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleCountByBlockNumber(ctx context.Context, blockNr rpc.BlockNumber) *hexutil.Uint
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) *hexutil.Uint
+	// These three commands worked anyway, but were not in this interface. Temporarily adding them for discussion
+	GetHeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error)
+	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
+	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -66,6 +74,7 @@ func NewAPI(db ethdb.KV, dbReader ethdb.Getter, eth ethdb.Backend, gascap uint64
 	}
 }
 
+// BlockNumber returns the latest block number of the chain
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
 	if err != nil {
@@ -97,6 +106,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 	}, nil
 }
 
+// GetBlockTransactionCountByNumber returns the number of transactions in the block
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
 	blockNum, err := getBlockNumber(blockNr, api.dbReader)
 	if err != nil {
@@ -111,6 +121,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	return &n, nil
 }
 
+// GetBlockTransactionCountByHash returns the number of transactions in the block
 func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
 	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
 	if block == nil {
@@ -119,6 +130,25 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	n := hexutil.Uint(len(block.Transactions()))
 	return &n, nil
 }
+
+// ChainId returns the chain id from the config
+func (api *APIImpl) ChainId(_ context.Context) (hexutil.Uint64, error) {
+	chainConfig := getChainConfig(api.dbReader)
+	return hexutil.Uint64(chainConfig.ChainID.Uint64()), nil
+}
+
+// ProtocolVersion returns the chain id from the config
+func (api *APIImpl) ProtocolVersion(_ context.Context) (hexutil.Uint, error) {
+	return hexutil.Uint(eth.ProtocolVersions[0]), nil
+}
+
+/*
+// GasPrice returns a suggestion for a gas price.
+func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
+	price, err := eth.SuggestPrice(ctx)
+	return (*hexutil.Big)(price), err
+}
+*/
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
@@ -130,12 +160,12 @@ type RPCTransaction struct {
 	Hash             common.Hash     `json:"hash"`
 	Input            hexutil.Bytes   `json:"input"`
 	Nonce            hexutil.Uint64  `json:"nonce"`
-	To               *common.Address `json:"to"`
-	TransactionIndex *hexutil.Uint64 `json:"transactionIndex"`
-	Value            *hexutil.Big    `json:"value"`
-	V                *hexutil.Big    `json:"v"`
 	R                *hexutil.Big    `json:"r"`
 	S                *hexutil.Big    `json:"s"`
+	To               *common.Address `json:"to"`
+	TransactionIndex *hexutil.Uint64 `json:"transactionIndex"`
+	V                *hexutil.Big    `json:"v"`
+	Value            *hexutil.Big    `json:"value"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
@@ -155,11 +185,11 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 		Hash:     tx.Hash(),
 		Input:    hexutil.Bytes(tx.Data()),
 		Nonce:    hexutil.Uint64(tx.Nonce()),
-		To:       tx.To(),
-		Value:    (*hexutil.Big)(tx.Value().ToBig()),
-		V:        (*hexutil.Big)(v.ToBig()),
 		R:        (*hexutil.Big)(r.ToBig()),
 		S:        (*hexutil.Big)(s.ToBig()),
+		To:       tx.To(),
+		V:        (*hexutil.Big)(v.ToBig()),
+		Value:    (*hexutil.Big)(tx.Value().ToBig()),
 	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash

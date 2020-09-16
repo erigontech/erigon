@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.ChainConfig, hash common.Hash) (types.Receipts, error) {
+func getReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.ChainConfig, hash common.Hash) (types.Receipts, error) {
 	number := rawdb.ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil, fmt.Errorf("block not found: %x", hash)
@@ -57,6 +57,8 @@ func GetReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.Chain
 	return receipts, nil
 }
 
+// GetLogsByHash non-standard RPC that returns all logs in a block
+// TODO(tjayrush): Since this is non-standard we could rename it to GetLogsByBlockHash to be more consistent and avoid confusion
 func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
 	number := rawdb.ReadHeaderNumber(api.dbReader, hash)
 	if number == nil {
@@ -65,9 +67,9 @@ func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*t
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
 
-	receipts, err := GetReceipts(ctx, api.dbReader, chainConfig, hash)
+	receipts, err := getReceipts(ctx, api.dbReader, chainConfig, hash)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipt error: %v", err)
+		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
 	logs := make([][]*types.Log, len(receipts))
 	for i, receipt := range receipts {
@@ -177,9 +179,9 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
 
-	receipts, err := GetReceipts(ctx, api.dbReader, chainConfig, blockHash)
+	receipts, err := getReceipts(ctx, api.dbReader, chainConfig, blockHash)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipt error: %v", err)
+		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
 	if len(receipts) <= int(txIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txIndex), blockNumber)
