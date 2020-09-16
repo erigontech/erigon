@@ -669,8 +669,8 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 		if peek := (*hd.tipQueue)[0]; peek.tip.timestamp+hd.newAnchorPastLimit < currentTime {
 			p := heap.Pop(hd.tipQueue).(TipQueueItem)
 			delete(hd.hardTips, p.tipHash)
-			hd.tips.Add(tipHash, tip)
-			fmt.Printf("Moved tip %d [%x] from hard to soft %d+%d < %d\n", tip.blockHeight, tipHash, tip.timestamp, hd.newAnchorPastLimit, currentTime)
+			hd.tips.Add(tipHash, p.tip)
+			fmt.Printf("Moved tip %d [%x] from hard to soft %d+%d < %d\n", tip.blockHeight, tipHash, p.tip.timestamp, hd.newAnchorPastLimit, currentTime)
 		} else {
 			break
 		}
