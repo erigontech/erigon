@@ -149,6 +149,9 @@ func (hd *HeaderDownload) InvalidateAnchors(anchorParent common.Hash, invalidAnc
 // FindTip attempts to find tip of a tree that given chain segment can be attached to
 // the given chain segment may be found invalid relative to a working tree, in this case penalty for peer is returned
 func (hd *HeaderDownload) FindTip(segment *ChainSegment, start int) (found bool, end int, penalty Penalty) {
+	if _, duplicate := hd.getTip(segment.Headers[start].Hash(), false); duplicate {
+		return true, 0, NoPenalty
+	}
 	// Walk the segment from children towards parents
 	for i, header := range segment.Headers[start:] {
 		// Check if the header can be attached to any tips

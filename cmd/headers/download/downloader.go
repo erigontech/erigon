@@ -68,11 +68,15 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			}
 		}
 	} else if foundTip {
-		// ExtendUp
-		if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
-			log.Error("ExtendUp failed", "error", err1)
+		if end == 0 {
+			log.Info("No action needed, tip already exists")
 		} else {
-			log.Info("Extended Up", "start", start, "end", end)
+			// ExtendUp
+			if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
+				log.Error("ExtendUp failed", "error", err1)
+			} else {
+				log.Info("Extended Up", "start", start, "end", end)
+			}
 		}
 	} else {
 		// NewAnchor
