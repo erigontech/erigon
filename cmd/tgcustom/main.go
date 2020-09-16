@@ -43,16 +43,16 @@ func syncStages(ctx *cli.Context) stagedsync.StageBuilders {
 					Description: "Custom Stage",
 					ExecFunc: func(s *stagedsync.StageState, _ stagedsync.Unwinder) error {
 						fmt.Println("hello from the custom stage", ctx.String(flag.Name))
-						val, err := world.DB.Get(customBucketName, []byte("test"))
+						val, err := world.TX.Get(customBucketName, []byte("test"))
 						fmt.Println("val", string(val), "err", err)
-						world.DB.Put(customBucketName, []byte("test"), []byte(ctx.String(flag.Name))) //nolint:errcheck
+						world.TX.Put(customBucketName, []byte("test"), []byte(ctx.String(flag.Name))) //nolint:errcheck
 						s.Done()
 						return nil
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						fmt.Println("hello from the custom stage unwind", ctx.String(flag.Name))
-						world.DB.Delete(customBucketName, []byte("test")) //nolint:errcheck
-						return u.Done(world.DB)
+						world.TX.Delete(customBucketName, []byte("test")) //nolint:errcheck
+						return u.Done(world.TX)
 					},
 				}
 			},
