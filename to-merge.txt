@@ -246,31 +246,3 @@ Date:   Wed Sep 16 17:51:16 2020 +0800
 
     les/lespay/server: bump database version (#21571)
 
-commit 8696dd39cbb5664a4a6900993e113713e56f3def
-Author: Vinod Damle <vdamle@users.noreply.github.com>
-Date:   Wed Sep 16 02:39:35 2020 -0400
-
-    params: allow setting Petersburg block before chain head (#21473)
-    
-    * Allow setting PetersburgBlock before chainhead
-    
-    if it is at the same block as ConstantinopleBlock
-    
-    * Add a negative test
-
-commit cf2a77af28e58359f3ec1c0376c3b834f9ad8fb5
-Author: Mason Fischer <mason@kissr.co>
-Date:   Tue Sep 15 05:29:51 2020 -0400
-
-    ethclient: fix BlockNumber (#21565)
-    
-    It didn't actually work because it called a method that doesn't
-    exist. This fixes it also adds a test.
-    
-    Co-authored-by: Felix Lange <fjl@twurst.com>
-
-commit 0185ee09936a3657cdd6d03e2c0c630e66954f33
-Author: Giuseppe Bertone <bertone.giuseppe@gmail.com>
-Date:   Tue Sep 15 10:37:01 2020 +0200
-
-    core/rawdb: single point of maintenance for writing and deleting tx lookup indexes (#21480)
