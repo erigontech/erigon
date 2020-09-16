@@ -252,7 +252,7 @@ Error: %v
 	return reorg, forkBlockNumber, nil
 }
 
-func verifyHeaders(db ethdb.Database, headers []*types.Header, engine consensus.EngineProcess, seals []bool) error {
+func verifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine consensus.EngineProcess, seals []bool) error {
 	if len(headers) == 0 {
 		return nil
 	}
