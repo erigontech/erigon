@@ -168,29 +168,3 @@ Date:   Tue Sep 8 11:13:16 2020 +0300
 
     eth/downloader: dynamically move pivot even during chain sync
 
-commit 07751c3d26a9c740fa1bf792199a47065db8aa8a
-Author: Giuseppe Bertone <bertone.giuseppe@gmail.com>
-Date:   Thu Sep 17 10:23:56 2020 +0200
-
-    cmd/geth: added counters to the geth inspect report (#21495)
-    
-    * database: added counters
-    
-    * Improved stats for ancient db
-    
-    * Small improvement
-    
-    * Better message and added percentage while counting receipts
-    
-    * Fast counting for receipts
-    
-    * added info message
-    
-    * Show both receips itemscount  from ancient db and counted receipts
-    
-    * Fixed default case
-    
-    * Removed counter for receipts in ancient store
-    
-    * Removed counting of receipts present in leveldb
-
