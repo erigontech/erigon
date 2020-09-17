@@ -196,12 +196,11 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 
 	// Fill in the derived information in the logs
 	if receipt.Logs != nil {
-		for i, log := range receipt.Logs {
+		for _, log := range receipt.Logs {
 			log.BlockNumber = blockNumber
 			log.TxHash = hash
 			log.TxIndex = uint(txIndex)
 			log.BlockHash = blockHash
-			log.Index = uint(i)
 		}
 	}
 

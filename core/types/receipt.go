@@ -296,7 +296,7 @@ func (r Receipts) GetRlp(i int) []byte {
 func (r Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, number uint64, txs Transactions) error {
 	signer := MakeSigner(config, new(big.Int).SetUint64(number))
 
-	logIndex := uint(0)
+	logIndex := uint(0) // logIdx is unique within the block and starts from 0
 	if len(txs) != len(r) {
 		return errors.New("transaction and receipt count mismatch")
 	}
