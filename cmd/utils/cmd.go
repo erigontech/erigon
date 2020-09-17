@@ -135,7 +135,10 @@ func ImportChain(chain *core.BlockChain, fn string) error {
 	// Run actual the import.
 	blocks := make(types.Blocks, importBatchSize)
 	n := 0
-	eng := process.NewConsensusProcess(chain.Engine(), chain)
+
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(chain.Engine(), chain, exit)
+	defer close(exit)
 	for batch := 0; ; batch++ {
 		// Load a batch of RLP blocks.
 		if checkInterrupt() {

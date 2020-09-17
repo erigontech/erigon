@@ -27,8 +27,8 @@ type HeaderResponse struct {
 }
 
 type EngineProcess interface {
-	VerifyHeader() chan<- VerifyHeaderRequest
-	VerifyHeaderResults() <-chan VerifyHeaderResponse
+	HeaderVerification() chan<- VerifyHeaderRequest
+	VerifyResults() <-chan VerifyHeaderResponse
 
 	HeaderRequest() <-chan HeadersRequest
 	HeaderResponse() chan<- HeaderResponse

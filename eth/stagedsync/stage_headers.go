@@ -265,8 +265,8 @@ func verifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 	for {
 		select {
 		case req := <-requests:
-			engine.VerifyHeader() <- req
-		case result := <-engine.VerifyHeaderResults():
+			engine.HeaderVerification() <- req
+		case result := <-engine.VerifyResults():
 			if result.Err != nil {
 				return result.Err
 			}

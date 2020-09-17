@@ -25,7 +25,7 @@ func TestBlockHashStage(t *testing.T) {
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
 	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
 
-	eng := process.NewConsensusProcess(ethash.NewFaker(), NewChainReader(params.AllEthashProtocolChanges, db))
+	eng := process.NewRemoteEngine(ethash.NewFaker(), NewChainReader(params.AllEthashProtocolChanges, db))
 	_, _, err := InsertHeaderChain(db, headers, eng, 0)
 	assert.NoError(t, err)
 	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, db, "", nil)

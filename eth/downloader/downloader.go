@@ -170,8 +170,9 @@ type Downloader struct {
 	bodiesState    *stagedsync.StageState
 	bodiesUnwinder stagedsync.Unwinder
 
-	stagedSyncState *stagedsync.State
-	stagedSync      *stagedsync.StagedSync
+	stagedSyncState  *stagedsync.State
+	stagedSync       *stagedsync.StagedSync
+	consensusProcess *process.Consensus
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -1663,9 +1664,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					if mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
-						eng := process.NewConsensusProcess(d.blockchain.Engine(), stagedsync.NewChainReader(d.chainConfig, d.stateDB))
-
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, eng, frequency)
+						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.consensusProcess, frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {

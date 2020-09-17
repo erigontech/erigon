@@ -26,15 +26,18 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -180,7 +183,7 @@ func (b *testWorkerBackend) newRandomTx(creation bool) *types.Transaction {
 	return tx
 }
 
-func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, blocks int) (*worker, *testWorkerBackend) {
+func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine *process.RemoteEngine, db ethdb.Database, blocks int) (*worker, *testWorkerBackend) {
 	backend := newTestWorkerBackend(t, chainConfig, engine, db, blocks)
 	backend.txPool.AddLocals(pendingTxs)
 	w := newWorker(testConfig, chainConfig, engine, backend, new(event.TypeMux), hooks{}, false)
@@ -214,7 +217,10 @@ func testGenerateBlockAndImport(t *testing.T, isClique bool) {
 		engine = ethash.NewFaker()
 	}
 
-	w, b := newTestWorker(t, chainConfig, engine, db, 0)
+	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(chainConfig, db))
+	defer eng.Close()
+
+	w, b := newTestWorker(t, chainConfig, eng, db, 0)
 	defer w.close()
 
 	// This test chain imports the mined blocks.
@@ -255,16 +261,26 @@ func testGenerateBlockAndImport(t *testing.T, isClique bool) {
 
 func TestEmptyWorkEthash(t *testing.T) {
 	t.Skip("should be restored. Unstable. tag: Mining")
-	testEmptyWork(t, ethashChainConfig, ethash.NewFaker())
+
+	db := ethdb.NewMemDatabase()
+	engine := ethash.NewFaker()
+	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(ethashChainConfig, db))
+	defer eng.Close()
+
+	testEmptyWork(t, ethashChainConfig, eng)
 }
 func TestEmptyWorkClique(t *testing.T) {
 	t.Skip("should be restored. Unstable. tag: Clique")
-	testEmptyWork(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase()))
+
+	db := ethdb.NewMemDatabase()
+	engine := clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase())
+	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(cliqueChainConfig, db))
+	defer eng.Close()
+
+	testEmptyWork(t, cliqueChainConfig, eng)
 }
 
-func testEmptyWork(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine) {
-	defer engine.Close()
-
+func testEmptyWork(t *testing.T, chainConfig *params.ChainConfig, engine *process.RemoteEngine) {
 	w, _ := newTestWorker(t, chainConfig, engine, ethdb.NewMemDatabase(), 0)
 	defer w.close()
 
@@ -310,9 +326,12 @@ func testEmptyWork(t *testing.T, chainConfig *params.ChainConfig, engine consens
 func TestStreamUncleBlock(t *testing.T) {
 	t.Skip("Fix when refactoring tx pool")
 	ethash := ethash.NewFaker()
-	defer ethash.Close()
 
-	w, b := newTestWorker(t, ethashChainConfig, ethash, ethdb.NewMemDatabase(), 1)
+	db := ethdb.NewMemDatabase()
+	eng := process.NewRemoteEngine(ethash, stagedsync.NewChainReader(ethashChainConfig, db))
+	defer eng.Close()
+
+	w, b := newTestWorker(t, ethashChainConfig, eng, db, 1)
 	defer w.close()
 
 	var taskCh = make(chan struct{})
@@ -362,17 +381,26 @@ func TestStreamUncleBlock(t *testing.T) {
 func TestRegenerateMiningBlockEthash(t *testing.T) {
 	t.Skip("should be restored. works only on small values of difficulty. tag: Mining")
 
-	testRegenerateMiningBlock(t, ethashChainConfig, ethash.NewFaker())
+	db := ethdb.NewMemDatabase()
+	engine := ethash.NewFaker()
+	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(ethashChainConfig, db))
+	defer eng.Close()
+
+	testRegenerateMiningBlock(t, ethashChainConfig, eng)
 }
 
 func TestRegenerateMiningBlockClique(t *testing.T) {
 	t.Skip("should be restored. works only on small values of difficulty. tag: Clique")
-	testRegenerateMiningBlock(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase()))
+
+	db := ethdb.NewMemDatabase()
+	engine := clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase())
+	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(cliqueChainConfig, db))
+	defer eng.Close()
+
+	testRegenerateMiningBlock(t, cliqueChainConfig, eng)
 }
 
-func testRegenerateMiningBlock(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine) {
-	defer engine.Close()
-
+func testRegenerateMiningBlock(t *testing.T, chainConfig *params.ChainConfig, engine *process.RemoteEngine) {
 	w, b := newTestWorker(t, chainConfig, engine, ethdb.NewMemDatabase(), 0)
 	defer w.close()
 
@@ -424,17 +452,26 @@ func testRegenerateMiningBlock(t *testing.T, chainConfig *params.ChainConfig, en
 
 func TestAdjustIntervalEthash(t *testing.T) {
 	t.Skip("Fix when refactoring tx pool")
-	testAdjustInterval(t, ethashChainConfig, ethash.NewFaker())
+
+	db := ethdb.NewMemDatabase()
+	engine := ethash.NewFaker()
+	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(ethashChainConfig, db))
+	defer eng.Close()
+
+	testAdjustInterval(t, ethashChainConfig, eng)
 }
 
 func TestAdjustIntervalClique(t *testing.T) {
 	t.Skip("Fix when refactoring tx pool")
-	testAdjustInterval(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase()))
+
+	db := ethdb.NewMemDatabase()
+	engine := clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase())
+	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(cliqueChainConfig, db))
+	defer eng.Close()
+	testAdjustInterval(t, cliqueChainConfig, eng)
 }
 
-func testAdjustInterval(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine) {
-	defer engine.Close()
-
+func testAdjustInterval(t *testing.T, chainConfig *params.ChainConfig, engine *process.RemoteEngine) {
 	w, _ := newTestWorker(t, chainConfig, engine, ethdb.NewMemDatabase(), 0)
 	defer w.close()
 

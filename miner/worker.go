@@ -184,12 +184,11 @@ type hooks struct {
 	resubmitHook func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
 }
 
-func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, h hooks, init bool) *worker {
+func newWorker(config *Config, chainConfig *params.ChainConfig, engine *process.RemoteEngine, eth Backend, mux *event.TypeMux, h hooks, init bool) *worker {
 	worker := &worker{
 		config:             config,
 		chainConfig:        chainConfig,
 		engine:             engine,
-		engineProcess:      process.NewConsensusProcess(engine, eth.BlockChain()),
 		eth:                eth,
 		mux:                mux,
 		chain:              eth.BlockChain(),

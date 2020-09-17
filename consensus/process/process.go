@@ -10,40 +10,44 @@ import (
 
 type Consensus struct {
 	consensus.Verifier
-	*consensus.Process
+	*consensus.Process // remote Engine
 }
 
-func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader) *Consensus {
+func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader, exit chan struct{}) *Consensus {
 	c := &Consensus{
 		Verifier: v,
 		Process:  consensus.NewProcess(chain),
 	}
 
 	go func() {
-		// fixme how to close/cancel the goroutine
 		// fixme remove records from VerifiedHeaders
-		for req := range c.VerifyHeaderRequests {
-			// If we're running a full engine faking, accept any input as valid
-			if c.IsFake() {
-				c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), nil}
-				continue
-			}
+		for {
+			select {
+			case <-exit:
+				return
+			case req := <-c.VerifyHeaderRequests:
+				// If we're running a full engine faking, accept any input as valid
+				if c.IsFake() {
+					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), nil}
+					continue
+				}
 
-			// Short circuit if the header is known
-			if _, ok := c.GetVerifiedBlocks(req.Header.Hash()); ok {
-				c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), nil}
-				continue
-			}
+				// Short circuit if the header is known
+				if _, ok := c.GetVerifiedBlocks(req.Header.Hash()); ok {
+					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), nil}
+					continue
+				}
 
-			parent, exit := c.waitParentHeaders(req)
-			if exit {
-				continue
-			}
+				parent, exit := c.waitParentHeaders(req)
+				if exit {
+					continue
+				}
 
-			err := c.Verify(c.Process.Chain, req.Header, parent, false, req.Seal)
-			c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), err}
-			if err == nil {
-				c.AddVerifiedBlocks(req.Header, req.Header.Hash())
+				err := c.Verify(c.Process.Chain, req.Header, parent, false, req.Seal)
+				c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), err}
+				if err == nil {
+					c.AddVerifiedBlocks(req.Header, req.Header.Hash())
+				}
 			}
 		}
 	}()
@@ -51,7 +55,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 	return c
 }
 
-func (c *Consensus) VerifyHeader() chan<- consensus.VerifyHeaderRequest {
+func (c *Consensus) HeaderVerification() chan<- consensus.VerifyHeaderRequest {
 	return c.VerifyHeaderRequests
 }
 
@@ -127,7 +131,7 @@ func (c *Consensus) waitHeader(blockHash, parentHash common.Hash) (*types.Header
 	return parent, false
 }
 
-func (c *Consensus) VerifyHeaderResults() <-chan consensus.VerifyHeaderResponse {
+func (c *Consensus) VerifyResults() <-chan consensus.VerifyHeaderResponse {
 	return c.VerifyHeaderResponses
 }
 
