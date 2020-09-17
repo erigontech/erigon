@@ -73,6 +73,7 @@ type PenaltyMsg struct {
 
 func makeP2PServer(
 	natSetting string,
+	port int,
 	peerHeightMap *sync.Map,
 	peerTimeMap *sync.Map,
 	peerRwMap *sync.Map,
@@ -104,6 +105,7 @@ func makeP2PServer(
 	p2pConfig.MaxPeers = 100
 	p2pConfig.Protocols = []p2p.Protocol{}
 	p2pConfig.NodeDatabase = "downloader_nodes"
+	p2pConfig.ListenAddr = fmt.Sprintf(":%d", port)
 	pMap := map[string]p2p.Protocol{
 		eth.ProtocolName: {
 			Name:           eth.ProtocolName,
@@ -367,7 +369,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func Download(natSetting string, filesDir string) error {
+func Download(natSetting string, filesDir string, port int) error {
 	ctx := rootContext()
 	newBlockCh := make(chan NewBlockFromSentry)
 	newBlockHashCh := make(chan NewBlockHashFromSentry)
@@ -375,7 +377,7 @@ func Download(natSetting string, filesDir string) error {
 	reqHeadersCh := make(chan headerdownload.HeaderRequest)
 	headersCh := make(chan BlockHeadersFromSentry)
 	var peerHeightMap, peerRwMap, peerTimeMap sync.Map
-	server, err := makeP2PServer(natSetting, &peerHeightMap, &peerTimeMap, &peerRwMap, []string{eth.ProtocolName}, newBlockCh, newBlockHashCh, headersCh, penaltyCh)
+	server, err := makeP2PServer(natSetting, port, &peerHeightMap, &peerTimeMap, &peerRwMap, []string{eth.ProtocolName}, newBlockCh, newBlockHashCh, headersCh, penaltyCh)
 	if err != nil {
 		return err
 	}
