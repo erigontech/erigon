@@ -195,13 +195,15 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	from, _ := types.Sender(signer, tx)
 
 	// Fill in the derived information in the logs
+	logIdx := uint(1) // logIdx is unique within the block and starts from 1
 	if receipt.Logs != nil {
-		for i, log := range receipt.Logs {
+		for _, log := range receipt.Logs {
 			log.BlockNumber = blockNumber
 			log.TxHash = hash
 			log.TxIndex = uint(txIndex)
 			log.BlockHash = blockHash
-			log.Index = uint(i)
+			log.Index = logIdx
+			logIdx++
 		}
 	}
 
