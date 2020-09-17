@@ -990,7 +990,7 @@ func splitAndTrim(input string) (ret []string) {
 // read-only interface to the databae
 func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
-	if !ctx.GlobalBool(TLSFlag.Name) {
+	if ctx.GlobalBool(TLSFlag.Name) {
 		certFile := ctx.GlobalString(TLSCertFlag.Name)
 		keyFile := ctx.GlobalString(TLSKeyFlag.Name)
 		if certFile == "" {

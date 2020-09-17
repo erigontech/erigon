@@ -29,6 +29,7 @@ var DefaultFlags = []cli.Flag{
 	utils.TLSFlag,
 	utils.TLSCertFlag,
 	utils.TLSKeyFlag,
+	utils.TLSCACertFlag,
 	utils.PrivateApiAddr,
 	utils.ListenPortFlag,
 	utils.NATFlag,
