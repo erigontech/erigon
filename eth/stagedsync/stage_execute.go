@@ -87,7 +87,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	const logIndicesMemLimit = 4 * datasize.MB
+	const logIndicesMemLimit = 16 * datasize.MB
 	logIndexFlushEvery := time.NewTicker(time.Minute / 10)
 	defer logIndexFlushEvery.Stop()
 	logIndices := map[string]*roaring.Bitmap{}
