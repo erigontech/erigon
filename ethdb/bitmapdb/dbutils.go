@@ -6,8 +6,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-// PutOr - puts bitmap into database. If database already has such key - does merge by OR.
-func PutOr(c ethdb.Cursor, k []byte, bm *roaring.Bitmap) error {
+// Or - puts bitmap into database. If database already has such key - does merge by OR.
+func Or(c ethdb.Cursor, k []byte, bm *roaring.Bitmap) error {
 	v, err := c.SeekExact(k)
 	if err != nil {
 		panic(err)
@@ -36,8 +36,8 @@ func PutOr(c ethdb.Cursor, k []byte, bm *roaring.Bitmap) error {
 	return nil
 }
 
-// PutRemoveRange - gets existing bitmap in db and call RemoveRange operator on it.
-func PutRemoveRange(c ethdb.Cursor, k []byte, from, to uint64) error {
+// RemoveRange - gets existing bitmap in db and call RemoveRange operator on it.
+func RemoveRange(c ethdb.Cursor, k []byte, from, to uint64) error {
 	v, err := c.SeekExact(k)
 	if err != nil {
 		panic(err)

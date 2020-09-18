@@ -162,7 +162,7 @@ var logIndex = Migration{
 			select {
 			default:
 			case <-logEvery.C:
-				log.Info("progress1", "blockNum", blockNum)
+				log.Info("progress", "blockNum", blockNum)
 
 				if needFlush(bitmaps, memLimit) {
 					bitmaps = flushBitmaps(logsIndexCursor, bitmaps)
@@ -207,18 +207,19 @@ var logIndex = Migration{
 	},
 }
 
-func needFlush(inMem map[string]*roaring.Bitmap, memLimit uint64) bool {
+func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit uint64) bool {
 	sz := uint64(0)
-	for _, m := range inMem {
+	for _, m := range bitmaps {
 		sz += m.GetSizeInBytes()
 	}
 
-	return sz > memLimit || uint64(len(inMem)*32) > memLimit
+	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
+	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > memLimit
 }
 
 func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) map[string]*roaring.Bitmap {
 	for kStr, b := range inMem {
-		if err := bitmapdb.PutOr(c, []byte(kStr), b); err != nil {
+		if err := bitmapdb.Or(c, []byte(kStr), b); err != nil {
 			panic(err)
 		}
 	}
