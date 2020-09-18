@@ -123,6 +123,12 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 		if err != nil {
 			return err
 		}
+		if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
+			k, v, err = cd.Next()
+			if err != nil {
+				return err
+			}
+		}
 		c = cd
 	}
 
