@@ -30,7 +30,9 @@ import (
 )
 
 const (
-	logInterval = 30 * time.Second
+	logInterval              = 30 * time.Second
+	logIndicesMemLimit       = 64 * datasize.MB
+	logIndicesCheckSizeEvery = 1 * time.Minute
 )
 
 type HasChangeSetWriter interface {
@@ -87,8 +89,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	const logIndicesMemLimit = 64 * datasize.MB
-	logIndexFlushEvery := time.NewTicker(time.Minute / 20)
+	logIndexFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer logIndexFlushEvery.Stop()
 	logIndices := map[string]*roaring.Bitmap{}
 	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
@@ -273,7 +274,6 @@ func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) b
 		sz += m.GetSizeInBytes()
 	}
 	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
-	fmt.Printf("sz: %s %s\n", common.StorageSize(uint64(len(bitmaps)*memoryNeedsForKey)), common.StorageSize(sz))
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 
