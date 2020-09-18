@@ -5,14 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/RoaringBitmap/roaring"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"os"
 	"runtime"
 	"runtime/pprof"
 	"sort"
 	"time"
 
+	"github.com/RoaringBitmap/roaring"
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -84,9 +85,22 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 	engine := chainContext.Engine()
 
-	stageProgress := s.BlockNumber
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	logIndexFlushEvery := time.NewTicker(time.Minute)
+	defer logIndexFlushEvery.Stop()
+	logIndices := map[string]*roaring.Bitmap{}
+	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
+	logIndicesFlush := func() error {
+		for kStr, b := range logIndices {
+			if err := bitmapdb.Or(logIndexCursor, []byte(kStr), b); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	stageProgress := s.BlockNumber
 	logBlock := stageProgress
 	// Warmup only works for HDD sync, and for long ranges
 	var warmup = hdd && (to-s.BlockNumber) > 30000
@@ -147,35 +161,27 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				return fmt.Errorf("writing receipts for block %d: %v", block.NumberU64(), err)
 			}
 
-			bitmaps := map[string]*roaring.Bitmap{}
 			logIdx := uint32(0) // logIdx - indexed IN THE BLOCK and starting from 0.
-			for _, storageReceipt := range storageReceipts {
-				for _, log := range storageReceipt.Logs {
+			for _, receipt := range receipts {
+				for _, log := range receipt.Logs {
 					for _, topic := range log.Topics {
 						topicStr := string(topic.Bytes())
-						m, ok := bitmaps[topicStr]
+						m, ok := logIndices[topicStr]
 						if !ok {
 							m = roaring.New()
-							bitmaps[topicStr] = m
+							logIndices[topicStr] = m
 						}
 						m.Add(uint32(blockNum))
 					}
 
 					accStr := string(log.Address.Bytes())
-					m, ok := bitmaps[accStr]
+					m, ok := logIndices[accStr]
 					if !ok {
 						m = roaring.New()
-						bitmaps[accStr] = m
+						logIndices[accStr] = m
 					}
 					m.Add(uint32(blockNum))
 					logIdx++
-				}
-			}
-
-			logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
-			for kStr, b := range bitmaps {
-				if err := bitmapdb.Or(logIndexCursor, []byte(kStr), b); err != nil {
-					panic(err)
 				}
 			}
 		}
@@ -212,7 +218,18 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		default:
 		case <-logEvery.C:
 			logBlock = logProgress(logBlock, blockNum, batch)
+		case <-logIndexFlushEvery.C:
+			if !needFlush(logIndices, 64*datasize.MB) {
+				break
+			}
+			if err := logIndicesFlush(); err != nil {
+				return nil
+			}
 		}
+	}
+
+	if err := logIndicesFlush(); err != nil {
+		return nil
 	}
 
 	if err := s.Update(batch, stageProgress); err != nil {
@@ -246,13 +263,14 @@ func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 	return now
 }
 
-func needFlush(inMem map[string]*roaring.Bitmap, memLimit uint64) bool {
+func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) bool {
 	sz := uint64(0)
-	for _, m := range inMem {
+	for _, m := range bitmaps {
 		sz += m.GetSizeInBytes()
 	}
 
-	return sz > memLimit || uint64(len(inMem)*32) > memLimit
+	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
+	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
