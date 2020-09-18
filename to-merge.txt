@@ -153,18 +153,3 @@ Date:   Fri Sep 18 14:26:19 2020 +0200
 
     core: fix a typo in comment (#21439)
 
-commit 2482ba016eb063db3a35fea2d4b56c1d354fc027
-Merge: 07751c3d2 fb835c024
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Fri Sep 18 12:29:33 2020 +0300
-
-    Merge pull request #21529 from karalabe/dynamic-pivot
-    
-    eth/downloader: dynamically move pivot even during chain sync
-
-commit fb835c024c9e9c02edd2351f20e7b8efcbe99543
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Sep 8 11:13:16 2020 +0300
-
-    eth/downloader: dynamically move pivot even during chain sync
-
