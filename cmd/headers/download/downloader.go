@@ -174,11 +174,13 @@ func Downloader(
 			log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d}", newBlockReq.Block.NumberU64()))
 		case newBlockHashReq := <-newBlockHashCh:
 			for _, announce := range newBlockHashReq.NewBlockHashesData {
-				//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
-				reqHeadersCh <- headerdownload.HeaderRequest{
-					Hash:   announce.Hash,
-					Number: announce.Number,
-					Length: 1,
+				if !hd.HasTip(announce.Hash) {
+					log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
+					reqHeadersCh <- headerdownload.HeaderRequest{
+						Hash:   announce.Hash,
+						Number: announce.Number,
+						Length: 1,
+					}
 				}
 			}
 		case headersReq := <-headersCh:

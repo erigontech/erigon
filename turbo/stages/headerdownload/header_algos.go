@@ -631,6 +631,13 @@ func (hd *HeaderDownload) childTipValid(child *types.Header, tipHash common.Hash
 	return true, NoPenalty
 }
 
+func (hd *HeaderDownload) HasTip(tipHash common.Hash) bool {
+	if _, ok := hd.getTip(tipHash, false); ok {
+		return true
+	}
+	return false
+}
+
 func (hd *HeaderDownload) getTip(tipHash common.Hash, touch bool) (*Tip, bool) {
 	if hardTip, ok := hd.hardTips[tipHash]; ok {
 		return hardTip, true
