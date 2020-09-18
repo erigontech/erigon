@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/big"
 	"os"
@@ -1765,6 +1767,37 @@ func extracHeaders(chaindata string, block uint64) error {
 	return nil
 }
 
+func checkHeaders() error {
+	if _, err := os.Stat("hard-coded-headers.dat"); err == nil {
+		if f, err1 := os.Open("hard-coded-headers.dat"); err1 == nil {
+			var hBuffer [headerdownload.HeaderSerLength]byte
+			var dBuffer [32]byte
+			i := 0
+			for {
+				var h types.Header
+				var d uint256.Int
+				if _, err2 := io.ReadFull(f, hBuffer[:]); err2 == nil {
+					headerdownload.DeserialiseHeader(&h, hBuffer[:])
+				} else if errors.Is(err2, io.EOF) {
+					break
+				} else {
+					log.Error("Failed to read hard coded header", "i", i, "error", err2)
+					break
+				}
+				if _, err2 := io.ReadFull(f, dBuffer[:]); err2 == nil {
+					d.SetBytes(dBuffer[:])
+				} else {
+					log.Error("Failed to read hard coded difficulty", "i", i, "error", err2)
+					break
+				}
+				log.Info(fmt.Sprintf("Header %d: %x", h.Number.Uint64(), h.Hash()))
+				i++
+			}
+		}
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -1908,6 +1941,11 @@ func main() {
 	}
 	if *action == "extractHeaders" {
 		if err := extracHeaders(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "checkHeaders" {
+		if err := checkHeaders(); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
