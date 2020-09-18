@@ -33,6 +33,7 @@ type EthAPI interface {
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
+	GetLogs3(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
@@ -59,13 +60,13 @@ type EthAPI interface {
 type APIImpl struct {
 	db           ethdb.KV
 	ethBackend   ethdb.Backend
-	dbReader     ethdb.Getter
+	dbReader     ethdb.Database
 	chainContext core.ChainContext
 	GasCap       uint64
 }
 
 // NewAPI returns APIImpl instance
-func NewAPI(db ethdb.KV, dbReader ethdb.Getter, eth ethdb.Backend, gascap uint64) *APIImpl {
+func NewAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
 	return &APIImpl{
 		db:         db,
 		dbReader:   dbReader,

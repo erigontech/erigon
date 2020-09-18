@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
@@ -68,10 +67,6 @@ type remoteCursor struct {
 
 type remoteCursorDupSort struct {
 	*remoteCursor
-}
-
-type remoteCursorDupFixed struct {
-	*remoteCursorDupSort
 }
 
 type RemoteBackend struct {
@@ -310,9 +305,9 @@ func (tx *remoteTx) Cursor(bucket string) Cursor {
 	return c
 }
 
-func (c *remoteCursor) initCursor() error {
-	return nil
-}
+//func (c *remoteCursor) initCursor() error {
+//	return nil
+//}
 
 func (c *remoteCursor) Current() ([]byte, []byte, error)              { panic("not supported") }
 func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
@@ -393,21 +388,21 @@ func (c *remoteCursorDupSort) Prefetch(v uint) Cursor {
 	return c
 }
 
-func (c *remoteCursorDupSort) initCursor() error {
-	if c.initialized {
-		return nil
-	}
-
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		return fmt.Errorf("class remoteCursorDupSort not compatible with AutoDupSortKeysConversion buckets")
-	}
-
-	if c.bucketCfg.Flags&lmdb.DupSort == 0 {
-		return fmt.Errorf("class remoteCursorDupSort can be used only if bucket created with flag lmdb.DupSort")
-	}
-
-	return c.remoteCursor.initCursor()
-}
+//func (c *remoteCursorDupSort) initCursor() error {
+//	if c.initialized {
+//		return nil
+//	}
+//
+//	if c.bucketCfg.AutoDupSortKeysConversion {
+//		return fmt.Errorf("class remoteCursorDupSort not compatible with AutoDupSortKeysConversion buckets")
+//	}
+//
+//	if c.bucketCfg.Flags&lmdb.DupSort == 0 {
+//		return fmt.Errorf("class remoteCursorDupSort can be used only if bucket created with flag lmdb.DupSort")
+//	}
+//
+//	return c.remoteCursor.initCursor()
+//}
 
 func (c *remoteCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
 	panic("not supported")

@@ -8,7 +8,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmap"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"time"
@@ -201,7 +201,7 @@ var logIndex = Migration{
 			}
 		}
 
-		bitmaps = flushBitmaps(logsIndexCursor, bitmaps)
+		_ = flushBitmaps(logsIndexCursor, bitmaps)
 
 		return OnLoadCommit(tx, nil, true)
 	},
@@ -218,7 +218,7 @@ func needFlush(inMem map[string]*roaring.Bitmap, memLimit uint64) bool {
 
 func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) map[string]*roaring.Bitmap {
 	for kStr, b := range inMem {
-		if err := bitmap.PutOr(c, []byte(kStr), b); err != nil {
+		if err := bitmapdb.PutOr(c, []byte(kStr), b); err != nil {
 			panic(err)
 		}
 	}

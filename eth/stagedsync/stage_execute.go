@@ -1,11 +1,16 @@
 package stagedsync
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"github.com/RoaringBitmap/roaring"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"sort"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -67,7 +72,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = stateDB.Begin()
+		tx, err = stateDB.Begin(context.Background())
 		if err != nil {
 			return err
 		}
@@ -141,17 +146,49 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
 				return fmt.Errorf("writing receipts for block %d: %v", block.NumberU64(), err)
 			}
+
+			bitmaps := map[string]*roaring.Bitmap{}
+			logIdx := uint32(0) // logIdx - indexed IN THE BLOCK and starting from 0.
+			for _, storageReceipt := range storageReceipts {
+				for _, log := range storageReceipt.Logs {
+					for _, topic := range log.Topics {
+						topicStr := string(topic.Bytes())
+						m, ok := bitmaps[topicStr]
+						if !ok {
+							m = roaring.New()
+							bitmaps[topicStr] = m
+						}
+						m.Add(uint32(blockNum))
+					}
+
+					accStr := string(log.Address.Bytes())
+					m, ok := bitmaps[accStr]
+					if !ok {
+						m = roaring.New()
+						bitmaps[accStr] = m
+					}
+					m.Add(uint32(blockNum))
+					logIdx++
+				}
+			}
+
+			logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
+			for kStr, b := range bitmaps {
+				if err := bitmapdb.PutOr(logIndexCursor, []byte(kStr), b); err != nil {
+					panic(err)
+				}
+			}
 		}
 
 		if batch.BatchSize() >= batch.IdealBatchSize() {
 			if err = s.Update(batch, blockNum); err != nil {
 				return err
 			}
-			if err = batch.CommitAndBegin(); err != nil {
+			if err = batch.CommitAndBegin(context.Background()); err != nil {
 				return err
 			}
 			if !useExternalTx {
-				if err = tx.CommitAndBegin(); err != nil {
+				if err = tx.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
 			}
@@ -207,6 +244,15 @@ func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 		"numGC", int(m.NumGC))
 
 	return now
+}
+
+func needFlush(inMem map[string]*roaring.Bitmap, memLimit uint64) bool {
+	sz := uint64(0)
+	for _, m := range inMem {
+		sz += m.GetSizeInBytes()
+	}
+
+	return sz > memLimit || uint64(len(inMem)*32) > memLimit
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
@@ -278,13 +324,39 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		return fmt.Errorf("unwind Execution: walking storage changesets: %v", err)
 	}
 	if writeReceipts {
-		if err = stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+		var logsIndexKeys [][]byte
+		if err = stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (bool, error) {
+			// Convert the receipts from their storage form to their internal representation
+			storageReceipts := []*types.ReceiptForStorage{}
+			if err := rlp.DecodeBytes(v, &storageReceipts); err != nil {
+				return false, fmt.Errorf("invalid receipt array RLP: %w, k=%x", err, k)
+			}
+
+			logIdx := uint32(0) // logIdx - indexed IN THE BLOCK and starting from 0.
+			for _, storageReceipt := range storageReceipts {
+				for _, log := range storageReceipt.Logs {
+					for _, topic := range log.Topics {
+						logsIndexKeys = append(logsIndexKeys, topic.Bytes())
+					}
+					logsIndexKeys = append(logsIndexKeys, log.Address.Bytes())
+					logIdx++
+				}
+			}
+
 			if err1 := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err1 != nil {
 				return false, fmt.Errorf("unwind Execution: delete receipts: %v", err1)
 			}
 			return true, nil
 		}); err != nil {
 			return fmt.Errorf("unwind Execution: walking receipts: %v", err)
+		}
+
+		sort.Slice(logsIndexKeys, func(i, j int) bool { return bytes.Compare(logsIndexKeys[i], logsIndexKeys[j]) < 0 })
+		c := stateDB.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
+		for _, k := range logsIndexKeys {
+			if err := bitmapdb.PutRemoveRange(c, k, u.UnwindPoint, s.BlockNumber); err != nil {
+				return nil
+			}
 		}
 	}
 

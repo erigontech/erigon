@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -38,7 +39,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin()
+		tx, err = db.Begin(context.Background())
 		if err != nil {
 			return err
 		}
@@ -298,7 +299,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin()
+		tx, err = db.Begin(context.Background())
 		if err != nil {
 			return err
 		}

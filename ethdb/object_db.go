@@ -344,9 +344,9 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 	return m
 }
 
-func (db *ObjectDatabase) Begin() (DbWithPendingMutations, error) {
+func (db *ObjectDatabase) Begin(ctx context.Context) (DbWithPendingMutations, error) {
 	batch := &TxDb{db: db}
-	if err := batch.begin(nil); err != nil {
+	if err := batch.begin(ctx, nil); err != nil {
 		panic(err)
 	}
 	return batch, nil

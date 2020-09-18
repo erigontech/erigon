@@ -17,6 +17,7 @@
 package ethdb
 
 import (
+	"context"
 	"errors"
 )
 
@@ -89,8 +90,8 @@ type Database interface {
 	// ... some calculations on `batch`
 	// batch.Commit()
 	//
-	NewBatch() DbWithPendingMutations       //
-	Begin() (DbWithPendingMutations, error) // starts db transaction
+	NewBatch() DbWithPendingMutations                          //
+	Begin(ctx context.Context) (DbWithPendingMutations, error) // starts db transaction
 	Last(bucket string) ([]byte, []byte, error)
 
 	// IdealBatchSize defines the size of the data batches should ideally add in one write.
@@ -143,7 +144,7 @@ type DbWithPendingMutations interface {
 	// }
 	// tx.Commit()
 	//
-	CommitAndBegin() error
+	CommitAndBegin(ctx context.Context) error
 	Rollback()
 	BatchSize() int
 }

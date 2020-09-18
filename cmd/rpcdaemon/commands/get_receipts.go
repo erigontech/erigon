@@ -2,11 +2,12 @@ package commands
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/big"
-
+	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/bloombits"
@@ -15,26 +16,23 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
+	"math/big"
 )
 
-func getReceipts(ctx context.Context, db rawdb.DatabaseReader, hash common.Hash) (types.Receipts, error) {
-	number := rawdb.ReadHeaderNumber(db, hash)
-	if number == nil {
-		return nil, fmt.Errorf("block not found: %x", hash)
-	}
-
-	block := rawdb.ReadBlock(db, hash, *number)
-	if cached := rawdb.ReadReceipts(db, block.Hash(), block.NumberU64()); cached != nil {
+func getReceipts(ctx context.Context, db rawdb.DatabaseReader, chainConfig *params.ChainConfig, number uint64, hash common.Hash) (types.Receipts, error) {
+	if cached := rawdb.ReadReceipts(db, hash, number, chainConfig); cached != nil {
 		return cached, nil
 	}
 
+	block := rawdb.ReadBlock(db, hash, number)
+
 	cc := adapter.NewChainContext(db)
 	bc := adapter.NewBlockGetter(db)
-	chainConfig := getChainConfig(db)
 	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, db.(ethdb.HasKV).KV(), hash, 0)
 	if err != nil {
 		return nil, err
@@ -46,7 +44,7 @@ func getReceipts(ctx context.Context, db rawdb.DatabaseReader, hash common.Hash)
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 
-		header := rawdb.ReadHeader(db, hash, *number)
+		header := rawdb.ReadHeader(db, hash, number)
 		receipt, err := core.ApplyTransaction(chainConfig, cc, nil, gp, ibs, dbstate, header, tx, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
@@ -65,7 +63,7 @@ func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*t
 		return nil, fmt.Errorf("block not found: %x", hash)
 	}
 
-	receipts, err := getReceipts(ctx, api.dbReader, hash)
+	receipts, err := getReceipts(ctx, api.dbReader, chainConfig, *number, hash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
@@ -105,34 +103,116 @@ func newFilter(addresses []common.Address, topics [][]common.Hash) *Filter {
 
 // GetLogs returns logs matching the given argument that are stored within the state.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
-	var filter *Filter
+	var begin, end uint32
+	var logs []*types.Log
+
+	tx, beginErr := api.dbReader.Begin(ctx)
+	if beginErr != nil {
+		return returnLogs(logs), beginErr
+	}
+	defer tx.Rollback()
+
 	if crit.BlockHash != nil {
-		// Block filter requested, construct a single-shot filter
-		filter = NewBlockFilter(*crit.BlockHash, crit.Addresses, crit.Topics)
+		number := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
+		if number == nil {
+			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
+		}
+		begin = uint32(*number)
+		end = uint32(*number)
 	} else {
 		// Convert the RPC block numbers into internal representations
-		latest, err := getLatestBlockNumber(api.dbReader)
+		latest, err := getLatestBlockNumber(tx)
 		if err != nil {
 			return nil, err
 		}
 
-		begin := int64(latest)
+		begin = uint32(latest)
 		if crit.FromBlock != nil {
-			begin = crit.FromBlock.Int64()
+			begin = uint32(crit.FromBlock.Uint64())
 		}
-		end := int64(latest)
+		end = uint32(latest)
 		if crit.ToBlock != nil {
-			end = crit.ToBlock.Int64()
+			end = uint32(crit.ToBlock.Uint64())
+		}
+	}
+
+	bitmapForANDing := roaring.New()
+	bitmapForANDing.AddRange(uint64(begin), uint64(end))
+
+	for _, sub := range crit.Topics {
+		var bitmapForORing *roaring.Bitmap
+		for _, topic := range sub {
+			m, err := bitmapdb.Get(tx, dbutils.LogIndex, topic[:])
+			if err != nil {
+				return nil, err
+			}
+			if bitmapForORing == nil {
+				bitmapForORing = m
+			} else {
+				bitmapForORing.Or(m)
+			}
 		}
 
-		filter = NewRangeFilter(begin, end, crit.Addresses, crit.Topics)
+		if bitmapForORing != nil {
+			if bitmapForANDing == nil {
+				bitmapForANDing = bitmapForORing
+			} else {
+				bitmapForANDing.And(bitmapForORing)
+			}
+		}
 	}
-	// Run the filter and return all the logs
-	logs, err := filter.Logs(ctx, api)
-	if err != nil {
-		return nil, err
+
+	var addrBitmap *roaring.Bitmap
+	for _, addr := range crit.Addresses {
+		m, err := bitmapdb.Get(tx, dbutils.LogIndex, addr[:])
+		if err != nil {
+			return nil, err
+		}
+		if addrBitmap == nil {
+			addrBitmap = m
+		} else {
+			addrBitmap.Or(m)
+		}
 	}
-	return returnLogs(logs), err
+
+	if addrBitmap != nil {
+		if bitmapForANDing == nil {
+			bitmapForANDing = addrBitmap
+		} else {
+			bitmapForANDing.And(addrBitmap)
+		}
+	}
+
+	var blockNToMatch uint32
+	blockNToMatchBytes := make([]byte, 4)
+
+	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
+	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+
+	blockNums := bitmapForANDing.Iterator()
+	for blockNums.HasNext() {
+		blockNToMatch = blockNums.Next()
+		binary.BigEndian.PutUint32(blockNToMatchBytes, blockNToMatch)
+
+		blockHash := rawdb.ReadCanonicalHash(tx, uint64(blockNToMatch))
+		if blockHash == (common.Hash{}) {
+			return returnLogs(logs), fmt.Errorf("block not found %d", uint64(blockNToMatch))
+		}
+
+		receipts, err := getReceipts(ctx, tx, chainConfig, uint64(blockNToMatch), blockHash)
+		if err != nil {
+			return returnLogs(logs), err
+		}
+
+		unfiltered := make([]*types.Log, 0, len(receipts))
+		for _, receipt := range receipts {
+			unfiltered = append(unfiltered, receipt.Logs...)
+		}
+		unfiltered = filterLogs(unfiltered, nil, nil, crit.Addresses, crit.Topics)
+		logs = append(logs, unfiltered...)
+	}
+
+	return returnLogs(logs), nil
 }
 
 // NewRangeFilter creates a new filter which uses a bloom filter on blocks to
@@ -174,7 +254,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
 
-	receipts, err := getReceipts(ctx, api.dbReader, blockHash)
+	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
+	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+
+	receipts, err := getReceipts(ctx, api.dbReader, chainConfig, blockNumber, blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
