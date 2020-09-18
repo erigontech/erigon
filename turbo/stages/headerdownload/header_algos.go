@@ -352,7 +352,22 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 
 func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty uint256.Int, currentTime uint64) error {
 	if anchor, err := hd.addHeaderAsAnchor(header, 0 /* powDepth */, totalDifficulty); err == nil {
-		hd.addHardCodedTip(header.Number.Uint64(), header.Time, header.Hash(), anchor, totalDifficulty)
+		diff, overflow := uint256.FromBig(header.Difficulty)
+		if overflow {
+			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
+		}
+		tip := &Tip{
+			anchor:               anchor,
+			cumulativeDifficulty: totalDifficulty,
+			timestamp:            header.Time,
+			blockHeight:          header.Number.Uint64(),
+			uncleHash:            header.UncleHash,
+			difficulty:           *diff,
+			noPrepend:            true,
+		}
+		tipHash := header.Hash()
+		hd.hardTips[tipHash] = tip
+		anchor.tips = append(anchor.tips, tipHash)
 		if header.ParentHash != (common.Hash{}) {
 			heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime})
 		}
@@ -644,7 +659,7 @@ func (hd *HeaderDownload) tipEvicted(key interface{}, value interface{}) {
 			newTips = append(newTips, anchorTipHash)
 		}
 	}
-	fmt.Printf("Tip %d [%x] evicted\n", tip.blockHeight, tipHash)
+	//fmt.Printf("Tip %d [%x] evicted\n", tip.blockHeight, tipHash)
 	anchor.tips = newTips
 }
 
@@ -670,7 +685,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 			p := heap.Pop(hd.tipQueue).(TipQueueItem)
 			delete(hd.hardTips, p.tipHash)
 			hd.tips.Add(p.tipHash, p.tip)
-			fmt.Printf("Moved tip %d [%x] from hard to soft %d+%d < %d\n", p.tip.blockHeight, tipHash, p.tip.timestamp, hd.newAnchorPastLimit, currentTime)
+			//fmt.Printf("Moved tip %d [%x] from hard to soft %d+%d < %d\n", p.tip.blockHeight, tipHash, p.tip.timestamp, hd.newAnchorPastLimit, currentTime)
 		} else {
 			break
 		}
