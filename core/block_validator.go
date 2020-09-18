@@ -95,7 +95,7 @@ func (v *BlockValidator) ValidateReceipts(block *types.Block, receipts types.Rec
 		fmt.Fprintf(&errorBuf, "invalid bloom (remote: %x  local: %x)", header.Bloom, rbloom)
 	}
 
-	// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, R1]]))
+	// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, Rn]]))
 	if v.config.IsByzantium(block.Header().Number) {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != header.ReceiptHash {
