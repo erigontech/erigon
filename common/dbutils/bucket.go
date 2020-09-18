@@ -114,6 +114,11 @@ var (
 	BlockBodyPrefix     = "b" // blockBodyPrefix + num (uint64 big endian) + hash -> block body
 	BlockReceiptsPrefix = "r" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
 
+	// addr -> bitmap(blockN)
+	// or
+	// topic -> bitmap(blockN)
+	LogIndex = "log_index"
+
 	TxLookupPrefix  = "l" // txLookupPrefix + hash -> transaction/receipt lookup metadata
 	BloomBitsPrefix = "B" // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
 
@@ -210,6 +215,7 @@ var Buckets = []string{
 	HeadFastBlockKey,
 	HeadHeaderKey,
 	Migrations,
+	LogIndex,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

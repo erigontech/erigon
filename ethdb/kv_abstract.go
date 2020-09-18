@@ -127,7 +127,7 @@ type Cursor interface {
 	DeleteCurrent() error
 
 	// PutNoOverwrite(key, value []byte) error
-	// Reserve()
+	Reserve(k []byte, n int) ([]byte, error)
 
 	// PutCurrent - replace the item at the current cursor position.
 	// Warning! this method doesn't check order of keys, it means you can insert key in wrong place of bucket
@@ -176,7 +176,6 @@ type CursorDupFixed interface {
 	// Panics if len(page) is not a multiple of stride.
 	// The cursor's bucket must be DupFixed and DupSort.
 	PutMulti(key []byte, page []byte, stride int) error
-	// ReserveMulti()
 }
 
 type HasStats interface {
