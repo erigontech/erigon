@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/http"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
@@ -10,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/spf13/cobra"
-	"net/http"
 )
 
 type Flags struct {
@@ -65,16 +66,18 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 	var db ethdb.KV
 	var txPool ethdb.Backend
 	var err error
-	if cfg.PrivateApiAddr != "" {
-		db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile)
-		if err != nil {
-			return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
-		}
-	} else if cfg.Chaindata != "" {
+	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
+	// If PrivateApiAddr is checked first, the Chaindata option will never work
+	if cfg.Chaindata != "" {
 		if database, errOpen := ethdb.Open(cfg.Chaindata); errOpen == nil {
 			db = database.KV()
 		} else {
 			err = errOpen
+		}
+	} else if cfg.PrivateApiAddr != "" {
+		db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
 		}
 	} else {
 		return nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
