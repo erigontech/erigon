@@ -1749,6 +1749,7 @@ func extracHeaders(chaindata string, block uint64) error {
 		}
 		h := rawdb.ReadHeader(db, hash, b)
 		td := rawdb.ReadTd(db, hash, b)
+		log.Info(fmt.Sprintf("Header %d: %x. Extra [%x]", h.Number.Uint64(), h.Hash(), h.Extra))
 		headerdownload.SerialiseHeader(h, hBuffer[:])
 		td.FillBytes(dBuffer[:])
 		if _, err := w.Write(hBuffer[:]); err != nil {
@@ -1790,7 +1791,7 @@ func checkHeaders() error {
 					log.Error("Failed to read hard coded difficulty", "i", i, "error", err2)
 					break
 				}
-				log.Info(fmt.Sprintf("Header %d: %x", h.Number.Uint64(), h.Hash()))
+				log.Info(fmt.Sprintf("Header %d: %x. Extra [%x]", h.Number.Uint64(), h.Hash(), h.Extra))
 				i++
 			}
 		}
