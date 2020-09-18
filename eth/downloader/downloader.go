@@ -172,7 +172,7 @@ type Downloader struct {
 
 	stagedSyncState  *stagedsync.State
 	stagedSync       *stagedsync.StagedSync
-	consensusProcess *process.Consensus
+	consensusProcess *process.RemoteEngine
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -246,7 +246,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode, eng *process.RemoteEngine) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
@@ -270,6 +270,7 @@ func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, c
 		headerProcCh:  make(chan []*types.Header, 1),
 		quitCh:        make(chan struct{}),
 		storageMode:   sm,
+		consensusProcess: eng,
 	}
 	go dl.qosTuner()
 	return dl

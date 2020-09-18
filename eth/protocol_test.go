@@ -29,12 +29,14 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -168,8 +170,6 @@ func TestForkIDSplit(t *testing.T) {
 	defer dbProFork.Close()
 
 	var (
-		engine = ethash.NewFaker()
-
 		configNoFork  = &params.ChainConfig{HomesteadBlock: big.NewInt(1)}
 		configProFork = &params.ChainConfig{
 			HomesteadBlock: big.NewInt(1),
@@ -178,7 +178,13 @@ func TestForkIDSplit(t *testing.T) {
 			EIP158Block:    big.NewInt(2),
 			ByzantiumBlock: big.NewInt(3),
 		}
+	)
 
+	engine := ethash.NewFaker()
+	engNoFork := process.NewRemoteEngine(engine, stagedsync.NewChainReader(configNoFork, dbNoFork))
+	engProFork := process.NewRemoteEngine(engine, stagedsync.NewChainReader(configProFork, dbProFork))
+
+	var (
 		gspecNoFork  = &core.Genesis{Config: configNoFork}
 		gspecProFork = &core.Genesis{Config: configProFork}
 
@@ -193,8 +199,8 @@ func TestForkIDSplit(t *testing.T) {
 		blocksNoFork, _, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil, false /* intermediateHashes */)
 		blocksProFork, _, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil, false /* intermediateHashes */)
 
-		ethNoFork, _  = NewProtocolManager(configNoFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainNoFork, dbNoFork, nil, nil)
-		ethProFork, _ = NewProtocolManager(configProFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engine, chainProFork, dbProFork, nil, nil)
+		ethNoFork, _  = NewProtocolManager(configNoFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engNoFork, chainNoFork, dbNoFork, nil, nil)
+		ethProFork, _ = NewProtocolManager(configProFork, nil, downloader.StagedSync, 1, new(event.TypeMux), new(testTxPool), engProFork, chainProFork, dbProFork, nil, nil)
 	)
 
 	defer func() {
