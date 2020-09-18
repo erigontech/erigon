@@ -87,7 +87,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	logIndexFlushEvery := time.NewTicker(time.Minute)
+	const logIndicesMemLimit = 4 * datasize.MB
+	logIndexFlushEvery := time.NewTicker(time.Minute / 10)
 	defer logIndexFlushEvery.Stop()
 	logIndices := map[string]*roaring.Bitmap{}
 	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
@@ -222,7 +223,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		case <-logEvery.C:
 			logBlock = logProgress(logBlock, blockNum, batch)
 		case <-logIndexFlushEvery.C:
-			if !needFlush(logIndices, 64*datasize.MB) {
+			if !needFlush(logIndices, logIndicesMemLimit) {
 				break
 			}
 			if err := logIndicesFlush(); err != nil {
