@@ -211,8 +211,8 @@ func (pp PeerPenalty) String() string {
 }
 
 const HeaderPreBlockHeight = 32 /*ParentHash*/ + 32 /*UncleHash*/ + 20 /*Coinbase*/ + 32 /*Root*/ + 32 /*TxHash*/ + 32 /*ReceiptHash*/ +
-																256 /*Bloom*/ + 16 /*Difficulty */
-const HeaderPostBlockHeight = 8 /*Number*/ + 8 /*GasLimit*/ + 8 /*GasUsed*/ + 8 /*Time*/ + 1 /*len(Extra)*/ + 32 /*Extra*/ + 8 /*Nonce*/
+																			256 /*Bloom*/ + 16 /*Difficulty */
+const HeaderPostBlockHeight = 8 /*Number*/ + 8 /*GasLimit*/ + 8 /*GasUsed*/ + 8 /*Time*/ + 1 /*len(Extra)*/ + 32 /*Extra*/ + 32 /* MixDigest */ + 8 /*Nonce*/
 
 const HeaderSerLength = HeaderPreBlockHeight + HeaderPostBlockHeight
 
@@ -251,6 +251,8 @@ func SerialiseHeader(header *types.Header, buffer []byte) {
 	buffer[pos] = byte(len(header.Extra))
 	pos++
 	copy(buffer[pos:pos+32], header.Extra)
+	pos += 32
+	copy(buffer[pos:pos+32], header.MixDigest[:])
 	pos += 32
 	binary.BigEndian.PutUint64(buffer[pos:pos+8], header.Nonce.Uint64())
 }
@@ -291,6 +293,8 @@ func DeserialiseHeader(header *types.Header, buffer []byte) {
 	pos++
 	header.Extra = header.Extra[:0]
 	header.Extra = append(header.Extra, buffer[pos:pos+extraLen]...)
+	pos += 32
+	copy(header.MixDigest[:], buffer[pos:pos+32])
 	pos += 32
 	header.Nonce = types.EncodeNonce(binary.BigEndian.Uint64(buffer[pos : pos+8]))
 }
