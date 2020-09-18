@@ -97,6 +97,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				return err
 			}
 		}
+		logIndices = map[string]*roaring.Bitmap{}
 		return nil
 	}
 
