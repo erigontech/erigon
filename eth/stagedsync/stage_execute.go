@@ -95,7 +95,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 	logIndicesFlush := func() error {
 		for kStr, b := range logIndices {
-			if err := bitmapdb.Or(logIndexCursor, []byte(kStr), b); err != nil {
+			if err := bitmapdb.PutMergeByOr(logIndexCursor, []byte(kStr), b); err != nil {
 				return err
 			}
 		}

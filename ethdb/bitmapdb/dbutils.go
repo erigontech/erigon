@@ -6,8 +6,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-// Or - puts bitmap into database. If database already has such key - does merge by OR.
-func Or(c ethdb.Cursor, k []byte, bm *roaring.Bitmap) error {
+// PutMergeByOr - puts bitmap with recent changes into database by merging it with existing bitmap. Merge by OR.
+func PutMergeByOr(c ethdb.Cursor, k []byte, delta *roaring.Bitmap) error {
 	v, err := c.SeekExact(k)
 	if err != nil {
 		panic(err)
@@ -20,16 +20,16 @@ func Or(c ethdb.Cursor, k []byte, bm *roaring.Bitmap) error {
 			panic(err)
 		}
 
-		bm.Or(existing)
+		delta.Or(existing)
 	}
 
-	bufBytes, err := c.Reserve(k, int(bm.GetSerializedSizeInBytes()))
+	bufBytes, err := c.Reserve(k, int(delta.GetSerializedSizeInBytes()))
 	if err != nil {
 		panic(err)
 	}
 
 	buf := bytes.NewBuffer(bufBytes[:0])
-	_, err = bm.WriteTo(buf)
+	_, err = delta.WriteTo(buf)
 	if err != nil {
 		return err
 	}

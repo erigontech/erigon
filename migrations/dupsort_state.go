@@ -219,7 +219,7 @@ func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit uint64) bool {
 
 func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) map[string]*roaring.Bitmap {
 	for kStr, b := range inMem {
-		if err := bitmapdb.Or(c, []byte(kStr), b); err != nil {
+		if err := bitmapdb.PutMergeByOr(c, []byte(kStr), b); err != nil {
 			panic(err)
 		}
 	}
