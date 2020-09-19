@@ -311,7 +311,14 @@ func runPeer(
 			if err = msg.Decode(&request); err != nil {
 				return errResp(eth.ErrDecode, "decode NewBlockMsg %v: %v", msg, err)
 			}
-			log.Info(fmt.Sprintf("[%s] NewBlockMsg{blockNumber: %d}", peer.ID(), request.Block.NumberU64()))
+			blockNum := request.Block.NumberU64()
+			x, _ := peerMap.Load(peer.ID().String())
+			highestBlock, _ := x.(uint64)
+			if blockNum > highestBlock {
+				highestBlock = blockNum
+				peerMap.Store(peer.ID().String(), highestBlock)
+			}
+			log.Info(fmt.Sprintf("[%s] NewBlockMsg{blockNumber: %d}", peer.ID(), blockNum))
 			newBlockCh <- NewBlockFromSentry{SentryMsg: SentryMsg{sentryId: 0, requestId: 0}, NewBlockData: request}
 		case eth.NewPooledTransactionHashesMsg:
 			var hashes []common.Hash
