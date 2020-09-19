@@ -235,6 +235,7 @@ On the RPC daemon machine, these three files need to be placed: `CA-cert.pem`, `
 
 **WARNING** Normally, the "client side" (which in our case is RPC daemon), verifies that the host name of the server matches the "Common Name" attribute of the "server" cerificate. At this stage, this verification is turned off, and it will be turned on again once we have updated the instruction above on how to properly generate cerificates with "Common Name".
 
+When running turbo-geth instance in the Google Cloud, for example, you need to specify the **Internal IP** in the `--private.api.addr` option. And, you will need to open the firewall on the port you are using, to that connection to the turbo-geth instances can be made.
 
 ## For Developers
 
