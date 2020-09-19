@@ -113,8 +113,9 @@ func makeP2PServer(
 			Length:         eth.ProtocolLengths[eth.ProtocolVersions[0]],
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-				log.Info(fmt.Sprintf("[%s] Start with peer", peer.ID()))
-				peerRwMap.Store(peer.ID().String(), rw)
+				peerID := peer.ID().String()
+				log.Info(fmt.Sprintf("[%s] Start with peer", peerID))
+				peerRwMap.Store(peerID, rw)
 				if err := runPeer(
 					peerHeightMap,
 					peerTimeMap,
@@ -131,11 +132,11 @@ func makeP2PServer(
 					headersCh,
 					penaltyCh,
 				); err != nil {
-					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peer.ID(), err))
+					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 				}
-				peerHeightMap.Delete(peer.ID().String())
-				peerTimeMap.Delete(peer.ID().String())
-				peerRwMap.Delete(peer.ID().String())
+				peerHeightMap.Delete(peerID)
+				peerTimeMap.Delete(peerID)
+				peerRwMap.Delete(peerID)
 				return nil
 			},
 		},
@@ -167,6 +168,7 @@ func runPeer(
 	headersCh chan BlockHeadersFromSentry,
 	_ chan PenaltyMsg,
 ) error {
+	peerID := peer.ID().String()
 	forkId := forkid.NewID(chainConfig, genesisHash, head)
 	// Send handshake message
 	if err := p2p.Send(rw, eth.StatusMsg, &eth.StatusData{
@@ -177,7 +179,7 @@ func runPeer(
 		Genesis:         genesisHash,
 		ForkID:          forkId,
 	}); err != nil {
-		return fmt.Errorf("handshake to peer %s: %v", peer.ID().String(), err)
+		return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 	}
 	// Read handshake message
 	msg, err := rw.ReadMsg()
@@ -185,8 +187,6 @@ func runPeer(
 		return err
 	}
 
-	// Peer responded or sent message - reset the "back off" timer
-	peerTimeMap.Store(peer.ID().String(), time.Now().Unix())
 	if msg.Code != eth.StatusMsg {
 		msg.Discard()
 		return errResp(eth.ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
@@ -215,13 +215,15 @@ func runPeer(
 	if err = forkFilter(status.ForkID); err != nil {
 		return errResp(eth.ErrForkIDRejected, "%v", err)
 	}
-	log.Info(fmt.Sprintf("[%s] Received status message OK", peer.ID()), "name", peer.Name())
+	log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 	for {
 		msg, err = rw.ReadMsg()
 		if err != nil {
 			return fmt.Errorf("reading message: %v", err)
 		}
+		// Peer responded or sent message - reset the "back off" timer
+		peerTimeMap.Store(peerID, time.Now().Unix())
 		if msg.Size > eth.ProtocolMaxMsgSize {
 			msg.Discard()
 			return errResp(eth.ErrMsgTooLarge, "message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
@@ -236,7 +238,7 @@ func runPeer(
 			if err = msg.Decode(&query); err != nil {
 				return errResp(eth.ErrDecode, "decoding GetBlockHeadersMsg %v: %v", msg, err)
 			}
-			log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t}", peer.ID(), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse))
+			log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t}", peerID, query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse))
 			var headers []*types.Header
 			if err = p2p.Send(rw, eth.BlockHeadersMsg, headers); err != nil {
 				return fmt.Errorf("send empty headers reply: %v", err)
@@ -254,7 +256,7 @@ func runPeer(
 				hash := header.Hash()
 				hashesStr.WriteString(fmt.Sprintf("%x-%x(%d)", hash[:4], hash[28:], header.Number.Uint64()))
 			}
-			log.Info(fmt.Sprintf("[%s] BlockHeadersMsg{%s}", peer.ID().String(), hashesStr.String()))
+			log.Info(fmt.Sprintf("[%s] BlockHeadersMsg{%s}", peerID, hashesStr.String()))
 			headersCh <- BlockHeadersFromSentry{SentryMsg: SentryMsg{sentryId: 0, requestId: 0}, headers: headers}
 		case eth.GetBlockBodiesMsg:
 			// Decode the retrieval message
@@ -277,21 +279,21 @@ func runPeer(
 				}
 				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
 			}
-			log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}", peer.ID(), hashesStr.String()))
+			log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}", peerID, hashesStr.String()))
 		case eth.BlockBodiesMsg:
-			log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peerID))
 		case eth.GetNodeDataMsg:
-			log.Info(fmt.Sprintf("[%s] GetNodeData", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
-			log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
 		case eth.ReceiptsMsg:
-			log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peer.ID()))
+			log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
 			var announces eth.NewBlockHashesData
 			if err = msg.Decode(&announces); err != nil {
 				return errResp(eth.ErrDecode, "decode NewBlockHashesData %v: %v", msg, err)
 			}
-			x, _ := peerMap.Load(peer.ID().String())
+			x, _ := peerMap.Load(peerID)
 			highestBlock, _ := x.(uint64)
 			var numStr strings.Builder
 			for _, announce := range announces {
@@ -303,8 +305,8 @@ func runPeer(
 					highestBlock = announce.Number
 				}
 			}
-			peerMap.Store(peer.ID().String(), highestBlock)
-			log.Info(fmt.Sprintf("[%s] NewBlockHashesMsg {%s}", peer.ID(), numStr.String()))
+			peerMap.Store(peerID, highestBlock)
+			log.Info(fmt.Sprintf("[%s] NewBlockHashesMsg {%s}", peerID, numStr.String()))
 			newBlockHashCh <- NewBlockHashFromSentry{SentryMsg: SentryMsg{sentryId: 0, requestId: 0}, NewBlockHashesData: announces}
 		case eth.NewBlockMsg:
 			var request eth.NewBlockData
@@ -312,13 +314,13 @@ func runPeer(
 				return errResp(eth.ErrDecode, "decode NewBlockMsg %v: %v", msg, err)
 			}
 			blockNum := request.Block.NumberU64()
-			x, _ := peerMap.Load(peer.ID().String())
+			x, _ := peerMap.Load(peerID)
 			highestBlock, _ := x.(uint64)
 			if blockNum > highestBlock {
 				highestBlock = blockNum
-				peerMap.Store(peer.ID().String(), highestBlock)
+				peerMap.Store(peerID, highestBlock)
 			}
-			log.Info(fmt.Sprintf("[%s] NewBlockMsg{blockNumber: %d}", peer.ID(), blockNum))
+			log.Info(fmt.Sprintf("[%s] NewBlockMsg{blockNumber: %d}", peerID, blockNum))
 			newBlockCh <- NewBlockFromSentry{SentryMsg: SentryMsg{sentryId: 0, requestId: 0}, NewBlockData: request}
 		case eth.NewPooledTransactionHashesMsg:
 			var hashes []common.Hash
@@ -332,9 +334,9 @@ func runPeer(
 				}
 				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
 			}
-			//log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg {%s}", peer.ID(), hashesStr.String()))
+			//log.Info(fmt.Sprintf("[%s] NewPooledTransactionHashesMsg {%s}", peerID, hashesStr.String()))
 		case eth.GetPooledTransactionsMsg:
-			//log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg", peer.ID()))
+			//log.Info(fmt.Sprintf("[%s] GetPooledTransactionsMsg", peerID)
 		case eth.TransactionMsg:
 			var txs []*types.Transaction
 			if err := msg.Decode(&txs); err != nil {
@@ -348,11 +350,11 @@ func runPeer(
 				hash := tx.Hash()
 				hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
 			}
-			//log.Info(fmt.Sprintf("[%s] TransactionMsg {%s}", peer.ID(), hashesStr.String()))
+			//log.Info(fmt.Sprintf("[%s] TransactionMsg {%s}", peerID, hashesStr.String()))
 		case eth.PooledTransactionsMsg:
-			//log.Info(fmt.Sprintf("[%s] PooledTransactionsMsg", peer.ID()))
+			//log.Info(fmt.Sprintf("[%s] PooledTransactionsMsg", peerID)
 		default:
-			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peer.ID(), msg.Code))
+			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peerID, msg.Code))
 		}
 		msg.Discard()
 	}
