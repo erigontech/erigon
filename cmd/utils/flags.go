@@ -547,18 +547,23 @@ var (
 		Usage: "API's offered over the HTTP-RPC interface",
 		Value: "",
 	}
-	NoTLSFlag = cli.BoolTFlag{
-		Name:  "notls",
-		Usage: "Disable TLS handshake",
+	TLSFlag = cli.BoolFlag{
+		Name:  "tls",
+		Usage: "Enable TLS handshake",
 	}
 	TLSCertFlag = cli.StringFlag{
 		Name:  "tls.cert",
-		Usage: "Specify certification file",
+		Usage: "Specify certificate",
 		Value: "",
 	}
 	TLSKeyFlag = cli.StringFlag{
 		Name:  "tls.key",
 		Usage: "Specify key file",
+		Value: "",
+	}
+	TLSCACertFlag = cli.StringFlag{
+		Name:  "tls.cacert",
+		Usage: "Specify certificate authority",
 		Value: "",
 	}
 	GraphQLEnabledFlag = cli.BoolFlag{
@@ -985,7 +990,7 @@ func splitAndTrim(input string) (ret []string) {
 // read-only interface to the databae
 func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
-	if !ctx.GlobalBool(NoTLSFlag.Name) {
+	if ctx.GlobalBool(TLSFlag.Name) {
 		certFile := ctx.GlobalString(TLSCertFlag.Name)
 		keyFile := ctx.GlobalString(TLSKeyFlag.Name)
 		if certFile == "" {
@@ -998,6 +1003,7 @@ func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 		cfg.TLSConnection = true
 		cfg.TLSCertFile = certFile
 		cfg.TLSKeyFile = keyFile
+		cfg.TLSCACert = ctx.GlobalString(TLSCACertFlag.Name)
 	}
 }
 
