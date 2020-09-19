@@ -223,6 +223,18 @@ And from this request, produce the certificate (signed by CA), proving that this
 openssl x509 -req -in RPC.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out RPC.crt -days 3650 -sha256
 ```
 
+When this is all done, these three files need to be placed on the machine where turbo-geth is running: `CA-cert.pem`, `TG-key.pem`, `TG.crt`. And turbo-geth needs to be run with these extra options:
+```
+--tls --tls.cacert CA-cert.pem --tls.key TG-key.pem --tls.cert TG.crt
+```
+
+On the RPC daemon machine, these three files need to be placed: `CA-cert.pem`, `RPC-key.pem`, and `RPC.crt`. And RPC daemon needs to be started with these extra options:
+```
+--tls.key RPC-key.pem --tls.cacert CA-cert.pem --tls.cert RPC.crt
+```
+
+**WARNING** Normally, the "client side" (which in our case is RPC daemon), verifies that the host name of the server matches the "Common Name" attribute of the "server" cerificate. At this stage, this verification is turned off, and it will be turned on again once we have updated the instruction above on how to properly generate cerificates with "Common Name".
+
 
 ## For Developers
 
