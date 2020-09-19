@@ -120,9 +120,10 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, erro
 			caCertPool := x509.NewCertPool()
 			caCertPool.AppendCertsFromPEM(caCert)
 			creds = credentials.NewTLS(&tls.Config{
-				Certificates:       []tls.Certificate{peerCert},
-				ClientCAs:          caCertPool,
-				ClientAuth:         tls.RequireAndVerifyClientCert,
+				Certificates: []tls.Certificate{peerCert},
+				ClientCAs:    caCertPool,
+				ClientAuth:   tls.RequireAndVerifyClientCert,
+				//nolint:gosec
 				InsecureSkipVerify: true, // This is to make it work when Common Name does not match - remove when procedure is updated for common name
 			})
 		}
