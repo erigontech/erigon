@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 // Result structs for GetProof

@@ -27,7 +27,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
+	"github.com/ledgerwatch/turbo-geth/turbo/rlphacks"
 )
 
 func TestV2HashBuilding(t *testing.T) {

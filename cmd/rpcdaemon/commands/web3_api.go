@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -9,8 +11,8 @@ import (
 
 // Web3API provides interfaces for the web3_ RPC commands
 type Web3API interface {
-	ClientVersion() (string, error)
-	Sha3(input hexutil.Bytes) hexutil.Bytes
+	ClientVersion(_ context.Context) (string, error)
+	Sha3(_ context.Context, input hexutil.Bytes) hexutil.Bytes
 }
 
 type Web3APIImpl struct {
@@ -22,13 +24,13 @@ func NewWeb3APIImpl() *Web3APIImpl {
 }
 
 // ClientVersion returns the node name
-func (api *Web3APIImpl) ClientVersion() (string, error) {
+func (api *Web3APIImpl) ClientVersion(_ context.Context) (string, error) {
 	// https://infura.io/docs/ethereum/json-rpc/web3-clientVersion
 	return common.MakeName("TurboGeth", params.VersionWithCommit(gitCommit, "")), nil
 }
 
 // Sha3 applies the ethereum sha3 implementation on the input.
-func (api *Web3APIImpl) Sha3(input hexutil.Bytes) hexutil.Bytes {
+func (api *Web3APIImpl) Sha3(_ context.Context, input hexutil.Bytes) hexutil.Bytes {
 	// https://infura.io/docs/ethereum/json-rpc/web3-sha3
 	return crypto.Keccak256(input)
 }

@@ -38,7 +38,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 )
