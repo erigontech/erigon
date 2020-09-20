@@ -488,6 +488,9 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 		var anchorDiffs = make(map[common.Hash]*uint256.Int)
 		var anchorDepths = make(map[common.Hash]int)
 		var anchorParent common.Hash
+		if anchorSequence >= hd.anchorSequence {
+			fmt.Printf("Reading anchor sequence %d, anchor count: %d\n", anchorSequence, anchorCount)
+		}
 		for i := 0; i < anchorCount; i++ {
 			if _, err = io.ReadFull(r, anchorBuf[:]); err != nil {
 				fmt.Printf("reading anchor %x from file: %v\n", i, err)
@@ -502,6 +505,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 				totalDiff.SetBytes16(anchorBuf[pos:])
 				anchorDiffs[anchorParent] = &totalDiff
 				anchorDepths[anchorParent] = powDepth
+				fmt.Printf("Anchor parent: %x, totalDifficulty: %s, powDepth: %d\n", anchorParent, totalDiff, powDepth)
 			}
 		}
 		if anchorSequence >= hd.anchorSequence {
@@ -667,9 +671,9 @@ func (hd *HeaderDownload) FlushBuffer() error {
 			pos += 32
 			binary.BigEndian.PutUint64(buf[pos:], uint64(powDepth))
 			pos += 8
-			maxTotalDiff.SetBytes16(buf[pos:])
-			pos += 16
-			if _, err = bufferFile.Write(buf[:pos]); err != nil {
+			b := maxTotalDiff.PaddedBytes(16)
+			copy(buf[pos:], b[:])
+			if _, err = bufferFile.Write(buf[:]); err != nil {
 				bufferFile.Close()
 				return err
 			}
