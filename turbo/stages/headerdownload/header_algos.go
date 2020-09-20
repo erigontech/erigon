@@ -576,6 +576,10 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			if parentAnchor, err = hd.addHeaderAsAnchor(he.header, powDepth, *totalDifficulty); err != nil {
 				return false, fmt.Errorf("add header as anchor: %v", err)
 			}
+			cumulativeDiff := headerDiff.Add(headerDiff, totalDifficulty)
+			if err = hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff, currentTime); err != nil {
+				return false, fmt.Errorf("add header as tip: %v", err)
+			}
 			childAnchors[hash] = parentAnchor
 			childDiffs[hash] = totalDifficulty
 		}
