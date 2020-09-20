@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"github.com/mitchellh/hashstructure"
 )
 
 //////////////////////////////////////////////////
@@ -256,7 +257,6 @@ type AbsValue struct {
 	kind          AbsValueKind
 	value         uint256.Int //only when kind=ConcreteValue
 	pc            int         //only when kind=TopValue
-	fromDeepStack bool        //only when Kind=TopValue
 }
 
 func (c0 AbsValue) String(abbrev bool) string {
@@ -273,8 +273,8 @@ func (c0 AbsValue) String(abbrev bool) string {
 	return "256bit"
 }
 
-func AbsValueTop(pc int, fromDeepStack bool) AbsValue {
-	return AbsValue{kind: TopValue, pc: pc, fromDeepStack: fromDeepStack}
+func AbsValueTop(pc int) AbsValue {
+	return AbsValue{kind: TopValue, pc: pc}
 }
 
 func AbsValueBot() AbsValue {
@@ -302,25 +302,43 @@ func (c0 AbsValue) Eq(c1 AbsValue) bool {
 //////////////////////////////////////////////////
 type astack struct {
 	values []AbsValue
+	hash uint64
+}
+
+func newStack() *astack {
+	st := &astack{}
+	st.updateHash()
+	return st
 }
 
 func (s *astack) Copy() *astack {
 	newStack := &astack{}
 	newStack.values = append(newStack.values, s.values...)
+	newStack.hash = s.hash
 	return newStack
 }
 
+func (s *astack) updateHash() {
+	hash, err := hashstructure.Hash(s, nil)
+	if err != nil {
+		panic("cannot hash")
+	}
+	s.hash = hash
+}
+
 func (s *astack) Push(value AbsValue) {
-	rest := s.values[0 : len(s.values)-1]
+	rest := s.values[:]
 	s.values = nil
 	s.values = append(s.values, value)
 	s.values = append(s.values, rest...)
+	s.updateHash()
 }
 
 func (s *astack) Pop(pc int) AbsValue {
 	res := s.values[0]
 	s.values = s.values[1:len(s.values)]
-	s.values = append(s.values, AbsValueTop(pc, true))
+	//s.values = append(s.values, AbsValueTop(pc, true))
+	s.updateHash()
 	return res
 }
 
@@ -333,8 +351,25 @@ func (s *astack) String(abbrev bool) string {
 }
 
 func (s *astack) Eq(s1 *astack) bool {
+	if s.hash != s1.hash {
+		return false
+	}
+
+	if len(s.values) != len(s1.values) {
+		return false
+	}
+
 	for i := 0; i < len(s.values); i++ {
 		if !s.values[i].Eq(s1.values[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *astack) hasIndices(i ...int) bool {
+	for _, i := range i {
+		if !(i < len(s.values)) {
 			return false
 		}
 	}
@@ -344,32 +379,27 @@ func (s *astack) Eq(s1 *astack) bool {
 //////////////////////////////////////////////////
 
 type astate struct {
-	astackLen 	int
 	stackset    []*astack
 	anlyCounter int
 	worklistLen int
 }
 
-func emptyState(astackLen int) *astate {
-	return &astate{astackLen: astackLen, stackset: nil, anlyCounter: -1, worklistLen: -1}
+func emptyState() *astate {
+	return &astate{stackset: nil, anlyCounter: -1, worklistLen: -1}
 }
 
 func (state *astate) Copy() *astate {
-	newState := emptyState(state.astackLen)
+	newState := emptyState()
 	for _, stack := range state.stackset {
 		newState.stackset = append(newState.stackset, stack.Copy())
 	}
 	return newState
 }
 
-// botState generates initial state which is a stack of "bottom" values
-func botState(astackLen int) *astate {
-	st := emptyState(astackLen)
+func botState() *astate {
+	st := emptyState()
 
-	botStack := &astack{}
-	for i := 0; i < st.astackLen; i++ {
-		botStack.values = append(botStack.values, AbsValueBot())
-	}
+	botStack := newStack()
 	st.stackset = append(st.stackset, botStack)
 
 	return st
@@ -385,15 +415,24 @@ func ExistsIn(values []AbsValue, value AbsValue) bool {
 }
 
 func (state *astate) String(abbrev bool) string {
+	maxStackLen := 0
+	for _, stack := range state.stackset {
+		if maxStackLen < len(stack.values) {
+			maxStackLen = len(stack.values)
+		}
+	}
+
 	var elms []string
-	for i := 0; i < state.astackLen; i++ {
+	for i := 0; i < maxStackLen; i++ {
 		var elm []string
 		var values []AbsValue
 		for _, stack := range state.stackset {
-			value := stack.values[i]
-			if !ExistsIn(values, value) {
-				elm = append(elm, value.String(abbrev))
-				values = append(values, value)
+			if stack.hasIndices(i) {
+				value := stack.values[i]
+				if !ExistsIn(values, value) {
+					elm = append(elm, value.String(abbrev))
+					values = append(values, value)
+				}
 			}
 		}
 
@@ -405,6 +444,8 @@ func (state *astate) String(abbrev bool) string {
 		}
 		elms = append(elms, e)
 	}
+
+	elms = append(elms, fmt.Sprintf("%v%v%v", "|", len(state.stackset), "|"))
 	return strings.Join(elms, " ")
 }
 
@@ -447,27 +488,28 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 	//jump edges
 	for _, stack := range st0.stackset {
 		if stmt.opcode == JUMP || stmt.opcode == JUMPI {
-			jumpDest := stack.values[0]
-			if jumpDest.kind == TopValue {
-				isBadJump = true
-				cfg.BadJumpImprecision = true
-				isStackTooShort = isStackTooShort || jumpDest.fromDeepStack
-			} else if jumpDest.kind == ConcreteValue {
-				if jumpDest.value.IsUint64() {
-					pc1 := int(jumpDest.value.Uint64())
+			if stack.hasIndices(0) {
+				jumpDest := stack.values[0]
+				if jumpDest.kind == TopValue {
+					isBadJump = true
+					cfg.BadJumpImprecision = true
+				} else if jumpDest.kind == ConcreteValue {
+					if jumpDest.value.IsUint64() {
+						pc1 := int(jumpDest.value.Uint64())
 
-					if pc1 >= len(cfg.Program.Stmts) || cfg.Program.Stmts[pc1].operation == nil {
-						//isBadJump = true
-						//cfg.BadJumpInvalidOp = true
-					} else if cfg.Program.Stmts[pc1].opcode != JUMPDEST {
+						if pc1 >= len(cfg.Program.Stmts) || cfg.Program.Stmts[pc1].operation == nil {
+							//isBadJump = true
+							//cfg.BadJumpInvalidOp = true
+						} else if cfg.Program.Stmts[pc1].opcode != JUMPDEST {
+							//isBadJump = true
+							//cfg.BadJumpInvalidJumpDest = true
+						} else {
+							edges = append(edges, edge{pc0, stmt, pc1, true})
+						}
+					} else {
 						//isBadJump = true
 						//cfg.BadJumpInvalidJumpDest = true
-					} else {
-						edges = append(edges, edge{pc0, stmt, pc1, true})
 					}
-				} else {
-					//isBadJump = true
-					//cfg.BadJumpInvalidJumpDest = true
 				}
 			}
 		}
@@ -535,15 +577,17 @@ func sortAndUnique(edges []edge) []edge {
 	return uedges
 }
 
-func post(cfg *Cfg, st0 *astate, edge edge) (*astate, error) {
-	st1 := emptyState(st0.astackLen)
+func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
+	st1 := emptyState()
 	stmt := edge.stmt
 
-	isStackTooShort := false
-
 	for _, stack0 := range st0.stackset {
-		elm0 := stack0.values[0]
 		if edge.isJump {
+			if !stack0.hasIndices(0) {
+				continue
+			}
+
+			elm0 := stack0.values[0]
 			if elm0.kind == ConcreteValue && elm0.value.IsUint64() && int(elm0.value.Uint64()) != edge.pc1 {
 				continue
 			}
@@ -554,19 +598,29 @@ func post(cfg *Cfg, st0 *astate, edge edge) (*astate, error) {
 		if stmt.opcode.IsPush() {
 			stack1.Push(AbsValueConcrete(stmt.value))
 		} else if stmt.operation.isDup {
+			if !stack0.hasIndices(stmt.operation.opNum-1) {
+				continue
+			}
+
 			value := stack1.values[stmt.operation.opNum-1]
 			stack1.Push(value)
-
-			isStackTooShort = isStackTooShort || value.fromDeepStack
 		} else if stmt.operation.isSwap {
 			opNum := stmt.operation.opNum
+
+			if !stack0.hasIndices(0, opNum) {
+				continue
+			}
+
 			a := stack1.values[0]
 			b := stack1.values[opNum]
 			stack1.values[0] = b
 			stack1.values[opNum] = a
 
-			isStackTooShort = isStackTooShort || a.fromDeepStack || b.fromDeepStack
 		}  else if stmt.opcode == AND {
+			if !stack0.hasIndices(0, 1) {
+				continue
+			}
+
 			a := stack1.Pop(edge.pc0)
 			b := stack1.Pop(edge.pc0)
 
@@ -575,29 +629,34 @@ func post(cfg *Cfg, st0 *astate, edge edge) (*astate, error) {
 				v.And(&a.value, &b.value)
 				stack1.Push(AbsValueConcrete(*v))
 			} else {
-				stack1.Push(AbsValueTop(edge.pc0, false))
+				stack1.Push(AbsValueTop(edge.pc0))
 			}
 		} else if stmt.opcode == PC {
 			v := uint256.NewInt()
 			v.SetUint64(uint64(stmt.pc))
 			stack1.Push(AbsValueConcrete(*v))
 		} else {
+			if !stack0.hasIndices(stmt.operation.numPop-1) {
+				continue
+			}
+
 			for i := 0; i < stmt.operation.numPop; i++ {
-				s := stack1.Pop(edge.pc0)
-				isStackTooShort = isStackTooShort || s.fromDeepStack
+				stack1.Pop(edge.pc0)
 			}
 
 			for i := 0; i < stmt.operation.numPush; i++ {
-				stack1.Push(AbsValueTop(edge.pc0, false))
+				stack1.Push(AbsValueTop(edge.pc0))
 			}
 		}
 
 		st1.Add(stack1)
 	}
 
-	if isStackTooShort {
-		cfg.ShortStack = true
-		return st1, errors.New("abstract stack too short: reached unmodelled depth")
+	for _, stack := range st1.stackset {
+		if len(stack.values) > maxStackLen {
+			cfg.ShortStack = true
+			return nil, errors.New("Max stack length reached")
+		}
 	}
 
 	return st1, nil
@@ -620,7 +679,7 @@ func Leq(st0 *astate, st1 *astate) bool {
 }
 
 func Lub(st0 *astate, st1 *astate) *astate {
-	newState := emptyState(st0.astackLen)
+	newState := emptyState()
 	for _, stack := range st0.stackset {
 		newState.Add(stack)
 	}
@@ -653,6 +712,8 @@ type Cfg struct {
 	BadJumpImprecision 		bool
 	BadJumpInvalidOp   		bool
 	BadJumpInvalidJumpDest 	bool
+
+	StackCountLimitReached 	bool
 }
 
 type CfgCoverageStats struct {
@@ -849,7 +910,7 @@ func pushNewEdges(workList []edge, edges []edge) []edge {
 }
 
 
-func GenCfg(contract *Contract, anlyCounterLimit int, astackLen int) (cfg *Cfg, err error) {
+func GenCfg(contract *Contract, anlyCounterLimit int, maxStackLen int, maxStackCount int) (cfg *Cfg, err error) {
 	/*defer func() {
 		if err := recover(); err != nil {
 			fmt.Println(err)
@@ -867,9 +928,9 @@ func GenCfg(contract *Contract, anlyCounterLimit int, astackLen int) (cfg *Cfg, 
 	codeLen := len(program.Contract.Code)
 	cfg.D = make(map[int]*astate)
 	for pc := 0; pc < codeLen; pc++ {
-		cfg.D[pc] = emptyState(astackLen)
+		cfg.D[pc] = emptyState()
 	}
-	cfg.D[startPC] = botState(astackLen)
+	cfg.D[startPC] = botState()
 
 	var workList []edge
 
@@ -891,7 +952,7 @@ func GenCfg(contract *Contract, anlyCounterLimit int, astackLen int) (cfg *Cfg, 
 		preDpc0 := cfg.D[e.pc0]
 		preDpc1 := cfg.D[e.pc1]
 
-		post1, err := post(cfg, preDpc0, e)
+		post1, err := post(cfg, preDpc0, e, maxStackLen)
 		if err != nil {
 			return cfg, err
 		}
@@ -899,6 +960,11 @@ func GenCfg(contract *Contract, anlyCounterLimit int, astackLen int) (cfg *Cfg, 
 		if !Leq(post1, preDpc1) {
 			postDpc1 := Lub(post1, preDpc1)
 			cfg.D[e.pc1] = postDpc1
+
+			if len(postDpc1.stackset) > maxStackCount {
+				cfg.StackCountLimitReached = true
+				return cfg, errors.New("stack count limit reach")
+			}
 
 			edgesR2, errR2 := resolve(cfg, e.pc1)
 			if errR2 != nil {

@@ -52,6 +52,7 @@ require (
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mattn/go-colorable v0.1.2
 	github.com/mattn/go-isatty v0.0.12
+	github.com/mitchellh/hashstructure v1.0.0
 	github.com/olekukonko/tablewriter v0.0.2-0.20190409134802-7e037d187b0c
 	github.com/pborman/uuid v0.0.0-20170112150404-1b00554d8222
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99

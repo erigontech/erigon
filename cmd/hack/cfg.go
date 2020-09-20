@@ -16,223 +16,6 @@ import (
 	"time"
 )
 
-type hashInfo struct {
-	hashHex string
-	count 	int
-	codeHex string
-	code 	[]byte
-}
-
-/*
-func testCfgByImpact(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	var contractKeyTotalLength int
-	var contractValTotalLength int
-	var codeHashTotalLength int
-	var codeTotalLength int // Total length of all byte code (just to illustrate iterating)
-	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.PlainContractCodeBucket)
-
-		hash2info := make(map[string]*hashInfo)
-		// This is a mapping of contractAddress + incarnation => CodeHash
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-
-			hashHex := hex.EncodeToString(v)
-
-			c := hash2info[hashHex]
-			if c == nil {
-				c = &hashInfo{hashHex, 0, "", v}
-				hash2info[hashHex] = c
-			}
-			c.count++
-		}
-
-		// This is a mapping of CodeHash => Byte code
-		c = tx.Cursor(dbutils.CodeBucket)
-		numPrograms := 0
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-
-			numPrograms++
-			hashHex := hex.EncodeToString(k)
-			c := hash2info[hashHex]
-			if c == nil {
-				c = &hashInfo{hashHex, 0, "", v}
-				hash2info[hashHex] = c
-			}
-			c.codeHex = hex.EncodeToString(v)
-		}
-
-		var infos []*hashInfo
-		for _,v := range hash2info {
-			infos = append(infos, v)
-		}
-		sort.SliceStable(infos, func(i, j int) bool {
-			return infos[i].count > infos[j].count
-		})
-
-		numAddresses := 0
-		for _, v := range infos {
-			numAddresses += v.count
-		}
-
-		i := 0
-		totalActualPass := 0
-		eval := &CfgEval{numPrograms: numPrograms, numAddresses: numAddresses}
-		for _, v := range infos {
-			fmt.Printf("\n%v %v\n", v.count, v.hashHex)
-
-			cfg := eval.update(v.code, v.count)
-			if cfg != nil {
-				totalActualPass += v.count
-			}
-
-			eval.printStats()
-			cfg.PrintAnlyState()
-			i++
-			if i > 10 {
-				break
-			}
-		}
-
-		return nil
-	}); err1 != nil {
-		return err1
-	}
-	fmt.Printf("contractKeyTotalLength: %d, contractValTotalLength: %d, codeHashTotalLength: %d, codeTotalLength: %d\n", contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
-	return nil
-}*/
-
-type CfgEval struct {
-	numProgramsPassed   int
-	numPanic            int
-	numAnlyCounterLimit int
-	numShortStack       int
-	numProgramsAnalyzed int
-	numUnresolved       int
-	numLowCoverage      int
-	numImprecision      int
-	numInvalidOpcode    int
-	numInvalidJumpDest  int
-	numPrograms         int
-	numAddresses			int
-	numAddressesPassed		int
-	numAddressesAnalyzed 	int
-}
-
-func (eval *CfgEval) printStats() {
-	fmt.Printf("AddressesPass=%v AddressesAnalyzed=%v Addresses=%v AddressesPassRate=%v ProgramsPass=%v ProgramsAnalyzed=%v Programs=%v ProgramsPassRate=%v Panic=%v CounterLimit=%v ShortStack=%v Unresolved=%v Imprecision=%v InvalidOp=%v InvalidJumpDest=%v DeadCode=%v\n",
-		eval.numAddressesPassed,
-		eval.numAddressesAnalyzed,
-		eval.numAddresses,
-		percent(eval.numAddressesPassed,eval.numAddressesAnalyzed),
-		eval.numProgramsPassed,
-		eval.numProgramsAnalyzed,
-		eval.numPrograms,
-		percent(eval.numProgramsPassed,eval.numProgramsAnalyzed),
-		eval.numPanic,
-		eval.numAnlyCounterLimit,
-		percent(eval.numShortStack,eval.numProgramsAnalyzed),
-		percent(eval.numUnresolved,eval.numProgramsAnalyzed),
-		percent(eval.numImprecision,eval.numProgramsAnalyzed),
-		percent(eval.numInvalidOpcode,eval.numProgramsAnalyzed),
-		percent(eval.numInvalidJumpDest,eval.numProgramsAnalyzed),
-		percent(eval.numLowCoverage,eval.numProgramsAnalyzed))
-}
-
-func (eval *CfgEval) update(cfg *vm.Cfg, count int)  {
-	eval.numProgramsAnalyzed++
-	eval.numAddressesAnalyzed += count
-
-	if cfg.Valid {
-		eval.numProgramsPassed++
-		eval.numAddressesPassed += count
-	}
-	if cfg.Panic {
-		eval.numPanic++
-	}
-	if cfg.AnlyCounterLimit {
-		eval.numAnlyCounterLimit++
-	}
-	if cfg.ShortStack {
-		eval.numShortStack++
-	}
-	if cfg.Unresolved {
-		eval.numUnresolved++
-	}
-	if cfg.LowCoverage {
-		eval.numLowCoverage++
-	}
-	if cfg.BadJumpImprecision {
-		eval.numImprecision++
-	}
-	if cfg.BadJumpInvalidOp {
-		eval.numInvalidOpcode++
-	}
-	if cfg.BadJumpInvalidJumpDest {
-		eval.numInvalidJumpDest++
-	}
-}
-
-/*
-func testCfgCodes(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	var contractKeyTotalLength int
-	var contractValTotalLength int
-	var codeHashTotalLength int
-	var codeTotalLength int // Total length of all byte code (just to illustrate iterating)
-	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.PlainContractCodeBucket)
-		// This is a mapping of contractAddress + incarnation => CodeHash
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			contractKeyTotalLength += len(k)
-			contractValTotalLength += len(v)
-		}
-
-		numPrograms := 0
-		c = tx.Cursor(dbutils.CodeBucket)
-		for k,_,_  := c.First(); k != nil; k,_,_ = c.Next() {
-			numPrograms++
-		}
-		eval := CfgEval{numPrograms: numPrograms}
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-
-			eval.update(v, 1)
-
-			if eval.numProgramsAnalyzed % 10 == 0 {
-				eval.printStats()
-			}
-		}
-		return nil
-	}); err1 != nil {
-		return err1
-	}
-	fmt.Printf("contractKeyTotalLength: %d, contractValTotalLength: %d, codeHashTotalLength: %d, codeTotalLength: %d\n", contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
-	return nil
-}*/
-
-type cfgJob struct {
-	txcnt int
-	code []byte
-}
-
-type cfgJobResult struct {
-	job *cfgJob
-	cfg *vm.Cfg
-}
 
 func testCfgByUsed() error {
 	numWorkers := runtime.NumCPU()
@@ -277,11 +60,10 @@ func testCfgByUsed() error {
 				//fmt.Printf("[%v] Running on bytecode: %v\n", id, len(bytecode))
 				contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 				contract.Code = job.code
-				cfg, _ := vm.GenCfg(contract, 10000, 64)
+				cfg, _ := vm.GenCfg(contract, 100000, 64, 100)
 				results <- &cfgJobResult{job, cfg}
 
-				/*
-				if hex.EncodeToString(job.code) == "6080604052600436106100405763ffffffff7c010000000000000000000000000000000000000000000000000000000060003504166393e84cd98114610045575b600080fd5b34801561005157600080fd5b5061005a61005c565b005b60008060008060008060008060008060008060008073a62142888aba8370742be823c1782d17a0389da173ffffffffffffffffffffffffffffffffffffffff1663747dff426040518163ffffffff167c01000000000000000000000000000000000000000000000000000000000281526004016101c060405180830381600087803b1580156100ea57600080fd5b505af11580156100fe573d6000803e3d6000fd5b505050506040513d6101c081101561011557600080fd5b8101908080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291905050509d509d509d509d509d509d509d509d509d509d509d509d509d509d508673ffffffffffffffffffffffffffffffffffffffff167318a0451ea56fd4ff58f59837e9ec30f346ffdca573ffffffffffffffffffffffffffffffffffffffff161415151561021057fe5b50505050505050505050505050505600a165627a7a72305820ec5e1703d3b74688c3350622a2bcfc097615733fa5f8df7adf51d66ebf42d0260029" {
+				/*if false && hex.EncodeToString(job.code) == "6080604052600436106100405763ffffffff7c010000000000000000000000000000000000000000000000000000000060003504166393e84cd98114610045575b600080fd5b34801561005157600080fd5b5061005a61005c565b005b60008060008060008060008060008060008060008073a62142888aba8370742be823c1782d17a0389da173ffffffffffffffffffffffffffffffffffffffff1663747dff426040518163ffffffff167c01000000000000000000000000000000000000000000000000000000000281526004016101c060405180830381600087803b1580156100ea57600080fd5b505af11580156100fe573d6000803e3d6000fd5b505050506040513d6101c081101561011557600080fd5b8101908080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291905050509d509d509d509d509d509d509d509d509d509d509d509d509d509d508673ffffffffffffffffffffffffffffffffffffffff167318a0451ea56fd4ff58f59837e9ec30f346ffdca573ffffffffffffffffffffffffffffffffffffffff161415151561021057fe5b50505050505050505050505050505600a165627a7a72305820ec5e1703d3b74688c3350622a2bcfc097615733fa5f8df7adf51d66ebf42d0260029" {
 					fmt.Printf("Valid=%v Imprecision=%v\n", cfg.Valid, cfg.BadJumpImprecision)
 					cfg.PrintAnlyState()
 					os.Exit(1)
@@ -331,19 +113,8 @@ func testCfgByUsed() error {
 	return nil
 }
 
-func sb(b bool) string {
-	return fmt.Sprintf("%v", b)
-}
-
-func si(i int) string {
-	return fmt.Sprintf("%v", i)
-}
-
-func percent(n int, d int) string {
-	return fmt.Sprintf("%v%v", n*1000/d/10, "%")
-}
-
 func testGenCfg() {
+
 	args := os.Args
 	if len(args) == 4 {
 		fmt.Printf("%v\n", args[3])
@@ -357,23 +128,22 @@ func testGenCfg() {
 		return
 	}
 
-
-	/*absIntTestSimple00()
-	absIntTestRequires00()
-	absIntTestCall01()
-	absIntTestDiv00()
-	absIntTestEcrecoverLoop02()
-	absIntTestStorageVar03()
-	absIntTestStaticLoop00()
-	absIntTestPrivateFunction01()
-	absIntTestPrivateFunction02()
-	absIntTestStaticLoop01()
-	absIntTestDepositContract()
-	absIntTestDepositContract2()
+	//absIntTestSimple00()
+	//absIntTestRequires00()
+	//absIntTestCall01()
+	//absIntTestDiv00()
+	//absIntTestEcrecoverLoop02()
+	//absIntTestStorageVar03()
+	//absIntTestStaticLoop00()
+	//absIntTestPrivateFunction01()
+	//absIntTestPrivateFunction02()
+	//absIntTestStaticLoop01()
+	//absIntTestDepositContract()
+	/*absIntTestDepositContract2()
 	absIntTestPanic00()
 	absIntTestSmallImprecision()
-	absIntTestSmallInvalidJumpDest()*/
-	absIntTestSmallImprecision2()
+	absIntTestSmallInvalidJumpDest()
+	absIntTestSmallImprecision2()*/
 }
 
 /*
@@ -587,7 +357,7 @@ func runCfgAnly(testName string, code string) {
 	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 	contract.Code = decoded
 	var cfg *vm.Cfg
-	cfg, err = vm.GenCfg(contract, 0, 64)
+	cfg, err = vm.GenCfg(contract, 0, 64, 10)
 	cfg.PrintAnlyState()
 	if !cfg.Valid || err != nil {
 		fmt.Printf("Test failed: %v %v\n", testName, err, )
@@ -704,3 +474,104 @@ func testGenCfg() error {
 	print("Done")
 	return nil
 }*/
+
+
+
+type CfgEval struct {
+	numProgramsPassed   int
+	numPanic            int
+	numAnlyCounterLimit int
+	numShortStack       int
+	numStackLimitReached       int
+	numProgramsAnalyzed int
+	numUnresolved       int
+	numLowCoverage      int
+	numImprecision      int
+	numInvalidOpcode    int
+	numInvalidJumpDest  int
+	numPrograms         int
+	numAddresses			int
+	numAddressesPassed		int
+	numAddressesAnalyzed 	int
+}
+
+func (eval *CfgEval) printStats() {
+	fmt.Printf("AddressesPass=%v AddressesAnalyzed=%v Addresses=%v AddressesPassRate=%v ProgramsPass=%v ProgramsAnalyzed=%v Programs=%v ProgramsPassRate=%v Panic=%v CounterLimit=%v ShortStack=%v StackCountLimit=%v Unresolved=%v Imprecision=%v InvalidOp=%v InvalidJumpDest=%v DeadCode=%v\n",
+		eval.numAddressesPassed,
+		eval.numAddressesAnalyzed,
+		eval.numAddresses,
+		percent(eval.numAddressesPassed,eval.numAddressesAnalyzed),
+		eval.numProgramsPassed,
+		eval.numProgramsAnalyzed,
+		eval.numPrograms,
+		percent(eval.numProgramsPassed,eval.numProgramsAnalyzed),
+		eval.numPanic,
+		eval.numAnlyCounterLimit,
+		eval.numShortStack,
+		eval.numStackLimitReached,
+		percent(eval.numUnresolved,eval.numProgramsAnalyzed),
+		percent(eval.numImprecision,eval.numProgramsAnalyzed),
+		percent(eval.numInvalidOpcode,eval.numProgramsAnalyzed),
+		percent(eval.numInvalidJumpDest,eval.numProgramsAnalyzed),
+		percent(eval.numLowCoverage,eval.numProgramsAnalyzed))
+}
+
+func (eval *CfgEval) update(cfg *vm.Cfg, count int)  {
+	eval.numProgramsAnalyzed++
+	eval.numAddressesAnalyzed += count
+
+	if cfg.Valid {
+		eval.numProgramsPassed++
+		eval.numAddressesPassed += count
+	}
+	if cfg.Panic {
+		eval.numPanic++
+	}
+	if cfg.AnlyCounterLimit {
+		eval.numAnlyCounterLimit++
+	}
+	if cfg.ShortStack {
+		eval.numShortStack++
+	}
+	if cfg.StackCountLimitReached {
+		eval.numStackLimitReached++
+	}
+	if cfg.Unresolved {
+		eval.numUnresolved++
+	}
+	if cfg.LowCoverage {
+		eval.numLowCoverage++
+	}
+	if cfg.BadJumpImprecision {
+		eval.numImprecision++
+	}
+	if cfg.BadJumpInvalidOp {
+		eval.numInvalidOpcode++
+	}
+	if cfg.BadJumpInvalidJumpDest {
+		eval.numInvalidJumpDest++
+	}
+}
+
+type cfgJob struct {
+	txcnt int
+	code []byte
+}
+
+type cfgJobResult struct {
+	job *cfgJob
+	cfg *vm.Cfg
+}
+
+
+func sb(b bool) string {
+	return fmt.Sprintf("%v", b)
+}
+
+func si(i int) string {
+	return fmt.Sprintf("%v", i)
+}
+
+func percent(n int, d int) string {
+	return fmt.Sprintf("%v%v", n*1000/d/10, "%")
+}
