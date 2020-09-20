@@ -410,8 +410,8 @@ func (hd *HeaderDownload) AnchorState() string {
 			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d}", end, end-anchor.blockHeight, count))
 		}
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
-		j++
 		ss[j] = sb.String()
+		j++
 	}
 	sort.Strings(ss)
 	return strings.Join(ss, "\n")
