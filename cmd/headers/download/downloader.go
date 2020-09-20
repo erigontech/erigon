@@ -164,6 +164,7 @@ func Downloader(
 			}
 		}
 	}
+	log.Info(hd.AnchorState())
 	for {
 		select {
 		case newBlockReq := <-newBlockCh:
