@@ -505,7 +505,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 				totalDiff.SetBytes16(anchorBuf[pos:])
 				anchorDiffs[anchorParent] = &totalDiff
 				anchorDepths[anchorParent] = powDepth
-				fmt.Printf("Anchor parent: %x, totalDifficulty: %s, powDepth: %d\n", anchorParent, totalDiff, powDepth)
+				fmt.Printf("Anchor parent: %x, totalDifficulty: %d, powDepth: %d\n", anchorParent, totalDiff, powDepth)
 			}
 		}
 		if anchorSequence >= hd.anchorSequence {
@@ -538,12 +538,11 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 		he := (heap.Pop(h)).(HeapElem)
 		if he.blockHeight > prevHeight {
 			// Clear out parent map and move childMap to its place
+			parentAnchors = childAnchors
+			parentDiffs = childDiffs
 			childAnchors = make(map[common.Hash]*Anchor)
 			childDiffs = make(map[common.Hash]*uint256.Int)
-			if he.blockHeight == prevHeight+1 {
-				parentAnchors = childAnchors
-				parentDiffs = childDiffs
-			} else {
+			if he.blockHeight != prevHeight+1 {
 				// Skipping the level, so no connection between grand-parents and grand-children
 				parentAnchors = make(map[common.Hash]*Anchor)
 				parentDiffs = make(map[common.Hash]*uint256.Int)
@@ -575,7 +574,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 				return false, fmt.Errorf("add header as anchor: %v", err)
 			}
 			childAnchors[he.header.Hash()] = parentAnchor
-			childDiffs[he.header.Hash()] = new(uint256.Int)
+			childDiffs[he.header.Hash()] = totalDifficulty
 		}
 		var header types.Header
 		if _, err = io.ReadFull(he.reader, buffer[:]); err == nil {
