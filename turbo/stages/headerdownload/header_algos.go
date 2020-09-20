@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -471,7 +472,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 	var lastAnchorDiffs = make(map[common.Hash]*uint256.Int)
 	var lastAnchorDepths = make(map[common.Hash]int)
 	for _, fileInfo := range fileInfos {
-		f, err1 := os.Open(fileInfo.Name())
+		f, err1 := os.Open(path.Join(hd.filesDir, fileInfo.Name()))
 		if err1 != nil {
 			return false, fmt.Errorf("open file %s: %v", fileInfo.Name(), err1)
 		}
