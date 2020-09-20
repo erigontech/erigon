@@ -457,6 +457,7 @@ func TestHeaderSerialisation(t *testing.T) {
 	header.Time = 34343242342332
 	header.Root = common.HexToHash("0xeeeeeeeefffffffbbbbbbbaaaaaa3456")
 	header.Coinbase = common.HexToAddress("0xdddd44333aaabbb555664300066555")
+	header.MixDigest = common.HexToHash("0x585859595959506968")
 	for i := 0; i < 256; i++ {
 		header.Bloom[i] = byte(i)
 	}
