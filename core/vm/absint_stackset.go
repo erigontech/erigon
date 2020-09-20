@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"github.com/mitchellh/hashstructure"
 )
 
 //////////////////////////////////////////////////
@@ -251,12 +250,24 @@ func (d AbsValueKind) String() string {
 	return [...]string{"⊥", "⊤", "AbsValue"}[d]
 }
 
+func (d AbsValueKind) hash() uint64 {
+	if d == BotValue {
+		return 0
+	} else if d == TopValue {
+		return 1
+	} else if d == ConcreteValue {
+		return 2
+	} else {
+		panic("no hash found")
+	}
+}
+
 //////////////////////////////////////////////////
 
 type AbsValue struct {
-	kind          AbsValueKind
-	value         uint256.Int //only when kind=ConcreteValue
-	pc            int         //only when kind=TopValue
+	kind  AbsValueKind
+	value uint256.Int 			//only when kind=ConcreteValue
+	pc    int   //only when kind=TopValue
 }
 
 func (c0 AbsValue) String(abbrev bool) string {
@@ -318,12 +329,17 @@ func (s *astack) Copy() *astack {
 	return newStack
 }
 
+func uint256Hash(e uint256.Int) uint64 {
+	return 19 * e[0] + 23 * e[1] + 29 * e[2] * 37 * e[3]
+}
+
 func (s *astack) updateHash() {
-	hash, err := hashstructure.Hash(s, nil)
-	if err != nil {
-		panic("cannot hash")
+	s.hash = 0
+	for _, e := range s.values {
+		s.hash = s.hash +
+					57 * uint256Hash(e.value) +
+					59 * e.kind.hash()
 	}
-	s.hash = hash
 }
 
 func (s *astack) Push(value AbsValue) {
@@ -962,11 +978,11 @@ func GenCfg(contract *Contract, anlyCounterLimit int, maxStackLen int, maxStackC
 			cfg.D[e.pc1] = postDpc1
 
 			if len(postDpc1.stackset) > maxStackCount {
-				/*fmt.Printf("stacklen: %v %v\n", len(postDpc1.stackset), maxStackCount)
-				fmt.Println(postDpc1.String(false))
-				for _, stack := range postDpc1.stackset {
-					fmt.Printf("%v\n", stack.String(false))
-				}*/
+				//fmt.Printf("stacklen: %v %v\n", len(postDpc1.stackset), maxStackCount)
+				//fmt.Println(postDpc1.String(false))
+				//for _, stack := range postDpc1.stackset {
+				//	fmt.Printf("%v\n", stack.String(false))
+				//}
 				cfg.StackCountLimitReached = true
 				return cfg, errors.New("stack count limit reach")
 			}

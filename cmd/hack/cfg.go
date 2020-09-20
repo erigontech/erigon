@@ -135,7 +135,7 @@ func testGenCfg() {
 		return
 	}
 
-	//
+
 	//absIntTestSimple00()
 	//absIntStackCountLimit00()
 	//absIntTestRequires00()
