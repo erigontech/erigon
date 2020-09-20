@@ -486,7 +486,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 		var anchorDepths = make(map[common.Hash]int)
 		var anchorParent common.Hash
 		for i := 0; i < anchorCount; i++ {
-			if _, err := io.ReadFull(r, anchorBuf[:]); err != nil {
+			if _, err = io.ReadFull(r, anchorBuf[:]); err != nil {
 				fmt.Printf("reading anchor %x from file: %v\n", i, err)
 			}
 			if anchorSequence >= hd.anchorSequence { // Don't bother with parsing if we are not going to use this info
