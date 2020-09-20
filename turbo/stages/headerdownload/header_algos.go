@@ -502,14 +502,13 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			}
 		}
 		if anchorSequence >= hd.anchorSequence {
-			hd.anchorSequence = anchorSequence
+			hd.anchorSequence = anchorSequence + 1
 			lastAnchorDiffs = anchorDiffs
 			lastAnchorDepths = anchorDepths
 		}
 		fs = append(fs, f)
 		rs = append(rs, r)
 	}
-	hd.anchorSequence++ // Prepare for the next flush
 	for i, f := range fs {
 		r := rs[i]
 		var header types.Header
