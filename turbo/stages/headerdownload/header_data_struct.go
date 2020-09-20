@@ -72,18 +72,18 @@ type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
 type HeaderDownload struct {
-	buffer   []byte
-	filesDir string
-	//currentFile            *os.File
-	//currentFileWriter      io.Writer
+	buffer                 []byte
+	bufferLimit            int
+	filesDir               string
+	anchorSequence         uint32 // Sequence number to be used for recording anchors next time the buffer is flushed
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
-	tips                   *lru.Cache
-	hardTips               map[common.Hash]*Tip // Hard-coded tips
-	tipQueue               *TipQueue            // Tips that are within the newAnchorPastLimit from current time
-	initPowDepth           int                  // powDepth assigned to the newly inserted anchor
-	newAnchorFutureLimit   uint64               // How far in the future (relative to current time) the new anchors are allowed to be
-	newAnchorPastLimit     uint64               // How far in the past (relative to current time) the new anchors are allowed to be
+	tips                   *lru.Cache                // Limited size LRU cache for tips
+	hardTips               map[common.Hash]*Tip      // Hard-coded and recent tips
+	tipQueue               *TipQueue                 // Tips that are within the newAnchorPastLimit from current time
+	initPowDepth           int                       // powDepth assigned to the newly inserted anchor
+	newAnchorFutureLimit   uint64                    // How far in the future (relative to current time) the new anchors are allowed to be
+	newAnchorPastLimit     uint64                    // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
 	requestQueue           *RequestQueue
 	calcDifficultyFunc     CalcDifficultyFunc
@@ -158,13 +158,14 @@ func (rq *RequestQueue) Pop() interface{} {
 }
 
 func NewHeaderDownload(filesDir string,
-	tipLimit, initPowDepth int,
+	bufferLimit, tipLimit, initPowDepth int,
 	calcDifficultyFunc CalcDifficultyFunc,
 	verifySealFunc VerifySealFunc,
 	newAnchorFutureLimit, newAnchorPastLimit uint64,
 ) *HeaderDownload {
 	hd := &HeaderDownload{
 		filesDir:             filesDir,
+		bufferLimit:          bufferLimit,
 		badHeaders:           make(map[common.Hash]struct{}),
 		anchors:              make(map[common.Hash][]*Anchor),
 		initPowDepth:         initPowDepth,

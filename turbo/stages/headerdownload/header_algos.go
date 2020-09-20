@@ -3,6 +3,7 @@ package headerdownload
 import (
 	"bufio"
 	"container/heap"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -34,8 +35,8 @@ func (h HeadersByBlockHeight) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 }
 
-// HandleHeadersMsg converts message containing headers into a collection of chain segments
-func (hd *HeaderDownload) HandleHeadersMsg(msg []*types.Header) ([]*ChainSegment, Penalty, error) {
+// SplitIntoSegments converts message containing headers into a collection of chain segments
+func (hd *HeaderDownload) SplitIntoSegments(msg []*types.Header) ([]*ChainSegment, Penalty, error) {
 	sort.Sort(HeadersByBlockHeight(msg))
 	// Now all headers are order from the highest block height to the lowest
 	var segments []*ChainSegment                         // Segments being built
@@ -88,8 +89,8 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 	return true, NoPenalty
 }
 
-// HandleNewBlockMsg converts message containing 1 header into one singleton chain segment
-func (hd *HeaderDownload) HandleNewBlockMsg(header *types.Header) ([]*ChainSegment, Penalty, error) {
+// SingleHeaderAsSegment converts message containing 1 header into one singleton chain segment
+func (hd *HeaderDownload) SingleHeaderAsSegment(header *types.Header) ([]*ChainSegment, Penalty, error) {
 	headerHash := header.Hash()
 	if _, bad := hd.badHeaders[headerHash]; bad {
 		return nil, BadBlockPenalty, nil
@@ -377,6 +378,7 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty 
 	return nil
 }
 
+// AddToBuffer adds another segment to the buffer and return true if the buffer is now full
 func (hd *HeaderDownload) AddToBuffer(segment *ChainSegment, start, end int) {
 	var serBuffer [HeaderSerLength]byte
 	for _, header := range segment.Headers[start:end] {
@@ -451,20 +453,65 @@ func (h *Heap) Pop() interface{} {
 	return x
 }
 
-func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) error {
+const AnchorSerLen = 32 /* ParentHash */ + 8 /* powDepth */ + 16 /* totalDifficulty */
+
+func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
-		return err
+		return false, err
 	}
 	h := &Heap{}
 	heap.Init(h)
 	var buffer [HeaderSerLength]byte
+	var anchorBuf [AnchorSerLen]byte
+	var fs []*os.File
+	var rs []io.Reader
+	// Open all files and only read anchor sequences to decide which one has the latest information about the anchors
+	hd.anchorSequence = 0
+	var lastAnchorDiffs = make(map[common.Hash]*uint256.Int)
+	var lastAnchorDepths = make(map[common.Hash]int)
 	for _, fileInfo := range fileInfos {
 		f, err1 := os.Open(fileInfo.Name())
 		if err1 != nil {
-			return fmt.Errorf("open file %s: %v", fileInfo.Name(), err1)
+			return false, fmt.Errorf("open file %s: %v", fileInfo.Name(), err1)
 		}
 		r := bufio.NewReader(f)
+		if _, err = io.ReadFull(r, anchorBuf[:8]); err != nil {
+			fmt.Printf("reading anchor sequence and count from file: %v\n", err)
+			continue
+		}
+		anchorSequence := binary.BigEndian.Uint32(anchorBuf[:])
+		anchorCount := int(binary.BigEndian.Uint32((anchorBuf[4:])))
+		var anchorDiffs = make(map[common.Hash]*uint256.Int)
+		var anchorDepths = make(map[common.Hash]int)
+		var anchorParent common.Hash
+		for i := 0; i < anchorCount; i++ {
+			if _, err := io.ReadFull(r, anchorBuf[:]); err != nil {
+				fmt.Printf("reading anchor %x from file: %v\n", i, err)
+			}
+			if anchorSequence >= hd.anchorSequence { // Don't bother with parsing if we are not going to use this info
+				pos := 0
+				copy(anchorParent[:], anchorBuf[pos:])
+				pos += 32
+				powDepth := int(binary.BigEndian.Uint64(anchorBuf[pos:]))
+				pos += 8
+				var totalDiff uint256.Int
+				totalDiff.SetBytes16(anchorBuf[pos:])
+				anchorDiffs[anchorParent] = &totalDiff
+				anchorDepths[anchorParent] = powDepth
+			}
+		}
+		if anchorSequence >= hd.anchorSequence {
+			hd.anchorSequence = anchorSequence
+			lastAnchorDiffs = anchorDiffs
+			lastAnchorDepths = anchorDepths
+		}
+		fs = append(fs, f)
+		rs = append(rs, r)
+	}
+	hd.anchorSequence++ // Prepare for the next flush
+	for i, f := range fs {
+		r := rs[i]
 		var header types.Header
 		if _, err = io.ReadFull(r, buffer[:]); err != nil {
 			if !errors.Is(err, io.EOF) {
@@ -500,19 +547,26 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) error {
 		// Since this header has already been processed, we do not expect overflow
 		headerDiff, overflow := uint256.FromBig(he.header.Difficulty)
 		if overflow {
-			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", he.header.Difficulty)
+			return false, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", he.header.Difficulty)
 		}
-		if parentAnchor, found := parentAnchors[he.header.ParentHash]; found {
-			parentDiff := parentDiffs[he.header.ParentHash]
+		parentHash := he.header.ParentHash
+		if parentAnchor, found := parentAnchors[parentHash]; found {
+			parentDiff := parentDiffs[parentHash]
 			cumulativeDiff := headerDiff.Add(headerDiff, parentDiff)
 			if err = hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff, currentTime); err != nil {
-				return fmt.Errorf("add header as tip: %v", err)
+				return false, fmt.Errorf("add header as tip: %v", err)
 			}
 		} else {
-			// Add header as anchor
-			//TODO - persist powDepth and totalDifficulty
-			if parentAnchor, err = hd.addHeaderAsAnchor(he.header, hd.initPowDepth, uint256.Int{}); err != nil {
-				return fmt.Errorf("add header as anchor: %v", err)
+			powDepth, ok := lastAnchorDepths[parentHash]
+			if !ok {
+				powDepth = hd.initPowDepth
+			}
+			totalDifficulty, _ := lastAnchorDiffs[parentHash]
+			if totalDifficulty == nil {
+				totalDifficulty = new(uint256.Int)
+			}
+			if parentAnchor, err = hd.addHeaderAsAnchor(he.header, powDepth, *totalDifficulty); err != nil {
+				return false, fmt.Errorf("add header as anchor: %v", err)
 			}
 			childAnchors[he.header.Hash()] = parentAnchor
 			childDiffs[he.header.Hash()] = new(uint256.Int)
@@ -532,7 +586,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) error {
 			}
 		}
 	}
-	return nil
+	return hd.anchorSequence > 0, nil
 }
 
 func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*HeaderRequest {
@@ -579,9 +633,45 @@ func (hd *HeaderDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64
 }
 
 func (hd *HeaderDownload) FlushBuffer() error {
+	if len(hd.buffer) < hd.bufferLimit {
+		// Not flushing the buffer unless it is full
+		return nil
+	}
 	// Sort the buffer first
 	sort.Sort(BufferSorter(hd.buffer))
 	if bufferFile, err := ioutil.TempFile(hd.filesDir, "headers-buf"); err == nil {
+		// First write the anchors
+		var buf [AnchorSerLen]byte
+		binary.BigEndian.PutUint32(buf[:], hd.anchorSequence)
+		binary.BigEndian.PutUint32(buf[4:], uint32(len(hd.anchors)))
+		if _, err = bufferFile.Write(buf[:8]); err != nil {
+			bufferFile.Close()
+			return err
+		}
+		for anchorParent, anchors := range hd.anchors {
+			// Figure out the minimum PoW depth
+			var powDepth int = hd.initPowDepth
+			var maxTotalDiff uint256.Int
+			for _, anchor := range anchors {
+				if anchor.powDepth < powDepth {
+					powDepth = anchor.powDepth
+				}
+				if anchor.totalDifficulty.Gt(&maxTotalDiff) {
+					maxTotalDiff.Set(&anchor.totalDifficulty)
+				}
+			}
+			pos := 0
+			copy(buf[pos:], anchorParent[:])
+			pos += 32
+			binary.BigEndian.PutUint64(buf[pos:], uint64(powDepth))
+			pos += 8
+			maxTotalDiff.SetBytes16(buf[pos:])
+			pos += 16
+			if _, err = bufferFile.Write(buf[:pos]); err != nil {
+				bufferFile.Close()
+				return err
+			}
+		}
 		if _, err = bufferFile.Write(hd.buffer); err != nil {
 			bufferFile.Close()
 			return err
@@ -590,6 +680,7 @@ func (hd *HeaderDownload) FlushBuffer() error {
 			return err
 		}
 		hd.buffer = hd.buffer[:0]
+		hd.anchorSequence++
 	} else {
 		return err
 	}
