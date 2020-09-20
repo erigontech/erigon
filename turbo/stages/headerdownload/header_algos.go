@@ -465,7 +465,9 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 	heap.Init(h)
 	var buffer [HeaderSerLength]byte
 	var anchorBuf [AnchorSerLen]byte
+	//nolint:prealloc
 	var fs []*os.File
+	//nolint:prealloc
 	var rs []io.Reader
 	// Open all files and only read anchor sequences to decide which one has the latest information about the anchors
 	hd.anchorSequence = 0
@@ -507,9 +509,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			lastAnchorDiffs = anchorDiffs
 			lastAnchorDepths = anchorDepths
 		}
-		//nolint:prealloc
 		fs = append(fs, f)
-		//nolint:prealloc
 		rs = append(rs, r)
 	}
 	for i, f := range fs {
