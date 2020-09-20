@@ -82,19 +82,23 @@ func testCfgByUsed() error {
 							"BytecodeLen",
 							"Valid",
 							"BadJumpReason",
+							"StackCountLimitReached",
+							"ShortStack",
 							"Bytecode"}
 	_, err = resultsFile.WriteString(strings.Join(headers, "|") + "\n")
 	check(err)
 	err = resultsFile.Sync()
 	check(err)
 
-	eval := CfgEval{numPrograms: 189395}
+	eval := CfgEval{numPrograms: 191400}
 	for j := 0; j < len(jobList); j++ {
 		result := <- results
 		line := []string{	si(result.job.txcnt),
 							si(len(result.cfg.Program.Contract.Code)),
 							sb(result.cfg.Valid),
 							result.cfg.GetBadJumpReason(),
+							sb(result.cfg.StackCountLimitReached),
+							sb(result.cfg.ShortStack),
 							hex.EncodeToString(result.cfg.Program.Contract.Code)}
 
 		_, err = resultsFile.WriteString(strings.Join(line,"|") + "\n")
