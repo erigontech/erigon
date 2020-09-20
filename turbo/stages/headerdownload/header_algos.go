@@ -507,7 +507,9 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			lastAnchorDiffs = anchorDiffs
 			lastAnchorDepths = anchorDepths
 		}
+		//nolint:prealloc
 		fs = append(fs, f)
+		//nolint:prealloc
 		rs = append(rs, r)
 	}
 	for i, f := range fs {
@@ -561,7 +563,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			if !ok {
 				powDepth = hd.initPowDepth
 			}
-			totalDifficulty, _ := lastAnchorDiffs[parentHash]
+			totalDifficulty := lastAnchorDiffs[parentHash]
 			if totalDifficulty == nil {
 				totalDifficulty = new(uint256.Int)
 			}
