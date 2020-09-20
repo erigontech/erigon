@@ -6,7 +6,6 @@ import (
 )
 
 var (
-	filesDir   string // Directory when the files should be stored
 	bufferSize int    // Size of buffer in MiB
 	natSetting string // NAT setting
 	port       int    // Listening port
