@@ -157,7 +157,7 @@ Currently, the algorithms are just listed without much explanation. Detailed exp
 Collection of block headers in the a `BlockHeadersMsg` message can be viewed as a specific reprentation of a "rooted forest". In this
 representation each header specifies a vertex and a potential outgoing edge (via `ParentHash` attribute, it if points to another header
 in the message). Vertices without outgoing edges (because `ParentHash` points to a header which is not contained in the message) are roots,
-and they gave rise to rooted trees. So rooted forest is a collection of rooted trees. This algorithm needs to transform this
+and they give rise to rooted trees. So rooted forest is a collection of rooted trees. This algorithm needs to transform this
 representation into another one, more useful, which groups all headers from the same rooted tree together, and in each group, the
 root is clearly identified.
 This algorithm also checks that no headers in the message is contained in the bad header set, any child header pointing to its parent header
