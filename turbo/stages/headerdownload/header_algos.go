@@ -386,7 +386,8 @@ func (hd *HeaderDownload) AddToBuffer(segment *ChainSegment, start, end int) {
 }
 
 func (hd *HeaderDownload) AnchorState() string {
-	var ss []string
+	var ss = make([]string, len(hd.anchors))
+	var j int
 	for anchorParent, anchors := range hd.anchors {
 		var sb strings.Builder
 		for i, anchor := range anchors {
@@ -395,24 +396,20 @@ func (hd *HeaderDownload) AnchorState() string {
 			}
 			sb.WriteString(fmt.Sprintf("{%8d-", anchor.blockHeight))
 			var end uint64
-			//var endTipHash common.Hash
 			var count int
 			for _, tipHash := range anchor.tips {
 				if tip, ok := hd.getTip(tipHash, false); ok {
 					if tip.blockHeight > end {
 						end = tip.blockHeight
-						//endTipHash = tipHash
 					}
 					count++
 				}
 			}
-			//if end != 0 {
-			//	hd.getTip(endTipHash, true) // Hacky way to keep at least one tip in the LRU cache
-			//}
 			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d}", end, end-anchor.blockHeight, count))
 		}
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
-		ss = append(ss, sb.String())
+		j++
+		ss[j] = sb.String()
 	}
 	sort.Strings(ss)
 	return strings.Join(ss, "\n")
