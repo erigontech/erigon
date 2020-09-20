@@ -555,12 +555,15 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			return false, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", he.header.Difficulty)
 		}
 		parentHash := he.header.ParentHash
+		hash := he.header.Hash()
 		if parentAnchor, found := parentAnchors[parentHash]; found {
 			parentDiff := parentDiffs[parentHash]
 			cumulativeDiff := headerDiff.Add(headerDiff, parentDiff)
 			if err = hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff, currentTime); err != nil {
 				return false, fmt.Errorf("add header as tip: %v", err)
 			}
+			childAnchors[hash] = parentAnchor
+			childDiffs[hash] = cumulativeDiff
 		} else {
 			powDepth, ok := lastAnchorDepths[parentHash]
 			if !ok {
@@ -573,8 +576,8 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			if parentAnchor, err = hd.addHeaderAsAnchor(he.header, powDepth, *totalDifficulty); err != nil {
 				return false, fmt.Errorf("add header as anchor: %v", err)
 			}
-			childAnchors[he.header.Hash()] = parentAnchor
-			childDiffs[he.header.Hash()] = totalDifficulty
+			childAnchors[hash] = parentAnchor
+			childDiffs[hash] = totalDifficulty
 		}
 		var header types.Header
 		if _, err = io.ReadFull(he.reader, buffer[:]); err == nil {
