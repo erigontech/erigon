@@ -962,6 +962,11 @@ func GenCfg(contract *Contract, anlyCounterLimit int, maxStackLen int, maxStackC
 			cfg.D[e.pc1] = postDpc1
 
 			if len(postDpc1.stackset) > maxStackCount {
+				/*fmt.Printf("stacklen: %v %v\n", len(postDpc1.stackset), maxStackCount)
+				fmt.Println(postDpc1.String(false))
+				for _, stack := range postDpc1.stackset {
+					fmt.Printf("%v\n", stack.String(false))
+				}*/
 				cfg.StackCountLimitReached = true
 				return cfg, errors.New("stack count limit reach")
 			}
