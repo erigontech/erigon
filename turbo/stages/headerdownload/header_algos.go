@@ -686,7 +686,7 @@ func (hd *HeaderDownload) FlushBuffer() error {
 	} else {
 		return err
 	}
-	fmt.Printf("Sucessfully flushed the buffer\n")
+	fmt.Printf("Successfully flushed the buffer\n")
 	return nil
 }
 
