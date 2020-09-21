@@ -7,7 +7,6 @@ require (
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/Azure/go-autorest/autorest/adal v0.8.3 // indirect
 	github.com/JekaMas/notify v0.9.4
-	github.com/RoaringBitmap/gocroaring v0.2.65
 	github.com/RoaringBitmap/roaring v0.5.1
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.5.7
@@ -78,7 +77,7 @@ require (
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
 	golang.org/x/tools v0.0.0-20200207183749-b753a1ba74fa
 	google.golang.org/grpc v1.32.0
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v0.0.0-20200908221732-5e8f83304c05 // indirect
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc v0.0.0-20200908221732-5e8f83304c05
 	google.golang.org/protobuf v1.25.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
