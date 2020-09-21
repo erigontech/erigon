@@ -393,12 +393,18 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty 
 }
 
 // AddToBuffer adds another segment to the buffer and return true if the buffer is now full
-func (hd *HeaderDownload) AddToBuffer(segment *ChainSegment, start, end int) {
+func (hd *HeaderDownload) AddSegmentToBuffer(segment *ChainSegment, start, end int) {
 	var serBuffer [HeaderSerLength]byte
 	for _, header := range segment.Headers[start:end] {
 		SerialiseHeader(header, serBuffer[:])
 		hd.buffer = append(hd.buffer, serBuffer[:]...)
 	}
+}
+
+func (hd *HeaderDownload) AddHeaderToBuffer(header *types.Header) {
+	var serBuffer [HeaderSerLength]byte
+	SerialiseHeader(header, serBuffer[:])
+	hd.buffer = append(hd.buffer, serBuffer[:]...)
 }
 
 func (hd *HeaderDownload) AnchorState() string {

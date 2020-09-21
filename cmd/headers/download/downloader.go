@@ -53,7 +53,7 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 		log.Error("Could not flush the buffer, will discard the data", "error", err1)
 		return
 	}
-	hd.AddToBuffer(segment, start, end)
+	hd.AddSegmentToBuffer(segment, start, end)
 	currentTime := uint64(time.Now().Unix())
 	// There are 4 cases
 	if foundAnchor {
@@ -97,6 +97,7 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 func Downloader(
 	ctx context.Context,
 	filesDir string,
+	bufferLimit int,
 	newBlockCh chan NewBlockFromSentry,
 	newBlockHashCh chan NewBlockHashFromSentry,
 	headersCh chan BlockHeadersFromSentry,
@@ -121,9 +122,9 @@ func Downloader(
 	}
 	hd := headerdownload.NewHeaderDownload(
 		filesDir,
-		32*1024, /* bufferLimit */
-		16*1024, /* tipLimit */
-		1024,    /* initPowDepth */
+		bufferLimit, /* bufferLimit */
+		16*1024,     /* tipLimit */
+		1024,        /* initPowDepth */
 		calcDiffFunc,
 		verifySealFunc,
 		3600, /* newAnchor future limit */
@@ -158,6 +159,8 @@ func Downloader(
 					}
 					if err2 := hd.HardCodedHeader(&h, d, uint64(time.Now().Unix())); err2 != nil {
 						log.Error("Failed to insert hard coded header", "i", i, "block", h.Number.Uint64(), "error", err2)
+					} else {
+						hd.AddHeaderToBuffer(&h)
 					}
 					i++
 				}

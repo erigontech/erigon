@@ -23,6 +23,6 @@ var downloadCmd = &cobra.Command{
 	Use:   "download",
 	Short: "Download headers backwards",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return download.Download(natSetting, filesDir, port)
+		return download.Download(natSetting, filesDir, bufferSize, port)
 	},
 }
