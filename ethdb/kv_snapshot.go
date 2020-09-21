@@ -303,6 +303,9 @@ func (s *snapshotTX) Rollback() {
 }
 
 func (s *snapshotTX) Cursor(bucket string) Cursor {
+	if _,ok:=s.forBuckets[bucket];!ok {
+		return s.dbTX.Cursor(bucket)
+	}
 	snCursor := s.snTX.Cursor(bucket)
 	//check snapshot bucket
 	if snCursor == nil {

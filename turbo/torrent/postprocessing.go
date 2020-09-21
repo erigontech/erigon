@@ -66,10 +66,6 @@ func PostProcessBodies(db ethdb.Database) error {
 	if err!=nil {
 		return err
 	}
-	err=stages.SaveStageProgress(db, stages.Senders, number, nil)
-	if err!=nil {
-		return err
-	}
 	return nil
 }
 
@@ -84,8 +80,6 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 		return err
 	}
 
-	_=v
-	//if true {
 	if v==0 {
 		log.Info("Generate headers hash to number index")
 		headHashBytes,err:=db.Get(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash))

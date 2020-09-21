@@ -54,7 +54,6 @@ func GenerateBodySnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 		return err
 	}
 
-
 	log.Info("Finished", "duration", time.Since(t))
 	return nil
 }
