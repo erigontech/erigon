@@ -761,7 +761,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 	}
 	hd.reserveTip()
 	hd.tips[tipHash] = tip
-	heap.Push(anchor.tipQueue, &AnchorTipItem{hash: tipHash, height: tip.blockHeight})
+	heap.Push(anchor.tipQueue, AnchorTipItem{hash: tipHash, height: tip.blockHeight})
 	hd.tipCount++
 	if tip.blockHeight > anchor.maxTipHeight {
 		anchor.maxTipHeight = tip.blockHeight
@@ -779,7 +779,7 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 	}
 	hd.reserveTip()
 	hd.tips[hash] = tip
-	heap.Push(anchor.tipQueue, &AnchorTipItem{hash: hash, height: blockHeight})
+	heap.Push(anchor.tipQueue, AnchorTipItem{hash: hash, height: blockHeight})
 	if blockHeight > anchor.maxTipHeight {
 		anchor.maxTipHeight = blockHeight
 	}
