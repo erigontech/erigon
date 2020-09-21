@@ -38,7 +38,9 @@ type StageParameters struct {
 
 // StageBuilder represent an object to create a single stage for staged sync
 type StageBuilder struct {
-	ID    stages.SyncStage
+	// ID is the stage identifier. Should be unique. It is recommended to prefix it with reverse domain `com.example.my-stage` to avoid conflicts.
+	ID stages.SyncStage
+	// Build is a factory function that initializes the sync stage based on the `StageParameters` provided.
 	Build func(StageParameters) *Stage
 }
 

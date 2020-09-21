@@ -5,16 +5,23 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
+// Unwinder allows the stage to cause an unwind.
 type Unwinder interface {
+	// UnwindTo begins staged sync unwind to the specified block.
 	UnwindTo(uint64, ethdb.Database) error
 }
 
+// UnwindState contains the information about unwind.
 type UnwindState struct {
-	Stage       stages.SyncStage
+	// Stage is the ID of the stage
+	Stage stages.SyncStage
+	// UnwindPoint is the block to unwind to.
 	UnwindPoint uint64
-	StageData   []byte
+	// StageData is additional data for unwind (useful for long unwinds with ETL that can be interrupted by a user).
+	StageData []byte
 }
 
+// Done() updates the DB state of the stage.
 func (u *UnwindState) Done(db ethdb.Putter) error {
 	err := stages.SaveStageProgress(db, u.Stage, u.UnwindPoint, nil)
 	if err != nil {
@@ -23,10 +30,12 @@ func (u *UnwindState) Done(db ethdb.Putter) error {
 	return stages.SaveStageUnwind(db, u.Stage, 0, nil)
 }
 
+// UpdateWithStageData() sets data for stage unwind (that can later be retrieved by `UnwindState.StageData`).
 func (u *UnwindState) UpdateWithStageData(db ethdb.Putter, stageData []byte) error {
 	return stages.SaveStageUnwind(db, u.Stage, u.UnwindPoint, stageData)
 }
 
+// Skip() ignores the unwind
 func (u *UnwindState) Skip(db ethdb.Putter) error {
 	return stages.SaveStageUnwind(db, u.Stage, 0, nil)
 }
