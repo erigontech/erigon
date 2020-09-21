@@ -141,6 +141,7 @@ func (hd *HeaderDownload) InvalidateAnchors(anchorParent common.Hash, invalidAnc
 			} else {
 				delete(hd.anchors, anchorParent)
 			}
+			hd.rebuildAnchorQueue()
 		} else {
 			return nil, fmt.Errorf("invalidateAnchors anchors were not found for %x", anchorParent)
 		}
@@ -244,6 +245,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 		}
 		heap.Init(newAnchor.tipQueue)
 		hd.anchors[newAnchorHeader.ParentHash] = append(hd.anchors[newAnchorHeader.ParentHash], newAnchor)
+		heap.Push(hd.anchorQueue, newAnchor)
 		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime})
 
 		// Add all headers in the segments as tips to this anchor
@@ -274,6 +276,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 			}
 		}
 		delete(hd.anchors, anchorHeader.Hash())
+		hd.rebuildAnchorQueue()
 	} else {
 		return fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
 	}
@@ -322,6 +325,7 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 		}
 	}
 	delete(hd.anchors, anchorHeader.Hash())
+	hd.rebuildAnchorQueue()
 	return nil
 }
 
@@ -801,6 +805,7 @@ func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, 
 	}
 	heap.Init(anchor.tipQueue)
 	hd.anchors[header.ParentHash] = append(hd.anchors[header.ParentHash], anchor)
+	heap.Push(hd.anchorQueue, anchor)
 	return anchor, nil
 }
 
@@ -813,6 +818,16 @@ func (hd *HeaderDownload) reserveTip() {
 		heap.Fix(hd.anchorQueue, 0) // top anchor was modified, fix the priority queue
 		delete(hd.tips, tipItem.hash)
 		hd.tipCount--
+	}
+}
+
+func (hd *HeaderDownload) rebuildAnchorQueue() {
+	*hd.anchorQueue = (*hd.anchorQueue)[:0]
+	heap.Init(hd.anchorQueue)
+	for _, anchors := range hd.anchors {
+		for _, anchor := range anchors {
+			heap.Push(hd.anchorQueue, anchor)
+		}
 	}
 }
 
