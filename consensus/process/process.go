@@ -26,6 +26,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 			case <-exit:
 				return
 			case req := <-c.VerifyHeaderRequests:
+				// fixme сделать как event loop - чтобы то, что можно, то обрабатывалось сразу, остальное откладывалось
 				// If we're running a full engine faking, accept any input as valid
 				if c.IsFake() {
 					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), nil}
@@ -86,13 +87,12 @@ func (c *Consensus) waitHeader(blockHash, parentHash common.Hash) (*types.Header
 
 	if !ok {
 		c.HeadersRequests <- consensus.HeadersRequest{parentHash}
-		ticker := time.NewTicker(100 * time.Millisecond)
+		ticker := time.NewTicker(time.Millisecond)
 		defer ticker.Stop()
 
 	loop:
 		for {
 			select {
-
 			case parentResp := <-c.HeaderResponses:
 				if parentResp.Header != nil {
 					c.AddVerifiedBlocks(parentResp.Header, parentResp.Header.Hash())
