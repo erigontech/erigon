@@ -28,7 +28,7 @@ var logIndex = Migration{
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
-		const memLimit = uint64(4 * datasize.MB)
+		const memLimit = uint64(512 * datasize.MB)
 
 		bitmaps := map[string]*roaring.Bitmap{}
 		if err := tx.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
@@ -104,7 +104,6 @@ func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit uint64) bool {
 }
 
 func flushBitmaps(db ethdb.MinDatabase, bucket string, inMem map[string]*roaring.Bitmap) map[string]*roaring.Bitmap {
-	defer func(t time.Time) { fmt.Printf("logs_index.go:107: %s\n", time.Since(t)) }(time.Now())
 	for kStr, b := range inMem {
 		if err := bitmapdb.NoLeadingZeroes.PutMergeByOr(db, bucket, []byte(kStr), b); err != nil {
 			panic(err)
