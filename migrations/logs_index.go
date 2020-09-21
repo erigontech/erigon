@@ -45,8 +45,7 @@ var logIndex = Migration{
 				log.Info("progress", "blockNum", blockNum)
 
 				if needFlush(bitmaps, memLimit) {
-					_ = flushBitmaps(tx, dbutils.LogIndex, bitmaps)
-					bitmaps = flushBitmaps2(tx, dbutils.LogIndex2, bitmaps)
+					bitmaps = flushBitmaps(tx, dbutils.LogIndex, bitmaps)
 				}
 			}
 
@@ -86,7 +85,6 @@ var logIndex = Migration{
 		}
 
 		_ = flushBitmaps(tx, dbutils.LogIndex, bitmaps)
-		_ = flushBitmaps2(tx, dbutils.LogIndex2, bitmaps)
 
 		return OnLoadCommit(tx, nil, true)
 	},
@@ -105,16 +103,6 @@ func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit uint64) bool {
 func flushBitmaps(db ethdb.MinDatabase, bucket string, inMem map[string]*roaring.Bitmap) map[string]*roaring.Bitmap {
 	for kStr, b := range inMem {
 		if err := bitmapdb.NoLeadingZeroes.PutMergeByOr(db, bucket, []byte(kStr), b); err != nil {
-			panic(err)
-		}
-	}
-
-	return map[string]*roaring.Bitmap{}
-}
-
-func flushBitmaps2(db ethdb.MinDatabase, bucket string, inMem map[string]*roaring.Bitmap) map[string]*roaring.Bitmap {
-	for kStr, b := range inMem {
-		if err := bitmapdb.Simple.PutMergeByOr(db, bucket, []byte(kStr), b); err != nil {
 			panic(err)
 		}
 	}
