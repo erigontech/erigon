@@ -240,6 +240,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 			difficulty:  *diff,
 			hash:        newAnchorHeader.Hash(),
 			blockHeight: newAnchorHeader.Number.Uint64(),
+			tipQueue:    &AnchorTipQueue{},
 		}
 		heap.Init(newAnchor.tipQueue)
 		hd.anchors[newAnchorHeader.ParentHash] = append(hd.anchors[newAnchorHeader.ParentHash], newAnchor)
@@ -483,7 +484,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 				fmt.Printf("reading anchor %x from file: %v\n", i, err)
 			}
 			if anchorSequence >= hd.anchorSequence { // Don't bother with parsing if we are not going to use this info
-				anchor := &Anchor{}
+				anchor := &Anchor{tipQueue: &AnchorTipQueue{}}
 				heap.Init(anchor.tipQueue)
 				pos := 0
 				copy(anchor.hash[:], anchorBuf[pos:])
@@ -555,7 +556,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 		} else {
 			anchor, ok := lastAnchors[hash]
 			if !ok {
-				anchor := &Anchor{powDepth: hd.initPowDepth, hash: hash}
+				anchor := &Anchor{powDepth: hd.initPowDepth, hash: hash, tipQueue: &AnchorTipQueue{}}
 				heap.Init(anchor.tipQueue)
 				fmt.Printf("Undeclared anchor for hash %x, inserting as empty\n", anchor)
 			}
@@ -787,6 +788,7 @@ func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, 
 		timestamp:       header.Time,
 		hash:            header.Hash(),
 		blockHeight:     header.Number.Uint64(),
+		tipQueue:        &AnchorTipQueue{},
 	}
 	heap.Init(anchor.tipQueue)
 	hd.anchors[header.ParentHash] = append(hd.anchors[header.ParentHash], anchor)
