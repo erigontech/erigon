@@ -127,29 +127,3 @@ Date:   Mon Sep 21 16:33:35 2020 +0200
     
     Co-authored-by: sarath <sarath@melvault.com>
 
-commit 9a39c6bcb1fe11a252ac832d995a72e5f2210fbe
-Author: Osoro Bironga <fanosoro@gmail.com>
-Date:   Sun Sep 20 11:43:57 2020 +0300
-
-    accounts/abi: improve documentation and names (#21540)
-    
-    * accounts: abi/bid/backends; cleaned doc errors, camelCase refactors and anonymous variable assignments
-    
-    * acounts/abi/bind: doc errors, anonymous parameter assignments
-    
-    * accounts/abi: doc edits, camelCase refactors
-    
-    * accounts/abi/bind: review fix
-    
-    * reverted name changes
-    
-    * name revert
-    
-    Co-authored-by: Osoro Bironga <osoro@doctaroo.com>
-
-commit f354c622ca05289d9190d3718fd0da3aa4e18f27
-Author: Guillaume Ballet <gballet@gmail.com>
-Date:   Fri Sep 18 14:26:19 2020 +0200
-
-    core: fix a typo in comment (#21439)
-
