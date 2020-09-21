@@ -127,8 +127,8 @@ func (hd *HeaderDownload) InvalidateAnchors(anchorParent common.Hash, invalidAnc
 			for k, anchor := range anchors {
 				if j < len(invalidAnchors) && invalidAnchors[j] == k {
 					// Invalidate the entire tree that is rooted at this anchor anchor
-					for _, tipHash := range anchor.tips {
-						hd.tips.Remove(tipHash)
+					for _, anchorTipItem := range *anchor.tipQueue {
+						delete(hd.tips, anchorTipItem.hash)
 					}
 					tombstones = append(tombstones, anchor.hash)
 					j++
@@ -203,9 +203,6 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int, curren
 	// Find attachment tip again
 	tipHeader := segment.Headers[end-1]
 	if attachmentTip, attaching := hd.getTip(tipHeader.ParentHash, true); attaching {
-		if attachmentTip.noPrepend {
-			return fmt.Errorf("extendUp attachment tip had noPrepend flag on for %x", tipHeader.ParentHash)
-		}
 		newAnchor := attachmentTip.anchor
 		cumulativeDifficulty := attachmentTip.cumulativeDifficulty
 		// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
@@ -244,6 +241,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 			hash:        newAnchorHeader.Hash(),
 			blockHeight: newAnchorHeader.Number.Uint64(),
 		}
+		heap.Init(newAnchor.tipQueue)
 		hd.anchors[newAnchorHeader.ParentHash] = append(hd.anchors[newAnchorHeader.ParentHash], newAnchor)
 		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime})
 
@@ -263,11 +261,11 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 		}
 		// Go over tips of the anchors we are replacing, bump their cumulative difficulty, and add them to the new anchor
 		for _, anchor := range anchors {
-			for _, tipHash := range anchor.tips {
-				if tip, ok := hd.getTip(tipHash, false); ok {
+			for _, tipQueueItem := range *anchor.tipQueue {
+				if tip, ok := hd.getTip(tipQueueItem.hash, false); ok {
 					tip.cumulativeDifficulty.Add(&tip.cumulativeDifficulty, &cumulativeDifficulty)
 					tip.anchor = newAnchor
-					newAnchor.tips = append(newAnchor.tips, tipHash)
+					heap.Push(newAnchor.tipQueue, tipQueueItem)
 				}
 			}
 		}
@@ -308,11 +306,11 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 	}
 	// Go over tips of the anchors we are replacing, bump their cumulative difficulty, and add them to the new anchor
 	for _, anchor := range anchors {
-		for _, tipHash := range anchor.tips {
-			if tip, ok := hd.getTip(tipHash, false); ok {
+		for _, tipQueueItem := range *anchor.tipQueue {
+			if tip, ok := hd.getTip(tipQueueItem.hash, false); ok {
 				tip.cumulativeDifficulty.Add(&tip.cumulativeDifficulty, &cumulativeDifficulty)
 				tip.anchor = newAnchor
-				newAnchor.tips = append(newAnchor.tips, tipHash)
+				heap.Push(newAnchor.tipQueue, tipQueueItem)
 			}
 		}
 	}
@@ -365,11 +363,12 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty 
 			blockHeight:          header.Number.Uint64(),
 			uncleHash:            header.UncleHash,
 			difficulty:           *diff,
-			noPrepend:            true,
 		}
 		tipHash := header.Hash()
-		hd.hardTips[tipHash] = tip
-		anchor.tips = append(anchor.tips, tipHash)
+		hd.reserveTip()
+		hd.tips[tipHash] = tip
+		heap.Push(anchor.tipQueue, AnchorTipItem{hash: tipHash, height: tip.blockHeight})
+		hd.tipCount++
 		if header.ParentHash != (common.Hash{}) {
 			heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime})
 		}
@@ -398,17 +397,8 @@ func (hd *HeaderDownload) AnchorState() string {
 				sb.WriteString("; ")
 			}
 			sb.WriteString(fmt.Sprintf("{%8d-", anchor.blockHeight))
-			var end uint64
-			var count int
-			for _, tipHash := range anchor.tips {
-				if tip, ok := hd.getTip(tipHash, false); ok {
-					if tip.blockHeight > end {
-						end = tip.blockHeight
-					}
-					count++
-				}
-			}
-			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d}", end, end-anchor.blockHeight, count))
+			end := anchor.maxTipHeight
+			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d}", end, end-anchor.blockHeight, anchor.tipQueue.Len()))
 		}
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
 		ss[j] = sb.String()
@@ -454,7 +444,7 @@ func (h *Heap) Pop() interface{} {
 	return x
 }
 
-const AnchorSerLen = 32 /* ParentHash */ + 8 /* powDepth */ + 16 /* totalDifficulty */
+const AnchorSerLen = 32 /* ParentHash */ + 8 /* powDepth */ + 16 /* totalDifficulty */ + 8 /* maxTipHeight */
 
 func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
@@ -471,8 +461,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 	var rs []io.Reader
 	// Open all files and only read anchor sequences to decide which one has the latest information about the anchors
 	hd.anchorSequence = 0
-	var lastAnchorDiffs = make(map[common.Hash]*uint256.Int)
-	var lastAnchorDepths = make(map[common.Hash]int)
+	var lastAnchors = make(map[common.Hash]*Anchor)
 	for _, fileInfo := range fileInfos {
 		f, err1 := os.Open(path.Join(hd.filesDir, fileInfo.Name()))
 		if err1 != nil {
@@ -485,9 +474,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 		}
 		anchorSequence := binary.BigEndian.Uint32(anchorBuf[:])
 		anchorCount := int(binary.BigEndian.Uint32((anchorBuf[4:])))
-		var anchorDiffs = make(map[common.Hash]*uint256.Int)
-		var anchorDepths = make(map[common.Hash]int)
-		var anchorParent common.Hash
+		var anchors = make(map[common.Hash]*Anchor)
 		if anchorSequence >= hd.anchorSequence {
 			fmt.Printf("Reading anchor sequence %d, anchor count: %d\n", anchorSequence, anchorCount)
 		}
@@ -496,22 +483,23 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 				fmt.Printf("reading anchor %x from file: %v\n", i, err)
 			}
 			if anchorSequence >= hd.anchorSequence { // Don't bother with parsing if we are not going to use this info
+				anchor := &Anchor{}
+				heap.Init(anchor.tipQueue)
 				pos := 0
-				copy(anchorParent[:], anchorBuf[pos:])
+				copy(anchor.hash[:], anchorBuf[pos:])
 				pos += 32
-				powDepth := int(binary.BigEndian.Uint64(anchorBuf[pos:]))
+				anchor.powDepth = int(binary.BigEndian.Uint64(anchorBuf[pos:]))
 				pos += 8
-				var totalDiff uint256.Int
-				totalDiff.SetBytes16(anchorBuf[pos:])
-				anchorDiffs[anchorParent] = &totalDiff
-				anchorDepths[anchorParent] = powDepth
-				fmt.Printf("Anchor parent: %x, totalDifficulty: %d, powDepth: %d\n", anchorParent, totalDiff, powDepth)
+				anchor.totalDifficulty.SetBytes16(anchorBuf[pos:])
+				pos += 16
+				anchor.maxTipHeight = binary.BigEndian.Uint64(anchorBuf[pos:])
+				anchors[anchor.hash] = anchor
+				fmt.Printf("anchor: %x, totalDifficulty: %d, powDepth: %d, maxTipHeight\n", anchor.hash, anchor.totalDifficulty, anchor.powDepth, anchor.maxTipHeight)
 			}
 		}
 		if anchorSequence >= hd.anchorSequence {
 			hd.anchorSequence = anchorSequence + 1
-			lastAnchorDiffs = anchorDiffs
-			lastAnchorDepths = anchorDepths
+			lastAnchors = anchors
 		}
 		fs = append(fs, f)
 		rs = append(rs, r)
@@ -565,23 +553,26 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			childAnchors[hash] = parentAnchor
 			childDiffs[hash] = cumulativeDiff
 		} else {
-			powDepth, ok := lastAnchorDepths[parentHash]
+			anchor, ok := lastAnchors[hash]
 			if !ok {
-				powDepth = hd.initPowDepth
+				anchor := &Anchor{powDepth: hd.initPowDepth, hash: hash}
+				heap.Init(anchor.tipQueue)
+				fmt.Printf("Undeclared anchor for hash %x, inserting as empty\n", anchor)
 			}
-			totalDifficulty := lastAnchorDiffs[parentHash]
-			if totalDifficulty == nil {
-				totalDifficulty = new(uint256.Int)
+			diff, overflow := uint256.FromBig(he.header.Difficulty)
+			if overflow {
+				return false, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", he.header.Difficulty)
 			}
-			if parentAnchor, err = hd.addHeaderAsAnchor(he.header, powDepth, *totalDifficulty); err != nil {
-				return false, fmt.Errorf("add header as anchor: %v", err)
-			}
-			cumulativeDiff := headerDiff.Add(headerDiff, totalDifficulty)
+			anchor.difficulty = *diff
+			anchor.timestamp = he.header.Time
+			anchor.blockHeight = he.header.Number.Uint64()
+			hd.anchors[parentHash] = append(hd.anchors[parentHash], anchor)
+			cumulativeDiff := headerDiff.Add(headerDiff, &anchor.totalDifficulty)
 			if err = hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff, currentTime); err != nil {
 				return false, fmt.Errorf("add header as tip: %v", err)
 			}
 			childAnchors[hash] = parentAnchor
-			childDiffs[hash] = totalDifficulty
+			childDiffs[hash] = &anchor.totalDifficulty
 		}
 		var header types.Header
 		if _, err = io.ReadFull(he.reader, buffer[:]); err == nil {
@@ -655,33 +646,30 @@ func (hd *HeaderDownload) FlushBuffer() error {
 		// First write the anchors
 		var buf [AnchorSerLen]byte
 		binary.BigEndian.PutUint32(buf[:], hd.anchorSequence)
-		binary.BigEndian.PutUint32(buf[4:], uint32(len(hd.anchors)))
+		anchorCount := 0
+		for _, anchors := range hd.anchors {
+			anchorCount += len(anchors)
+		}
+		binary.BigEndian.PutUint32(buf[4:], uint32(anchorCount))
 		if _, err = bufferFile.Write(buf[:8]); err != nil {
 			bufferFile.Close()
 			return err
 		}
-		for anchorParent, anchors := range hd.anchors {
-			// Figure out the minimum PoW depth
-			var powDepth int = hd.initPowDepth
-			var maxTotalDiff uint256.Int
+		for _, anchors := range hd.anchors {
 			for _, anchor := range anchors {
-				if anchor.powDepth < powDepth {
-					powDepth = anchor.powDepth
+				pos := 0
+				copy(buf[pos:], anchor.hash[:])
+				pos += 32
+				binary.BigEndian.PutUint64(buf[pos:], uint64(anchor.powDepth))
+				pos += 8
+				b := anchor.totalDifficulty.PaddedBytes(16)
+				copy(buf[pos:], b[:])
+				pos += 16
+				binary.BigEndian.PutUint64(buf[pos:], anchor.maxTipHeight)
+				if _, err = bufferFile.Write(buf[:]); err != nil {
+					bufferFile.Close()
+					return err
 				}
-				if anchor.totalDifficulty.Gt(&maxTotalDiff) {
-					maxTotalDiff.Set(&anchor.totalDifficulty)
-				}
-			}
-			pos := 0
-			copy(buf[pos:], anchorParent[:])
-			pos += 32
-			binary.BigEndian.PutUint64(buf[pos:], uint64(powDepth))
-			pos += 8
-			b := maxTotalDiff.PaddedBytes(16)
-			copy(buf[pos:], b[:])
-			if _, err = bufferFile.Write(buf[:]); err != nil {
-				bufferFile.Close()
-				return err
 			}
 		}
 		if _, err = bufferFile.Write(hd.buffer); err != nil {
@@ -739,36 +727,11 @@ func (hd *HeaderDownload) HasTip(tipHash common.Hash) bool {
 	return false
 }
 
-func (hd *HeaderDownload) getTip(tipHash common.Hash, touch bool) (*Tip, bool) {
-	if hardTip, ok := hd.hardTips[tipHash]; ok {
+func (hd *HeaderDownload) getTip(tipHash common.Hash, _ bool) (*Tip, bool) {
+	if hardTip, ok := hd.tips[tipHash]; ok {
 		return hardTip, true
 	}
-	if touch {
-		if tipRaw, ok := hd.tips.Get(tipHash); ok {
-			tip := tipRaw.(*Tip)
-			return tip, true
-		}
-	} else {
-		if tipRaw, ok := hd.tips.Peek(tipHash); ok {
-			tip := tipRaw.(*Tip)
-			return tip, true
-		}
-	}
 	return nil, false
-}
-
-func (hd *HeaderDownload) tipEvicted(key interface{}, value interface{}) {
-	tipHash := key.(common.Hash)
-	tip := value.(*Tip)
-	anchor := tip.anchor
-	var newTips []common.Hash
-	for _, anchorTipHash := range anchor.tips {
-		if anchorTipHash != tipHash {
-			newTips = append(newTips, anchorTipHash)
-		}
-	}
-	//fmt.Printf("Tip %d [%x] evicted\n", tip.blockHeight, tipHash)
-	anchor.tips = newTips
 }
 
 // addHeaderAsTip adds given header as a tip belonging to a given anchorParent
@@ -785,26 +748,14 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 		difficulty:           *diff,
 		blockHeight:          header.Number.Uint64(),
 		uncleHash:            header.UncleHash,
-		noPrepend:            false,
 	}
-	// Move expired items from protected map to the LRU cache
-	for hd.tipQueue.Len() > 0 {
-		if peek := (*hd.tipQueue)[0]; peek.tip.timestamp+hd.newAnchorPastLimit < currentTime {
-			p := heap.Pop(hd.tipQueue).(TipQueueItem)
-			delete(hd.hardTips, p.tipHash)
-			hd.tips.Add(p.tipHash, p.tip)
-			//fmt.Printf("Moved tip %d [%x] from hard to soft %d+%d < %d\n", p.tip.blockHeight, tipHash, p.tip.timestamp, hd.newAnchorPastLimit, currentTime)
-		} else {
-			break
-		}
+	hd.reserveTip()
+	hd.tips[tipHash] = tip
+	heap.Push(anchor.tipQueue, &AnchorTipItem{hash: tipHash, height: tip.blockHeight})
+	hd.tipCount++
+	if tip.blockHeight > anchor.maxTipHeight {
+		anchor.maxTipHeight = tip.blockHeight
 	}
-	if tip.timestamp+hd.newAnchorPastLimit >= currentTime {
-		heap.Push(hd.tipQueue, TipQueueItem{tip: tip, tipHash: tipHash})
-		hd.hardTips[tipHash] = tip
-	} else {
-		hd.tips.Add(tipHash, tip)
-	}
-	anchor.tips = append(anchor.tips, tipHash)
 	return nil
 }
 
@@ -815,10 +766,13 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 		cumulativeDifficulty: cumulativeDifficulty,
 		timestamp:            timestamp,
 		blockHeight:          blockHeight,
-		noPrepend:            true,
 	}
-	hd.hardTips[hash] = tip
-	anchor.tips = append(anchor.tips, hash)
+	hd.reserveTip()
+	hd.tips[hash] = tip
+	heap.Push(anchor.tipQueue, &AnchorTipItem{hash: hash, height: blockHeight})
+	if blockHeight > anchor.maxTipHeight {
+		anchor.maxTipHeight = blockHeight
+	}
 }
 
 func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, totalDifficulty uint256.Int) (*Anchor, error) {
@@ -834,8 +788,21 @@ func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, 
 		hash:            header.Hash(),
 		blockHeight:     header.Number.Uint64(),
 	}
+	heap.Init(anchor.tipQueue)
 	hd.anchors[header.ParentHash] = append(hd.anchors[header.ParentHash], anchor)
 	return anchor, nil
+}
+
+// reserveTip makes sure there is a space for at least one more tip
+func (hd *HeaderDownload) reserveTip() {
+	for hd.tipCount >= hd.tipLimit {
+		// Pick the anchor with the largest (maxTipHeight - minTipHeight) difference
+		anchor := (*hd.anchorQueue)[0]
+		tipItem := heap.Pop(anchor.tipQueue).(AnchorTipItem)
+		heap.Fix(hd.anchorQueue, 0) // top anchor was modified, fix the priority queue
+		delete(hd.tips, tipItem.hash)
+		hd.tipCount--
+	}
 }
 
 // anchorParentValid checks whether child-parent relationship between an anchor and
