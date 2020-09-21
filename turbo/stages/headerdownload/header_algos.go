@@ -272,6 +272,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 					if tip.blockHeight > newAnchor.maxTipHeight {
 						newAnchor.maxTipHeight = tip.blockHeight
 					}
+					heap.Init(hd.anchorQueue)
 				}
 			}
 		}
@@ -321,6 +322,7 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 				if tip.blockHeight > newAnchor.maxTipHeight {
 					newAnchor.maxTipHeight = tip.blockHeight
 				}
+				heap.Init(hd.anchorQueue)
 			}
 		}
 	}
@@ -382,6 +384,7 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty 
 		if tip.blockHeight > anchor.maxTipHeight {
 			anchor.maxTipHeight = tip.blockHeight
 		}
+		heap.Init(hd.anchorQueue)
 		hd.tipCount++
 		if header.ParentHash != (common.Hash{}) {
 			heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime})
@@ -777,6 +780,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 	if tip.blockHeight > anchor.maxTipHeight {
 		anchor.maxTipHeight = tip.blockHeight
 	}
+	heap.Init(hd.anchorQueue)
 	return nil
 }
 
@@ -794,6 +798,7 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 	if blockHeight > anchor.maxTipHeight {
 		anchor.maxTipHeight = blockHeight
 	}
+	heap.Init(hd.anchorQueue)
 }
 
 func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, totalDifficulty uint256.Int) (*Anchor, error) {
