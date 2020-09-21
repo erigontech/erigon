@@ -591,6 +591,9 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			anchor.blockHeight = he.header.Number.Uint64()
 			hd.anchors[parentHash] = append(hd.anchors[parentHash], anchor)
 			heap.Push(hd.anchorQueue, anchor)
+			if parentHash != (common.Hash{}) {
+				heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime})
+			}
 			cumulativeDiff := headerDiff.Add(headerDiff, &anchor.totalDifficulty)
 			if err = hd.addHeaderAsTip(he.header, anchor, *cumulativeDiff, currentTime); err != nil {
 				return false, fmt.Errorf("add header as tip: %v", err)
