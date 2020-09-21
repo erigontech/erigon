@@ -508,7 +508,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 				pos += 16
 				anchor.maxTipHeight = binary.BigEndian.Uint64(anchorBuf[pos:])
 				anchors[anchor.hash] = anchor
-				fmt.Printf("anchor: %x, totalDifficulty: %d, powDepth: %d, maxTipHeight\n", anchor.hash, anchor.totalDifficulty, anchor.powDepth, anchor.maxTipHeight)
+				fmt.Printf("anchor: %x, totalDifficulty: %d, powDepth: %d, maxTipHeight %d\n", anchor.hash, anchor.totalDifficulty, anchor.powDepth, anchor.maxTipHeight)
 			}
 		}
 		if anchorSequence >= hd.anchorSequence {
@@ -582,10 +582,10 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			anchor.blockHeight = he.header.Number.Uint64()
 			hd.anchors[parentHash] = append(hd.anchors[parentHash], anchor)
 			cumulativeDiff := headerDiff.Add(headerDiff, &anchor.totalDifficulty)
-			if err = hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff, currentTime); err != nil {
+			if err = hd.addHeaderAsTip(he.header, anchor, *cumulativeDiff, currentTime); err != nil {
 				return false, fmt.Errorf("add header as tip: %v", err)
 			}
-			childAnchors[hash] = parentAnchor
+			childAnchors[hash] = anchor
 			childDiffs[hash] = &anchor.totalDifficulty
 		}
 		var header types.Header
