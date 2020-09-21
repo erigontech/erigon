@@ -301,42 +301,42 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	writeAccountFunc := writeAccountPlain
 	recoverCodeHashFunc := recoverCodeHashPlain
 
-	accountMap, storageMap, err := rewindFunc(stateDB, s.BlockNumber, u.UnwindPoint)
-	if err != nil {
-		return fmt.Errorf("unwind Execution: getting rewind data: %v", err)
+	accountMap, storageMap, errRewind := rewindFunc(stateDB, s.BlockNumber, u.UnwindPoint)
+	if errRewind != nil {
+		return fmt.Errorf("unwind Execution: getting rewind data: %v", errRewind)
 	}
 
 	for key, value := range accountMap {
 		if len(value) > 0 {
 			var acc accounts.Account
-			if err = acc.DecodeForStorage(value); err != nil {
+			if err := acc.DecodeForStorage(value); err != nil {
 				return err
 			}
 
 			// Fetch the code hash
 			recoverCodeHashFunc(&acc, stateDB, key)
-			if err = writeAccountFunc(batch, key, acc); err != nil {
+			if err := writeAccountFunc(batch, key, acc); err != nil {
 				return err
 			}
 		} else {
-			if err = deleteAccountFunc(batch, key); err != nil {
+			if err := deleteAccountFunc(batch, key); err != nil {
 				return err
 			}
 		}
 	}
 	for key, value := range storageMap {
 		if len(value) > 0 {
-			if err = batch.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
+			if err := batch.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
 				return err
 			}
 		} else {
-			if err = batch.Delete(stateBucket, []byte(key)[:storageKeyLength]); err != nil {
+			if err := batch.Delete(stateBucket, []byte(key)[:storageKeyLength]); err != nil {
 				return err
 			}
 		}
 	}
 
-	if err = stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+	if err := stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
 		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket, common.CopyBytes(k)); err1 != nil {
 			return false, fmt.Errorf("unwind Execution: delete account changesets: %v", err1)
 		}
@@ -344,7 +344,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	}); err != nil {
 		return fmt.Errorf("unwind Execution: walking account changesets: %v", err)
 	}
-	if err = stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+	if err := stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
 		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket, common.CopyBytes(k)); err1 != nil {
 			return false, fmt.Errorf("unwind Execution: delete storage changesets: %v", err1)
 		}
@@ -354,7 +354,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	}
 	if writeReceipts {
 		var logsIndexKeys [][]byte
-		if err = stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (bool, error) {
+		if err := stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (bool, error) {
 			// Convert the receipts from their storage form to their internal representation
 			storageReceipts := []*types.ReceiptForStorage{}
 			if err := rlp.DecodeBytes(v, &storageReceipts); err != nil {
@@ -372,8 +372,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 				}
 			}
 
-			if err1 := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err1 != nil {
-				return false, fmt.Errorf("unwind Execution: delete receipts: %v", err1)
+			if err := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err != nil {
+				return false, fmt.Errorf("unwind Execution: delete receipts: %v", err)
 			}
 			return true, nil
 		}); err != nil {
@@ -389,11 +389,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
-	if err = u.Done(batch); err != nil {
+	if err := u.Done(batch); err != nil {
 		return fmt.Errorf("unwind Execution: reset: %v", err)
 	}
 
-	_, err = batch.Commit()
+	_, err := batch.Commit()
 	if err != nil {
 		return fmt.Errorf("unwind Execute: failed to write db commit: %v", err)
 	}
