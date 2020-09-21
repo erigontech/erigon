@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -44,8 +43,6 @@ var logIndex = Migration{
 			default:
 			case <-logEvery.C:
 				log.Info("progress", "blockNum", blockNum)
-				sz, _ := tx.(ethdb.HasTx).Tx().BucketSize(dbutils.LogIndex)
-				log.Info("size", dbutils.LogIndex, common.StorageSize(sz))
 
 				if needFlush(bitmaps, memLimit) {
 					bitmaps = flushBitmaps(tx, dbutils.LogIndex, bitmaps)
