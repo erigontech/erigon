@@ -15,6 +15,8 @@ Our own binary [`tg`](../cmd/tg) is built using it.
 
 ## Examples
 
-* [`tgcustom`](../cmd/tgcustom) - a very simple example of adding a custom stage, a custom bucket and a custom command-line parameter
+* [`tg`](../cmd/tg/main.go) - our binary is using turbo-api with all defaults
+
+* [`tgcustom`](../cmd/tgcustom/main.go) - a very simple example of adding a custom stage, a custom bucket and a custom command-line parameter
 
 * [turbo-api-examples](https://github.com/mandrigin/turbo-api-examples) - a series of examples for turbo-geth api
