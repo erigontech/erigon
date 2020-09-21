@@ -39,6 +39,7 @@ func (simple) PutMergeByOr(db ethdb.MinDatabase, bucket string, k []byte, delta 
 }
 
 // RemoveRange - gets existing bitmap in db and call RemoveRange operator on it.
+// !Important: [from, to)
 func (simple) RemoveRange(db ethdb.MinDatabase, bucket string, k []byte, from, to uint64) error {
 	v, err := db.Get(bucket, k)
 	if err != nil {
@@ -124,7 +125,7 @@ func (noLeadingZeroes) PutMergeByOr(db ethdb.MinDatabase, bucket string, k []byt
 }
 
 // RemoveRange - gets existing bitmap in db and call roaring.Bitmap.RemoveRange operator on it.
-// [from, to)
+// !Important: [from, to)
 func (noLeadingZeroes) RemoveRange(db ethdb.MinDatabase, bucket string, k []byte, from, to uint64) error {
 	v, err := db.Get(bucket, k)
 	if err != nil {

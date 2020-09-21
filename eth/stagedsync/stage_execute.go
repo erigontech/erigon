@@ -102,7 +102,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		for _, k := range keys {
 			b := logIndices[k]
-			if err := bitmapdb.NoLeadingZeroes.PutMergeByOr(tx, dbutils.LogIndex, []byte(k), b); err != nil {
+			if err := bitmapdb.Simple.PutMergeByOr(tx, dbutils.LogIndex, []byte(k), b); err != nil {
 				return err
 			}
 		}
@@ -380,7 +380,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 
 		sort.Slice(logsIndexKeys, func(i, j int) bool { return bytes.Compare(logsIndexKeys[i], logsIndexKeys[j]) < 0 })
 		for _, k := range logsIndexKeys {
-			if err := bitmapdb.NoLeadingZeroes.RemoveRange(batch, dbutils.LogIndex, k, u.UnwindPoint, s.BlockNumber); err != nil {
+			if err := bitmapdb.Simple.RemoveRange(batch, dbutils.LogIndex, k, u.UnwindPoint, s.BlockNumber+1); err != nil {
 				return nil
 			}
 		}

@@ -1,13 +1,12 @@
 package bitmapdb_test
 
 import (
-	"testing"
-
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestRoaringBitmapAddOffset(t *testing.T) {
