@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -23,7 +24,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -92,7 +92,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	logIndexFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer logIndexFlushEvery.Stop()
 	logIndices := map[string]*roaring.Bitmap{}
-	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 	logIndicesFlush := func() error {
 		defer func(t time.Time) { fmt.Printf("stage_execute.go:97: %s\n", time.Since(t)) }(time.Now())
 		keys := make([]string, 0, len(logIndices))
@@ -103,7 +102,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		for _, k := range keys {
 			b := logIndices[k]
-			if err := bitmapdb.PutMergeByOr(logIndexCursor, []byte(k), b); err != nil {
+			if err := bitmapdb.NoLeadingZeroes.PutMergeByOr(tx, dbutils.LogIndex, []byte(k), b); err != nil {
 				return err
 			}
 		}
@@ -208,7 +207,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				if err = tx.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
-				logIndexCursor = tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 			}
 			warmup = hdd && (to-blockNum) > 30000
 		}
@@ -381,9 +379,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 
 		sort.Slice(logsIndexKeys, func(i, j int) bool { return bytes.Compare(logsIndexKeys[i], logsIndexKeys[j]) < 0 })
-		c := stateDB.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 		for _, k := range logsIndexKeys {
-			if err := bitmapdb.RemoveRange(c, k, u.UnwindPoint, s.BlockNumber); err != nil {
+			if err := bitmapdb.NoLeadingZeroes.RemoveRange(batch, dbutils.LogIndex, k, u.UnwindPoint, s.BlockNumber); err != nil {
 				return nil
 			}
 		}
