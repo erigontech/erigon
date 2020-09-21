@@ -8,36 +8,39 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
+type simple struct{}
+
+var Simple simple
+
 // PutMergeByOr - puts bitmap with recent changes into database by merging it with existing bitmap. Merge by OR.
-func PutMergeByOr(c ethdb.Cursor, k []byte, delta *roaring.Bitmap) error {
-	v, err := c.SeekExact(k)
+func (simple) PutMergeByOr(db ethdb.MinDatabase, bucket string, k []byte, delta *roaring.Bitmap) error {
+	v, err := db.Get(bucket, k)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return err
 	}
 
-	existing := roaring.New()
-	_, err = existing.ReadFrom(bytes.NewReader(v))
+	if len(v) > 0 { // if found record in db - then get 'min' from db's value, otherwise get it from incoming bitmap
+		existing := roaring.New()
+		_, err = existing.ReadFrom(bytes.NewReader(v))
+		if err != nil {
+			return err
+		}
+
+		delta.Or(existing)
+	}
+
+	delta.RunOptimize()
+	newV := make([]byte, int(delta.GetSerializedSizeInBytes()))
+	_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
 	if err != nil {
 		return err
 	}
-
-	delta.Or(existing)
-
-	bufBytes, err := c.Reserve(k, int(delta.GetSerializedSizeInBytes()))
-	if err != nil {
-		return err
-	}
-
-	_, err = delta.WriteTo(bytes.NewBuffer(bufBytes[:0]))
-	if err != nil {
-		return err
-	}
-	return nil
+	return db.Put(bucket, k, newV)
 }
 
 // RemoveRange - gets existing bitmap in db and call RemoveRange operator on it.
-func RemoveRange(c ethdb.Cursor, k []byte, from, to uint64) error {
-	v, err := c.SeekExact(k)
+func (simple) RemoveRange(db ethdb.MinDatabase, bucket string, k []byte, from, to uint64) error {
+	v, err := db.Get(bucket, k)
 	if err != nil {
 		if errors.Is(err, ethdb.ErrKeyNotFound) {
 			return nil
@@ -54,31 +57,27 @@ func RemoveRange(c ethdb.Cursor, k []byte, from, to uint64) error {
 	bm.RemoveRange(from, to)
 
 	if bm.GetCardinality() == 0 { // don't store empty bitmaps
-		return c.DeleteCurrent()
+		return db.Delete(bucket, k)
 	}
 
-	bufBytes, err := c.Reserve(k, int(bm.GetSerializedSizeInBytes()))
+	bm.RunOptimize()
+	newV := make([]byte, int(bm.GetSerializedSizeInBytes()))
+	_, err = bm.WriteTo(bytes.NewBuffer(newV[:0]))
 	if err != nil {
 		return err
 	}
-
-	buf := bytes.NewBuffer(bufBytes[:0])
-	_, err = bm.WriteTo(buf)
-	if err != nil {
-		return err
-	}
-	return nil
+	return db.Put(bucket, k, newV)
 }
 
 // Get - gets bitmap from database
-func Get(db ethdb.Getter, bucket string, k []byte) (*roaring.Bitmap, error) {
-	bitmapBytes, err := db.Get(bucket, k)
+func (simple) Get(db ethdb.Getter, bucket string, k []byte) (*roaring.Bitmap, error) {
+	v, err := db.Get(bucket, k)
 	if err != nil {
 		return nil, err
 	}
-	m := roaring.New()
-	_, err = m.ReadFrom(bytes.NewReader(bitmapBytes))
-	return m, err
+	bm := roaring.New()
+	_, err = bm.ReadFrom(bytes.NewReader(v))
+	return bm, err
 }
 
 type noLeadingZeroes struct{}
