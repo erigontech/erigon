@@ -4,9 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	mrand "math/rand"
+	"math/rand"
 	"os"
 	"runtime/pprof"
+	"sort"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -146,7 +147,7 @@ Error: %v
 		seals[len(seals)-1] = true
 	}
 
-	if err := verifyHeaders(db, headers, engine, seals); err != nil {
+	if err := VerifyHeaders(db, headers, engine, seals); err != nil {
 		return false, 0, err
 	}
 
@@ -163,7 +164,7 @@ Error: %v
 		if lastHeader.Number.Uint64() < *headNumber {
 			newCanonical = true
 		} else if lastHeader.Number.Uint64() == *headNumber {
-			newCanonical = mrand.Float64() < 0.5
+			newCanonical = rand.Float64() < 0.5
 		}
 	}
 
@@ -252,26 +253,43 @@ Error: %v
 	return reorg, forkBlockNumber, nil
 }
 
-func verifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine consensus.EngineProcess, seals []bool) error {
+func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine consensus.EngineProcess, seals []bool) error {
 	if len(headers) == 0 {
 		return nil
 	}
 
+	idxs := make([]int, len(headers))
+	for i := range headers {
+		idxs[i] = i
+	}
+	sort.SliceStable(idxs, func(i, j int) bool {
+		return headers[idxs[i]].Number.Cmp(headers[idxs[j]].Number) == -1
+	})
+
 	requests := make(chan consensus.VerifyHeaderRequest, len(headers))
-	for i := 0; i < len(headers); i++ {
-		requests <- consensus.VerifyHeaderRequest{headers[i], seals[i]}
+	ids := make(map[uint64]struct{}, len(headers))
+	for _, n := range idxs {
+		id := rand.Uint64()
+		ids[id] = struct{}{}
+		requests <- consensus.VerifyHeaderRequest{id, headers[n], seals[n], nil}
 	}
 
+	var verified int
 	for {
 		select {
 		case req := <-requests:
 			engine.HeaderVerification() <- req
 		case result := <-engine.VerifyResults():
+			if _, ok := ids[result.ID]; !ok {
+				engine.VerifyResults() <- result
+			}
+			verified++
+
 			if result.Err != nil {
 				return result.Err
 			}
 
-			if len(requests) == 0 {
+			if verified == len(headers) {
 				return nil
 			}
 		case result := <-engine.HeaderRequest():
