@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"time"
 )
 
 // PutMergeByOr - puts bitmap with recent changes into database by merging it with existing bitmap. Merge by OR.
@@ -17,25 +17,30 @@ func PutMergeByOr(db ethdb.DbWithPendingMutations, bucket string, k []byte, delt
 	}
 
 	if len(v) > 0 { // if found record in db - then get 'min' from db's value, otherwise get it from incoming bitmap
+		t := time.Now()
 		existing := roaring.New()
-		//_, err = existing.FromBuffer(v)
-		_, err = existing.ReadFrom(bytes.NewReader(v))
+		_, err = existing.FromBuffer(v)
+		//_, err = existing.ReadFrom(bytes.NewReader(v))
 		if err != nil {
 			return err
 		}
 
 		delta.Or(existing)
-		fmt.Printf("1: %d\n", delta.GetSerializedSizeInBytes())
-		existing.Or(delta)
-		fmt.Printf("2: %d\n", existing.GetSerializedSizeInBytes())
+		fmt.Printf("21: %s\n", time.Since(t))
 	}
 
-	//delta.RunOptimize()
+	t := time.Now()
+	delta.RunOptimize()
+	fmt.Printf("22: %s\n", time.Since(t))
+	t = time.Now()
 	newV, err := db.Reserve(bucket, k, int(delta.GetSerializedSizeInBytes()))
 	if err != nil {
 		return err
 	}
+	fmt.Printf("23: %s\n", time.Since(t))
+	t = time.Now()
 	_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
+	fmt.Printf("24: %s\n", time.Since(t))
 	return err
 }
 
