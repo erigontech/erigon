@@ -1,6 +1,7 @@
 package bitmapdb_test
 
 import (
+	"context"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -13,24 +14,30 @@ func TestRoaringBitmapAddOffset(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
+	tx, err := db.Begin(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
+
 	{ // Simple encoding
 		k := []byte{1}
 		bm1 := roaring.NewBitmap()
 		bm1.Add(940287)
 		bm1.Add(940288)
-		err := bitmapdb.PutMergeByOr(db, dbutils.LogIndex, k, bm1)
+		err := bitmapdb.PutMergeByOr(c, k, bm1)
 		require.NoError(t, err)
 
 		bm2 := roaring.NewBitmap()
 		bm2.Add(1_000_000)
 		bm2.Add(1_000_001)
 		bm2.Add(1_000_002)
-		err = bitmapdb.PutMergeByOr(db, dbutils.LogIndex, k, bm2)
+		err = bitmapdb.PutMergeByOr(c, k, bm2)
 		require.NoError(t, err)
-		err = bitmapdb.RemoveRange(db, dbutils.LogIndex, k, 1_000_001, 1_000_003) // [from, to)
+		err = bitmapdb.RemoveRange(tx, dbutils.LogIndex, k, 1_000_001, 1_000_003) // [from, to)
 		require.NoError(t, err)
 
-		bm3, err := bitmapdb.Get(db, dbutils.LogIndex, k)
+		bm3, err := bitmapdb.Get(tx, dbutils.LogIndex, k)
 		require.NoError(t, err)
 		arr := bm3.ToArray()
 		require.Equal(t, 3, len(arr))
@@ -44,25 +51,30 @@ func TestRoaringBitmapAddOffset(t *testing.T) {
 func TestRemoveRange(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
+	tx, err := db.Begin(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 
 	{ // Simple encoding
 		k := []byte{1}
 		bm1 := roaring.NewBitmap()
 		bm1.Add(940287)
 		bm1.Add(940288)
-		err := bitmapdb.PutMergeByOr(db, dbutils.LogIndex, k, bm1)
+		err := bitmapdb.PutMergeByOr(c, k, bm1)
 		require.NoError(t, err)
 
 		bm2 := roaring.NewBitmap()
 		bm2.Add(1_000_000)
 		bm2.Add(1_000_001)
 		bm2.Add(1_000_002)
-		err = bitmapdb.PutMergeByOr(db, dbutils.LogIndex, k, bm2)
+		err = bitmapdb.PutMergeByOr(c, k, bm2)
 		require.NoError(t, err)
-		err = bitmapdb.RemoveRange(db, dbutils.LogIndex, k, 1_000_001, 1_000_002) // [from, to)
+		err = bitmapdb.RemoveRange(tx, dbutils.LogIndex, k, 1_000_001, 1_000_002) // [from, to)
 		require.NoError(t, err)
 
-		bm3, err := bitmapdb.Get(db, dbutils.LogIndex, k)
+		bm3, err := bitmapdb.Get(tx, dbutils.LogIndex, k)
 		require.NoError(t, err)
 		arr := bm3.ToArray()
 		require.Equal(t, 4, len(arr))
