@@ -1,6 +1,7 @@
 package clique
 
 import (
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
@@ -9,7 +10,7 @@ func (c *Clique) Verify(chain consensus.ChainHeaderReader, header *types.Header,
 	panic("not implemented")
 }
 
-func (c *Clique) NeededForVerification(header *types.Header) int {
+func (c *Clique) NeededForVerification(header *types.Header) []common.Hash {
 	panic("not implemented")
 }
 

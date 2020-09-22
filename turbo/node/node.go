@@ -1,3 +1,4 @@
+// Package node contains classes for running a turbo-geth node.
 package node
 
 import (
@@ -20,11 +21,14 @@ import (
 	gopsutil "github.com/shirou/gopsutil/mem"
 )
 
+// TurboGethNode represents a single node, that runs sync and p2p network.
+// it also can export the private endpoint for RPC daemon, etc.
 type TurboGethNode struct {
 	stack   *node.Node
 	backend *eth.Ethereum
 }
 
+// Serve runs the node and blocks the execution. It returns when the node is existed.
 func (tg *TurboGethNode) Serve() error {
 	defer tg.stack.Close()
 
@@ -42,19 +46,28 @@ func (tg *TurboGethNode) run() {
 	// see cmd/geth/main.go#startNode for full implementation
 }
 
+// Params contains optional parameters for creating a node.
+// * GitCommit is a commit from which then node was built.
+// * CustomBuckets is a `map[string]dbutils.BucketConfigItem`, that contains bucket name and its properties.
+//
+// NB: You have to declare your custom buckets here to be able to use them in the app.
 type Params struct {
 	GitCommit     string
 	CustomBuckets dbutils.BucketsCfg
 }
 
+// New creates a new `TurboGethNode`.
+// * ctx - `*cli.Context` from the main function. Necessary to be able to configure the node based on the command-line flags
+// * sync - `stagedsync.StagedSync`, an instance of staged sync, setup just as needed.
+// * optionalParams - additional parameters for running a node.
 func New(
 	ctx *cli.Context,
 	sync *stagedsync.StagedSync,
-	p Params,
+	optionalParams Params,
 ) *TurboGethNode {
-	prepareBuckets(p.CustomBuckets)
+	prepareBuckets(optionalParams.CustomBuckets)
 	prepare(ctx)
-	nodeConfig := makeNodeConfig(ctx, p)
+	nodeConfig := makeNodeConfig(ctx, optionalParams)
 	node := makeConfigNode(nodeConfig)
 	ethConfig := makeEthConfig(ctx, node)
 

@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/http"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
@@ -10,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/spf13/cobra"
-	"net/http"
 )
 
 type Flags struct {
@@ -18,6 +19,8 @@ type Flags struct {
 	Chaindata         string
 	HttpListenAddress string
 	TLSCertfile       string
+	TLSCACert         string
+	TLSKeyFile        string
 	HttpPort          int
 	HttpCORSDomain    []string
 	HttpVirtualHost   []string
@@ -50,6 +53,8 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
+	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
+	rootCmd.PersistentFlags().StringVar(&cfg.TLSCACert, "tls.cacert", "", "CA certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", node.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
@@ -65,16 +70,18 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 	var db ethdb.KV
 	var txPool ethdb.Backend
 	var err error
-	if cfg.PrivateApiAddr != "" {
-		db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile)
-		if err != nil {
-			return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
-		}
-	} else if cfg.Chaindata != "" {
+	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
+	// If PrivateApiAddr is checked first, the Chaindata option will never work
+	if cfg.Chaindata != "" {
 		if database, errOpen := ethdb.Open(cfg.Chaindata); errOpen == nil {
 			db = database.KV()
 		} else {
 			err = errOpen
+		}
+	} else if cfg.PrivateApiAddr != "" {
+		db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
 		}
 	} else {
 		return nil, nil, fmt.Errorf("either remote db or lmdb must be specified")

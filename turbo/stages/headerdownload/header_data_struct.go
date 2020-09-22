@@ -1,17 +1,16 @@
 package headerdownload
 
 import (
-	"bytes"
 	"container/heap"
 	"encoding/binary"
 	"fmt"
 	"math/big"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/petar/GoLLRB/llrb"
 )
 
 type Anchor struct {
@@ -34,15 +33,10 @@ type Tip struct {
 	noPrepend            bool
 }
 
-type TipItem struct {
-	tipHash              common.Hash
-	cumulativeDifficulty uint256.Int
-}
-
 // First item in ChainSegment is the anchor
 // ChainSegment must be contigous and must not include bad headers
 type ChainSegment struct {
-	headers []*types.Header
+	Headers []*types.Header
 }
 
 type PeerHandle int // This is int just for the PoC phase - will be replaced by more appropriate type to find a peer
@@ -67,13 +61,6 @@ type PeerPenalty struct {
 	err        error // Underlying error if available
 }
 
-type RequestQueueItem struct {
-	anchorParent common.Hash
-	waitUntil    uint64
-}
-
-type RequestQueue []RequestQueueItem
-
 // Request for chain segment starting with hash and going to its parent, etc, with length headers in total
 type HeaderRequest struct {
 	Hash   common.Hash
@@ -91,12 +78,12 @@ type HeaderDownload struct {
 	//currentFileWriter      io.Writer
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
-	tips                   map[common.Hash]*Tip
-	tipLimiter             *llrb.LLRB
-	tipLimit               int
-	initPowDepth           int    // powDepth assigned to the newly inserted anchor
-	newAnchorFutureLimit   uint64 // How far in the future (relative to current time) the new anchors are allowed to be
-	newAnchorPastLimit     uint64 // How far in the past (relative to current time) the new anchors are allowed to be
+	tips                   *lru.Cache
+	hardTips               map[common.Hash]*Tip // Hard-coded tips
+	tipQueue               *TipQueue            // Tips that are within the newAnchorPastLimit from current time
+	initPowDepth           int                  // powDepth assigned to the newly inserted anchor
+	newAnchorFutureLimit   uint64               // How far in the future (relative to current time) the new anchors are allowed to be
+	newAnchorPastLimit     uint64               // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
 	requestQueue           *RequestQueue
 	calcDifficultyFunc     CalcDifficultyFunc
@@ -104,14 +91,45 @@ type HeaderDownload struct {
 	RequestQueueTimer      *time.Timer
 }
 
-func (a *TipItem) Less(b llrb.Item) bool {
-	bi := b.(*TipItem)
-	if a.cumulativeDifficulty.Eq(&bi.cumulativeDifficulty) {
-		// hash is unique and it breaks the ties
-		return bytes.Compare(a.tipHash[:], bi.tipHash[:]) < 0
-	}
-	return a.cumulativeDifficulty.Lt(&bi.cumulativeDifficulty)
+type TipQueueItem struct {
+	tip     *Tip
+	tipHash common.Hash
 }
+
+type TipQueue []TipQueueItem
+
+func (tq TipQueue) Len() int {
+	return len(tq)
+}
+
+func (tq TipQueue) Less(i, j int) bool {
+	return tq[i].tip.timestamp < tq[j].tip.timestamp
+}
+
+func (tq TipQueue) Swap(i, j int) {
+	tq[i], tq[j] = tq[j], tq[i]
+}
+
+func (tq *TipQueue) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	*tq = append(*tq, x.(TipQueueItem))
+}
+
+func (tq *TipQueue) Pop() interface{} {
+	old := *tq
+	n := len(old)
+	x := old[n-1]
+	*tq = old[0 : n-1]
+	return x
+}
+
+type RequestQueueItem struct {
+	anchorParent common.Hash
+	waitUntil    uint64
+}
+
+type RequestQueue []RequestQueueItem
 
 func (rq RequestQueue) Len() int {
 	return len(rq)
@@ -149,17 +167,18 @@ func NewHeaderDownload(filesDir string,
 		filesDir:             filesDir,
 		badHeaders:           make(map[common.Hash]struct{}),
 		anchors:              make(map[common.Hash][]*Anchor),
-		tips:                 make(map[common.Hash]*Tip),
-		tipLimiter:           llrb.New(),
-		tipLimit:             tipLimit,
 		initPowDepth:         initPowDepth,
 		requestQueue:         &RequestQueue{},
+		tipQueue:             &TipQueue{},
 		calcDifficultyFunc:   calcDifficultyFunc,
 		verifySealFunc:       verifySealFunc,
 		newAnchorFutureLimit: newAnchorFutureLimit,
 		newAnchorPastLimit:   newAnchorPastLimit,
 	}
+	hd.tips, _ = lru.NewWithEvict(tipLimit, hd.tipEvicted)
+	hd.hardTips = make(map[common.Hash]*Tip)
 	heap.Init(hd.requestQueue)
+	heap.Init(hd.tipQueue)
 	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd
 }
@@ -192,8 +211,8 @@ func (pp PeerPenalty) String() string {
 }
 
 const HeaderPreBlockHeight = 32 /*ParentHash*/ + 32 /*UncleHash*/ + 20 /*Coinbase*/ + 32 /*Root*/ + 32 /*TxHash*/ + 32 /*ReceiptHash*/ +
-																256 /*Bloom*/ + 16 /*Difficulty */
-const HeaderPostBlockHeight = 8 /*Number*/ + 8 /*GasLimit*/ + 8 /*GasUsed*/ + 8 /*Time*/ + 1 /*len(Extra)*/ + 32 /*Extra*/ + 8 /*Nonce*/
+																			256 /*Bloom*/ + 16 /*Difficulty */
+const HeaderPostBlockHeight = 8 /*Number*/ + 8 /*GasLimit*/ + 8 /*GasUsed*/ + 8 /*Time*/ + 1 /*len(Extra)*/ + 32 /*Extra*/ + 32 /* MixDigest */ + 8 /*Nonce*/
 
 const HeaderSerLength = HeaderPreBlockHeight + HeaderPostBlockHeight
 
@@ -232,6 +251,8 @@ func SerialiseHeader(header *types.Header, buffer []byte) {
 	buffer[pos] = byte(len(header.Extra))
 	pos++
 	copy(buffer[pos:pos+32], header.Extra)
+	pos += 32
+	copy(buffer[pos:pos+32], header.MixDigest[:])
 	pos += 32
 	binary.BigEndian.PutUint64(buffer[pos:pos+8], header.Nonce.Uint64())
 }
@@ -272,6 +293,8 @@ func DeserialiseHeader(header *types.Header, buffer []byte) {
 	pos++
 	header.Extra = header.Extra[:0]
 	header.Extra = append(header.Extra, buffer[pos:pos+extraLen]...)
+	pos += 32
+	copy(header.MixDigest[:], buffer[pos:pos+32])
 	pos += 32
 	header.Nonce = types.EncodeNonce(binary.BigEndian.Uint64(buffer[pos : pos+8]))
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/urfave/cli"
 )
 
+// DefaultFlags contains all flags that are used and supported by turbo-geth binary.
 var DefaultFlags = []cli.Flag{
 	utils.DataDirFlag,
 	utils.KeyStoreDirFlag,
@@ -26,9 +27,10 @@ var DefaultFlags = []cli.Flag{
 	utils.HddFlag,
 	utils.DatabaseFlag,
 	utils.LMDBMapSizeFlag,
-	utils.NoTLSFlag,
+	utils.TLSFlag,
 	utils.TLSCertFlag,
 	utils.TLSKeyFlag,
+	utils.TLSCACertFlag,
 	utils.PrivateApiAddr,
 	utils.ListenPortFlag,
 	utils.NATFlag,

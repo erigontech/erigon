@@ -83,7 +83,7 @@ func (c *powEngine) Verify(chain consensus.ChainHeaderReader, header *types.Head
 	panic("not implemented")
 }
 
-func (c *powEngine) NeededForVerification(header *types.Header) int {
+func (c *powEngine) NeededForVerification(header *types.Header) []common.Hash {
 	panic("not implemented")
 }
 

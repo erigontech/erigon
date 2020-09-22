@@ -1,7 +1,7 @@
 package process
 
 import (
-	"time"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -26,29 +26,48 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 			case <-exit:
 				return
 			case req := <-c.VerifyHeaderRequests:
+				fmt.Println("<-c.VerifyHeaderRequests", req.Header.Number.String())
 				// fixme сделать как event loop - чтобы то, что можно, то обрабатывалось сразу, остальное откладывалось
 				// If we're running a full engine faking, accept any input as valid
 				if c.IsFake() {
+					fmt.Println("<-c.VerifyHeaderRequests fake 1")
 					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), nil}
+					fmt.Println("<-c.VerifyHeaderRequests fake 2")
 					continue
 				}
 
 				// Short circuit if the header is known
 				if _, ok := c.GetVerifiedBlocks(req.Header.Hash()); ok {
+					fmt.Println("<-c.VerifyHeaderRequests ok 1")
 					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), nil}
+					fmt.Println("<-c.VerifyHeaderRequests ok 2")
 					continue
 				}
 
-				parent, exit := c.waitParentHeaders(req)
+				parents, exit := c.requestParentHeaders(req)
 				if exit {
+					// fixme добавить задержку? добавить id запросов?
+					fmt.Println("<-c.VerifyHeaderRequests rerequest 1")
+					c.VerifyHeaderRequests <- req
+					fmt.Println("<-c.VerifyHeaderRequests rerequest 2")
 					continue
 				}
 
-				err := c.Verify(c.Process.Chain, req.Header, parent, false, req.Seal)
+				err := c.Verify(c.Process.Chain, req.Header, parents, false, req.Seal)
+				fmt.Println("<-c.VerifyHeaderRequests GOT IT 1")
 				c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.Header.Hash(), err}
+				fmt.Println("<-c.VerifyHeaderRequests GOT IT 2", err)
 				if err == nil {
 					c.AddVerifiedBlocks(req.Header, req.Header.Hash())
 				}
+				fmt.Println("<-c.VerifyHeaderRequests DONE")
+			case parentResp := <-c.HeaderResponses:
+				fmt.Println("<-c.HeaderResponses 1")
+				if parentResp.Header != nil {
+					fmt.Println("<-c.HeaderResponses 2")
+					c.AddVerifiedBlocks(parentResp.Header, parentResp.Header.Hash())
+				}
+				fmt.Println("<-c.HeaderResponses DONE")
 			}
 		}
 	}()
@@ -60,13 +79,13 @@ func (c *Consensus) HeaderVerification() chan<- consensus.VerifyHeaderRequest {
 	return c.VerifyHeaderRequests
 }
 
-func (c *Consensus) waitParentHeaders(req consensus.VerifyHeaderRequest) ([]*types.Header, bool) {
+func (c *Consensus) requestParentHeaders(req consensus.VerifyHeaderRequest) ([]*types.Header, bool) {
 	parentsToGet := c.NeededForVerification(req.Header)
-	parents := make([]*types.Header, 0, parentsToGet)
+	parents := make([]*types.Header, 0, len(parentsToGet))
 	header := req.Header
 
-	for i := 0; i < parentsToGet; i++ {
-		parent, exit := c.waitHeader(header.Hash(), header.ParentHash)
+	for _, hash := range parentsToGet {
+		parent, exit := c.requestHeader(header.Hash(), hash)
 		if exit {
 			return nil, true
 		}
@@ -78,7 +97,7 @@ func (c *Consensus) waitParentHeaders(req consensus.VerifyHeaderRequest) ([]*typ
 	return parents, false
 }
 
-func (c *Consensus) waitHeader(blockHash, parentHash common.Hash) (*types.Header, bool) {
+func (c *Consensus) requestHeader(blockHash, parentHash common.Hash) (*types.Header, bool) {
 	parent, ok := c.GetVerifiedBlocks(parentHash)
 	if ok && parent == nil {
 		c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
@@ -86,47 +105,9 @@ func (c *Consensus) waitHeader(blockHash, parentHash common.Hash) (*types.Header
 	}
 
 	if !ok {
+		// fixme - надо проверять, что мы уже запросили и ждём
 		c.HeadersRequests <- consensus.HeadersRequest{parentHash}
-		ticker := time.NewTicker(time.Millisecond)
-		defer ticker.Stop()
-
-	loop:
-		for {
-			select {
-			case parentResp := <-c.HeaderResponses:
-				if parentResp.Header != nil {
-					c.AddVerifiedBlocks(parentResp.Header, parentResp.Header.Hash())
-				}
-
-				parent, ok = c.GetVerifiedBlocks(parentHash)
-				if ok && parent == nil {
-					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
-					return nil, true
-				} else if ok {
-					break loop
-				}
-
-				if parentResp.Hash == blockHash {
-					if parentResp.Header == nil {
-						c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
-						return nil, true
-					}
-
-					parent = parentResp.Header
-					break loop
-				}
-			case <-ticker.C:
-				parent, ok = c.GetVerifiedBlocks(parentHash)
-				if !ok {
-					continue
-				}
-				if parent == nil {
-					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{blockHash, consensus.ErrUnknownAncestor}
-					return nil, true
-				}
-				break loop
-			}
-		}
+		return nil, true
 	}
 	return parent, false
 }
