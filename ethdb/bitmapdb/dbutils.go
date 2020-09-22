@@ -32,17 +32,21 @@ func PutMergeByOr(db ethdb.DbWithPendingMutations, bucket string, k []byte, delt
 
 	t := time.Now()
 	delta.RunOptimize()
+	newV := make([]byte, int(delta.GetSerializedSizeInBytes()))
 	fmt.Printf("22: %s\n", time.Since(t))
 	t = time.Now()
-	newV, err := db.Reserve(bucket, k, int(delta.GetSerializedSizeInBytes()))
+	_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
 	if err != nil {
 		return err
 	}
 	fmt.Printf("23: %s\n", time.Since(t))
 	t = time.Now()
-	_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
+	err = db.Put(bucket, k, newV)
+	if err != nil {
+		return err
+	}
 	fmt.Printf("24: %s\n", time.Since(t))
-	return err
+	return nil
 }
 
 // RemoveRange - gets existing bitmap in db and call RemoveRange operator on it.
