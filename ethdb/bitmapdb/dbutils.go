@@ -31,7 +31,7 @@ func PutMergeByOr(db ethdb.MinDatabase, bucket string, k []byte, delta *roaring.
 		toPut = delta
 	}
 
-	toPut.RunOptimize()
+	//toPut.RunOptimize()
 	newV := make([]byte, int(toPut.GetSerializedSizeInBytes()))
 	_, err = toPut.WriteTo(bytes.NewBuffer(newV[:0]))
 	if err != nil {
@@ -63,7 +63,7 @@ func RemoveRange(db ethdb.MinDatabase, bucket string, k []byte, from, to uint64)
 		return db.Delete(bucket, k)
 	}
 
-	bm.RunOptimize()
+	//bm.RunOptimize()
 	newV := make([]byte, int(bm.GetSerializedSizeInBytes()))
 	_, err = bm.WriteTo(bytes.NewBuffer(newV[:0]))
 	if err != nil {
