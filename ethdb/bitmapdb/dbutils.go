@@ -50,8 +50,8 @@ func RemoveRange(db ethdb.DbWithPendingMutations, bucket string, k []byte, from,
 	}
 
 	bm := roaring.New()
-	_, err = bm.ReadFrom(bytes.NewReader(v))
-	//_, err = bm.FromBuffer(v)
+	//_, err = bm.ReadFrom(bytes.NewReader(v))
+	_, err = bm.FromBuffer(v)
 	if err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func RemoveRange(db ethdb.DbWithPendingMutations, bucket string, k []byte, from,
 		return db.Delete(bucket, k)
 	}
 
-	//bm.RunOptimize()
+	bm.RunOptimize()
 	newV, err := db.Reserve(bucket, k, int(bm.GetSerializedSizeInBytes()))
 	if err != nil {
 		return err
