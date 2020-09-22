@@ -103,15 +103,3 @@ Date:   Wed Sep 23 05:22:54 2020 +0800
 
     cmd/clef, cmd/geth: use SplitAndTrim from cmd/utils (#21579)
 
-commit 129cf075e963df10f42da81d817a4c12f7d4bf16
-Author: rene <41963722+renaynay@users.noreply.github.com>
-Date:   Tue Sep 22 10:17:39 2020 +0200
-
-    p2p: move rlpx into separate package (#21464)
-    
-    This change moves the RLPx protocol implementation into a separate package,
-    p2p/rlpx. The new package can be used to establish RLPx connections for
-    protocol testing purposes.
-    
-    Co-authored-by: Felix Lange <fjl@twurst.com>
-
