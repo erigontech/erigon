@@ -92,11 +92,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	logIndexFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer logIndexFlushEvery.Stop()
 	logIndices := map[string]*roaring.Bitmap{}
-	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 	logIndicesFlush := func() error {
 		t := time.Now()
 		for kStr, b := range logIndices {
-			if err := bitmapdb.PutMergeByOr(logIndexCursor, []byte(kStr), b); err != nil {
+			if err := bitmapdb.PutMergeByOr(tx, dbutils.LogIndex, []byte(kStr), b); err != nil {
 				return err
 			}
 		}
@@ -203,7 +202,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				if err = tx.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
-				logIndexCursor = tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 			}
 			warmup = hdd && (to-blockNum) > 30000
 		}
