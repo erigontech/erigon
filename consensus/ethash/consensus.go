@@ -621,7 +621,7 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 // AccumulateRewards returns rewards for a given block. The mining reward consists
 // of the static blockReward plus a reward for each included uncle (if any). Individual
 // uncle rewards are also returned in an array.
-func AccumulateRewards(config *params.ChainConfig, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) (uint256.Int, []uint256.Int) {
+func AccumulateRewards(config *params.ChainConfig, header *types.Header, uncles []*types.Header) (uint256.Int, []uint256.Int) {
 	// Select the correct block reward based on chain progression
 	blockReward := FrontierBlockReward
 	if config.IsByzantium(header.Number) {
@@ -651,7 +651,7 @@ func AccumulateRewards(config *params.ChainConfig, state *state.IntraBlockState,
 
 // accumulateRewards retreives rewards for a block and applies them to the coinbase accounts for miner and uncle miners
 func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) {
-	minerReward, uncleRewards := AccumulateRewards(config, state, header, uncles)
+	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	for i, uncle := range uncles {
 		if i < len(uncleRewards) {
 			state.AddBalance(uncle.Coinbase, &uncleRewards[i])
