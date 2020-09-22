@@ -600,8 +600,6 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 					if parentHash != (common.Hash{}) {
 						heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime})
 					}
-				} else {
-					fmt.Printf("Adding anchor when the list is not empty: %d\n", he.header.Number.Uint64())
 				}
 				hd.anchors[parentHash] = append(hd.anchors[parentHash], anchor)
 				heap.Push(hd.anchorQueue, anchor)
@@ -613,6 +611,8 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 				childDiffs[hash] = &anchor.totalDifficulty
 			}
 			prevHash = hash
+		} else {
+			fmt.Printf("Duplicate header: %d %x\n", he.header.Number.Uint64(), hash)
 		}
 		var header types.Header
 		if _, err = io.ReadFull(he.reader, buffer[:]); err == nil {
