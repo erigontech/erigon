@@ -3,7 +3,6 @@ package bitmapdb
 import (
 	"bytes"
 	"errors"
-
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -25,7 +24,7 @@ func PutMergeByOr(db ethdb.DbWithPendingMutations, bucket string, k []byte, delt
 		delta.Or(existing)
 	}
 
-	delta.RunOptimize()
+	//delta.RunOptimize()
 	newV, err := db.Reserve(bucket, k, int(delta.GetSerializedSizeInBytes()))
 	if err != nil {
 		return err
@@ -57,7 +56,7 @@ func RemoveRange(db ethdb.DbWithPendingMutations, bucket string, k []byte, from,
 		return db.Delete(bucket, k)
 	}
 
-	bm.RunOptimize()
+	//bm.RunOptimize()
 	newV, err := db.Reserve(bucket, k, int(bm.GetSerializedSizeInBytes()))
 	if err != nil {
 		return err

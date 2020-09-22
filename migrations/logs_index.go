@@ -27,7 +27,7 @@ var logIndex = Migration{
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
-		const memLimit = uint64(4 * datasize.MB)
+		const memLimit = uint64(1 * datasize.GB)
 
 		bitmaps := map[string]*roaring.Bitmap{}
 		if err := tx.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
