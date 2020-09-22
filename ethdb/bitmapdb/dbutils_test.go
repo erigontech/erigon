@@ -2,6 +2,7 @@ package bitmapdb_test
 
 import (
 	"context"
+	"fmt"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -40,6 +41,10 @@ func TestRoaringBitmapAddOffset(t *testing.T) {
 		bm3, err := bitmapdb.Get(tx, dbutils.LogIndex, k)
 		require.NoError(t, err)
 		arr := bm3.ToArray()
+		bm3.Iterate(func(x uint32) bool {
+			fmt.Printf("%d\n", x)
+			return true
+		})
 		require.Equal(t, 3, len(arr))
 		require.Equal(t, uint32(940287), arr[0])
 		require.Equal(t, uint32(940288), arr[1])
