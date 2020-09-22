@@ -111,7 +111,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				return err
 			}
 		}
-		fmt.Printf("13: %s\n", time.Since(t))
+		fmt.Printf("13: %s %d\n", time.Since(t), len(keys))
 
 		logIndices = map[string]*roaring.Bitmap{}
 		return nil

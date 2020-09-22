@@ -25,7 +25,8 @@ func PutMergeByOr(db ethdb.DbWithPendingMutations, bucket string, k []byte, delt
 			return err
 		}
 
-		delta.Or(existing)
+		existing.Or(delta)
+		delta = existing
 		fmt.Printf("21: %s\n", time.Since(t))
 	}
 
