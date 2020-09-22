@@ -115,15 +115,3 @@ Date:   Tue Sep 22 10:17:39 2020 +0200
     
     Co-authored-by: Felix Lange <fjl@twurst.com>
 
-commit 2c097bb7a2f6e048dd9a0c4f6d74c10c07ec12df
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Mon Sep 21 16:33:35 2020 +0200
-
-    mobile: better api for java users (#21580)
-    
-    * (mobile): Adds string representations for types
-    
-    * mobile: better interfaces add stringer to types
-    
-    Co-authored-by: sarath <sarath@melvault.com>
-
