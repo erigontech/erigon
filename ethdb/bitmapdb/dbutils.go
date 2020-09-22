@@ -11,13 +11,13 @@ import (
 
 // PutMergeByOr - puts bitmap with recent changes into database by merging it with existing bitmap. Merge by OR.
 func PutMergeByOr(db ethdb.DbWithPendingMutations, bucket string, k []byte, delta *roaring.Bitmap) error {
+	defer func(t time.Time) { fmt.Printf("dbutils.go:14: %s\n", time.Since(t)) }(time.Now())
 	v, err := db.Get(bucket, k)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return err
 	}
 
 	if len(v) > 0 { // if found record in db - then get 'min' from db's value, otherwise get it from incoming bitmap
-		t := time.Now()
 		existing := roaring.New()
 		_, err = existing.FromBuffer(v)
 		//_, err = existing.ReadFrom(bytes.NewReader(v))
@@ -27,26 +27,15 @@ func PutMergeByOr(db ethdb.DbWithPendingMutations, bucket string, k []byte, delt
 
 		existing.Or(delta)
 		delta = existing
-		fmt.Printf("21: %s\n", time.Since(t))
 	}
 
-	t := time.Now()
 	delta.RunOptimize()
-	newV := make([]byte, int(delta.GetSerializedSizeInBytes()))
-	fmt.Printf("22: %s\n", time.Since(t))
-	t = time.Now()
+	newV, err := db.Reserve(bucket, k, int(delta.GetSerializedSizeInBytes()))
+	if err != nil {
+		return err
+	}
 	_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
-	if err != nil {
-		return err
-	}
-	fmt.Printf("23: %s\n", time.Since(t))
-	t = time.Now()
-	err = db.Put(bucket, k, newV)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("24: %s\n", time.Since(t))
-	return nil
+	return err
 }
 
 // RemoveRange - gets existing bitmap in db and call RemoveRange operator on it.
