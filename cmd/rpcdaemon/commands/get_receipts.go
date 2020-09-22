@@ -144,7 +144,11 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return nil, err
 	}
 	if topicsBitmap != nil {
-		blockNumbers.And(topicsBitmap)
+		if blockNumbers == nil {
+			blockNumbers = topicsBitmap
+		} else {
+			blockNumbers.And(topicsBitmap)
+		}
 	}
 
 	var addrBitmap *roaring.Bitmap
