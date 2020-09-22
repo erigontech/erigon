@@ -398,6 +398,9 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty 
 
 // AddSegmentToBuffer adds another segment to the buffer and return true if the buffer is now full
 func (hd *HeaderDownload) AddSegmentToBuffer(segment *ChainSegment, start, end int) {
+	if end > start {
+		fmt.Printf("Adding segment [%d-%d] to the buffer\n", segment.Headers[end-1].Number.Uint64(), segment.Headers[start].Number.Uint64())
+	}
 	var serBuffer [HeaderSerLength]byte
 	for _, header := range segment.Headers[start:end] {
 		SerialiseHeader(header, serBuffer[:])
@@ -406,6 +409,7 @@ func (hd *HeaderDownload) AddSegmentToBuffer(segment *ChainSegment, start, end i
 }
 
 func (hd *HeaderDownload) AddHeaderToBuffer(header *types.Header) {
+	fmt.Printf("Adding header %d to the buffer\n", header.Number.Uint64())
 	var serBuffer [HeaderSerLength]byte
 	SerialiseHeader(header, serBuffer[:])
 	hd.buffer = append(hd.buffer, serBuffer[:]...)
@@ -553,6 +557,9 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 	var prevHash common.Hash // Hash of previously seen header - to filter out potential duplicates
 	for h.Len() > 0 {
 		he := (heap.Pop(h)).(HeapElem)
+		if he.blockHeight == 10911575 {
+			//fmt.Printf("Header %d in file %d\n", he.blockHeight, he.file.Name())
+		}
 		hash := he.header.Hash()
 		if hash != prevHash {
 			if he.blockHeight > prevHeight {
