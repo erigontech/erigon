@@ -18,7 +18,7 @@ import (
 )
 
 var logIndex = Migration{
-	Name: "receipt_logs_index",
+	Name: "receipt_logs_index2",
 	Up: func(tx ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 		if err := tx.(ethdb.BucketsMigrator).ClearBuckets(dbutils.LogIndex); err != nil {
 			return err
