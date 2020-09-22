@@ -2,6 +2,7 @@ package headerdownload
 
 import (
 	"bufio"
+	"bytes"
 	"container/heap"
 	"encoding/binary"
 	"errors"
@@ -395,7 +396,7 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty 
 	return nil
 }
 
-// AddToBuffer adds another segment to the buffer and return true if the buffer is now full
+// AddSegmentToBuffer adds another segment to the buffer and return true if the buffer is now full
 func (hd *HeaderDownload) AddSegmentToBuffer(segment *ChainSegment, start, end int) {
 	var serBuffer [HeaderSerLength]byte
 	for _, header := range segment.Headers[start:end] {
@@ -436,6 +437,7 @@ type HeapElem struct {
 	file        *os.File
 	reader      io.Reader
 	blockHeight uint64
+	hash        common.Hash
 	header      *types.Header
 }
 
@@ -446,6 +448,9 @@ func (h Heap) Len() int {
 }
 
 func (h Heap) Less(i, j int) bool {
+	if h[i].blockHeight == h[j].blockHeight {
+		return bytes.Compare(h[i].hash[:], h[j].hash[:]) < 0
+	}
 	return h[i].blockHeight < h[j].blockHeight
 }
 
@@ -537,7 +542,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			continue
 		}
 		DeserialiseHeader(&header, buffer[:])
-		he := HeapElem{file: f, reader: r, blockHeight: header.Number.Uint64(), header: &header}
+		he := HeapElem{file: f, reader: r, blockHeight: header.Number.Uint64(), hash: header.Hash(), header: &header}
 		heap.Push(h, he)
 	}
 	var prevHeight uint64
@@ -545,68 +550,75 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 	var parentDiffs = make(map[common.Hash]*uint256.Int)
 	var childAnchors = make(map[common.Hash]*Anchor)
 	var childDiffs = make(map[common.Hash]*uint256.Int)
+	var prevHash common.Hash // Hash of previously seen header - to filter out potential duplicates
 	for h.Len() > 0 {
 		he := (heap.Pop(h)).(HeapElem)
-		if he.blockHeight > prevHeight {
-			// Clear out parent map and move childMap to its place
-			parentAnchors = childAnchors
-			parentDiffs = childDiffs
-			childAnchors = make(map[common.Hash]*Anchor)
-			childDiffs = make(map[common.Hash]*uint256.Int)
-			if he.blockHeight != prevHeight+1 {
-				// Skipping the level, so no connection between grand-parents and grand-children
-				parentAnchors = make(map[common.Hash]*Anchor)
-				parentDiffs = make(map[common.Hash]*uint256.Int)
-			}
-			prevHeight = he.blockHeight
-		}
-		// Since this header has already been processed, we do not expect overflow
-		headerDiff, overflow := uint256.FromBig(he.header.Difficulty)
-		if overflow {
-			return false, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", he.header.Difficulty)
-		}
-		parentHash := he.header.ParentHash
 		hash := he.header.Hash()
-		if parentAnchor, found := parentAnchors[parentHash]; found {
-			parentDiff := parentDiffs[parentHash]
-			cumulativeDiff := headerDiff.Add(headerDiff, parentDiff)
-			if err = hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff, currentTime); err != nil {
-				return false, fmt.Errorf("add header as tip: %v", err)
+		if hash != prevHash {
+			if he.blockHeight > prevHeight {
+				// Clear out parent map and move childMap to its place
+				parentAnchors = childAnchors
+				parentDiffs = childDiffs
+				childAnchors = make(map[common.Hash]*Anchor)
+				childDiffs = make(map[common.Hash]*uint256.Int)
+				if he.blockHeight != prevHeight+1 {
+					// Skipping the level, so no connection between grand-parents and grand-children
+					parentAnchors = make(map[common.Hash]*Anchor)
+					parentDiffs = make(map[common.Hash]*uint256.Int)
+				}
+				prevHeight = he.blockHeight
 			}
-			childAnchors[hash] = parentAnchor
-			childDiffs[hash] = cumulativeDiff
-		} else {
-			anchor, ok := lastAnchors[hash]
-			if !ok {
-				anchor := &Anchor{powDepth: hd.initPowDepth, hash: hash, tipQueue: &AnchorTipQueue{}}
-				heap.Init(anchor.tipQueue)
-				fmt.Printf("Undeclared anchor for hash %x, inserting as empty\n", anchor)
-			}
-			diff, overflow := uint256.FromBig(he.header.Difficulty)
+			// Since this header has already been processed, we do not expect overflow
+			headerDiff, overflow := uint256.FromBig(he.header.Difficulty)
 			if overflow {
 				return false, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", he.header.Difficulty)
 			}
-			anchor.difficulty = *diff
-			anchor.timestamp = he.header.Time
-			anchor.blockHeight = he.header.Number.Uint64()
-			if len(hd.anchors[parentHash]) == 0 {
-				if parentHash != (common.Hash{}) {
-					heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime})
+			parentHash := he.header.ParentHash
+			if parentAnchor, found := parentAnchors[parentHash]; found {
+				parentDiff := parentDiffs[parentHash]
+				cumulativeDiff := headerDiff.Add(headerDiff, parentDiff)
+				if err = hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff, currentTime); err != nil {
+					return false, fmt.Errorf("add header as tip: %v", err)
 				}
+				childAnchors[hash] = parentAnchor
+				childDiffs[hash] = cumulativeDiff
+			} else {
+				anchor, ok := lastAnchors[hash]
+				if !ok {
+					anchor := &Anchor{powDepth: hd.initPowDepth, hash: hash, tipQueue: &AnchorTipQueue{}}
+					heap.Init(anchor.tipQueue)
+					fmt.Printf("Undeclared anchor for hash %x, inserting as empty\n", anchor)
+				}
+				diff, overflow := uint256.FromBig(he.header.Difficulty)
+				if overflow {
+					return false, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", he.header.Difficulty)
+				}
+				anchor.difficulty = *diff
+				anchor.timestamp = he.header.Time
+				anchor.blockHeight = he.header.Number.Uint64()
+				if len(hd.anchors[parentHash]) == 0 {
+					if parentHash != (common.Hash{}) {
+						heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime})
+					}
+				} else {
+					fmt.Printf("Adding anchor when the list is not empty: %d\n", he.header.Number.Uint64())
+				}
+				hd.anchors[parentHash] = append(hd.anchors[parentHash], anchor)
+				heap.Push(hd.anchorQueue, anchor)
+				cumulativeDiff := headerDiff.Add(headerDiff, &anchor.totalDifficulty)
+				if err = hd.addHeaderAsTip(he.header, anchor, *cumulativeDiff, currentTime); err != nil {
+					return false, fmt.Errorf("add header as tip: %v", err)
+				}
+				childAnchors[hash] = anchor
+				childDiffs[hash] = &anchor.totalDifficulty
 			}
-			hd.anchors[parentHash] = append(hd.anchors[parentHash], anchor)
-			heap.Push(hd.anchorQueue, anchor)
-			cumulativeDiff := headerDiff.Add(headerDiff, &anchor.totalDifficulty)
-			if err = hd.addHeaderAsTip(he.header, anchor, *cumulativeDiff, currentTime); err != nil {
-				return false, fmt.Errorf("add header as tip: %v", err)
-			}
-			childAnchors[hash] = anchor
-			childDiffs[hash] = &anchor.totalDifficulty
+			prevHash = hash
 		}
 		var header types.Header
 		if _, err = io.ReadFull(he.reader, buffer[:]); err == nil {
 			DeserialiseHeader(&header, buffer[:])
 			he.blockHeight = header.Number.Uint64()
+			he.hash = header.Hash()
 			he.header = &header
 			heap.Push(h, he)
 		} else {
