@@ -142,7 +142,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	for _, sub := range crit.Topics {
 		var bitmapForORing *roaring.Bitmap
 		for _, topic := range sub {
-			m, err := bitmapdb.Simple.Get(tx, dbutils.LogIndex, topic[:])
+			m, err := bitmapdb.Get(tx, dbutils.LogIndex, topic[:])
 			if err != nil {
 				return nil, err
 			}
@@ -164,7 +164,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 	var addrBitmap *roaring.Bitmap
 	for _, addr := range crit.Addresses {
-		m, err := bitmapdb.Simple.Get(tx, dbutils.LogIndex, addr[:])
+		m, err := bitmapdb.Get(tx, dbutils.LogIndex, addr[:])
 		if err != nil {
 			return nil, err
 		}
