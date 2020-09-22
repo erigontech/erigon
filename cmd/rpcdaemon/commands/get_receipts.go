@@ -136,30 +136,15 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 	}
 
-	bitmapForANDing := roaring.New()
-	bitmapForANDing.AddRange(uint64(begin), uint64(end))
+	blockNumbers := roaring.New()
+	blockNumbers.AddRange(uint64(begin), uint64(end))
 
-	for _, sub := range crit.Topics {
-		var bitmapForORing *roaring.Bitmap
-		for _, topic := range sub {
-			m, err := bitmapdb.Get(tx, dbutils.LogIndex, topic[:])
-			if err != nil {
-				return nil, err
-			}
-			if bitmapForORing == nil {
-				bitmapForORing = m
-			} else {
-				bitmapForORing.Or(m)
-			}
-		}
-
-		if bitmapForORing != nil {
-			if bitmapForANDing == nil {
-				bitmapForANDing = bitmapForORing
-			} else {
-				bitmapForANDing.And(bitmapForORing)
-			}
-		}
+	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics)
+	if err != nil {
+		return nil, err
+	}
+	if topicsBitmap != nil {
+		blockNumbers.And(topicsBitmap)
 	}
 
 	var addrBitmap *roaring.Bitmap
@@ -176,10 +161,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	}
 
 	if addrBitmap != nil {
-		if bitmapForANDing == nil {
-			bitmapForANDing = addrBitmap
+		if blockNumbers == nil {
+			blockNumbers = addrBitmap
 		} else {
-			bitmapForANDing.And(addrBitmap)
+			blockNumbers.And(addrBitmap)
 		}
 	}
 
@@ -189,7 +174,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
 
-	blockNums := bitmapForANDing.Iterator()
+	blockNums := blockNumbers.Iterator()
 	for blockNums.HasNext() {
 		blockNToMatch = blockNums.Next()
 		binary.BigEndian.PutUint32(blockNToMatchBytes, blockNToMatch)
@@ -213,6 +198,44 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	}
 
 	return returnLogs(logs), nil
+}
+
+// The Topic list restricts matches to particular event topics. Each event has a list
+// of topics. Topics matches a prefix of that list. An empty element slice matches any
+// topic. Non-empty elements represent an alternative that matches any of the
+// contained topics.
+//
+// Examples:
+// {} or nil          matches any topic list
+// {{A}}              matches topic A in first position
+// {{}, {B}}          matches any topic in first position AND B in second position
+// {{A}, {B}}         matches topic A in first position AND B in second position
+// {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
+func getTopicsBitmap(tx ethdb.Getter, topics [][]common.Hash) (*roaring.Bitmap, error) {
+	var result *roaring.Bitmap
+	for _, sub := range topics {
+		var bitmapForORing *roaring.Bitmap
+		for _, topic := range sub {
+			m, err := bitmapdb.Get(tx, dbutils.LogIndex, topic[:])
+			if err != nil {
+				return nil, err
+			}
+			if bitmapForORing == nil {
+				bitmapForORing = m
+			} else {
+				bitmapForORing.Or(m)
+			}
+		}
+
+		if bitmapForORing != nil {
+			if result == nil {
+				result = bitmapForORing
+			} else {
+				result.And(bitmapForORing)
+			}
+		}
+	}
+	return result, nil
 }
 
 // NewRangeFilter creates a new filter which uses a bloom filter on blocks to
