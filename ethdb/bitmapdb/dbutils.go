@@ -10,10 +10,10 @@ import (
 )
 
 // PutMergeByOr - puts bitmap with recent changes into database by merging it with existing bitmap. Merge by OR.
-func PutMergeByOr(db ethdb.DbWithPendingMutations, bucket string, k []byte, delta *roaring.Bitmap) error {
+func PutMergeByOr(c ethdb.Cursor, k []byte, delta *roaring.Bitmap) error {
 	defer func(t time.Time) { fmt.Printf("dbutils.go:14: %s\n", time.Since(t)) }(time.Now())
-	v, err := db.Get(bucket, k)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	v, err := c.SeekExact(k)
+	if err != nil {
 		return err
 	}
 
@@ -24,13 +24,13 @@ func PutMergeByOr(db ethdb.DbWithPendingMutations, bucket string, k []byte, delt
 		if err != nil {
 			return err
 		}
-
-		existing.Or(delta)
-		delta = existing
+		delta.Or(existing)
+		//existing.Or(delta)
+		//delta = existing
 	}
 
 	delta.RunOptimize()
-	newV, err := db.Reserve(bucket, k, int(delta.GetSerializedSizeInBytes()))
+	newV, err := c.Reserve(k, int(delta.GetSerializedSizeInBytes()))
 	if err != nil {
 		return err
 	}
