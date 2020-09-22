@@ -3,13 +3,15 @@ package bitmapdb
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"time"
 )
 
 // PutMergeByOr - puts bitmap with recent changes into database by merging it with existing bitmap. Merge by OR.
 func PutMergeByOr(db ethdb.MinDatabase, bucket string, k []byte, delta *roaring.Bitmap) error {
-	//defer func(t time.Time) { fmt.Printf("dbutils.go:14: %s\n", time.Since(t)) }(time.Now())
+	defer func(t time.Time) { fmt.Printf("dbutils.go:14: %s\n", time.Since(t)) }(time.Now())
 	v, err := db.Get(bucket, k)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return err
