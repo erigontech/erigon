@@ -137,8 +137,7 @@ func (cli *Client) Run(db ethdb.Database) error  {
 	}
 
 	for i:=range cli.cli.Torrents() {
-		t:=cli.cli.Torrents()[i]
-		go func() {
+		go func(t *torrent.Torrent) {
 			t.AllowDataDownload()
 			t.DownloadAll()
 
@@ -156,9 +155,13 @@ func (cli *Client) Run(db ethdb.Database) error  {
 				}
 
 			}
-		}()
+		}(cli.cli.Torrents()[i])
 	}
 	cli.cli.WaitAll()
+
+	for _,t:=range cli.cli.Torrents() {
+		log.Info("Snapshot seeding", "name", t.Name(), "seeding", t.Seeding())
+	}
 
 	return nil
 }

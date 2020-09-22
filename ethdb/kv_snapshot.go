@@ -19,23 +19,23 @@ var (
 )
 
 func (s *snapshotTX) CursorDupSort(bucket string) CursorDupSort {
-	panic("implement me")
+	return s.dbTX.CursorDupSort(bucket)
 }
 
 func (s *snapshotTX) CursorDupFixed(bucket string) CursorDupFixed {
-	panic("implement me")
+	return s.dbTX.CursorDupFixed(bucket)
 }
 
 func (s *snapshotTX) Comparator(bucket string) dbutils.CmpFunc {
-	panic("implement me")
+	return s.dbTX.Comparator(bucket)
 }
 
 func (s *snapshotTX) Cmp(bucket string, a, b []byte) int {
-	panic("implement me")
+	return s.dbTX.Cmp(bucket,a,b)
 }
 
 func (s *snapshotTX) DCmp(bucket string, a, b []byte) int {
-	panic("implement me")
+	return s.dbTX.DCmp(bucket,a,b)
 }
 
 func (v *lazyTx) CursorDupSort(bucket string) CursorDupSort {
@@ -59,19 +59,19 @@ func (v *lazyTx) DCmp(bucket string, a, b []byte) int {
 }
 
 func (s *snapshotCursor) Prev() ([]byte, []byte, error) {
-	panic("implement me")
+	return s.dbCursor.Prev()
 }
 
 func (s *snapshotCursor) Current() ([]byte, []byte, error) {
-	panic("implement me")
+	return s.dbCursor.Current()
 }
 
 func (s *snapshotCursor) DeleteCurrent() error {
-	panic("implement me")
+	return s.dbCursor.DeleteCurrent()
 }
 
 func (s *snapshotCursor) Count() (uint64, error) {
-	panic("implement me")
+	return s.dbCursor.Count()
 }
 
 func (s *SnapshotKV) AllBuckets() dbutils.BucketsCfg {

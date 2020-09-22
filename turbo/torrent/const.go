@@ -12,8 +12,8 @@ const (
 	ReceiptsSnapshotName = "receipts"
 
 
-	HeadersSnapshotHash = "75bf7abe891bbbfda2ecfa341eaef0010c524994" //10kk block 1mb chunk
-	BlocksSnapshotHash = "370caf08e1a10f7977cba7804d34512e92db63d0" //11kk block 1mb chunk
+	HeadersSnapshotHash = "15b33f22237a7dbebe74335481e796614cc91303" //10700k block 1mb chunk
+	BlocksSnapshotHash = "326de018d30a3b4b63ae90f2280a40522afb605d" //10700k block 1mb chunk
 	StateSnapshotHash = ""
 	ReceiptsSnapshotHash = ""
 

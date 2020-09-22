@@ -155,6 +155,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	var torrentClient *torrent.Client
 	if config.SyncMode==downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID==params.MainnetChainConfig.ChainID.Uint64() {
+		config.SnapshotSeeding = true
 		torrentClient = torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
 		//panic(stack.Config().ResolvePath("snapshots"))
 		err:=torrentClient.Run(chainDb)
