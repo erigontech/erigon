@@ -3,6 +3,8 @@ package bitmapdb
 import (
 	"bytes"
 	"errors"
+	"fmt"
+
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -22,6 +24,9 @@ func PutMergeByOr(db ethdb.DbWithPendingMutations, bucket string, k []byte, delt
 		}
 
 		delta.Or(existing)
+		fmt.Printf("1: %d\n", delta.GetSerializedSizeInBytes())
+		existing.Or(delta)
+		fmt.Printf("2: %d\n", existing.GetSerializedSizeInBytes())
 	}
 
 	//delta.RunOptimize()
