@@ -93,12 +93,17 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	defer logIndexFlushEvery.Stop()
 	logIndices := map[string]*roaring.Bitmap{}
 	logIndicesFlush := func() error {
-		defer func(t time.Time) { fmt.Printf("stage_execute.go:97: %s\n", time.Since(t)) }(time.Now())
+		t := time.Now()
+
 		keys := make([]string, 0, len(logIndices))
 		for k := range logIndices {
 			keys = append(keys, k)
 		}
+		fmt.Printf("11: %s\n", time.Since(t))
+		t = time.Now()
 		sort.Strings(keys)
+		fmt.Printf("12: %s\n", time.Since(t))
+		t = time.Now()
 
 		for _, k := range keys {
 			b := logIndices[k]
@@ -106,6 +111,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				return err
 			}
 		}
+		fmt.Printf("13: %s\n", time.Since(t))
+
 		logIndices = map[string]*roaring.Bitmap{}
 		return nil
 	}

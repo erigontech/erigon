@@ -18,7 +18,8 @@ func PutMergeByOr(db ethdb.DbWithPendingMutations, bucket string, k []byte, delt
 
 	if len(v) > 0 { // if found record in db - then get 'min' from db's value, otherwise get it from incoming bitmap
 		existing := roaring.New()
-		_, err = existing.FromBuffer(v)
+		//_, err = existing.FromBuffer(v)
+		_, err = existing.ReadFrom(bytes.NewReader(v))
 		if err != nil {
 			return err
 		}
@@ -50,7 +51,8 @@ func RemoveRange(db ethdb.DbWithPendingMutations, bucket string, k []byte, from,
 	}
 
 	bm := roaring.New()
-	_, err = bm.FromBuffer(v)
+	_, err = bm.ReadFrom(bytes.NewReader(v))
+	//_, err = bm.FromBuffer(v)
 	if err != nil {
 		return err
 	}
@@ -77,6 +79,7 @@ func Get(db ethdb.Getter, bucket string, k []byte) (*roaring.Bitmap, error) {
 		return nil, err
 	}
 	bm := roaring.New()
-	_, err = bm.FromBuffer(v)
+	_, err = bm.ReadFrom(bytes.NewReader(v))
+	//_, err = bm.FromBuffer(v)
 	return bm, err
 }
