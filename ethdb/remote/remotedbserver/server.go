@@ -172,6 +172,12 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 				if err != nil {
 					return err
 				}
+				if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
+					k, v, err = dc.Next()
+					if err != nil {
+						return err
+					}
+				}
 				c = dc
 			} else {
 				c = tx.Cursor(bucketName).Prefix(prefix)
