@@ -8,7 +8,7 @@ import (
 
 var stagedsyncToUseStageBlockhashes = Migration{
 	Name: "stagedsync_to_use_stage_blockhashes",
-	Up: func(db ethdb.DbWithPendingMutations, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 
 		var progress uint64
 		var err error
@@ -30,7 +30,7 @@ var stagedsyncToUseStageBlockhashes = Migration{
 
 var unwindStagedsyncToUseStageBlockhashes = Migration{
 	Name: "unwind_stagedsync_to_use_stage_blockhashes",
-	Up: func(db ethdb.DbWithPendingMutations, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 
 		var progress uint64
 		var err error

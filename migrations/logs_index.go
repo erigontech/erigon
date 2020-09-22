@@ -19,7 +19,7 @@ import (
 
 var logIndex = Migration{
 	Name: "receipt_logs_index",
-	Up: func(tx ethdb.DbWithPendingMutations, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(tx ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 		if err := tx.(ethdb.BucketsMigrator).ClearBuckets(dbutils.LogIndex); err != nil {
 			return err
 		}
