@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -64,8 +65,13 @@ func (stagedSync *StagedSync) Prepare(
 
 	state.unwindOrder = make([]*Stage, len(stagedSync.unwindOrder))
 
-	for i, stageIndex := range stagedSync.unwindOrder {
-		state.unwindOrder[i] = stages[stageIndex]
+	for i, stageID := range stagedSync.unwindOrder {
+		for j := range stages {
+			if bytes.Equal(stages[j].ID, stageID) {
+				state.unwindOrder[i] = stages[j]
+				break
+			}
+		}
 	}
 
 	if err := state.LoadUnwindInfo(db); err != nil {

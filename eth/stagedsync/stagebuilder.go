@@ -213,6 +213,23 @@ func DefaultStages() StageBuilders {
 			},
 		},
 		{
+			ID: stages.LogIndex,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:                  stages.LogIndex,
+					Description:         "Generate receipt logs index",
+					Disabled:            !world.storageMode.Receipts,
+					DisabledDescription: "Enable by adding `r` to --storage-mode",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnLogIndex(s, world.TX, world.datadir, world.quitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						return UnwindLogIndex(u, s, world.TX, world.quitCh)
+					},
+				}
+			},
+		},
+		{
 			ID: stages.TxLookup,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
@@ -277,19 +294,19 @@ func DefaultStages() StageBuilders {
 // The unwind order is important and not always just stages going backwards.
 // Let's say, there is tx pool (state 10) can be unwound only after execution
 // is fully unwound (stages 9...3).
-type UnwindOrder []int
+type UnwindOrder []stages.SyncStage
 
 // DefaultUnwindOrder contains the default unwind order for `DefaultStages()`.
 // Just adding stages that don't do unwinding, don't require altering the default order.
 func DefaultUnwindOrder() UnwindOrder {
-	return []int{
-		0, 1, 2,
+	return []stages.SyncStage{
+		stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders,
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
-		10,
-		3, 4,
+		stages.TxPool, stages.Execution,
 		// Unwinding of IHashes needs to happen after unwinding HashState
-		6, 5,
-		7, 8, 9,
+		stages.HashState, stages.IntermediateHashes,
+		stages.AccountHistoryIndex, stages.StorageHistoryIndex, stages.LogIndex,
+		stages.TxLookup,
 	}
 }

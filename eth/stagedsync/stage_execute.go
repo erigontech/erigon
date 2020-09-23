@@ -1,19 +1,14 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"os"
 	"runtime"
 	"runtime/pprof"
-	"sort"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -30,9 +25,7 @@ import (
 )
 
 const (
-	logInterval              = 30 * time.Second
-	logIndicesMemLimit       = 64 * datasize.MB
-	logIndicesCheckSizeEvery = 1 * time.Minute
+	logInterval = 30 * time.Second
 )
 
 type HasChangeSetWriter interface {
@@ -89,28 +82,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	logIndexFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
-	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
-	defer logIndexFlushEvery.Stop()
-	logIndices := map[string]*roaring.Bitmap{}
-	logIndicesFlush := func() error {
-		defer func(t time.Time) { fmt.Printf("stage_execute.go:97: %s\n", time.Since(t)) }(time.Now())
-		keys := make([]string, 0, len(logIndices))
-		for k := range logIndices {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-
-		for _, k := range keys {
-			b := logIndices[k]
-			if err := bitmapdb.PutMergeByOr(logIndexCursor, []byte(k), b); err != nil {
-				return err
-			}
-		}
-		logIndices = map[string]*roaring.Bitmap{}
-		return nil
-	}
-
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
 	// Warmup only works for HDD sync, and for long ranges
@@ -171,30 +142,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
 				return fmt.Errorf("writing receipts for block %d: %v", block.NumberU64(), err)
 			}
-
-			logIdx := uint32(0) // logIdx - indexed IN THE BLOCK and starting from 0.
-			for _, receipt := range receipts {
-				for _, log := range receipt.Logs {
-					for _, topic := range log.Topics {
-						topicStr := string(topic.Bytes())
-						m, ok := logIndices[topicStr]
-						if !ok {
-							m = roaring.New()
-							logIndices[topicStr] = m
-						}
-						m.Add(uint32(blockNum))
-					}
-
-					accStr := string(log.Address.Bytes())
-					m, ok := logIndices[accStr]
-					if !ok {
-						m = roaring.New()
-						logIndices[accStr] = m
-					}
-					m.Add(uint32(blockNum))
-					logIdx++
-				}
-			}
 		}
 
 		if batch.BatchSize() >= batch.IdealBatchSize() {
@@ -208,7 +155,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				if err = tx.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
-				logIndexCursor = tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 			}
 			warmup = hdd && (to-blockNum) > 30000
 		}
@@ -230,18 +176,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		default:
 		case <-logEvery.C:
 			logBlock = logProgress(logBlock, blockNum, batch)
-		case <-logIndexFlushEvery.C:
-			if !needFlush(logIndices, logIndicesMemLimit) {
-				break
-			}
-			if err := logIndicesFlush(); err != nil {
-				return nil
-			}
 		}
-	}
-
-	if err := logIndicesFlush(); err != nil {
-		return nil
 	}
 
 	if err := s.Update(batch, stageProgress); err != nil {
@@ -273,15 +208,6 @@ func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 		"numGC", int(m.NumGC))
 
 	return now
-}
-
-func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) bool {
-	sz := uint64(0)
-	for _, m := range bitmaps {
-		sz += m.GetSizeInBytes()
-	}
-	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
-	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
@@ -353,23 +279,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		return fmt.Errorf("unwind Execution: walking storage changesets: %v", err)
 	}
 	if writeReceipts {
-		var logsIndexKeys [][]byte
 		if err := stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (bool, error) {
 			// Convert the receipts from their storage form to their internal representation
 			storageReceipts := []*types.ReceiptForStorage{}
 			if err := rlp.DecodeBytes(v, &storageReceipts); err != nil {
 				return false, fmt.Errorf("invalid receipt array RLP: %w, k=%x", err, k)
-			}
-
-			logIdx := uint32(0) // logIdx - indexed IN THE BLOCK and starting from 0.
-			for _, storageReceipt := range storageReceipts {
-				for _, log := range storageReceipt.Logs {
-					for _, topic := range log.Topics {
-						logsIndexKeys = append(logsIndexKeys, topic.Bytes())
-					}
-					logsIndexKeys = append(logsIndexKeys, log.Address.Bytes())
-					logIdx++
-				}
 			}
 
 			if err := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err != nil {
@@ -378,13 +292,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 			return true, nil
 		}); err != nil {
 			return fmt.Errorf("unwind Execution: walking receipts: %v", err)
-		}
-
-		sort.Slice(logsIndexKeys, func(i, j int) bool { return bytes.Compare(logsIndexKeys[i], logsIndexKeys[j]) < 0 })
-		for _, k := range logsIndexKeys {
-			if err := bitmapdb.RemoveRange(batch, dbutils.LogIndex, k, u.UnwindPoint, s.BlockNumber+1); err != nil {
-				return nil
-			}
 		}
 	}
 
