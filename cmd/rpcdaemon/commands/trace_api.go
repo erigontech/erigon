@@ -17,16 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-// TraceFilterRequest represents the arguments for trace_filter.
-type TraceFilterRequest struct {
-	FromBlock   *hexutil.Uint64   `json:"fromBlock"`
-	ToBlock     *hexutil.Uint64   `json:"toBlock"`
-	FromAddress []*common.Address `json:"fromAddress"`
-	ToAddress   []*common.Address `json:"toAddress"`
-	After       *uint64           `json:"after"`
-	Count       *uint64           `json:"count"`
-}
-
 // TraceAPI RPC interface into tracing API
 type TraceAPI interface {
 	Filter(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
