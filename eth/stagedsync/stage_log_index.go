@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"sort"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -84,7 +85,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 	defer logEvery.Stop()
 
 	indices := map[string]*roaring.Bitmap{}
-	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
+	logIndexCursor := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.LogIndex2)
 	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
@@ -225,13 +226,13 @@ func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) b
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 
-func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
+func flushBitmaps(c ethdb.CursorDupSort, inMem map[string]*roaring.Bitmap) error {
 	t := time.Now()
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
 	}
-	//sort.Strings(keys)
+	sort.Strings(keys)
 
 	var total uint64
 	for _, b := range inMem {
@@ -243,7 +244,7 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 			continue
 		}
 		b := inMem[k]
-		if err := bitmapdb.PutMergeByOr(c, []byte(k), b); err != nil {
+		if err := bitmapdb.AppendShardedMergeByOr(c, []byte(k), b); err != nil {
 			return err
 		}
 	}
@@ -261,7 +262,7 @@ func truncateBitmaps(db ethdb.Database, bucket string, inMem map[string]bool, fr
 	for k := range inMem {
 		keys = append(keys, k)
 	}
-	//sort.Strings(keys)
+	sort.Strings(keys)
 	for _, k := range keys {
 		if _, ok := LogIndexBlackList[k]; ok {
 			continue

@@ -1,12 +1,11 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"github.com/RoaringBitmap/gocroaring"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"runtime"
 	"time"
 
@@ -316,55 +315,28 @@ func stageLogIndex(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	total := 0
-	max := 0
-	count := 0
-	if err := db.Walk(dbutils.LogIndex, nil, 0, func(k, v []byte) (bool, error) {
-		if len(v) > 1_000_000 {
-			fmt.Printf("%d %x\n", len(v), k)
+	db.ClearBuckets(dbutils.LogIndex2)
+	db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.CursorDupSort(dbutils.LogIndex2)
+		total := 0
+		max := 0
+		count := 0
 
+		if err := db.Walk(dbutils.LogIndex, nil, 0, func(k, v []byte) (bool, error) {
 			m := roaring.New()
-			_, _ = m.ReadFrom(bytes.NewReader(v))
-			fmt.Printf("card: %d\n", m.GetCardinality())
-			m.RunOptimize()
-			m2 := gocroaring.New(m.ToArray()...)
-			old := uint32(0)
-			seqLen := uint32(0)
-			maxSeqLen := uint32(0)
-			m.Iterate(func(x uint32) bool {
-				if x-old == 1 {
-					old = x
-					seqLen++
-				} else {
-					old = x
-					if maxSeqLen < seqLen {
-						maxSeqLen = seqLen
-					}
-					seqLen = 0
-				}
-				m2.Add(x)
-				return true
-			})
-			//m2 = roaring.AddOffset64(m2, -int64(m2.Minimum()))
-			m2.RunOptimize()
-			fmt.Printf("maxSeqLen: %d\n", maxSeqLen)
-			//fmt.Printf("%d\n", m.ToArray())
-			fmt.Printf("after opt: %d, fr=%d\n", m2.SerializedSizeInBytes(), m2.FrozenSizeInBytes())
-			m2.RunOptimize()
-			fmt.Printf("after opt: %d, fr=%d\n", m2.SerializedSizeInBytes(), m2.FrozenSizeInBytes())
+			_, _ = m.FromBuffer(v)
+			err := bitmapdb.AppendShardedMergeByOr(c, k, m)
+			if err != nil {
+				return false, err
+			}
+			return true, nil
+		}); err != nil {
+			panic(err)
 		}
-
-		count++
-		total += len(v)
-		if max < len(v) {
-			max = len(v)
-		}
-		return true, nil
-	}); err != nil {
-		panic(err)
-	}
-	fmt.Printf("avg: %.2f\n", float64(total)/float64(count))
-	fmt.Printf("Max: %.2f\n", float64(max))
+		fmt.Printf("avg: %.2f\n", float64(total)/float64(count))
+		fmt.Printf("Max: %.2f\n", float64(max))
+		return nil
+	})
 	return nil
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)

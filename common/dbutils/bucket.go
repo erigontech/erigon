@@ -116,7 +116,8 @@ var (
 
 	// Stores bitmap indices - in which block numbers saw logs with given 'address' or 'topic'
 	// [addr or topic] -> bitmap(blockN)
-	LogIndex = "log_index"
+	LogIndex  = "log_index"
+	LogIndex2 = "log_index2"
 
 	TxLookupPrefix  = "l" // txLookupPrefix + hash -> transaction/receipt lookup metadata
 	BloomBitsPrefix = "B" // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
@@ -215,6 +216,7 @@ var Buckets = []string{
 	HeadHeaderKey,
 	Migrations,
 	LogIndex,
+	LogIndex2,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

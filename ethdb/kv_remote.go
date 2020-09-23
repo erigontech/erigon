@@ -442,7 +442,7 @@ func (c *remoteCursorDupSort) NextDup() ([]byte, []byte, error)     { panic("not
 func (c *remoteCursorDupSort) NextNoDup() ([]byte, []byte, error)   { panic("not supported") }
 func (c *remoteCursorDupSort) PrevDup() ([]byte, []byte, error)     { panic("not supported") }
 func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error)   { panic("not supported") }
-func (c *remoteCursorDupSort) LastDup() ([]byte, error)             { panic("not supported") }
+func (c *remoteCursorDupSort) LastDup(k []byte) ([]byte, error)     { panic("not supported") }
 func (c *remoteCursorDupSort) AppendDup(k []byte, v []byte) error   { panic("not supported") }
 func (c *remoteCursorDupSort) PutNoDupData(key, value []byte) error { panic("not supported") }
 func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error       { panic("not supported") }

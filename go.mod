@@ -13,7 +13,7 @@ require (
 	github.com/VictoriaMetrics/fastcache v1.5.7
 	github.com/aristanetworks/goarista v0.0.0-20170210015632-ea17b1a17847
 	github.com/aws/aws-sdk-go v1.28.9
-	github.com/blend/go-sdk v2.0.0+incompatible // indirect
+	github.com/blend/go-sdk v2.0.0+incompatible
 	github.com/btcsuite/btcd v0.0.0-20171128150713-2e60448ffcc6
 	github.com/c2h5oh/datasize v0.0.0-20200112174442-28bbd4740fee
 	github.com/cespare/cp v0.1.0
@@ -49,6 +49,7 @@ require (
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/ledgerwatch/lmdb-go v1.15.1-0.20200907102535-adf129c101e7
+	github.com/lib/pq v1.8.0 // indirect
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mattn/go-colorable v0.1.2
