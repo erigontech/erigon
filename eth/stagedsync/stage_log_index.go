@@ -177,11 +177,12 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	if err := truncateBitmaps(tx, dbutils.LogIndex, logsIndexKeys, u.UnwindPoint, s.BlockNumber+1); err != nil {
 		return err
 	}
+	log.Info("UnwindLogIndex 3")
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind AccountHistorytIndex: %w", err)
 	}
 
-	log.Info("UnwindLogIndex 3")
+	log.Info("UnwindLogIndex 4")
 
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
