@@ -330,7 +330,8 @@ func stageLogIndex(ctx context.Context) error {
 			seqLen := uint32(0)
 			maxSeqLen := uint32(0)
 			m.Iterate(func(x uint32) bool {
-				if old-x == 1 {
+				if x-old == 1 {
+					old = x
 					seqLen++
 				} else {
 					old = x
