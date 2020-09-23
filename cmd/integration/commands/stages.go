@@ -318,6 +318,7 @@ func stageLogIndex(ctx context.Context) error {
 		if err := resetLogIndex(db); err != nil {
 			return err
 		}
+		return nil
 	}
 	execStage := progress(stages.Execution)
 	s := progress(stages.LogIndex)
@@ -387,6 +388,7 @@ func stageTxLookup(ctx context.Context) error {
 		if err := resetTxLookup(db); err != nil {
 			return err
 		}
+		return nil
 	}
 	stage9 := progress(stages.TxLookup)
 	log.Info("Stage9", "progress", stage9.BlockNumber)
