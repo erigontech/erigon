@@ -195,7 +195,7 @@ func GetSharded(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
 	return roaring.FastOr(shards...), nil
 }
 
-const shard2 = 64 * datasize.KB
+const shard2 = 256 * datasize.KB
 
 func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
 	t := time.Now()
@@ -235,7 +235,7 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) 
 			return err
 		}
 		s := time.Since(t)
-		if s > 30*time.Millisecond {
+		if s > 50*time.Millisecond {
 			fmt.Printf("1: time=%s, card=%d, serializeSize=%d shard=%d\n", s, delta.GetCardinality(), delta.GetSerializedSizeInBytes(), sN)
 		}
 		return nil
@@ -250,7 +250,7 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) 
 	}
 
 	s := time.Since(t)
-	if s > 30*time.Millisecond {
+	if s > 50*time.Millisecond {
 		fmt.Printf("1: time=%s, card=%d, serializeSize=%d shard=%d\n", s, delta.GetCardinality(), delta.GetSerializedSizeInBytes(), sN)
 	}
 	return nil
