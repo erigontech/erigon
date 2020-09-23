@@ -195,7 +195,7 @@ func GetSharded(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
 	return roaring.FastOr(shards...), nil
 }
 
-const shard2 = 256 * datasize.KB
+const shard2 = 512 * datasize.KB
 
 func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
 	t := time.Now()
