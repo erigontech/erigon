@@ -227,6 +227,8 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 }
 
 func truncateBitmaps(db ethdb.MinDatabase, bucket string, inMem map[string]bool, from, to uint64) error {
+	t := time.Now()
+
 	defer func(t time.Time) { fmt.Printf("stage_log_index.go:230: %s\n", time.Since(t)) }(time.Now())
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
@@ -238,6 +240,7 @@ func truncateBitmaps(db ethdb.MinDatabase, bucket string, inMem map[string]bool,
 			return nil
 		}
 	}
+	fmt.Printf("truncateBitmaps: %s, %d\n", time.Since(t), len(keys))
 
 	return nil
 }
