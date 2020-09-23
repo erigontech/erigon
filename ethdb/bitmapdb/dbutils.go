@@ -23,6 +23,7 @@ func PutMergeByOr(c ethdb.Cursor, k []byte, delta *roaring.Bitmap) error {
 		delta.Or(existing)
 	}
 
+	//toPut.RunOptimize()
 	bufBytes, err := c.Reserve(k, int(delta.GetSerializedSizeInBytes()))
 	if err != nil {
 		panic(err)
