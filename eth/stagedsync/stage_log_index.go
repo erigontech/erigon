@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -147,7 +146,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 		defer tx.Rollback()
 	}
 
-	var logsIndexKeys [][]byte
+	logsIndexKeys := map[string]bool{}
 	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(u.UnwindPoint + 1)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
@@ -165,16 +164,20 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 		for _, storageReceipt := range storageReceipts {
 			for _, log := range storageReceipt.Logs {
 				for _, topic := range log.Topics {
-					logsIndexKeys = append(logsIndexKeys, topic.Bytes())
+					logsIndexKeys[string(topic.Bytes())] = true
 				}
-				logsIndexKeys = append(logsIndexKeys, log.Address.Bytes())
+				logsIndexKeys[string(log.Address.Bytes())] = true
 			}
 		}
 	}
 
-	sort.Slice(logsIndexKeys, func(i, j int) bool { return bytes.Compare(logsIndexKeys[i], logsIndexKeys[j]) < 0 })
-	for _, k := range logsIndexKeys {
-		if err := bitmapdb.RemoveRange(db, dbutils.LogIndex, k, u.UnwindPoint, s.BlockNumber+1); err != nil {
+	keys := make([]string, 0, len(logsIndexKeys))
+	for k := range logsIndexKeys {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if err := bitmapdb.RemoveRange(db, dbutils.LogIndex, []byte(k), u.UnwindPoint, s.BlockNumber+1); err != nil {
 			return nil
 		}
 	}
