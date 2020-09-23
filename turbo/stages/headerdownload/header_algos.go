@@ -698,7 +698,6 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*Hea
 		pop := heap.Pop(hd.requestQueue).(RequestQueueItem)
 		if anchors, present := hd.anchors[pop.anchorParent]; present {
 			// Anchor still exists after the timeout
-			//TODO: Figure out correct request length
 			requests = append(requests, &HeaderRequest{Hash: pop.anchorParent, Number: anchors[0].blockHeight - 1, Length: 192})
 			pop.waitUntil = currentTime + timeout
 			heap.Push(hd.requestQueue, pop)
