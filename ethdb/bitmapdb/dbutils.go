@@ -235,8 +235,8 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) 
 			return err
 		}
 		s := time.Since(t)
-		if s > 10*time.Millisecond {
-			fmt.Printf("1: card=%d, serializeSize=%d shard=%d\n", delta.GetCardinality(), delta.GetSerializedSizeInBytes(), sN)
+		if s > 20*time.Millisecond {
+			fmt.Printf("1: time=%s, card=%d, serializeSize=%d shard=%d\n", s, delta.GetCardinality(), delta.GetSerializedSizeInBytes(), sN)
 		}
 		return nil
 	}
@@ -251,7 +251,7 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) 
 
 	s := time.Since(t)
 	if s > 10*time.Millisecond {
-		fmt.Printf("1: card=%d, serializeSize=%d\n", delta.GetCardinality(), delta.GetSerializedSizeInBytes())
+		fmt.Printf("1: time=%s, card=%d, serializeSize=%d shard=%d\n", s, delta.GetCardinality(), delta.GetSerializedSizeInBytes(), sN)
 	}
 	return nil
 }
@@ -260,7 +260,7 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) 
 // !Important: [from, to)
 func TrimShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 	t := time.Now()
-
+	updated := 0
 	for k, v, err := c.Seek(key); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -278,6 +278,7 @@ func TrimShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 			break
 		}
 
+		updated++
 		bm.RemoveRange(from, to)
 		if bm.GetCardinality() == 0 { // don't store empty bitmaps
 			err = c.DeleteCurrent()
@@ -300,9 +301,8 @@ func TrimShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 	}
 
 	s := time.Since(t)
-	if s > 10*time.Millisecond {
-		//fmt.Printf("3: %x %s %d\n", k, s, len(newV))
-		//fmt.Printf("3: card=%d, serializeSize=%d\n", bm.GetCardinality(), bm.GetSerializedSizeInBytes())
+	if s > 20*time.Millisecond {
+		fmt.Printf("3: time=%s, updated=%d\n", s, updated)
 	}
 	return nil
 }
