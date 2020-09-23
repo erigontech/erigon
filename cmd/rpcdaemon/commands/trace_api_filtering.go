@@ -19,18 +19,22 @@ import (
 )
 
 // Transaction Implements trace_transaction
-func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) ([]interface{}, error) {
-	var stub []interface{}
-	return stub, nil
+// TODO(tjayrush): I think this should return an []interface{}, so we can return both Parity and Geth traces
+func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error) {
+	traces, err := api.getTransactionTraces(ctx, txHash)
+	if err != nil {
+		return nil, err
+	}
+	return traces, err
 }
 
 // Get Implements trace_get
 // TODO(tjayrush): This command should take an rpc.BlockNumber .This would allow blockNumbers and 'latest',
 // TODO(tjayrush): 'pending', etc. Parity only accepts block hash.
-//
 // TODO(tjayrush): Also, for some reason, Parity definesthe second parameter as an array of indexes, but
 // TODO(tjayrush): only accepts a single one
-func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64) (interface{}, error) {
+// TODO(tjayrush): I think this should return an interface{}, so we can return both Parity and Geth traces
+func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64) (*ParityTrace, error) {
 	// TODO(tjayrush): Parity fails if it gets more than a single index. Returns nothing in this case.
 	if len(indicies) > 1 {
 		return nil, nil
@@ -45,7 +49,7 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 	firstIndex := int(indicies[0]) + 1
 	for i, trace := range traces {
 		if i == firstIndex {
-			return trace, nil
+			return &trace, nil
 		}
 	}
 	return nil, err
@@ -274,7 +278,6 @@ func (api *TraceAPIImpl) getTransactionTraces(ctx context.Context, txHash common
 	traceType := "callTracer" // nolint: goconst
 
 	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, txHash)
-	// _, blockHash, _, txIndex := rawdb.ReadTransaction(api.dbReader, txHash)
 	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, api.db, blockHash, txIndex)
 	if err != nil {
 		return nil, err
