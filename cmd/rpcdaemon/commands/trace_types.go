@@ -4,14 +4,15 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 )
 
 // TODO:(tjayrush)
 // Implementation Notes:
-// -- Many of these fields are of string type. I chose to do this for ease of debugging / clarity of code (less conversions).
-//    Once we start optimizing this code, many of these fields will be made into their native types (Addresses, uint64, etc.)
-// -- The ordering of the fields in the Parity types should not be changed. This allows us to compare output directly with existing Parity tests
+// -- Many of these fields are of string type. I chose to do this for ease of debugging / clarity of code (less
+//    conversions, etc.).Once we start optimizing this code, many of these fields will be made into their native
+//    types (Addresses, uint64, etc.)
+// -- The ordering of the fields in the Parity types should not be changed. This allows us to compare output
+//    directly with existing Parity tests
 
 // GethTrace The trace as received from the existing Geth javascript tracer 'callTracer'
 type GethTrace struct {
@@ -29,20 +30,6 @@ type GethTrace struct {
 
 // GethTraces an array of GethTraces
 type GethTraces []*GethTrace
-
-// Allows for easy printing of a geth trace for debugging
-func (p GethTrace) String() string {
-	var ret string
-	ret += fmt.Sprintf("Type: %s\n", p.Type)
-	ret += fmt.Sprintf("From: %s\n", p.From)
-	ret += fmt.Sprintf("To: %s\n", p.To)
-	ret += fmt.Sprintf("Value: %s\n", p.Value)
-	ret += fmt.Sprintf("Gas: %s\n", p.Gas)
-	ret += fmt.Sprintf("GasUsed: %s\n", p.GasUsed)
-	ret += fmt.Sprintf("Input: %s\n", p.Input)
-	ret += fmt.Sprintf("Output: %s\n", p.Output)
-	return ret
-}
 
 // ParityTrace A trace in the desired format (Parity/OpenEtherum) See: https://openethereum.github.io/wiki/JSONRPC-trace-module
 type ParityTrace struct {
@@ -84,6 +71,24 @@ type TraceResult struct {
 	Output  string `json:"output,omitempty"`
 }
 
+// ParityTraces what
+type ParityTraces []ParityTrace
+
+// Allows for easy printing of a geth trace for debugging
+func (p GethTrace) String() string {
+	var ret string
+	ret += fmt.Sprintf("Type: %s\n", p.Type)
+	ret += fmt.Sprintf("From: %s\n", p.From)
+	ret += fmt.Sprintf("To: %s\n", p.To)
+	ret += fmt.Sprintf("Value: %s\n", p.Value)
+	ret += fmt.Sprintf("Gas: %s\n", p.Gas)
+	ret += fmt.Sprintf("GasUsed: %s\n", p.GasUsed)
+	ret += fmt.Sprintf("Input: %s\n", p.Input)
+	ret += fmt.Sprintf("Output: %s\n", p.Output)
+	return ret
+}
+
+// Allows for easy printing of a parity trace for debugging
 func (t ParityTrace) String() string {
 	var ret string
 	ret += fmt.Sprintf("Action.SelfDestructed: %s\n", t.Action.SelfDestructed)
@@ -108,17 +113,4 @@ func (t ParityTrace) String() string {
 	ret += fmt.Sprintf("TransactionPosition: %d\n", t.TransactionPosition)
 	ret += fmt.Sprintf("Type: %s\n", t.Type)
 	return ret
-}
-
-// ParityTraces what
-type ParityTraces []ParityTrace
-
-// TraceFilterRequest represents the arguments for trace_filter.
-type TraceFilterRequest struct {
-	FromBlock   *hexutil.Uint64   `json:"fromBlock"`
-	ToBlock     *hexutil.Uint64   `json:"toBlock"`
-	FromAddress []*common.Address `json:"fromAddress"`
-	ToAddress   []*common.Address `json:"toAddress"`
-	After       *uint64           `json:"after"`
-	Count       *uint64           `json:"count"`
 }

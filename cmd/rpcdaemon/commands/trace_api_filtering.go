@@ -3,7 +3,6 @@ package commands
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -237,4 +236,14 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 	})
 
 	return i != len(filter)
+}
+
+// TraceFilterRequest represents the arguments for trace_filter
+type TraceFilterRequest struct {
+	FromBlock   *hexutil.Uint64   `json:"fromBlock"`
+	ToBlock     *hexutil.Uint64   `json:"toBlock"`
+	FromAddress []*common.Address `json:"fromAddress"`
+	ToAddress   []*common.Address `json:"toAddress"`
+	After       *uint64           `json:"after"`
+	Count       *uint64           `json:"count"`
 }
