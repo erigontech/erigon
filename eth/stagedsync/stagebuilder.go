@@ -221,10 +221,10 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.Receipts,
 					DisabledDescription: "Enable by adding `r` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnLogIndex(s, world.TX, world.datadir, world.quitCh)
+						return SpawnLogIndex(s, world.TX, world.datadir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindLogIndex(u, s, world.TX, world.quitCh)
+						return UnwindLogIndex(u, s, world.TX, world.QuitCh)
 					},
 				}
 			},
