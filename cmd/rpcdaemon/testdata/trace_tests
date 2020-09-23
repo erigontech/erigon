@@ -64,4 +64,18 @@
 #
 #debug_traceTransaction ["0xDBBA1"]
 
+# custom, experimental stuff
+05_turbo trace_blockReward rew_0 ["0x0"]
+10_turbo trace_blockReward rew_1 ["0x1"]
+15_turbo trace_blockReward rew_2 ["0x2"]
+20_turbo trace_blockReward rew_3 ["0x3"]
+25_turbo trace_uncleReward unc_0 ["0x0"]
+30_turbo trace_uncleReward unc_1 ["0x1"]
+35_turbo trace_uncleReward unc_2 ["0x2"]
+40_turbo trace_uncleReward unc_3 ["0x3"]
+45_turbo trace_issuance iss_0 ["0x0"]
+50_turbo trace_issuance iss_1 ["0x1"]
+55_turbo trace_issuance iss_2 ["0x2"]
+60_turbo trace_issuance iss_3 ["0x3"]
+
 05 trace_junk12 no_rpc []

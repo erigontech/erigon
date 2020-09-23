@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/big"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
@@ -12,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -35,9 +35,9 @@ type TraceAPI interface {
 	Transaction(ctx context.Context, txHash common.Hash) ([]interface{}, error)
 
 	// Custom (turbo geth exclusive)
-	BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (big.Int, error)
-	UncleRewards(ctx context.Context, blockNr rpc.BlockNumber) ([]big.Int, error)
-	Issuance(ctx context.Context, blockNr rpc.BlockNumber) (big.Int, error)
+	BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
+	UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
+	Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
 }
 
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
@@ -259,4 +259,12 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 		traces = append(traces, trace)
 	}
 	return traces, nil
+}
+
+func (api *TraceAPIImpl) getBlockByRPCNumber(blockNr rpc.BlockNumber) (*types.Block, error) {
+	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+	if err != nil {
+		return nil, err
+	}
+	return rawdb.ReadBlockByNumber(api.dbReader, blockNum), nil
 }
