@@ -119,7 +119,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 		return err
 	}
 
-	if err := s.DoneAndUpdate(db, endBlock); err != nil {
+	if err := s.DoneAndUpdate(tx, endBlock); err != nil {
 		return err
 	}
 	if !useExternalTx {
@@ -148,7 +148,6 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 
 	logsIndexKeys := map[string]bool{}
 	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
-	log.Info("UnwindLogIndex started")
 
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(u.UnwindPoint + 1)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
@@ -172,19 +171,14 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 			}
 		}
 	}
-	log.Info("UnwindLogIndex 2")
 
 	if err := truncateBitmaps(tx, dbutils.LogIndex, logsIndexKeys, u.UnwindPoint, s.BlockNumber+1); err != nil {
 		return err
 	}
-	log.Info("UnwindLogIndex 3")
-	if err := u.Done(db); err != nil {
+	if err := u.Done(tx); err != nil {
 		return fmt.Errorf("unwind AccountHistorytIndex: %w", err)
 	}
 
-	log.Info("UnwindLogIndex 4")
-
-	fmt.Printf("?? %t\n", useExternalTx)
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
 			return err
