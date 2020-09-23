@@ -197,64 +197,103 @@ func GetSharded(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
 	return roaring.FastOr(shards...), nil
 }
 
-const shard2 = 40 * datasize.KB
+const shard2 = 32 * datasize.KB
 
-func AppendShardedMergeByOr2(c ethdb.Cursor, k []byte, delta *roaring.Bitmap) error {
+func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
 	t := time.Now()
 
-	type shardT struct {
-		sN uint32
-		bm *roaring.Bitmap
-	}
-	var bitmaps []shardT
+	createNewShard := true
+	sN := uint16(0)
 
-	var sN uint32
-	for delta.GetCardinality() > 0 {
-		min := delta.Minimum()
-		localSn := min / shard
-		sN += localSn
-		st := shardT{
-			sN: sN,
-		}
-		st.bm = roaring.AddOffset64(delta, -int64(localSn*shard))
-		st.bm.RemoveRange(uint64(shard), math.MaxInt32)
-		bitmaps = append(bitmaps, st)
-		delta.RemoveRange(0, uint64(shard*(localSn+1)))
-	}
-
-	kk, v, err := c.Seek(k)
+	k, v, err := c.Seek(key)
 	if err != nil {
 		return err
 	}
-	if kk != nil && bytes.HasPrefix(kk, k) {
+	if k != nil && bytes.HasPrefix(k, key) {
 		existing := roaring.New()
 		_, err = existing.FromBuffer(v)
 		if err != nil {
 			return err
 		}
-		sN := ^binary.BigEndian.Uint16(kk[len(kk)-2:])
 
-		for i := range bitmaps {
-			if uint16(bitmaps[i].sN) != sN {
-				continue
-			}
-			bitmaps[i].bm.Or(existing)
-			err = c.DeleteCurrent()
-			if err != nil {
-				return err
+		if len(v) < int(shard2) {
+			createNewShard = false
+			delta.Or(existing)
+		} else {
+			createNewShard = true
+			if len(k) > len(key) { // don't store zero shard marker
+				sN = ^binary.BigEndian.Uint16(k[len(k)-2:]) + 1
+			} else {
+				sN = 1
 			}
 		}
 	}
 
-	for i := range bitmaps {
-		bm := bitmaps[i].bm
+	if createNewShard {
+		newV := make([]byte, int(delta.GetSerializedSizeInBytes()))
+		newK := make([]byte, len(k)+2)
+		delta.RunOptimize()
+		copy(newK, k)
+		binary.BigEndian.PutUint16(newK[len(newK)-2:], ^sN)
+		_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
+		err = c.Put(newK, newV)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	newV := make([]byte, int(delta.GetSerializedSizeInBytes()))
+	delta.RunOptimize()
+	_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
+	err = c.Put(k, newV)
+	if err != nil {
+		return err
+	}
+
+	s := time.Since(t)
+	if s > 10*time.Millisecond {
+		//fmt.Printf("2: %x %s %d\n", k, s, len(bitmaps))
+		delta.RunOptimize()
+		fmt.Printf("2: card=%d, serializeSize=%d\n", delta.GetCardinality(), delta.GetSerializedSizeInBytes())
+	}
+	return nil
+}
+
+// RemoveRange - gets existing bitmap in db and call RemoveRange operator on it.
+// !Important: [from, to)
+func RemoveShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
+	t := time.Now()
+
+	for k, v, err := c.Seek(key); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+
+		if !bytes.HasPrefix(k, key) {
+			break
+		}
+		bm := roaring.New()
+		_, err = bm.FromBuffer(v)
+		if err != nil {
+			return err
+		}
+		if uint64(bm.Maximum()) < from {
+			break
+		}
+
+		bm.RemoveRange(from, to)
+		if bm.GetCardinality() == 0 { // don't store empty bitmaps
+			return c.DeleteCurrent()
+		}
+
 		bm.RunOptimize()
 		newV := make([]byte, int(bm.GetSerializedSizeInBytes()))
-		newK := make([]byte, len(k)+2)
-		copy(newK, k)
-		binary.BigEndian.PutUint16(newK[len(newK)-2:], ^uint16(bitmaps[i].sN))
 		_, err = bm.WriteTo(bytes.NewBuffer(newV[:0]))
-		err = c.Put(newK, newV)
+		if err != nil {
+			return err
+		}
+		err = c.Put(k, newV)
 		if err != nil {
 			return err
 		}
@@ -262,9 +301,8 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, k []byte, delta *roaring.Bitmap) er
 
 	s := time.Since(t)
 	if s > 10*time.Millisecond {
-		fmt.Printf("2: %x %s %d\n", k, s, len(bitmaps))
-		delta.RunOptimize()
-		fmt.Printf("2: card=%d, serializeSize=%d\n", delta.GetCardinality(), delta.GetSerializedSizeInBytes())
+		//fmt.Printf("3: %x %s %d\n", k, s, len(newV))
+		//fmt.Printf("3: card=%d, serializeSize=%d\n", bm.GetCardinality(), bm.GetSerializedSizeInBytes())
 	}
 	return nil
 }
@@ -284,8 +322,6 @@ func GetSharded2(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
 		if err != nil {
 			return nil, err
 		}
-		sN := ^binary.BigEndian.Uint16(k[len(k)-2:])
-		bm = roaring.AddOffset64(bm, int64(uint32(sN)*shard))
 		shards = append(shards, bm)
 	}
 

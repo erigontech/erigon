@@ -2,10 +2,7 @@ package commands
 
 import (
 	"context"
-	"fmt"
-	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"runtime"
 	"time"
 
@@ -316,28 +313,6 @@ func stageLogIndex(ctx context.Context) error {
 	defer db.Close()
 
 	db.ClearBuckets(dbutils.LogIndex2)
-	db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.CursorDupSort(dbutils.LogIndex2)
-		total := 0
-		max := 0
-		count := 0
-
-		if err := db.Walk(dbutils.LogIndex, nil, 0, func(k, v []byte) (bool, error) {
-			m := roaring.New()
-			_, _ = m.FromBuffer(v)
-			err := bitmapdb.AppendShardedMergeByOr(c, k, m)
-			if err != nil {
-				return false, err
-			}
-			return true, nil
-		}); err != nil {
-			panic(err)
-		}
-		fmt.Printf("avg: %.2f\n", float64(total)/float64(count))
-		fmt.Printf("Max: %.2f\n", float64(max))
-		return nil
-	})
-	return nil
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()

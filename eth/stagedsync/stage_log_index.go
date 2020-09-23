@@ -20,6 +20,7 @@ import (
 
 const (
 	logIndicesMemLimit       = 1 * datasize.GB
+	logIndicesSingleMemLimit = 32 * datasize.KB
 	logIndicesCheckSizeEvery = 1 * time.Minute
 )
 
@@ -106,7 +107,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 		case <-logEvery.C:
 			log.Info("Progress", "blockNum", blockNum)
 		case <-checkFlushEvery.C:
-			if needFlush(indices, logIndicesMemLimit) {
+			if needFlush(indices, logIndicesMemLimit, logIndicesSingleMemLimit) {
 				if err := flushBitmaps(logIndexCursor, indices); err != nil {
 					return err
 				}
@@ -177,6 +178,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 
 	logsIndexKeys := map[string]bool{}
 	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
+	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex2)
 
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(u.UnwindPoint + 1)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
@@ -201,7 +203,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 		}
 	}
 
-	if err := truncateBitmaps(tx, dbutils.LogIndex, logsIndexKeys, u.UnwindPoint, s.BlockNumber+1); err != nil {
+	if err := truncateBitmaps(logIndexCursor, logsIndexKeys, u.UnwindPoint, s.BlockNumber+1); err != nil {
 		return err
 	}
 	if err := u.Done(tx); err != nil {
@@ -217,10 +219,14 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	return nil
 }
 
-func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) bool {
+func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit, singleLimit datasize.ByteSize) bool {
 	sz := uint64(0)
 	for _, m := range bitmaps {
-		sz += m.GetSizeInBytes()
+		sz1 := m.GetSizeInBytes()
+		if sz1 > uint64(singleLimit) {
+			return true
+		}
+		sz += sz1
 	}
 	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
@@ -254,7 +260,7 @@ func flushBitmaps(c ethdb.CursorDupSort, inMem map[string]*roaring.Bitmap) error
 	return nil
 }
 
-func truncateBitmaps(db ethdb.Database, bucket string, inMem map[string]bool, from, to uint64) error {
+func truncateBitmaps(c ethdb.Cursor, inMem map[string]bool, from, to uint64) error {
 	t := time.Now()
 
 	defer func(t time.Time) { fmt.Printf("stage_log_index.go:230: %s\n", time.Since(t)) }(time.Now())
@@ -268,7 +274,7 @@ func truncateBitmaps(db ethdb.Database, bucket string, inMem map[string]bool, fr
 			continue
 		}
 
-		if err := bitmapdb.RemoveRange(db, bucket, []byte(k), from, to); err != nil {
+		if err := bitmapdb.RemoveShardedRange(c, []byte(k), from, to); err != nil {
 			return nil
 		}
 	}
