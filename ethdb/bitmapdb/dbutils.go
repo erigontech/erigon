@@ -207,24 +207,25 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) 
 	if err != nil {
 		return err
 	}
-	if k != nil && bytes.HasPrefix(k, key) {
-		existing := roaring.New()
-		_, err = existing.FromBuffer(v)
-		if err != nil {
-			return err
-		}
+	if k != nil {
+		if bytes.HasPrefix(k, key) {
+			existing := roaring.New()
+			_, err = existing.FromBuffer(v)
+			if err != nil {
+				return err
+			}
 
-		if len(v) < int(shard2) {
-			createNewShard = false
-			delta.Or(existing)
-		} else {
-			createNewShard = true
-			if len(k) > len(key) { // don't store zero shard marker
-				sN = ^binary.BigEndian.Uint16(k[len(k)-2:]) + 1
+			if len(v) < int(shard2) {
+				createNewShard = false
+				delta.Or(existing)
 			} else {
-				sN = 1
+				createNewShard = true
+				sN = ^binary.BigEndian.Uint16(k[len(k)-2:]) + 1
 			}
 		}
+	} else {
+		createNewShard = true
+		sN = 1
 	}
 
 	if createNewShard {
@@ -237,6 +238,10 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) 
 		err = c.Put(newK, newV)
 		if err != nil {
 			return err
+		}
+		s := time.Since(t)
+		if s > 10*time.Millisecond {
+			fmt.Printf("1: card=%d, serializeSize=%d shard=%d\n", delta.GetCardinality(), delta.GetSerializedSizeInBytes(), sN)
 		}
 		return nil
 	}
@@ -251,9 +256,7 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) 
 
 	s := time.Since(t)
 	if s > 10*time.Millisecond {
-		//fmt.Printf("2: %x %s %d\n", k, s, len(bitmaps))
-		delta.RunOptimize()
-		fmt.Printf("2: card=%d, serializeSize=%d\n", delta.GetCardinality(), delta.GetSerializedSizeInBytes())
+		fmt.Printf("1: card=%d, serializeSize=%d\n", delta.GetCardinality(), delta.GetSerializedSizeInBytes())
 	}
 	return nil
 }
