@@ -79,7 +79,7 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 		} else {
 			// ExtendUp
 			if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
-				log.Error("ExtendUp failsegmented", "error", err1)
+				log.Error("ExtendUp failed", "error", err1)
 			} else {
 				hd.AddSegmentToBuffer(segment, start, end)
 				log.Info("Extended Up", "start", start, "end", end)

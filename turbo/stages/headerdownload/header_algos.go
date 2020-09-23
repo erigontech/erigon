@@ -259,9 +259,6 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 				return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 			}
 			cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, currentTime); err != nil {
-				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
-			}
 		}
 		// Go over tips of the anchors we are replacing, bump their cumulative difficulty, and add them to the new anchor
 		for _, anchor := range anchors {
@@ -279,6 +276,18 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 		}
 		delete(hd.anchors, anchorHeader.Hash())
 		hd.rebuildAnchorQueue()
+		cumulativeDifficulty.Clear()
+		for i := end - 1; i >= start; i-- {
+			header := segment.Headers[i]
+			diff, overflow := uint256.FromBig(header.Difficulty)
+			if overflow {
+				return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
+			}
+			cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
+			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, currentTime); err != nil {
+				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
+			}
+		}
 	} else {
 		return fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
 	}
