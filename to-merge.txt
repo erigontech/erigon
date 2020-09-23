@@ -97,9 +97,3 @@ Date:   Wed Sep 23 15:59:11 2020 +0800
 
     trie: fix gaped range proof test case (#21484)
 
-commit fdb742419e6ff8373e57bdf99836c22f689b0e55
-Author: Binacs <bin646891055@gmail.com>
-Date:   Wed Sep 23 05:22:54 2020 +0800
-
-    cmd/clef, cmd/geth: use SplitAndTrim from cmd/utils (#21579)
-
