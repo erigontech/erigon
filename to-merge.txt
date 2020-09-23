@@ -85,15 +85,3 @@ Date:   Wed Sep 23 10:29:48 2020 +0200
     
     If blockNrOrHash is not specified, estimateGas defaults to pending
 
-commit 25b16085da1bab4b84f52de7275ea481ea923d68
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed Sep 23 16:03:21 2020 +0800
-
-    trie: support empty range proof (#21199)
-
-commit e1365b24647481ca92d95f678f6f8ee9773202cb
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed Sep 23 15:59:11 2020 +0800
-
-    trie: fix gaped range proof test case (#21484)
-
