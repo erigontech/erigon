@@ -14,23 +14,18 @@ func PutMergeByOr(db ethdb.MinDatabase, bucket string, k []byte, delta *roaring.
 		return err
 	}
 
-	var toPut *roaring.Bitmap
-
 	if len(v) > 0 { // if found record in db - then get 'min' from db's value, otherwise get it from incoming bitmap
 		existing := roaring.New()
 		_, err = existing.FromBuffer(v)
 		if err != nil {
 			return err
 		}
-		existing.Or(delta)
-		toPut = existing
-	} else {
-		toPut = delta
+		delta.Or(existing)
 	}
 
 	//toPut.RunOptimize()
-	newV := make([]byte, int(toPut.GetSerializedSizeInBytes()))
-	_, err = toPut.WriteTo(bytes.NewBuffer(newV[:0]))
+	newV := make([]byte, int(delta.GetSerializedSizeInBytes()))
+	_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
 	if err != nil {
 		return err
 	}
