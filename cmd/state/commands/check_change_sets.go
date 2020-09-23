@@ -9,6 +9,9 @@ var (
 	historyfile   string
 	nocheck       bool
 	writeReceipts bool
+	numBlocks	  uint64
+	saveOpcodes	  bool
+	saveSegments  bool
 )
 
 func init() {
@@ -17,6 +20,12 @@ func init() {
 	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as --chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
 	checkChangeSetsCmd.Flags().BoolVar(&writeReceipts, "writeReceipts", false, "set to turn off writing receipts as the exection ongoing")
+
+	checkChangeSetsCmd.Flags().Uint64Var(&numBlocks, "numBlocks", 1, "number of blocks to run the operation on")
+	checkChangeSetsCmd.Flags().BoolVar(&saveOpcodes, "saveOpcodes", false, "set to save the opcodes")
+	checkChangeSetsCmd.Flags().BoolVar(&saveSegments, "saveSegments", false, "set to save the segments")
+
+
 	rootCmd.AddCommand(checkChangeSetsCmd)
 }
 
@@ -24,6 +33,6 @@ var checkChangeSetsCmd = &cobra.Command{
 	Use:   "checkChangeSets",
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return stateless.CheckChangeSets(genesis, block, chaindata, historyfile, nocheck, writeReceipts)
+		return stateless.CheckChangeSets(genesis, block, chaindata, historyfile, nocheck, writeReceipts, numBlocks, saveOpcodes, saveSegments)
 	},
 }
