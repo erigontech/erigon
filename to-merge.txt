@@ -72,16 +72,4 @@ Date:   Wed Sep 23 17:44:09 2020 +0800
     
     Co-authored-by: Péter Szilágyi <peterke@gmail.com>
 
-commit 0921f8a74f1c050792453fc241eef67d7400d94c
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Wed Sep 23 10:29:48 2020 +0200
-
-    internal/ethapi: add optional parameter blockNrOrHash to estimateGas (#21545)
-    
-    This allows users to estimate gas on top of arbitrary blocks as well as pending and latest.
-    Tracing on pending is useful for most users as it takes into account the current txpool while
-    tracing on latest might be useful for users that have little to know knowledge of the current
-    transactions in the network.
-    
-    If blockNrOrHash is not specified, estimateGas defaults to pending
 
