@@ -18,7 +18,7 @@ func PutMergeByOr(c ethdb.Cursor, k []byte, delta *roaring.Bitmap) error {
 
 	if len(v) > 0 {
 		existing := roaring.New()
-		_, err = existing.ReadFrom(bytes.NewReader(v))
+		_, err = existing.FromBuffer(v)
 		if err != nil {
 			return err
 		}
@@ -26,7 +26,7 @@ func PutMergeByOr(c ethdb.Cursor, k []byte, delta *roaring.Bitmap) error {
 		delta.Or(existing)
 	}
 
-	//delta.RunOptimize()
+	delta.RunOptimize()
 	bufBytes, err := c.Reserve(k, int(delta.GetSerializedSizeInBytes()))
 	if err != nil {
 		panic(err)
@@ -69,7 +69,7 @@ func RemoveRange(db ethdb.MinDatabase, bucket string, k []byte, from, to uint64)
 		return db.Delete(bucket, k)
 	}
 
-	//bm.RunOptimize()
+	bm.RunOptimize()
 	newV := make([]byte, int(bm.GetSerializedSizeInBytes()))
 	_, err = bm.WriteTo(bytes.NewBuffer(newV[:0]))
 	if err != nil {
