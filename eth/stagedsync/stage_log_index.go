@@ -184,6 +184,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 
 	log.Info("UnwindLogIndex 4")
 
+	fmt.Printf("?? %t\n", useExternalTx)
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
 			return err
