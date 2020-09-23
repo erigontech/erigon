@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"sort"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -27,6 +26,9 @@ var LogIndexBlackList = map[string]bool{
 	string(common.FromHex("0000000000000000000000000000000000000000000000000000000000000000")): true,
 	string(common.FromHex("0000000000000000000000000000000000000000000000000000000000000001")): true,
 	string(common.FromHex("0000000000000000000000000000000000000000000000000000000000000002")): true,
+	string(common.FromHex("0000000000000000000000000000000000000000000000000000000000000003")): true,
+	string(common.FromHex("0000000000000000000000000000000000000000000000000000000000000004")): true,
+	string(common.FromHex("0000000000000000000000000000000000000000000000000000000000000005")): true,
 	//common.HexToHash("ea0f544916910bb1ff33390cbe54a3f5d36d298328578399311cde3c9a750686"):  true,
 	//common.HexToHash("009f837f1feddc3de305fab200310a83d2871686078dab617c02b44360c9e236"):  true,
 	//common.HexToHash("00000000000000000000000048175da4c20313bcb6b62d74937d3ff985885701"):  true,
@@ -229,7 +231,7 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 	for k := range inMem {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	//sort.Strings(keys)
 
 	var total uint64
 	for _, b := range inMem {
@@ -259,7 +261,7 @@ func truncateBitmaps(db ethdb.Database, bucket string, inMem map[string]bool, fr
 	for k := range inMem {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	//sort.Strings(keys)
 	for _, k := range keys {
 		if _, ok := LogIndexBlackList[k]; ok {
 			continue
