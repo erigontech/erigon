@@ -3,11 +3,14 @@ package bitmapdb
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"time"
 )
 
 func PutMergeByOr(c ethdb.Cursor, k []byte, delta *roaring.Bitmap) error {
+	t := time.Now()
 	v, err := c.SeekExact(k)
 	if err != nil {
 		panic(err)
@@ -32,6 +35,12 @@ func PutMergeByOr(c ethdb.Cursor, k []byte, delta *roaring.Bitmap) error {
 	_, err = delta.WriteTo(bytes.NewBuffer(bufBytes[:0]))
 	if err != nil {
 		return err
+	}
+	s := time.Since(t)
+	if s > 10*time.Millisecond {
+		fmt.Printf("2: %x %s %d\n", k, s, len(bufBytes))
+		delta.RunOptimize()
+		fmt.Printf("2: %d\n", delta.GetSerializedSizeInBytes())
 	}
 	return nil
 }
