@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"runtime"
 	"time"
@@ -319,6 +320,9 @@ func stageLogIndex(ctx context.Context) error {
 	if err := db.Walk(dbutils.LogIndex, nil, 0, func(k, v []byte) (bool, error) {
 		if len(v) > 4096 {
 			fmt.Printf("%d %x\n", len(v), k)
+			m := roaring.New()
+			m.FromBuffer(v)
+			fmt.Printf("card: %d\n", m.GetCardinality())
 		}
 
 		count++
