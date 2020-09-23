@@ -319,7 +319,7 @@ func stageLogIndex(ctx context.Context) error {
 	max := 0
 	count := 0
 	if err := db.Walk(dbutils.LogIndex, nil, 0, func(k, v []byte) (bool, error) {
-		if len(v) > 600_000 {
+		if len(v) > 1_000_000 {
 			fmt.Printf("%d %x\n", len(v), k)
 			m := roaring.New()
 			m.ReadFrom(bytes.NewReader(v))
@@ -332,7 +332,7 @@ func stageLogIndex(ctx context.Context) error {
 			})
 			m2 = roaring.AddOffset64(m2, -int64(m2.Minimum()))
 			m2.RunOptimize()
-			//fmt.Printf("%d\n", m.ToArray())
+			fmt.Printf("%d\n", m.ToArray())
 			fmt.Printf("after opt: %d\n", m2.GetSerializedSizeInBytes())
 		}
 
