@@ -214,7 +214,7 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 	return nil
 }
 
-func truncateBitmaps(db ethdb.Database, bucket string, inMem map[string]bool, from, to uint64) error {
+func truncateBitmaps(db ethdb.MinDatabase, bucket string, inMem map[string]bool, from, to uint64) error {
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)

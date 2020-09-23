@@ -322,7 +322,7 @@ func stageLogIndex(ctx context.Context) error {
 		if len(v) > 1_000_000 {
 			fmt.Printf("%d %x\n", len(v), k)
 			m := roaring.New()
-			m.ReadFrom(bytes.NewReader(v))
+			_, _ = m.ReadFrom(bytes.NewReader(v))
 			fmt.Printf("card: %d\n", m.GetCardinality())
 			m.RunOptimize()
 			m2 := roaring.New()
