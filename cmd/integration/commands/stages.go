@@ -311,54 +311,6 @@ func stageLogIndex(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	//total := 0
-	//max := 0
-	//count := 0
-	//if err := db.Walk(dbutils.LogIndex, nil, 0, func(k, v []byte) (bool, error) {
-	//	if len(v) > 1_000_000 {
-	//		fmt.Printf("%d %x\n", len(v), k)
-	//		m := roaring.New()
-	//		_, _ = m.ReadFrom(bytes.NewReader(v))
-	//		fmt.Printf("card: %d\n", m.GetCardinality())
-	//		m.RunOptimize()
-	//		m2 := roaring.New()
-	//		old := uint32(0)
-	//		seqLen := uint32(0)
-	//		maxSeqLen := uint32(0)
-	//		m.Iterate(func(x uint32) bool {
-	//			if x-old == 1 {
-	//				old = x
-	//				seqLen++
-	//			} else {
-	//				old = x
-	//				if maxSeqLen < seqLen {
-	//					maxSeqLen = seqLen
-	//				}
-	//				seqLen = 0
-	//			}
-	//			m2.Add(x)
-	//			return true
-	//		})
-	//		//m2 = roaring.AddOffset64(m2, -int64(m2.Minimum()))
-	//		m2.RunOptimize()
-	//		fmt.Printf("maxSeqLen: %d\n", maxSeqLen)
-	//		//fmt.Printf("%d\n", m.ToArray())
-	//		fmt.Printf("after opt: %d\n", m2.GetSerializedSizeInBytes())
-	//	}
-	//
-	//	count++
-	//	total += len(v)
-	//	if max < len(v) {
-	//		max = len(v)
-	//	}
-	//	return true, nil
-	//}); err != nil {
-	//	panic(err)
-	//}
-	//fmt.Printf("avg: %.2f\n", float64(total)/float64(count))
-	//fmt.Printf("Max: %.2f\n", float64(max))
-	//return nil
-
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
@@ -376,9 +328,7 @@ func stageLogIndex(ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.LogIndex, UnwindPoint: s.BlockNumber - unwind}
-		if err := stagedsync.UnwindLogIndex(u, s, db, ch); err != nil {
-			return err
-		}
+		return stagedsync.UnwindLogIndex(u, s, db, ch)
 	}
 
 	if err := stagedsync.SpawnLogIndex(s, db, datadir, ch); err != nil {
