@@ -326,12 +326,25 @@ func stageLogIndex(ctx context.Context) error {
 			fmt.Printf("card: %d\n", m.GetCardinality())
 			m.RunOptimize()
 			m2 := roaring.New()
+			old := uint32(0)
+			seqLen := uint32(0)
+			maxSeqLen := uint32(0)
 			m.Iterate(func(x uint32) bool {
+				if old-x == 1 {
+					seqLen++
+				} else {
+					old = x
+					if maxSeqLen < seqLen {
+						maxSeqLen = seqLen
+					}
+					seqLen = 0
+				}
 				m2.Add(x)
 				return true
 			})
 			m2 = roaring.AddOffset64(m2, -int64(m2.Minimum()))
 			m2.RunOptimize()
+			fmt.Printf("maxSeqLen: %d\n", maxSeqLen)
 			//fmt.Printf("%d\n", m.ToArray())
 			fmt.Printf("after opt: %d\n", m2.GetSerializedSizeInBytes())
 		}
