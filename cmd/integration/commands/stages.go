@@ -83,6 +83,18 @@ var cmdStageHistory = &cobra.Command{
 	},
 }
 
+var cmdLogIndex = &cobra.Command{
+	Use:   "stage_log_index",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		if err := stageLogIndex(ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
 var cmdStageTxLookup = &cobra.Command{
 	Use:   "stage_tx_lookup",
 	Short: "",
@@ -151,6 +163,14 @@ func init() {
 	withDatadir(cmdStageHistory)
 
 	rootCmd.AddCommand(cmdStageHistory)
+
+	withChaindata(cmdLogIndex)
+	withReset(cmdLogIndex)
+	withBlock(cmdLogIndex)
+	withUnwind(cmdLogIndex)
+	withDatadir(cmdLogIndex)
+
+	rootCmd.AddCommand(cmdLogIndex)
 
 	withChaindata(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
@@ -283,6 +303,39 @@ func stageHashState(ctx context.Context) error {
 		return stagedsync.UnwindHashStateStage(u, stage6, db, datadir, ch)
 	}
 	return stagedsync.SpawnHashStateStage(stage6, db, datadir, ch)
+}
+
+func stageLogIndex(ctx context.Context) error {
+	core.UsePlainStateExecution = true
+
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	defer bc.Stop()
+
+	if reset {
+		if err := resetLogIndex(db); err != nil {
+			return err
+		}
+	}
+	execStage := progress(stages.Execution)
+	s := progress(stages.LogIndex)
+	log.Info("Stage exec", "progress", execStage.BlockNumber)
+	log.Info("Stage log index", "progress", s.BlockNumber)
+	ch := ctx.Done()
+
+	if unwind > 0 {
+		u := &stagedsync.UnwindState{Stage: stages.LogIndex, UnwindPoint: s.BlockNumber - unwind}
+		if err := stagedsync.UnwindLogIndex(u, s, db, ch); err != nil {
+			return err
+		}
+	}
+
+	if err := stagedsync.SpawnLogIndex(s, db, datadir, ch); err != nil {
+		return err
+	}
+	return nil
 }
 
 func stageHistory(ctx context.Context) error {

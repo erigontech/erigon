@@ -99,6 +99,9 @@ func resetState(_ context.Context) error {
 	if err := resetHistory(db); err != nil {
 		return err
 	}
+	if err := resetLogIndex(db); err != nil {
+		return err
+	}
 	if err := resetTxLookup(db); err != nil {
 		return err
 	}
@@ -178,6 +181,22 @@ func resetHistory(db *ethdb.ObjectDatabase) error {
 		return err
 	}
 	if err := stages.SaveStageUnwind(db, stages.StorageHistoryIndex, 0, nil); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func resetLogIndex(db *ethdb.ObjectDatabase) error {
+	if err := db.ClearBuckets(
+		dbutils.LogIndex,
+	); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(db, stages.LogIndex, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.LogIndex, 0, nil); err != nil {
 		return err
 	}
 
