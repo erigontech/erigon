@@ -201,6 +201,7 @@ func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) b
 }
 
 func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
+	defer func(t time.Time) { fmt.Printf("stage_log_index.go:204: %s\n", time.Since(t)) }(time.Now())
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
