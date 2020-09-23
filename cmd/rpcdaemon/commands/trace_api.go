@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -26,7 +27,7 @@ type TraceFilterRequest struct {
 	Count       *uint64           `json:"count"`
 }
 
-// TraceAPI
+// TraceAPI RPC interface into tracing API
 type TraceAPI interface {
 	Filter(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
 }
@@ -36,14 +37,16 @@ type TraceAPIImpl struct {
 	db        ethdb.KV
 	dbReader  ethdb.Getter
 	maxTraces uint64
+	traceType string
 }
 
-// NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewTraceAPI(db ethdb.KV, dbReader ethdb.Getter, maxTraces uint64) *TraceAPIImpl {
+// NewTraceAPI returns NewTraceAPI instance
+func NewTraceAPI(db ethdb.KV, dbReader ethdb.Getter, cfg *cli.Flags) *TraceAPIImpl {
 	return &TraceAPIImpl{
 		db:        db,
 		dbReader:  dbReader,
-		maxTraces: maxTraces,
+		maxTraces: cfg.MaxTraces,
+		traceType: cfg.TraceType,
 	}
 }
 
