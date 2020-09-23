@@ -2,6 +2,8 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"runtime"
 	"time"
 
@@ -310,6 +312,27 @@ func stageLogIndex(ctx context.Context) error {
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+
+	total := 0
+	max := 0
+	count := 0
+	if err := db.Walk(dbutils.LogIndex, nil, 0, func(k, v []byte) (bool, error) {
+		if len(v) > 512 {
+			fmt.Printf("%d %x\n", len(v), k)
+		}
+
+		count++
+		total += len(v)
+		if max < len(v) {
+			max = len(v)
+		}
+		return true, nil
+	}); err != nil {
+		panic(err)
+	}
+	fmt.Printf("avg: %.2f\n", float64(total)/float64(count))
+	fmt.Printf("Max: %.2f\n", float64(max))
+	return nil
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
