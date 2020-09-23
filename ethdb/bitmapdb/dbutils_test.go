@@ -182,7 +182,7 @@ func TestRoaringBitmapAddOffset2(t *testing.T) {
 	}
 }
 
-func TestRoaringBitmapAddOffset3(t *testing.T) {
+func TestSharding2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
@@ -192,8 +192,9 @@ func TestRoaringBitmapAddOffset3(t *testing.T) {
 
 	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 
-	{ // Simple encoding
+	{
 		k := []byte{1}
+		// Write/Read large bitmap works expected
 		for i := uint32(0); i < 3_000_000; i += 100_000 {
 			bm1 := roaring.New()
 			for j := uint32(0); j < i+100_000; j += 2 {
@@ -214,7 +215,8 @@ func TestRoaringBitmapAddOffset3(t *testing.T) {
 		expect.Xor(fromDb)
 		require.Equal(t, 0, int(expect.GetCardinality()))
 
-		err = bitmapdb.RemoveShardedRange(c, k, 2_000_000, 3_000_000) // [from, to)
+		// TrimShardedRange can remove large part
+		err = bitmapdb.TrimShardedRange(c, k, 2_000_000, 3_000_000) // [from, to)
 		require.NoError(t, err)
 
 		fromDb, err = bitmapdb.GetSharded2(c, k)
@@ -228,5 +230,17 @@ func TestRoaringBitmapAddOffset3(t *testing.T) {
 		}
 		expect.Xor(fromDb)
 		require.Equal(t, 0, int(expect.GetCardinality()))
+
+		// check that TrimShardedRange will preserve right interval: [from, to)
+		max := fromDb.Maximum()
+		err = bitmapdb.TrimShardedRange(c, k, 0, uint64(fromDb.Maximum())) // [from, to)
+		require.NoError(t, err)
+
+		fromDb, err = bitmapdb.GetSharded2(c, k)
+		require.NoError(t, err)
+		require.Equal(t, 1, int(fromDb.GetCardinality()))
+		require.Equal(t, int(max), int(fromDb.Maximum()))
+
 	}
+
 }

@@ -274,7 +274,7 @@ func truncateBitmaps(c ethdb.Cursor, inMem map[string]bool, from, to uint64) err
 			continue
 		}
 
-		if err := bitmapdb.RemoveShardedRange(c, []byte(k), from, to); err != nil {
+		if err := bitmapdb.TrimShardedRange(c, []byte(k), from, to); err != nil {
 			return nil
 		}
 	}

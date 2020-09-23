@@ -262,7 +262,7 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) 
 
 // RemoveRange - gets existing bitmap in db and call RemoveRange operator on it.
 // !Important: [from, to)
-func RemoveShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
+func TrimShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 	t := time.Now()
 
 	for k, v, err := c.Seek(key); k != nil; k, v, err = c.Next() {
@@ -284,7 +284,11 @@ func RemoveShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 
 		bm.RemoveRange(from, to)
 		if bm.GetCardinality() == 0 { // don't store empty bitmaps
-			return c.DeleteCurrent()
+			err = c.DeleteCurrent()
+			if err != nil {
+				return err
+			}
+			continue
 		}
 
 		bm.RunOptimize()
@@ -325,6 +329,5 @@ func GetSharded2(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
 		shards = append(shards, bm)
 	}
 
-	fmt.Printf("%d\n", len(shards))
 	return roaring.FastOr(shards...), nil
 }
