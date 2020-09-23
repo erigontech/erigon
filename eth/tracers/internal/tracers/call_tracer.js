@@ -61,7 +61,12 @@
 			if (this.callstack[left-1].calls === undefined) {
 				this.callstack[left-1].calls = [];
 			}
-			this.callstack[left-1].calls.push({type: op});
+			var call = {
+				type:    op,
+				from:    toHex(log.contract.getAddress()),
+				//value:   '0x' + log.stack.peek(0).toString(16)
+			};
+			this.callstack[left-1].calls.push(call);
 			return
 		}
 		// If a new method invocation is being done, add to the call stack
