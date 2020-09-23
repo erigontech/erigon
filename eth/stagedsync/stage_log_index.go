@@ -20,7 +20,7 @@ import (
 
 const (
 	logIndicesMemLimit       = 1 * datasize.GB
-	logIndicesSingleMemLimit = 32 * datasize.KB
+	logIndicesSingleMemLimit = 16 * datasize.KB
 	logIndicesCheckSizeEvery = 1 * time.Minute
 )
 
@@ -105,7 +105,11 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("Progress", "blockNum", blockNum)
+			sz, err := tx.(ethdb.HasTx).Tx().BucketSize(dbutils.LogIndex2)
+			if err != nil {
+				return err
+			}
+			log.Info("Progress", "blockNum", blockNum, "bucketSize", common.StorageSize(sz))
 		case <-checkFlushEvery.C:
 			if needFlush(indices, logIndicesMemLimit, logIndicesSingleMemLimit) {
 				if err := flushBitmaps(logIndexCursor, indices); err != nil {
