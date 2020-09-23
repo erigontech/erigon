@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/big"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
@@ -13,13 +14,30 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
 // TraceAPI RPC interface into tracing API
 type TraceAPI interface {
+	// Ad-hoc
+	// Call(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
+	// CallMany(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
+	// RawTransaction(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
+	// ReplayBlockTransactions(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
+	// ReplayTransaction(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
+
+	// Filtering
+	Block(ctx context.Context, blockNr rpc.BlockNumber) ([]interface{}, error)
 	Filter(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
+	Get(ctx context.Context, txHash common.Hash, txIndicies []hexutil.Uint64) (interface{}, error)
+	Transaction(ctx context.Context, txHash common.Hash) ([]interface{}, error)
+
+	// Custom (turbo geth exclusive)
+	BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (big.Int, error)
+	UncleRewards(ctx context.Context, blockNr rpc.BlockNumber) ([]big.Int, error)
+	Issuance(ctx context.Context, blockNr rpc.BlockNumber) (big.Int, error)
 }
 
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
@@ -98,7 +116,6 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 // Filter Implements trace_filter
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]interface{}, error) {
 	var filteredTransactionsHash []common.Hash
-	resp := []interface{}{}
 	var maxTracesCount uint64
 	var offset uint64
 	var skipped uint64
@@ -228,8 +245,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
 	traceType := "callTracer"
-	for _, hash := range filteredTransactionsHash {
-		_, blockHash, _, txIndex := rawdb.ReadTransaction(api.dbReader, hash)
+	traces := []interface{}{}
+	for _, txHash := range filteredTransactionsHash {
+		_, blockHash, _, txIndex := rawdb.ReadTransaction(api.dbReader, txHash)
 		msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, api.db, blockHash, txIndex)
 		if err != nil {
 			return nil, err
@@ -238,7 +256,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 		if err != nil {
 			return nil, err
 		}
-		resp = append(resp, trace)
+		traces = append(traces, trace)
 	}
-	return resp, nil
+	return traces, nil
 }
