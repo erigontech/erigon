@@ -318,11 +318,13 @@ func stageLogIndex(ctx context.Context) error {
 	max := 0
 	count := 0
 	if err := db.Walk(dbutils.LogIndex, nil, 0, func(k, v []byte) (bool, error) {
-		if len(v) > 4096 {
+		if len(v) > 10_000 {
 			fmt.Printf("%d %x\n", len(v), k)
 			m := roaring.New()
 			m.FromBuffer(v)
 			fmt.Printf("card: %d\n", m.GetCardinality())
+			m.RunOptimize()
+			fmt.Printf("after opt: %d\n", m.GetSerializedSizeInBytes())
 		}
 
 		count++
