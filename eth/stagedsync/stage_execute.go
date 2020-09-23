@@ -280,12 +280,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	}
 	if writeReceipts {
 		if err := stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (bool, error) {
-			// Convert the receipts from their storage form to their internal representation
-			storageReceipts := []*types.ReceiptForStorage{}
-			if err := rlp.DecodeBytes(v, &storageReceipts); err != nil {
-				return false, fmt.Errorf("invalid receipt array RLP: %w, k=%x", err, k)
-			}
-
 			if err := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err != nil {
 				return false, fmt.Errorf("unwind Execution: delete receipts: %v", err)
 			}
