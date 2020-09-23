@@ -40,36 +40,3 @@ Date:   Wed Sep 23 15:18:17 2020 +0200
     This change adds a test framework for the "eth" protocol and some basic
     tests. The tests can be run using the './devp2p rlpx eth-test' command.
 
-commit c1544423d655f540b55bb6ec0e7167dad9683c42
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Wed Sep 23 13:08:40 2020 +0200
-
-    internal/ethapi: fix nil deref + fix estimateGas console bindings (#21601)
-    
-    * tried to fix
-    
-    * fix for js api
-    
-    * fix for nil pointer ex
-    
-    * rev space
-    
-    * rev space
-    
-    * input call formatter
-
-commit e5defccd581880101aa0897705e3e9c3735a8186
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed Sep 23 17:44:09 2020 +0800
-
-    trie: extend range proof (#21250)
-    
-    * trie: support non-existent right proof
-    
-    * trie: improve test
-    
-    * trie: minor linter fix
-    
-    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
-
-
