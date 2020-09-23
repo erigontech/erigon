@@ -351,6 +351,7 @@ func stageHistory(ctx context.Context) error {
 		if err := resetHistory(db); err != nil {
 			return err
 		}
+		return nil
 	}
 	execStage := progress(stages.Execution)
 	stage7 := progress(stages.AccountHistoryIndex)
