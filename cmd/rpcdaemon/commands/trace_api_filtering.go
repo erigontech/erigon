@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -17,8 +18,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-// Block Implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) ([]interface{}, error) {
+// Transaction Implements trace_transaction
+func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) ([]interface{}, error) {
 	var stub []interface{}
 	return stub, nil
 }
@@ -29,8 +30,8 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 	return stub, nil
 }
 
-// Transaction Implements trace_transaction
-func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) ([]interface{}, error) {
+// Block Implements trace_block
+func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) ([]interface{}, error) {
 	var stub []interface{}
 	return stub, nil
 }

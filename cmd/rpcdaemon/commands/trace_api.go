@@ -22,10 +22,10 @@ type TraceAPI interface {
 	// ReplayTransaction(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
 
 	// Filtering
+	Transaction(ctx context.Context, txHash common.Hash) ([]interface{}, error)
+	Get(ctx context.Context, txHash common.Hash, txIndicies []hexutil.Uint64) (interface{}, error)
 	Block(ctx context.Context, blockNr rpc.BlockNumber) ([]interface{}, error)
 	Filter(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
-	Get(ctx context.Context, txHash common.Hash, txIndicies []hexutil.Uint64) (interface{}, error)
-	Transaction(ctx context.Context, txHash common.Hash) ([]interface{}, error)
 
 	// Custom (turbo geth exclusive)
 	BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
