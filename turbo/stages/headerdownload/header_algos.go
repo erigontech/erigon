@@ -478,6 +478,44 @@ func (h *Heap) Pop() interface{} {
 
 const AnchorSerLen = 32 /* ParentHash */ + 8 /* powDepth */ + 16 /* totalDifficulty */ + 8 /* maxTipHeight */
 
+func (hd *HeaderDownload) CheckFiles() error {
+	fileInfos, err := ioutil.ReadDir(hd.filesDir)
+	if err != nil {
+		return err
+	}
+	var buffer [HeaderSerLength]byte
+	var anchorBuf [AnchorSerLen]byte
+	for _, fileInfo := range fileInfos {
+		f, err1 := os.Open(path.Join(hd.filesDir, fileInfo.Name()))
+		if err1 != nil {
+			return fmt.Errorf("open file %s: %v", fileInfo.Name(), err1)
+		}
+		r := bufio.NewReader(f)
+		if _, err = io.ReadFull(r, anchorBuf[:8]); err != nil {
+			fmt.Printf("reading anchor sequence and count from file: %v\n", err)
+			continue
+		}
+		anchorCount := int(binary.BigEndian.Uint32((anchorBuf[4:])))
+		for i := 0; i < anchorCount; i++ {
+			if _, err = io.ReadFull(r, anchorBuf[:]); err != nil {
+				fmt.Printf("reading anchor %x from file: %v\n", i, err)
+			}
+		}
+		for {
+			var header types.Header
+			if _, err = io.ReadFull(r, buffer[:]); err != nil {
+				if !errors.Is(err, io.EOF) {
+					fmt.Printf("reading header from file: %v\n", err)
+				}
+				break
+			}
+			DeserialiseHeader(&header, buffer[:])
+			fmt.Printf("Read header %d from file %s\n", header.Number.Uint64(), fileInfo.Name())
+		}
+	}
+	return nil
+}
+
 func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
@@ -557,9 +595,6 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 	var prevHash common.Hash // Hash of previously seen header - to filter out potential duplicates
 	for h.Len() > 0 {
 		he := (heap.Pop(h)).(HeapElem)
-		if he.blockHeight == 10911575 {
-			//fmt.Printf("Header %d in file %d\n", he.blockHeight, he.file.Name())
-		}
 		hash := he.header.Hash()
 		if hash != prevHash {
 			if he.blockHeight > prevHeight {

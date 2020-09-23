@@ -53,7 +53,6 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 		log.Error("Could not flush the buffer, will discard the data", "error", err1)
 		return
 	}
-	hd.AddSegmentToBuffer(segment, start, end)
 	currentTime := uint64(time.Now().Unix())
 	// There are 4 cases
 	if foundAnchor {
@@ -62,6 +61,7 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			if err1 := hd.Connect(segment, start, end, currentTime); err1 != nil {
 				log.Error("Connect failed", "error", err1)
 			} else {
+				hd.AddSegmentToBuffer(segment, start, end)
 				log.Info("Connected", "start", start, "end", end)
 			}
 		} else {
@@ -69,6 +69,7 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			if err1 := hd.ExtendDown(segment, start, end, powDepth, currentTime); err1 != nil {
 				log.Error("ExtendDown failed", "error", err1)
 			} else {
+				hd.AddSegmentToBuffer(segment, start, end)
 				log.Info("Extended Down", "start", start, "end", end)
 			}
 		}
@@ -80,14 +81,18 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
 				log.Error("ExtendUp failsegmented", "error", err1)
 			} else {
+				hd.AddSegmentToBuffer(segment, start, end)
 				log.Info("Extended Up", "start", start, "end", end)
 			}
 		}
 	} else {
 		// NewAnchor
-		if _, err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
+		if penalty, err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
 			log.Error("NewAnchor failed", "error", err1)
+		} else if penalty != headerdownload.NoPenalty {
+			log.Warn("NewAnchor returned", "penalty", penalty)
 		} else {
+			hd.AddSegmentToBuffer(segment, start, end)
 			log.Info("NewAnchor", "start", start, "end", end)
 		}
 	}
