@@ -332,7 +332,7 @@ func stageLogIndex(ctx context.Context) error {
 			})
 			m2 = roaring.AddOffset64(m2, -int64(m2.Minimum()))
 			m2.RunOptimize()
-			fmt.Printf("%d\n", m.ToArray())
+			//fmt.Printf("%d\n", m.ToArray())
 			fmt.Printf("after opt: %d\n", m2.GetSerializedSizeInBytes())
 		}
 
