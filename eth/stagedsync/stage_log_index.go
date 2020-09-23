@@ -171,15 +171,8 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 		}
 	}
 
-	keys := make([]string, 0, len(logsIndexKeys))
-	for k := range logsIndexKeys {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		if err := bitmapdb.RemoveRange(db, dbutils.LogIndex, []byte(k), u.UnwindPoint, s.BlockNumber+1); err != nil {
-			return nil
-		}
+	if err := truncateBitmaps(tx, dbutils.LogIndex, logsIndexKeys, u.UnwindPoint, s.BlockNumber+1); err != nil {
+		return err
 	}
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind AccountHistorytIndex: %w", err)
@@ -215,6 +208,21 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 		b := inMem[k]
 		if err := bitmapdb.PutMergeByOr(c, []byte(k), b); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+func truncateBitmaps(db ethdb.Database, bucket string, inMem map[string]bool, from, to uint64) error {
+	keys := make([]string, 0, len(inMem))
+	for k := range inMem {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if err := bitmapdb.RemoveRange(db, bucket, []byte(k), from, to); err != nil {
+			return nil
 		}
 	}
 
