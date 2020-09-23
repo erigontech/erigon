@@ -319,7 +319,7 @@ func stageLogIndex(ctx context.Context) error {
 	max := 0
 	count := 0
 	if err := db.Walk(dbutils.LogIndex, nil, 0, func(k, v []byte) (bool, error) {
-		if len(v) > 200_000 {
+		if len(v) > 300_000 {
 			fmt.Printf("%d %x\n", len(v), k)
 			m := roaring.New()
 			m.ReadFrom(bytes.NewReader(v))
