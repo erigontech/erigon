@@ -22,47 +22,57 @@ docker-compose:
 
 geth:
 	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 tg:
 	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 hack:
 	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack 
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/hack\" to launch hack."
 
 tester:
 	$(GOBUILD) -o $(GOBIN)/tester ./cmd/tester 
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tester\" to launch tester."
 
 rpctest:
 	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest 
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
 
 state:
 	$(GOBUILD) -o $(GOBIN)/state ./cmd/state 
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/state\" to launch state."
 
 restapi:
 	$(GOBUILD) -o $(GOBIN)/restapi ./cmd/restapi 
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/restapi\" to launch restapi."
 
 run-web-ui:
 	@echo 'Web: Turbo-Geth Debug Utility is launching...'
 	@cd debug-web-ui && yarn start
-
+	
 pics:
 	$(GOBUILD) -o $(GOBIN)/pics ./cmd/pics 
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
 rpcdaemon:
 	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/rpcdaemon 
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
 semantics: semantics/z3/build/libz3.a
 	build/env.sh go run build/ci.go install ./cmd/semantics
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/semantics\" to launch semantics."
 
 semantics/z3/build/libz3.a:
 	cd semantics/z3 && python scripts/mk_make.py --staticlib
@@ -71,11 +81,13 @@ semantics/z3/build/libz3.a:
 
 integration:
 	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration 
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
 headers:
 	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers 
-	@colorEcho -c blue -t "Done building."
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
 
 test: semantics/z3/build/libz3.a
 	$(GOTEST)
