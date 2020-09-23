@@ -2,8 +2,12 @@ package commands
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
 // TODO:(tjayrush)
@@ -45,6 +49,9 @@ type ParityTrace struct {
 	Type                string      `json:"type"`
 }
 
+// ParityTraces An array of parity traces
+type ParityTraces []ParityTrace
+
 // TraceAction A parity formatted trace action
 type TraceAction struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
@@ -70,9 +77,6 @@ type TraceResult struct {
 	GasUsed string `json:"gasUsed,omitempty"`
 	Output  string `json:"output,omitempty"`
 }
-
-// ParityTraces what
-type ParityTraces []ParityTrace
 
 // Allows for easy printing of a geth trace for debugging
 func (p GethTrace) String() string {
@@ -113,4 +117,81 @@ func (t ParityTrace) String() string {
 	ret += fmt.Sprintf("TransactionPosition: %d\n", t.TransactionPosition)
 	ret += fmt.Sprintf("Type: %s\n", t.Type)
 	return ret
+}
+
+// Takes a hierarchical Geth trace with fields of different meaning stored in the same named fields depending on 'type'. Parity traces
+// are flattened depth first and each field is put in its proper place
+func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, tx *types.Transaction, txIndex uint64, depth []int) ParityTraces {
+	var traces ParityTraces // nolint prealloc
+	var pt ParityTrace
+
+	callType := strings.ToLower(gethTrace.Type)
+	if callType == "create" {
+		pt.Action.CallType = ""
+		pt.Action.From = gethTrace.From
+		pt.Action.Init = gethTrace.Input
+		pt.Result.Address = gethTrace.To
+		pt.Result.Output = ""
+		pt.Action.Value = gethTrace.Value
+		pt.Result.Code = gethTrace.Output
+		pt.Action.Gas = gethTrace.Gas
+		pt.Result.GasUsed = gethTrace.GasUsed
+
+	} else if callType == "selfdestruct" {
+		pt.Action.CallType = ""
+		pt.Action.Input = gethTrace.Input
+		pt.Result.Output = gethTrace.Output
+		pt.Action.Value = gethTrace.Value
+		pt.Action.Gas = gethTrace.Gas
+		pt.Result.GasUsed = gethTrace.GasUsed
+		pt.Action.SelfDestructed = gethTrace.From
+		pt.Action.RefundAddress = gethTrace.To
+		acc, err := rpchelper.GetAccount(api.db, blockNumber, common.HexToAddress(gethTrace.From))
+		if err != nil {
+			return traces
+		}
+		if acc != nil {
+			val := acc.Balance.ToBig()
+			pt.Action.Balance = (*val).String()
+		}
+	} else {
+		pt.Action.CallType = callType
+		pt.Action.Input = gethTrace.Input
+		pt.Action.From = gethTrace.From
+		pt.Action.To = gethTrace.To
+		pt.Result.Output = gethTrace.Output
+		pt.Action.Value = gethTrace.Value
+		pt.Result.Code = "" // gethTrace.XXX
+		pt.Action.Gas = gethTrace.Gas
+		pt.Result.GasUsed = gethTrace.GasUsed
+
+		if pt.Action.Gas == "0xdeadbeef" {
+			a, _ := hexutil.DecodeUint64(pt.Action.Gas)
+			b, _ := hexutil.DecodeUint64(pt.Result.GasUsed)
+			c := a - b
+			pt.Action.Gas = hexutil.EncodeUint64(c)
+			pt.Result.GasUsed = hexutil.EncodeUint64(0)
+		}
+	}
+
+	pt.BlockHash = blockHash
+	pt.BlockNumber = blockNumber
+	pt.Subtraces = len(gethTrace.Calls)
+	pt.TraceAddress = depth
+	pt.TransactionHash = tx.Hash()
+	pt.TransactionPosition = txIndex
+	pt.Type = callType
+	if pt.Type == "delegatecall" || pt.Type == "staticcall" {
+		pt.Type = "call"
+	}
+
+	traces = append(traces, pt)
+
+	for i, item := range gethTrace.Calls {
+		newDepth := append(depth, i)
+		subTraces := api.convertToParityTrace(*item, blockHash, blockNumber, tx, txIndex, newDepth)
+		traces = append(traces, subTraces...)
+	}
+
+	return traces
 }

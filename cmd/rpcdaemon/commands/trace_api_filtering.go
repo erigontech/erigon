@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -24,9 +25,30 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) ([
 }
 
 // Get Implements trace_get
+// TODO(tjayrush): This command should take an rpc.BlockNumber .This would allow blockNumbers and 'latest',
+// TODO(tjayrush): 'pending', etc. Parity only accepts block hash.
+//
+// TODO(tjayrush): Also, for some reason, Parity definesthe second parameter as an array of indexes, but
+// TODO(tjayrush): only accepts a single one
 func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64) (interface{}, error) {
-	var stub []interface{}
-	return stub, nil
+	// TODO(tjayrush): Parity fails if it gets more than a single index. Returns nothing in this case.
+	if len(indicies) > 1 {
+		return nil, nil
+	}
+
+	traces, err := api.getTransactionTraces(ctx, txHash)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO(tjayrush): For some reason, the 'get' index is one-based
+	firstIndex := int(indicies[0]) + 1
+	for i, trace := range traces {
+		if i == firstIndex {
+			return trace, nil
+		}
+	}
+	return nil, err
 }
 
 // Block Implements trace_block
@@ -166,7 +188,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 	chainContext := adapter.NewChainContext(api.dbReader)
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
-	traceType := "callTracer"
+	traceType := "callTracer" // nolint goconst
 	traces := []interface{}{}
 	for _, txHash := range filteredTransactionsHash {
 		_, blockHash, _, txIndex := rawdb.ReadTransaction(api.dbReader, txHash)
@@ -236,6 +258,46 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 	})
 
 	return i != len(filter)
+}
+
+// getTransactionTraces - returns the traces for a single transaction. Used by trace_get and trace_transaction.
+// TODO(tjayrush):
+// Implementation Notes:
+// -- For convienience, we return both Parity and Geth traces for now. In the future we will either separate
+//    these functions or eliminate Geth traces
+// -- The function convertToParityTraces takes a hierarchical Geth trace and returns a flattened Parity trace
+func (api *TraceAPIImpl) getTransactionTraces(ctx context.Context, txHash common.Hash) (ParityTraces, error) {
+	getter := adapter.NewBlockGetter(api.dbReader)
+	chainContext := adapter.NewChainContext(api.dbReader)
+	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
+	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+	traceType := "callTracer" // nolint: goconst
+
+	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, txHash)
+	// _, blockHash, _, txIndex := rawdb.ReadTransaction(api.dbReader, txHash)
+	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, api.db, blockHash, txIndex)
+	if err != nil {
+		return nil, err
+	}
+
+	trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, &eth.TraceConfig{Tracer: &traceType})
+	if err != nil {
+		return nil, err
+	}
+
+	traceJSON, ok := trace.(json.RawMessage)
+	if !ok {
+		return nil, fmt.Errorf("unknown type in trace_filter")
+	}
+
+	var gethTrace GethTrace
+	jsonStr, _ := traceJSON.MarshalJSON()
+	json.Unmarshal(jsonStr, &gethTrace) // nolint errcheck
+
+	resp := ParityTraces{}
+	converted := api.convertToParityTrace(gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
+	resp = append(resp, converted...)
+	return resp, nil
 }
 
 // TraceFilterRequest represents the arguments for trace_filter
