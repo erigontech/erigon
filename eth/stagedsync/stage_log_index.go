@@ -76,7 +76,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("progress", "blockNum", blockNum)
+			log.Info("Progress", "blockNum", blockNum)
 		case <-checkFlushEvery.C:
 			if needFlush(indices, logIndicesMemLimit) {
 				if err := flushBitmaps(logIndexCursor, indices); err != nil {
