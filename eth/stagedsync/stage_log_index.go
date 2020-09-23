@@ -23,6 +23,30 @@ const (
 	logIndicesCheckSizeEvery = 1 * time.Minute
 )
 
+var LogIndexBlackList = map[string]bool{
+	string(common.FromHex("0000000000000000000000000000000000000000000000000000000000000000")): true,
+	//common.HexToHash("ea0f544916910bb1ff33390cbe54a3f5d36d298328578399311cde3c9a750686"):  true,
+	//common.HexToHash("009f837f1feddc3de305fab200310a83d2871686078dab617c02b44360c9e236"):  true,
+	//common.HexToHash("00000000000000000000000048175da4c20313bcb6b62d74937d3ff985885701"):  true,
+	//common.HexToHash("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"):  true,
+	//common.HexToHash("0000000000000000000000000000000000000000000000000000000000000058"):  true,
+	//common.HexToHash("90890809c654f11d6e72a28fa60149770a0d11ec6c92319d6ceb2bb0a4ea1a15"):  true,
+	//common.HexToHash("cc494284735b76f0235b8a507abc67ce930b369dac12b8a45e49510ccee0abe5"):  true,
+	//common.HexToHash("f10cb5dcb691bb26c2685b3fd72f4ca4008c33eafd1ee88c27210ef1db722459"):  true,
+	//common.HexToHash("e1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c"):  true,
+	//common.HexToHash("5b59a4139d8c317549b49f57962d4733012f0e76915ab0828c22548892d71782"):  true,
+	//common.HexToHash("0000000000000000000000007fb3b877f2d85d92d4172764ea5cd68982cbe53e"):  true,
+	//common.HexToHash("000000000000000000000000490c0dd13bfea5865ca985297cf2bed3f77beb5d"):  true,
+	//common.HexToHash("000000000000000000000000b3089884fa970922e6c099e818a8164bd0d402d2"):  true,
+	//common.HexToHash("0000000000000000000000002a65aca4d5fc5b5c859090a6c34d164135398226"):  true,
+	//common.HexToHash("000000000000000000000000b5606469f317018d21f504b6e1518e54b23fa761"):  true,
+	//common.HexToHash("000000000000000000000000939292f2b41b74ccb7261a452de556ba2c45db86"):  true,
+	//common.HexToHash("0000000000000000000000009c4ea8d25d6150a8ed2848fc745158aad926bf8d"):  true,
+	//common.HexToHash("dbccb92686efceafb9bb7e0394df7f58f71b954061b81afb57109bf247d3d75a"):  true,
+	//common.HexToHash("95c567a11896e793a41e067198ab5c4a4bdc7b3cf1182571fe911ec7e1426853"):  true,
+	//common.HexToHash("23919512b2162ddc59b67a65e3b03c419d4105366f7d4a632f5d3c3bee9b1cff"):  true,
+}
+
 func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
@@ -211,6 +235,9 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 	}
 
 	for _, k := range keys {
+		if _, ok := LogIndexBlackList[k]; ok {
+			continue
+		}
 		b := inMem[k]
 		if err := bitmapdb.PutMergeByOr(c, []byte(k), b); err != nil {
 			return err
@@ -232,6 +259,10 @@ func truncateBitmaps(db ethdb.Database, bucket string, inMem map[string]bool, fr
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
+		if _, ok := LogIndexBlackList[k]; ok {
+			continue
+		}
+
 		if err := bitmapdb.RemoveRange(db, bucket, []byte(k), from, to); err != nil {
 			return nil
 		}
