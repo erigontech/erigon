@@ -343,7 +343,7 @@ func stageLogIndex(ctx context.Context) error {
 				m2.Add(x)
 				return true
 			})
-			m2 = roaring.AddOffset64(m2, -int64(m2.Minimum()))
+			//m2 = roaring.AddOffset64(m2, -int64(m2.Minimum()))
 			m2.RunOptimize()
 			fmt.Printf("maxSeqLen: %d\n", maxSeqLen)
 			//fmt.Printf("%d\n", m.ToArray())
