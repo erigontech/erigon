@@ -326,7 +326,10 @@ func stageLogIndex(ctx context.Context) error {
 			fmt.Printf("card: %d\n", m.GetCardinality())
 			m.RunOptimize()
 			m2 := roaring.New()
-			m2.Or(m)
+			m.Iterate(func(x uint32) bool {
+				m2.Add(x)
+				return true
+			})
 			m2.RunOptimize()
 			//fmt.Printf("%d\n", m.ToArray())
 			fmt.Printf("after opt: %d\n", m2.GetSerializedSizeInBytes())
