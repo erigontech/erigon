@@ -182,40 +182,51 @@ func TestRoaringBitmapAddOffset2(t *testing.T) {
 	}
 }
 
-func TestRemoveRange2(t *testing.T) {
+func TestRoaringBitmapAddOffset3(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
+
 	tx, err := db.Begin(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.LogIndex2)
+	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 
 	{ // Simple encoding
 		k := []byte{1}
-		bm1 := roaring.NewBitmap()
-		bm1.Add(940287)
-		bm1.Add(940288)
-		err := bitmapdb.AppendShardedMergeByOr(c, k, bm1)
+		for i := uint32(0); i < 3_000_000; i += 100_000 {
+			bm1 := roaring.New()
+			for j := uint32(0); j < i+100_000; j += 2 {
+				bm1.Add(j)
+			}
+			err := bitmapdb.AppendShardedMergeByOr2(c, k, bm1)
+			require.NoError(t, err)
+		}
+
+		fromDb, err := bitmapdb.GetSharded2(c, k)
+		require.NoError(t, err)
+		expect := roaring.NewBitmap()
+		for i := uint32(0); i < 3_000_000; i += 100_000 {
+			for j := uint32(0); j < i+100_000; j += 2 {
+				expect.Add(j)
+			}
+		}
+		expect.Xor(fromDb)
+		require.Equal(t, 0, int(expect.GetCardinality()))
+
+		err = bitmapdb.RemoveShardedRange(c, k, 2_000_000, 3_000_000) // [from, to)
 		require.NoError(t, err)
 
-		bm2 := roaring.NewBitmap()
-		bm2.Add(1_000_000)
-		bm2.Add(1_000_001)
-		bm2.Add(1_000_002)
-		err = bitmapdb.AppendShardedMergeByOr(c, k, bm2)
+		fromDb, err = bitmapdb.GetSharded2(c, k)
 		require.NoError(t, err)
-		//err = bitmapdb.RemoveRange(tx, dbutils.LogIndex2, k, 1_000_001, 1_000_002) // [from, to)
-		//require.NoError(t, err)
 
-		bm3, err := bitmapdb.GetSharded(c, k)
-		require.NoError(t, err)
-		arr := bm3.ToArray()
-		require.Equal(t, 4, len(arr))
-		require.Equal(t, uint32(940287), arr[0])
-		require.Equal(t, uint32(940288), arr[1])
-		require.Equal(t, uint32(1_000_000), arr[2])
-		require.Equal(t, uint32(1_000_002), arr[3])
+		expect = roaring.New()
+		for i := uint32(0); i < 2_000_000; i += 100_000 {
+			for j := uint32(0); j < i+100_000; j += 2 {
+				expect.Add(j)
+			}
+		}
+		expect.Xor(fromDb)
+		require.Equal(t, 0, int(expect.GetCardinality()))
 	}
-
 }

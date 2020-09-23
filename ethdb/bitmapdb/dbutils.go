@@ -231,9 +231,9 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) 
 
 	if createNewShard {
 		newV := make([]byte, int(delta.GetSerializedSizeInBytes()))
-		newK := make([]byte, len(k)+2)
+		newK := make([]byte, len(key)+2)
 		delta.RunOptimize()
-		copy(newK, k)
+		copy(newK, key)
 		binary.BigEndian.PutUint16(newK[len(newK)-2:], ^sN)
 		_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
 		err = c.Put(newK, newV)
@@ -325,5 +325,6 @@ func GetSharded2(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
 		shards = append(shards, bm)
 	}
 
+	fmt.Printf("%d\n", len(shards))
 	return roaring.FastOr(shards...), nil
 }
