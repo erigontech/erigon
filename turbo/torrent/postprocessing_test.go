@@ -2,6 +2,9 @@ package torrent
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -37,7 +40,9 @@ func TestHeadersGenerateIndex(t *testing.T) {
 
 	//ethdb.NewLMDB().WithBucketsConfig()
 	db := ethdb.NewLMDB().InMem().WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
-	snKV := ethdb.NewSnapshotKV().For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).Path(snPath).DB(db).MustOpen()
+	snKV := ethdb.NewLMDB().Path(snPath).ReadOnly().WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
+
+	snKV = ethdb.NewSnapshotKV().For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).SnapshotDB(snKV).DB(db).MustOpen()
 	err = GenerateHeaderIndexes(context.Background(), ethdb.NewObjectDatabase(snKV))
 	if err != nil {
 		t.Fatal(err)
@@ -75,4 +80,47 @@ func generateHeaders(n int) []types.Header {
 		headers[i] = types.Header{Difficulty: new(big.Int).SetUint64(i), Number: new(big.Int).SetUint64(i)}
 	}
 	return headers
+}
+
+func TestDebugSnapshot(t *testing.T) {
+	snKV := ethdb.NewLMDB().Path("/media/b00ris/nvme/snapshotsync/tg/snapshots/headers/").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
+		}
+	}).MustOpen()
+	var prevHeader *types.Header
+	err:=snKV.View(context.Background(), func(tx ethdb.Tx) error {
+		c:=tx.Cursor(dbutils.HeaderPrefix)
+		k,v,err:=c.First()
+		for  {
+			if len(k)==0 && len(v)==0 {
+				break
+			}
+			if err!=nil {
+				t.Fatal(err)
+			}
+
+			fmt.Println(common.Bytes2Hex(k), binary.BigEndian.Uint64(k))
+			header := new(types.Header)
+			if err := rlp.DecodeBytes(v, header); err != nil {
+				t.Fatal(err)
+				return nil
+			}
+			if prevHeader!=nil {
+				if prevHeader.Number.Uint64()+1!=header.Number.Uint64() {
+					t.Fatal(prevHeader.Number.Uint64()!=header.Number.Uint64())
+				}
+				if prevHeader.Hash()!=header.ParentHash {
+					t.Fatal(prevHeader.Hash(), header.ParentHash)
+				}
+			}
+			k, v, err = c.Next()
+			prevHeader=header
+		}
+		return nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+
 }

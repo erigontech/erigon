@@ -58,7 +58,7 @@ func PostProcessBodies(db ethdb.Database) error {
 	}
 
 	if body==nil {
-		return fmt.Errorf("empty body for key", common.Bytes2Hex(k))
+		return fmt.Errorf("empty body for key %s", common.Bytes2Hex(k))
 	}
 
 	number:=binary.BigEndian.Uint64(k[:8])
