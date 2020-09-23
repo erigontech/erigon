@@ -132,7 +132,6 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 }
 
 func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}) error {
-	log.Info("UnwindLogIndex started")
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -149,6 +148,8 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 
 	logsIndexKeys := map[string]bool{}
 	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
+	log.Info("UnwindLogIndex started")
+
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(u.UnwindPoint + 1)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
 			return err
@@ -171,6 +172,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 			}
 		}
 	}
+	log.Info("UnwindLogIndex 2")
 
 	if err := truncateBitmaps(tx, dbutils.LogIndex, logsIndexKeys, u.UnwindPoint, s.BlockNumber+1); err != nil {
 		return err
@@ -178,6 +180,8 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind AccountHistorytIndex: %w", err)
 	}
+
+	log.Info("UnwindLogIndex 3")
 
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
@@ -223,6 +227,7 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 }
 
 func truncateBitmaps(db ethdb.MinDatabase, bucket string, inMem map[string]bool, from, to uint64) error {
+	defer func(t time.Time) { fmt.Printf("stage_log_index.go:230: %s\n", time.Since(t)) }(time.Now())
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
