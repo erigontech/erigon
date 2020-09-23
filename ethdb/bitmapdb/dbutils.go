@@ -207,25 +207,20 @@ func AppendShardedMergeByOr2(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) 
 	if err != nil {
 		return err
 	}
-	if k != nil {
-		if bytes.HasPrefix(k, key) {
-			existing := roaring.New()
-			_, err = existing.FromBuffer(v)
-			if err != nil {
-				return err
-			}
-
-			if len(v) < int(shard2) {
-				createNewShard = false
-				delta.Or(existing)
-			} else {
-				createNewShard = true
-				sN = ^binary.BigEndian.Uint16(k[len(k)-2:]) + 1
-			}
+	if k != nil && bytes.HasPrefix(k, key) {
+		existing := roaring.New()
+		_, err = existing.FromBuffer(v)
+		if err != nil {
+			return err
 		}
-	} else {
-		createNewShard = true
-		sN = 1
+
+		if len(v) < int(shard2) {
+			createNewShard = false
+			delta.Or(existing)
+		} else {
+			createNewShard = true
+			sN = ^binary.BigEndian.Uint16(k[len(k)-2:]) + 1
+		}
 	}
 
 	if createNewShard {
