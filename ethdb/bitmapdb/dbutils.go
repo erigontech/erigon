@@ -16,7 +16,7 @@ func PutMergeByOr(db ethdb.MinDatabase, bucket string, k []byte, delta *roaring.
 
 	if len(v) > 0 { // if found record in db - then get 'min' from db's value, otherwise get it from incoming bitmap
 		existing := roaring.New()
-		_, err = existing.FromBuffer(v)
+		_, err = existing.ReadFrom(bytes.NewReader(v))
 		if err != nil {
 			return err
 		}
