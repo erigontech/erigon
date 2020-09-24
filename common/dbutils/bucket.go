@@ -123,7 +123,7 @@ var (
 	//   delta - most recent changes (appendable)
 	//   hot_shard - merge delta here until hot_shard size < HotShardLimit, otherwise merge hot to cold
 	//   cold_shard - merge hot_shard here until cold_shard size < ColdShardLimit, otherwise mark hot as cold, create new hot from delta
-	// cold shards never merged for compaction - because it's expensive operation
+	// cold shards never merged for compaction - because it's expensive operation (expensive means attackable)
 	LogIndex  = "log_index"
 	LogIndex2 = "log_index2"
 
