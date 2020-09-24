@@ -449,8 +449,35 @@ func (hd *HeaderDownload) AnchorState() string {
 			sb.WriteString(fmt.Sprintf("{%8d-", anchor.blockHeight))
 			end := anchor.maxTipHeight
 			var sbb strings.Builder
+			var bs []int
 			for _, tipQueueItem := range *anchor.tipQueue {
-				sbb.WriteString(fmt.Sprintf("%d ", tipQueueItem.height))
+				bs = append(bs, int(tipQueueItem.height))
+			}
+			sort.Ints(bs)
+			for j, b := range bs {
+				if j == 0 {
+					sbb.WriteString(fmt.Sprintf("%d", b))
+				} else if j == len(bs)-1 {
+					if bs[j-1]+1 == b {
+						// Close interval
+						sbb.WriteString(fmt.Sprintf("-%d", b))
+					} else {
+						// Standalone
+						sbb.WriteString(fmt.Sprintf(" %d", b))
+					}
+				} else {
+					if bs[j-1]+1 == b {
+						if b+1 == bs[j+1] {
+							// Skip
+						} else {
+							// Close interval
+							sbb.WriteString(fmt.Sprintf("-%d", b))
+						}
+					} else {
+						// Open interval or standalone
+						sbb.WriteString(fmt.Sprintf(" %d", b))
+					}
+				}
 			}
 			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d (%s)}", end, end-anchor.blockHeight, anchor.tipQueue.Len(), sbb.String()))
 		}
