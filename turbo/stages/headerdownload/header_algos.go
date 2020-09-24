@@ -322,6 +322,7 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 		}
 		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
 	}
+	hd.anchorTree.Delete(AnchorItem{ID: newAnchor.anchorID, tipStretch: newAnchor.tipStretch()})
 	for _, anchor := range anchors {
 		hd.anchorTree.Delete(AnchorItem{tipStretch: anchor.tipStretch(), ID: anchor.anchorID})
 		for _, tipQueueItem := range *anchor.tipQueue {
@@ -854,6 +855,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 		uncleHash:            header.UncleHash,
 	}
 	hd.reserveTip()
+	hd.anchorTree.Delete(AnchorItem{ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
 	hd.tips[tipHash] = tip
 	heap.Push(anchor.tipQueue, AnchorTipItem{hash: tipHash, height: tip.blockHeight})
 	hd.tipCount++
@@ -873,6 +875,7 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 		blockHeight:          blockHeight,
 	}
 	hd.reserveTip()
+	hd.anchorTree.Delete(AnchorItem{ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
 	hd.tips[hash] = tip
 	heap.Push(anchor.tipQueue, AnchorTipItem{hash: hash, height: blockHeight})
 	if blockHeight > anchor.maxTipHeight {
@@ -909,6 +912,7 @@ func (hd *HeaderDownload) reserveTip() {
 		// Pick the anchor with the largest (maxTipHeight - minTipHeight) difference
 		anchor := hd.anchorTree.Min().(AnchorItem).anchor
 		fmt.Printf("Chose anchor %d with maxTipHeight %d, tips: %d\n", anchor.blockHeight, anchor.maxTipHeight, anchor.tipQueue.Len())
+		hd.anchorTree.Delete(AnchorItem{ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
 		tipItem := heap.Pop(anchor.tipQueue).(AnchorTipItem)
 		hd.anchorTree.ReplaceOrInsert(AnchorItem{anchor: anchor, ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
 		delete(hd.tips, tipItem.hash)
