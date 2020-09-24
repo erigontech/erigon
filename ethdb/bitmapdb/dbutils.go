@@ -84,7 +84,7 @@ func hotShardOverflow(c ethdb.Cursor, initialKey []byte, hotShardN uint16, hotV 
 	}
 
 	if coldK == nil || !bytes.HasPrefix(coldK, initialKey) {
-		return 0, fmt.Errorf("No cold shard? key=%x, hotShardN=%d, found=%x\n", initialKey, hotShardN, coldK)
+		return 0, fmt.Errorf("cold shard not found in db: key=%x, hotShardN=%d, found=%x\n", initialKey, hotShardN, coldK)
 	}
 
 	if len(coldV) > int(ColdShardLimit) { // cold shard is too big, write delta to `hotShardN + 1` - it will turn hot to cold automatically
