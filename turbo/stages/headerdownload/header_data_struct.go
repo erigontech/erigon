@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/petar/GoLLRB/llrb"
 )
 
 // AnchorTipItem is element of the priority queue of tips belonging to an anchor
@@ -56,6 +57,29 @@ type Anchor struct {
 	blockHeight     uint64
 	timestamp       uint64
 	maxTipHeight    uint64 // Maximum value of `blockHeight` of all tips associated with this anchor
+	anchorID        int    // Unique ID of this anchor to be able to find it in the balanced tree
+}
+
+// AnchorItem is a representation on a anchor in the balanced tree
+type AnchorItem struct {
+	tipStretch uint64 // Difference between maxTipHeight and minTipHeight for all tips of this anchor
+	ID         int    // Unique identifier of the anchor
+	anchor     *Anchor
+}
+
+func (a AnchorItem) Less(bi llrb.Item) bool {
+	b := bi.(AnchorItem)
+	if a.tipStretch == b.tipStretch {
+		return a.ID < b.ID
+	}
+	return a.tipStretch > b.tipStretch
+}
+
+func (a *Anchor) tipStretch() uint64 {
+	if a.tipQueue.Len() == 0 {
+		return 0
+	}
+	return a.maxTipHeight - (*a.tipQueue)[0].height
 }
 
 // AnchorQueue is a priority queue of anchors
@@ -154,13 +178,14 @@ type HeaderDownload struct {
 	anchorSequence         uint32 // Sequence number to be used for recording anchors next time the buffer is flushed
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
-	anchorQueue            *AnchorQueue              // Priority queue of anchors for restricting the number of tips kept in memory
-	tips                   map[common.Hash]*Tip      // Tips by tip hash
-	tipCount               int                       // Total number of tips associated to all anchors
-	tipLimit               int                       // Maximum allowed number of tips
-	initPowDepth           int                       // powDepth assigned to the newly inserted anchor
-	newAnchorFutureLimit   uint64                    // How far in the future (relative to current time) the new anchors are allowed to be
-	newAnchorPastLimit     uint64                    // How far in the past (relative to current time) the new anchors are allowed to be
+	anchorTree             *llrb.LLRB                // Balanced tree of anchors sorted by tip stretch (longest stretch first)
+	nextAnchorID           int
+	tips                   map[common.Hash]*Tip // Tips by tip hash
+	tipCount               int                  // Total number of tips associated to all anchors
+	tipLimit               int                  // Maximum allowed number of tips
+	initPowDepth           int                  // powDepth assigned to the newly inserted anchor
+	newAnchorFutureLimit   uint64               // How far in the future (relative to current time) the new anchors are allowed to be
+	newAnchorPastLimit     uint64               // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
 	requestQueue           *RequestQueue
 	calcDifficultyFunc     CalcDifficultyFunc
@@ -220,7 +245,7 @@ func NewHeaderDownload(filesDir string,
 		tipLimit:             tipLimit,
 		initPowDepth:         initPowDepth,
 		requestQueue:         &RequestQueue{},
-		anchorQueue:          &AnchorQueue{},
+		anchorTree:           llrb.New(),
 		calcDifficultyFunc:   calcDifficultyFunc,
 		verifySealFunc:       verifySealFunc,
 		newAnchorFutureLimit: newAnchorFutureLimit,
@@ -228,7 +253,6 @@ func NewHeaderDownload(filesDir string,
 	}
 	hd.tips = make(map[common.Hash]*Tip)
 	heap.Init(hd.requestQueue)
-	heap.Init(hd.anchorQueue)
 	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd
 }
