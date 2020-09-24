@@ -141,7 +141,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	blockNumbers.AddRange(uint64(begin), uint64(end+1)) // [min,max)
 
 	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
-	topicsBitmap, err := getTopicsBitmap(c, crit.Topics, end)
+	topicsBitmap, err := getTopicsBitmap(c, crit.Topics)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c ethdb.Cursor, topics [][]common.Hash, maxBlockNum uint32) (*gocroaring.Bitmap, error) {
+func getTopicsBitmap(c ethdb.Cursor, topics [][]common.Hash) (*gocroaring.Bitmap, error) {
 	var result *gocroaring.Bitmap
 	for _, sub := range topics {
 		var bitmapForORing *gocroaring.Bitmap

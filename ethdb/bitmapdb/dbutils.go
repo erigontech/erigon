@@ -26,13 +26,14 @@ const HotShardLimit = 4 * datasize.KB
 func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) error {
 	shardNForDelta := uint16(0)
 
-	hotK, hotV, err := c.Seek(key)
-	if err != nil {
-		return err
+	hotK, hotV, seekErr := c.Seek(key)
+	if seekErr != nil {
+		return seekErr
 	}
 	if hotK != nil && bytes.HasPrefix(hotK, key) {
 		hotShardN := ^binary.BigEndian.Uint16(hotK[len(hotK)-2:])
 		if len(hotV) > int(HotShardLimit) { // merge hot to cold
+			var err error
 			shardNForDelta, err = hotShardOverflow(c, key, hotShardN, hotV)
 			if err != nil {
 				return err
@@ -54,22 +55,14 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) error
 
 	delta.RunOptimize()
 	newV := make([]byte, delta.SerializedSizeInBytes())
-	err = delta.Write(newV)
+	err := delta.Write(newV)
+	if err != nil {
+		return err
+	}
 	err = c.Put(newK, newV)
 	if err != nil {
 		return err
 	}
-
-	//bufBytes, err := c.Reserve(newK, int(delta.GetSerializedSizeInBytes()))
-	//if err != nil {
-	//	panic(err)
-	//}
-	//
-	//_, err = delta.WriteTo(bytes.NewBuffer(bufBytes[:0]))
-	//if err != nil {
-	//	return err
-	//}
-
 	return nil
 }
 
@@ -107,6 +100,9 @@ func hotShardOverflow(c ethdb.Cursor, initialKey []byte, hotShardN uint16, hotV 
 	cold.RunOptimize()
 	coldBytes := make([]byte, cold.SerializedSizeInBytes())
 	err = cold.Write(coldBytes)
+	if err != nil {
+		return 0, err
+	}
 	err = c.Put(common.CopyBytes(coldK), coldBytes) // copy 'coldK' if want replace c.PutCurrent() by c.Put()
 	if err != nil {
 		return 0, err

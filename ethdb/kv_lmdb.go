@@ -1029,10 +1029,7 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 		return c.putDupSort(key, value)
 	}
 
-	if err := c.put(key, value); err != nil {
-		return fmt.Errorf("%w, method: put, bucket: %s", err, c.bucketName)
-	}
-	return nil
+	return c.put(key, value)
 }
 
 func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
@@ -1046,18 +1043,12 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 		_, _, err := c.set(key)
 		if err != nil {
 			if lmdb.IsNotFound(err) {
-				if err := c.put(key, value); err != nil {
-					return fmt.Errorf("%w, bucket: %s", err, c.bucketName)
-				}
-				return nil
+				return c.put(key, value)
 			}
-			return fmt.Errorf("%w, bucket: %s", err, c.bucketName)
+			return err
 		}
 
-		if err := c.putCurrent(key, value); err != nil {
-			return fmt.Errorf("%w, bucket: %s", err, c.bucketName)
-		}
-		return nil
+		return c.putCurrent(key, value)
 	}
 
 	value = append(key[to:], value...)
@@ -1067,26 +1058,20 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 		if lmdb.IsNotFound(err) {
 			return c.put(key, value)
 		}
-		return fmt.Errorf("%w, bucket: %s", err, c.bucketName)
+		return err
 	}
 
 	if bytes.Equal(v[:from-to], value[:from-to]) {
 		if len(v) == len(value) { // in DupSort case lmdb.Current works only with values of same length
-			if err := c.putCurrent(key, value); err != nil {
-				return fmt.Errorf("%w, bucket: %s", err, c.bucketName)
-			}
-			return nil
+			return c.putCurrent(key, value)
 		}
 		err = c.delCurrent()
 		if err != nil {
-			return fmt.Errorf("%w, bucket: %s", err, c.bucketName)
+			return err
 		}
 	}
 
-	if err := c.put(key, value); err != nil {
-		return fmt.Errorf("%w, bucket: %s", err, c.bucketName)
-	}
-	return nil
+	return c.put(key, value)
 }
 
 func (c *LmdbCursor) PutCurrent(key []byte, value []byte) error {
