@@ -11,82 +11,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-// RemoveRange - gets existing bitmap in db and call RemoveRange operator on it.
-// !Important: [from, to)
-func TrimShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
-	t := time.Now()
-	updated := 0
-	for k, v, err := c.Seek(key); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-
-		if !bytes.HasPrefix(k, key) {
-			break
-		}
-		bm := roaring.New()
-		_, err = bm.FromBuffer(v)
-		if err != nil {
-			return err
-		}
-		if uint64(bm.Maximum()) < from {
-			break
-		}
-
-		updated++
-		bm.RemoveRange(from, to)
-		if bm.GetCardinality() == 0 { // don't store empty bitmaps
-			err = c.DeleteCurrent()
-			if err != nil {
-				return err
-			}
-			continue
-		}
-
-		bm.RunOptimize()
-		newV := make([]byte, int(bm.GetSerializedSizeInBytes()))
-		_, err = bm.WriteTo(bytes.NewBuffer(newV[:0]))
-		if err != nil {
-			return err
-		}
-		err = c.Put(k, newV)
-		if err != nil {
-			return err
-		}
-	}
-
-	s := time.Since(t)
-	if s > 20*time.Millisecond {
-		fmt.Printf("3: time=%s, updated=%d\n", s, updated)
-	}
-	return nil
-}
-
-func GetSharded2(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
-	var shards []*roaring.Bitmap
-	for k, v, err := c.Seek(key); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return nil, err
-		}
-
-		if !bytes.HasPrefix(k, key) {
-			break
-		}
-		bm := roaring.New()
-		_, err = bm.FromBuffer(v)
-		if err != nil {
-			return nil, err
-		}
-		shards = append(shards, bm)
-	}
-
-	return roaring.FastOr(shards...), nil
-}
-
-const ColdShardLimit = 512 * datasize.KB
+const ColdShardLimit = 256 * datasize.KB
 const HotShardLimit = 4 * datasize.KB
 
-// AppendMergeByOr3 - appending delta to existing data in db, merge by Or
+// AppendMergeByOr - appending delta to existing data in db, merge by Or
 // Method maintains sharding - because some bitmaps are >1Mb and when new incoming blocks process it
 //	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (LMDB does copy-on-write).
 //
@@ -96,7 +24,7 @@ const HotShardLimit = 4 * datasize.KB
 //   cold_shard - merge hot_shard here until cold_shard size < ColdShardLimit, otherwise mark hot as cold, create new hot from delta
 // if no cold shard, create new hot from delta - it will turn hot to cold automatically
 // never merges cold with cold for compaction - because it's expensive operation
-func AppendMergeByOr3(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
+func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
 	t := time.Now()
 
 	shardNForDelta := uint16(0)
@@ -184,4 +112,81 @@ func hotShardOverflow(c ethdb.Cursor, hotShardN uint16, hotV []byte) (shardNForD
 	}
 
 	return hotShardN, nil
+}
+
+// RemoveRange - gets existing bitmap in db and call RemoveRange operator on it.
+// !Important: [from, to)
+func TrimShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
+	t := time.Now()
+	updated := 0
+	for k, v, err := c.Seek(key); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+
+		if !bytes.HasPrefix(k, key) {
+			break
+		}
+		bm := roaring.New()
+		_, err = bm.FromBuffer(v)
+		if err != nil {
+			return err
+		}
+		if uint64(bm.Maximum()) < from {
+			break
+		}
+		noReasonToCheckNextShard := uint64(bm.Minimum()) <= from && uint64(bm.Maximum()) >= to
+
+		updated++
+		bm.RemoveRange(from, to)
+		if bm.GetCardinality() == 0 { // don't store empty bitmaps
+			err = c.DeleteCurrent()
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		bm.RunOptimize()
+		newV := make([]byte, int(bm.GetSerializedSizeInBytes()))
+		_, err = bm.WriteTo(bytes.NewBuffer(newV[:0]))
+		if err != nil {
+			return err
+		}
+		err = c.Put(k, newV)
+		if err != nil {
+			return err
+		}
+
+		if noReasonToCheckNextShard {
+			break
+		}
+	}
+
+	s := time.Since(t)
+	if s > 20*time.Millisecond {
+		fmt.Printf("3: time=%s, updated=%d\n", s, updated)
+	}
+	return nil
+}
+
+func Get(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
+	var shards []*roaring.Bitmap
+	for k, v, err := c.Seek(key); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+
+		if !bytes.HasPrefix(k, key) {
+			break
+		}
+		bm := roaring.New()
+		_, err = bm.FromBuffer(v)
+		if err != nil {
+			return nil, err
+		}
+		shards = append(shards, bm)
+	}
+
+	return roaring.FastOr(shards...), nil
 }

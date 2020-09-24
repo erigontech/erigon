@@ -87,11 +87,11 @@ func TestSharding(t *testing.T) {
 			for j := i; j < i+5_000; j += 2 {
 				bm1.Add(j)
 			}
-			err := bitmapdb.AppendMergeByOr3(c, k, bm1)
+			err := bitmapdb.AppendMergeByOr(c, k, bm1)
 			require.NoError(t, err)
 		}
 
-		fromDb, err := bitmapdb.GetSharded2(c, k)
+		fromDb, err := bitmapdb.Get(c, k)
 		require.NoError(t, err)
 		expect := roaring.NewBitmap()
 		for i := uint32(0); i < 3_000_000; i += 5_000 {
@@ -106,7 +106,7 @@ func TestSharding(t *testing.T) {
 		err = bitmapdb.TrimShardedRange(c, k, 2_000_000, 3_000_000) // [from, to)
 		require.NoError(t, err)
 
-		fromDb, err = bitmapdb.GetSharded2(c, k)
+		fromDb, err = bitmapdb.Get(c, k)
 		require.NoError(t, err)
 
 		expect = roaring.New()
@@ -123,7 +123,7 @@ func TestSharding(t *testing.T) {
 		err = bitmapdb.TrimShardedRange(c, k, 0, uint64(fromDb.Maximum())) // [from, to)
 		require.NoError(t, err)
 
-		fromDb, err = bitmapdb.GetSharded2(c, k)
+		fromDb, err = bitmapdb.Get(c, k)
 		require.NoError(t, err)
 		require.Equal(t, 1, int(fromDb.GetCardinality()))
 		require.Equal(t, int(max), int(fromDb.Maximum()))
