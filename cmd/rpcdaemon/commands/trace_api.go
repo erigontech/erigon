@@ -24,8 +24,8 @@ type TraceAPI interface {
 	// Filtering
 	Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error)
 	Get(ctx context.Context, txHash common.Hash, txIndicies []hexutil.Uint64) (*ParityTrace, error)
-	Block(ctx context.Context, blockNr rpc.BlockNumber) ([]interface{}, error)
-	Filter(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
+	Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error)
+	Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error)
 
 	// Custom (turbo geth exclusive)
 	BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)

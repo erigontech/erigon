@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -56,14 +58,20 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 }
 
 // Block Implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) ([]interface{}, error) {
-	var stub []interface{}
+func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error) {
+	var stub ParityTraces
 	return stub, nil
 }
 
 // Filter Implements trace_filter
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]interface{}, error) {
-	var filteredTransactionsHash []common.Hash
+// TODO(tjayrush): Eventually, we will need to protect ourselves from 'large' queries. Parity crashes when a range query of a very large size
+// is sent. We need to protect ourselves with maxTraces. It may already be done
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error) {
+	var filteredHashes []common.Hash
+	// TODO(tjayrush): Parity intersperses block/uncle reward traces with transaction call traces. We need to be able to tell the
+	// difference. I do that with this boolean array. This will be re-written shortly. For now, we use this simple boolean flag.
+	// Eventually, we will fill the ParityTrace array directly as we go (and we can probably even do better than that)
+	var traceTypes []bool
 	var maxTracesCount uint64
 	var offset uint64
 	var skipped uint64
@@ -92,7 +100,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 	}
 
 	if fromBlock > toBlock {
-		return nil, fmt.Errorf("invalid parameters: toBlock must be greater than fromBlock")
+		// TODO(tjayrush): Parity reports no error in this case it simply returns an empty response
+		return nil, nil //fmt.Errorf("invalid parameters: toBlock must be greater than fromBlock")
 	}
 
 	if req.Count == nil {
@@ -131,8 +140,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 					senders := rawdb.ReadSenders(api.dbReader, block.Hash(), num)
 					txs := block.Transactions()
 					for i, tx := range txs {
-						if uint64(len(filteredTransactionsHash)) == maxTracesCount {
-							if uint64(len(filteredTransactionsHash)) == api.maxTraces {
+						if uint64(len(filteredHashes)) == maxTracesCount {
+							if uint64(len(filteredHashes)) == api.maxTraces {
 								return fmt.Errorf("too many traces found")
 							}
 							return nil
@@ -150,16 +159,19 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 								continue
 							}
 							if bytes.Equal(senders[i].Bytes(), addrBytes) {
-								filteredTransactionsHash = append(filteredTransactionsHash, tx.Hash())
+								filteredHashes = append(filteredHashes, tx.Hash())
+								traceTypes = append(traceTypes, false)
 							}
 						} else if bytes.Equal(to.Bytes(), addrBytes) {
 							if skipped < offset {
 								skipped++
 								continue
 							}
-							filteredTransactionsHash = append(filteredTransactionsHash, tx.Hash())
+							filteredHashes = append(filteredHashes, tx.Hash())
+							traceTypes = append(traceTypes, false)
 						}
 					}
+					// TODO(tjayrush): Parity does not (for some unknown reason) include blockReward traces here
 				}
 			}
 		} else if req.FromBlock != nil || req.ToBlock != nil { // iterate over blocks
@@ -168,8 +180,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 				block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
 				blockTransactions := block.Transactions()
 				for _, tx := range blockTransactions {
-					if uint64(len(filteredTransactionsHash)) == maxTracesCount {
-						if uint64(len(filteredTransactionsHash)) == api.maxTraces {
+					if uint64(len(filteredHashes)) == maxTracesCount {
+						if uint64(len(filteredHashes)) == api.maxTraces {
 							return fmt.Errorf("too many traces found")
 						}
 						return nil
@@ -178,8 +190,17 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 						skipped++
 						continue
 					}
-					filteredTransactionsHash = append(filteredTransactionsHash, tx.Hash())
+					filteredHashes = append(filteredHashes, tx.Hash())
+					traceTypes = append(traceTypes, false)
 				}
+				// TODO(tjayrush): Need much, much better testing surrounding offset and count especially when including block rewards
+				if skipped < offset {
+					skipped++
+					continue
+				}
+				// We need to intersperse block reward traces to match Parity
+				filteredHashes = append(filteredHashes, block.Hash())
+				traceTypes = append(traceTypes, true)
 			}
 		} else {
 			return fmt.Errorf("invalid parameters")
@@ -192,19 +213,55 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) ([]
 	chainContext := adapter.NewChainContext(api.dbReader)
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
-	traceType := "callTracer" // nolint goconst
-	traces := []interface{}{}
-	for _, txHash := range filteredTransactionsHash {
-		_, blockHash, _, txIndex := rawdb.ReadTransaction(api.dbReader, txHash)
-		msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, api.db, blockHash, txIndex)
-		if err != nil {
-			return nil, err
+	traceType := "callTracer" // nolint: goconst
+	traces := ParityTraces{}
+	for i, txOrBlockHash := range filteredHashes {
+		if traceTypes[i] {
+			// In this case, we're processing a block (or uncle) reward trace. The hash is a block hash
+			// Because Geth does not return blockReward or uncleReward traces, we must create them here
+			block := rawdb.ReadBlockByHash(api.dbReader, txOrBlockHash)
+			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+			var tr ParityTrace
+			tr.Action.Author = strings.ToLower(block.Coinbase().String())
+			tr.Action.RewardType = "block" // goconst
+			tr.Action.Value = minerReward.String()
+			tr.BlockHash = block.Hash()
+			tr.BlockNumber = block.NumberU64()
+			tr.Type = "reward" // nolint: goconst
+			traces = append(traces, tr)
+			for i, uncle := range block.Uncles() {
+				if i < len(uncleRewards) {
+					var tr ParityTrace
+					tr.Action.Author = strings.ToLower(uncle.Coinbase.String())
+					tr.Action.RewardType = "uncle" // goconst
+					tr.Action.Value = uncleRewards[i].String()
+					tr.BlockHash = block.Hash()
+					tr.BlockNumber = block.NumberU64()
+					tr.Type = "reward" // nolint: goconst
+					traces = append(traces, tr)
+				}
+			}
+		} else {
+			// In this case, we're processing a transaction hash
+			tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, txOrBlockHash)
+			msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, api.db, blockHash, txIndex)
+			if err != nil {
+				return nil, err
+			}
+			trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, &eth.TraceConfig{Tracer: &traceType})
+			if err != nil {
+				return nil, err
+			}
+			traceJSON, ok := trace.(json.RawMessage)
+			if !ok {
+				return nil, fmt.Errorf("unknown type in trace_filter")
+			}
+			var gethTrace GethTrace
+			jsonStr, _ := traceJSON.MarshalJSON()
+			json.Unmarshal(jsonStr, &gethTrace) // nolint errcheck
+			converted := api.convertToParityTrace(gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
+			traces = append(traces, converted...)
 		}
-		trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, &eth.TraceConfig{Tracer: &traceType})
-		if err != nil {
-			return nil, err
-		}
-		traces = append(traces, trace)
 	}
 	return traces, nil
 }
@@ -297,10 +354,10 @@ func (api *TraceAPIImpl) getTransactionTraces(ctx context.Context, txHash common
 	jsonStr, _ := traceJSON.MarshalJSON()
 	json.Unmarshal(jsonStr, &gethTrace) // nolint errcheck
 
-	resp := ParityTraces{}
+	traces := ParityTraces{}
 	converted := api.convertToParityTrace(gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
-	resp = append(resp, converted...)
-	return resp, nil
+	traces = append(traces, converted...)
+	return traces, nil
 }
 
 // TraceFilterRequest represents the arguments for trace_filter
