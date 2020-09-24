@@ -8,6 +8,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -47,7 +48,7 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
 				return err
 			}
 
-			delta.Or(hot)
+			delta = roaring.FastOr(delta, hot)
 			shardNForDelta = hotShardN
 		}
 	}
@@ -57,15 +58,22 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
 	binary.BigEndian.PutUint16(newK[len(newK)-2:], ^shardNForDelta)
 
 	delta.RunOptimize()
-	bufBytes, err := c.Reserve(newK, int(delta.GetSerializedSizeInBytes()))
-	if err != nil {
-		panic(err)
-	}
-
-	_, err = delta.WriteTo(bytes.NewBuffer(bufBytes[:0]))
+	newV := make([]byte, int(delta.GetSerializedSizeInBytes()))
+	_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
+	err = c.Put(newK, newV)
 	if err != nil {
 		return err
 	}
+
+	//bufBytes, err := c.Reserve(newK, int(delta.GetSerializedSizeInBytes()))
+	//if err != nil {
+	//	panic(err)
+	//}
+	//
+	//_, err = delta.WriteTo(bytes.NewBuffer(bufBytes[:0]))
+	//if err != nil {
+	//	return err
+	//}
 
 	s := time.Since(t)
 	if s > 50*time.Millisecond {
@@ -110,7 +118,7 @@ func hotShardOverflow(c ethdb.Cursor, initialKey []byte, hotShardN uint16, hotV 
 	cold.RunOptimize()
 	coldBytes := make([]byte, int(cold.GetSerializedSizeInBytes()))
 	_, err = cold.WriteTo(bytes.NewBuffer(coldBytes[:0]))
-	err = c.PutCurrent(coldK, coldBytes) // copy 'coldK' if want replace c.PutCurrent() by c.Put()
+	err = c.Put(common.CopyBytes(coldK), coldBytes) // copy 'coldK' if want replace c.PutCurrent() by c.Put()
 	if err != nil {
 		return 0, err
 	}
@@ -157,7 +165,7 @@ func TrimShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 		if err != nil {
 			return err
 		}
-		err = c.Put(k, newV)
+		err = c.Put(common.CopyBytes(k), newV)
 		if err != nil {
 			return err
 		}
