@@ -12,12 +12,12 @@ import (
 
 // BlockReward returns the block reward for this block
 func (api *TraceAPIImpl) BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	return api.rewardCalc(blockNr, "block")
+	return api.rewardCalc(blockNr, "block") // nolint goconst
 }
 
 // UncleReward returns the uncle reward for this block
 func (api *TraceAPIImpl) UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	return api.rewardCalc(blockNr, "uncle")
+	return api.rewardCalc(blockNr, "uncle") // nolint goconst
 }
 
 // Issuance returns the issuance for this block
@@ -41,10 +41,10 @@ func (api *TraceAPIImpl) rewardCalc(blockNr rpc.BlockNumber, which string) (Issu
 
 	var ret Issuance
 	switch which {
-	case "block":
+	case "block": // nolint goconst
 		ret.BlockReward = hexutil.EncodeBig(minerReward.ToBig())
 		return ret, nil
-	case "uncle":
+	case "uncle": // nolint goconst
 		issuance.Sub(&issuance, &minerReward)
 		ret.UncleReward = hexutil.EncodeBig(issuance.ToBig())
 		return ret, nil
