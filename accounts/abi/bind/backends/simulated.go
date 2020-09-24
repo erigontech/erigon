@@ -43,6 +43,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -166,15 +167,7 @@ func (b *SimulatedBackend) Commit() {
 	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	stateWriter := state.NewPlainStateWriter(b.database, nil, b.pendingBlock.NumberU64())
-	ctx := b.config.WithEIPsFlags(context.Background(), b.pendingHeader.Number)
-	rawdb.WriteBlock(ctx, b.database, b.pendingBlock)
-	rawdb.WriteCanonicalHash(b.database, b.pendingBlock.Hash(), b.pendingBlock.NumberU64())
-	rawdb.WriteTxLookupEntries(b.database, b.pendingBlock)
-	rawdb.WriteReceipts(b.database, b.pendingBlock.Hash(), b.pendingBlock.NumberU64(), b.pendingReceipts)
-	if err := b.pendingState.CommitBlock(ctx, stateWriter); err != nil {
-		panic(fmt.Errorf("committing block %d failed: %v", b.pendingBlock.NumberU64(), err))
-	}
+	stagedsync.InsertBlockInStages(b.database, b.config, b.blockchain.Engine(), b.pendingBlock, b.blockchain)
 	//nolint:prealloc
 	var allLogs []*types.Log
 	for _, r := range b.pendingReceipts {
@@ -272,7 +265,7 @@ func (b *SimulatedBackend) TransactionReceipt(_ context.Context, txHash common.H
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	receipt, _, _, _ := rawdb.ReadReceipt(b.database, txHash, b.config)
+	receipt, _, _, _ := rawdb.ReadReceipt(b.database, txHash)
 	return receipt, nil
 }
 
@@ -834,7 +827,7 @@ func (fb *filterBackend) GetReceipts(_ context.Context, hash common.Hash) (types
 	if number == nil {
 		return nil, nil
 	}
-	return rawdb.ReadReceipts(fb.db, hash, *number, fb.b.config), nil
+	return rawdb.ReadReceipts(fb.db, hash, *number), nil
 }
 
 func (fb *filterBackend) GetLogs(_ context.Context, hash common.Hash) ([][]*types.Log, error) {
@@ -842,7 +835,7 @@ func (fb *filterBackend) GetLogs(_ context.Context, hash common.Hash) ([][]*type
 	if number == nil {
 		return nil, nil
 	}
-	receipts := rawdb.ReadReceipts(fb.db, hash, *number, fb.b.config)
+	receipts := rawdb.ReadReceipts(fb.db, hash, *number)
 	if receipts == nil {
 		return nil, nil
 	}

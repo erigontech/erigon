@@ -22,6 +22,8 @@ After building, run this command to start the daemon locally:
 ./build/bin/rpcdaemon --chaindata ~/Library/TurboGeth/tg/chaindata --http.api=eth,debug,net,web3
 ```
 
+Runing RPC daemon locally (with `--chaindata` option) can only be used when turbo-geth node is not running. This mode is mostly convenient for debugging purposes, because we know that the database does not change as we are sending requests to the RPC daemon.
+
 Note that we've also specified which RPC commands to enable in the above command.
 
 ### Running remotely
