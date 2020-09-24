@@ -2,6 +2,8 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"runtime"
 	"time"
@@ -225,6 +227,14 @@ func stageExec(ctx context.Context) error {
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+	if err := db.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(10729250), 0, func(k, v []byte) (bool, error) {
+		if err := db.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err != nil {
+			return false, err
+		}
+		return true, nil
+	}); err != nil {
+		return fmt.Errorf("unwind Execution: walking receipts: %v", err)
+	}
 
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
@@ -311,7 +321,6 @@ func stageLogIndex(ctx context.Context) error {
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-
 	db.ClearBuckets(dbutils.LogIndex2)
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
