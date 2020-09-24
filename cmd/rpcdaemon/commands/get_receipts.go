@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -138,7 +137,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	}
 
 	blockNumbers := roaring.New()
-	blockNumbers.AddRange(uint64(begin), uint64(end))
+	blockNumbers.AddRange(uint64(begin), uint64(end+1)) // [min,max)
 
 	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex2)
 	topicsBitmap, err := getTopicsBitmap(c, crit.Topics, end)
@@ -222,17 +221,6 @@ func getTopicsBitmap(c ethdb.Cursor, topics [][]common.Hash, maxBlockNum uint32)
 	for _, sub := range topics {
 		var bitmapForORing *roaring.Bitmap
 		for _, topic := range sub {
-			if _, ok := stagedsync.LogIndexBlackList[string(topic.Bytes())]; ok {
-				m := roaring.New()
-				m.AddRange(0, uint64(maxBlockNum))
-				if bitmapForORing == nil {
-					bitmapForORing = m
-				} else {
-					bitmapForORing.Or(m)
-				}
-				continue
-			}
-
 			m, err := bitmapdb.Get(c, topic[:])
 			if err != nil {
 				return nil, err
