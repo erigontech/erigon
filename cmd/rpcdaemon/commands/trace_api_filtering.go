@@ -59,8 +59,24 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 
 // Block Implements trace_block
 func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error) {
-	var stub ParityTraces
-	return stub, nil
+	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+	if err != nil {
+		return nil, err
+	}
+	bn := hexutil.Uint64(blockNum)
+	var req TraceFilterRequest
+	req.FromBlock = &bn
+	req.ToBlock = &bn
+	req.FromAddress = nil
+	req.ToAddress = nil
+	req.After = nil
+	req.Count = nil
+
+	traces, err := api.Filter(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return traces, err
 }
 
 // Filter Implements trace_filter
