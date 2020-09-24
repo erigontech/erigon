@@ -329,7 +329,7 @@ func GetSharded2(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
 	return roaring.FastOr(shards...), nil
 }
 
-const ColdShardLimit = 32 * datasize.KB
+const ColdShardLimit = 512 * datasize.KB
 const HotShardLimit = 4 * datasize.KB
 
 // 3 terms are used: cold_shard, hot_shard, delta
