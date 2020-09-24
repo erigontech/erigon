@@ -36,7 +36,7 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
 	if hotK != nil && bytes.HasPrefix(hotK, key) {
 		hotShardN := ^binary.BigEndian.Uint16(hotK[len(hotK)-2:])
 		if len(hotV) > int(HotShardLimit) { // merge hot to cold
-			shardNForDelta, err = hotShardOverflow(c, hotShardN, hotV)
+			shardNForDelta, err = hotShardOverflow(c, key, hotShardN, hotV)
 			if err != nil {
 				return err
 			}
@@ -74,7 +74,7 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
 	return nil
 }
 
-func hotShardOverflow(c ethdb.Cursor, hotShardN uint16, hotV []byte) (shardNForDelta uint16, err error) {
+func hotShardOverflow(c ethdb.Cursor, initialKey []byte, hotShardN uint16, hotV []byte) (shardNForDelta uint16, err error) {
 	if hotShardN == 0 { // no cold shards, create new hot from delta - it will turn hot to cold automatically
 		return 1, nil
 	}
@@ -82,6 +82,10 @@ func hotShardOverflow(c ethdb.Cursor, hotShardN uint16, hotV []byte) (shardNForD
 	coldK, coldV, err := c.Next() // get cold shard from db
 	if err != nil {
 		return 0, err
+	}
+
+	if coldK == nil || !bytes.HasPrefix(coldK, initialKey) {
+		return 0, fmt.Errorf("No cold shard? key=%x, hotShardN=%d, found=%x\n", initialKey, hotShardN, coldK)
 	}
 
 	if len(coldV) > int(ColdShardLimit) { // cold shard is too big, write delta to `hotShardN + 1` - it will turn hot to cold automatically
@@ -101,12 +105,12 @@ func hotShardOverflow(c ethdb.Cursor, hotShardN uint16, hotV []byte) (shardNForD
 		return 0, err
 	}
 
-	cold.Or(hot)
+	cold = roaring.FastOr(cold, hot)
 
 	cold.RunOptimize()
 	coldBytes := make([]byte, int(cold.GetSerializedSizeInBytes()))
 	_, err = cold.WriteTo(bytes.NewBuffer(coldBytes[:0]))
-	err = c.PutCurrent(coldK, coldBytes)
+	err = c.PutCurrent(coldK, coldBytes) // copy 'coldK' if want replace c.PutCurrent() by c.Put()
 	if err != nil {
 		return 0, err
 	}
@@ -180,12 +184,17 @@ func Get(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
 		if !bytes.HasPrefix(k, key) {
 			break
 		}
+
 		bm := roaring.New()
 		_, err = bm.FromBuffer(v)
 		if err != nil {
 			return nil, err
 		}
 		shards = append(shards, bm)
+	}
+
+	if len(shards) == 0 {
+		return roaring.New(), nil
 	}
 
 	return roaring.FastOr(shards...), nil

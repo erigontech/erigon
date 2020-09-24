@@ -228,16 +228,18 @@ func getTopicsBitmap(c ethdb.Cursor, topics [][]common.Hash, maxBlockNum uint32)
 			if bitmapForORing == nil {
 				bitmapForORing = m
 			} else {
-				bitmapForORing.Or(m)
+				bitmapForORing = roaring.FastOr(bitmapForORing, m)
 			}
+			fmt.Printf("11: %d\n", bitmapForORing.GetCardinality())
 		}
 
 		if bitmapForORing != nil {
 			if result == nil {
 				result = bitmapForORing
 			} else {
-				result.And(bitmapForORing)
+				result = roaring.FastAnd(result, bitmapForORing)
 			}
+			fmt.Printf("12: %d\n", result.GetCardinality())
 		}
 	}
 	return result, nil
