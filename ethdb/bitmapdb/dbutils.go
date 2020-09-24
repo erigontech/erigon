@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/gocroaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-const ColdShardLimit = 256 * datasize.KB
+const ColdShardLimit = 512 * datasize.KB
 const HotShardLimit = 4 * datasize.KB
 
 // AppendMergeByOr - appending delta to existing data in db, merge by Or
@@ -25,7 +25,7 @@ const HotShardLimit = 4 * datasize.KB
 //   cold_shard - merge hot_shard here until cold_shard size < ColdShardLimit, otherwise mark hot as cold, create new hot from delta
 // if no cold shard, create new hot from delta - it will turn hot to cold automatically
 // never merges cold with cold for compaction - because it's expensive operation
-func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
+func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) error {
 	t := time.Now()
 
 	shardNForDelta := uint16(0)
@@ -42,13 +42,12 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
 				return err
 			}
 		} else { // merge delta to hot, write result to `hotShardN`
-			hot := roaring.New()
-			_, err = hot.FromBuffer(hotV)
+			hot, err := gocroaring.Read(hotV)
 			if err != nil {
 				return err
 			}
 
-			delta = roaring.FastOr(delta, hot)
+			delta = gocroaring.FastOr(delta, hot)
 			shardNForDelta = hotShardN
 		}
 	}
@@ -58,8 +57,8 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
 	binary.BigEndian.PutUint16(newK[len(newK)-2:], ^shardNForDelta)
 
 	delta.RunOptimize()
-	newV := make([]byte, int(delta.GetSerializedSizeInBytes()))
-	_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
+	newV := make([]byte, delta.SerializedSizeInBytes())
+	err = delta.Write(newV)
 	err = c.Put(newK, newV)
 	if err != nil {
 		return err
@@ -77,7 +76,7 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
 
 	s := time.Since(t)
 	if s > 50*time.Millisecond {
-		fmt.Printf("1: time=%s, card=%d, serializeSize=%d shard=%d\n", s, delta.GetCardinality(), delta.GetSerializedSizeInBytes(), shardNForDelta)
+		fmt.Printf("1: time=%s, card=%d, serializeSize=%d shard=%d\n", s, delta.GetCardinality(), delta.SerializedSizeInBytes(), shardNForDelta)
 	}
 	return nil
 }
@@ -101,23 +100,21 @@ func hotShardOverflow(c ethdb.Cursor, initialKey []byte, hotShardN uint16, hotV 
 	}
 
 	// merge hot to cold and replace hot by delta (by write delta to `hotShardN`)
-	cold := roaring.New()
-	_, err = cold.FromBuffer(coldV)
+	cold, err := gocroaring.Read(coldV)
 	if err != nil {
 		return 0, err
 	}
 
-	hot := roaring.New()
-	_, err = hot.FromBuffer(hotV)
+	hot, err := gocroaring.Read(hotV)
 	if err != nil {
 		return 0, err
 	}
 
-	cold = roaring.FastOr(cold, hot)
+	cold = gocroaring.FastOr(cold, hot)
 
 	cold.RunOptimize()
-	coldBytes := make([]byte, int(cold.GetSerializedSizeInBytes()))
-	_, err = cold.WriteTo(bytes.NewBuffer(coldBytes[:0]))
+	coldBytes := make([]byte, cold.SerializedSizeInBytes())
+	err = cold.Write(coldBytes)
 	err = c.Put(common.CopyBytes(coldK), coldBytes) // copy 'coldK' if want replace c.PutCurrent() by c.Put()
 	if err != nil {
 		return 0, err
@@ -126,9 +123,10 @@ func hotShardOverflow(c ethdb.Cursor, initialKey []byte, hotShardN uint16, hotV 
 	return hotShardN, nil
 }
 
-// RemoveRange - gets existing bitmap in db and call RemoveRange operator on it.
+// TruncateRange - gets existing bitmap in db and call RemoveRange operator on it.
+// starts from hot shard, stops when shard not overlap with [from-to)
 // !Important: [from, to)
-func TrimShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
+func TruncateRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 	t := time.Now()
 	updated := 0
 	for k, v, err := c.Seek(key); k != nil; k, v, err = c.Next() {
@@ -139,8 +137,8 @@ func TrimShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 		if !bytes.HasPrefix(k, key) {
 			break
 		}
-		bm := roaring.New()
-		_, err = bm.FromBuffer(v)
+
+		bm, err := gocroaring.Read(v)
 		if err != nil {
 			return err
 		}
@@ -160,8 +158,8 @@ func TrimShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 		}
 
 		bm.RunOptimize()
-		newV := make([]byte, int(bm.GetSerializedSizeInBytes()))
-		_, err = bm.WriteTo(bytes.NewBuffer(newV[:0]))
+		newV := make([]byte, bm.SerializedSizeInBytes())
+		err = bm.Write(newV)
 		if err != nil {
 			return err
 		}
@@ -182,8 +180,8 @@ func TrimShardedRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 	return nil
 }
 
-func Get(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
-	var shards []*roaring.Bitmap
+func Get(c ethdb.Cursor, key []byte) (*gocroaring.Bitmap, error) {
+	var shards []*gocroaring.Bitmap
 	for k, v, err := c.Seek(key); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return nil, err
@@ -193,8 +191,7 @@ func Get(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
 			break
 		}
 
-		bm := roaring.New()
-		_, err = bm.FromBuffer(v)
+		bm, err := gocroaring.Read(v)
 		if err != nil {
 			return nil, err
 		}
@@ -202,8 +199,7 @@ func Get(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
 	}
 
 	if len(shards) == 0 {
-		return roaring.New(), nil
+		return gocroaring.New(), nil
 	}
-
-	return roaring.FastOr(shards...), nil
+	return gocroaring.FastOr(shards...), nil
 }

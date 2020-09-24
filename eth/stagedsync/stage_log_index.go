@@ -4,23 +4,23 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/RoaringBitmap/roaring"
-	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"sort"
 	"time"
 
+	"github.com/RoaringBitmap/gocroaring"
+	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
 	logIndicesMemLimit       = 512 * datasize.MB
-	logIndicesCheckSizeEvery = 30 * time.Second
+	logIndicesCheckSizeEvery = 10 * time.Second
 )
 
 func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
@@ -55,8 +55,8 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	indices := map[string]*roaring.Bitmap{}
-	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex2)
+	indices := map[string]*gocroaring.Bitmap{}
+	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
@@ -75,7 +75,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 		select {
 		default:
 		case <-logEvery.C:
-			sz, err := tx.(ethdb.HasTx).Tx().BucketSize(dbutils.LogIndex2)
+			sz, err := tx.(ethdb.HasTx).Tx().BucketSize(dbutils.LogIndex)
 			if err != nil {
 				return err
 			}
@@ -86,7 +86,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 					return err
 				}
 
-				indices = map[string]*roaring.Bitmap{}
+				indices = map[string]*gocroaring.Bitmap{}
 			}
 		}
 
@@ -102,7 +102,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 					topicStr := string(topic.Bytes())
 					m, ok := indices[topicStr]
 					if !ok {
-						m = roaring.New()
+						m = gocroaring.New()
 						indices[topicStr] = m
 					}
 					m.Add(uint32(blockNum))
@@ -111,7 +111,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 				accStr := string(log.Address.Bytes())
 				m, ok := indices[accStr]
 				if !ok {
-					m = roaring.New()
+					m = gocroaring.New()
 					indices[accStr] = m
 				}
 				m.Add(uint32(blockNum))
@@ -151,7 +151,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	}
 
 	logsIndexKeys := map[string]bool{}
-	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex2)
+	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
 
 	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
 	start := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
@@ -194,10 +194,10 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	return nil
 }
 
-func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit, singleLimit datasize.ByteSize) bool {
+func needFlush(bitmaps map[string]*gocroaring.Bitmap, memLimit, singleLimit datasize.ByteSize) bool {
 	sz := uint64(0)
 	for _, m := range bitmaps {
-		sz1 := m.GetSizeInBytes()
+		sz1 := uint64(m.SerializedSizeInBytes())
 		if sz1 > uint64(singleLimit) {
 			return true
 		}
@@ -207,18 +207,13 @@ func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit, singleLimit datasiz
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 
-func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
+func flushBitmaps(c ethdb.Cursor, inMem map[string]*gocroaring.Bitmap) error {
 	t := time.Now()
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-
-	var total uint64
-	for _, b := range inMem {
-		total += b.GetSerializedSizeInBytes()
-	}
 
 	for _, k := range keys {
 		b := inMem[k]
@@ -227,22 +222,20 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 		}
 	}
 
-	fmt.Printf("flush: %s, %d %s\n", time.Since(t), len(keys), common.StorageSize(total))
+	fmt.Printf("flush: %s, %d\n", time.Since(t), len(keys))
 
 	return nil
 }
 
 func truncateBitmaps(c ethdb.Cursor, inMem map[string]bool, from, to uint64) error {
 	t := time.Now()
-
-	defer func(t time.Time) { fmt.Printf("stage_log_index.go:230: %s\n", time.Since(t)) }(time.Now())
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		if err := bitmapdb.TrimShardedRange(c, []byte(k), from, to); err != nil {
+		if err := bitmapdb.TruncateRange(c, []byte(k), from, to); err != nil {
 			return nil
 		}
 	}

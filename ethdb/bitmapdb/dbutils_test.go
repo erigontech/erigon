@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/gocroaring"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
@@ -83,7 +83,7 @@ func TestSharding(t *testing.T) {
 		k := []byte{1}
 		// Write/Read large bitmap works expected
 		for i := uint32(0); i < 3_000_000; i += 5_000 {
-			bm1 := roaring.New()
+			bm1 := gocroaring.New()
 			for j := i; j < i+5_000; j += 2 {
 				bm1.Add(j)
 			}
@@ -93,7 +93,7 @@ func TestSharding(t *testing.T) {
 
 		fromDb, err := bitmapdb.Get(c, k)
 		require.NoError(t, err)
-		expect := roaring.NewBitmap()
+		expect := gocroaring.New()
 		for i := uint32(0); i < 3_000_000; i += 5_000 {
 			for j := i; j < i+5_000; j += 2 {
 				expect.Add(j)
@@ -102,14 +102,14 @@ func TestSharding(t *testing.T) {
 		expect.Xor(fromDb)
 		require.Equal(t, 0, int(expect.GetCardinality()))
 
-		// TrimShardedRange can remove large part
-		err = bitmapdb.TrimShardedRange(c, k, 2_000_000, 3_000_000) // [from, to)
+		// TruncateRange can remove large part
+		err = bitmapdb.TruncateRange(c, k, 2_000_000, 3_000_000) // [from, to)
 		require.NoError(t, err)
 
 		fromDb, err = bitmapdb.Get(c, k)
 		require.NoError(t, err)
 
-		expect = roaring.New()
+		expect = gocroaring.New()
 		for i := uint32(0); i < 2_000_000; i += 100_000 {
 			for j := uint32(0); j < i+100_000; j += 2 {
 				expect.Add(j)
@@ -118,16 +118,14 @@ func TestSharding(t *testing.T) {
 		expect.Xor(fromDb)
 		require.Equal(t, 0, int(expect.GetCardinality()))
 
-		// check that TrimShardedRange will preserve right interval: [from, to)
+		// check that TruncateRange will preserve right interval: [from, to)
 		max := fromDb.Maximum()
-		err = bitmapdb.TrimShardedRange(c, k, 0, uint64(fromDb.Maximum())) // [from, to)
+		err = bitmapdb.TruncateRange(c, k, 0, uint64(fromDb.Maximum())) // [from, to)
 		require.NoError(t, err)
 
 		fromDb, err = bitmapdb.Get(c, k)
 		require.NoError(t, err)
 		require.Equal(t, 1, int(fromDb.GetCardinality()))
 		require.Equal(t, int(max), int(fromDb.Maximum()))
-
 	}
-
 }

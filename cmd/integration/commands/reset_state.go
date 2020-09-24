@@ -189,7 +189,7 @@ func resetHistory(db *ethdb.ObjectDatabase) error {
 
 func resetLogIndex(db *ethdb.ObjectDatabase) error {
 	if err := db.ClearBuckets(
-		dbutils.LogIndex2,
+		dbutils.LogIndex,
 	); err != nil {
 		return err
 	}

@@ -2,12 +2,10 @@ package commands
 
 import (
 	"context"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -311,7 +309,6 @@ func stageLogIndex(ctx context.Context) error {
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	db.ClearBuckets(dbutils.LogIndex2)
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
