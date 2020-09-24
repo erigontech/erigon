@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"time"
-
 	"github.com/RoaringBitmap/gocroaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -26,8 +24,6 @@ const HotShardLimit = 4 * datasize.KB
 // if no cold shard, create new hot from delta - it will turn hot to cold automatically
 // never merges cold with cold for compaction - because it's expensive operation
 func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) error {
-	t := time.Now()
-
 	shardNForDelta := uint16(0)
 
 	hotK, hotV, err := c.Seek(key)
@@ -74,10 +70,6 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) error
 	//	return err
 	//}
 
-	s := time.Since(t)
-	if s > 50*time.Millisecond {
-		fmt.Printf("1: time=%s, card=%d, serializeSize=%d shard=%d\n", s, delta.GetCardinality(), delta.SerializedSizeInBytes(), shardNForDelta)
-	}
 	return nil
 }
 
@@ -127,7 +119,6 @@ func hotShardOverflow(c ethdb.Cursor, initialKey []byte, hotShardN uint16, hotV 
 // starts from hot shard, stops when shard not overlap with [from-to)
 // !Important: [from, to)
 func TruncateRange(c ethdb.Cursor, key []byte, from, to uint64) error {
-	t := time.Now()
 	updated := 0
 	for k, v, err := c.Seek(key); k != nil; k, v, err = c.Next() {
 		if err != nil {
@@ -173,10 +164,6 @@ func TruncateRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 		}
 	}
 
-	s := time.Since(t)
-	if s > 20*time.Millisecond {
-		fmt.Printf("3: time=%s, updated=%d\n", s, updated)
-	}
 	return nil
 }
 
