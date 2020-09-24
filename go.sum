@@ -1,7 +1,5 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
-github.com/AskAlexSharov/gocroaring v0.2.66-0.20200924070856-7f2b9e16b418 h1:ZTngPmkkcq2jMbMJKPQyy9oPeSOAgihGmH3ADIfdJhQ=
-github.com/AskAlexSharov/gocroaring v0.2.66-0.20200924070856-7f2b9e16b418/go.mod h1:UY3cRDn1176ZP/joHjSQFUbD4WiK4j65wzbmXregcUc=
 github.com/Azure/azure-pipeline-go v0.2.1 h1:OLBdZJ3yvOn2MezlWvbrBMTEUQC72zAftRZOMdj5HYo=
 github.com/Azure/azure-pipeline-go v0.2.1/go.mod h1:UGSo8XybXnIGZ3epmeBw7Jdz+HiUVpqIlpz/HKHylF4=
 github.com/Azure/azure-pipeline-go v0.2.2 h1:6oiIS9yaG6XCCzhgAgKFfIWyo4LLCiDhZot6ltoThhY=
