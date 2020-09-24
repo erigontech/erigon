@@ -448,7 +448,11 @@ func (hd *HeaderDownload) AnchorState() string {
 			}
 			sb.WriteString(fmt.Sprintf("{%8d-", anchor.blockHeight))
 			end := anchor.maxTipHeight
-			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d}", end, end-anchor.blockHeight, anchor.tipQueue.Len()))
+			var sbb strings.Builder
+			for _, tipQueueItem := range *anchor.tipQueue {
+				sbb.WriteString(fmt.Sprintf("%d ", tipQueueItem.height))
+			}
+			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d (%s)}", end, end-anchor.blockHeight, anchor.tipQueue.Len(), sbb.String()))
 		}
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
 		ss[j] = sb.String()
@@ -881,6 +885,7 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 	if blockHeight > anchor.maxTipHeight {
 		anchor.maxTipHeight = blockHeight
 	}
+	hd.tipCount++
 	hd.anchorTree.ReplaceOrInsert(AnchorItem{anchor: anchor, ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
 }
 
