@@ -86,7 +86,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 	defer logEvery.Stop()
 
 	indices := map[string]*roaring.Bitmap{}
-	logIndexCursor := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.LogIndex2)
+	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex2)
 	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
@@ -236,7 +236,7 @@ func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit, singleLimit datasiz
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 
-func flushBitmaps(c ethdb.CursorDupSort, inMem map[string]*roaring.Bitmap) error {
+func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 	t := time.Now()
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
