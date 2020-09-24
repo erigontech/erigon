@@ -401,7 +401,6 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty 
 			difficulty:           *diff,
 		}
 		tipHash := header.Hash()
-		hd.reserveTip()
 		hd.tips[tipHash] = tip
 		heap.Push(anchor.tipQueue, AnchorTipItem{hash: tipHash, height: tip.blockHeight})
 		if tip.blockHeight > anchor.maxTipHeight {
@@ -409,6 +408,7 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty 
 		}
 		hd.tipCount++
 		hd.anchorTree.ReplaceOrInsert(AnchorItem{anchor: anchor, ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
+		hd.limitTips()
 		if header.ParentHash != (common.Hash{}) {
 			heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime})
 		}
@@ -885,7 +885,6 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 		blockHeight:          header.Number.Uint64(),
 		uncleHash:            header.UncleHash,
 	}
-	hd.reserveTip()
 	hd.anchorTree.Delete(AnchorItem{ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
 	hd.tips[tipHash] = tip
 	heap.Push(anchor.tipQueue, AnchorTipItem{hash: tipHash, height: tip.blockHeight})
@@ -894,6 +893,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 		anchor.maxTipHeight = tip.blockHeight
 	}
 	hd.anchorTree.ReplaceOrInsert(AnchorItem{anchor: anchor, ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
+	hd.limitTips()
 	return nil
 }
 
@@ -905,7 +905,6 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 		timestamp:            timestamp,
 		blockHeight:          blockHeight,
 	}
-	hd.reserveTip()
 	hd.anchorTree.Delete(AnchorItem{ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
 	hd.tips[hash] = tip
 	heap.Push(anchor.tipQueue, AnchorTipItem{hash: hash, height: blockHeight})
@@ -914,6 +913,7 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 	}
 	hd.tipCount++
 	hd.anchorTree.ReplaceOrInsert(AnchorItem{anchor: anchor, ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
+	hd.limitTips()
 }
 
 func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, totalDifficulty uint256.Int) (*Anchor, error) {
@@ -938,8 +938,8 @@ func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, 
 }
 
 // reserveTip makes sure there is a space for at least one more tip
-func (hd *HeaderDownload) reserveTip() {
-	for hd.tipCount >= hd.tipLimit {
+func (hd *HeaderDownload) limitTips() {
+	for hd.tipCount > hd.tipLimit {
 		//fmt.Printf("reserve tips %d >= %d\n", hd.tipCount, hd.tipLimit)
 		// Pick the anchor with the largest (maxTipHeight - minTipHeight) difference
 		anchor := hd.anchorTree.Min().(AnchorItem).anchor
