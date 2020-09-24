@@ -177,10 +177,12 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 		pt.Action.Gas = gethTrace.Gas
 		pt.Result.GasUsed = gethTrace.GasUsed
 
+		// TODO(tjayrush): This extreme hack will be removed. It is here because it's the only way I could
+		// TODO(tjayrush): get test cases to pass. Search (gasUsedHack) for related code
 		if pt.Action.Gas == "0xdeadbeef" {
-			a, _ := hexutil.DecodeUint64(pt.Action.Gas)
-			b, _ := hexutil.DecodeUint64(pt.Result.GasUsed)
-			c := a - b
+			a, _ := hexutil.DecodeUint64(pt.Action.Gas)     // 0xdeadbeef
+			b, _ := hexutil.DecodeUint64(pt.Result.GasUsed) // the tracer returns a value too big by 0xdeadbeef - trueValue
+			c := a - b                                      // trueValue
 			pt.Action.Gas = hexutil.EncodeUint64(c)
 			pt.Result.GasUsed = hexutil.EncodeUint64(0)
 		}
