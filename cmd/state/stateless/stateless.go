@@ -43,7 +43,9 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	chainConfig *params.ChainConfig, bcb core.ChainContext, block *types.Block,
 ) (types.Receipts, error) {
 	header := block.Header()
-	vmConfig := vm.Config{TraceJumpDest: true}
+	bc := bcb.(*core.BlockChain)
+	vmConfig := *bc.GetVMConfig()
+	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
