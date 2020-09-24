@@ -28,7 +28,13 @@ func GenerateHeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 		return err
 	}
 	kv:=ethdb.NewLMDB().Path(dbPath).MustOpen()
-	snkv:=ethdb.NewLMDB().Path(snapshotPath).MustOpen()
+	snkv:=ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
+			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+			dbutils.HeadBlockKey: dbutils.BucketConfigItem{},
+		}
+	}).Path(snapshotPath).MustOpen()
 	db:=ethdb.NewObjectDatabase(kv)
 	sndb:=ethdb.NewObjectDatabase(snkv)
 

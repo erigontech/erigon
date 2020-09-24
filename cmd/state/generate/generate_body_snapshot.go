@@ -7,12 +7,18 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"math/big"
+	"os"
 	"time"
 )
 
 func GenerateBodySnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 	kv:=ethdb.NewLMDB().Path(dbPath).MustOpen()
-	snkv:=ethdb.NewLMDB().Path(snapshotPath).MustOpen()
+	snkv:=ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.BlockBodyPrefix: dbutils.BucketConfigItem{},
+			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+		}
+	}).Path(snapshotPath).MustOpen()
 	db:=ethdb.NewObjectDatabase(kv)
 	sndb:=ethdb.NewObjectDatabase(snkv)
 
@@ -53,6 +59,13 @@ func GenerateBodySnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 		log.Crit("SnapshotBodyHeadHash error", "err", err)
 		return err
 	}
+	sndb.Close()
+	err = os.Remove(snapshotPath+"/lock.mdb")
+	if err!=nil {
+		log.Warn("Remove lock", "err", err)
+		return err
+	}
+
 
 	log.Info("Finished", "duration", time.Since(t))
 	return nil

@@ -7,6 +7,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
 	trnt "github.com/ledgerwatch/turbo-geth/turbo/torrent"
@@ -30,10 +31,10 @@ func Seed(pathes []string) error {
 	cfg.DataDir = "/media/b00ris/nvme/snapshots"
 
 	pathes=[]string{
-		cfg.DataDir+"/headers/",
-		cfg.DataDir+"/bodies/",
-		//cfg.DataDir+"state/",
-		//cfg.DataDir+"receipts/",
+		cfg.DataDir+"/headers",
+		cfg.DataDir+"/bodies",
+		//cfg.DataDir+"/state/",
+		//cfg.DataDir+"/receipts/",
 	}
 
 	//cfg.Logger=cfg.Logger.FilterLevel(trlog.Info)
@@ -46,28 +47,23 @@ func Seed(pathes []string) error {
 	torrents:=make([]*torrent.Torrent, len(pathes))
 	for i,v :=range pathes {
 		i:=i
-		fmt.Println("i", i)
 		mi := &metainfo.MetaInfo{
 			CreationDate: time.Now().Unix(),
 			CreatedBy:    "turbogeth",
 			AnnounceList: trnt.Trackers,
 		}
 
-		info := metainfo.Info{PieceLength: trnt.DefaultChunkSize}
-		fmt.Println("BuildFromFilePath")
 		if _, err := os.Stat(v); os.IsNotExist(err) {
 			fmt.Println(err)
 			continue
-		} else {
-			fmt.Println(err)
+		} else if err!=nil {
+			return err
 		}
-		err := info.BuildFromFilePath(v)
+		info, err := trnt.BuildInfoBytesForLMDBSnapshot(v)
 		if err!=nil {
 			return err
 		}
 		mi.InfoBytes, err = bencode.Marshal(info)
-		fmt.Println("AddTorrent")
-		fmt.Println("info", common.Bytes2Hex(mi.InfoBytes))
 
 		torrents[i],_,err = cl.AddTorrentSpec(&torrent.TorrentSpec{
 			Trackers:trnt.Trackers,
@@ -82,8 +78,9 @@ func Seed(pathes []string) error {
 		if !torrents[i].Seeding() {
 			log.Warn(torrents[i].Name()+" not seeding")
 		}
-		fmt.Println("VerifyData")
+
 		torrents[i].VerifyData()
+		spew.Dump(torrents[i].Info())
 		go func() {
 			tt:=time.Now()
 			peerID:=cl.PeerID()

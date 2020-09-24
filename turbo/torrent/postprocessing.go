@@ -195,7 +195,9 @@ func BuildInfoBytesForLMDBSnapshot(root string) (metainfo.Info, error) {
 	}
 
 	info:=metainfo.Info{
-		PieceLength: 16*1024,
+		Name: filepath.Base(root),
+		PieceLength: DefaultChunkSize,
+		Length: fi.Size(),
 		Files: []metainfo.FileInfo{
 			{
 				Length:   fi.Size(),
@@ -206,6 +208,7 @@ func BuildInfoBytesForLMDBSnapshot(root string) (metainfo.Info, error) {
 	}
 
 	err = info.GeneratePieces(func(fi metainfo.FileInfo) (io.ReadCloser, error) {
+		fmt.Println("info.GeneratePieces", filepath.Join(root, strings.Join(fi.Path, string(filepath.Separator))))
 		return os.Open(filepath.Join(root, strings.Join(fi.Path, string(filepath.Separator))))
 	})
 	if err != nil {

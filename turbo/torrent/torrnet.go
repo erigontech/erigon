@@ -7,6 +7,9 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
+	"github.com/davecgh/go-spew/spew"
+
+	//"github.com/anacrolix/torrent/storage"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -81,6 +84,10 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotNa
 	select {
 		case <-t.GotInfo():
 			log.Info("Init", "snapshot", snapshotName)
+			fmt.Println(t.Info().Length)
+			fmt.Println(t.Info().PieceLength, DefaultChunkSize)
+			spew.Dump(t.Info())
+			//panic("asda")
 			if newTorrent {
 				log.Info("Save spec", "snapshot", snapshotName)
 				ts.InfoBytes=common.CopyBytes(t.Metainfo().InfoBytes)
@@ -96,7 +103,7 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotNa
 			log.Warn("Init failure", "snapshot", snapshotName, "err", ctx.Err())
 			return ctx.Err()
 	}
-	//t.VerifyData()
+	t.VerifyData()
 	t.DisallowDataDownload()
 	return nil
 }

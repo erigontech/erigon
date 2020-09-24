@@ -83,7 +83,7 @@ func generateHeaders(n int) []types.Header {
 }
 
 func TestDebugSnapshot(t *testing.T) {
-	snKV := ethdb.NewLMDB().Path("/media/b00ris/nvme/snapshotsync/tg/snapshots/headers/").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snKV := ethdb.NewLMDB().Path("/media/b00ris/nvme/snapshots/headers/").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
 		}
@@ -122,5 +122,4 @@ func TestDebugSnapshot(t *testing.T) {
 	if err!=nil {
 		t.Fatal(err)
 	}
-
 }
