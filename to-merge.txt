@@ -25,11 +25,6 @@ Date:   Thu Sep 24 10:46:43 2020 +0200
 
     cmd/devp2p/internal/ethtest: lower protocol version to 64 (#21604)
 
-commit 39f8268147b5f4f0e42ce56dea8e1cd37aeedb75
-Author: rene <41963722+renaynay@users.noreply.github.com>
-Date:   Wed Sep 23 17:48:47 2020 +0200
-
-    cmd/devp2p/internal/ethtest: update version in handshake (#21603)
 
 commit a25899f3dc2494cad515ed1a65b0c4e28db951a9
 Author: rene <41963722+renaynay@users.noreply.github.com>
