@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"time"
@@ -326,4 +327,103 @@ func GetSharded2(c ethdb.Cursor, key []byte) (*roaring.Bitmap, error) {
 	}
 
 	return roaring.FastOr(shards...), nil
+}
+
+const ColdShardLimit = 32 * datasize.KB
+const HotShardLimit = 4 * datasize.KB
+
+// 3 terms are used: cold_shard, hot_shard, delta
+// delta - most recent changes (appendable)
+// hot_shard - merge delta here until hot_shard size < HotShardLimit, otherwise merge hot to cold
+// cold_shard - merge hot_shard here until cold_shard size < ColdShardLimit, otherwise mark hot as cold, create new hot from delta
+// no cold shards, create new hot from delta - it will turn hot to cold automatically
+// never merge cold with cold for compaction - because it's expensive operation
+func AppendShardedMergeByOr3(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
+	t := time.Now()
+
+	shardNForDelta := uint16(0)
+
+	hotK, hotV, err := c.Seek(key)
+	if err != nil {
+		return err
+	}
+	if hotK != nil && bytes.HasPrefix(hotK, key) {
+		hotShardN := ^binary.BigEndian.Uint16(hotK[len(hotK)-2:])
+		if len(hotV) > int(HotShardLimit) { // merge hot to cold
+			shardNForDelta, err = hotShardOverflow(c, hotShardN, hotV)
+			if err != nil {
+				return err
+			}
+		} else { // merge delta to hot, write result to `hotShardN`
+			hot := roaring.New()
+			_, err = hot.FromBuffer(hotV)
+			if err != nil {
+				return err
+			}
+
+			delta.Or(hot)
+			shardNForDelta = hotShardN
+		}
+	}
+
+	delta.RunOptimize()
+	newV := make([]byte, int(delta.GetSerializedSizeInBytes()))
+	_, err = delta.WriteTo(bytes.NewBuffer(newV[:0]))
+	if err != nil {
+		return err
+	}
+
+	newK := make([]byte, len(key)+2)
+	copy(newK, key)
+	binary.BigEndian.PutUint16(newK[len(newK)-2:], ^shardNForDelta)
+	err = c.Put(newK, newV)
+	if err != nil {
+		return err
+	}
+
+	s := time.Since(t)
+	if s > 50*time.Millisecond {
+		fmt.Printf("1: time=%s, card=%d, serializeSize=%d shard=%d\n", s, delta.GetCardinality(), delta.GetSerializedSizeInBytes(), shardNForDelta)
+	}
+	return nil
+}
+
+func hotShardOverflow(c ethdb.Cursor, hotShardN uint16, hotV []byte) (shardNForDelta uint16, err error) {
+	if hotShardN == 0 { // no cold shards, create new hot from delta - it will turn hot to cold automatically
+		return 1, nil
+	}
+
+	coldK, coldV, err := c.Next() // get cold shard from db
+	if err != nil {
+		return 0, err
+	}
+
+	if len(coldV) > int(ColdShardLimit) { // cold shard is too big, write delta to `hotShardN + 1` - it will turn hot to cold automatically
+		return hotShardN + 1, nil
+	}
+
+	// merge hot to cold and replace hot by delta (by write delta to `hotShardN`)
+	cold := roaring.New()
+	_, err = cold.FromBuffer(coldV)
+	if err != nil {
+		return 0, err
+	}
+
+	hot := roaring.New()
+	_, err = hot.FromBuffer(hotV)
+	if err != nil {
+		return 0, err
+	}
+
+	cold.Or(hot)
+
+	cold.RunOptimize()
+	coldBytes := make([]byte, int(cold.GetSerializedSizeInBytes()))
+	_, err = cold.WriteTo(bytes.NewBuffer(coldBytes[:0]))
+	err = c.Put(common.CopyBytes(coldK), coldBytes)
+	if err != nil {
+		return 0, err
+	}
+
+	return hotShardN, nil
 }

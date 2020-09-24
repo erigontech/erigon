@@ -111,7 +111,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 			}
 			log.Info("Progress", "blockNum", blockNum, "bucketSize", common.StorageSize(sz))
 		case <-checkFlushEvery.C:
-			if needFlush(indices, logIndicesMemLimit, logIndicesSingleMemLimit) {
+			if needFlush(indices, logIndicesMemLimit, bitmapdb.HotShardLimit/2) {
 				if err := flushBitmaps(logIndexCursor, indices); err != nil {
 					return err
 				}
@@ -254,7 +254,7 @@ func flushBitmaps(c ethdb.CursorDupSort, inMem map[string]*roaring.Bitmap) error
 			continue
 		}
 		b := inMem[k]
-		if err := bitmapdb.AppendShardedMergeByOr2(c, []byte(k), b); err != nil {
+		if err := bitmapdb.AppendShardedMergeByOr3(c, []byte(k), b); err != nil {
 			return err
 		}
 	}
