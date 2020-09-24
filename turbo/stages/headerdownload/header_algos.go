@@ -908,10 +908,10 @@ func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, powDepth int, 
 // reserveTip makes sure there is a space for at least one more tip
 func (hd *HeaderDownload) reserveTip() {
 	for hd.tipCount >= hd.tipLimit {
-		fmt.Printf("reserve tips %d >= %d\n", hd.tipCount, hd.tipLimit)
+		//fmt.Printf("reserve tips %d >= %d\n", hd.tipCount, hd.tipLimit)
 		// Pick the anchor with the largest (maxTipHeight - minTipHeight) difference
 		anchor := hd.anchorTree.Min().(AnchorItem).anchor
-		fmt.Printf("Chose anchor %d with maxTipHeight %d, tips: %d\n", anchor.blockHeight, anchor.maxTipHeight, anchor.tipQueue.Len())
+		//fmt.Printf("Chose anchor %d with maxTipHeight %d, tips: %d\n", anchor.blockHeight, anchor.maxTipHeight, anchor.tipQueue.Len())
 		hd.anchorTree.Delete(AnchorItem{ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
 		tipItem := heap.Pop(anchor.tipQueue).(AnchorTipItem)
 		hd.anchorTree.ReplaceOrInsert(AnchorItem{anchor: anchor, ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
