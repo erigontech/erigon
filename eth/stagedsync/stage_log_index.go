@@ -254,7 +254,7 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 			continue
 		}
 		b := inMem[k]
-		if err := bitmapdb.AppendShardedMergeByOr3(c, []byte(k), b); err != nil {
+		if err := bitmapdb.AppendMergeByOr3(c, []byte(k), b); err != nil {
 			return err
 		}
 	}

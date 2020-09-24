@@ -114,8 +114,16 @@ var (
 	BlockBodyPrefix     = "b" // blockBodyPrefix + num (uint64 big endian) + hash -> block body
 	BlockReceiptsPrefix = "r" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
 
-	// Stores bitmap indices - in which block numbers saw logs with given 'address' or 'topic'
+	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] -> bitmap(blockN)
+	// indices are sharded - because some bitmaps are >1Mb and when new incoming blocks process it
+	//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (LMDB does copy-on-write).
+	//
+	// 3 terms are used: cold_shard, hot_shard, delta
+	//   delta - most recent changes (appendable)
+	//   hot_shard - merge delta here until hot_shard size < HotShardLimit, otherwise merge hot to cold
+	//   cold_shard - merge hot_shard here until cold_shard size < ColdShardLimit, otherwise mark hot as cold, create new hot from delta
+	// cold shards never merged for compaction - because it's expensive operation
 	LogIndex  = "log_index"
 	LogIndex2 = "log_index2"
 

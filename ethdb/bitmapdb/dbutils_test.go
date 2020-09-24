@@ -263,7 +263,7 @@ func TestSharding3(t *testing.T) {
 			for j := i; j < i+5_000; j += 2 {
 				bm1.Add(j)
 			}
-			err := bitmapdb.AppendShardedMergeByOr3(c, k, bm1)
+			err := bitmapdb.AppendMergeByOr3(c, k, bm1)
 			require.NoError(t, err)
 		}
 

@@ -1187,6 +1187,16 @@ func (c *LmdbDupSortCursor) initCursor() error {
 	return c.LmdbCursor.initCursor()
 }
 
+// Warning! this method doesn't check order of keys, it means you can insert key in wrong place of bucket
+//	The key parameter must still be provided, and must match it.
+//	If using sorted duplicates (#MDB_DUPSORT) the data item must still
+//	sort into the same place. This is intended to be used when the
+//	new data is the same size as the old. Otherwise it will simply
+//	perform a delete of the old record followed by an insert.
+func (c *LmdbDupSortCursor) PutCurrent(k, v []byte) error {
+	panic("method is too dangerous, read docs")
+}
+
 // DeleteExact - does delete
 func (c *LmdbDupSortCursor) DeleteExact(k1, k2 []byte) error {
 	if c.c == nil {
