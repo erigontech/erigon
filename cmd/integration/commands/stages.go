@@ -227,7 +227,7 @@ func stageExec(ctx context.Context) error {
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	if err := db.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(10729250), 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(10729270), 0, func(k, v []byte) (bool, error) {
 		if err := db.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err != nil {
 			return false, err
 		}
