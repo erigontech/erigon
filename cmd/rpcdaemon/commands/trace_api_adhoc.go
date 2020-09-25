@@ -11,8 +11,8 @@ import (
 
 // CallParam a parameter for a eth_callMany routine
 type CallParam struct {
-	tx         types.Transaction
-	traceTypes []string
+	_ types.Transaction
+	_ []string
 }
 
 // CallParams array of callMany structs
