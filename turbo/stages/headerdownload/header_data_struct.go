@@ -60,17 +60,13 @@ type Anchor struct {
 	anchorID        int    // Unique ID of this anchor to be able to find it in the balanced tree
 }
 
-// AnchorItem is a representation on a anchor in the balanced tree
-type AnchorItem struct {
-	anchor *Anchor
-}
-
-func (a *AnchorItem) Less(bi llrb.Item) bool {
-	b := bi.(*AnchorItem)
-	if a.anchor.tipStretch() == b.anchor.tipStretch() {
-		return a.anchor.anchorID < b.anchor.anchorID
+// For placing anchors into the sorting tree
+func (a *Anchor) Less(bi llrb.Item) bool {
+	b := bi.(*Anchor)
+	if a.tipStretch() == b.tipStretch() {
+		return a.anchorID < b.anchorID
 	}
-	return a.anchor.tipStretch() > b.anchor.tipStretch()
+	return a.tipStretch() > b.tipStretch()
 }
 
 func (a *Anchor) tipStretch() uint64 {
