@@ -62,17 +62,15 @@ type Anchor struct {
 
 // AnchorItem is a representation on a anchor in the balanced tree
 type AnchorItem struct {
-	tipStretch uint64 // Difference between maxTipHeight and minTipHeight for all tips of this anchor
-	ID         int    // Unique identifier of the anchor
-	anchor     *Anchor
+	anchor *Anchor
 }
 
 func (a *AnchorItem) Less(bi llrb.Item) bool {
 	b := bi.(*AnchorItem)
-	if a.tipStretch == b.tipStretch {
-		return a.ID < b.ID
+	if a.anchor.tipStretch() == b.anchor.tipStretch() {
+		return a.anchor.anchorID < b.anchor.anchorID
 	}
-	return a.tipStretch > b.tipStretch
+	return a.anchor.tipStretch() > b.anchor.tipStretch()
 }
 
 func (a *Anchor) tipStretch() uint64 {
@@ -80,48 +78,6 @@ func (a *Anchor) tipStretch() uint64 {
 		return 0
 	}
 	return a.maxTipHeight - (*a.tipQueue)[0].height
-}
-
-// AnchorQueue is a priority queue of anchors
-// This queue is prioritised by difference between maxTipHeight and minTipHeight (which it top of the anchor's tip queue)
-// Anchor with the largest difference is on the top of the queue. In this queue, we do not use `Pop` (it never shink),
-// but instead we use `Fix` on the top element
-type AnchorQueue []*Anchor
-
-func (aq AnchorQueue) Len() int {
-	return len(aq)
-}
-
-func (aq AnchorQueue) Less(i, j int) bool {
-	iMax := aq[i].maxTipHeight
-	jMax := aq[j].maxTipHeight
-	iMin := iMax
-	jMin := jMax
-	if aq[i].tipQueue.Len() > 0 {
-		iMin = (*aq[i].tipQueue)[0].height
-	}
-	if aq[j].tipQueue.Len() > 0 {
-		jMin = (*aq[j].tipQueue)[0].height
-	}
-	return (iMax - iMin) > (jMax - jMin)
-}
-
-func (aq AnchorQueue) Swap(i, j int) {
-	aq[i], aq[j] = aq[j], aq[i]
-}
-
-func (aq *AnchorQueue) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	*aq = append(*aq, x.(*Anchor))
-}
-
-func (aq *AnchorQueue) Pop() interface{} {
-	old := *aq
-	n := len(old)
-	x := old[n-1]
-	*aq = old[0 : n-1]
-	return x
 }
 
 type Tip struct {

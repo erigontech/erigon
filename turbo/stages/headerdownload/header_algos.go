@@ -128,7 +128,7 @@ func (hd *HeaderDownload) InvalidateAnchors(anchorParent common.Hash, invalidAnc
 			for k, anchor := range anchors {
 				if j < len(invalidAnchors) && invalidAnchors[j] == k {
 					// Invalidate the entire tree that is rooted at this anchor anchor
-					hd.anchorTree.Delete(&AnchorItem{tipStretch: anchor.tipStretch(), ID: anchor.anchorID})
+					hd.anchorTree.Delete(&AnchorItem{anchor: anchor})
 					for _, anchorTipItem := range *anchor.tipQueue {
 						delete(hd.tips, anchorTipItem.hash)
 						hd.tipCount--
@@ -264,7 +264,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 		}
 		// Go over tips of the anchors we are replacing, bump their cumulative difficulty, and add them to the new anchor
 		for _, anchor := range anchors {
-			hd.anchorTree.Delete(&AnchorItem{tipStretch: anchor.tipStretch(), ID: anchor.anchorID})
+			hd.anchorTree.Delete(&AnchorItem{anchor: anchor})
 			for _, tipQueueItem := range *anchor.tipQueue {
 				if tip, ok := hd.getTip(tipQueueItem.hash, false); ok {
 					tip.cumulativeDifficulty.Add(&tip.cumulativeDifficulty, &cumulativeDifficulty)
@@ -277,7 +277,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 			}
 		}
 		delete(hd.anchors, anchorHeader.Hash())
-		hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: newAnchor, ID: newAnchor.anchorID, tipStretch: newAnchor.tipStretch()})
+		hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: newAnchor})
 		cumulativeDifficulty.Clear()
 		for i := end - 1; i >= start; i-- {
 			header := segment.Headers[i]
@@ -322,9 +322,9 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 		}
 		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
 	}
-	hd.anchorTree.Delete(&AnchorItem{ID: newAnchor.anchorID, tipStretch: newAnchor.tipStretch()})
+	hd.anchorTree.Delete(&AnchorItem{anchor: newAnchor})
 	for _, anchor := range anchors {
-		hd.anchorTree.Delete(&AnchorItem{tipStretch: anchor.tipStretch(), ID: anchor.anchorID})
+		hd.anchorTree.Delete(&AnchorItem{anchor: anchor})
 		for _, tipQueueItem := range *anchor.tipQueue {
 			if tip, ok := hd.getTip(tipQueueItem.hash, false); ok {
 				tip.cumulativeDifficulty.Add(&tip.cumulativeDifficulty, &cumulativeDifficulty)
@@ -338,7 +338,7 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 	}
 	cumulativeDifficulty = attachmentTip.cumulativeDifficulty
 	delete(hd.anchors, anchorHeader.Hash())
-	hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: newAnchor, ID: newAnchor.anchorID, tipStretch: newAnchor.tipStretch()})
+	hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: newAnchor})
 	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
 	for i := end - 1; i >= start; i-- {
 		header := segment.Headers[i]
@@ -407,7 +407,7 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty 
 			anchor.maxTipHeight = tip.blockHeight
 		}
 		hd.tipCount++
-		hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: anchor, ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
+		hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: anchor})
 		hd.limitTips()
 		if header.ParentHash != (common.Hash{}) {
 			heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime})
@@ -887,14 +887,14 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 		blockHeight:          header.Number.Uint64(),
 		uncleHash:            header.UncleHash,
 	}
-	hd.anchorTree.Delete(&AnchorItem{ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
+	hd.anchorTree.Delete(&AnchorItem{anchor: anchor})
 	hd.tips[tipHash] = tip
 	heap.Push(anchor.tipQueue, AnchorTipItem{hash: tipHash, height: tip.blockHeight})
 	hd.tipCount++
 	if tip.blockHeight > anchor.maxTipHeight {
 		anchor.maxTipHeight = tip.blockHeight
 	}
-	hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: anchor, ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
+	hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: anchor})
 	hd.limitTips()
 	return nil
 }
@@ -907,14 +907,14 @@ func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, 
 		timestamp:            timestamp,
 		blockHeight:          blockHeight,
 	}
-	hd.anchorTree.Delete(&AnchorItem{ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
+	hd.anchorTree.Delete(&AnchorItem{anchor: anchor})
 	hd.tips[hash] = tip
 	heap.Push(anchor.tipQueue, AnchorTipItem{hash: hash, height: blockHeight})
 	if blockHeight > anchor.maxTipHeight {
 		anchor.maxTipHeight = blockHeight
 	}
 	hd.tipCount++
-	hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: anchor, ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
+	hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: anchor})
 	hd.limitTips()
 }
 
@@ -948,7 +948,7 @@ func (hd *HeaderDownload) limitTips() {
 		fmt.Printf("Chose anchor %d with maxTipHeight %d, tipStetch: %d\n", anchor.blockHeight, anchor.maxTipHeight, anchor.tipStretch())
 		//hd.anchorTree.Delete(&AnchorItem{ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
 		tipItem := heap.Pop(anchor.tipQueue).(AnchorTipItem)
-		hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: anchor, ID: anchor.anchorID, tipStretch: anchor.tipStretch()})
+		hd.anchorTree.ReplaceOrInsert(&AnchorItem{anchor: anchor})
 		delete(hd.tips, tipItem.hash)
 		hd.tipCount--
 	}
