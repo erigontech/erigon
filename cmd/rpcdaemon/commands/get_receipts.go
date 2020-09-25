@@ -323,7 +323,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
 		"logs":              receipt.Logs,
-		"logsBloom":         receipt.Bloom,
+		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
 	// Assign receipt status or post state.
