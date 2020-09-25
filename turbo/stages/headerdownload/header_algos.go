@@ -466,7 +466,9 @@ func (hd *HeaderDownload) AnchorState() string {
 						sbb.WriteString(fmt.Sprintf(" %d", b))
 					}
 				} else {
-					if bs[j-1]+1 == b {
+					if bs[j-1] == b {
+						// Skip
+					} else if bs[j-1]+1 == b {
 						if b+1 == bs[j+1] {
 							// Skip
 						} else {
