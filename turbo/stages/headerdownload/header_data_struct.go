@@ -67,8 +67,8 @@ type AnchorItem struct {
 	anchor     *Anchor
 }
 
-func (a AnchorItem) Less(bi llrb.Item) bool {
-	b := bi.(AnchorItem)
+func (a *AnchorItem) Less(bi llrb.Item) bool {
+	b := bi.(*AnchorItem)
 	if a.tipStretch == b.tipStretch {
 		return a.ID < b.ID
 	}
