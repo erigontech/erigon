@@ -481,7 +481,7 @@ func (hd *HeaderDownload) AnchorState() string {
 					}
 				}
 			}
-			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d (%s)}", end, end-anchor.blockHeight, anchor.tipQueue.Len(), sbb.String()))
+			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d tipStretch=%d (%s)}", end, end-anchor.blockHeight, anchor.tipQueue.Len(), anchor.tipStretch(), sbb.String()))
 		}
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
 		ss[j] = sb.String()
