@@ -34,7 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-// Test getChain() parameters.
+// Test chain parameters.
 var (
 	testKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddress = crypto.PubkeyToAddress(testKey.PublicKey)
@@ -46,7 +46,7 @@ var (
 var testChainBaseMu sync.Mutex
 var testChainBase *testChain
 
-// Different forks on top of the base getChain():
+// Different forks on top of the base chain:
 var testChainForkLightA, testChainForkLightB, testChainForkHeavy *testChain
 var forkLen = int(fullMaxForkAncestry + 50)
 
@@ -54,7 +54,6 @@ func getTestChainForkLightA() *testChain {
 	testChainBaseMu.Lock()
 	defer testChainBaseMu.Unlock()
 	if testChainForkLightA == nil {
-		_ = getTestChainBase()
 		testChainForkLightA = getTestChainBase().makeFork(forkLen, false, 1)
 	}
 	return testChainForkLightA
@@ -63,7 +62,6 @@ func getTestChainForkLightB() *testChain {
 	testChainBaseMu.Lock()
 	defer testChainBaseMu.Unlock()
 	if testChainForkLightB == nil {
-		_ = getTestChainBase()
 		testChainForkLightB = getTestChainBase().makeFork(forkLen, false, 2)
 	}
 	return testChainForkLightB
@@ -72,7 +70,6 @@ func getTestChainForkHeavy() *testChain {
 	testChainBaseMu.Lock()
 	defer testChainBaseMu.Unlock()
 	if testChainForkHeavy == nil {
-		_ = getTestChainBase()
 		testChainForkHeavy = getTestChainBase().makeFork(forkLen+1, true, 3)
 	}
 	return testChainForkHeavy
@@ -119,14 +116,14 @@ func newTestChain(length int, db *ethdb.ObjectDatabase, genesis *types.Block) *t
 	return tc
 }
 
-// makeFork creates a fork on top of the test getChain().
+// makeFork creates a fork on top of the test chain.
 func (tc *testChain) makeFork(length int, heavy bool, seed byte) *testChain {
 	fork := tc.copy(tc.len() + length)
 	fork.generate(length, seed, tc.headBlock(), heavy)
 	return fork
 }
 
-// shorten creates a copy of the getChain() with the given length. It panics if the
+// shorten creates a copy of the chain with the given length. It panics if the
 // length is longer than the number of available blocks.
 func (tc *testChain) shorten(length int) *testChain {
 	if length > tc.len() {
@@ -157,8 +154,8 @@ func (tc *testChain) copy(newlen int) *testChain {
 	return cpy
 }
 
-// generate creates a getChain() of n blocks starting at and including parent.
-// the returned hash getChain() is ordered head->parent. In addition, every 22th block
+// generate creates a chain of n blocks starting at and including parent.
+// the returned hash chain is ordered head->parent. In addition, every 22th block
 // contains a transaction and every 5th an uncle to allow testing correct block
 // reassembly.
 func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool) {
@@ -232,12 +229,12 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	}
 }
 
-// len returns the total number of blocks in the getChain().
+// len returns the total number of blocks in the chain.
 func (tc *testChain) len() int {
 	return len(tc.chain)
 }
 
-// headBlock returns the head of the getChain().
+// headBlock returns the head of the chain.
 func (tc *testChain) headBlock() *types.Block {
 	return tc.blockm[tc.chain[len(tc.chain)-1]]
 }

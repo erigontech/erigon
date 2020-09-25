@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
@@ -39,30 +41,36 @@ type EngineProcess interface {
 }
 
 type Process struct {
-	Chain                 ChainHeaderReader
-	VerifyHeaderRequests  chan VerifyHeaderRequest
-	VerifyHeaderResponses chan VerifyHeaderResponse
-	HeadersRequests       chan HeadersRequest
-	HeaderResponses       chan HeaderResponse
+	Chain                     ChainHeaderReader
+	VerifyHeaderRequests      chan VerifyHeaderRequest
+	RetryVerifyHeaderRequests chan VerifyHeaderRequest
+	RetryVerifyTicker         *time.Ticker
+	VerifyHeaderResponses     chan VerifyHeaderResponse
+	HeadersRequests           chan HeadersRequest
+	HeaderResponses           chan HeaderResponse
 
-	VerifiedBlocks   map[common.Hash]*types.Header
-	VerifiedBlocksMu sync.RWMutex
+	VerifiedBlocks *lru.Cache // common.Hash->*types.Header
 
 	RequestedBlocks   map[common.Hash]struct{}
 	RequestedBlocksMu sync.RWMutex
 }
 
 const size = 128
+const storageSize = 60000
+const retry = time.Microsecond
 
 func NewProcess(chain ChainHeaderReader) *Process {
+	verifiedBlocks, _ := lru.New(storageSize)
 	return &Process{
-		Chain:                 chain,
-		VerifyHeaderRequests:  make(chan VerifyHeaderRequest, size),
-		VerifyHeaderResponses: make(chan VerifyHeaderResponse, size),
-		HeadersRequests:       make(chan HeadersRequest, size),
-		HeaderResponses:       make(chan HeaderResponse, size),
-		VerifiedBlocks:        make(map[common.Hash]*types.Header, size),
-		RequestedBlocks:       make(map[common.Hash]struct{}, size),
+		Chain:                     chain,
+		VerifyHeaderRequests:      make(chan VerifyHeaderRequest, size),
+		RetryVerifyHeaderRequests: make(chan VerifyHeaderRequest, size),
+		RetryVerifyTicker:         time.NewTicker(retry),
+		VerifyHeaderResponses:     make(chan VerifyHeaderResponse, size),
+		HeadersRequests:           make(chan HeadersRequest, size),
+		HeaderResponses:           make(chan HeaderResponse, size),
+		VerifiedBlocks:            verifiedBlocks,
+		RequestedBlocks:           make(map[common.Hash]struct{}, size),
 	}
 }
 
@@ -79,22 +87,25 @@ func (p *Process) HeaderResponse() chan<- HeaderResponse {
 }
 
 func (p *Process) AddVerifiedBlocks(header *types.Header, hash common.Hash) {
-	p.VerifiedBlocksMu.Lock()
-	defer p.VerifiedBlocksMu.Unlock()
-	p.VerifiedBlocks[hash] = header
+	p.VerifiedBlocks.Add(hash, header)
 }
 
 func (p *Process) GetVerifiedBlocks(hash common.Hash) (*types.Header, bool) {
-	p.VerifiedBlocksMu.RLock()
-	defer p.VerifiedBlocksMu.RUnlock()
-	h, ok := p.VerifiedBlocks[hash]
-	return h, ok
+	h, ok := p.VerifiedBlocks.Get(hash)
+	if !ok {
+		return nil, false
+	}
+
+	header, ok := h.(*types.Header)
+	if !ok {
+		return nil, false
+	}
+
+	return header, true
 }
 
 func (p *Process) DeleteVerifiedBlocks(hash common.Hash) {
-	p.VerifiedBlocksMu.Lock()
-	defer p.VerifiedBlocksMu.Unlock()
-	delete(p.VerifiedBlocks, hash)
+	p.VerifiedBlocks.Remove(hash)
 }
 
 func (p *Process) AddRequestedBlocks(hash common.Hash) bool {

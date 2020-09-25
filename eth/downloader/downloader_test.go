@@ -54,7 +54,7 @@ func init() {
 	fsHeaderContCheck = 500 * time.Millisecond
 }
 
-// downloadTester is a test simulator for mocking out local block getChain().
+// downloadTester is a test simulator for mocking out local block chain.
 type downloadTester struct {
 	downloader *Downloader
 
@@ -64,16 +64,16 @@ type downloadTester struct {
 	peers   map[string]*downloadTesterPeer
 	engine  consensus.Engine
 
-	ownHashes   []common.Hash                  // Hash getChain() belonging to the tester
+	ownHashes   []common.Hash                  // Hash chain belonging to the tester
 	ownHeaders  map[common.Hash]*types.Header  // Headers belonging to the tester
 	ownBlocks   map[common.Hash]*types.Block   // Blocks belonging to the tester
 	ownReceipts map[common.Hash]types.Receipts // Receipts belonging to the tester
-	ownChainTd  map[common.Hash]*big.Int       // Total difficulties of the blocks in the local getChain()
+	ownChainTd  map[common.Hash]*big.Int       // Total difficulties of the blocks in the local chain
 
 	ancientHeaders  map[common.Hash]*types.Header  // Ancient headers belonging to the tester
 	ancientBlocks   map[common.Hash]*types.Block   // Ancient blocks belonging to the tester
 	ancientReceipts map[common.Hash]types.Receipts // Ancient receipts belonging to the tester
-	ancientChainTd  map[common.Hash]*big.Int       // Ancient total difficulties of the blocks in the local getChain()
+	ancientChainTd  map[common.Hash]*big.Int       // Ancient total difficulties of the blocks in the local chain
 
 	lock sync.RWMutex
 }
@@ -510,8 +510,8 @@ func (dlp *downloadTesterPeer) RequestReceipts(hashes []common.Hash) error {
 	return nil
 }
 
-// assertOwnChain checks if the local getChain() contains the correct number of items
-// of the various getChain() components.
+// assertOwnChain checks if the local chain contains the correct number of items
+// of the various chain components.
 func assertOwnChain(t *testing.T, tester *downloadTester, length int) {
 	// Mark this method as a helper to report errors at callsite, not in here
 	t.Helper()
@@ -519,8 +519,8 @@ func assertOwnChain(t *testing.T, tester *downloadTester, length int) {
 	assertOwnForkedChain(t, tester, 1, []int{length})
 }
 
-// assertOwnForkedChain checks if the local forked getChain() contains the correct
-// number of items of the various getChain() components.
+// assertOwnForkedChain checks if the local forked chain contains the correct
+// number of items of the various chain components.
 func assertOwnForkedChain(t *testing.T, tester *downloadTester, common int, lengths []int) {
 	// Mark this method as a helper to report errors at callsite, not in here
 	t.Helper()

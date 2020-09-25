@@ -39,8 +39,8 @@ var (
 	genesis = core.GenesisBlockForTesting(testdb, testAddress, big.NewInt(1000000000))
 )
 
-// makeChain creates a getChain() of n blocks starting at and including parent.
-// the returned hash getChain() is ordered head->parent. In addition, every 3rd block
+// makeChain creates a chain of n blocks starting at and including parent.
+// the returned hash chain is ordered head->parent. In addition, every 3rd block
 // contains a transaction and every 5th an uncle to allow testing correct block
 // reassembly.
 func makeChain(n int, seed byte, parent *types.Block, empty bool) ([]*types.Block, []types.Receipts) { //nolint:unparam

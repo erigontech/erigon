@@ -23,11 +23,12 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 	}
 
 	go func() {
-		// fixme remove records from VerifiedHeaders
 		for {
 			select {
 			case <-exit:
 				return
+			case <-c.RetryVerifyTicker.C:
+				c.VerifyHeaderRequests <- <-c.RetryVerifyHeaderRequests
 			case req := <-c.VerifyHeaderRequests:
 				if req.Deadline == nil {
 					t := time.Now().Add(ttl)
@@ -51,7 +52,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 
 				parents, exit := c.requestParentHeaders(req)
 				if exit {
-					c.VerifyHeaderRequests <- req
+					c.RetryVerifyHeaderRequests <- req
 					continue
 				}
 
