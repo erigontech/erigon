@@ -15,11 +15,11 @@ import (
 // TraceAPI RPC interface into tracing API
 type TraceAPI interface {
 	// Ad-hoc
-	// Call(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
-	// CallMany(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
-	// RawTransaction(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
-	// ReplayBlockTransactions(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
-	// ReplayTransaction(ctx context.Context, req TraceFilterRequest) ([]interface{}, error)
+	ReplayBlockTransactions(ctx context.Context, blockNr rpc.BlockNumber, traceTypes []string) ([]interface{}, error)
+	ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error)
+	Call(ctx context.Context, call CallParam, blockNr rpc.BlockNumber) ([]interface{}, error)
+	CallMany(ctx context.Context, calls CallParams) ([]interface{}, error)
+	RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error)
 
 	// Filtering
 	Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error)
