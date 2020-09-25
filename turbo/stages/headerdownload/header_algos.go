@@ -250,24 +250,31 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 		heap.Init(newAnchor.tipQueue)
 		hd.anchors[newAnchorHeader.ParentHash] = append(hd.anchors[newAnchorHeader.ParentHash], newAnchor)
 		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime})
-
-		// Add all headers in the segments as tips to this anchor
-		// Iterate in reverse order to be able to compute cumulative difficulty along the way
-		var cumulativeDifficulty uint256.Int
-		for i := end - 1; i >= start; i-- {
-			header := segment.Headers[i]
+		// Iterate headers in the segment to compute difficulty difference along the way
+		var difficultyDifference uint256.Int
+		for _, header := range segment.Headers[start:end] {
 			diff, overflow := uint256.FromBig(header.Difficulty)
 			if overflow {
 				return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 			}
-			cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
+			difficultyDifference.Add(&difficultyDifference, diff)
 		}
 		// Go over tips of the anchors we are replacing, bump their cumulative difficulty, and add them to the new anchor
-		for _, anchor := range anchors {
+		for i, anchor := range anchors {
 			hd.anchorTree.Delete(anchor)
+			if i == 0 {
+				newAnchor.totalDifficulty.Sub(&anchor.totalDifficulty, &difficultyDifference)
+			} else {
+				//TODO: Remove after debugging
+				var td uint256.Int
+				td.Sub(&td, &difficultyDifference)
+				if !newAnchor.totalDifficulty.Eq(&td) {
+					panic(fmt.Errorf("Total difficulty does not match in ExtendDown: %v vs %v\n", newAnchor.totalDifficulty, td))
+				}
+			}
 			for _, tipQueueItem := range *anchor.tipQueue {
 				if tip, ok := hd.getTip(tipQueueItem.hash, false); ok {
-					tip.cumulativeDifficulty.Add(&tip.cumulativeDifficulty, &cumulativeDifficulty)
+					tip.cumulativeDifficulty.Add(&tip.cumulativeDifficulty, &difficultyDifference)
 					tip.anchor = newAnchor
 					heap.Push(newAnchor.tipQueue, tipQueueItem)
 					if tip.blockHeight > newAnchor.maxTipHeight {
@@ -278,7 +285,9 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 		}
 		delete(hd.anchors, anchorHeader.Hash())
 		hd.anchorTree.ReplaceOrInsert(newAnchor)
-		cumulativeDifficulty.Clear()
+		// Add all headers in the segments as tips to this anchor
+		// Recalculate cumulative difficulty for each header
+		var cumulativeDifficulty uint256.Int
 		for i := end - 1; i >= start; i-- {
 			header := segment.Headers[i]
 			diff, overflow := uint256.FromBig(header.Difficulty)
@@ -311,23 +320,22 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 		return fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
 	}
 	newAnchor := attachmentTip.anchor
-	// Go over tips of the anchors we are replacing, bump their cumulative difficulty, and add them to the new anchor
-	cumulativeDifficulty := attachmentTip.cumulativeDifficulty
-	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
-	for i := end - 1; i >= start; i-- {
-		header := segment.Headers[i]
+	// Iterate headers in the segment to compute difficulty difference along the way
+	var difficultyDifference uint256.Int
+	for _, header := range segment.Headers[start:end] {
 		diff, overflow := uint256.FromBig(header.Difficulty)
 		if overflow {
 			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 		}
-		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
+		difficultyDifference.Add(&difficultyDifference, diff)
 	}
 	hd.anchorTree.Delete(newAnchor)
+	// Go over tips of the anchors we are replacing, bump their cumulative difficulty, and add them to the new anchor
 	for _, anchor := range anchors {
 		hd.anchorTree.Delete(anchor)
 		for _, tipQueueItem := range *anchor.tipQueue {
 			if tip, ok := hd.getTip(tipQueueItem.hash, false); ok {
-				tip.cumulativeDifficulty.Add(&tip.cumulativeDifficulty, &cumulativeDifficulty)
+				tip.cumulativeDifficulty.Add(&tip.cumulativeDifficulty, &difficultyDifference)
 				tip.anchor = newAnchor
 				heap.Push(newAnchor.tipQueue, tipQueueItem)
 				if tip.blockHeight > newAnchor.maxTipHeight {
@@ -336,7 +344,7 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 			}
 		}
 	}
-	cumulativeDifficulty = attachmentTip.cumulativeDifficulty
+	cumulativeDifficulty := attachmentTip.cumulativeDifficulty
 	delete(hd.anchors, anchorHeader.Hash())
 	hd.anchorTree.ReplaceOrInsert(newAnchor)
 	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
@@ -392,9 +400,11 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, totalDifficulty 
 		if overflow {
 			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 		}
+		cumulativeDifficulty := totalDifficulty
+		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
 		tip := &Tip{
 			anchor:               anchor,
-			cumulativeDifficulty: totalDifficulty,
+			cumulativeDifficulty: cumulativeDifficulty,
 			timestamp:            header.Time,
 			blockHeight:          header.Number.Uint64(),
 			uncleHash:            header.UncleHash,

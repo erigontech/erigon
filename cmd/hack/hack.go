@@ -1748,6 +1748,8 @@ func extracHeaders(chaindata string, block uint64) error {
 		h := rawdb.ReadHeader(db, hash, b)
 		td := rawdb.ReadTd(db, hash, b)
 		headerdownload.SerialiseHeader(h, hBuffer[:])
+		// Exclude the anchor header's difficulty from the totalDifficulty of the anchor
+		td.Sub(td, h.Difficulty)
 		td.FillBytes(dBuffer[:])
 		if _, err := w.Write(hBuffer[:]); err != nil {
 			return err
