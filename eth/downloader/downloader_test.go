@@ -592,11 +592,13 @@ func testThrottling(t *testing.T, protocol int, mode SyncMode) {
 		atomic.StoreUint32(&blocked, uint32(len(results)))
 		<-proceed
 	}
+
 	// Start a synchronisation concurrently
 	errc := make(chan error)
 	go func() {
 		errc <- tester.sync("peer", nil, mode)
 	}()
+
 	// Iteratively take some blocks, always checking the retrieval count
 	for {
 		// Check the retrieval count synchronously (! reason for this ugly block)

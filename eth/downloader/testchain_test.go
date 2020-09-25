@@ -167,19 +167,30 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	tc.cpyLock.Lock()
 	defer tc.cpyLock.Unlock()
 
+	zeroAddress := common.Address{0}
+	seedAddress := common.Address{seed}
+	amount := uint256.NewInt().SetUint64(1000)
+
+	var signer types.Signer
 	existingLen := len(tc.chain) - 1
 	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db, existingLen+n, func(i int, block *core.BlockGen) {
+		if i%500 == 0 {
+			fmt.Println("generated a chain of", i)
+		}
+
 		if i < existingLen || existingLen == 0 {
-			block.SetCoinbase(common.Address{0})
+			block.SetCoinbase(zeroAddress)
+
 			// Include transactions to the miner to make blocks more interesting.
 			if i%22 == 0 {
-				signer := types.MakeSigner(params.TestChainConfig, block.Number())
-				tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), common.Address{0}, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, testKey)
+				signer = types.MakeSigner(params.TestChainConfig, block.Number())
+				tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), zeroAddress, amount, params.TxGas, nil, nil), signer, testKey)
 				if err != nil {
 					panic(err)
 				}
 				block.AddTx(tx)
 			}
+
 			// if the block number is a multiple of 5, add a bonus uncle to the block
 			if i > 0 && i%5 == 0 {
 				block.AddUncle(&types.Header{
@@ -188,11 +199,13 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 				})
 			}
 		} else {
-			block.SetCoinbase(common.Address{seed})
+			block.SetCoinbase(seedAddress)
+
 			// If a heavy chain is requested, delay blocks to raise difficulty
 			if heavy {
 				block.OffsetTime(-1)
 			}
+
 			// if the block number is a multiple of 5, add a bonus uncle to the block
 			if i > existingLen && (i-existingLen)%5 == 0 {
 				block.AddUncle(&types.Header{
