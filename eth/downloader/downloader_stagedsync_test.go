@@ -266,20 +266,20 @@ func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 
 func TestStagedBase(t *testing.T) {
 	core.UsePlainStateExecution = true // Stage5 unwinds do not support hashed state
-	// Same as testChainForkLightA but much shorter
+	// Same as getTestChainForkLightA() but much shorter
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	tester, clear := newStagedSyncTester()
 	defer clear()
-	if err := tester.newPeer("peer", 65, testChainBase); err != nil {
+	if err := tester.newPeer("peer", 65, getTestChainBase()); err != nil {
 		t.Fatal(err)
 	}
 	if err := tester.sync("peer", nil); err != nil {
 		t.Fatal(err)
 	}
 	currentHeader := tester.CurrentHeader()
-	expectedHash := testChainBase.chain[len(testChainBase.chain)-1]
-	if int(currentHeader.Number.Uint64()) != len(testChainBase.chain)-1 {
-		t.Errorf("last block expected number %d, got %d", len(testChainBase.chain)-1, currentHeader.Number.Uint64())
+	expectedHash := getTestChainBase().chain[len(getTestChainBase().chain)-1]
+	if int(currentHeader.Number.Uint64()) != len(getTestChainBase().chain)-1 {
+		t.Errorf("last block expected number %d, got %d", len(getTestChainBase().chain)-1, currentHeader.Number.Uint64())
 	}
 	if currentHeader.Hash() != expectedHash {
 		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())
@@ -291,14 +291,14 @@ func TestUnwind(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	tester, clear := newStagedSyncTester()
 	defer clear()
-	if err := tester.newPeer("peer", 65, testChainForkLightA); err != nil {
+	if err := tester.newPeer("peer", 65, getTestChainForkLightA()); err != nil {
 		t.Fatal(err)
 	}
 	if err := tester.sync("peer", nil); err != nil {
 		t.Fatal(err)
 	}
 	fmt.Println("sync heavy")
-	if err := tester.newPeer("forkpeer", 65, testChainForkHeavy); err != nil {
+	if err := tester.newPeer("forkpeer", 65, getTestChainForkHeavy()); err != nil {
 		t.Fatal(err)
 	}
 	if err := tester.sync("forkpeer", nil); err != nil {
@@ -309,9 +309,9 @@ func TestUnwind(t *testing.T) {
 		t.Fatal(err)
 	}
 	currentHeader := tester.CurrentHeader()
-	expectedHash := testChainForkHeavy.chain[len(testChainForkHeavy.chain)-1]
-	if int(currentHeader.Number.Uint64()) != len(testChainForkHeavy.chain)-1 {
-		t.Errorf("last block expected number %d, got %d", len(testChainForkHeavy.chain)-1, currentHeader.Number.Uint64())
+	expectedHash := getTestChainForkHeavy().chain[len(getTestChainForkHeavy().chain)-1]
+	if int(currentHeader.Number.Uint64()) != len(getTestChainForkHeavy().chain)-1 {
+		t.Errorf("last block expected number %d, got %d", len(getTestChainForkHeavy().chain)-1, currentHeader.Number.Uint64())
 	}
 	if currentHeader.Hash() != expectedHash {
 		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())
