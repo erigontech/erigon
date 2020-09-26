@@ -75,13 +75,6 @@ func (a *Anchor) tipStretch() uint64 {
 	return a.maxTipHeight - (*a.tipQueue)[0].height
 }
 
-func (a *Anchor) chainSize() uint64 {
-	if a.maxTipHeight == 0 {
-		return 0
-	}
-	return a.maxTipHeight - a.blockHeight
-}
-
 type Tip struct {
 	anchor               *Anchor
 	cumulativeDifficulty uint256.Int
