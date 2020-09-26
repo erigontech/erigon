@@ -39,7 +39,7 @@ func (api *NetAPIImpl) Listening(_ context.Context) (bool, error) {
 func (api *NetAPIImpl) Version(_ context.Context) (string, error) {
 	if api.ethBackend == nil {
 		// We're running in --chaindata mode or otherwise cannot get the backend
-		return "", fmt.Errorf("net_version function is not available")
+		return "", fmt.Errorf(NotAvailableChainData, "net_version")
 	}
 
 	res, err := api.ethBackend.NetVersion()

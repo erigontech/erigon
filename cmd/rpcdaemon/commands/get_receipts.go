@@ -266,7 +266,7 @@ func (f *Filter) Logs(ctx context.Context, api *APIImpl) ([]*types.Log, error) {
 
 	if api.ethBackend == nil {
 		// We're running in --chaindata mode or otherwise cannot get the backend
-		return nil, fmt.Errorf("net_version function is not available")
+		return nil, fmt.Errorf(NotAvailableChainData, "eth_getLogs")
 	}
 
 	// Gather all indexed logs, and finish with non indexed ones

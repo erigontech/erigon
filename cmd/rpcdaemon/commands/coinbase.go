@@ -11,7 +11,7 @@ import (
 func (api *APIImpl) Coinbase(_ context.Context) (common.Address, error) {
 	if api.ethBackend == nil {
 		// We're running in --chaindata mode or otherwise cannot get the backend
-		return common.Address{}, fmt.Errorf("eth_coinbase function is not available")
+		return common.Address{}, fmt.Errorf(NotAvailableChainData, "eth_coinbase")
 	}
 	return api.ethBackend.Etherbase()
 }
