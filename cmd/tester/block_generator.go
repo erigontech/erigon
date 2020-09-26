@@ -138,7 +138,7 @@ func (*NoopBackend) SendTransaction(ctx context.Context, tx *types.Transaction) 
 }
 
 func (b *NoopBackend) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
-	receipt, _, _, _ := rawdb.ReadReceipt(b.db, txHash, b.genesis.Config)
+	receipt, _, _, _ := rawdb.ReadReceipt(b.db, txHash)
 	return receipt, nil
 }
 
