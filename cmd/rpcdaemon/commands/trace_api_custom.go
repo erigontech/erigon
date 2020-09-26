@@ -28,6 +28,11 @@ func (api *TraceAPIImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) 
 func (api *TraceAPIImpl) rewardCalc(blockNr rpc.BlockNumber, which string) (Issuance, error) {
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+	if chainConfig.Ethash == nil {
+		// Clique for example has no issuance
+		return Issuance{}, nil
+	}
+
 	block, err := api.getBlockByRPCNumber(blockNr)
 	if err != nil {
 		return Issuance{}, err

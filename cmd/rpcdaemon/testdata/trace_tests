@@ -42,6 +42,11 @@
 #215 trace_filter slow_2   [{"fromBlock":"0xa606ba","toBlock":"0xa606ba"}]
 #220 trace_filter 10700000 [{"fromBlock":"0xa344e0","toBlock":"0xa344e0"}]
 
+250 trace_replayBlockTransactions fail ["0x3", ["stateDiff"]]
+300 trace_replayTransaction       fail ["0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f", ["fail"]]
+320_turbo trace_call              fail [{"input":"0x0","nonce":"0x0","from":"0x02fcf30912b6fe2b6452ee19721c6068fe4c7b61","gas":"0xf4240","to":"0x37a9679c41e99db270bda88de8ff50c0cd23f326","gasPrice":"0x4a817c800","value":"0x0"},["fail"],"latest"]
+340 trace_callMany                fail [[[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["fail"]],[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["fail"]]],"latest"]
+360 trace_rawTransaction          fail ["0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",["fail"]]
 #255 trace_replayBlockTransactions ["0x1",["trace"]]
 #250 trace_replayBlockTransactions ["0x1"]
 #265 trace_replayBlockTransactions ["0x100"]
@@ -51,16 +56,10 @@
 #285 trace_replayBlockTransactions ["0xDBBA1",["trace"]]
 #280 trace_replayBlockTransactions ["0xDBBA1",["vmTrace"]]
 #285 trace_replayBlockTransactions ["CF9BF",["trace"]]
-
 #290 trace_replayTransactions ["CF9BF",["trace"]]
 #295trace_replayTransactions ["CF9BF",["trace"]]
 
 305 trace_junk12 no_rpc []
-
-#trace_call
-#trace_callMany
-#trace_rawTransaction
-#debug_traceTransaction ["0xDBBA1"]
 
 # custom, experimental stuff
 405_turbo trace_blockReward rew_0 ["0x0"]

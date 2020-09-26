@@ -15,3 +15,8 @@ s/,\"traceAddress\":null/,\"traceAddress\":[]/g
 s/\"0x0000000000000000000000000000000000000000000000000000000000000000\"/\"0x\"/g
 s/\"transactionHash\":\"0x\",\"transactionPosition\":0/\"transactionHash\":null,\"transactionPosition\":null/g
 s/\"result\":null/\"result\":[]/g
+
+s/\"error\":{\"code\":-32000,\"message\":\"function trace_replayBlockTransactions not implemented\"}/\"result\":\[\]/
+s/\"error\":{\"code\":-32000,\"message\":\"function trace_replayTransaction not implemented\"}/\"result\":{\"output\":\"0x\",\"stateDiff\":null,\"trace\":\[\],\"vmTrace\":null}/
+s/\"error\":{\"code\":-32602,\"message\":\"invalid argument 0: json: cannot unmarshal array into Go value of type commands.CallParam\"}/\"result\":\[{\"output\":\"0x\",\"stateDiff\":null,\"trace\":\[\],\"vmTrace\":null},{\"output\":\"0x\",\"stateDiff\":null,\"trace\":\[\],\"vmTrace\":null}]/
+s/\"error\":{\"code\":-32602,\"message\":\"invalid argument 0: hex string has length 82, want 64 for common.Hash\"}/\"error\":{\"code\":-32602,\"data\":\"RlpIncorrectListLen\",\"message\":\"Couldn't parse parameters: Transaction is not valid RLP\"}/
