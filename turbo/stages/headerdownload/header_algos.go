@@ -439,7 +439,7 @@ func (hd *HeaderDownload) AnchorState() string {
 			if i > 0 {
 				sb.WriteString("; ")
 			}
-			sb.WriteString(fmt.Sprintf("{%8d-", anchor.blockHeight))
+			sb.WriteString(fmt.Sprintf("{%8d", anchor.blockHeight))
 			end := anchor.maxTipHeight
 			var sbb strings.Builder
 			var bs []int
@@ -474,7 +474,11 @@ func (hd *HeaderDownload) AnchorState() string {
 					}
 				}
 			}
-			sb.WriteString(fmt.Sprintf("%d (%d) tips=%d tipStretch=%d (%s)}", end, end-anchor.blockHeight, anchor.tipQueue.Len(), anchor.tipStretch(), sbb.String()))
+			if end == 0 {
+				sb.WriteString(fmt.Sprintf(" tips=%d tipStretch=%d (%s)}", end, anchor.tipQueue.Len(), anchor.tipStretch(), sbb.String()))
+			} else {
+				sb.WriteString(fmt.Sprintf("-%d (%d) tips=%d tipStretch=%d (%s)}", end, end-anchor.blockHeight, anchor.tipQueue.Len(), anchor.tipStretch(), sbb.String()))
+			}
 		}
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
 		ss[j] = sb.String()
