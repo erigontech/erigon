@@ -90,7 +90,7 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.
 	apiImpl := NewAPI(db, dbReader, eth, cfg.Gascap)
 	netImpl := NewNetAPIImpl(eth)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader)
-	traceAPIImpl := NewTraceAPI(db, dbReader, cfg.MaxTraces)
+	traceAPIImpl := NewTraceAPI(db, dbReader, &cfg)
 	web3Impl := NewWeb3APIImpl()
 
 	for _, enabledAPI := range cfg.API {

@@ -27,6 +27,7 @@ type Flags struct {
 	API               []string
 	Gascap            uint64
 	MaxTraces         uint64
+	TraceType         string
 	WebsocketEnabled  bool
 }
 
@@ -61,6 +62,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth"}, "API's offered over the HTTP-RPC interface")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 0, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
+	rootCmd.PersistentFlags().StringVar(&cfg.TraceType, "trace.type", "parity", "Specify the type of tracing [geth|parity*] (experimental)")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets")
 
 	return rootCmd, cfg
@@ -124,6 +126,9 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
 
+	if cfg.TraceType != "parity" {
+		log.Info("Tracing output type: ", cfg.TraceType)
+	}
 	log.Info("HTTP endpoint opened", "url", httpEndpoint, "ws", cfg.WebsocketEnabled)
 
 	defer func() {
