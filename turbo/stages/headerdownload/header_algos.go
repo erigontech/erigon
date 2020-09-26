@@ -822,8 +822,8 @@ func (hd *HeaderDownload) FlushBuffer() error {
 // that it has been added as a tip, checks whether the anchor parent hash
 // associated with this tip equals to pre-set value (0x00..00 for genesis)
 func (hd *HeaderDownload) CheckInitiation(segment *ChainSegment, initialHash common.Hash) bool {
-	// Find attachment tip again
-	tip, exists := hd.getTip(segment.Headers[0].Hash(), false)
+	tipHash := segment.Headers[0].Hash()
+	tip, exists := hd.getTip(tipHash, false)
 	if !exists {
 		return false
 	}
@@ -832,6 +832,7 @@ func (hd *HeaderDownload) CheckInitiation(segment *ChainSegment, initialHash com
 	}
 	if tip.cumulativeDifficulty.Gt(&hd.highestTotalDifficulty) {
 		hd.highestTotalDifficulty.Set(&tip.cumulativeDifficulty)
+		fmt.Printf("Tip %d %x has total difficulty %d\n", tip.blockHeight, tipHash, tip.cumulativeDifficulty.ToBig())
 		return true
 	}
 	return false

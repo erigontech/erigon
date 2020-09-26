@@ -95,6 +95,9 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			log.Info("NewAnchor", "start", start, "end", end)
 		}
 	}
+	if start == 0 || end > 0 {
+		hd.CheckInitiation(segment, params.MainnetGenesisHash)
+	}
 }
 
 // Downloader needs to be run from a go-routine, and it is in the sole control of the HeaderDownloader object
