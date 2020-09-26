@@ -699,7 +699,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			} else {
 				anchor, anchorExisted := lastAnchors[hash]
 				if !anchorExisted {
-					anchor := &Anchor{powDepth: hd.initPowDepth, hash: hash, tipQueue: &AnchorTipQueue{}, anchorID: hd.nextAnchorID}
+					anchor = &Anchor{powDepth: hd.initPowDepth, hash: hash, tipQueue: &AnchorTipQueue{}, anchorID: hd.nextAnchorID}
 					hd.nextAnchorID++
 					heap.Init(anchor.tipQueue)
 					fmt.Printf("Undeclared anchor for hash %x, inserting as empty\n", hash)
@@ -850,9 +850,9 @@ func (hd *HeaderDownload) CheckInitiation(segment *ChainSegment, initialHash com
 	if tip.anchor.hash != initialHash {
 		return false
 	}
+	fmt.Printf("Tip %d %x has total difficulty %d, highest %d\n", tip.blockHeight, tipHash, tip.cumulativeDifficulty.ToBig(), hd.highestTotalDifficulty.ToBig())
 	if tip.cumulativeDifficulty.Gt(&hd.highestTotalDifficulty) {
 		hd.highestTotalDifficulty.Set(&tip.cumulativeDifficulty)
-		fmt.Printf("Tip %d %x has total difficulty %d\n", tip.blockHeight, tipHash, tip.cumulativeDifficulty.ToBig())
 		return true
 	}
 	return false
