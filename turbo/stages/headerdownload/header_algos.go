@@ -475,7 +475,7 @@ func (hd *HeaderDownload) AnchorState() string {
 				}
 			}
 			if end == 0 {
-				sb.WriteString(fmt.Sprintf(" tips=%d tipStretch=%d (%s)}", end, anchor.tipQueue.Len(), anchor.tipStretch(), sbb.String()))
+				sb.WriteString(fmt.Sprintf(" HardCoded tips=%d tipStretch=%d (%s)}", anchor.tipQueue.Len(), anchor.tipStretch(), sbb.String()))
 			} else {
 				sb.WriteString(fmt.Sprintf("-%d (%d) tips=%d tipStretch=%d (%s)}", end, end-anchor.blockHeight, anchor.tipQueue.Len(), anchor.tipStretch(), sbb.String()))
 			}
