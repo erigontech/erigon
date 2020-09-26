@@ -310,7 +310,7 @@ func TestExtendUp(t *testing.T) {
 	h2.Number = big.NewInt(2)
 	h2.Difficulty = big.NewInt(1010)
 	h2.ParentHash = h1.Hash()
-	if anchor, err := hd.addHeaderAsAnchor(&h1, 256, uint256.Int{}); err == nil {
+	if anchor, err := hd.addHeaderAsAnchor(&h1, 256); err == nil {
 		if err1 := hd.addHeaderAsTip(&h1, anchor, *new(uint256.Int).SetUint64(2000), currentTime); err1 != nil {
 			t.Fatalf("setting up h1 (tip): %v", err1)
 		}
@@ -318,8 +318,8 @@ func TestExtendUp(t *testing.T) {
 		t.Errorf("setting up h1 (anchor): %v", err)
 	}
 	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h2}}, 0, 1, currentTime); err == nil {
-		if hd.tips.Len() != 2 {
-			t.Errorf("expected 2 tips, got %d", hd.tips.Len())
+		if len(hd.tips) != 2 {
+			t.Errorf("expected 2 tips, got %d", len(hd.tips))
 		}
 	} else {
 		t.Errorf("extendUp: %v", err)
@@ -334,10 +334,10 @@ func TestExtendUp(t *testing.T) {
 	h4.Difficulty = big.NewInt(3010)
 	h4.ParentHash = h3.Hash()
 	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h4, &h3}}, 0, 2, currentTime); err == nil {
-		if hd.tips.Len() != 4 {
-			t.Errorf("expected 4 tips, got %d", hd.tips.Len())
+		if len(hd.tips) != 4 {
+			t.Errorf("expected 4 tips, got %d", len(hd.tips))
 		}
-		tip, ok := hd.getTip(h4.Hash(), false)
+		tip, ok := hd.getTip(h4.Hash())
 		if !ok {
 			t.Errorf("did not find h4 in the tips")
 		}
@@ -355,10 +355,10 @@ func TestExtendUp(t *testing.T) {
 	h41.Extra = []byte("Extra")
 	h41.ParentHash = h3.Hash()
 	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h41}}, 0, 1, currentTime); err == nil {
-		if hd.tips.Len() != 5 {
-			t.Errorf("expected 5 tips, got %d", hd.tips.Len())
+		if len(hd.tips) != 5 {
+			t.Errorf("expected 5 tips, got %d", len(hd.tips))
 		}
-		tip, ok := hd.getTip(h41.Hash(), false)
+		tip, ok := hd.getTip(h41.Hash())
 		if !ok {
 			t.Errorf("did not find h41 in the tips")
 		}
@@ -386,7 +386,7 @@ func TestExtendUp(t *testing.T) {
 	}
 
 	// Introduce h5 as a tip and prepend h6
-	if anchor, err := hd.addHeaderAsAnchor(&h5, 256, uint256.Int{}); err == nil {
+	if anchor, err := hd.addHeaderAsAnchor(&h5, 256); err == nil {
 		if err1 := hd.addHeaderAsTip(&h5, anchor, *new(uint256.Int).SetUint64(10000), currentTime); err1 != nil {
 			t.Fatalf("setting up h5 (tip): %v", err1)
 		}
@@ -394,10 +394,10 @@ func TestExtendUp(t *testing.T) {
 		t.Errorf("setting up h5 (anchor): %v", err)
 	}
 	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h6}}, 0, 1, currentTime); err == nil {
-		if hd.tips.Len() != 7 {
-			t.Errorf("expected 7 tips, got %d", hd.tips.Len())
+		if len(hd.tips) != 7 {
+			t.Errorf("expected 7 tips, got %d", len(hd.tips))
 		}
-		tip, ok := hd.getTip(h6.Hash(), false)
+		tip, ok := hd.getTip(h6.Hash())
 		if !ok {
 			t.Errorf("did not find h6 in the tips")
 		}
@@ -416,19 +416,10 @@ func TestExtendUp(t *testing.T) {
 	h7.Difficulty = big.NewInt(6010)
 	h7.ParentHash = common.HexToHash("0x4354543543959438594359348990345893408")
 	// Introduce hard-coded tip
-	if anchor, err := hd.addHeaderAsAnchor(&h7, 256, uint256.Int{}); err == nil {
+	if anchor, err := hd.addHeaderAsAnchor(&h7, 256); err == nil {
 		hd.addHardCodedTip(10, 5555, h7.Hash(), anchor, *new(uint256.Int).SetUint64(2000))
 	} else {
 		t.Fatalf("settings up h7 (anchor): %v", err)
-	}
-
-	// Try to prepend to the hard-coded tip
-	var h8 types.Header
-	h8.Number = big.NewInt(8)
-	h8.Difficulty = big.NewInt(7010)
-	h8.ParentHash = h7.Hash()
-	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h8}}, 0, 1, currentTime); err == nil {
-		t.Errorf("extendUp to hard-coded tip - expected error")
 	}
 }
 

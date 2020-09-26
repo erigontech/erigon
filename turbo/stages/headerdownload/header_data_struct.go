@@ -131,12 +131,13 @@ type HeaderDownload struct {
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
 	anchorTree             *llrb.LLRB                // Balanced tree of anchors sorted by tip stretch (longest stretch first)
 	nextAnchorID           int
-	tips                   map[common.Hash]*Tip // Tips by tip hash
-	tipCount               int                  // Total number of tips associated to all anchors
-	tipLimit               int                  // Maximum allowed number of tips
-	initPowDepth           int                  // powDepth assigned to the newly inserted anchor
-	newAnchorFutureLimit   uint64               // How far in the future (relative to current time) the new anchors are allowed to be
-	newAnchorPastLimit     uint64               // How far in the past (relative to current time) the new anchors are allowed to be
+	hardTips               map[common.Hash]struct{} // Set of hashes for hard-coded tips
+	tips                   map[common.Hash]*Tip     // Tips by tip hash
+	tipCount               int                      // Total number of tips associated to all anchors
+	tipLimit               int                      // Maximum allowed number of tips
+	initPowDepth           int                      // powDepth assigned to the newly inserted anchor
+	newAnchorFutureLimit   uint64                   // How far in the future (relative to current time) the new anchors are allowed to be
+	newAnchorPastLimit     uint64                   // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
 	requestQueue           *RequestQueue
 	calcDifficultyFunc     CalcDifficultyFunc
@@ -201,8 +202,9 @@ func NewHeaderDownload(filesDir string,
 		verifySealFunc:       verifySealFunc,
 		newAnchorFutureLimit: newAnchorFutureLimit,
 		newAnchorPastLimit:   newAnchorPastLimit,
+		hardTips:             make(map[common.Hash]struct{}),
+		tips:                 make(map[common.Hash]*Tip),
 	}
-	hd.tips = make(map[common.Hash]*Tip)
 	heap.Init(hd.requestQueue)
 	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd
