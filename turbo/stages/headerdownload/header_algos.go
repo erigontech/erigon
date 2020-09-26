@@ -289,7 +289,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
-		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime, tipStretch: newAnchor.tipStretch()})
+		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime, chainSize: newAnchor.chainSize()})
 	} else {
 		return fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
 	}
@@ -380,7 +380,7 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 		}
 	}
 	if anchorHeader.ParentHash != (common.Hash{}) {
-		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime, tipStretch: anchor.tipStretch()})
+		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime, chainSize: anchor.chainSize()})
 	}
 	return NoPenalty, nil
 }
@@ -403,7 +403,7 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, currentTime uint
 		hd.tips[tipHash] = tip
 		hd.anchorTree.ReplaceOrInsert(anchor)
 		if header.ParentHash != (common.Hash{}) {
-			heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime, tipStretch: anchor.tipStretch()})
+			heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime, chainSize: anchor.chainSize()})
 		}
 	} else {
 		return err
@@ -721,7 +721,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 				}
 				if len(hd.anchors[parentHash]) == 0 {
 					if parentHash != (common.Hash{}) {
-						heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime, tipStretch: anchor.tipStretch()})
+						heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime, chainSize: anchor.chainSize()})
 					}
 				}
 				childAnchors[hash] = anchor

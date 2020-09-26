@@ -75,6 +75,13 @@ func (a *Anchor) tipStretch() uint64 {
 	return a.maxTipHeight - (*a.tipQueue)[0].height
 }
 
+func (a *Anchor) chainSize() uint64 {
+	if a.maxTipHeight == 0 {
+		return 0
+	}
+	return a.maxTipHeight - a.blockHeight
+}
+
 type Tip struct {
 	anchor               *Anchor
 	cumulativeDifficulty uint256.Int
@@ -153,7 +160,7 @@ type TipQueueItem struct {
 type RequestQueueItem struct {
 	anchorParent common.Hash
 	waitUntil    uint64
-	tipStretch   uint64
+	chainSize    uint64
 }
 
 type RequestQueue []RequestQueueItem
@@ -164,7 +171,7 @@ func (rq RequestQueue) Len() int {
 
 func (rq RequestQueue) Less(i, j int) bool {
 	if rq[i].waitUntil == rq[j].waitUntil {
-		return rq[i].tipStretch < rq[j].tipStretch
+		return rq[i].chainSize < rq[j].chainSize
 	}
 	return rq[i].waitUntil < rq[j].waitUntil
 }
