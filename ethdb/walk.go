@@ -18,7 +18,6 @@ package ethdb
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
@@ -95,21 +94,21 @@ func (sc *splitCursor) Next() (key1, key2, key3, val []byte, err error) {
 var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
 func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]common.Address, error) {
-	keys := make(map[common.Hash]struct{})
+	keys := make(map[common.Address]struct{})
 	startCode := dbutils.EncodeTimestamp(startTimestamp)
-	if err := db.Walk(dbutils.AccountChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.PlainAccountChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
 		keyTimestamp, _ := dbutils.DecodeTimestamp(k)
 
 		if keyTimestamp > endTimestamp {
 			return false, nil
 		}
 
-		walker := func(addrHash, _ []byte) error {
-			keys[common.BytesToHash(addrHash)] = struct{}{}
+		walker := func(addr, _ []byte) error {
+			keys[common.BytesToAddress(addr)] = struct{}{}
 			return nil
 		}
 
-		if innerErr := changeset.AccountChangeSetBytes(v).Walk(walker); innerErr != nil {
+		if innerErr := changeset.AccountChangeSetPlainBytes(v).Walk(walker); innerErr != nil {
 			return false, innerErr
 		}
 
@@ -125,11 +124,7 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 	idx := 0
 
 	for key := range keys {
-		value, err := db.Get(dbutils.PreimagePrefix, key[:])
-		if err != nil {
-			return nil, fmt.Errorf("could not get preimage for key %x", key)
-		}
-		copy(accounts[idx][:], value)
+		copy(accounts[idx][:], key[:])
 		idx++
 	}
 	return accounts, nil
