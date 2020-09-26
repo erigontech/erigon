@@ -1,7 +1,7 @@
 package headerdownload
 
 import (
-	"container/heap"
+	"container/list"
 	"encoding/binary"
 	"fmt"
 	"math/big"
@@ -146,7 +146,7 @@ type HeaderDownload struct {
 	newAnchorFutureLimit   uint64                   // How far in the future (relative to current time) the new anchors are allowed to be
 	newAnchorPastLimit     uint64                   // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
-	requestQueue           *RequestQueue
+	requestQueue           *list.List
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
 	RequestQueueTimer      *time.Timer
@@ -160,7 +160,6 @@ type TipQueueItem struct {
 type RequestQueueItem struct {
 	anchorParent common.Hash
 	waitUntil    uint64
-	chainSize    uint64
 }
 
 type RequestQueue []RequestQueueItem
@@ -170,9 +169,6 @@ func (rq RequestQueue) Len() int {
 }
 
 func (rq RequestQueue) Less(i, j int) bool {
-	if rq[i].waitUntil == rq[j].waitUntil {
-		return rq[i].chainSize < rq[j].chainSize
-	}
 	return rq[i].waitUntil < rq[j].waitUntil
 }
 
@@ -207,7 +203,7 @@ func NewHeaderDownload(filesDir string,
 		anchors:              make(map[common.Hash][]*Anchor),
 		tipLimit:             tipLimit,
 		initPowDepth:         initPowDepth,
-		requestQueue:         &RequestQueue{},
+		requestQueue:         list.New(),
 		anchorTree:           llrb.New(),
 		calcDifficultyFunc:   calcDifficultyFunc,
 		verifySealFunc:       verifySealFunc,
@@ -216,7 +212,6 @@ func NewHeaderDownload(filesDir string,
 		hardTips:             make(map[common.Hash]struct{}),
 		tips:                 make(map[common.Hash]*Tip),
 	}
-	heap.Init(hd.requestQueue)
 	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd
 }

@@ -289,7 +289,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
-		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime, chainSize: newAnchor.chainSize()})
+		hd.requestQueue.PushBack(RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime})
 	} else {
 		return fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
 	}
@@ -380,7 +380,7 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 		}
 	}
 	if anchorHeader.ParentHash != (common.Hash{}) {
-		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime, chainSize: anchor.chainSize()})
+		hd.requestQueue.PushBack(RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
 	}
 	return NoPenalty, nil
 }
@@ -403,7 +403,7 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, currentTime uint
 		hd.tips[tipHash] = tip
 		hd.anchorTree.ReplaceOrInsert(anchor)
 		if header.ParentHash != (common.Hash{}) {
-			heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime, chainSize: anchor.chainSize()})
+			hd.requestQueue.PushBack(RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime})
 		}
 	} else {
 		return err
@@ -721,7 +721,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 				}
 				if len(hd.anchors[parentHash]) == 0 {
 					if parentHash != (common.Hash{}) {
-						heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime, chainSize: anchor.chainSize()})
+						hd.requestQueue.PushBack(RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime})
 					}
 				}
 				childAnchors[hash] = anchor
@@ -754,22 +754,15 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*Hea
 	if hd.requestQueue.Len() == 0 {
 		return nil
 	}
-	var prevTopTime uint64
-	if hd.requestQueue.Len() > 0 {
-		prevTopTime = (*hd.requestQueue)[0].waitUntil
-	}
+	var prevTopTime uint64 = hd.requestQueue.Front().Value.(RequestQueueItem).waitUntil
 	var requests []*HeaderRequest
-	peek := (*hd.requestQueue)[0]
-	for hd.requestQueue.Len() > 0 && peek.waitUntil <= currentTime {
-		pop := heap.Pop(hd.requestQueue).(RequestQueueItem)
-		if anchors, present := hd.anchors[pop.anchorParent]; present {
+	for peek := hd.requestQueue.Front(); peek != nil && peek.Value.(RequestQueueItem).waitUntil <= currentTime; peek = hd.requestQueue.Front() {
+		hd.requestQueue.Remove(peek)
+		item := peek.Value.(RequestQueueItem)
+		if anchors, present := hd.anchors[item.anchorParent]; present {
 			// Anchor still exists after the timeout
-			requests = append(requests, &HeaderRequest{Hash: pop.anchorParent, Number: anchors[0].blockHeight - 1, Length: 192})
-			pop.waitUntil = currentTime + timeout
-			heap.Push(hd.requestQueue, pop)
-		}
-		if hd.requestQueue.Len() > 0 {
-			peek = (*hd.requestQueue)[0]
+			requests = append(requests, &HeaderRequest{Hash: item.anchorParent, Number: anchors[0].blockHeight - 1, Length: 192})
+			hd.requestQueue.PushBack(RequestQueueItem{anchorParent: item.anchorParent, waitUntil: currentTime + timeout})
 		}
 	}
 	hd.resetRequestQueueTimer(prevTopTime, currentTime)
@@ -779,7 +772,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) []*Hea
 func (hd *HeaderDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64) {
 	var nextTopTime uint64
 	if hd.requestQueue.Len() > 0 {
-		nextTopTime = (*hd.requestQueue)[0].waitUntil
+		nextTopTime = hd.requestQueue.Front().Value.(RequestQueueItem).waitUntil
 	}
 	if nextTopTime == prevTopTime {
 		return // Nothing changed
