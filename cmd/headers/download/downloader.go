@@ -42,17 +42,18 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 		log.Error(fmt.Sprintf("FindTip penalty %d", penalty))
 		return
 	}
+	currentTime := uint64(time.Now().Unix())
 	var powDepth int
-	if powDepth1, err1 := hd.VerifySeals(segment, foundAnchor, start, end); err1 == nil {
+	if powDepth1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
 		powDepth = powDepth1
 	} else {
 		log.Error("VerifySeals", "error", err1)
+		return
 	}
 	if err1 := hd.FlushBuffer(); err1 != nil {
 		log.Error("Could not flush the buffer, will discard the data", "error", err1)
 		return
 	}
-	currentTime := uint64(time.Now().Unix())
 	// There are 4 cases
 	if foundAnchor {
 		if foundTip {
@@ -86,10 +87,8 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 		}
 	} else {
 		// NewAnchor
-		if penalty, err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
+		if err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
 			log.Error("NewAnchor failed", "error", err1)
-		} else if penalty != headerdownload.NoPenalty {
-			log.Warn("NewAnchor returned", "penalty", penalty)
 		} else {
 			hd.AddSegmentToBuffer(segment, start, end)
 			log.Info("NewAnchor", "start", start, "end", end)

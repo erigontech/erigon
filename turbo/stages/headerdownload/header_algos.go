@@ -105,16 +105,15 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(header *types.Header) ([]*ChainS
 func (hd *HeaderDownload) FindAnchors(segment *ChainSegment) (found bool, start int, anchorParent common.Hash, invalidAnchors []int) {
 	// Walk the segment from children towards parents
 	for i, header := range segment.Headers {
-		headerHash := header.Hash()
 		// Check if the header can be attached to an anchor of a working tree
-		if anchors, attaching := hd.anchors[headerHash]; attaching {
+		if anchors, attaching := hd.anchors[header.Hash()]; attaching {
 			var invalidAnchors []int
 			for anchorIdx, anchor := range anchors {
 				if valid := hd.anchorParentValid(anchor, header); !valid {
 					invalidAnchors = append(invalidAnchors, anchorIdx)
 				}
 			}
-			return true, i, headerHash, invalidAnchors
+			return true, i, header.Hash(), invalidAnchors
 		}
 	}
 	return false, 0, common.Hash{}, nil
@@ -175,7 +174,17 @@ func (hd *HeaderDownload) FindTip(segment *ChainSegment, start int) (found bool,
 // VerifySeals verifies Proof Of Work for the part of the given chain segment
 // It reports first verification error, or returns the powDepth that the anchor of this
 // chain segment should have, if created
-func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound bool, start, end int) (powDepth int, err error) {
+func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound, tipFound bool, start, end int, currentTime uint64) (powDepth int, err error) {
+	if !anchorFound && !tipFound {
+		anchorHeader := segment.Headers[end-1]
+		if anchorHeader.Time > currentTime+hd.newAnchorFutureLimit {
+			return 0, fmt.Errorf("detached segment too far in the future")
+		}
+		if anchorHeader.Time+hd.newAnchorPastLimit < currentTime {
+			return 0, fmt.Errorf("detached segment too far in the past")
+		}
+	}
+
 	var powDepthSet bool
 	if anchorFound {
 		if anchors, ok := hd.anchors[segment.Headers[start].Hash()]; ok {
@@ -353,18 +362,12 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 	return nil
 }
 
-func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, currentTime uint64) (Penalty, error) {
+func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, currentTime uint64) error {
 	anchorHeader := segment.Headers[end-1]
-	if anchorHeader.Time > currentTime+hd.newAnchorFutureLimit {
-		return TooFarFuturePenalty, nil
-	}
-	if anchorHeader.Time+hd.newAnchorPastLimit < currentTime {
-		return TooFarPastPenalty, nil
-	}
 	var anchor *Anchor
 	var err error
 	if anchor, err = hd.addHeaderAsAnchor(anchorHeader, hd.initPowDepth); err != nil {
-		return NoPenalty, err
+		return err
 	}
 	cumulativeDifficulty := uint256.Int{}
 	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
@@ -372,17 +375,17 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 		header := segment.Headers[i]
 		diff, overflow := uint256.FromBig(header.Difficulty)
 		if overflow {
-			return NoPenalty, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
+			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 		}
 		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
 		if err = hd.addHeaderAsTip(header, anchor, cumulativeDifficulty, currentTime); err != nil {
-			return NoPenalty, fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err)
+			return fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
 	if anchorHeader.ParentHash != (common.Hash{}) {
 		hd.requestQueue.PushFront(RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
 	}
-	return NoPenalty, nil
+	return nil
 }
 
 func (hd *HeaderDownload) HardCodedHeader(header *types.Header, currentTime uint64) error {
