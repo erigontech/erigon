@@ -289,7 +289,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
-		hd.requestQueue.PushBack(RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime})
+		hd.requestQueue.PushFront(RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime})
 	} else {
 		return fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
 	}
@@ -380,7 +380,7 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 		}
 	}
 	if anchorHeader.ParentHash != (common.Hash{}) {
-		hd.requestQueue.PushBack(RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
+		hd.requestQueue.PushFront(RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
 	}
 	return NoPenalty, nil
 }
@@ -403,7 +403,7 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, currentTime uint
 		hd.tips[tipHash] = tip
 		hd.anchorTree.ReplaceOrInsert(anchor)
 		if header.ParentHash != (common.Hash{}) {
-			hd.requestQueue.PushBack(RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime})
+			hd.requestQueue.PushFront(RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime})
 		}
 	} else {
 		return err
@@ -720,7 +720,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 				}
 				if len(hd.anchors[parentHash]) == 0 {
 					if parentHash != (common.Hash{}) {
-						hd.requestQueue.PushBack(RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime})
+						hd.requestQueue.PushFront(RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime})
 					}
 				}
 				hd.anchors[parentHash] = append(hd.anchors[parentHash], anchor)
