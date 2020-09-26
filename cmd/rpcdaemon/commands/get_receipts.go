@@ -21,14 +21,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-func getReceipts(ctx context.Context, db rawdb.DatabaseReader, cfg *params.ChainConfig, hash common.Hash) (types.Receipts, error) {
+func getReceipts(ctx context.Context, db rawdb.DatabaseReader, hash common.Hash) (types.Receipts, error) {
 	number := rawdb.ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil, fmt.Errorf("block not found: %x", hash)
 	}
 
 	block := rawdb.ReadBlock(db, hash, *number)
-	if cached := rawdb.ReadReceipts(db, block.Hash(), block.NumberU64(), cfg); cached != nil {
+	if cached := rawdb.ReadReceipts(db, block.Hash(), block.NumberU64()); cached != nil {
 		return cached, nil
 	}
 
@@ -64,10 +64,8 @@ func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*t
 	if number == nil {
 		return nil, fmt.Errorf("block not found: %x", hash)
 	}
-	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
 
-	receipts, err := getReceipts(ctx, api.dbReader, chainConfig, hash)
+	receipts, err := getReceipts(ctx, api.dbReader, hash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
@@ -176,10 +174,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
 
-	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
-
-	receipts, err := getReceipts(ctx, api.dbReader, chainConfig, blockHash)
+	receipts, err := getReceipts(ctx, api.dbReader, blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
@@ -352,8 +347,7 @@ func (f *Filter) checkMatches(ctx context.Context, header *types.Header, api *AP
 	if len(logs) > 0 {
 		// We have matching logs, check if we need to resolve full logs via the light client
 		if logs[0].TxHash == (common.Hash{}) {
-			chainConfig := getChainConfig(api.dbReader)
-			receipts := rawdb.ReadReceipts(api.dbReader, header.Hash(), header.Number.Uint64(), chainConfig)
+			receipts := rawdb.ReadReceipts(api.dbReader, header.Hash(), header.Number.Uint64())
 			unfiltered = unfiltered[:0]
 			for _, receipt := range receipts {
 				unfiltered = append(unfiltered, receipt.Logs...)
