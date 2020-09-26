@@ -269,12 +269,13 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if intermediateHashes {
 				collector = etl.NewCollector("", etl.NewSortableBuffer(etl.BufferOptimalSize))
 				hashCollector = func(keyHex []byte, hash []byte) error {
-					if len(keyHex)%2 != 0 || len(keyHex) == 0 {
+					if len(keyHex) == 0 {
 						return nil
 					}
-					k := make([]byte, len(keyHex)/2)
-					trie.CompressNibbles(keyHex, &k)
-					return collector.Collect(k, common.CopyBytes(hash))
+					if len(keyHex) > trie.IHDupKeyLen {
+						return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
+					}
+					return collector.Collect(keyHex, hash)
 				}
 				changeSetWriter := stateWriter.ChangeSetWriter()
 				accountChangeSet, err1 := changeSetWriter.GetAccountChanges()

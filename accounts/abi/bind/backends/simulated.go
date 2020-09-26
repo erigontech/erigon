@@ -167,6 +167,7 @@ func (b *SimulatedBackend) Commit() {
 	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	//nolint:errcheck
 	stagedsync.InsertBlockInStages(b.database, b.config, b.blockchain.Engine(), b.pendingBlock, b.blockchain)
 	//nolint:prealloc
 	var allLogs []*types.Log
