@@ -49,15 +49,14 @@ func (atq *AnchorTipQueue) Pop() interface{} {
 }
 
 type Anchor struct {
-	powDepth        int
-	totalDifficulty uint256.Int
-	tipQueue        *AnchorTipQueue
-	difficulty      uint256.Int
-	hash            common.Hash
-	blockHeight     uint64
-	timestamp       uint64
-	maxTipHeight    uint64 // Maximum value of `blockHeight` of all tips associated with this anchor
-	anchorID        int    // Unique ID of this anchor to be able to find it in the balanced tree
+	powDepth     int
+	tipQueue     *AnchorTipQueue
+	difficulty   uint256.Int
+	hash         common.Hash
+	blockHeight  uint64
+	timestamp    uint64
+	maxTipHeight uint64 // Maximum value of `blockHeight` of all tips associated with this anchor
+	anchorID     int    // Unique ID of this anchor to be able to find it in the balanced tree
 }
 
 // For placing anchors into the sorting tree

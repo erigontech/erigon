@@ -9,7 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -143,11 +142,9 @@ func Downloader(
 		if _, err := os.Stat("hard-coded-headers.dat"); err == nil {
 			if f, err1 := os.Open("hard-coded-headers.dat"); err1 == nil {
 				var hBuffer [headerdownload.HeaderSerLength]byte
-				var dBuffer [32]byte
 				i := 0
 				for {
 					var h types.Header
-					var d uint256.Int
 					if _, err2 := io.ReadFull(f, hBuffer[:]); err2 == nil {
 						headerdownload.DeserialiseHeader(&h, hBuffer[:])
 					} else if errors.Is(err2, io.EOF) {
@@ -156,13 +153,7 @@ func Downloader(
 						log.Error("Failed to read hard coded header", "i", i, "error", err2)
 						break
 					}
-					if _, err2 := io.ReadFull(f, dBuffer[:]); err2 == nil {
-						d.SetBytes(dBuffer[:])
-					} else {
-						log.Error("Failed to read hard coded difficulty", "i", i, "error", err2)
-						break
-					}
-					if err2 := hd.HardCodedHeader(&h, d, uint64(time.Now().Unix())); err2 != nil {
+					if err2 := hd.HardCodedHeader(&h, uint64(time.Now().Unix())); err2 != nil {
 						log.Error("Failed to insert hard coded header", "i", i, "block", h.Number.Uint64(), "error", err2)
 					} else {
 						hd.AddHeaderToBuffer(&h)
