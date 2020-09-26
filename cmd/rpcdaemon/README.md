@@ -77,9 +77,9 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | web3_clientVersion                      | Yes     |                                            |
 | web3_sha3                               | Yes     |                                            |
 |                                         |         |                                            |
-| net_listening                           | HC      | (hard coded returns true)                  |
+| net_listening                           | HC      | (remote only hard coded returns true)      |
 | net_peerCount                           | HC      | (hard coded 25 - work continues on Sentry) |
-| net_version                             | Yes     |                                            |
+| net_version                             | Yes     | remote only                                |
 |                                         |         |                                            |
 | eth_blockNumber                         | Yes     |                                            |
 | eth_chainID                             | Yes     |                                            |
@@ -117,10 +117,10 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | eth_getFilterChanges                    | -       |                                            |
 | eth_getFilterLogs                       | -       |                                            |
 | eth_uninstallFilter                     | -       |                                            |
-| eth_getLogs                             | Yes     |                                            |
+| eth_getLogs                             | Yes     | remote only                                |
 |                                         |         |                                            |
 | eth_accounts                            | -       |                                            |
-| eth_sendRawTransaction                  | Yes     |                                            |
+| eth_sendRawTransaction                  | Yes     | remote only                                |
 | eth_sendTransaction                     | -       |                                            |
 | eth_sign                                | -       |                                            |
 | eth_signTransaction                     | -       |                                            |
