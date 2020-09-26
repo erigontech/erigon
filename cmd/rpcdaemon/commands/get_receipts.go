@@ -259,6 +259,11 @@ func (f *Filter) Logs(ctx context.Context, api *APIImpl) ([]*types.Log, error) {
 		end = latest
 	}
 
+	if api.ethBackend == nil {
+		// We're running in --chaindata mode or otherwise cannot get the backend
+		return nil, fmt.Errorf(NotAvailableChainData, "eth_getLogs")
+	}
+
 	// Gather all indexed logs, and finish with non indexed ones
 	var logs []*types.Log
 	size, sections, _ := api.ethBackend.BloomStatus()
