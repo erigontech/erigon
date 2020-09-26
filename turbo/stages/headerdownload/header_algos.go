@@ -250,7 +250,6 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 		hd.nextAnchorID++
 		heap.Init(newAnchor.tipQueue)
 		hd.anchors[newAnchorHeader.ParentHash] = append(hd.anchors[newAnchorHeader.ParentHash], newAnchor)
-		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime})
 		// Iterate headers in the segment to compute difficulty difference along the way
 		var difficultyDifference uint256.Int
 		for _, header := range segment.Headers[start:end] {
@@ -290,6 +289,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, powD
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
+		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: newAnchorHeader.ParentHash, waitUntil: currentTime, tipStretch: newAnchor.tipStretch()})
 	} else {
 		return fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
 	}
@@ -366,9 +366,6 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 	if anchor, err = hd.addHeaderAsAnchor(anchorHeader, hd.initPowDepth); err != nil {
 		return NoPenalty, err
 	}
-	if anchorHeader.ParentHash != (common.Hash{}) {
-		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime})
-	}
 	cumulativeDifficulty := uint256.Int{}
 	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
 	for i := end - 1; i >= start; i-- {
@@ -381,6 +378,9 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 		if err = hd.addHeaderAsTip(header, anchor, cumulativeDifficulty, currentTime); err != nil {
 			return NoPenalty, fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
+	}
+	if anchorHeader.ParentHash != (common.Hash{}) {
+		heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: anchorHeader.ParentHash, waitUntil: currentTime, tipStretch: anchor.tipStretch()})
 	}
 	return NoPenalty, nil
 }
@@ -403,7 +403,7 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, currentTime uint
 		hd.tips[tipHash] = tip
 		hd.anchorTree.ReplaceOrInsert(anchor)
 		if header.ParentHash != (common.Hash{}) {
-			heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime})
+			heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime, tipStretch: anchor.tipStretch()})
 		}
 	} else {
 		return err
@@ -715,14 +715,14 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 				anchor.difficulty = *diff
 				anchor.timestamp = he.header.Time
 				anchor.blockHeight = he.header.Number.Uint64()
-				if len(hd.anchors[parentHash]) == 0 {
-					if parentHash != (common.Hash{}) {
-						heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime})
-					}
-				}
 				hd.anchors[parentHash] = append(hd.anchors[parentHash], anchor)
 				if err = hd.addHeaderAsTip(he.header, anchor, *cumulativeDiff, currentTime); err != nil {
 					return false, fmt.Errorf("add header as tip: %v", err)
+				}
+				if len(hd.anchors[parentHash]) == 0 {
+					if parentHash != (common.Hash{}) {
+						heap.Push(hd.requestQueue, RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime, tipStretch: anchor.tipStretch()})
+					}
 				}
 				childAnchors[hash] = anchor
 				childDiffs[hash] = cumulativeDiff

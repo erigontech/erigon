@@ -153,6 +153,7 @@ type TipQueueItem struct {
 type RequestQueueItem struct {
 	anchorParent common.Hash
 	waitUntil    uint64
+	tipStretch   uint64
 }
 
 type RequestQueue []RequestQueueItem
@@ -162,6 +163,9 @@ func (rq RequestQueue) Len() int {
 }
 
 func (rq RequestQueue) Less(i, j int) bool {
+	if rq[i].waitUntil == rq[j].waitUntil {
+		return rq[i].tipStretch < rq[j].tipStretch
+	}
 	return rq[i].waitUntil < rq[j].waitUntil
 }
 
