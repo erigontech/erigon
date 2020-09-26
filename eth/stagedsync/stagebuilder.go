@@ -11,18 +11,24 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
+// StageParameters contains the stage that stages receives at runtime when initializes.
+// Then the stage can use it to receive different useful functions.
 type StageParameters struct {
-	d                DownloaderGlue
-	chainConfig      *params.ChainConfig
-	chainContext     core.ChainContext
-	vmConfig         *vm.Config
-	db               ethdb.Database
-	TX               ethdb.Database
-	pid              string
-	hdd              bool
-	storageMode      ethdb.StorageMode
-	datadir          string
-	quitCh           <-chan struct{}
+	d            DownloaderGlue
+	chainConfig  *params.ChainConfig
+	chainContext core.ChainContext
+	vmConfig     *vm.Config
+	db           ethdb.Database
+	// TX is a current transaction that staged sync runs in. It contains all the latest changes that DB has.
+	// It can be used for both reading and writing.
+	TX          ethdb.Database
+	pid         string
+	hdd         bool
+	storageMode ethdb.StorageMode
+	datadir     string
+	// QuitCh is a channel that is closed. This channel is useful to listen to when
+	// the stage can take significant time and gracefully shutdown at Ctrl+C.
+	QuitCh           <-chan struct{}
 	headersFetchers  []func() error
 	txPool           *core.TxPool
 	poolStart        func() error
@@ -30,13 +36,18 @@ type StageParameters struct {
 	prefetchedBlocks *PrefetchedBlocks
 }
 
+// StageBuilder represent an object to create a single stage for staged sync
 type StageBuilder struct {
-	ID    stages.SyncStage
+	// ID is the stage identifier. Should be unique. It is recommended to prefix it with reverse domain `com.example.my-stage` to avoid conflicts.
+	ID stages.SyncStage
+	// Build is a factory function that initializes the sync stage based on the `StageParameters` provided.
 	Build func(StageParameters) *Stage
 }
 
+// StageBuilders represents an ordered list of builders to build different stages. It also contains helper methods to change the list of stages.
 type StageBuilders []StageBuilder
 
+// Build creates sync states out of builders
 func (bb StageBuilders) Build(world StageParameters) []*Stage {
 	stages := make([]*Stage, len(bb))
 	for i, builder := range bb {
@@ -45,6 +56,7 @@ func (bb StageBuilders) Build(world StageParameters) []*Stage {
 	return stages
 }
 
+// DefaultStages contains the list of default stage builders that are used by turbo-geth.
 func DefaultStages() StageBuilders {
 	return []StageBuilder{
 		{
@@ -69,7 +81,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.db, world.datadir, world.quitCh)
+						return SpawnBlockHashStage(s, world.db, world.datadir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return u.Done(world.db)
@@ -113,7 +125,7 @@ func DefaultStages() StageBuilders {
 							ReadChLen:       4,
 							Now:             time.Now(),
 						}
-						return SpawnRecoverSendersStage(cfg, s, world.TX, world.chainConfig, 0, world.datadir, world.quitCh)
+						return SpawnRecoverSendersStage(cfg, s, world.TX, world.chainConfig, 0, world.datadir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindSendersStage(u, world.TX)
@@ -128,7 +140,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnExecuteBlocksStage(s, world.TX, world.chainConfig, world.chainContext, world.vmConfig, 0 /* limit (meaning no limit) */, world.quitCh, world.storageMode.Receipts, world.hdd, world.changeSetHook)
+						return SpawnExecuteBlocksStage(s, world.TX, world.chainConfig, world.chainContext, world.vmConfig, 0 /* limit (meaning no limit) */, world.QuitCh, world.storageMode.Receipts, world.hdd, world.changeSetHook)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindExecutionStage(u, s, world.TX, world.storageMode.Receipts)
@@ -143,10 +155,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, world.datadir, world.quitCh)
+						return SpawnHashStateStage(s, world.TX, world.datadir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, world.datadir, world.quitCh)
+						return UnwindHashStateStage(u, s, world.TX, world.datadir, world.QuitCh)
 					},
 				}
 			},
@@ -158,10 +170,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnIntermediateHashesStage(s, world.TX, world.datadir, world.quitCh)
+						return SpawnIntermediateHashesStage(s, world.TX, world.datadir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, world.datadir, world.quitCh)
+						return UnwindIntermediateHashesStage(u, s, world.TX, world.datadir, world.QuitCh)
 					},
 				}
 			},
@@ -175,10 +187,10 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnAccountHistoryIndex(s, world.TX, world.datadir, world.quitCh)
+						return SpawnAccountHistoryIndex(s, world.TX, world.datadir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindAccountHistoryIndex(u, world.TX, world.quitCh)
+						return UnwindAccountHistoryIndex(u, world.TX, world.QuitCh)
 					},
 				}
 			},
@@ -192,10 +204,10 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnStorageHistoryIndex(s, world.TX, world.datadir, world.quitCh)
+						return SpawnStorageHistoryIndex(s, world.TX, world.datadir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindStorageHistoryIndex(u, world.TX, world.quitCh)
+						return UnwindStorageHistoryIndex(u, world.TX, world.QuitCh)
 					},
 				}
 			},
@@ -209,10 +221,10 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.TxIndex,
 					DisabledDescription: "Enable by adding `t` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnTxLookup(s, world.TX, world.datadir, world.quitCh)
+						return SpawnTxLookup(s, world.TX, world.datadir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxLookup(u, s, world.TX, world.datadir, world.quitCh)
+						return UnwindTxLookup(u, s, world.TX, world.datadir, world.QuitCh)
 					},
 				}
 			},
@@ -224,10 +236,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.TxPool,
 					Description: "Update transaction pool",
 					ExecFunc: func(s *StageState, _ Unwinder) error {
-						return spawnTxPool(s, world.TX, world.txPool, world.poolStart, world.quitCh)
+						return spawnTxPool(s, world.TX, world.txPool, world.poolStart, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return unwindTxPool(u, s, world.TX, world.txPool, world.quitCh)
+						return unwindTxPool(u, s, world.TX, world.txPool, world.QuitCh)
 					},
 				}
 			},
@@ -260,8 +272,15 @@ func DefaultStages() StageBuilders {
 	}
 }
 
+// UnwindOrder represents the order in which the stages needs to be unwound.
+// Currently it is using indexes of stages, 0-based.
+// The unwind order is important and not always just stages going backwards.
+// Let's say, there is tx pool (state 10) can be unwound only after execution
+// is fully unwound (stages 9...3).
 type UnwindOrder []int
 
+// DefaultUnwindOrder contains the default unwind order for `DefaultStages()`.
+// Just adding stages that don't do unwinding, don't require altering the default order.
 func DefaultUnwindOrder() UnwindOrder {
 	return []int{
 		0, 1, 2,

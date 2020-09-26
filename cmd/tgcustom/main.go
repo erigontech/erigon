@@ -15,17 +15,23 @@ import (
 	"github.com/urfave/cli"
 )
 
+// defining a custom command-line flag, a string
 var flag = cli.StringFlag{
 	Name:  "custom-stage-greeting",
 	Value: "default-value",
 }
 
+// defining a custom bucket name
 const (
-	customBucketName = "ZZZ_0x0F_CUSTOM_BUCKET"
+	customBucketName = "ch.torquem.demo.tgcustom.CUSTOM_BUCKET"
 )
 
+// the regular main function
 func main() {
-	app := turbocli.MakeApp(runTurboGeth, append(turbocli.DefaultFlags, flag))
+	// initializing turbo-geth application here and providing our custom flag
+	app := turbocli.MakeApp(runTurboGeth,
+		append(turbocli.DefaultFlags, flag), // always use DefaultFlags, but add a new one in the end.
+	)
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -34,12 +40,12 @@ func main() {
 
 func syncStages(ctx *cli.Context) stagedsync.StageBuilders {
 	return append(
-		stagedsync.DefaultStages(),
-		stagedsync.StageBuilder{
-			ID: stages.SyncStage("0x0F_CUSTOM"),
+		stagedsync.DefaultStages(), // adding all default stages
+		stagedsync.StageBuilder{ // adding our custom stage
+			ID: stages.SyncStage("ch.torquem.demo.tgcustom.CUSTOM_STAGE"),
 			Build: func(world stagedsync.StageParameters) *stagedsync.Stage {
 				return &stagedsync.Stage{
-					ID:          stages.SyncStage("0x0F_CUSTOM"),
+					ID:          stages.SyncStage("ch.torquem.demo.tgcustom.CUSTOM_STAGE"),
 					Description: "Custom Stage",
 					ExecFunc: func(s *stagedsync.StageState, _ stagedsync.Unwinder) error {
 						fmt.Println("hello from the custom stage", ctx.String(flag.Name))
@@ -60,12 +66,15 @@ func syncStages(ctx *cli.Context) stagedsync.StageBuilders {
 	)
 }
 
+// turbo-geth main function
 func runTurboGeth(ctx *cli.Context) {
+	// creating a staged sync with our new stage
 	sync := stagedsync.New(
 		syncStages(ctx),
 		stagedsync.DefaultUnwindOrder(),
 	)
 
+	// running a node and initializing a custom bucket with all default settings
 	tg := node.New(ctx, sync, node.Params{
 		CustomBuckets: map[string]dbutils.BucketConfigItem{
 			customBucketName: {},
