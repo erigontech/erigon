@@ -175,7 +175,7 @@ var zstd = Migration{
 				return err
 			}
 			total += len(v)
-			blockNum := binary.BigEndian.Uint64(k[:8])
+			blockNum := binary.BigEndian.Uint64(k)
 			if blockNum%101 != 0 {
 				continue
 			}
@@ -226,13 +226,21 @@ var zstd = Migration{
 		}
 		defer cd16.Release()
 		fmt.Printf("dict16: %s\n", time.Since(t))
-		t = time.Now()
+
+		dict32 := gozstd.BuildDict(samples, 32*1024)
+		cd32, err := gozstd.NewCDictLevel(dict32, gozstd.DefaultCompressionLevel)
+		if err != nil {
+			return err
+		}
+		defer cd32.Release()
+		fmt.Printf("dict32: %s\n", time.Since(t))
 
 		t = time.Now()
 		total4 := 0
 		total8 := 0
 		total12 := 0
 		total16 := 0
+		total32 := 0
 		buf := make([]byte, 0, 1024)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
@@ -251,6 +259,8 @@ var zstd = Migration{
 			total12 += len(buf)
 			buf = gozstd.CompressDict(buf[:0], v, cd16)
 			total16 += len(buf)
+			buf = gozstd.CompressDict(buf[:0], v, cd32)
+			total32 += len(buf)
 			select {
 			default:
 			case <-logEvery.C:
@@ -259,6 +269,7 @@ var zstd = Migration{
 					"total8", common.StorageSize(total8),
 					"total12", common.StorageSize(total12),
 					"total16", common.StorageSize(total16),
+					"total32", common.StorageSize(total32),
 				)
 			}
 		}
