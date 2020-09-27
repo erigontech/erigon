@@ -235,13 +235,13 @@ var zstd = Migration{
 		fmt.Printf("dict128: %s\n", time.Since(t))
 
 		t = time.Now()
-		dict128_s40 := gozstd.BuildDict(samples40, 128*1024)
-		cd128_s40, err := gozstd.NewCDictLevel(dict128_s40, -1)
+		dict128_s20 := gozstd.BuildDict(samples40, 128*1024)
+		cd128_s20, err := gozstd.NewCDictLevel(dict128_s20, -1)
 		if err != nil {
 			return err
 		}
-		defer cd128_s40.Release()
-		fmt.Printf("cd128_s40: %s\n", time.Since(t))
+		defer cd128_s20.Release()
+		fmt.Printf("cd128_s20: %s\n", time.Since(t))
 
 		t = time.Now()
 		dict256 := gozstd.BuildDict(samples, 256*1024)
@@ -253,21 +253,21 @@ var zstd = Migration{
 		fmt.Printf("dict256: %s\n", time.Since(t))
 
 		t = time.Now()
-		dict256_s40 := gozstd.BuildDict(samples40, 256*1024)
-		cd256_s40, err := gozstd.NewCDictLevel(dict256_s40, -1)
+		dict256_s20 := gozstd.BuildDict(samples40, 256*1024)
+		cd256_s20, err := gozstd.NewCDictLevel(dict256_s20, -1)
 		if err != nil {
 			return err
 		}
-		defer cd256_s40.Release()
-		fmt.Printf("dict256_s40: %s\n", time.Since(t))
+		defer cd256_s20.Release()
+		fmt.Printf("dict256_s20: %s\n", time.Since(t))
 
 		t = time.Now()
-		cd256_s40_minus3, err := gozstd.NewCDictLevel(dict256_s40, -3)
+		cd256_s20_minus3, err := gozstd.NewCDictLevel(dict256_s20, -3)
 		if err != nil {
 			return err
 		}
-		defer cd256_s40_minus3.Release()
-		fmt.Printf("cd256_s40_minus3: %s\n", time.Since(t))
+		defer cd256_s20_minus3.Release()
+		fmt.Printf("cd256_s20_minus3: %s\n", time.Since(t))
 
 		cd128_minus3, err := gozstd.NewCDictLevel(dict128, -3)
 		if err != nil {
@@ -306,12 +306,12 @@ var zstd = Migration{
 		}
 		defer cd512_minus3.Release()
 
-		dict512_s40 := gozstd.BuildDict(samples40, 512*1024)
-		cd512_s40_minus3, err := gozstd.NewCDictLevel(dict512_s40, -3)
+		dict512_s20 := gozstd.BuildDict(samples40, 512*1024)
+		cd512_s20_minus3, err := gozstd.NewCDictLevel(dict512_s20, -3)
 		if err != nil {
 			return err
 		}
-		defer cd512_s40_minus3.Release()
+		defer cd512_s20_minus3.Release()
 
 		//cd128_19, err := gozstd.NewCDictLevel(dict128, 19)
 		//if err != nil {
@@ -330,17 +330,17 @@ var zstd = Migration{
 		total64 := 0
 		total64_minus3 := 0
 		total128 := 0
-		total128_s40 := 0
+		total128_s20 := 0
 		total128_minus40 := 0
 		total128_minus20 := 0
 		total128_minus3 := 0
 		//total128_3 := 0
 		total256 := 0
 		total256_minus3 := 0
-		total256_s40 := 0
-		total256_s40_minus3 := 0
+		total256_s20 := 0
+		total256_s20_minus3 := 0
 		total512_minus3 := 0
-		total512_s40_minus3 := 0
+		total512_s20_minus3 := 0
 		//total128_19 := 0
 		//total128_22 := 0
 
@@ -377,9 +377,9 @@ var zstd = Migration{
 			t128 := time.Since(t)
 
 			t = time.Now()
-			buf = gozstd.CompressDict(buf[:0], v, cd128_s40)
-			total128_s40 += len(buf)
-			t128_s40 := time.Since(t)
+			buf = gozstd.CompressDict(buf[:0], v, cd128_s20)
+			total128_s20 += len(buf)
+			t128_s20 := time.Since(t)
 
 			t = time.Now()
 			buf = gozstd.CompressDict(buf[:0], v, cd128_minus20)
@@ -412,19 +412,19 @@ var zstd = Migration{
 			t256_minus3 := time.Since(t)
 
 			t = time.Now()
-			buf = gozstd.CompressDict(buf[:0], v, cd256_s40)
-			total256_s40 += len(buf)
-			t256_s40 := time.Since(t)
+			buf = gozstd.CompressDict(buf[:0], v, cd256_s20)
+			total256_s20 += len(buf)
+			t256_s20 := time.Since(t)
 
 			t = time.Now()
-			buf = gozstd.CompressDict(buf[:0], v, cd256_s40_minus3)
-			total256_s40_minus3 += len(buf)
-			t256_s40_minus3 := time.Since(t)
+			buf = gozstd.CompressDict(buf[:0], v, cd256_s20_minus3)
+			total256_s20_minus3 += len(buf)
+			t256_s20_minus3 := time.Since(t)
 
 			t = time.Now()
-			buf = gozstd.CompressDict(buf[:0], v, cd512_s40_minus3)
-			total512_s40_minus3 += len(buf)
-			t512_s40_minus3 := time.Since(t)
+			buf = gozstd.CompressDict(buf[:0], v, cd512_s20_minus3)
+			total512_s20_minus3 += len(buf)
+			t512_s20_minus3 := time.Since(t)
 
 			t = time.Now()
 			buf = gozstd.CompressDict(buf[:0], v, cd512_minus3)
@@ -451,16 +451,16 @@ var zstd = Migration{
 					"64_minus3", fmt.Sprintf("%.2f", totalf/float64(total64_minus3)), "t64_minus3", t64_minus3,
 					//"128_3", fmt.Sprintf("%.2f", totalf/float64(total128_3)), "t128_3", t128_3,
 					"128", fmt.Sprintf("%.2f", totalf/float64(total128)), "t128", t128,
-					"128_s40", fmt.Sprintf("%.2f", totalf/float64(total128_s40)), "t128_s40", t128_s40,
+					"128_s20", fmt.Sprintf("%.2f", totalf/float64(total128_s20)), "t128_s20", t128_s20,
 					"128_minus3", fmt.Sprintf("%.2f", totalf/float64(total128_minus3)), "t128_minus3", t128_minus3,
 					"128_minus20", fmt.Sprintf("%.2f", totalf/float64(total128_minus20)), "t128_minus20", t128_minus20,
 					"128_minus40", fmt.Sprintf("%.2f", totalf/float64(total128_minus40)), "t128_minus40", t128_minus40,
 					"256", fmt.Sprintf("%.2f", totalf/float64(total256)), "t256", t256,
 					"256_minus3", fmt.Sprintf("%.2f", totalf/float64(total256_minus3)), "t256_minus3", t256_minus3,
-					"256_s40", fmt.Sprintf("%.2f", totalf/float64(total256_s40)), "t256_s40", t256_s40,
-					"256_s40_minus3", fmt.Sprintf("%.2f", totalf/float64(total256_s40_minus3)), "t256_s40_minus3", t256_s40_minus3,
+					"256_s20", fmt.Sprintf("%.2f", totalf/float64(total256_s20)), "t256_s20", t256_s20,
+					"256_s20_minus3", fmt.Sprintf("%.2f", totalf/float64(total256_s20_minus3)), "t256_s20_minus3", t256_s20_minus3,
 					"512_minus3", fmt.Sprintf("%.2f", totalf/float64(total512_minus3)), "t512_minus3", t512_minus3,
-					"512_s40_minus3", fmt.Sprintf("%.2f", totalf/float64(total512_s40_minus3)), "t512_s40_minus3", t512_s40_minus3,
+					"512_s20_minus3", fmt.Sprintf("%.2f", totalf/float64(total512_s20_minus3)), "t512_s20_minus3", t512_s20_minus3,
 					//"total128_19", common.StorageSize(total128_19), "time128_19", t128_19,
 					//"total128_22", common.StorageSize(total128_22), "time128_22", t128_22,
 				)
