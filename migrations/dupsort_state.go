@@ -277,6 +277,12 @@ var zstd = Migration{
 		}
 		defer cd128_minus20.Release()
 
+		cd128_minus40, err := gozstd.NewCDictLevel(dict128, -40)
+		if err != nil {
+			return err
+		}
+		defer cd128_minus40.Release()
+
 		cd128_3, err := gozstd.NewCDictLevel(dict128, 3)
 		if err != nil {
 			return err
@@ -304,6 +310,7 @@ var zstd = Migration{
 		total64 := 0
 		total128 := 0
 		total256 := 0
+		total128_minus40 := 0
 		total128_minus20 := 0
 		total128_minus3 := 0
 		total128_3 := 0
@@ -365,6 +372,11 @@ var zstd = Migration{
 			t128_minus20 := time.Since(t)
 
 			t = time.Now()
+			buf = gozstd.CompressDict(buf[:0], v, cd128_minus40)
+			total128_minus40 += len(buf)
+			t128_minus40 := time.Since(t)
+
+			t = time.Now()
 			buf = gozstd.CompressDict(buf[:0], v, cd128_minus3)
 			total128_minus20 += len(buf)
 			t128_minus3 := time.Since(t)
@@ -397,6 +409,7 @@ var zstd = Migration{
 					"total128", common.StorageSize(total128), "time128", t128,
 					"total256", common.StorageSize(total256), "time256", t256,
 					"total128_minus20", common.StorageSize(total128_minus20), "time128_minus20", t128_minus20,
+					"total128_minus40", common.StorageSize(total128_minus40), "time128_minus40", t128_minus40,
 					"total128_minus3", common.StorageSize(total128_minus3), "time128_minus3", t128_minus3,
 					"total128_3", common.StorageSize(total128_3), "time128_3", t128_3,
 					//"total128_19", common.StorageSize(total128_19), "time128_19", t128_19,
