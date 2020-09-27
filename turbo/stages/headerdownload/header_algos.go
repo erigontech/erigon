@@ -879,8 +879,8 @@ func (hd *HeaderDownload) HasTip(tipHash common.Hash) bool {
 }
 
 func (hd *HeaderDownload) getTip(tipHash common.Hash) (*Tip, bool) {
-	if hardTip, ok := hd.tips[tipHash]; ok {
-		return hardTip, true
+	if tip, ok := hd.tips[tipHash]; ok {
+		return tip, true
 	}
 	return nil, false
 }
@@ -900,18 +900,16 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 		blockHeight:          header.Number.Uint64(),
 		uncleHash:            header.UncleHash,
 	}
-	if _, hard := hd.hardTips[tipHash]; !hard {
-		// Only place the tip under the limiter if it is not hard-coded
-		hd.anchorTree.Delete(anchor)
-		hd.tips[tipHash] = tip
-		heap.Push(anchor.tipQueue, AnchorTipItem{hash: tipHash, height: tip.blockHeight})
-		hd.tipCount++
-		if tip.blockHeight > anchor.maxTipHeight {
-			anchor.maxTipHeight = tip.blockHeight
-		}
-		hd.anchorTree.ReplaceOrInsert(anchor)
-		hd.limitTips()
+	_, hard := hd.hardTips[tipHash]
+	hd.anchorTree.Delete(anchor)
+	hd.tips[tipHash] = tip
+	heap.Push(anchor.tipQueue, AnchorTipItem{hash: tipHash, height: tip.blockHeight, hard: hard})
+	hd.tipCount++
+	if tip.blockHeight > anchor.maxTipHeight {
+		anchor.maxTipHeight = tip.blockHeight
 	}
+	hd.anchorTree.ReplaceOrInsert(anchor)
+	hd.limitTips()
 	return nil
 }
 

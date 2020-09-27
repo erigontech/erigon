@@ -18,6 +18,7 @@ import (
 type AnchorTipItem struct {
 	hash   common.Hash
 	height uint64
+	hard   bool // Whether the tip is hard coded
 }
 
 type AnchorTipQueue []AnchorTipItem
@@ -27,7 +28,10 @@ func (atq AnchorTipQueue) Len() int {
 }
 
 func (atq AnchorTipQueue) Less(i, j int) bool {
-	return atq[i].height < atq[j].height
+	if atq[i].hard == atq[j].hard {
+		return atq[i].height < atq[j].height
+	}
+	return !atq[i].hard
 }
 
 func (atq AnchorTipQueue) Swap(i, j int) {
