@@ -180,7 +180,7 @@ var zstd = Migration{
 			}
 			total += len(v)
 			blockNum := binary.BigEndian.Uint64(k)
-			if blockNum%320 != 0 {
+			if blockNum%640 != 0 {
 				continue
 			}
 			samples = append(samples, v)
@@ -378,7 +378,7 @@ var zstd = Migration{
 
 			t = time.Now()
 			buf = gozstd.CompressDict(buf[:0], v, cd128_minus3)
-			total128_minus20 += len(buf)
+			total128_minus3 += len(buf)
 			t128_minus3 := time.Since(t)
 
 			t = time.Now()
