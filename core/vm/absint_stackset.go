@@ -730,6 +730,8 @@ type Cfg struct {
 	BadJumpInvalidJumpDest 	bool
 
 	StackCountLimitReached 	bool
+
+	NumStacks int
 }
 
 type CfgCoverageStats struct {

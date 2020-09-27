@@ -16,8 +16,8 @@ import (
 	"time"
 )
 
-var maxStackLen = 8096
-var maxStackCount = 8096
+var maxStackLen = 1024
+var maxStackCount = 2048
 
 
 func testCfgByUsed() error {
@@ -66,8 +66,8 @@ func testCfgByUsed() error {
 					contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 					contract.Code = job.code
 					start := time.Now()
-					vm.GenCfg(contract, 1048756, maxStackLen, maxStackCount)
-					//cfg.Clear()
+					cfg, _ := vm.GenCfg(contract, 1048756, maxStackLen, maxStackCount)
+					cfg.Clear()
 					elapsed := time.Since(start)
 					results <- &cfgJobResult{job, nil, false, &elapsed}
 					mon <- 0
@@ -75,7 +75,7 @@ func testCfgByUsed() error {
 
 				select {
 				case <-mon:
-				case <-time.After(300 * time.Second):
+				case <-time.After(60 * time.Second):
 					fmt.Printf("Timed out: %v %v %v\n", job.txcnt, len(job.code), hex.EncodeToString(job.code))
 					results <- &cfgJobResult{job, nil, true, nil}
 				}
