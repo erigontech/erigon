@@ -184,7 +184,7 @@ var zstd = Migration{
 			if blockNum%1280 == 0 {
 				samples = append(samples, v)
 			}
-			if blockNum%10 == 0 {
+			if blockNum%20 == 0 {
 				samples40 = append(samples40, v)
 			}
 
