@@ -68,7 +68,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 
 			blockNumber, _, err = stages.GetStageProgress(api.dbReader, stages.Execution)
 			if err != nil {
-				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
+				return state.IteratorDump{}, fmt.Errorf("las block has not found: %w", err)
 			}
 		} else {
 			blockNumber = uint64(number)
