@@ -25,15 +25,15 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-func getReceipts(ctx context.Context, db rawdb.DatabaseReader, kv ethdb.KV, chainConfig *params.ChainConfig, number uint64, hash common.Hash) (types.Receipts, error) {
-	if cached := rawdb.ReadReceipts(db, hash, number, chainConfig); cached != nil {
+func getReceipts(ctx context.Context, tx rawdb.DatabaseReader, kv ethdb.KV, chainConfig *params.ChainConfig, number uint64, hash common.Hash) (types.Receipts, error) {
+	if cached := rawdb.ReadReceipts(tx, hash, number, chainConfig); cached != nil {
 		return cached, nil
 	}
 
-	block := rawdb.ReadBlock(db, hash, number)
+	block := rawdb.ReadBlock(tx, hash, number)
 
-	cc := adapter.NewChainContext(db)
-	bc := adapter.NewBlockGetter(db)
+	cc := adapter.NewChainContext(tx)
+	bc := adapter.NewBlockGetter(tx)
 	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, kv, hash, 0)
 	if err != nil {
 		return nil, err
@@ -42,11 +42,11 @@ func getReceipts(ctx context.Context, db rawdb.DatabaseReader, kv ethdb.KV, chai
 	var receipts types.Receipts
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	var usedGas = new(uint64)
-	for i, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
+	for i, txn := range block.Transactions() {
+		ibs.Prepare(txn.Hash(), block.Hash(), i)
 
-		header := rawdb.ReadHeader(db, hash, number)
-		receipt, err := core.ApplyTransaction(chainConfig, cc, nil, gp, ibs, dbstate, header, tx, usedGas, vm.Config{})
+		header := rawdb.ReadHeader(tx, hash, number)
+		receipt, err := core.ApplyTransaction(chainConfig, cc, nil, gp, ibs, dbstate, header, txn, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}

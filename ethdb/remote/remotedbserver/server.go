@@ -1,6 +1,7 @@
 package remotedbserver
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -117,6 +118,7 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 		if err != nil {
 			return err
 		}
+		fmt.Printf("Seek: %x->%x\n", in.SeekKey, k)
 	} else {
 		cd := tx.CursorDupSort(bucketName)
 		k, v, err = cd.SeekBothRange(in.SeekKey, in.SeekValue)
@@ -151,12 +153,36 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 				}
 				return err
 			}
+
+			if len(in.SeekValue) > 0 {
+				k, v, err = c.(ethdb.CursorDupSort).SeekBothRange(in.SeekKey, in.SeekValue)
+				if err != nil {
+					return err
+				}
+				if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
+					k, v, err = c.Next()
+					if err != nil {
+						return err
+					}
+				}
+			} else if len(in.SeekKey) > 0 {
+				k, v, err = c.Seek(in.SeekKey)
+				if err != nil {
+					return err
+				}
+			} else {
+				k, v, err = c.Next()
+				if err != nil {
+					return err
+				}
+			}
+		} else {
+			k, v, err = c.Next()
+			if err != nil {
+				return err
+			}
 		}
 
-		k, v, err = c.Next()
-		if err != nil {
-			return err
-		}
 		//TODO: protect against client - which doesn't send any requests
 		select {
 		default:
