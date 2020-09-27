@@ -568,6 +568,9 @@ func (eval *CfgEval) update(result *cfgJobResult, count int)  {
 	}
 
 	cfg := result.cfg
+	if cfg == nil {
+		return
+	}
 
 	if cfg.Valid {
 		eval.numProgramsPassed++
