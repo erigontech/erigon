@@ -169,16 +169,17 @@ var zstd = Migration{
 		var samples [][]byte
 
 		total := 0
-		c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.BlockBodyPrefix)
+		c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
 			total += len(v)
 			blockNum := binary.BigEndian.Uint64(k[:8])
-			if blockNum%37 == 0 {
-				samples = append(samples, v)
+			if blockNum%101 != 0 {
+				continue
 			}
+			samples = append(samples, v)
 
 			if blockNum == 6_000_000 {
 				break
