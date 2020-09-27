@@ -181,7 +181,7 @@ var zstd = Migration{
 			}
 			samples = append(samples, v)
 
-			if blockNum == 6_000_000 {
+			if blockNum >= 6_000_000 {
 				break
 			}
 
@@ -235,6 +235,14 @@ var zstd = Migration{
 		defer cd32.Release()
 		fmt.Printf("dict32: %s\n", time.Since(t))
 
+		dict64 := gozstd.BuildDict(samples, 64*1024)
+		cd64, err := gozstd.NewCDictLevel(dict64, gozstd.DefaultCompressionLevel)
+		if err != nil {
+			return err
+		}
+		defer cd64.Release()
+		fmt.Printf("dict64: %s\n", time.Since(t))
+
 		t = time.Now()
 		total4 := 0
 		total8 := 0
@@ -247,7 +255,7 @@ var zstd = Migration{
 				return err
 			}
 			blockNum := binary.BigEndian.Uint64(k)
-			if blockNum == 6_000_000 {
+			if blockNum >= 6_000_000 {
 				break
 			}
 
