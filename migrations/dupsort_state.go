@@ -176,7 +176,6 @@ var zstd = Migration{
 			}
 			total += len(v)
 			blockNum := binary.BigEndian.Uint64(k)
-			fmt.Printf("%d\n", blockNum)
 			if blockNum%7 != 0 {
 				continue
 			}
@@ -192,6 +191,7 @@ var zstd = Migration{
 			}
 		}
 
+		fmt.Printf("samples: %d\n", len(samples))
 		t := time.Now()
 		dict4 := gozstd.BuildDict(samples, 4*1024)
 		cd4, err := gozstd.NewCDictLevel(dict4, gozstd.DefaultCompressionLevel)
