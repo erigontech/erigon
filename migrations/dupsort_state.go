@@ -174,7 +174,7 @@ var zstd = Migration{
 		var samples10k [][]byte
 
 		total := 0
-		c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockBodyPrefix)
+		c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
