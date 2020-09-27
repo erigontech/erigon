@@ -68,7 +68,7 @@ func testCfgByUsed() error {
 					start := time.Now()
 					cfg, _ := vm.GenCfg(contract, 100000, maxStackLen, maxStackCount)
 					elapsed := time.Since(start)
-					results <- &cfgJobResult{job, cfg, false, elapsed}
+					results <- &cfgJobResult{job, cfg, false, &elapsed}
 					mon <- 0
 				}()
 
@@ -610,7 +610,7 @@ type cfgJobResult struct {
 	job     *cfgJob
 	cfg     *vm.Cfg
 	timeout bool
-	elapsed time.Duration
+	elapsed *time.Duration
 }
 
 
