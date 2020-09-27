@@ -229,7 +229,7 @@ var zstd = Migration{
 		dict128 := gozstd.BuildDict(samples, 128*1024)
 		cd128, err := gozstd.NewCDictLevel(dict128, -1)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer cd128.Release()
 		fmt.Printf("dict128: %s\n", time.Since(t))
@@ -238,7 +238,7 @@ var zstd = Migration{
 		dict128_s20 := gozstd.BuildDict(samples40, 128*1024)
 		cd128_s20, err := gozstd.NewCDictLevel(dict128_s20, -1)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer cd128_s20.Release()
 		fmt.Printf("cd128_s20: %s\n", time.Since(t))
@@ -247,7 +247,7 @@ var zstd = Migration{
 		dict256 := gozstd.BuildDict(samples, 256*1024)
 		cd256, err := gozstd.NewCDictLevel(dict256, -1)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer cd256.Release()
 		fmt.Printf("dict256: %s\n", time.Since(t))
@@ -256,7 +256,7 @@ var zstd = Migration{
 		dict256_s20 := gozstd.BuildDict(samples40, 256*1024)
 		cd256_s20, err := gozstd.NewCDictLevel(dict256_s20, -1)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer cd256_s20.Release()
 		fmt.Printf("dict256_s20: %s\n", time.Since(t))
@@ -264,38 +264,38 @@ var zstd = Migration{
 		t = time.Now()
 		cd256_s20_minus3, err := gozstd.NewCDictLevel(dict256_s20, -3)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer cd256_s20_minus3.Release()
 		fmt.Printf("cd256_s20_minus3: %s\n", time.Since(t))
 
 		cd128_minus3, err := gozstd.NewCDictLevel(dict128, -3)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer cd128_minus3.Release()
 
 		cd128_minus20, err := gozstd.NewCDictLevel(dict128, -20)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer cd128_minus20.Release()
 
 		cd128_minus40, err := gozstd.NewCDictLevel(dict128, -40)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer cd128_minus40.Release()
 
 		cd128_3, err := gozstd.NewCDictLevel(dict128, 3)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer cd128_3.Release()
 
 		cd256_minus3, err := gozstd.NewCDictLevel(dict256, -3)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer cd256_minus3.Release()
 
