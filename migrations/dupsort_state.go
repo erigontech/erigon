@@ -199,7 +199,7 @@ var zstd = Migration{
 			}
 		}
 
-		fmt.Printf("samples: %d, total: %s\n", len(samples), common.StorageSize(total))
+		fmt.Printf("samples: %d, samples10k: %d, total: %s\n", len(samples), len(samples10k), common.StorageSize(total))
 		t := time.Now()
 		//dict32 := gozstd.BuildDict(samples, 32*1024)
 		//cd32, err := gozstd.NewCDictLevel(dict32, -1)
