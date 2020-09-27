@@ -185,13 +185,13 @@ var zstd = Migration{
 			}
 			total += len(v)
 			blockNum := binary.BigEndian.Uint64(k)
-			if blockNum%(count/3000) == 0 {
+			if blockNum%(count/4000) == 0 {
 				samples100k = append(samples100k, v)
 			}
-			if blockNum%(count/2000) == 0 {
+			if blockNum%(count/3000) == 0 {
 				samples10k = append(samples10k, v)
 			}
-			if blockNum%(count/1000) == 0 {
+			if blockNum%(count/2000) == 0 {
 				samples1K = append(samples1K, v)
 			}
 
@@ -232,39 +232,39 @@ var zstd = Migration{
 		//defer cd64_minus3.Release()
 
 		t = time.Now()
-		dict128 := gozstd.BuildDict(samples1K, 128*1024)
+		dict128 := gozstd.BuildDict(samples1K, 64*1024)
 		fmt.Printf("dict128: %s\n", time.Since(t))
 
 		t = time.Now()
-		dict128_10k := gozstd.BuildDict(samples10k, 128*1024)
+		dict128_10k := gozstd.BuildDict(samples10k, 64*1024)
 		fmt.Printf("dict128_10k: %s\n", time.Since(t))
 
 		t = time.Now()
-		dict128_100k := gozstd.BuildDict(samples100k, 128*1024)
+		dict128_100k := gozstd.BuildDict(samples100k, 64*1024)
 		fmt.Printf("dict128_100k: %s\n", time.Since(t))
 
 		t = time.Now()
-		dict64 := gozstd.BuildDict(samples1K, 64*1024)
+		dict64 := gozstd.BuildDict(samples1K, 32*1024)
 		fmt.Printf("dict64: %s\n", time.Since(t))
 
 		t = time.Now()
-		dict64_10k := gozstd.BuildDict(samples10k, 64*1024)
+		dict64_10k := gozstd.BuildDict(samples10k, 32*1024)
 		fmt.Printf("dict64_10k: %s\n", time.Since(t))
 
 		t = time.Now()
-		dict64_100k := gozstd.BuildDict(samples100k, 64*1024)
+		dict64_100k := gozstd.BuildDict(samples100k, 32*1024)
 		fmt.Printf("dict64_100k: %s\n", time.Since(t))
 
 		t = time.Now()
-		dict32 := gozstd.BuildDict(samples1K, 32*1024)
+		dict32 := gozstd.BuildDict(samples1K, 16*1024)
 		fmt.Printf("dict32: %s\n", time.Since(t))
 
 		t = time.Now()
-		dict32_10k := gozstd.BuildDict(samples10k, 32*1024)
+		dict32_10k := gozstd.BuildDict(samples10k, 16*1024)
 		fmt.Printf("dict32_10k: %s\n", time.Since(t))
 
 		t = time.Now()
-		dict32_100k := gozstd.BuildDict(samples100k, 32*1024)
+		dict32_100k := gozstd.BuildDict(samples100k, 16*1024)
 		fmt.Printf("dict32_100k: %s\n", time.Since(t))
 
 		//t = time.Now()
