@@ -740,6 +740,13 @@ type CfgCoverageStats struct {
 	Epilogue		    int
 }
 
+func (cfg *Cfg) Clear() {
+	cfg.D = nil
+	cfg.PrevEdgeMap = nil
+	cfg.BadJumps = nil
+	cfg.Program = nil
+}
+
 func (cfg *Cfg) checkRep() {
 	if true {
 		return

@@ -67,6 +67,7 @@ func testCfgByUsed() error {
 					contract.Code = job.code
 					start := time.Now()
 					cfg, _ := vm.GenCfg(contract, 1048756, maxStackLen, maxStackCount)
+					cfg.Clear()
 					elapsed := time.Since(start)
 					results <- &cfgJobResult{job, cfg, false, &elapsed}
 					mon <- 0
