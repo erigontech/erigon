@@ -72,7 +72,7 @@ func testCfgByUsed() error {
 
 				select {
 				case <-mon:
-				case <-time.After(15 * time.Second):
+				case <-time.After(300 * time.Second):
 					fmt.Printf("Timed out: %v %v %v\n", job.txcnt, len(job.code), hex.EncodeToString(job.code))
 					results <- &cfgJobResult{job, nil, true}
 				}
