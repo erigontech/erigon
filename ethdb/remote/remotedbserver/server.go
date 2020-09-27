@@ -1,7 +1,6 @@
 package remotedbserver
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"time"
@@ -118,7 +117,6 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Seek: %x->%x\n", in.SeekKey, k)
 	} else {
 		cd := tx.CursorDupSort(bucketName)
 		k, v, err = cd.SeekBothRange(in.SeekKey, in.SeekValue)
