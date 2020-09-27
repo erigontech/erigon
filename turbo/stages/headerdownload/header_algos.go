@@ -404,6 +404,13 @@ func (hd *HeaderDownload) HardCodedHeader(header *types.Header, currentTime uint
 		}
 		tipHash := header.Hash()
 		hd.tips[tipHash] = tip
+		_, hard := hd.hardTips[tipHash]
+		hd.tips[tipHash] = tip
+		heap.Push(anchor.tipQueue, AnchorTipItem{hash: tipHash, height: tip.blockHeight, hard: hard})
+		hd.tipCount++
+		if tip.blockHeight > anchor.maxTipHeight {
+			anchor.maxTipHeight = tip.blockHeight
+		}
 		hd.anchorTree.ReplaceOrInsert(anchor)
 		if header.ParentHash != (common.Hash{}) {
 			hd.requestQueue.PushFront(RequestQueueItem{anchorParent: header.ParentHash, waitUntil: currentTime})
