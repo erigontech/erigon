@@ -180,7 +180,7 @@ var zstd = Migration{
 			//	continue
 			//}
 			samples = append(samples, v)
-			if blockNum >= 4_000_000 {
+			if blockNum >= 6_000_000 {
 				break
 			}
 
@@ -267,7 +267,7 @@ var zstd = Migration{
 				return err
 			}
 			blockNum := binary.BigEndian.Uint64(k)
-			if blockNum >= 4_000_000 {
+			if blockNum >= 6_000_000 {
 				break
 			}
 
