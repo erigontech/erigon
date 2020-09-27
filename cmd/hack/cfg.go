@@ -65,8 +65,10 @@ func testCfgByUsed() error {
 				go func() {
 					contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 					contract.Code = job.code
+					start := time.Now()
 					cfg, _ := vm.GenCfg(contract, 100000, maxStackLen, maxStackCount)
-					results <- &cfgJobResult{job, cfg, false}
+					elapsed := time.Since(start)
+					results <- &cfgJobResult{job, cfg, false, elapsed}
 					mon <- 0
 				}()
 
@@ -74,7 +76,7 @@ func testCfgByUsed() error {
 				case <-mon:
 				case <-time.After(300 * time.Second):
 					fmt.Printf("Timed out: %v %v %v\n", job.txcnt, len(job.code), hex.EncodeToString(job.code))
-					results <- &cfgJobResult{job, nil, true}
+					results <- &cfgJobResult{job, nil, true, nil}
 				}
 			}
 		}(i)
@@ -93,6 +95,7 @@ func testCfgByUsed() error {
 							"StackCountLimitReached",
 							"ShortStack",
 							"Timeout",
+							"Elapsed (ms)",
 							"Bytecode"}
 	_, err = resultsFile.WriteString(strings.Join(headers, "|") + "\n")
 	check(err)
@@ -107,11 +110,13 @@ func testCfgByUsed() error {
 		badJumpReason := ""
 		stackLimitReached := ""
 		shortStack := ""
+		elapsed := ""
 		if result.cfg != nil {
 			valid = sb(result.cfg.Valid)
 			badJumpReason = result.cfg.GetBadJumpReason()
 			stackLimitReached = sb(result.cfg.StackCountLimitReached)
 			shortStack = sb(result.cfg.ShortStack)
+			elapsed = si64(result.elapsed.Milliseconds())
 		}
 
 		line := []string{	si(result.job.txcnt),
@@ -121,6 +126,7 @@ func testCfgByUsed() error {
 							stackLimitReached,
 							shortStack,
 							sb(result.timeout),
+							elapsed,
 							hex.EncodeToString(result.job.code)}
 
 		_, err = resultsFile.WriteString(strings.Join(line,"|") + "\n")
@@ -137,6 +143,10 @@ func testCfgByUsed() error {
 	}
 
 	return nil
+}
+
+func si64(milliseconds int64) string {
+	return fmt.Sprintf("%v", milliseconds)
 }
 
 func testGenCfg() {
@@ -600,6 +610,7 @@ type cfgJobResult struct {
 	job     *cfgJob
 	cfg     *vm.Cfg
 	timeout bool
+	elapsed time.Duration
 }
 
 
