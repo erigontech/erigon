@@ -197,40 +197,40 @@ var zstd = Migration{
 
 		fmt.Printf("samples: %d, total: %s\n", len(samples), common.StorageSize(total))
 		t := time.Now()
-		//dict4 := gozstd.BuildDict(samples, 4*1024)
-		//cd4, err := gozstd.NewCDictLevel(dict4, gozstd.DefaultCompressionLevel)
-		//if err != nil {
-		//	return err
-		//}
-		//defer cd4.Release()
-		//fmt.Printf("dict4: %s\n", time.Since(t))
-		//t = time.Now()
-		//dict8 := gozstd.BuildDict(samples, 8*1024)
-		//cd8, err := gozstd.NewCDictLevel(dict8, gozstd.DefaultCompressionLevel)
-		//if err != nil {
-		//	return err
-		//}
-		//defer cd8.Release()
-		//fmt.Printf("dict8: %s\n", time.Since(t))
-		//t = time.Now()
-		//
-		//dict12 := gozstd.BuildDict(samples, 12*1024)
-		//cd12, err := gozstd.NewCDictLevel(dict12, gozstd.DefaultCompressionLevel)
-		//if err != nil {
-		//	return err
-		//}
-		//defer cd12.Release()
-		//fmt.Printf("dict12: %s\n", time.Since(t))
-		//t = time.Now()
+		dict4 := gozstd.BuildDict(samples, 4*1024)
+		cd4, err := gozstd.NewCDictLevel(dict4, gozstd.DefaultCompressionLevel)
+		if err != nil {
+			return err
+		}
+		defer cd4.Release()
+		fmt.Printf("dict4: %s\n", time.Since(t))
+		t = time.Now()
+		dict8 := gozstd.BuildDict(samples, 8*1024)
+		cd8, err := gozstd.NewCDictLevel(dict8, gozstd.DefaultCompressionLevel)
+		if err != nil {
+			return err
+		}
+		defer cd8.Release()
+		fmt.Printf("dict8: %s\n", time.Since(t))
+		t = time.Now()
 
-		//dict16 := gozstd.BuildDict(samples, 16*1024)
-		//cd16, err := gozstd.NewCDictLevel(dict16, gozstd.DefaultCompressionLevel)
-		//if err != nil {
-		//	return err
-		//}
-		//defer cd16.Release()
-		//fmt.Printf("dict16: %s\n", time.Since(t))
-		//t = time.Now()
+		dict12 := gozstd.BuildDict(samples, 12*1024)
+		cd12, err := gozstd.NewCDictLevel(dict12, gozstd.DefaultCompressionLevel)
+		if err != nil {
+			return err
+		}
+		defer cd12.Release()
+		fmt.Printf("dict12: %s\n", time.Since(t))
+		t = time.Now()
+
+		dict16 := gozstd.BuildDict(samples, 16*1024)
+		cd16, err := gozstd.NewCDictLevel(dict16, gozstd.DefaultCompressionLevel)
+		if err != nil {
+			return err
+		}
+		defer cd16.Release()
+		fmt.Printf("dict16: %s\n", time.Since(t))
+		t = time.Now()
 
 		dict32 := gozstd.BuildDict(samples, 32*1024)
 		cd32, err := gozstd.NewCDictLevel(dict32, -1)
@@ -266,10 +266,10 @@ var zstd = Migration{
 		fmt.Printf("dict256: %s\n", time.Since(t))
 
 		t = time.Now()
-		//total4 := 0
-		//total8 := 0
-		//total12 := 0
-		//total16 := 0
+		total4 := 0
+		total8 := 0
+		total12 := 0
+		total16 := 0
 		total32 := 0
 		total64 := 0
 		total128 := 0
@@ -284,14 +284,14 @@ var zstd = Migration{
 				break
 			}
 
-			//buf := gozstd.CompressDict(buf[:0], v, cd4)
-			//total4 += len(buf)
-			//buf = gozstd.CompressDict(buf[:0], v, cd8)
-			//total8 += len(buf)
-			//buf = gozstd.CompressDict(buf[:0], v, cd12)
-			//total12 += len(buf)
-			//buf = gozstd.CompressDict(buf[:0], v, cd16)
-			//total16 += len(buf)
+			buf := gozstd.CompressDict(buf[:0], v, cd4)
+			total4 += len(buf)
+			buf = gozstd.CompressDict(buf[:0], v, cd8)
+			total8 += len(buf)
+			buf = gozstd.CompressDict(buf[:0], v, cd12)
+			total12 += len(buf)
+			buf = gozstd.CompressDict(buf[:0], v, cd16)
+			total16 += len(buf)
 			buf = gozstd.CompressDict(buf[:0], v, cd32)
 			total32 += len(buf)
 			buf = gozstd.CompressDict(buf[:0], v, cd64)
@@ -304,10 +304,10 @@ var zstd = Migration{
 			default:
 			case <-logEvery.C:
 				log.Info("Progress 8", "blockNum", blockNum,
-					//"total4", common.StorageSize(total4),
-					//"total8", common.StorageSize(total8),
-					//"total12", common.StorageSize(total12),
-					//"total16", common.StorageSize(total16),
+					"total4", common.StorageSize(total4),
+					"total8", common.StorageSize(total8),
+					"total12", common.StorageSize(total12),
+					"total16", common.StorageSize(total16),
 					"total32", common.StorageSize(total32),
 					"total64", common.StorageSize(total64),
 					"total128", common.StorageSize(total128),
