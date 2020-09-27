@@ -6,6 +6,7 @@ require (
 	github.com/Azure/azure-pipeline-go v0.2.2 // indirect
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/Azure/go-autorest/autorest/adal v0.8.3 // indirect
+	github.com/DataDog/zstd v1.4.5 // indirect
 	github.com/JekaMas/notify v0.9.4
 	github.com/RoaringBitmap/gocroaring v0.2.66-0.20200926170445-4232533f8158
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
@@ -67,6 +68,7 @@ require (
 	github.com/tyler-smith/go-bip39 v1.0.2
 	github.com/ugorji/go/codec v1.1.7
 	github.com/urfave/cli v1.22.1
+	github.com/valyala/gozstd v1.8.3
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
