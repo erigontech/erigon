@@ -212,7 +212,7 @@ source: `(accounts/keystore/keystore.go)`
 
 the Keystore object is a cluster in which all the above components are used accordingly,
 it uses `fileCache`, `watcher` and `accountCache` to keep track of the keystore directory and have access to the wallets and
-has the power to unlock and used each wallets inside the keystore wallet.
+has the power to unlock and use each wallets inside the keystore directory.
 
 .. code-block:: go
 
@@ -235,13 +235,13 @@ creates an async subscription to receive notifications on the addition or remova
 
 .. code-block:: go
 
-    func (ks *KeyStore) HasAddress(addr common.Address) bool {
+    func (ks *KeyStore) HasAddress(addr common.Address) bool;
 
 returns wheter given account is in keystore.
 
 .. code-block:: go
 
-    func (ks *KeyStore) Accounts() []accounts.Account {
+    func (ks *KeyStore) Accounts() []accounts.Account;
 
 returns all accounts in keystore.
 
@@ -270,7 +270,7 @@ lock a certain account in the keystore and remove the its private key from memor
 
 .. code-block:: go
 
-    func (ks *KeyStore) TimedUnlock(a accounts.Account, passphrase string, timeout time.Duration) error {
+    func (ks *KeyStore) TimedUnlock(a accounts.Account, passphrase string, timeout time.Duration) error;
 
 unlock an account for a given amount of time.
 
@@ -294,13 +294,13 @@ import given account and encrypt key with newPassphrase.
 
 .. code-block:: go
 
-    func (ks *KeyStore) ImportECDSA(priv *ecdsa.PrivateKey, passphrase string) (accounts.Account, error) {
+    func (ks *KeyStore) ImportECDSA(priv *ecdsa.PrivateKey, passphrase string) (accounts.Account, error);
 
 stores the given key into the key directory, encrypting it with the passphrase.
 
 .. code-block:: go
 
-    func (ks *KeyStore) Update(a accounts.Account, passphrase, newPassphrase string) error {
+    func (ks *KeyStore) Update(a accounts.Account, passphrase, newPassphrase string) error;
 
 changes the passphrase of an existing account.
 
