@@ -16,8 +16,8 @@ import (
 	"time"
 )
 
-var maxStackLen = 64
-var maxStackCount = 1000
+var maxStackLen = 256
+var maxStackCount = 8096
 
 
 func testCfgByUsed() error {
@@ -66,7 +66,7 @@ func testCfgByUsed() error {
 					contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
 					contract.Code = job.code
 					start := time.Now()
-					cfg, _ := vm.GenCfg(contract, 100000, maxStackLen, maxStackCount)
+					cfg, _ := vm.GenCfg(contract, 1048756, maxStackLen, maxStackCount)
 					elapsed := time.Since(start)
 					results <- &cfgJobResult{job, cfg, false, &elapsed}
 					mon <- 0
