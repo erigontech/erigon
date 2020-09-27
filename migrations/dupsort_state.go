@@ -154,3 +154,110 @@ var resetIHBucketToRecoverDB = Migration{
 		return OnLoadCommit(db, nil, true)
 	},
 }
+
+var zstd = Migration{
+	Name: "zstd_2",
+	Up: func(tx ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+		if err := tx.(ethdb.BucketsMigrator).ClearBuckets(dbutils.BlockReceiptsZstd); err != nil {
+			return err
+		}
+
+		logEvery := time.NewTicker(10 * time.Second)
+		defer logEvery.Stop()
+
+		// train
+		var samples [][]byte
+
+		total := 0
+		c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.BlockBodyPrefix)
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			total += len(v)
+			blockNum := binary.BigEndian.Uint64(k[:8])
+			if blockNum%37 == 0 {
+				samples = append(samples, v)
+			}
+
+			if blockNum == 6_000_000 {
+				break
+			}
+
+			select {
+			default:
+			case <-logEvery.C:
+				log.Info("Progress", "blockNum", blockNum, "sz", common.StorageSize(total))
+			}
+		}
+
+		dict4 := gozstd.BuildDict(samples, 4*1024)
+		cd4, err := gozstd.NewCDictLevel(dict4, gozstd.DefaultCompressionLevel)
+		if err != nil {
+			return err
+		}
+		defer cd4.Release()
+
+		dict8 := gozstd.BuildDict(samples, 8*1024)
+		cd8, err := gozstd.NewCDictLevel(dict8, gozstd.DefaultCompressionLevel)
+		if err != nil {
+			return err
+		}
+		defer cd8.Release()
+
+		dict12 := gozstd.BuildDict(samples, 12*1024)
+		cd12, err := gozstd.NewCDictLevel(dict12, gozstd.DefaultCompressionLevel)
+		if err != nil {
+			return err
+		}
+		defer cd12.Release()
+
+		dict16 := gozstd.BuildDict(samples, 16*1024)
+		cd16, err := gozstd.NewCDictLevel(dict16, gozstd.DefaultCompressionLevel)
+		if err != nil {
+			return err
+		}
+		defer cd16.Release()
+
+		t := time.Now()
+		total4 := 0
+		total8 := 0
+		total12 := 0
+		total16 := 0
+		buf := make([]byte, 0, 1024)
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			blockNum := binary.BigEndian.Uint64(k)
+			if blockNum == 6_000_000 {
+				break
+			}
+
+			buf := gozstd.CompressDict(buf[:0], v, cd4)
+			total4 += len(buf)
+			buf = gozstd.CompressDict(buf[:0], v, cd8)
+			total8 += len(buf)
+			buf = gozstd.CompressDict(buf[:0], v, cd12)
+			total12 += len(buf)
+			buf = gozstd.CompressDict(buf[:0], v, cd16)
+			total16 += len(buf)
+			select {
+			default:
+			case <-logEvery.C:
+				log.Info("Progress 8", "blockNum", blockNum,
+					"total4", common.StorageSize(total4),
+					"total8", common.StorageSize(total8),
+					"total12", common.StorageSize(total12),
+					"total16", common.StorageSize(total16),
+				)
+			}
+		}
+
+		fmt.Printf("s: %s\n", time.Since(t))
+		//if err := tx.(ethdb.BucketsMigrator).DropBuckets(dbutils.BlockReceiptsPrefixOld1); err != nil {
+		//	return err
+		//}
+		return OnLoadCommit(tx, nil, true)
+	},
+}
