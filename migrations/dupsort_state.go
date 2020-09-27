@@ -347,7 +347,7 @@ var zstd = Migration{
 			buf = gozstd.CompressDict(buf[:0], v, cd128_minus3)
 			total128_minus3 += len(buf)
 			t128_minus3 := time.Since(t)
-			d_minus1 += t128_minus3
+			d_minus3 += t128_minus3
 
 			t = time.Now()
 			buf = gozstd.CompressDict(buf[:0], v, cd128_minus2)
