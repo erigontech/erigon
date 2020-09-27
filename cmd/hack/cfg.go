@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-var maxStackLen = 256
+var maxStackLen = 8096
 var maxStackCount = 8096
 
 
