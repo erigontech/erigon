@@ -174,7 +174,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 	}
 
-	var blockNToMatch uint32
 	blockNToMatchBytes := make([]byte, 4)
 
 	if blockNumbers.Cardinality() == 0 {
@@ -184,9 +183,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
 
-	blockNums := blockNumbers.Iterator()
-	for blockNums.HasNext() {
-		blockNToMatch = blockNums.Next()
+	for _, blockNToMatch := range blockNumbers.ToArray() {
 		binary.BigEndian.PutUint32(blockNToMatchBytes, blockNToMatch)
 
 		blockHash := rawdb.ReadCanonicalHash(tx, uint64(blockNToMatch))
