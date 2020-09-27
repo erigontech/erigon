@@ -175,22 +175,23 @@ var zstd = Migration{
 		var samples100k [][]byte
 
 		total := 0
-		bucket := dbutils.BlockReceiptsPrefix
+		bucket := dbutils.BlockBodyPrefix
 		fmt.Printf("bucket: %s\n", bucket)
 		c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
+		count, _ := c.Count()
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
 			total += len(v)
 			blockNum := binary.BigEndian.Uint64(k)
-			if blockNum%6_000 == 0 {
+			if blockNum%(count/4000) == 0 {
 				samples100k = append(samples100k, v)
 			}
-			if blockNum%4_000 == 0 {
+			if blockNum%(count/3000) == 0 {
 				samples10k = append(samples10k, v)
 			}
-			if blockNum%2_000 == 0 {
+			if blockNum%(count/2000) == 0 {
 				samples1K = append(samples1K, v)
 			}
 
