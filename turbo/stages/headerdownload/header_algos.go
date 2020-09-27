@@ -321,7 +321,7 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 	}
 	newAnchor := attachmentTip.anchor
 	// Iterate headers in the segment to compute difficulty difference along the way
-	var difficultyDifference uint256.Int
+	difficultyDifference := attachmentTip.cumulativeDifficulty
 	for _, header := range segment.Headers[start:end] {
 		diff, overflow := uint256.FromBig(header.Difficulty)
 		if overflow {
