@@ -177,6 +177,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	var blockNToMatch uint32
 	blockNToMatchBytes := make([]byte, 4)
 
+	if blockNumbers.Cardinality() == 0 {
+		return returnLogs(logs), nil
+	}
+
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
 

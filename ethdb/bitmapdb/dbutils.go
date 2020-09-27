@@ -53,7 +53,7 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) error
 	copy(newK, key)
 	binary.BigEndian.PutUint16(newK[len(newK)-2:], ^shardNForDelta)
 
-	delta.RunOptimize()
+	//delta.RunOptimize()
 	newV := make([]byte, delta.SerializedSizeInBytes())
 	err := delta.Write(newV)
 	if err != nil {
@@ -97,7 +97,7 @@ func hotShardOverflow(c ethdb.Cursor, initialKey []byte, hotShardN uint16, hotV 
 
 	cold = gocroaring.FastOr(cold, hot)
 
-	cold.RunOptimize()
+	//cold.RunOptimize()
 	coldBytes := make([]byte, cold.SerializedSizeInBytes())
 	err = cold.Write(coldBytes)
 	if err != nil {

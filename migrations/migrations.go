@@ -61,6 +61,7 @@ var migrations = []Migration{
 	dupSortHashState,
 	dupSortPlainState,
 	dupSortIH,
+	clearIndices,
 }
 
 type Migration struct {
