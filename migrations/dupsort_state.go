@@ -184,10 +184,10 @@ var zstd = Migration{
 			}
 			total += len(v)
 			blockNum := binary.BigEndian.Uint64(k)
-			if blockNum%14_000 == 0 {
+			if blockNum%6_000 == 0 {
 				samples100k = append(samples100k, v)
 			}
-			if blockNum%8_000 == 0 {
+			if blockNum%4_000 == 0 {
 				samples10k = append(samples10k, v)
 			}
 			if blockNum%2_000 == 0 {
