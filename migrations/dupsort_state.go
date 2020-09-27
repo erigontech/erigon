@@ -240,11 +240,6 @@ var zstd = Migration{
 		//}
 		//defer cd256.Release()
 		//fmt.Printf("dict256: %s\n", time.Since(t))
-		cd128_minus3, err := gozstd.NewCDictLevel(dict128, -3)
-		if err != nil {
-			panic(err)
-		}
-		defer cd128_minus3.Release()
 
 		cd128_minus2, err := gozstd.NewCDictLevel(dict128, -2)
 		if err != nil {
@@ -292,7 +287,6 @@ var zstd = Migration{
 		//total32 := 0
 		//total64 := 0
 		//total64_minus3 := 0
-		total128_minus3 := 0
 		total128_minus2 := 0
 		total128_10k_minus2 := 0
 		total128_minus1 := 0
@@ -309,7 +303,6 @@ var zstd = Migration{
 		//total128_22 := 0
 
 		total = 0
-		var d_minus3 time.Duration
 		var d_minus2 time.Duration
 		var d_10k_minus2 time.Duration
 		var d_minus1 time.Duration
@@ -393,10 +386,10 @@ var zstd = Migration{
 					//"64", fmt.Sprintf("%.2f", totalf/float64(total64)), "t64", t64,
 					//"64_minus3", fmt.Sprintf("%.2f", totalf/float64(total64_minus3)), "t64_minus3", t64_minus3,
 					//"128_3", fmt.Sprintf("%.2f", totalf/float64(total128_3)), "t128_3", t128_3,
-					"128_minus3", fmt.Sprintf("%.2f", totalf/float64(total128_minus3)), "d_minus3", d_minus3,
-					"128_minus2", fmt.Sprintf("%.2f", totalf/float64(total128_minus2)), "d_minus2", d_minus2,
+					//"128_minus3", fmt.Sprintf("%.2f", totalf/float64(total128_minus3)), "d_minus3", d_minus3,
 					"128_minus2", fmt.Sprintf("%.2f", totalf/float64(total128_minus2)), "d_minus2", d_minus2,
 					"128_10k_minus2", fmt.Sprintf("%.2f", totalf/float64(total128_10k_minus2)), "d_10k_minus2", d_10k_minus2,
+					"128_minus1", fmt.Sprintf("%.2f", totalf/float64(total128_minus1)), "d_minus2", d_minus1,
 					//"128_0", fmt.Sprintf("%.2f", totalf/float64(total128_0)), "t128_0", t128_0,
 					//"128_1", fmt.Sprintf("%.2f", totalf/float64(total128_1)), "d_1", d_1,
 					//"128_2", fmt.Sprintf("%.2f", totalf/float64(total128_2)), "t128_2", t128_2,
