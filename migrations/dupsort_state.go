@@ -192,19 +192,23 @@ var zstd = Migration{
 			}
 		}
 
+		t := time.Now()
 		dict4 := gozstd.BuildDict(samples, 4*1024)
 		cd4, err := gozstd.NewCDictLevel(dict4, gozstd.DefaultCompressionLevel)
 		if err != nil {
 			return err
 		}
 		defer cd4.Release()
-
+		fmt.Printf("dict4: %s\n", time.Since(t))
+		t = time.Now()
 		dict8 := gozstd.BuildDict(samples, 8*1024)
 		cd8, err := gozstd.NewCDictLevel(dict8, gozstd.DefaultCompressionLevel)
 		if err != nil {
 			return err
 		}
 		defer cd8.Release()
+		fmt.Printf("dict8: %s\n", time.Since(t))
+		t = time.Now()
 
 		dict12 := gozstd.BuildDict(samples, 12*1024)
 		cd12, err := gozstd.NewCDictLevel(dict12, gozstd.DefaultCompressionLevel)
@@ -212,6 +216,8 @@ var zstd = Migration{
 			return err
 		}
 		defer cd12.Release()
+		fmt.Printf("dict12: %s\n", time.Since(t))
+		t = time.Now()
 
 		dict16 := gozstd.BuildDict(samples, 16*1024)
 		cd16, err := gozstd.NewCDictLevel(dict16, gozstd.DefaultCompressionLevel)
@@ -219,8 +225,10 @@ var zstd = Migration{
 			return err
 		}
 		defer cd16.Release()
+		fmt.Printf("dict16: %s\n", time.Since(t))
+		t = time.Now()
 
-		t := time.Now()
+		t = time.Now()
 		total4 := 0
 		total8 := 0
 		total12 := 0
