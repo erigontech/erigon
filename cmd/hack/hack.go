@@ -1739,20 +1739,14 @@ func extracHeaders(chaindata string, block uint64) error {
 	w := bufio.NewWriter(f)
 	defer w.Flush()
 	var hBuffer [headerdownload.HeaderSerLength]byte
-	var dBuffer [32]byte
 	for {
 		hash := rawdb.ReadCanonicalHash(db, b)
 		if hash == (common.Hash{}) {
 			break
 		}
 		h := rawdb.ReadHeader(db, hash, b)
-		td := rawdb.ReadTd(db, hash, b)
 		headerdownload.SerialiseHeader(h, hBuffer[:])
-		td.FillBytes(dBuffer[:])
 		if _, err := w.Write(hBuffer[:]); err != nil {
-			return err
-		}
-		if _, err := w.Write(dBuffer[:]); err != nil {
 			return err
 		}
 		b += block
