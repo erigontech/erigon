@@ -208,7 +208,6 @@ func needFlush(bitmaps map[string]*gocroaring.Bitmap, memLimit, singleLimit data
 }
 
 func flushBitmaps(c ethdb.Cursor, inMem map[string]*gocroaring.Bitmap) error {
-	t := time.Now()
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
@@ -222,13 +221,10 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*gocroaring.Bitmap) error {
 		}
 	}
 
-	fmt.Printf("flush: %s, %d\n", time.Since(t), len(keys))
-
 	return nil
 }
 
 func truncateBitmaps(c ethdb.Cursor, inMem map[string]bool, from, to uint64) error {
-	t := time.Now()
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
@@ -239,7 +235,6 @@ func truncateBitmaps(c ethdb.Cursor, inMem map[string]bool, from, to uint64) err
 			return nil
 		}
 	}
-	fmt.Printf("truncateBitmaps: %s, %d\n", time.Since(t), len(keys))
 
 	return nil
 }
