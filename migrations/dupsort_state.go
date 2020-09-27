@@ -160,7 +160,7 @@ var resetIHBucketToRecoverDB = Migration{
 }
 
 var zstd = Migration{
-	Name: "zstd_4",
+	Name: "zstd_5",
 	Up: func(tx ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 		if err := tx.(ethdb.BucketsMigrator).ClearBuckets(dbutils.BlockReceiptsZstd); err != nil {
 			return err
@@ -180,7 +180,7 @@ var zstd = Migration{
 			}
 			total += len(v)
 			blockNum := binary.BigEndian.Uint64(k)
-			if blockNum%21 != 0 {
+			if blockNum%40 != 0 {
 				continue
 			}
 			samples = append(samples, v)
@@ -233,7 +233,7 @@ var zstd = Migration{
 		//t = time.Now()
 
 		dict32 := gozstd.BuildDict(samples, 32*1024)
-		cd32, err := gozstd.NewCDictLevel(dict32, gozstd.DefaultCompressionLevel)
+		cd32, err := gozstd.NewCDictLevel(dict32, -1)
 		if err != nil {
 			return err
 		}
@@ -242,7 +242,7 @@ var zstd = Migration{
 		t = time.Now()
 
 		dict64 := gozstd.BuildDict(samples, 64*1024)
-		cd64, err := gozstd.NewCDictLevel(dict64, gozstd.DefaultCompressionLevel)
+		cd64, err := gozstd.NewCDictLevel(dict64, -1)
 		if err != nil {
 			return err
 		}
@@ -250,7 +250,7 @@ var zstd = Migration{
 		fmt.Printf("dict64: %s\n", time.Since(t))
 
 		dict128 := gozstd.BuildDict(samples, 128*1024)
-		cd128, err := gozstd.NewCDictLevel(dict128, gozstd.DefaultCompressionLevel)
+		cd128, err := gozstd.NewCDictLevel(dict128, -1)
 		if err != nil {
 			return err
 		}
@@ -258,7 +258,7 @@ var zstd = Migration{
 		fmt.Printf("dict128: %s\n", time.Since(t))
 
 		dict256 := gozstd.BuildDict(samples, 256*1024)
-		cd256, err := gozstd.NewCDictLevel(dict256, gozstd.DefaultCompressionLevel)
+		cd256, err := gozstd.NewCDictLevel(dict256, -1)
 		if err != nil {
 			return err
 		}
