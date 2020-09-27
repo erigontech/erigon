@@ -184,9 +184,9 @@ var zstd = Migration{
 				samples = append(samples, v)
 			}
 
-			if blockNum >= 8_000_000 {
-				break
-			}
+			//if blockNum >= 8_000_000 {
+			//	break
+			//}
 
 			select {
 			default:
@@ -324,9 +324,9 @@ var zstd = Migration{
 			}
 			total += len(v)
 			blockNum := binary.BigEndian.Uint64(k)
-			if blockNum >= 8_000_000 {
-				break
-			}
+			//if blockNum >= 8_000_000 {
+			//	break
+			//}
 
 			t := time.Now()
 			//buf = gozstd.CompressDict(buf[:0], v, cd32)
