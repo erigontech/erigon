@@ -169,7 +169,7 @@ var zstd = Migration{
 		var samples [][]byte
 
 		total := 0
-		c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockBodyPrefix)
+		c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -225,6 +225,7 @@ var zstd = Migration{
 		}
 		defer cd16.Release()
 		fmt.Printf("dict16: %s\n", time.Since(t))
+		t = time.Now()
 
 		dict32 := gozstd.BuildDict(samples, 32*1024)
 		cd32, err := gozstd.NewCDictLevel(dict32, gozstd.DefaultCompressionLevel)
@@ -233,6 +234,7 @@ var zstd = Migration{
 		}
 		defer cd32.Release()
 		fmt.Printf("dict32: %s\n", time.Since(t))
+		t = time.Now()
 
 		dict64 := gozstd.BuildDict(samples, 64*1024)
 		cd64, err := gozstd.NewCDictLevel(dict64, gozstd.DefaultCompressionLevel)
