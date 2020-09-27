@@ -161,7 +161,7 @@ var resetIHBucketToRecoverDB = Migration{
 }
 
 var zstd = Migration{
-	Name: "zstd_3",
+	Name: "zstd_4",
 	Up: func(tx ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 		if err := tx.(ethdb.BucketsMigrator).ClearBuckets(dbutils.BlockReceiptsZstd); err != nil {
 			return err
@@ -309,6 +309,7 @@ var zstd = Migration{
 		//if err := tx.(ethdb.BucketsMigrator).DropBuckets(dbutils.BlockReceiptsPrefixOld1); err != nil {
 		//	return err
 		//}
-		return OnLoadCommit(tx, nil, true)
+		//return OnLoadCommit(tx, nil, true)
+		return nil
 	},
 }
