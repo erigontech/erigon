@@ -176,11 +176,12 @@ var zstd = Migration{
 			}
 			total += len(v)
 			blockNum := binary.BigEndian.Uint64(k)
+			fmt.Printf("%d\n", blockNum)
 			if blockNum%7 != 0 {
 				continue
 			}
 			samples = append(samples, v)
-			if blockNum >= 6_000_000 {
+			if blockNum >= 4_000_000 {
 				break
 			}
 
@@ -256,7 +257,7 @@ var zstd = Migration{
 				return err
 			}
 			blockNum := binary.BigEndian.Uint64(k)
-			if blockNum >= 6_000_000 {
+			if blockNum >= 4_000_000 {
 				break
 			}
 
