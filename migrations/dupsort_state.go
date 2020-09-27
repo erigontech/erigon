@@ -162,7 +162,7 @@ var zstd = Migration{
 			return err
 		}
 
-		logEvery := time.NewTicker(10 * time.Second)
+		logEvery := time.NewTicker(5 * time.Second)
 		defer logEvery.Stop()
 
 		// train
