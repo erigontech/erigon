@@ -16,8 +16,8 @@ import (
 	"time"
 )
 
-var maxStackLen = 1024
-var maxStackCount = 2048
+var maxStackLen = 256
+var maxStackCount = 256
 
 
 func testCfgByUsed() error {
