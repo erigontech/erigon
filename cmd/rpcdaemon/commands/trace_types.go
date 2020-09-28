@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
@@ -21,6 +22,7 @@ import (
 // GethTrace The trace as received from the existing Geth javascript tracer 'callTracer'
 type GethTrace struct {
 	Type    string     `json:"type"`
+	Error   string     `json:"error"`
 	From    string     `json:"from"`
 	To      string     `json:"to"`
 	Value   string     `json:"value"`
@@ -41,6 +43,7 @@ type ParityTrace struct {
 	Action              TraceAction `json:"action"`
 	BlockHash           common.Hash `json:"blockHash"`
 	BlockNumber         uint64      `json:"blockNumber"`
+	Error               string      `json:"error,omitempty"`
 	Result              TraceResult `json:"result"`
 	Subtraces           int         `json:"subtraces"`
 	TraceAddress        []int       `json:"traceAddress"`
@@ -187,6 +190,26 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 			pt.Result.GasUsed = hexutil.EncodeUint64(0)
 		}
 	}
+
+	// This ugly code is here to convert Geth error messages to Parity error message. One day, when
+	// we figure out what we want to do, it will be removed
+	var (
+		ErrInvalidJumpParity       = "Bad jump destination"
+		ErrExecutionRevertedParity = "Reverted"
+	)
+	gethError := gethTrace.Error
+	if gethError == vm.ErrInvalidJump.Error() {
+		pt.Error = ErrInvalidJumpParity
+	} else if gethError == vm.ErrExecutionReverted.Error() {
+		pt.Error = ErrExecutionRevertedParity
+	} else {
+		pt.Error = gethTrace.Error
+	}
+	if pt.Error != "" {
+		pt.Result.GasUsed = "0"
+	}
+	// This ugly code is here to convert Geth error messages to Parity error message. One day, when
+	// we figure out what we want to do, it will be removed
 
 	pt.BlockHash = blockHash
 	pt.BlockNumber = blockNumber
