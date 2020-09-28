@@ -79,7 +79,6 @@ func promoteLogIndex(tx ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
-	fmt.Printf("Start: %x\n", dbutils.EncodeBlockNumber(start))
 
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(start)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
