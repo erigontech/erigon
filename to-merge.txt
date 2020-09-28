@@ -509,33 +509,3 @@ Date:   Tue Sep 29 02:10:11 2020 +0800
 
     p2p/enode: remove unused code (#21612)
 
-commit b007df89ddc3d91610332f90af18092cd2793202
-Author: shigeyuki azuchi <azuchi@chaintope.com>
-Date:   Mon Sep 28 21:30:10 2020 +0900
-
-    light: fix wrong description in a comment (#21573)
-
-commit a04294d1607d0526002770cdc93bed73ee78a3a5
-Author: mr_franklin <mr_franklin@126.com>
-Date:   Mon Sep 28 20:28:38 2020 +0800
-
-    internal/web3ext: improve eth_getBlockByNumber and eth_getBlockByHash console api (#21608)
-
-commit eebfb13053a06433408f3b7b43837e3b2c7a8145
-Author: aaronbuchwald <aaron.buchwald56@gmail.com>
-Date:   Mon Sep 28 08:24:01 2020 -0400
-
-    core: free pointer from slice after popping element from price heap (#21572)
-    
-    * Fix potential memory leak in price heap
-    
-    * core: nil free pointer slice (alternative version)
-    
-    Co-authored-by: Martin Holst Swende <martin@swende.se>
-
-commit 0ddd4612b7db34a6b23926f05f0dd5807d86c7ab
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Mon Sep 28 14:14:45 2020 +0200
-
-    core/vm, params: make 2200 in line with spec (#21605)
-
