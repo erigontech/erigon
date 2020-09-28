@@ -121,7 +121,6 @@ func promoteLogIndex(tx ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 				addresses = map[string]*gocroaring.Bitmap{}
 			}
 		}
-		fmt.Printf("Go: %d\n", blockNum)
 
 		// Convert the receipts from their storage form to their internal representation
 		storageReceipts := []*types.ReceiptForStorage{}
