@@ -493,19 +493,3 @@ Date:   Tue Sep 29 17:31:14 2020 +0800
 
     cmd/bootnode,internal/debug: fix some comments (#21623)
 
-commit 901471f733dbd5f08fdf1523a16227afd96efcd9
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Mon Sep 28 20:11:30 2020 +0200
-
-    build: keep geth-sources.jar build result for JavaDoc (#21596)
-    
-    * ci: tooltips for javadoc for mobile app
-    
-    * f space
-
-commit 666092936cf766a88ad7eb972768537127c5adc9
-Author: mr_franklin <mr_franklin@126.com>
-Date:   Tue Sep 29 02:10:11 2020 +0800
-
-    p2p/enode: remove unused code (#21612)
-
