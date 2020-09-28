@@ -18,10 +18,13 @@
 package eth
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
+	"io/ioutil"
 	"math/big"
 	"os"
 	"reflect"
@@ -144,7 +147,6 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
-
 
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
 
@@ -271,8 +273,33 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
+			// load peer cert/key, ca cert
 			var creds credentials.TransportCredentials
-			creds, err = credentials.NewServerTLSFromFile(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+
+			if stack.Config().TLSCACert != "" {
+				var peerCert tls.Certificate
+				var caCert []byte
+				peerCert, err = tls.LoadX509KeyPair(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+				if err != nil {
+					log.Error("load peer cert/key error:%v", err)
+					return nil, err
+				}
+				caCert, err = ioutil.ReadFile(stack.Config().TLSCACert)
+				if err != nil {
+					log.Error("read ca cert file error:%v", err)
+					return nil, err
+				}
+				caCertPool := x509.NewCertPool()
+				caCertPool.AppendCertsFromPEM(caCert)
+				creds = credentials.NewTLS(&tls.Config{
+					Certificates: []tls.Certificate{peerCert},
+					ClientCAs:    caCertPool,
+					ClientAuth:   tls.RequireAndVerifyClientCert,
+				})
+			} else {
+				creds, err = credentials.NewServerTLSFromFile(stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+			}
+
 			if err != nil {
 				return nil, err
 			}
@@ -331,7 +358,6 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		}
 		eth.netRPCService = ethapi.NewPublicNetAPI(eth.p2pServer, id)
 	}
-
 
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())

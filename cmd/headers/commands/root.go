@@ -13,6 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	filesDir string // Directory when the files should be stored
+)
+
 func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 }

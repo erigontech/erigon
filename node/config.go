@@ -195,6 +195,7 @@ type Config struct {
 	TLSConnection bool
 	TLSCertFile   string
 	TLSKeyFile    string
+	TLSCACert     string
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into

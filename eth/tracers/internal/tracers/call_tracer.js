@@ -61,7 +61,18 @@
 			if (this.callstack[left-1].calls === undefined) {
 				this.callstack[left-1].calls = [];
 			}
-			this.callstack[left-1].calls.push({type: op});
+			var toAddr = log.stack.peek(0).toString(16);
+			while (toAddr.length < 40) {
+				toAddr = '0' + toAddr;
+			}
+			var call = {
+				type:    op,
+				from:    toHex(log.contract.getAddress()),
+				to:      '0x' + toAddr,
+				//value:   '0x' + log.stack.peek(0).toString(16)
+			};
+			this.callstack[left-1].calls.push(call);
+			// TODO(tjayrush): This needs to return the balance of the destructed account, but where to get that?
 			return
 		}
 		// If a new method invocation is being done, add to the call stack
@@ -104,6 +115,10 @@
 				// TODO(karalabe): The call was made to a plain account. We currently don't
 				// have access to the true gas amount inside the call and so any amount will
 				// mostly be wrong since it depends on a lot of input args. Skip gas for now.
+				// TODO(tjayrush): gasUsedHack
+				// TODO(tjayrush): Obscene hack to get gas by subtraction in caller
+				// TODO(tjayrush): This works, but when I run `make test` the tests fail
+				this.callstack[this.callstack.length - 1].gas = 0xdeadbeef;
 			}
 			this.descended = false;
 		}

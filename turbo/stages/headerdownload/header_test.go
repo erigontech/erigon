@@ -11,14 +11,18 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
-func TestHandleHeadersMsg(t *testing.T) {
-	hd := NewHeaderDownload("", 10, 16, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+const TestBufferLimit = 32 * 1024
+const TestTipLimit = 10
+const TestInitPowDepth = 16
+
+func TestSplitIntoSegments(t *testing.T) {
+	hd := NewHeaderDownload("", TestBufferLimit, TestTipLimit, TestInitPowDepth, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	}, nil, 60, 60)
 
 	// Empty message
-	if chainSegments, penalty, err := hd.HandleHeadersMsg([]*types.Header{}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -32,7 +36,7 @@ func TestHandleHeadersMsg(t *testing.T) {
 	// Single header
 	var h types.Header
 	h.Number = big.NewInt(5)
-	if chainSegments, penalty, err := hd.HandleHeadersMsg([]*types.Header{&h}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -44,7 +48,7 @@ func TestHandleHeadersMsg(t *testing.T) {
 	}
 
 	// Same header repeated twice
-	if chainSegments, penalty, err := hd.HandleHeadersMsg([]*types.Header{&h, &h}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h, &h}); err == nil {
 		if penalty != DuplicateHeaderPenalty {
 			t.Errorf("expected DuplicateHeader penalty, got %s", penalty)
 		}
@@ -57,7 +61,7 @@ func TestHandleHeadersMsg(t *testing.T) {
 
 	// Single header with a bad hash
 	hd.badHeaders[h.Hash()] = struct{}{}
-	if chainSegments, penalty, err := hd.HandleHeadersMsg([]*types.Header{&h}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h}); err == nil {
 		if penalty != BadBlockPenalty {
 			t.Errorf("expected BadBlock penalty, got %s", penalty)
 		}
@@ -75,17 +79,17 @@ func TestHandleHeadersMsg(t *testing.T) {
 	h2.Number = big.NewInt(2)
 	h2.Difficulty = big.NewInt(1010)
 	h2.ParentHash = h1.Hash()
-	if chainSegments, penalty, err := hd.HandleHeadersMsg([]*types.Header{&h1, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h1, &h2}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
 		if len(chainSegments) != 1 {
 			t.Errorf("expected 1 chainSegments, got %d", len(chainSegments))
 		}
-		if len(chainSegments[0].headers) != 2 {
-			t.Errorf("expected chainSegment of the length 2, got %d", len(chainSegments[0].headers))
+		if len(chainSegments[0].Headers) != 2 {
+			t.Errorf("expected chainSegment of the length 2, got %d", len(chainSegments[0].Headers))
 		}
-		if chainSegments[0].headers[0] != &h2 {
+		if chainSegments[0].Headers[0] != &h2 {
 			t.Errorf("expected h2 to be the root")
 		}
 	} else {
@@ -94,7 +98,7 @@ func TestHandleHeadersMsg(t *testing.T) {
 
 	// Two connected headers with wrong numbers
 	h2.Number = big.NewInt(3) // Child number 3, parent number 1
-	if chainSegments, penalty, err := hd.HandleHeadersMsg([]*types.Header{&h1, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h1, &h2}); err == nil {
 		if penalty != WrongChildBlockHeightPenalty {
 			t.Errorf("expected WrongChildBlockHeight penalty, got %s", penalty)
 		}
@@ -108,7 +112,7 @@ func TestHandleHeadersMsg(t *testing.T) {
 	// Two connected headers with wrong difficulty
 	h2.Number = big.NewInt(2)        // Child number 2, parent number 1
 	h2.Difficulty = big.NewInt(2000) // Expected difficulty 10 + 1000 = 1010
-	if chainSegments, penalty, err := hd.HandleHeadersMsg([]*types.Header{&h1, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h1, &h2}); err == nil {
 		if penalty != WrongChildDifficultyPenalty {
 			t.Errorf("expected WrongChildDifficulty penalty, got %s", penalty)
 		}
@@ -126,17 +130,17 @@ func TestHandleHeadersMsg(t *testing.T) {
 	h3.Difficulty = big.NewInt(1010)
 	h3.ParentHash = h1.Hash()
 	h3.Extra = []byte("I'm different") // To make sure the hash of h3 is different from the hash of h2
-	if chainSegments, penalty, err := hd.HandleHeadersMsg([]*types.Header{&h1, &h2, &h3}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h1, &h2, &h3}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
 		if len(chainSegments) != 3 {
 			t.Errorf("expected 3 chainSegments, got %d", len(chainSegments))
 		}
-		if len(chainSegments[0].headers) != 1 {
-			t.Errorf("expected chainSegment of the length 1, got %d", len(chainSegments[0].headers))
+		if len(chainSegments[0].Headers) != 1 {
+			t.Errorf("expected chainSegment of the length 1, got %d", len(chainSegments[0].Headers))
 		}
-		if chainSegments[2].headers[0] != &h1 {
+		if chainSegments[2].Headers[0] != &h1 {
 			t.Errorf("expected h1 to be the root")
 		}
 	} else {
@@ -144,17 +148,17 @@ func TestHandleHeadersMsg(t *testing.T) {
 	}
 
 	// Same three headers, but in a reverse order
-	if chainSegments, penalty, err := hd.HandleHeadersMsg([]*types.Header{&h3, &h2, &h1}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h3, &h2, &h1}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
 		if len(chainSegments) != 3 {
 			t.Errorf("expected 3 chainSegments, got %d", len(chainSegments))
 		}
-		if len(chainSegments[0].headers) != 1 {
-			t.Errorf("expected chainSegment of the length 1, got %d", len(chainSegments[0].headers))
+		if len(chainSegments[0].Headers) != 1 {
+			t.Errorf("expected chainSegment of the length 1, got %d", len(chainSegments[0].Headers))
 		}
-		if chainSegments[2].headers[0] != &h1 {
+		if chainSegments[2].Headers[0] != &h1 {
 			t.Errorf("expected h1 to be the root")
 		}
 	} else {
@@ -162,7 +166,7 @@ func TestHandleHeadersMsg(t *testing.T) {
 	}
 
 	// Two headers not connected to each other
-	if chainSegments, penalty, err := hd.HandleHeadersMsg([]*types.Header{&h3, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h3, &h2}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -174,24 +178,24 @@ func TestHandleHeadersMsg(t *testing.T) {
 	}
 }
 
-func TestHandleNewBlockMsg(t *testing.T) {
-	hd := NewHeaderDownload("", 10, 16, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+func TestSingleHeaderAsSegment(t *testing.T) {
+	hd := NewHeaderDownload("", TestBufferLimit, TestTipLimit, TestInitPowDepth, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	}, nil, 60, 60)
 	var h types.Header
 	h.Number = big.NewInt(5)
-	if chainSegments, penalty, err := hd.HandleNewBlockMsg(&h); err == nil {
+	if chainSegments, penalty, err := hd.SingleHeaderAsSegment(&h); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
 		if len(chainSegments) != 1 {
 			t.Errorf("expected 1 chainSegments, got %d", len(chainSegments))
 		}
-		if len(chainSegments[0].headers) != 1 {
-			t.Errorf("expected chainSegment of the length 1, got %d", len(chainSegments[0].headers))
+		if len(chainSegments[0].Headers) != 1 {
+			t.Errorf("expected chainSegment of the length 1, got %d", len(chainSegments[0].Headers))
 		}
-		if chainSegments[0].headers[0] != &h {
+		if chainSegments[0].Headers[0] != &h {
 			t.Errorf("expected h to be the root")
 		}
 	} else {
@@ -200,7 +204,7 @@ func TestHandleNewBlockMsg(t *testing.T) {
 
 	// Same header with a bad hash
 	hd.badHeaders[h.Hash()] = struct{}{}
-	if chainSegments, penalty, err := hd.HandleNewBlockMsg(&h); err == nil {
+	if chainSegments, penalty, err := hd.SingleHeaderAsSegment(&h); err == nil {
 		if penalty != BadBlockPenalty {
 			t.Errorf("expected BadBlock penalty, got %s", penalty)
 		}
@@ -284,7 +288,7 @@ func TestFindTip(t *testing.T) {
 }
 
 func TestExtendUp(t *testing.T) {
-	hd := NewHeaderDownload("", 10, 16, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+	hd := NewHeaderDownload("", TestBufferLimit, TestTipLimit, TestInitPowDepth, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	}, func(header *types.Header) error {
@@ -292,9 +296,10 @@ func TestExtendUp(t *testing.T) {
 	}, 60, 60,
 	)
 
+	var currentTime uint64 = 100
 	// single header in the chain segment
 	var h types.Header
-	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h}}, 0, 1); err == nil {
+	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h}}, 0, 1, currentTime); err == nil {
 		t.Errorf("extendUp without working tips - expected error")
 	}
 
@@ -305,14 +310,14 @@ func TestExtendUp(t *testing.T) {
 	h2.Number = big.NewInt(2)
 	h2.Difficulty = big.NewInt(1010)
 	h2.ParentHash = h1.Hash()
-	if anchor, err := hd.addHeaderAsAnchor(&h1, 256, uint256.Int{}); err == nil {
-		if err1 := hd.addHeaderAsTip(&h1, anchor, *new(uint256.Int).SetUint64(2000)); err1 != nil {
+	if anchor, err := hd.addHeaderAsAnchor(&h1, 256); err == nil {
+		if err1 := hd.addHeaderAsTip(&h1, anchor, *new(uint256.Int).SetUint64(2000), currentTime); err1 != nil {
 			t.Fatalf("setting up h1 (tip): %v", err1)
 		}
 	} else {
 		t.Errorf("setting up h1 (anchor): %v", err)
 	}
-	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h2}}, 0, 1); err == nil {
+	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h2}}, 0, 1, currentTime); err == nil {
 		if len(hd.tips) != 2 {
 			t.Errorf("expected 2 tips, got %d", len(hd.tips))
 		}
@@ -328,12 +333,16 @@ func TestExtendUp(t *testing.T) {
 	h4.Number = big.NewInt(4)
 	h4.Difficulty = big.NewInt(3010)
 	h4.ParentHash = h3.Hash()
-	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h4, &h3}}, 0, 2); err == nil {
+	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h4, &h3}}, 0, 2, currentTime); err == nil {
 		if len(hd.tips) != 4 {
 			t.Errorf("expected 4 tips, got %d", len(hd.tips))
 		}
-		if !hd.tips[h4.Hash()].cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(2000 + 1010 + 2010 + 3010)) {
-			t.Errorf("cumulative difficulty of h4 expected %d, got %d", 2000+1010+2010+3010, hd.tips[h4.Hash()].cumulativeDifficulty.ToBig())
+		tip, ok := hd.getTip(h4.Hash())
+		if !ok {
+			t.Errorf("did not find h4 in the tips")
+		}
+		if ok && !tip.cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(2000+1010+2010+3010)) {
+			t.Errorf("cumulative difficulty of h4 expected %d, got %d", 2000+1010+2010+3010, tip.cumulativeDifficulty.ToBig())
 		}
 	} else {
 		t.Errorf("extendUp: %v", err)
@@ -345,15 +354,19 @@ func TestExtendUp(t *testing.T) {
 	h41.Difficulty = big.NewInt(3010)
 	h41.Extra = []byte("Extra")
 	h41.ParentHash = h3.Hash()
-	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h41}}, 0, 1); err == nil {
+	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h41}}, 0, 1, currentTime); err == nil {
 		if len(hd.tips) != 5 {
 			t.Errorf("expected 5 tips, got %d", len(hd.tips))
 		}
-		if !hd.tips[h41.Hash()].cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(2000 + 1010 + 2010 + 3010)) {
-			t.Errorf("cumulative difficulty of h41 expected %d, got %d", 2000+1010+2010+3010, hd.tips[h41.Hash()].cumulativeDifficulty.ToBig())
+		tip, ok := hd.getTip(h41.Hash())
+		if !ok {
+			t.Errorf("did not find h41 in the tips")
 		}
-		if hd.tips[h41.Hash()].anchor.hash != h1.Hash() {
-			t.Errorf("Expected h41 anchor to be %x, got %x", h1.Hash(), hd.tips[h41.Hash()].anchor.hash)
+		if ok && !tip.cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(2000+1010+2010+3010)) {
+			t.Errorf("cumulative difficulty of h41 expected %d, got %d", 2000+1010+2010+3010, tip.cumulativeDifficulty.ToBig())
+		}
+		if ok && tip.anchor.hash != h1.Hash() {
+			t.Errorf("Expected h41 anchor to be %x, got %x", h1.Hash(), tip.anchor.hash)
 		}
 	} else {
 		t.Errorf("extendUp: %v", err)
@@ -368,27 +381,31 @@ func TestExtendUp(t *testing.T) {
 	h6.Number = big.NewInt(6)
 	h6.Difficulty = big.NewInt(5010)
 	h6.ParentHash = h5.Hash()
-	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h6}}, 0, 1); err == nil {
+	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h6}}, 0, 1, currentTime); err == nil {
 		t.Errorf("extendUp not connected to tips - expected error")
 	}
 
 	// Introduce h5 as a tip and prepend h6
-	if anchor, err := hd.addHeaderAsAnchor(&h5, 256, uint256.Int{}); err == nil {
-		if err1 := hd.addHeaderAsTip(&h5, anchor, *new(uint256.Int).SetUint64(10000)); err1 != nil {
+	if anchor, err := hd.addHeaderAsAnchor(&h5, 256); err == nil {
+		if err1 := hd.addHeaderAsTip(&h5, anchor, *new(uint256.Int).SetUint64(10000), currentTime); err1 != nil {
 			t.Fatalf("setting up h5 (tip): %v", err1)
 		}
 	} else {
 		t.Errorf("setting up h5 (anchor): %v", err)
 	}
-	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h6}}, 0, 1); err == nil {
+	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h6}}, 0, 1, currentTime); err == nil {
 		if len(hd.tips) != 7 {
 			t.Errorf("expected 7 tips, got %d", len(hd.tips))
 		}
-		if !hd.tips[h6.Hash()].cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(10000 + 5010)) {
-			t.Errorf("cumulative difficulty of h6 expected %d, got %d", 10000+5010, hd.tips[h6.Hash()].cumulativeDifficulty.ToBig())
+		tip, ok := hd.getTip(h6.Hash())
+		if !ok {
+			t.Errorf("did not find h6 in the tips")
 		}
-		if hd.tips[h6.Hash()].anchor.hash != h5.Hash() {
-			t.Errorf("Expected h6 anchor to be %x, got %x", h5.Hash(), hd.tips[h6.Hash()].anchor.hash)
+		if ok && !tip.cumulativeDifficulty.Eq(new(uint256.Int).SetUint64(10000+5010)) {
+			t.Errorf("cumulative difficulty of h6 expected %d, got %d", 10000+5010, tip.cumulativeDifficulty.ToBig())
+		}
+		if ok && tip.anchor.hash != h5.Hash() {
+			t.Errorf("Expected h6 anchor to be %x, got %x", h5.Hash(), tip.anchor.hash)
 		}
 	} else {
 		t.Errorf("prepend: %v", err)
@@ -399,24 +416,15 @@ func TestExtendUp(t *testing.T) {
 	h7.Difficulty = big.NewInt(6010)
 	h7.ParentHash = common.HexToHash("0x4354543543959438594359348990345893408")
 	// Introduce hard-coded tip
-	if anchor, err := hd.addHeaderAsAnchor(&h7, 256, uint256.Int{}); err == nil {
+	if anchor, err := hd.addHeaderAsAnchor(&h7, 256); err == nil {
 		hd.addHardCodedTip(10, 5555, h7.Hash(), anchor, *new(uint256.Int).SetUint64(2000))
 	} else {
 		t.Fatalf("settings up h7 (anchor): %v", err)
 	}
-
-	// Try to prepend to the hard-coded tip
-	var h8 types.Header
-	h8.Number = big.NewInt(8)
-	h8.Difficulty = big.NewInt(7010)
-	h8.ParentHash = h7.Hash()
-	if err := hd.ExtendUp(&ChainSegment{headers: []*types.Header{&h8}}, 0, 1); err == nil {
-		t.Errorf("extendUp to hard-coded tip - expected error")
-	}
 }
 
 func TestExtendDown(t *testing.T) {
-	hd := NewHeaderDownload("", 10, 16, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+	hd := NewHeaderDownload("", TestBufferLimit, TestTipLimit, TestInitPowDepth, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	}, func(header *types.Header) error {
@@ -426,7 +434,7 @@ func TestExtendDown(t *testing.T) {
 
 	// single header in the chain segment
 	var h types.Header
-	if err := hd.ExtendDown(&ChainSegment{headers: []*types.Header{&h}}, 0, 1, 256, uint64(time.Now().Unix())); err == nil {
+	if err := hd.ExtendDown(&ChainSegment{Headers: []*types.Header{&h}}, 0, 1, 256, uint64(time.Now().Unix())); err == nil {
 		t.Errorf("extendDown without working trees - expected error")
 	}
 }
@@ -444,6 +452,7 @@ func TestHeaderSerialisation(t *testing.T) {
 	header.Time = 34343242342332
 	header.Root = common.HexToHash("0xeeeeeeeefffffffbbbbbbbaaaaaa3456")
 	header.Coinbase = common.HexToAddress("0xdddd44333aaabbb555664300066555")
+	header.MixDigest = common.HexToHash("0x585859595959506968")
 	for i := 0; i < 256; i++ {
 		header.Bloom[i] = byte(i)
 	}
