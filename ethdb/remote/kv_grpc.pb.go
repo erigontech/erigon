@@ -11,7 +11,7 @@ import (
 
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the grpc package it is being compiled against.
-const _ = grpc.SupportPackageIsVersion6
+const _ = grpc.SupportPackageIsVersion7
 
 // KVClient is the client API for KV service.
 //
@@ -32,8 +32,14 @@ func NewKVClient(cc grpc.ClientConnInterface) KVClient {
 	return &kVClient{cc}
 }
 
+var kVSeekStreamDesc = &grpc.StreamDesc{
+	StreamName:    "Seek",
+	ServerStreams: true,
+	ClientStreams: true,
+}
+
 func (c *kVClient) Seek(ctx context.Context, opts ...grpc.CallOption) (KV_SeekClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_KV_serviceDesc.Streams[0], "/remote.KV/Seek", opts...)
+	stream, err := c.cc.NewStream(ctx, kVSeekStreamDesc, "/remote.KV/Seek", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -63,33 +69,23 @@ func (x *kVSeekClient) Recv() (*Pair, error) {
 	return m, nil
 }
 
-// KVServer is the server API for KV service.
-// All implementations must embed UnimplementedKVServer
-// for forward compatibility
-type KVServer interface {
+// KVService is the service API for KV service.
+// Fields should be assigned to their respective handler implementations only before
+// RegisterKVService is called.  Any unassigned fields will result in the
+// handler for that method returning an Unimplemented error.
+type KVService struct {
 	// open a cursor on given position of given bucket
 	// if streaming requested - streams all data: stops if client's buffer is full, resumes when client read enough from buffer
 	// if streaming not requested - streams next data only when clients sends message to bi-directional channel
 	// no full consistency guarantee - server implementation can close/open underlying db transaction at any time
-	Seek(KV_SeekServer) error
-	mustEmbedUnimplementedKVServer()
+	Seek func(KV_SeekServer) error
 }
 
-// UnimplementedKVServer must be embedded to have forward compatible implementations.
-type UnimplementedKVServer struct {
-}
-
-func (*UnimplementedKVServer) Seek(KV_SeekServer) error {
-	return status.Errorf(codes.Unimplemented, "method Seek not implemented")
-}
-func (*UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
-
-func RegisterKVServer(s *grpc.Server, srv KVServer) {
-	s.RegisterService(&_KV_serviceDesc, srv)
-}
-
-func _KV_Seek_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(KVServer).Seek(&kVSeekServer{stream})
+func (s *KVService) seek(_ interface{}, stream grpc.ServerStream) error {
+	if s.Seek == nil {
+		return status.Errorf(codes.Unimplemented, "method Seek not implemented")
+	}
+	return s.Seek(&kVSeekServer{stream})
 }
 
 type KV_SeekServer interface {
@@ -114,17 +110,47 @@ func (x *kVSeekServer) Recv() (*SeekRequest, error) {
 	return m, nil
 }
 
-var _KV_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "remote.KV",
-	HandlerType: (*KVServer)(nil),
-	Methods:     []grpc.MethodDesc{},
-	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "Seek",
-			Handler:       _KV_Seek_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
+// RegisterKVService registers a service implementation with a gRPC server.
+func RegisterKVService(s grpc.ServiceRegistrar, srv *KVService) {
+	sd := grpc.ServiceDesc{
+		ServiceName: "remote.KV",
+		Methods:     []grpc.MethodDesc{},
+		Streams: []grpc.StreamDesc{
+			{
+				StreamName:    "Seek",
+				Handler:       srv.seek,
+				ServerStreams: true,
+				ClientStreams: true,
+			},
 		},
-	},
-	Metadata: "remote/kv.proto",
+		Metadata: "remote/kv.proto",
+	}
+
+	s.RegisterService(&sd, nil)
+}
+
+// NewKVService creates a new KVService containing the
+// implemented methods of the KV service in s.  Any unimplemented
+// methods will result in the gRPC server returning an UNIMPLEMENTED status to the client.
+// This includes situations where the method handler is misspelled or has the wrong
+// signature.  For this reason, this function should be used with great care and
+// is not recommended to be used by most users.
+func NewKVService(s interface{}) *KVService {
+	ns := &KVService{}
+	if h, ok := s.(interface{ Seek(KV_SeekServer) error }); ok {
+		ns.Seek = h.Seek
+	}
+	return ns
+}
+
+// UnstableKVService is the service API for KV service.
+// New methods may be added to this interface if they are added to the service
+// definition, which is not a backward-compatible change.  For this reason,
+// use of this type is not recommended.
+type UnstableKVService interface {
+	// open a cursor on given position of given bucket
+	// if streaming requested - streams all data: stops if client's buffer is full, resumes when client read enough from buffer
+	// if streaming not requested - streams next data only when clients sends message to bi-directional channel
+	// no full consistency guarantee - server implementation can close/open underlying db transaction at any time
+	Seek(KV_SeekServer) error
 }

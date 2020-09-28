@@ -256,6 +256,23 @@ func compareLogs(logs, logsg *EthLogs) bool {
 	return true
 }
 
+func getTopics(logs *EthLogs) []common.Hash {
+	topicSet := make(map[common.Hash]struct{})
+	r := logs.Result
+	for _, l := range r {
+		for _, t := range l.Topics {
+			topicSet[t] = struct{}{}
+		}
+	}
+	topics := make([]common.Hash, len(topicSet))
+	i := 0
+	for t := range topicSet {
+		topics[i] = t
+		i++
+	}
+	return topics
+}
+
 func compareAccountRanges(tg, geth map[common.Address]state.DumpAccount) bool {
 	allAddresses := make(map[common.Address]struct{})
 	for k := range tg {

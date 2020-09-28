@@ -213,6 +213,23 @@ func DefaultStages() StageBuilders {
 			},
 		},
 		{
+			ID: stages.LogIndex,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:                  stages.LogIndex,
+					Description:         "Generate receipt logs index",
+					Disabled:            !world.storageMode.Receipts,
+					DisabledDescription: "Enable by adding `r` to --storage-mode",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnLogIndex(s, world.TX, world.datadir, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						return UnwindLogIndex(u, s, world.TX, world.QuitCh)
+					},
+				}
+			},
+		},
+		{
 			ID: stages.TxLookup,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
@@ -286,10 +303,10 @@ func DefaultUnwindOrder() UnwindOrder {
 		0, 1, 2,
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
-		10,
+		11,
 		3, 4,
 		// Unwinding of IHashes needs to happen after unwinding HashState
 		6, 5,
-		7, 8, 9,
+		7, 8, 9, 10,
 	}
 }

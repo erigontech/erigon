@@ -36,13 +36,13 @@ func NewTxDbWithoutTransaction(db Database) *TxDb {
 	return &TxDb{db: db}
 }
 
-func (m *TxDb) Begin() (DbWithPendingMutations, error) {
+func (m *TxDb) Begin(ctx context.Context) (DbWithPendingMutations, error) {
 	batch := m
 	if m.tx != nil {
 		batch = &TxDb{db: m.db}
 	}
 
-	if err := batch.begin(m.tx); err != nil {
+	if err := batch.begin(ctx, m.tx); err != nil {
 		return nil, err
 	}
 	return batch, nil
@@ -56,6 +56,11 @@ func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
 	}
 	m.len += uint64(len(key) + len(value))
 	return m.cursors[bucket].Put(key, value)
+}
+
+func (m *TxDb) Reserve(bucket string, key []byte, i int) ([]byte, error) {
+	m.len += uint64(len(key) + i)
+	return m.cursors[bucket].Reserve(key, i)
 }
 
 func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
@@ -80,8 +85,8 @@ func (m *TxDb) NewBatch() DbWithPendingMutations {
 	}
 }
 
-func (m *TxDb) begin(parent Tx) error {
-	tx, err := m.db.(HasKV).KV().Begin(context.Background(), parent, true)
+func (m *TxDb) begin(ctx context.Context, parent Tx) error {
+	tx, err := m.db.(HasKV).KV().Begin(ctx, parent, true)
 	if err != nil {
 		return err
 	}
@@ -323,13 +328,18 @@ func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, [
 	return nil
 }
 
-func (m *TxDb) CommitAndBegin() error {
+func (m *TxDb) CommitAndBegin(ctx context.Context) error {
 	_, err := m.Commit()
 	if err != nil {
 		return err
 	}
 
-	return m.begin(m.ParentTx)
+	return m.begin(ctx, m.ParentTx)
+}
+
+func (m *TxDb) RollbackAndBegin(ctx context.Context) error {
+	m.Rollback()
+	return m.begin(ctx, m.ParentTx)
 }
 
 func (m *TxDb) Commit() (uint64, error) {

@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 
@@ -60,6 +61,7 @@ var migrations = []Migration{
 	dupSortHashState,
 	dupSortPlainState,
 	dupSortIH,
+	clearIndices,
 }
 
 type Migration struct {
@@ -115,7 +117,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		uniqueNameCheck[m.Migrations[i].Name] = true
 	}
 
-	tx, err := db.Begin()
+	tx, err := db.Begin(context.Background())
 	if err != nil {
 		return err
 	}
@@ -145,7 +147,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 				return err
 			}
 
-			if err := tx.CommitAndBegin(); err != nil {
+			if err := tx.CommitAndBegin(context.Background()); err != nil {
 				return err
 			}
 			return nil

@@ -3,10 +3,11 @@ package rpctest
 import (
 	"encoding/base64"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 type CallResult struct {
@@ -59,6 +60,16 @@ func (g *RequestGenerator) getModifiedAccountsByNumber(prevBn int, bn int) strin
 func (g *RequestGenerator) getLogs(prevBn int, bn int, account common.Address) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, g.reqID)
+}
+
+func (g *RequestGenerator) getLogs1(prevBn int, bn int, account common.Address, topic common.Hash) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x"]}],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, account, topic, g.reqID)
+}
+
+func (g *RequestGenerator) getLogs2(prevBn int, bn int, account common.Address, topic1, topic2 common.Hash) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x", "0x%x"]}],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, account, topic1, topic2, g.reqID)
 }
 
 func (g *RequestGenerator) accountRange(bn int, page []byte, num int) string { //nolint
