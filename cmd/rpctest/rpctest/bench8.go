@@ -71,15 +71,13 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockNum uint64) {
 						res = reqGen.Geth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logsg)
 						if res.Err != nil {
 							fmt.Printf("Could not get logs for account (geth) %x: %v\n", account, res.Err)
-							return
-						}
-						if logsg.Error != nil {
+						} else if logsg.Error != nil {
 							fmt.Printf("Error getting logs for account (geth) %x: %d %s\n", account, logsg.Error.Code, logsg.Error.Message)
-							return
-						}
-						if !compareLogs(&logs, &logsg) {
-							fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
-							return
+						} else {
+							if !compareLogs(&logs, &logsg) {
+								fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
+								return
+							}
 						}
 					}
 					log.Info("Results", "count", len(logs.Result))
