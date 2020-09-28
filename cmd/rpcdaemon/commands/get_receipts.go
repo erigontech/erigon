@@ -73,7 +73,7 @@ func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*t
 
 // GetLogs returns logs matching the given argument that are stored within the state.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
-	var begin, end uint32
+	var begin, end uint64
 	var logs []*types.Log //nolint:prealloc
 
 	tx, beginErr := api.dbReader.Begin(ctx)
@@ -87,8 +87,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		if number == nil {
 			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-		begin = uint32(*number)
-		end = uint32(*number)
+		begin = *number
+		end = *number
 	} else {
 		// Convert the RPC block numbers into internal representations
 		latest, err := getLatestBlockNumber(tx)
@@ -96,18 +96,18 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			return nil, err
 		}
 
-		begin = uint32(latest)
+		begin = latest
 		if crit.FromBlock != nil {
-			begin = uint32(crit.FromBlock.Uint64())
+			begin = crit.FromBlock.Uint64()
 		}
-		end = uint32(latest)
+		end = latest
 		if crit.ToBlock != nil {
-			end = uint32(crit.ToBlock.Uint64())
+			end = crit.ToBlock.Uint64()
 		}
 	}
 
 	blockNumbers := gocroaring.New()
-	blockNumbers.AddRange(uint64(begin), uint64(end+1)) // [min,max)
+	blockNumbers.AddRange(begin, end+1) // [min,max)
 
 	topicsBitmap, err := getTopicsBitmap(tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex), crit.Topics)
 	if err != nil {
@@ -148,16 +148,20 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	}
 
 	for _, blockNToMatch := range blockNumbers.ToArray() {
+		if uint64(blockNToMatch) < begin {
+			continue
+		}
+		if uint64(blockNToMatch) > end {
+			continue
+		}
 		blockHash := rawdb.ReadCanonicalHash(tx, uint64(blockNToMatch))
 		if blockHash == (common.Hash{}) {
 			return returnLogs(logs), fmt.Errorf("block not found %d", uint64(blockNToMatch))
 		}
-
 		receipts, err := getReceipts(ctx, tx, api.db, uint64(blockNToMatch), blockHash)
 		if err != nil {
 			return returnLogs(logs), err
 		}
-
 		unfiltered := make([]*types.Log, 0, len(receipts))
 		for _, receipt := range receipts {
 			unfiltered = append(unfiltered, receipt.Logs...)
