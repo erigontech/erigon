@@ -36,7 +36,7 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockNum uint64) {
 
 	firstBn := int(blockNum)
 	prevBn := firstBn
-	rnd := rand.New(rand.NewSource(42))
+	rnd := rand.New(rand.NewSource(42)) // nolint:gosec
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
 
 		if prevBn < bn && bn%100 == 0 {

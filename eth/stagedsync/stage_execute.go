@@ -129,18 +129,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 
 		if writeReceipts {
-			// Convert the receipts into their storage form and serialize them
-			storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
-			for i, receipt := range receipts {
-				storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
-			}
-			var bytes []byte
-			if bytes, err = rlp.EncodeToBytes(storageReceipts); err != nil {
-				return fmt.Errorf("encode block receipts for block %d: %v", block.NumberU64(), err)
-			}
-			// Store the flattened receipt slice
-			if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
-				return fmt.Errorf("writing receipts for block %d: %v", block.NumberU64(), err)
+			if err = appendReceipts(tx, receipts, block.NumberU64(), block.Hash()); err != nil {
+				return err
 			}
 		}
 
@@ -208,6 +198,24 @@ func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 		"numGC", int(m.NumGC))
 
 	return now
+}
+
+func appendReceipts(tx ethdb.DbWithPendingMutations, receipts types.Receipts, blockNumber uint64, blockHash common.Hash) error {
+	// Convert the receipts into their storage form and serialize them
+	storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
+	for i, receipt := range receipts {
+		storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
+	}
+	var bytes []byte
+	var err error
+	if bytes, err = rlp.EncodeToBytes(storageReceipts); err != nil {
+		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
+	}
+	// Store the flattened receipt slice
+	if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(blockNumber, blockHash), bytes); err != nil {
+		return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
+	}
+	return nil
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {

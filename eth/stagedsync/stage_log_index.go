@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"sort"
 	"time"
 
@@ -14,7 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -52,14 +52,34 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 		start++
 	}
 
+	if err := promoteLogIndex(tx, start, quit); err != nil {
+		return err
+	}
+
+	if err := s.DoneAndUpdate(tx, endBlock); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func promoteLogIndex(tx ethdb.DbWithPendingMutations, start uint64, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	indices := map[string]*gocroaring.Bitmap{}
-	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
+	topics := map[string]*gocroaring.Bitmap{}
+	addresses := map[string]*gocroaring.Bitmap{}
+	logTopicIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex)
+	logAddrIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
 	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
+	fmt.Printf("Start: %x\n", dbutils.EncodeBlockNumber(start))
 
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(start)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
@@ -75,20 +95,33 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 		select {
 		default:
 		case <-logEvery.C:
-			sz, err := tx.(ethdb.HasTx).Tx().BucketSize(dbutils.LogIndex)
+			sz, err := tx.(ethdb.HasTx).Tx().BucketSize(dbutils.LogTopicIndex)
 			if err != nil {
 				return err
 			}
-			log.Info("Progress", "blockNum", blockNum, "bucketSize", common.StorageSize(sz))
+			sz2, err := tx.(ethdb.HasTx).Tx().BucketSize(dbutils.LogAddressIndex)
+			if err != nil {
+				return err
+			}
+			log.Info("Progress", "blockNum", blockNum, dbutils.LogTopicIndex, common.StorageSize(sz), dbutils.LogAddressIndex, common.StorageSize(sz2))
 		case <-checkFlushEvery.C:
-			if needFlush(indices, logIndicesMemLimit, bitmapdb.HotShardLimit/2) {
-				if err := flushBitmaps(logIndexCursor, indices); err != nil {
+			if needFlush(topics, logIndicesMemLimit, bitmapdb.HotShardLimit/2) {
+				if err := flushBitmaps(logTopicIndexCursor, topics); err != nil {
 					return err
 				}
 
-				indices = map[string]*gocroaring.Bitmap{}
+				topics = map[string]*gocroaring.Bitmap{}
+			}
+
+			if needFlush(addresses, logIndicesMemLimit, bitmapdb.HotShardLimit/2) {
+				if err := flushBitmaps(logAddrIndexCursor, addresses); err != nil {
+					return err
+				}
+
+				addresses = map[string]*gocroaring.Bitmap{}
 			}
 		}
+		fmt.Printf("Go: %d\n", blockNum)
 
 		// Convert the receipts from their storage form to their internal representation
 		storageReceipts := []*types.ReceiptForStorage{}
@@ -100,38 +133,31 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 			for _, log := range receipt.Logs {
 				for _, topic := range log.Topics {
 					topicStr := string(topic.Bytes())
-					m, ok := indices[topicStr]
+					m, ok := topics[topicStr]
 					if !ok {
 						m = gocroaring.New()
-						indices[topicStr] = m
+						topics[topicStr] = m
 					}
 					m.Add(uint32(blockNum))
 				}
 
 				accStr := string(log.Address.Bytes())
-				m, ok := indices[accStr]
+				m, ok := addresses[accStr]
 				if !ok {
 					m = gocroaring.New()
-					indices[accStr] = m
+					addresses[accStr] = m
 				}
 				m.Add(uint32(blockNum))
 			}
 		}
 	}
 
-	if err := flushBitmaps(logIndexCursor, indices); err != nil {
+	if err := flushBitmaps(logTopicIndexCursor, topics); err != nil {
 		return err
 	}
-
-	if err := s.DoneAndUpdate(tx, endBlock); err != nil {
+	if err := flushBitmaps(logAddrIndexCursor, addresses); err != nil {
 		return err
 	}
-	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -150,11 +176,31 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 		defer tx.Rollback()
 	}
 
-	logsIndexKeys := map[string]bool{}
-	logIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
+	if err := unwindLogIndex(tx, s.BlockNumber, u.UnwindPoint, quitCh); err != nil {
+		return err
+	}
+
+	if err := u.Done(tx); err != nil {
+		return fmt.Errorf("unwind AccountHistorytIndex: %w", err)
+	}
+
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func unwindLogIndex(tx ethdb.Database, from, to uint64, quitCh <-chan struct{}) error {
+	topics := map[string]bool{}
+	addrs := map[string]bool{}
+	addrIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
+	topicIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex)
 
 	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
-	start := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
+	start := dbutils.EncodeBlockNumber(to + 1)
 	for k, v, err := receipts.Seek(start); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
 			return err
@@ -171,26 +217,19 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 		for _, storageReceipt := range storageReceipts {
 			for _, log := range storageReceipt.Logs {
 				for _, topic := range log.Topics {
-					logsIndexKeys[string(topic.Bytes())] = true
+					topics[string(topic.Bytes())] = true
 				}
-				logsIndexKeys[string(log.Address.Bytes())] = true
+				addrs[string(log.Address.Bytes())] = true
 			}
 		}
 	}
 
-	if err := truncateBitmaps(logIndexCursor, logsIndexKeys, u.UnwindPoint, s.BlockNumber+1); err != nil {
+	if err := truncateBitmaps(topicIndex, topics, to+1, from+1); err != nil {
 		return err
 	}
-	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("unwind AccountHistorytIndex: %w", err)
+	if err := truncateBitmaps(addrIndex, addrs, to+1, from+1); err != nil {
+		return err
 	}
-
-	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 

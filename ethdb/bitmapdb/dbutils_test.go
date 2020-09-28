@@ -11,64 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//func TestBug(t *testing.T) {
-//	bm1 := roaring.NewBitmap()
-//	bm1.Add(940287)
-//	bm1.Add(940288)
-//
-//	bm1.RunOptimize()
-//	buf := make([]byte, bm1.GetSerializedSizeInBytes())
-//	_, err := bm1.WriteTo(bytes.NewBuffer(buf[:0]))
-//	if err != nil {
-//		panic(err)
-//	}
-//
-//	bm2 := roaring.New()
-//	_, err = bm2.FromBuffer(buf)
-//	if err != nil {
-//		panic(err)
-//	}
-//
-//	bm3 := roaring.NewBitmap()
-//	bm3.Add(1_000_000)
-//	bm3.Add(1_000_001)
-//	bm3.Add(1_000_002)
-//	bm2.Or(bm3)
-//
-//	bm2.RunOptimize()
-//	buf = make([]byte, bm2.GetSerializedSizeInBytes())
-//	_, err = bm1.WriteTo(bytes.NewBuffer(buf[:0]))
-//	if err != nil {
-//		panic(err)
-//	}
-//
-//	bm4 := roaring.New()
-//	_, err = bm4.FromBuffer(buf)
-//	if err != nil {
-//		panic(err)
-//	}
-//
-//	bm4.RemoveRange(1_000_001, 1_000_003)
-//
-//	bm4.RunOptimize()
-//	buf = make([]byte, bm4.GetSerializedSizeInBytes())
-//	_, err = bm4.WriteTo(bytes.NewBuffer(buf[:0]))
-//	if err != nil {
-//		panic(err)
-//	}
-//
-//	bm5 := roaring.New()
-//	_, err = bm5.FromBuffer(buf)
-//	if err != nil {
-//		panic(err)
-//	}
-//
-//	bm5.Iterate(func(x uint32) bool {
-//		fmt.Printf("%d\n", x)
-//		return true
-//	})
-//}
-
 func TestSharding(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -77,7 +19,7 @@ func TestSharding(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogIndex)
+	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex)
 
 	{
 		k := []byte{1}
