@@ -475,6 +475,7 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 	defer blockchain.Stop()
 
 	eng := process.NewRemoteEngine(ethash.NewFaker(), stagedsync.NewChainReader(params.TestChainConfig, db))
+	defer eng.Close()
 
 	pm, err := NewProtocolManager(config, cht, syncmode, DefaultConfig.NetworkID, new(event.TypeMux), &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, eng, blockchain, db, nil, nil)
 	if err != nil {
@@ -563,6 +564,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 		genesis = gspec.MustCommit(db)
 	)
 	eng := process.NewRemoteEngine(pow, stagedsync.NewChainReader(config, db))
+	defer eng.Close()
 
 	blockchain, err := core.NewBlockChain(db, nil, config, pow, vm.Config{}, nil, nil)
 	if err != nil {
@@ -1358,6 +1360,8 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 	defer blockchain.Stop()
 
 	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(config, db))
+	defer eng.Close()
+
 	pm, err := NewProtocolManager(config, nil, downloader.StagedSync, DefaultConfig.NetworkID, new(event.TypeMux), new(testTxPool), eng, blockchain, db, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)

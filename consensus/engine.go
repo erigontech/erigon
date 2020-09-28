@@ -55,9 +55,11 @@ type Process struct {
 	RequestedBlocksMu sync.RWMutex
 }
 
-const size = 128
-const storageSize = 60000
-const retry = time.Microsecond
+const (
+	size        = 128
+	storageSize = 60000
+	retry       = 10 * time.Millisecond
+)
 
 func NewProcess(chain ChainHeaderReader) *Process {
 	verifiedBlocks, _ := lru.New(storageSize)

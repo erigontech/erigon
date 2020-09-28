@@ -254,11 +254,12 @@ Error: %v
 }
 
 func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine consensus.EngineProcess, seals []bool) error {
-	if len(headers) == 0 {
+	toVerify := len(headers)
+	if toVerify == 0 {
 		return nil
 	}
 
-	idxs := make([]int, len(headers))
+	idxs := make([]int, toVerify)
 	for i := range headers {
 		idxs[i] = i
 	}
@@ -266,8 +267,8 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 		return headers[idxs[i]].Number.Cmp(headers[idxs[j]].Number) == -1
 	})
 
-	requests := make(chan consensus.VerifyHeaderRequest, len(headers))
-	ids := make(map[uint64]struct{}, len(headers))
+	requests := make(chan consensus.VerifyHeaderRequest, toVerify)
+	ids := make(map[uint64]struct{}, toVerify)
 	for _, n := range idxs {
 		id := rand.Uint64()
 		ids[id] = struct{}{}
@@ -289,7 +290,7 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 				return result.Err
 			}
 
-			if verified == len(headers) {
+			if verified == toVerify {
 				return nil
 			}
 		case result := <-engine.HeaderRequest():

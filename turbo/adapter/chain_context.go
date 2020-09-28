@@ -77,10 +77,6 @@ func (c *powEngine) NeededForVerification(header *types.Header) []common.Hash {
 	panic("must not be called")
 }
 
-func (c *powEngine) IsFake() bool {
-	panic("must not be called")
-}
-
 func (c *chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
 	return rawdb.ReadHeader(c.db, hash, number)
 }

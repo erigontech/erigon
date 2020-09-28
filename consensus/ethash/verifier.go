@@ -18,7 +18,3 @@ func (ethash *Ethash) Verify(chain consensus.ChainHeaderReader, header *types.He
 func (ethash *Ethash) NeededForVerification(header *types.Header) []common.Hash {
 	return []common.Hash{header.ParentHash}
 }
-
-func (ethash *Ethash) IsFake() bool {
-	return ethash.config.PowMode == ModeFullFake
-}

@@ -71,7 +71,10 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	var chain []*types.Block
 	// Fresh database
 	db := ethdb.NewMemDatabase()
+
 	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(params.TestChainConfig, db))
+	defer eng.Close()
+
 	// Regenerate genesis block in the fresh database
 	gspec.MustCommit(db)
 	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)

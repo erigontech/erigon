@@ -22,25 +22,29 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 		Process:  consensus.NewProcess(chain),
 	}
 
+	// store genesis
+	genesis := chain.GetHeaderByNumber(0)
+	c.AddVerifiedBlocks(genesis, genesis.Hash())
+
 	go func() {
 		for {
 			select {
 			case <-exit:
 				return
 			case <-c.RetryVerifyTicker.C:
-				c.VerifyHeaderRequests <- <-c.RetryVerifyHeaderRequests
+				select {
+				case req := <-c.RetryVerifyHeaderRequests:
+					c.VerifyHeaderRequests <- req
+				default:
+					// nothing to do
+				}
+
 			case req := <-c.VerifyHeaderRequests:
 				if req.Deadline == nil {
 					t := time.Now().Add(ttl)
 					req.Deadline = &t
 				} else if req.Deadline.Before(time.Now()) {
 					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, req.Header.Hash(), errors.New("timeout")}
-					continue
-				}
-
-				// If we're running a full engine faking, accept any input as valid
-				if c.IsFake() {
-					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, req.Header.Hash(), nil}
 					continue
 				}
 
@@ -79,10 +83,16 @@ func (c *Consensus) HeaderVerification() chan<- consensus.VerifyHeaderRequest {
 
 func (c *Consensus) requestParentHeaders(req consensus.VerifyHeaderRequest) ([]*types.Header, bool) {
 	parentsToGet := c.NeededForVerification(req.Header)
+	if len(parentsToGet) == 0 {
+		return nil, false
+	}
 	parents := make([]*types.Header, 0, len(parentsToGet))
 	header := req.Header
 
 	for _, hash := range parentsToGet {
+		if hash == (common.Hash{}) {
+			continue
+		}
 		parent, exit, err := c.requestHeader(hash)
 		if err != nil {
 			c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, header.Hash(), consensus.ErrUnknownAncestor}

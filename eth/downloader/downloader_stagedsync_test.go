@@ -54,6 +54,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	)
 	clear := func() {
 		tester.db.Close()
+		eng.Close()
 	}
 	return tester, clear
 }

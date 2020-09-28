@@ -112,6 +112,7 @@ func newTester() *downloadTester {
 func (dl *downloadTester) terminate() {
 	dl.downloader.Terminate()
 	dl.stateDb.Close()
+	dl.engine.Close()
 }
 
 // sync starts synchronizing with a remote peer, blocking until it completes.
