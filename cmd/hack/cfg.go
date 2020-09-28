@@ -151,7 +151,7 @@ func si64(milliseconds int64) string {
 }
 
 func testGenCfg() {
-/*
+
 	args := os.Args
 	if len(args) == 4 {
 		fmt.Printf("%v\n", args[3])
@@ -163,7 +163,7 @@ func testGenCfg() {
 	_ = testCfgByUsed()
 	if true {
 		return
-	}*/
+	}
 
 
 	//absIntTestSimple00()
