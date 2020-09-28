@@ -100,15 +100,13 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockNum uint64) {
 							res = reqGen.Geth("eth_getLogs", reqGen.getLogs1(prevBn, bn+10000, account, topic), &logsg1)
 							if res.Err != nil {
 								fmt.Printf("Could not get logs for account (geth) %x %x: %v\n", account, topic, res.Err)
-								return
-							}
-							if logsg1.Error != nil {
+							} else if logsg1.Error != nil {
 								fmt.Printf("Error getting logs for account (geth) %x %x: %d %s\n", account, topic, logsg1.Error.Code, logsg1.Error.Message)
-								return
-							}
-							if !compareLogs(&logs1, &logsg1) {
-								fmt.Printf("Different logs for account %x %x and block %d-%d\n", account, topic, prevBn, bn)
-								return
+							} else {
+								if !compareLogs(&logs1, &logsg1) {
+									fmt.Printf("Different logs for account %x %x and block %d-%d\n", account, topic, prevBn, bn)
+									return
+								}
 							}
 						}
 						log.Info("Results", "count", len(logs1.Result))
@@ -136,15 +134,13 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockNum uint64) {
 							res = reqGen.Geth("eth_getLogs", reqGen.getLogs2(prevBn, bn+100000, account, topics[idx1], topics[idx2]), &logsg2)
 							if res.Err != nil {
 								fmt.Printf("Could not get logs for account (geth) %x %x %x: %v\n", account, topics[idx1], topics[idx2], res.Err)
-								return
-							}
-							if logsg2.Error != nil {
+							} else if logsg2.Error != nil {
 								fmt.Printf("Error getting logs for account (geth) %x %x %x: %d %s\n", account, topics[idx1], topics[idx2], logsg2.Error.Code, logsg2.Error.Message)
-								return
-							}
-							if !compareLogs(&logs2, &logsg2) {
-								fmt.Printf("Different logs for account %x %x %x and block %d-%d\n", account, topics[idx1], topics[idx2], prevBn, bn)
-								return
+							} else {
+								if !compareLogs(&logs2, &logsg2) {
+									fmt.Printf("Different logs for account %x %x %x and block %d-%d\n", account, topics[idx1], topics[idx2], prevBn, bn)
+									return
+								}
 							}
 						}
 						log.Info("Results", "count", len(logs2.Result))
