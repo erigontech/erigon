@@ -174,7 +174,7 @@ var zstd = Migration{
 		var samples2 [][]byte
 
 		total := 0
-		bucket := dbutils.BlockBodyPrefix
+		bucket := dbutils.BlockReceiptsPrefix
 		fmt.Printf("bucket: %s\n", bucket)
 		c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
 		count, _ := c.Count()
