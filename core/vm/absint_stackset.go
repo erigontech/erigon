@@ -54,6 +54,24 @@ func (program *Program) GetCodeHex() string {
 	return hex.EncodeToString(program.Contract.Code)
 }
 
+func (program *Program) isJumpDest(value *uint256.Int) bool {
+	if !value.IsUint64() {
+		return false
+	}
+
+	pc := value.Uint64()
+	if pc < 0 || pc >= uint64(len(program.Stmts)) {
+		return false
+	}
+
+	stmt := program.Stmts[pc]
+	if stmt == nil {
+		return false
+	}
+
+	return stmt.opcode == JUMPDEST
+}
+
 func toProgram(contract *Contract) *Program {
 	jt := newIstanbulInstructionSet()
 
@@ -187,67 +205,17 @@ func (e edge) String() string {
 	return fmt.Sprintf("%v %v %v", e.pc0, e.pc1, e.stmt.opcode)
 }
 
-/*
-func reverseSortEdges(edges []edge) {
-	sort.SliceStable(edges, func(i, j int) bool {
-		return edges[i].pc0 > edges[j].pc0
-	})
-}
-
-func sortEdges(edges []edge) {
-	sort.SliceStable(edges, func(i, j int) bool {
-		return edges[i].pc0 < edges[j].pc0
-	})
-}*/
-
-func printEdges(edges []edge) {
-	for _, edge := range edges {
-		fmt.Printf("%v\n", edge)
-	}
-}
-
-func getEntryReachableEdges(entry int, edges []edge) []edge {
-	pc2edges := make(map[int][]edge)
-	for _, e := range edges {
-		l := pc2edges[e.pc0]
-		l = append(l, e)
-		pc2edges[e.pc0] = l
-	}
-
-	workList := []int{entry}
-	visited := make(map[int]bool)
-	visited[entry] = true
-	for len(workList) > 0 {
-		var pc int
-		pc, workList = workList[0], workList[1:]
-
-		for _, edge := range pc2edges[pc] {
-			if !visited[edge.pc1] {
-				visited[edge.pc1] = true
-				workList = append(workList, edge.pc1)
-			}
-		}
-	}
-
-	var reachable []edge
-	for pc, exists := range visited {
-		if exists {
-			reachable = append(reachable, pc2edges[pc]...)
-		}
-	}
-	return reachable
-}
-
 ////////////////////////
 
 const (
 	BotValue AbsValueKind = iota
 	TopValue
+	InvalidValue
 	ConcreteValue
 )
 
 func (d AbsValueKind) String() string {
-	return [...]string{"⊥", "⊤", "AbsValue"}[d]
+	return [...]string{"⊥", "⊤", "x", "AbsValue"}[d]
 }
 
 func (d AbsValueKind) hash() uint64 {
@@ -255,8 +223,10 @@ func (d AbsValueKind) hash() uint64 {
 		return 0
 	} else if d == TopValue {
 		return 1
-	} else if d == ConcreteValue {
+	} else if d == InvalidValue {
 		return 2
+	} else if d == ConcreteValue {
+		return 3
 	} else {
 		panic("no hash found")
 	}
@@ -266,14 +236,16 @@ func (d AbsValueKind) hash() uint64 {
 
 type AbsValue struct {
 	kind  AbsValueKind
-	value uint256.Int 			//only when kind=ConcreteValue
+	value *uint256.Int 			//only when kind=ConcreteValue
 	pc    int   //only when kind=TopValue
 }
 
 func (c0 AbsValue) String(abbrev bool) string {
-	if c0.kind == BotValue {
+	if c0.kind == InvalidValue {
 		return c0.kind.String()
-	} else if c0.kind == TopValue {
+	} else if c0.kind == BotValue {
+		return c0.kind.String()
+	}  else if c0.kind == TopValue {
 		if !abbrev {
 			return fmt.Sprintf("%v%v", c0.kind.String(), c0.pc)
 		}
@@ -288,12 +260,12 @@ func AbsValueTop(pc int) AbsValue {
 	return AbsValue{kind: TopValue, pc: pc}
 }
 
-func AbsValueBot() AbsValue {
-	return AbsValue{kind: BotValue}
+func AbsValueInvalid() AbsValue {
+	return AbsValue{kind: InvalidValue}
 }
 
 func AbsValueConcrete(value uint256.Int) AbsValue {
-	return AbsValue{kind: ConcreteValue, value: value}
+	return AbsValue{kind: ConcreteValue, value: &value}
 }
 
 func (c0 AbsValue) Eq(c1 AbsValue) bool {
@@ -302,12 +274,20 @@ func (c0 AbsValue) Eq(c1 AbsValue) bool {
 	}
 
 	if c0.kind == ConcreteValue {
-		if !c0.value.Eq(&c1.value) {
+		if !c0.value.Eq(c1.value) {
 			return false
 		}
 	}
 
 	return true
+}
+
+func (c0 AbsValue) hash() uint64 {
+	hash := 47 * c0.kind.hash()
+	if c0.kind == ConcreteValue {
+		hash += 57 * uint256Hash(c0.value)
+	}
+	return hash
 }
 
 //////////////////////////////////////////////////
@@ -329,16 +309,14 @@ func (s *astack) Copy() *astack {
 	return newStack
 }
 
-func uint256Hash(e uint256.Int) uint64 {
+func uint256Hash(e *uint256.Int) uint64 {
 	return 19 * e[0] + 23 * e[1] + 29 * e[2] * 37 * e[3]
 }
 
 func (s *astack) updateHash() {
 	s.hash = 0
-	for _, e := range s.values {
-		s.hash = s.hash +
-					57 * uint256Hash(e.value) +
-					59 * e.kind.hash()
+	for k, e := range s.values {
+		s.hash += uint64(k) * e.hash()
 	}
 }
 
@@ -506,25 +484,15 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 		if stmt.opcode == JUMP || stmt.opcode == JUMPI {
 			if stack.hasIndices(0) {
 				jumpDest := stack.values[0]
-				if jumpDest.kind == TopValue {
+				if jumpDest.kind == InvalidValue {
+					//program terminates, don't add edges
+				} else if jumpDest.kind == TopValue {
 					isBadJump = true
 					cfg.BadJumpImprecision = true
 				} else if jumpDest.kind == ConcreteValue {
-					if jumpDest.value.IsUint64() {
+					if cfg.Program.isJumpDest(jumpDest.value) {
 						pc1 := int(jumpDest.value.Uint64())
-
-						if pc1 >= len(cfg.Program.Stmts) || cfg.Program.Stmts[pc1].operation == nil {
-							//isBadJump = true
-							//cfg.BadJumpInvalidOp = true
-						} else if cfg.Program.Stmts[pc1].opcode != JUMPDEST {
-							//isBadJump = true
-							//cfg.BadJumpInvalidJumpDest = true
-						} else {
-							edges = append(edges, edge{pc0, stmt, pc1, true})
-						}
-					} else {
-						//isBadJump = true
-						//cfg.BadJumpInvalidJumpDest = true
+						edges = append(edges, edge{pc0, stmt, pc1, true})
 					}
 				}
 			}
@@ -612,7 +580,11 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 		stack1 := stack0.Copy()
 
 		if stmt.opcode.IsPush() {
-			stack1.Push(AbsValueConcrete(stmt.value))
+			if cfg.Program.isJumpDest(&stmt.value) || isFF(&stmt.value) {
+				stack1.Push(AbsValueConcrete(stmt.value))
+			} else {
+				stack1.Push(AbsValueInvalid())
+			}
 		} else if stmt.operation.isDup {
 			if !stack0.hasIndices(stmt.operation.opNum-1) {
 				continue
@@ -642,7 +614,7 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 
 			if a.kind == ConcreteValue && b.kind == ConcreteValue {
 				v := uint256.NewInt()
-				v.And(&a.value, &b.value)
+				v.And(a.value, b.value)
 				stack1.Push(AbsValueConcrete(*v))
 			} else {
 				stack1.Push(AbsValueTop(edge.pc0))
@@ -676,6 +648,13 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 	}
 
 	return st1, nil
+}
+
+func isFF(u *uint256.Int) bool {
+	if u.IsUint64() && u.Uint64() == 4294967295 {
+		return true
+	}
+	return false
 }
 
 func Leq(st0 *astate, st1 *astate) bool {
