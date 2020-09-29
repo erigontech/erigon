@@ -735,7 +735,6 @@ type IHCursorNoDup struct {
 	c          ethdb.Cursor
 	cForDelete ethdb.Cursor
 	filter     Filter
-	kHex       []byte
 }
 
 func IHNoDup(f Filter, c ethdb.Cursor, cForDelete ethdb.Cursor) *IHCursorNoDup {
