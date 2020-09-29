@@ -116,11 +116,11 @@ type intervalAdjust struct {
 // worker is the main object which takes care of submitting new work to consensus engine
 // and gathering the sealing result.
 type worker struct {
-	config        *Config
-	chainConfig   *params.ChainConfig
-	engine        *process.RemoteEngine
-	eth           Backend
-	chain         *core.BlockChain
+	config      *Config
+	chainConfig *params.ChainConfig
+	engine      *process.RemoteEngine
+	eth         Backend
+	chain       *core.BlockChain
 
 	// Feeds
 	pendingLogsFeed event.Feed
