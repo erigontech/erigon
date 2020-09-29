@@ -20,7 +20,6 @@ type ETHBACKENDClient interface {
 	Add(ctx context.Context, in *TxRequest, opts ...grpc.CallOption) (*AddReply, error)
 	Etherbase(ctx context.Context, in *EtherbaseRequest, opts ...grpc.CallOption) (*EtherbaseReply, error)
 	NetVersion(ctx context.Context, in *NetVersionRequest, opts ...grpc.CallOption) (*NetVersionReply, error)
-	BloomStatus(ctx context.Context, in *BloomStatusRequest, opts ...grpc.CallOption) (*BloomStatusReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -70,28 +69,14 @@ func (c *eTHBACKENDClient) NetVersion(ctx context.Context, in *NetVersionRequest
 	return out, nil
 }
 
-var eTHBACKENDBloomStatusStreamDesc = &grpc.StreamDesc{
-	StreamName: "BloomStatus",
-}
-
-func (c *eTHBACKENDClient) BloomStatus(ctx context.Context, in *BloomStatusRequest, opts ...grpc.CallOption) (*BloomStatusReply, error) {
-	out := new(BloomStatusReply)
-	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/BloomStatus", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // ETHBACKENDService is the service API for ETHBACKEND service.
 // Fields should be assigned to their respective handler implementations only before
 // RegisterETHBACKENDService is called.  Any unassigned fields will result in the
 // handler for that method returning an Unimplemented error.
 type ETHBACKENDService struct {
-	Add         func(context.Context, *TxRequest) (*AddReply, error)
-	Etherbase   func(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
-	NetVersion  func(context.Context, *NetVersionRequest) (*NetVersionReply, error)
-	BloomStatus func(context.Context, *BloomStatusRequest) (*BloomStatusReply, error)
+	Add        func(context.Context, *TxRequest) (*AddReply, error)
+	Etherbase  func(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
+	NetVersion func(context.Context, *NetVersionRequest) (*NetVersionReply, error)
 }
 
 func (s *ETHBACKENDService) add(_ interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -154,26 +139,6 @@ func (s *ETHBACKENDService) netVersion(_ interface{}, ctx context.Context, dec f
 	}
 	return interceptor(ctx, in, info, handler)
 }
-func (s *ETHBACKENDService) bloomStatus(_ interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	if s.BloomStatus == nil {
-		return nil, status.Errorf(codes.Unimplemented, "method BloomStatus not implemented")
-	}
-	in := new(BloomStatusRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return s.BloomStatus(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     s,
-		FullMethod: "/remote.ETHBACKEND/BloomStatus",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return s.BloomStatus(ctx, req.(*BloomStatusRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
 
 // RegisterETHBACKENDService registers a service implementation with a gRPC server.
 func RegisterETHBACKENDService(s grpc.ServiceRegistrar, srv *ETHBACKENDService) {
@@ -191,10 +156,6 @@ func RegisterETHBACKENDService(s grpc.ServiceRegistrar, srv *ETHBACKENDService) 
 			{
 				MethodName: "NetVersion",
 				Handler:    srv.netVersion,
-			},
-			{
-				MethodName: "BloomStatus",
-				Handler:    srv.bloomStatus,
 			},
 		},
 		Streams:  []grpc.StreamDesc{},
@@ -227,11 +188,6 @@ func NewETHBACKENDService(s interface{}) *ETHBACKENDService {
 	}); ok {
 		ns.NetVersion = h.NetVersion
 	}
-	if h, ok := s.(interface {
-		BloomStatus(context.Context, *BloomStatusRequest) (*BloomStatusReply, error)
-	}); ok {
-		ns.BloomStatus = h.BloomStatus
-	}
 	return ns
 }
 
@@ -243,5 +199,4 @@ type UnstableETHBACKENDService interface {
 	Add(context.Context, *TxRequest) (*AddReply, error)
 	Etherbase(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
 	NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error)
-	BloomStatus(context.Context, *BloomStatusRequest) (*BloomStatusReply, error)
 }
