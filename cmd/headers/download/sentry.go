@@ -378,7 +378,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func Download(natSetting string, filesDir string, port int) error {
+func Download(natSetting string, filesDir string, bufferSize int, port int) error {
 	ctx := rootContext()
 	newBlockCh := make(chan NewBlockFromSentry)
 	newBlockHashCh := make(chan NewBlockHashFromSentry)
@@ -394,7 +394,7 @@ func Download(natSetting string, filesDir string, port int) error {
 	if err = server.Start(); err != nil {
 		return fmt.Errorf("could not start server: %w", err)
 	}
-	go Downloader(ctx, filesDir, newBlockCh, newBlockHashCh, headersCh, penaltyCh, reqHeadersCh)
+	go Downloader(ctx, filesDir, bufferSize*1024*1024, newBlockCh, newBlockHashCh, headersCh, penaltyCh, reqHeadersCh)
 
 	go func() {
 		for {

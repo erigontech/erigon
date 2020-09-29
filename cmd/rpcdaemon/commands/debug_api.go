@@ -68,7 +68,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 
 			blockNumber, _, err = stages.GetStageProgress(api.dbReader, stages.Execution)
 			if err != nil {
-				return state.IteratorDump{}, fmt.Errorf("las block has not found: %w", err)
+				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
 			}
 		} else {
 			blockNumber = uint64(number)
@@ -108,12 +108,12 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(_ context.Context, s
 		return nil, fmt.Errorf("start block height (%d) must be less than end block height (%d)", startNum.Int64(), endNum.Int64())
 	}
 
-	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Execution)
+	final, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
 	if err != nil {
 		return nil, err
 	}
 
-	lastBlockNumber := execution
+	lastBlockNumber := final
 
 	if startNum.Int64() < 1 || uint64(startNum.Int64()) > lastBlockNumber {
 		return nil, fmt.Errorf("start block %x not found", uint64(startNum.Int64()))

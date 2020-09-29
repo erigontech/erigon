@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -140,7 +141,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 			}
 		}
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
-			if err := mutation.CommitAndBegin(); err != nil {
+			if err := mutation.CommitAndBegin(context.Background()); err != nil {
 				return err
 			}
 		}

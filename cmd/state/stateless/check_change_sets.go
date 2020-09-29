@@ -2,6 +2,7 @@ package stateless
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -76,7 +77,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			blockWriter = csw
 		}
 
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, bc, block)
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, bc, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
@@ -90,7 +91,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
 			if batch.BatchSize() >= batch.IdealBatchSize() {
 				log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
-				if err := batch.CommitAndBegin(); err != nil {
+				if err := batch.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
 			}

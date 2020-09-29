@@ -1,26 +1,82 @@
 package headerdownload
 
 import (
-	"container/heap"
+	"container/list"
 	"encoding/binary"
 	"fmt"
 	"math/big"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/petar/GoLLRB/llrb"
 )
 
+// AnchorTipItem is element of the priority queue of tips belonging to an anchor
+// This queue is prioritised by block heights, lowest block height being first out
+type AnchorTipItem struct {
+	hash   common.Hash
+	height uint64
+	hard   bool // Whether the tip is hard coded
+}
+
+type AnchorTipQueue []AnchorTipItem
+
+func (atq AnchorTipQueue) Len() int {
+	return len(atq)
+}
+
+func (atq AnchorTipQueue) Less(i, j int) bool {
+	if atq[i].hard == atq[j].hard {
+		return atq[i].height < atq[j].height
+	}
+	return !atq[i].hard
+}
+
+func (atq AnchorTipQueue) Swap(i, j int) {
+	atq[i], atq[j] = atq[j], atq[i]
+}
+
+func (atq *AnchorTipQueue) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	*atq = append(*atq, x.(AnchorTipItem))
+}
+
+func (atq *AnchorTipQueue) Pop() interface{} {
+	old := *atq
+	n := len(old)
+	x := old[n-1]
+	*atq = old[0 : n-1]
+	return x
+}
+
 type Anchor struct {
-	powDepth        int
-	totalDifficulty uint256.Int
-	tips            []common.Hash
-	difficulty      uint256.Int
-	hash            common.Hash
-	blockHeight     uint64
-	timestamp       uint64
+	powDepth     int
+	tipQueue     *AnchorTipQueue
+	difficulty   uint256.Int
+	hash         common.Hash
+	blockHeight  uint64
+	timestamp    uint64
+	maxTipHeight uint64 // Maximum value of `blockHeight` of all tips associated with this anchor
+	anchorID     int    // Unique ID of this anchor to be able to find it in the balanced tree
+}
+
+// For placing anchors into the sorting tree
+func (a *Anchor) Less(bi llrb.Item) bool {
+	b := bi.(*Anchor)
+	if a.tipStretch() == b.tipStretch() {
+		return a.anchorID < b.anchorID
+	}
+	return a.tipStretch() > b.tipStretch()
+}
+
+func (a *Anchor) tipStretch() uint64 {
+	if a.tipQueue.Len() == 0 {
+		return 0
+	}
+	return a.maxTipHeight - (*a.tipQueue)[0].height
 }
 
 type Tip struct {
@@ -30,7 +86,6 @@ type Tip struct {
 	difficulty           uint256.Int
 	blockHeight          uint64
 	uncleHash            common.Hash
-	noPrepend            bool
 }
 
 // First item in ChainSegment is the anchor
@@ -72,20 +127,23 @@ type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
 type HeaderDownload struct {
-	buffer   []byte
-	filesDir string
-	//currentFile            *os.File
-	//currentFileWriter      io.Writer
+	buffer                 []byte
+	bufferLimit            int
+	filesDir               string
+	anchorSequence         uint32 // Sequence number to be used for recording anchors next time the buffer is flushed
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
-	tips                   *lru.Cache
-	hardTips               map[common.Hash]*Tip // Hard-coded tips
-	tipQueue               *TipQueue            // Tips that are within the newAnchorPastLimit from current time
-	initPowDepth           int                  // powDepth assigned to the newly inserted anchor
-	newAnchorFutureLimit   uint64               // How far in the future (relative to current time) the new anchors are allowed to be
-	newAnchorPastLimit     uint64               // How far in the past (relative to current time) the new anchors are allowed to be
+	anchorTree             *llrb.LLRB                // Balanced tree of anchors sorted by tip stretch (longest stretch first)
+	nextAnchorID           int
+	hardTips               map[common.Hash]struct{} // Set of hashes for hard-coded tips
+	tips                   map[common.Hash]*Tip     // Tips by tip hash
+	tipCount               int                      // Total number of tips associated to all anchors
+	tipLimit               int                      // Maximum allowed number of tips
+	initPowDepth           int                      // powDepth assigned to the newly inserted anchor
+	newAnchorFutureLimit   uint64                   // How far in the future (relative to current time) the new anchors are allowed to be
+	newAnchorPastLimit     uint64                   // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
-	requestQueue           *RequestQueue
+	requestQueue           *list.List
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
 	RequestQueueTimer      *time.Timer
@@ -94,34 +152,6 @@ type HeaderDownload struct {
 type TipQueueItem struct {
 	tip     *Tip
 	tipHash common.Hash
-}
-
-type TipQueue []TipQueueItem
-
-func (tq TipQueue) Len() int {
-	return len(tq)
-}
-
-func (tq TipQueue) Less(i, j int) bool {
-	return tq[i].tip.timestamp < tq[j].tip.timestamp
-}
-
-func (tq TipQueue) Swap(i, j int) {
-	tq[i], tq[j] = tq[j], tq[i]
-}
-
-func (tq *TipQueue) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	*tq = append(*tq, x.(TipQueueItem))
-}
-
-func (tq *TipQueue) Pop() interface{} {
-	old := *tq
-	n := len(old)
-	x := old[n-1]
-	*tq = old[0 : n-1]
-	return x
 }
 
 type RequestQueueItem struct {
@@ -158,27 +188,27 @@ func (rq *RequestQueue) Pop() interface{} {
 }
 
 func NewHeaderDownload(filesDir string,
-	tipLimit, initPowDepth int,
+	bufferLimit, tipLimit, initPowDepth int,
 	calcDifficultyFunc CalcDifficultyFunc,
 	verifySealFunc VerifySealFunc,
 	newAnchorFutureLimit, newAnchorPastLimit uint64,
 ) *HeaderDownload {
 	hd := &HeaderDownload{
 		filesDir:             filesDir,
+		bufferLimit:          bufferLimit,
 		badHeaders:           make(map[common.Hash]struct{}),
 		anchors:              make(map[common.Hash][]*Anchor),
+		tipLimit:             tipLimit,
 		initPowDepth:         initPowDepth,
-		requestQueue:         &RequestQueue{},
-		tipQueue:             &TipQueue{},
+		requestQueue:         list.New(),
+		anchorTree:           llrb.New(),
 		calcDifficultyFunc:   calcDifficultyFunc,
 		verifySealFunc:       verifySealFunc,
 		newAnchorFutureLimit: newAnchorFutureLimit,
 		newAnchorPastLimit:   newAnchorPastLimit,
+		hardTips:             make(map[common.Hash]struct{}),
+		tips:                 make(map[common.Hash]*Tip),
 	}
-	hd.tips, _ = lru.NewWithEvict(tipLimit, hd.tipEvicted)
-	hd.hardTips = make(map[common.Hash]*Tip)
-	heap.Init(hd.requestQueue)
-	heap.Init(hd.tipQueue)
 	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd
 }

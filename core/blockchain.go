@@ -30,6 +30,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
@@ -716,7 +717,7 @@ func (bc *BlockChain) GetReceiptsByHash(hash common.Hash) types.Receipts {
 	if number == nil {
 		return nil
 	}
-	receipts := rawdb.ReadReceipts(bc.db, hash, *number, bc.chainConfig)
+	receipts := rawdb.ReadReceipts(bc.db, hash, *number)
 	if receipts == nil {
 		return nil
 	}
@@ -1014,7 +1015,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			stats.processed++
 			if batch.BatchSize() >= batch.IdealBatchSize() {
 				size += batch.BatchSize()
-				if err := batch.CommitAndBegin(); err != nil {
+				if err := batch.CommitAndBegin(context.Background()); err != nil {
 					return 0, err
 				}
 			}
@@ -1121,6 +1122,14 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	}
 	rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd)
 	rawdb.WriteBody(ctx, bc.db, block.Hash(), block.NumberU64(), block.Body())
+	sendersData := make([]byte, len(block.Transactions())*common.AddressLength)
+	senders := block.Body().SendersFromTxs()
+	for i, sender := range senders {
+		copy(sendersData[i*common.AddressLength:], sender[:])
+	}
+	if err := bc.db.Put(dbutils.Senders, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()), sendersData); err != nil {
+		return NonStatTy, err
+	}
 	rawdb.WriteHeader(ctx, bc.db, block.Header())
 
 	if tds != nil {
@@ -1714,7 +1723,7 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 			if number == nil {
 				return
 			}
-			receipts := rawdb.ReadReceipts(bc.db, hash, *number, bc.chainConfig)
+			receipts := rawdb.ReadReceipts(bc.db, hash, *number)
 
 			var logs []*types.Log
 			for _, receipt := range receipts {

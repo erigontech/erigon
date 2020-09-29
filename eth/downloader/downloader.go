@@ -626,7 +626,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 			var errTx error
 			log.Debug("Begin tx")
-			tx, errTx = tx.Begin()
+			tx, errTx = tx.Begin(context.Background())
 			return errTx
 		})
 		d.stagedSyncState.OnBeforeUnwind(func(id stages.SyncStage) error {
@@ -641,7 +641,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			}
 			var errTx error
 			log.Debug("Begin tx")
-			tx, errTx = tx.Begin()
+			tx, errTx = tx.Begin(context.Background())
 			return errTx
 		})
 		d.stagedSyncState.BeforeStageUnwind(stages.Bodies, func() error {

@@ -114,6 +114,19 @@ var (
 	BlockBodyPrefix     = "b" // blockBodyPrefix + num (uint64 big endian) + hash -> block body
 	BlockReceiptsPrefix = "r" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
 
+	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
+	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
+	// indices are sharded - because some bitmaps are >1Mb and when new incoming blocks process it
+	//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (LMDB does copy-on-write).
+	//
+	// 3 terms are used: cold_shard, hot_shard, delta
+	//   delta - most recent changes (appendable) - which need save into database
+	//   hot_shard - merge delta here until hot_shard size < HotShardLimit, otherwise merge hot to cold
+	//   cold_shard - merge hot_shard here until cold_shard size < ColdShardLimit, otherwise mark hot as cold, create new hot from delta
+	// cold shards never merged for compaction - because it's expensive operation (expensive means attackable)
+	LogTopicIndex   = "log_topic_index"
+	LogAddressIndex = "log_address_index"
+
 	TxLookupPrefix  = "l" // txLookupPrefix + hash -> transaction/receipt lookup metadata
 	BloomBitsPrefix = "B" // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
 
@@ -210,6 +223,8 @@ var Buckets = []string{
 	HeadFastBlockKey,
 	HeadHeaderKey,
 	Migrations,
+	LogTopicIndex,
+	LogAddressIndex,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

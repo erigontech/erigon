@@ -6,7 +6,6 @@ import (
 )
 
 var (
-	filesDir   string // Directory when the files should be stored
 	bufferSize int    // Size of buffer in MiB
 	natSetting string // NAT setting
 	port       int    // Listening port
@@ -24,6 +23,6 @@ var downloadCmd = &cobra.Command{
 	Use:   "download",
 	Short: "Download headers backwards",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return download.Download(natSetting, filesDir, port)
+		return download.Download(natSetting, filesDir, bufferSize, port)
 	},
 }

@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -232,7 +231,7 @@ func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 	for i, log := range stored.Logs {
 		r.Logs[i] = (*Log)(log)
 	}
-	r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
+	//r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
 
 	return nil
 }
@@ -253,7 +252,7 @@ func decodeV4StoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 	for i, log := range stored.Logs {
 		r.Logs[i] = (*Log)(log)
 	}
-	r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
+	//r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
 
 	return nil
 }
@@ -293,9 +292,7 @@ func (r Receipts) GetRlp(i int) []byte {
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, number uint64, txs Transactions) error {
-	signer := MakeSigner(config, new(big.Int).SetUint64(number))
-
+func (r Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
 	logIndex := uint(0) // logIdx is unique within the block and starts from 0
 	if len(txs) != len(r) {
 		return errors.New("transaction and receipt count mismatch")
@@ -311,9 +308,10 @@ func (r Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, num
 
 		// The contract address can be derived from the transaction itself
 		if txs[i].To() == nil {
-			// Deriving the signer is expensive, only do if it's actually needed
-			from, _ := Sender(signer, txs[i])
-			r[i].ContractAddress = crypto.CreateAddress(from, txs[i].Nonce())
+			// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
+			// and then the address of the contract one is creating this way will depend on the `tx.From`
+			// and the nonce of the creating account (which is `tx.From`).
+			r[i].ContractAddress = crypto.CreateAddress(senders[i], txs[i].Nonce())
 		}
 		// The used gas can be calculated based on previous r
 		if i == 0 {

@@ -1,12 +1,13 @@
 module github.com/ledgerwatch/turbo-geth
 
-go 1.13
+go 1.15
 
 require (
 	github.com/Azure/azure-pipeline-go v0.2.2 // indirect
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/Azure/go-autorest/autorest/adal v0.8.3 // indirect
 	github.com/JekaMas/notify v0.9.4
+	github.com/RoaringBitmap/gocroaring v0.2.66-0.20200926170445-4232533f8158
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.5.7
 	github.com/aristanetworks/goarista v0.0.0-20170210015632-ea17b1a17847
@@ -35,7 +36,7 @@ require (
 	github.com/golang/snappy v0.0.2-0.20200707131729-196ae77b8a26
 	github.com/gorilla/websocket v1.4.1
 	github.com/graph-gophers/graphql-go v0.0.0-20191115155744-f33e81362277
-	github.com/grpc-ecosystem/go-grpc-middleware v1.0.0
+	github.com/grpc-ecosystem/go-grpc-middleware v1.2.2
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/holiman/uint256 v1.1.1
@@ -74,9 +75,9 @@ require (
 	golang.org/x/sys v0.0.0-20200615200032-f1bc736245b1
 	golang.org/x/text v0.3.2
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
-	golang.org/x/tools v0.0.0-20191126055441-b0650ceb63d9
-	google.golang.org/grpc v1.30.1
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v0.0.0-20200825174526-e13e057332a8
+	golang.org/x/tools v0.0.0-20200207183749-b753a1ba74fa
+	google.golang.org/grpc v1.32.0
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc v0.0.0-20200908221732-5e8f83304c05
 	google.golang.org/protobuf v1.25.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce

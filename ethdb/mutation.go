@@ -54,6 +54,10 @@ func (m *mutation) Last(bucket string) ([]byte, []byte, error) {
 	return m.db.Last(bucket)
 }
 
+func (m *mutation) Reserve(bucket string, key []byte, i int) ([]byte, error) {
+	return m.db.(DbWithPendingMutations).Reserve(bucket, key, i)
+}
+
 func (m *mutation) GetIndexChunk(bucket string, key []byte, timestamp uint64) ([]byte, error) {
 	if m.db != nil {
 		return m.db.GetIndexChunk(bucket, key, timestamp)
@@ -145,9 +149,14 @@ func (m *mutation) Delete(bucket string, key []byte) error {
 	return nil
 }
 
-func (m *mutation) CommitAndBegin() error {
+func (m *mutation) CommitAndBegin(ctx context.Context) error {
 	_, err := m.Commit()
 	return err
+}
+
+func (m *mutation) RollbackAndBegin(ctx context.Context) error {
+	m.Rollback()
+	return nil
 }
 
 func (m *mutation) Commit() (uint64, error) {
@@ -215,8 +224,8 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 	return mm
 }
 
-func (m *mutation) Begin() (DbWithPendingMutations, error) {
-	return m.db.Begin()
+func (m *mutation) Begin(ctx context.Context) (DbWithPendingMutations, error) {
+	return m.db.Begin(ctx)
 }
 
 func (m *mutation) panicOnEmptyDB() {

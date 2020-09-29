@@ -93,7 +93,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	}
 
-	tx, errBegin := db.Begin()
+	tx, errBegin := db.Begin(context.Background())
 	if errBegin != nil {
 		return errBegin
 	}
@@ -102,7 +102,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	bc, st, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
 
-	if err := tx.CommitAndBegin(); err != nil {
+	if err := tx.CommitAndBegin(context.Background()); err != nil {
 		return err
 	}
 
@@ -122,7 +122,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		default:
 		}
 
-		if err := tx.CommitAndBegin(); err != nil {
+		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
 

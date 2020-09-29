@@ -9,7 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -43,13 +42,18 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 		log.Error(fmt.Sprintf("FindTip penalty %d", penalty))
 		return
 	}
+	currentTime := uint64(time.Now().Unix())
 	var powDepth int
-	if powDepth1, err1 := hd.VerifySeals(segment, foundAnchor, start, end); err1 == nil {
+	if powDepth1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
 		powDepth = powDepth1
 	} else {
 		log.Error("VerifySeals", "error", err1)
+		return
 	}
-	currentTime := uint64(time.Now().Unix())
+	if err1 := hd.FlushBuffer(); err1 != nil {
+		log.Error("Could not flush the buffer, will discard the data", "error", err1)
+		return
+	}
 	// There are 4 cases
 	if foundAnchor {
 		if foundTip {
@@ -57,6 +61,7 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			if err1 := hd.Connect(segment, start, end, currentTime); err1 != nil {
 				log.Error("Connect failed", "error", err1)
 			} else {
+				hd.AddSegmentToBuffer(segment, start, end)
 				log.Info("Connected", "start", start, "end", end)
 			}
 		} else {
@@ -64,6 +69,7 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			if err1 := hd.ExtendDown(segment, start, end, powDepth, currentTime); err1 != nil {
 				log.Error("ExtendDown failed", "error", err1)
 			} else {
+				hd.AddSegmentToBuffer(segment, start, end)
 				log.Info("Extended Down", "start", start, "end", end)
 			}
 		}
@@ -75,24 +81,29 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
 				log.Error("ExtendUp failed", "error", err1)
 			} else {
+				hd.AddSegmentToBuffer(segment, start, end)
 				log.Info("Extended Up", "start", start, "end", end)
 			}
 		}
 	} else {
 		// NewAnchor
-		if _, err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
+		if err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
 			log.Error("NewAnchor failed", "error", err1)
 		} else {
+			hd.AddSegmentToBuffer(segment, start, end)
 			log.Info("NewAnchor", "start", start, "end", end)
 		}
 	}
-
+	if start == 0 || end > 0 {
+		hd.CheckInitiation(segment, params.MainnetGenesisHash)
+	}
 }
 
 // Downloader needs to be run from a go-routine, and it is in the sole control of the HeaderDownloader object
 func Downloader(
 	ctx context.Context,
 	filesDir string,
+	bufferLimit int,
 	newBlockCh chan NewBlockFromSentry,
 	newBlockHashCh chan NewBlockHashFromSentry,
 	headersCh chan BlockHeadersFromSentry,
@@ -117,50 +128,49 @@ func Downloader(
 	}
 	hd := headerdownload.NewHeaderDownload(
 		filesDir,
-		16*1024, /* tipLimit */
-		1024,    /* initPowDepth */
+		bufferLimit, /* bufferLimit */
+		16*1024,     /* tipLimit */
+		1024,        /* initPowDepth */
 		calcDiffFunc,
 		verifySealFunc,
 		3600, /* newAnchor future limit */
 		3600, /* newAnchor past limit */
 	)
-	//if err := hd.RecoverFromFiles(); err != nil {
-	//	log.Error("Recovery from file failed, downloader not started", "error", err)
-	//}
-	// Insert hard-coded headers if present
-	if _, err := os.Stat("hard-coded-headers.dat"); err == nil {
-		if f, err1 := os.Open("hard-coded-headers.dat"); err1 == nil {
-			var hBuffer [headerdownload.HeaderSerLength]byte
-			var dBuffer [32]byte
-			i := 0
-			for {
-				var h types.Header
-				var d uint256.Int
-				if _, err2 := io.ReadFull(f, hBuffer[:]); err2 == nil {
-					headerdownload.DeserialiseHeader(&h, hBuffer[:])
-				} else if errors.Is(err2, io.EOF) {
-					break
-				} else {
-					log.Error("Failed to read hard coded header", "i", i, "error", err2)
-					break
+	hd.InitHardCodedTips("hard-coded-headers.dat")
+	if recovered, err := hd.RecoverFromFiles(uint64(time.Now().Unix())); err != nil || !recovered {
+		if err != nil {
+			log.Error("Recovery from file failed, will start from scratch", "error", err)
+		}
+		// Insert hard-coded headers if present
+		if _, err := os.Stat("hard-coded-headers.dat"); err == nil {
+			if f, err1 := os.Open("hard-coded-headers.dat"); err1 == nil {
+				var hBuffer [headerdownload.HeaderSerLength]byte
+				i := 0
+				for {
+					var h types.Header
+					if _, err2 := io.ReadFull(f, hBuffer[:]); err2 == nil {
+						headerdownload.DeserialiseHeader(&h, hBuffer[:])
+					} else if errors.Is(err2, io.EOF) {
+						break
+					} else {
+						log.Error("Failed to read hard coded header", "i", i, "error", err2)
+						break
+					}
+					if err2 := hd.HardCodedHeader(&h, uint64(time.Now().Unix())); err2 != nil {
+						log.Error("Failed to insert hard coded header", "i", i, "block", h.Number.Uint64(), "error", err2)
+					} else {
+						hd.AddHeaderToBuffer(&h)
+					}
+					i++
 				}
-				if _, err2 := io.ReadFull(f, dBuffer[:]); err2 == nil {
-					d.SetBytes(dBuffer[:])
-				} else {
-					log.Error("Failed to read hard coded difficulty", "i", i, "error", err2)
-					break
-				}
-				if err2 := hd.HardCodedHeader(&h, d, uint64(time.Now().Unix())); err2 != nil {
-					log.Error("Failed to insert hard coded header", "i", i, "block", h.Number.Uint64(), "error", err2)
-				}
-				i++
 			}
 		}
 	}
+	log.Info(hd.AnchorState())
 	for {
 		select {
 		case newBlockReq := <-newBlockCh:
-			if segments, penalty, err := hd.HandleNewBlockMsg(newBlockReq.Block.Header()); err == nil {
+			if segments, penalty, err := hd.SingleHeaderAsSegment(newBlockReq.Block.Header()); err == nil {
 				if penalty == headerdownload.NoPenalty {
 					processSegment(hd, segments[0]) // There is only one segment in this case
 				} else {
@@ -168,7 +178,7 @@ func Downloader(
 					penaltyCh <- PenaltyMsg{SentryMsg: newBlockReq.SentryMsg, penalty: penalty}
 				}
 			} else {
-				log.Error("HandleNewBlockMsg failed", "error", err)
+				log.Error("SingleHeaderAsSegment failed", "error", err)
 				continue
 			}
 			log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d}", newBlockReq.Block.NumberU64()))
@@ -184,7 +194,7 @@ func Downloader(
 				}
 			}
 		case headersReq := <-headersCh:
-			if segments, penalty, err := hd.HandleHeadersMsg(headersReq.headers); err == nil {
+			if segments, penalty, err := hd.SplitIntoSegments(headersReq.headers); err == nil {
 				if penalty == headerdownload.NoPenalty {
 					for _, segment := range segments {
 						processSegment(hd, segment)
@@ -193,7 +203,7 @@ func Downloader(
 					penaltyCh <- PenaltyMsg{SentryMsg: headersReq.SentryMsg, penalty: penalty}
 				}
 			} else {
-				log.Error("HandleHeadersMsg failed", "error", err)
+				log.Error("SingleHeaderAsSegment failed", "error", err)
 			}
 			log.Info("HeadersMsg processed")
 		case <-hd.RequestQueueTimer.C:

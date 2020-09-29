@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -304,7 +303,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
 	}
-	receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
+	//receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
 
 	receipt2 := &types.Receipt{
 		PostState:         common.Hash{2}.Bytes(),
@@ -317,12 +316,12 @@ func TestBlockReceiptStorage(t *testing.T) {
 		ContractAddress: common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
 		GasUsed:         222222,
 	}
-	receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
+	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
 	receipts := []*types.Receipt{receipt1, receipt2}
 
 	// Check that no receipt entries are in a pristine database
 	hash := common.BytesToHash([]byte{0x03, 0x14})
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); len(rs) != 0 {
+	if rs := ReadReceipts(db, hash, 0); len(rs) != 0 {
 		t.Fatalf("non existent receipts returned: %v", rs)
 	}
 	// Insert the body that corresponds to the receipts
@@ -330,7 +329,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 	// Insert the receipt slice into the database and check presence
 	WriteReceipts(db, hash, 0, receipts)
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); len(rs) == 0 {
+	if rs := ReadReceipts(db, hash, 0); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
 	} else {
 		if err := checkReceiptsRLP(rs, receipts); err != nil {
@@ -339,7 +338,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
 	DeleteBody(db, hash, 0)
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); rs != nil {
+	if rs := ReadReceipts(db, hash, 0); rs != nil {
 		t.Fatalf("receipts returned when body was deleted: %v", rs)
 	}
 	// Ensure that receipts without metadata can be returned without the block body too
@@ -350,7 +349,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	WriteBody(ctx, db, hash, 0, body)
 
 	DeleteReceipts(db, hash, 0)
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); len(rs) != 0 {
+	if rs := ReadReceipts(db, hash, 0); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}
 }

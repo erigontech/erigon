@@ -104,7 +104,7 @@ This daemon can use both local or remote DBs. That means, that this RPC daemon
 doesn't have to be running on the same machine as the main turbo-geth binary or
 it can run from a snapshot of a database for read-only calls. 
 
-<code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/Readme.md)</code>
+<code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
 
 **For local DB**
 

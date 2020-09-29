@@ -3,6 +3,7 @@ package etl
 import (
 	"bytes"
 	"container/heap"
+	"context"
 	"fmt"
 	"io"
 	"runtime"
@@ -104,7 +105,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin()
+		tx, err = db.Begin(context.Background())
 		if err != nil {
 			return err
 		}

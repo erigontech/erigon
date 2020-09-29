@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -67,7 +68,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = stateDB.Begin()
+		tx, err = stateDB.Begin(context.Background())
 		if err != nil {
 			return err
 		}
@@ -79,9 +80,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 	engine := chainContext.Engine()
 
-	stageProgress := s.BlockNumber
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	stageProgress := s.BlockNumber
 	logBlock := stageProgress
 	// Warmup only works for HDD sync, and for long ranges
 	var warmup = hdd && (to-s.BlockNumber) > 30000
@@ -128,18 +129,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 
 		if writeReceipts {
-			// Convert the receipts into their storage form and serialize them
-			storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
-			for i, receipt := range receipts {
-				storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
-			}
-			var bytes []byte
-			if bytes, err = rlp.EncodeToBytes(storageReceipts); err != nil {
-				return fmt.Errorf("encode block receipts for block %d: %v", block.NumberU64(), err)
-			}
-			// Store the flattened receipt slice
-			if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(block.NumberU64(), block.Hash()), bytes); err != nil {
-				return fmt.Errorf("writing receipts for block %d: %v", block.NumberU64(), err)
+			if err = appendReceipts(tx, receipts, block.NumberU64(), block.Hash()); err != nil {
+				return err
 			}
 		}
 
@@ -147,11 +138,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			if err = s.Update(batch, blockNum); err != nil {
 				return err
 			}
-			if err = batch.CommitAndBegin(); err != nil {
+			if err = batch.CommitAndBegin(context.Background()); err != nil {
 				return err
 			}
 			if !useExternalTx {
-				if err = tx.CommitAndBegin(); err != nil {
+				if err = tx.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
 			}
@@ -209,6 +200,24 @@ func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 	return now
 }
 
+func appendReceipts(tx ethdb.DbWithPendingMutations, receipts types.Receipts, blockNumber uint64, blockHash common.Hash) error {
+	// Convert the receipts into their storage form and serialize them
+	storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
+	for i, receipt := range receipts {
+		storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
+	}
+	var bytes []byte
+	var err error
+	if bytes, err = rlp.EncodeToBytes(storageReceipts); err != nil {
+		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
+	}
+	// Store the flattened receipt slice
+	if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(blockNumber, blockHash), bytes); err != nil {
+		return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
+	}
+	return nil
+}
+
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
@@ -226,42 +235,42 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	writeAccountFunc := writeAccountPlain
 	recoverCodeHashFunc := recoverCodeHashPlain
 
-	accountMap, storageMap, err := rewindFunc(stateDB, s.BlockNumber, u.UnwindPoint)
-	if err != nil {
-		return fmt.Errorf("unwind Execution: getting rewind data: %v", err)
+	accountMap, storageMap, errRewind := rewindFunc(stateDB, s.BlockNumber, u.UnwindPoint)
+	if errRewind != nil {
+		return fmt.Errorf("unwind Execution: getting rewind data: %v", errRewind)
 	}
 
 	for key, value := range accountMap {
 		if len(value) > 0 {
 			var acc accounts.Account
-			if err = acc.DecodeForStorage(value); err != nil {
+			if err := acc.DecodeForStorage(value); err != nil {
 				return err
 			}
 
 			// Fetch the code hash
 			recoverCodeHashFunc(&acc, stateDB, key)
-			if err = writeAccountFunc(batch, key, acc); err != nil {
+			if err := writeAccountFunc(batch, key, acc); err != nil {
 				return err
 			}
 		} else {
-			if err = deleteAccountFunc(batch, key); err != nil {
+			if err := deleteAccountFunc(batch, key); err != nil {
 				return err
 			}
 		}
 	}
 	for key, value := range storageMap {
 		if len(value) > 0 {
-			if err = batch.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
+			if err := batch.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
 				return err
 			}
 		} else {
-			if err = batch.Delete(stateBucket, []byte(key)[:storageKeyLength]); err != nil {
+			if err := batch.Delete(stateBucket, []byte(key)[:storageKeyLength]); err != nil {
 				return err
 			}
 		}
 	}
 
-	if err = stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+	if err := stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
 		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket, common.CopyBytes(k)); err1 != nil {
 			return false, fmt.Errorf("unwind Execution: delete account changesets: %v", err1)
 		}
@@ -269,7 +278,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	}); err != nil {
 		return fmt.Errorf("unwind Execution: walking account changesets: %v", err)
 	}
-	if err = stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+	if err := stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
 		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket, common.CopyBytes(k)); err1 != nil {
 			return false, fmt.Errorf("unwind Execution: delete storage changesets: %v", err1)
 		}
@@ -278,9 +287,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		return fmt.Errorf("unwind Execution: walking storage changesets: %v", err)
 	}
 	if writeReceipts {
-		if err = stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
-			if err1 := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err1 != nil {
-				return false, fmt.Errorf("unwind Execution: delete receipts: %v", err1)
+		if err := stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (bool, error) {
+			if err := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err != nil {
+				return false, fmt.Errorf("unwind Execution: delete receipts: %v", err)
 			}
 			return true, nil
 		}); err != nil {
@@ -288,11 +297,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
-	if err = u.Done(batch); err != nil {
+	if err := u.Done(batch); err != nil {
 		return fmt.Errorf("unwind Execution: reset: %v", err)
 	}
 
-	_, err = batch.Commit()
+	_, err := batch.Commit()
 	if err != nil {
 		return fmt.Errorf("unwind Execute: failed to write db commit: %v", err)
 	}

@@ -224,6 +224,7 @@ func (b *oldestEntrySortableBuffer) Size() int {
 func (b *oldestEntrySortableBuffer) Len() int {
 	return len(b.entries)
 }
+
 func (b *oldestEntrySortableBuffer) Sort() {
 	for k, v := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
