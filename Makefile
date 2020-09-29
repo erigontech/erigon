@@ -1,4 +1,4 @@
-GOBIN = ./build/bin
+GOBIN = $(shell pwd)/build/bin
 GOBUILD = env GO111MODULE=on go build -trimpath
 GOTEST = go test ./... -p 1
 
@@ -147,9 +147,9 @@ bindings:
 
 grpc:
 	# See also: ./cmd/hack/binary-deps/main.go
-	env GOBIN= go install google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
-	env GOBIN= go install google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
-	go generate ./ethdb
+	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
+	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
+	PATH=$(GOBIN):$(PATH) go generate ./ethdb  # add folder with binaries to temporary PATH, `protoc` will search there installed above plugins
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
