@@ -362,14 +362,14 @@ func bucketStats(chaindata string) error {
 	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
 	return env.View(func(tx *lmdb.Txn) error {
 		for _, bucket := range bucketList {
-			dbi, bucketErr := tx.OpenDBI(string(bucket), 0)
+			dbi, bucketErr := tx.OpenDBI(bucket, 0)
 			if bucketErr != nil {
 				fmt.Printf("opening bucket %s: %v\n", bucket, bucketErr)
 				continue
 			}
 			bs, statErr := tx.Stat(dbi)
 			check(statErr)
-			fmt.Printf("%s,%d,%d,%d,%d\n", string(bucket),
+			fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
 				bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
 		}
 		return nil
