@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"runtime"
@@ -168,35 +167,9 @@ func stageSenders(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
-		mode, err := torrent.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			panic(err)
-		}
-		snapshotKV := db.KV()
-		if mode.Bodies {
-			snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-				return dbutils.BucketsCfg{
-					dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
-					dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
-				}
-			}).ReadOnly().MustOpen()).
-				For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).
-				For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
-				DB(snapshotKV).MustOpen()
-		}
-		if mode.Headers {
-			snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/headers").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-				return dbutils.BucketsCfg{
-					dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
-					dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
-				}
-			}).MustOpen()).
-				For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).
-				For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
-				DB(snapshotKV).MustOpen()
-		}
-		db.SetKV(snapshotKV)
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
 	}
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
@@ -239,6 +212,11 @@ func stageExec(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
+	}
+
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
@@ -270,35 +248,10 @@ func stageIHash(ctx context.Context) error {
 	if err := migrations.NewMigrator().Apply(db, ""); err != nil {
 		panic(err)
 	}
-	if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
-		mode, err := torrent.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			panic(err)
-		}
-		snapshotKV := db.KV()
-		if mode.Bodies {
-			snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-				return dbutils.BucketsCfg{
-					dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
-					dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
-				}
-			}).ReadOnly().MustOpen()).
-				For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).
-				For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
-				DB(snapshotKV).MustOpen()
-		}
-		if mode.Headers {
-			snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/headers").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-				return dbutils.BucketsCfg{
-					dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
-					dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
-				}
-			}).MustOpen()).
-				For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).
-				For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
-				DB(snapshotKV).MustOpen()
-		}
-		db.SetKV(snapshotKV)
+
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
 	}
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
@@ -330,6 +283,11 @@ func stageHashState(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
+	}
+
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
@@ -358,6 +316,11 @@ func stageHistory(ctx context.Context) error {
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
+	}
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
@@ -393,6 +356,11 @@ func stageTxLookup(ctx context.Context) error {
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
+	}
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
@@ -466,4 +434,21 @@ func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, er
 		return nil, nil, err1
 	}
 	return params.MainnetChainConfig, blockchain, nil
+}
+
+func SetSnapshotKV(db *ethdb.ObjectDatabase, snapshotDir, snapshotMode string) error {
+	if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
+		mode, err := torrent.SnapshotModeFromString(snapshotMode)
+		if err != nil {
+			panic(err)
+		}
+
+		snapshotKV := db.KV()
+		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, snapshotDir, mode)
+		if err != nil {
+			return err
+		}
+		db.SetKV(snapshotKV)
+	}
+	return nil
 }

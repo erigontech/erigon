@@ -114,9 +114,6 @@ func (cli *Client) Run(db ethdb.Database) error {
 	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(time.Minute*10))
 	defer cancel()
 	eg := errgroup.Group{}
-	//todo remove
-	//db.Delete(dbutils.SnapshotInfoBucket, []byte(HeadersSnapshotName))
-	//db.Delete(dbutils.SnapshotInfoBucket, []byte(BodiesSnapshotName))
 
 	if cli.snMode.Headers {
 		eg.Go(func() error {
@@ -193,4 +190,43 @@ func saveTorrentSpec(db ethdb.Database, key []byte, ts torrentSpec) error { //no
 		return err
 	}
 	return db.Put(dbutils.SnapshotInfoBucket, key, v)
+}
+
+func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.KV, error) {
+	if mode.Bodies {
+		snapshotKV, err := ethdb.NewLMDB().Path(snapshotDir + "/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
+				dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+			}
+		}).ReadOnly().Open()
+		if err != nil {
+			log.Error("Can't open body snapshot", "err", err)
+			return nil, err
+		} else { //nolint
+			kv = ethdb.NewSnapshotKV().SnapshotDB(snapshotKV).
+				For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).
+				For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
+				DB(kv).MustOpen()
+		}
+	}
+
+	if mode.Headers {
+		snapshotKV, err := ethdb.NewLMDB().Path(snapshotDir + "/headers").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
+				dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+			}
+		}).ReadOnly().Open()
+		if err != nil {
+			log.Error("Can't open headers snapshot", "err", err)
+			return nil, err
+		} else { //nolint
+			kv = ethdb.NewSnapshotKV().SnapshotDB(snapshotKV).
+				For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).
+				For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
+				DB(kv).MustOpen()
+		}
+	}
+	return kv, nil
 }
