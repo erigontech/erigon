@@ -156,7 +156,7 @@ func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 
 // iteration moves through the database buckets and creates at most
 // one stream item, which is indicated by setting the field fstl.itemPresent to true
-func (l *FlatDBTrieLoader) iteration(c *StateCursor, ih *IHCursor, first bool) error {
+func (l *FlatDBTrieLoader) iteration(c *StateCursor, ih *IHCursorNoDup, first bool) error {
 	var isIH, isIHSequence bool
 	var err error
 	if first {
@@ -383,7 +383,8 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{})
 	var filter = func(k []byte) bool {
 		return !l.rd.Retain(k)
 	}
-	ih := IH(filter, tx.CursorDupSort(l.intermediateHashesBucket), tx.CursorDupSort(l.intermediateHashesBucket))
+	//ih := IH(filter, tx.CursorDupSort(l.intermediateHashesBucket), tx.CursorDupSort(l.intermediateHashesBucket))
+	ih := IHNoDup(filter, tx.CursorDupSort(l.intermediateHashesBucket), tx.CursorDupSort(l.intermediateHashesBucket))
 	if err := l.iteration(c, ih, true /* first */); err != nil {
 		return EmptyRoot, err
 	}
@@ -728,6 +729,90 @@ func (r *RootHashAggregator) saveValueAccount(isIH bool, v *accounts.Account, h 
 type Filter func([]byte) bool // returns false - if element must be skipped
 
 const IHDupKeyLen = 2 * (common.HashLength + common.IncarnationLength)
+
+// IHCursorNoDup - holds logic related to iteration over IH bucket
+type IHCursorNoDup struct {
+	c          ethdb.Cursor
+	cForDelete ethdb.Cursor
+	filter     Filter
+	kHex       []byte
+}
+
+func IHNoDup(f Filter, c ethdb.Cursor, cForDelete ethdb.Cursor) *IHCursorNoDup {
+	return &IHCursorNoDup{c: c, filter: f, cForDelete: cForDelete}
+}
+
+func (c *IHCursorNoDup) _seek(seek []byte) (k, v []byte, err error) {
+	k, v, err = c.c.Seek(seek)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	if k == nil {
+		return nil, nil, nil
+	}
+
+	kCopy := common.CopyBytes(k)
+	//DecompressNibbles(k, &c.kHex)
+	if c.filter(k) { // if filter allow us, return. otherwise delete and go ahead.
+		return k, v, nil
+	}
+
+	_, err = c.cForDelete.SeekExact(kCopy)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	err = c.cForDelete.DeleteCurrent()
+	if err != nil {
+		return []byte{}, nil, err
+	}
+
+	return c._next()
+}
+
+func (c *IHCursorNoDup) _next() (k, v []byte, err error) {
+	k, v, err = c.c.Next()
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	for {
+		if k == nil {
+			return nil, nil, nil
+		}
+
+		kCopy := common.CopyBytes(k)
+		//DecompressNibbles(k, &c.kHex)
+		if c.filter(k) { // if filter allow us, return. otherwise delete and go ahead.
+			return k, v, nil
+		}
+
+		_, err = c.cForDelete.SeekExact(kCopy)
+		if err != nil {
+			return []byte{}, nil, err
+		}
+		err = c.cForDelete.DeleteCurrent()
+		if err != nil {
+			return []byte{}, nil, err
+		}
+
+		k, v, err = c.c.Next()
+		if err != nil {
+			return []byte{}, nil, err
+		}
+	}
+}
+
+func (c *IHCursorNoDup) Seek(seek []byte) ([]byte, []byte, bool, error) {
+	k, v, err := c._seek(seek)
+	if err != nil {
+		return []byte{}, nil, false, err
+	}
+
+	if k == nil {
+		return nil, nil, false, nil
+	}
+
+	return common.CopyBytes(k), common.CopyBytes(v), isSequence(seek, k), nil
+}
 
 // IHCursor - holds logic related to iteration over IH bucket
 type IHCursor struct {

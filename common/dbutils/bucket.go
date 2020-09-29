@@ -290,10 +290,10 @@ var BucketsConfigs = BucketsCfg{
 		DupFromLen:                60,
 		DupToLen:                  28,
 	},
-	IntermediateTrieHashBucket: {
-		Flags:               lmdb.DupSort,
-		CustomDupComparator: DupCmpSuffix32,
-	},
+	//IntermediateTrieHashBucket: {
+	//	Flags:               lmdb.DupSort,
+	//	CustomDupComparator: DupCmpSuffix32,
+	//},
 }
 
 func sortBuckets() {

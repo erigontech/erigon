@@ -77,16 +77,16 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	log.Info("Regeneration intermediate hashes started")
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
-	buf.SetComparator(comparator)
+	//comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucketn)
+	//buf.SetComparator(comparator)
 	collector := etl.NewCollector(datadir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
 		}
-		if len(keyHex) > trie.IHDupKeyLen {
-			return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
-		}
+		//if len(keyHex) > trie.IHDupKeyLen {
+		//	return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
+		//}
 		return collector.Collect(keyHex, hash)
 	}
 	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
@@ -107,8 +107,8 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		return err
 	}
 	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{
-		Quit:       quit,
-		Comparator: comparator,
+		Quit: quit,
+		//Comparator: comparator,
 	}); err != nil {
 		return fmt.Errorf("gen ih stage: fail load data to bucket: %w", err)
 	}
@@ -243,16 +243,16 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	}
 
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
-	buf.SetComparator(comparator)
+	//comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
+	//buf.SetComparator(comparator)
 	collector := etl.NewCollector(datadir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
 		}
-		if len(keyHex) > trie.IHDupKeyLen {
-			return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
-		}
+		//if len(keyHex) > trie.IHDupKeyLen {
+		//	return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
+		//}
 
 		return collector.Collect(keyHex, hash)
 	}
@@ -278,8 +278,8 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		dbutils.IntermediateTrieHashBucket,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
-			Quit:       quit,
-			Comparator: comparator,
+			Quit: quit,
+			//Comparator: comparator,
 		},
 	); err != nil {
 		return err
@@ -341,16 +341,16 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	}
 
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
-	buf.SetComparator(comparator)
+	//comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
+	//buf.SetComparator(comparator)
 	collector := etl.NewCollector(datadir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
 		}
-		if len(keyHex) > trie.IHDupKeyLen {
-			return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
-		}
+		//if len(keyHex) > trie.IHDupKeyLen {
+		//	return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
+		//}
 		return collector.Collect(keyHex, hash)
 	}
 	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
@@ -375,8 +375,8 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		dbutils.IntermediateTrieHashBucket,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
-			Quit:       quit,
-			Comparator: comparator,
+			Quit: quit,
+			//Comparator: comparator,
 		},
 	); err != nil {
 		return err
