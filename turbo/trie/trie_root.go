@@ -762,11 +762,12 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 		return nil, nil, nil
 	}
 
+	_, _, err = c.cForDelete.SeekBothExact(k, v)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+
 	if len(v) > common.HashLength {
-		_, _, err := c.cForDelete.SeekBothExact(k, v)
-		if err != nil {
-			return []byte{}, nil, err
-		}
 		keyPart := len(v) - common.HashLength
 		k = append(k, v[:keyPart]...)
 		v = v[keyPart:]
