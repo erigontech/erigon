@@ -331,35 +331,49 @@ func accountSavings(db ethdb.KV) (int, int) {
 	return emptyRoots, emptyCodes
 }
 
-func bucketStats(chaindata string) {
-	t := ethdb.Lmdb
-	bucketList := dbutils.Buckets
+func bucketStats(chaindata string) error {
+	ethDb := ethdb.MustOpen(chaindata)
 
-	switch t {
-	case ethdb.Lmdb:
-		env, err := lmdb.NewEnv()
-		check(err)
-		err = env.SetMaxDBs(100)
-		check(err)
-		err = env.Open(chaindata, lmdb.Readonly, 0664)
-		check(err)
-
-		fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
-		_ = env.View(func(tx *lmdb.Txn) error {
-			for _, bucket := range bucketList {
-				dbi, bucketErr := tx.OpenDBI(string(bucket), 0)
-				if bucketErr != nil {
-					fmt.Printf("opening bucket %s: %v\n", bucket, bucketErr)
-					continue
-				}
-				bs, statErr := tx.Stat(dbi)
-				check(statErr)
-				fmt.Printf("%s,%d,%d,%d,%d\n", string(bucket),
-					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
-			}
-			return nil
-		})
+	var bucketList []string
+	if err1 := ethDb.KV().View(context.Background(), func(txa ethdb.Tx) error {
+		if bl, err := txa.(ethdb.BucketMigrator).ExistingBuckets(); err == nil {
+			bucketList = bl
+		} else {
+			return err
+		}
+		return nil
+	}); err1 != nil {
+		ethDb.Close()
+		return err1
 	}
+	ethDb.Close()
+	env, err := lmdb.NewEnv()
+	if err != nil {
+		return err
+	}
+	err = env.SetMaxDBs(100)
+	if err != nil {
+		return err
+	}
+	err = env.Open(chaindata, lmdb.Readonly, 0664)
+	if err != nil {
+		return err
+	}
+	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
+	return env.View(func(tx *lmdb.Txn) error {
+		for _, bucket := range bucketList {
+			dbi, bucketErr := tx.OpenDBI(string(bucket), 0)
+			if bucketErr != nil {
+				fmt.Printf("opening bucket %s: %v\n", bucket, bucketErr)
+				continue
+			}
+			bs, statErr := tx.Stat(dbi)
+			check(statErr)
+			fmt.Printf("%s,%d,%d,%d,%d\n", string(bucket),
+				bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+		}
+		return nil
+	})
 }
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
@@ -1784,7 +1798,9 @@ func main() {
 		testGenCfg()
 	}
 	if *action == "bucketStats" {
-		bucketStats(*chaindata)
+		if err := bucketStats(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 	if *action == "syncChart" {
 		mychart()
