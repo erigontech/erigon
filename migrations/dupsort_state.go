@@ -138,3 +138,19 @@ var clearIndices = Migration{
 		return OnLoadCommit(db, nil, true)
 	},
 }
+
+var resetIHBucketToRecoverDB = Migration{
+	Name: "reset_in_bucket_to_recover_db",
+	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
+			return err
+		}
+		if err := stages.SaveStageUnwind(db, stages.IntermediateHashes, 0, nil); err != nil {
+			return err
+		}
+		return OnLoadCommit(db, nil, true)
+	},
+}
