@@ -22,7 +22,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"io/ioutil"
 	"math/big"
@@ -159,31 +158,16 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
 		config.SnapshotSeeding = true
 		torrentClient = torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
-		//panic(stack.Config().ResolvePath("snapshots"))
 		err = torrentClient.Run(chainDb)
 		if err != nil {
 			return nil, err
 		}
 
 		snapshotKV := chainDb.KV()
-		snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(stack.Config().ResolvePath("snapshots")+"/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
-				dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
-			}
-		}).ReadOnly().MustOpen()).
-			For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).
-			For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
-			DB(snapshotKV).MustOpen()
-		snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(stack.Config().ResolvePath("snapshots")+"/headers").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
-				dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
-			}
-		}).MustOpen()).
-			For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).
-			For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
-			DB(snapshotKV).MustOpen()
+		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, stack.Config().ResolvePath("snapshots"), config.SnapshotMode)
+		if err != nil {
+			return nil, err
+		}
 		chainDb.SetKV(snapshotKV)
 		err = torrent.PostProcessing(chainDb, config.SnapshotMode)
 		if err != nil {

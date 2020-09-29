@@ -8,8 +8,6 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
-	"github.com/davecgh/go-spew/spew"
-
 	//"github.com/anacrolix/torrent/storage"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -85,10 +83,6 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotNa
 	select {
 	case <-t.GotInfo():
 		log.Info("Init", "snapshot", snapshotName)
-		fmt.Println(t.Info().Length)
-		fmt.Println(t.Info().PieceLength, DefaultChunkSize)
-		spew.Dump(t.Info())
-		//panic("asda")
 		if newTorrent {
 			log.Info("Save spec", "snapshot", snapshotName)
 			ts.InfoBytes = common.CopyBytes(t.Metainfo().InfoBytes)
@@ -140,6 +134,7 @@ func (cli *Client) Run(db ethdb.Database) error {
 		return err
 	}
 
+	log.Info("Start snapshot downloading")
 	for i := range cli.cli.Torrents() {
 		go func(t *torrent.Torrent) {
 			t.AllowDataDownload()
@@ -149,7 +144,6 @@ func (cli *Client) Run(db ethdb.Database) error {
 		dwn:
 			for {
 				if t.Info().TotalLength()-t.BytesCompleted() == 0 {
-					fmt.Println("Downloaded", t.Name())
 					log.Info("Dowloaded", "snapshot", t.Name(), "t", time.Since(tt))
 					break dwn
 				} else {
@@ -216,6 +210,7 @@ func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.
 			return dbutils.BucketsCfg{
 				dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
 				dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+				dbutils.HeadHeaderKey:      dbutils.BucketConfigItem{},
 			}
 		}).ReadOnly().Open()
 		if err != nil {
