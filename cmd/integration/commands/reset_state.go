@@ -149,7 +149,7 @@ func resetExec(db *ethdb.ObjectDatabase) error {
 		dbutils.PlainAccountChangeSetBucket,
 		dbutils.PlainStorageChangeSetBucket,
 		dbutils.PlainContractCodeBucket,
-		dbutils.BlockReceiptsPrefix,
+		dbutils.BlockReceipts,
 		dbutils.IncarnationMapBucket,
 		dbutils.CodeBucket,
 	); err != nil {

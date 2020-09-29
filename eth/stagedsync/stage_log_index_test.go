@@ -43,10 +43,10 @@ func TestLogIndex(t *testing.T) {
 			},
 		},
 	}}
-	err = appendReceipts(tx, receipts1, 1, common.Hash{})
+	err = appendReceipts(tx, receipts1, 1)
 	require.NoError(err)
 
-	err = appendReceipts(tx, receipts2, 2, common.Hash{})
+	err = appendReceipts(tx, receipts2, 2)
 	require.NoError(err)
 
 	err = promoteLogIndex(tx, 0, nil)

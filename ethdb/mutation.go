@@ -239,6 +239,10 @@ func (m *mutation) MemCopy() Database {
 	return m.db
 }
 
+func (m *mutation) WithCounters(key []byte, counters Counters) (Counters, error) {
+	panic("only TxDb supports this method")
+}
+
 // [TURBO-GETH] Freezer support (not implemented yet)
 // Ancients returns an error as we don't have a backing chain freezer.
 func (m *mutation) Ancients() (uint64, error) {

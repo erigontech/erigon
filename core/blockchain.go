@@ -453,7 +453,7 @@ func (bc *BlockChain) SetHead(head uint64) error {
 			// The header, total difficulty and canonical hash will be
 			// removed in the hc.SetHead function.
 			rawdb.DeleteBody(db, hash, num)
-			rawdb.DeleteReceipts(db, hash, num)
+			rawdb.DeleteReceipts(db, num)
 		}
 		// Todo(rjl493456442) txlookup, bloombits, etc
 	}
@@ -664,7 +664,7 @@ func (bc *BlockChain) HasFastBlock(hash common.Hash, number uint64) bool {
 	if bc.receiptsCache.Contains(hash) {
 		return true
 	}
-	return rawdb.HasReceipts(bc.db, hash, number)
+	return rawdb.HasReceipts(bc.db, number)
 }
 
 // HasBlockAndState checks if a block and associated state trie is fully present
@@ -717,7 +717,7 @@ func (bc *BlockChain) GetReceiptsByHash(hash common.Hash) types.Receipts {
 	if number == nil {
 		return nil
 	}
-	receipts := rawdb.ReadReceipts(bc.db, hash, *number)
+	receipts := rawdb.ReadReceipts(bc.db, *number)
 	if receipts == nil {
 		return nil
 	}
@@ -1007,7 +1007,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			}
 			// Write all the data out into the database
 			rawdb.WriteBody(context.Background(), batch, block.Hash(), block.NumberU64(), block.Body())
-			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receiptChain[i])
+			rawdb.WriteReceipts(batch, block.NumberU64(), receiptChain[i])
 			if bc.enableTxLookupIndex {
 				rawdb.WriteTxLookupEntries(batch, block)
 			}
@@ -1158,7 +1158,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 		}
 	}
 	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
-		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
+		rawdb.WriteReceipts(bc.db, block.NumberU64(), receipts)
 	}
 
 	// If the total difficulty is higher than our known, add it to the canonical chain
@@ -1375,7 +1375,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				// state, but if it's this special case here(skip reexecution) we will lose
 				// the empty receipt entry.
 				if len(block.Transactions()) == 0 {
-					rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), nil)
+					rawdb.WriteReceipts(bc.db, block.NumberU64(), nil)
 				} else {
 					log.Error("Please file an issue, skip known block execution without receipt",
 						"hash", block.Hash(), "number", block.NumberU64())
@@ -1723,7 +1723,7 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 			if number == nil {
 				return
 			}
-			receipts := rawdb.ReadReceipts(bc.db, hash, *number)
+			receipts := rawdb.ReadReceipts(bc.db, *number)
 
 			var logs []*types.Log
 			for _, receipt := range receipts {

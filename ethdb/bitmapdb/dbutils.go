@@ -164,6 +164,14 @@ func TruncateRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 	return nil
 }
 
+func Has(c ethdb.Cursor, key []byte) (bool, error) {
+	k, _, err := c.Seek(key)
+	if err != nil {
+		return false, err
+	}
+	return bytes.HasPrefix(k, key), nil
+}
+
 func Get(c ethdb.Cursor, key []byte) (*gocroaring.Bitmap, error) {
 	var shards []*gocroaring.Bitmap
 	for k, v, err := c.Seek(key); k != nil; k, v, err = c.Next() {

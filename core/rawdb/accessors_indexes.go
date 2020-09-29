@@ -98,7 +98,7 @@ func ReadReceipt(db DatabaseReader, hash common.Hash) (*types.Receipt, common.Ha
 		return nil, common.Hash{}, 0, 0
 	}
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts := ReadReceipts(db, blockHash, *blockNumber)
+	receipts := ReadReceipts(db, *blockNumber)
 	for receiptIndex, receipt := range receipts {
 		if receipt.TxHash == hash {
 			return receipt, blockHash, *blockNumber, uint64(receiptIndex)

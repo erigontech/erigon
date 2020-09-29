@@ -321,15 +321,15 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 	// Check that no receipt entries are in a pristine database
 	hash := common.BytesToHash([]byte{0x03, 0x14})
-	if rs := ReadReceipts(db, hash, 0); len(rs) != 0 {
+	if rs := ReadReceipts(db, 0); len(rs) != 0 {
 		t.Fatalf("non existent receipts returned: %v", rs)
 	}
 	// Insert the body that corresponds to the receipts
 	WriteBody(ctx, db, hash, 0, body)
 
 	// Insert the receipt slice into the database and check presence
-	WriteReceipts(db, hash, 0, receipts)
-	if rs := ReadReceipts(db, hash, 0); len(rs) == 0 {
+	WriteReceipts(db, 0, receipts)
+	if rs := ReadReceipts(db, 0); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
 	} else {
 		if err := checkReceiptsRLP(rs, receipts); err != nil {
@@ -338,18 +338,18 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
 	DeleteBody(db, hash, 0)
-	if rs := ReadReceipts(db, hash, 0); rs != nil {
+	if rs := ReadReceipts(db, 0); rs != nil {
 		t.Fatalf("receipts returned when body was deleted: %v", rs)
 	}
 	// Ensure that receipts without metadata can be returned without the block body too
-	if err := checkReceiptsRLP(ReadRawReceipts(db, hash, 0), receipts); err != nil {
+	if err := checkReceiptsRLP(ReadRawReceipts(db, 0), receipts); err != nil {
 		t.Fatalf(err.Error())
 	}
 	// Sanity check that body alone without the receipt is a full purge
 	WriteBody(ctx, db, hash, 0, body)
 
-	DeleteReceipts(db, hash, 0)
-	if rs := ReadReceipts(db, hash, 0); len(rs) != 0 {
+	DeleteReceipts(db, 0)
+	if rs := ReadReceipts(db, 0); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}
 }

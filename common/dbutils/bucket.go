@@ -111,8 +111,12 @@ var (
 	HeaderHashSuffix   = []byte("n") // headerPrefix + num (uint64 big endian) + headerHashSuffix -> hash
 	HeaderNumberPrefix = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
 
-	BlockBodyPrefix     = "b" // blockBodyPrefix + num (uint64 big endian) + hash -> block body
-	BlockReceiptsPrefix = "r" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+	BlockBodyPrefix         = "b"  // blockBodyPrefix + num (uint64 big endian) + hash -> block body
+	BlockReceipts           = "r2" // blockNum_u64 -> block receipts rlp
+	BlockReceiptsPrefixOld1 = "r"  // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+
+	LogId2Topic = "log_id_topic" // num (uint32 big endian) -> 32 bytes topic
+	LogTopic2Id = "log_topic_id" // 32 bytes topic -> num (uint32 big endian)
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -162,6 +166,8 @@ var (
 	// it stores stages progress to understand in which context was executed migration
 	// in case of bug-report developer can ask content of this bucket
 	Migrations = "migrations"
+
+	Counters = "counters"
 )
 
 // Keys
@@ -201,7 +207,7 @@ var Buckets = []string{
 	HeaderPrefix,
 	HeaderNumberPrefix,
 	BlockBodyPrefix,
-	BlockReceiptsPrefix,
+	BlockReceipts,
 	TxLookupPrefix,
 	BloomBitsPrefix,
 	PreimagePrefix,
@@ -225,6 +231,9 @@ var Buckets = []string{
 	Migrations,
 	LogTopicIndex,
 	LogAddressIndex,
+	LogId2Topic,
+	LogTopic2Id,
+	Counters,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
@@ -234,6 +243,7 @@ var DeprecatedBuckets = []string{
 	CurrentStateBucketOld1,
 	PlainStateBucketOld1,
 	IntermediateTrieHashBucketOld1,
+	BlockReceiptsPrefixOld1,
 }
 
 type CustomComparator string
@@ -293,6 +303,13 @@ var BucketsConfigs = BucketsCfg{
 	IntermediateTrieHashBucket: {
 		Flags:               lmdb.DupSort,
 		CustomDupComparator: DupCmpSuffix32,
+	},
+	LogTopic2Id: {
+		Flags:                     lmdb.DupSort | lmdb.DupFixed,
+		AutoDupSortKeysConversion: true,
+		DupFromLen:                32,
+		DupToLen:                  8,
+		DupFixedSize:              28,
 	},
 }
 

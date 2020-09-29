@@ -225,7 +225,6 @@ func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, 
 func (b *EthAPIBackend) tryGetReceiptsFromDb(block *types.Block) types.Receipts {
 	return rawdb.ReadReceipts(
 		b.eth.chainDb,
-		block.Hash(),
 		block.NumberU64(),
 	)
 }

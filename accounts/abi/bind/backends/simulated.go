@@ -508,7 +508,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 	// Determine the lowest and highest possible gas limits to binary search in between
 	var (
-		lo  uint64 = params.TxGas - 1
+		lo  = params.TxGas - 1
 		hi  uint64
 		cap uint64
 	)
@@ -828,7 +828,7 @@ func (fb *filterBackend) GetReceipts(_ context.Context, hash common.Hash) (types
 	if number == nil {
 		return nil, nil
 	}
-	return rawdb.ReadReceipts(fb.db, hash, *number), nil
+	return rawdb.ReadReceipts(fb.db, *number), nil
 }
 
 func (fb *filterBackend) GetLogs(_ context.Context, hash common.Hash) ([][]*types.Log, error) {
@@ -836,7 +836,7 @@ func (fb *filterBackend) GetLogs(_ context.Context, hash common.Hash) ([][]*type
 	if number == nil {
 		return nil, nil
 	}
-	receipts := rawdb.ReadReceipts(fb.db, hash, *number)
+	receipts := rawdb.ReadReceipts(fb.db, *number)
 	if receipts == nil {
 		return nil, nil
 	}

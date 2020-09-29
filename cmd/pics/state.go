@@ -116,7 +116,7 @@ func keyTape(t *trie.Trie, number int) error {
 }
 
 var bucketLabels = map[string]string{
-	dbutils.BlockReceiptsPrefix:   "Receipts",
+	dbutils.BlockReceipts:         "Receipts",
 	dbutils.AccountsHistoryBucket: "History Of Accounts",
 	dbutils.HeaderPrefix:          "Headers",
 	//dbutils.ConfigPrefix:                "Config",

@@ -284,3 +284,44 @@ func testWalk(db Database, t *testing.T) {
 
 	assert.Equal(t, keysInRange, gotKeys)
 }
+
+func TestCounters(t *testing.T) {
+	db := newTestLmdb()
+	defer db.Close()
+	tx, err := db.Begin(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	ids, err := Ids(tx)
+	require.NoError(t, err)
+	ids.Topic++
+	ids.Topic++
+	ids.Topic++
+
+	err = tx.CommitAndBegin(context.Background())
+	require.NoError(t, err)
+
+	ids2, err := Ids(tx)
+	require.NoError(t, err)
+	require.Equal(t, 3, int(ids2.Topic))
+	ids2.Topic++
+	ids2.Topic++
+
+	err = tx.CommitAndBegin(context.Background())
+	require.NoError(t, err)
+
+	ids3, err := Ids(tx)
+	require.NoError(t, err)
+	require.Equal(t, 5, int(ids3.Topic))
+
+	ids.Topic++
+	tx.Rollback()
+
+	tx, err = db.Begin(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	ids4, err := Ids(tx)
+	require.NoError(t, err)
+	require.Equal(t, 5, int(ids4.Topic))
+}

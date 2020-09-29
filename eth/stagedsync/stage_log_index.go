@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"sort"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -76,9 +76,10 @@ func promoteLogIndex(tx ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 	addresses := map[string]*gocroaring.Bitmap{}
 	logTopicIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex)
 	logAddrIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
-	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
+	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceipts)
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
+	idBytes := make([]byte, 4)
 
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(start)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
@@ -88,8 +89,7 @@ func promoteLogIndex(tx ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 		if err := common.Stopped(quit); err != nil {
 			return err
 		}
-		blockNum64Bytes := k[:len(k)-32]
-		blockNum := binary.BigEndian.Uint64(blockNum64Bytes)
+		blockNum := binary.BigEndian.Uint64(k)
 
 		select {
 		default:
@@ -129,12 +129,13 @@ func promoteLogIndex(tx ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 
 		for _, receipt := range storageReceipts {
 			for _, log := range receipt.Logs {
-				for _, topic := range log.Topics {
-					topicStr := string(topic.Bytes())
-					m, ok := topics[topicStr]
+				for _, topicId := range log.TopicIds {
+					binary.BigEndian.PutUint32(idBytes, topicId)
+					topicIdStr := string(common.CopyBytes(idBytes))
+					m, ok := topics[topicIdStr]
 					if !ok {
 						m = gocroaring.New()
-						topics[topicStr] = m
+						topics[topicIdStr] = m
 					}
 					m.Add(uint32(blockNum))
 				}
@@ -197,7 +198,7 @@ func unwindLogIndex(tx ethdb.Database, from, to uint64, quitCh <-chan struct{}) 
 	addrIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
 	topicIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex)
 
-	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
+	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceipts)
 	start := dbutils.EncodeBlockNumber(to + 1)
 	for k, v, err := receipts.Seek(start); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
@@ -228,6 +229,7 @@ func unwindLogIndex(tx ethdb.Database, from, to uint64, quitCh <-chan struct{}) 
 	if err := truncateBitmaps(addrIndex, addrs, to+1, from+1); err != nil {
 		return err
 	}
+
 	return nil
 }
 

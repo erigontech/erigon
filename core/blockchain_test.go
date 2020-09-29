@@ -776,7 +776,7 @@ func TestFastVsFullChains(t *testing.T) {
 		} else if types.CalcUncleHash(fblock.Uncles()) != types.CalcUncleHash(arblock.Uncles()) || types.CalcUncleHash(anblock.Uncles()) != types.CalcUncleHash(arblock.Uncles()) {
 			t.Errorf("block #%d [%x]: uncles mismatch: fastdb %v, ancientdb %v, archivedb %v", num, hash, fblock.Uncles(), anblock, arblock.Uncles())
 		}
-		if freceipts, anreceipts, areceipts := rawdb.ReadReceipts(fastDb, hash, *rawdb.ReadHeaderNumber(fastDb, hash)), rawdb.ReadReceipts(ancientDb, hash, *rawdb.ReadHeaderNumber(ancientDb, hash)), rawdb.ReadReceipts(archiveDb, hash, *rawdb.ReadHeaderNumber(archiveDb, hash)); types.DeriveSha(freceipts) != types.DeriveSha(areceipts) {
+		if freceipts, anreceipts, areceipts := rawdb.ReadReceipts(fastDb, *rawdb.ReadHeaderNumber(fastDb, hash)), rawdb.ReadReceipts(ancientDb, *rawdb.ReadHeaderNumber(ancientDb, hash)), rawdb.ReadReceipts(archiveDb, *rawdb.ReadHeaderNumber(archiveDb, hash)); types.DeriveSha(freceipts) != types.DeriveSha(areceipts) {
 			t.Errorf("block #%d [%x]: receipts mismatch: fastdb %v, ancientdb %v, archivedb %v", num, hash, freceipts, anreceipts, areceipts)
 		}
 	}
@@ -1029,7 +1029,7 @@ func TestChainTxReorgs(t *testing.T) {
 	}
 
 	// removed tx
-	for i, tx := range (types.Transactions{pastDrop, freshDrop}) {
+	for i, tx := range types.Transactions{pastDrop, freshDrop} {
 		if txn, _, _, _ := rawdb.ReadTransaction(db, tx.Hash()); txn != nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
@@ -1038,7 +1038,7 @@ func TestChainTxReorgs(t *testing.T) {
 		}
 	}
 	// added tx
-	for i, tx := range (types.Transactions{pastAdd, freshAdd, futureAdd}) {
+	for i, tx := range types.Transactions{pastAdd, freshAdd, futureAdd} {
 		if txn, _, _, _ := rawdb.ReadTransaction(db, tx.Hash()); txn == nil {
 			t.Errorf("add %d: expected tx to be found", i)
 		}
@@ -1047,7 +1047,7 @@ func TestChainTxReorgs(t *testing.T) {
 		}
 	}
 	// shared tx
-	for i, tx := range (types.Transactions{postponed, swapped}) {
+	for i, tx := range types.Transactions{postponed, swapped} {
 		if txn, _, _, _ := rawdb.ReadTransaction(db, tx.Hash()); txn == nil {
 			t.Errorf("share %d: expected tx to be found", i)
 		}
@@ -1644,7 +1644,7 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 	for bucketName, shouldBeEmpty := range map[string]bool{
 		dbutils.AccountsHistoryBucket: !history,
 		dbutils.PreimagePrefix:        !preimages,
-		dbutils.BlockReceiptsPrefix:   !receipts,
+		dbutils.BlockReceipts:         !receipts,
 		dbutils.TxLookupPrefix:        !txlookup,
 	} {
 		numberOfEntries := 0
@@ -1652,7 +1652,7 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 		err := db.Walk(bucketName, nil, 0, func(k, v []byte) (bool, error) {
 			// we ignore empty account history
 			//nolint:scopelint
-			if bucketName == string(dbutils.AccountsHistoryBucket) && len(v) == 0 {
+			if bucketName == dbutils.AccountsHistoryBucket && len(v) == 0 {
 				return true, nil
 			}
 
@@ -1663,12 +1663,12 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 			return err
 		}
 
-		if bucketName == string(dbutils.BlockReceiptsPrefix) {
+		if bucketName == dbutils.BlockReceipts {
 			// we will always have a receipt for genesis
 			numberOfEntries--
 		}
 
-		if bucketName == string(dbutils.PreimagePrefix) {
+		if bucketName == dbutils.PreimagePrefix {
 			// we will always have 2 preimages because GenerateChain interface does not
 			// allow us to set it to ignore them
 			// but if the preimages are enabled in BlockChain, we will have more than 2.

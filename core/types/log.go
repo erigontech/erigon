@@ -50,6 +50,8 @@ type Log struct {
 	// index of the log in the block
 	Index uint `json:"logIndex"`
 
+	TopicIds []uint32 `json:"-" gencodec:"-"`
+
 	// The Removed field is true if this log was reverted due to a chain reorganisation.
 	// You must pay attention to this field if you receive logs through a filter query.
 	Removed bool `json:"removed"`
@@ -65,11 +67,16 @@ type logMarshaling struct {
 type rlpLog struct {
 	Address common.Address
 	Topics  []common.Hash
-	Data    []byte
+	//TopicIds []uint32
+	Data []byte
 }
 
 // rlpStorageLog is the storage encoding of a log.
-type rlpStorageLog rlpLog
+type rlpStorageLog struct {
+	Address  common.Address
+	TopicIds []uint32
+	Data     []byte
+}
 
 // legacyRlpStorageLog is the previous storage encoding of a log including some redundant fields.
 type legacyRlpStorageLog struct {
@@ -105,9 +112,10 @@ type LogForStorage Log
 // EncodeRLP implements rlp.Encoder.
 func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, rlpStorageLog{
-		Address: l.Address,
-		Topics:  l.Topics,
-		Data:    l.Data,
+		Address:  l.Address,
+		TopicIds: l.TopicIds,
+		//Topics:  l.Topics,
+		Data: l.Data,
 		//BlockNumber: l.BlockNumber,
 		//TxHash:      l.TxHash,
 		//TxIndex:     l.TxIndex,
@@ -126,23 +134,38 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 	var dec rlpStorageLog
 	err = rlp.DecodeBytes(blob, &dec)
+	*l = LogForStorage{
+		Address:  dec.Address,
+		TopicIds: dec.TopicIds,
+		Data:     dec.Data,
+	}
+
+	return err
+}
+
+// LogForStorage is a wrapper around a Log that flattens and parses the entire content of
+// a log including non-consensus fields.
+type DeprecatedLogForStorage1 Log
+
+// DecodeRLP implements rlp.Decoder.
+//
+// Note some redundant fields(e.g. block number, tx hash etc) will be assembled later.
+func (l *DeprecatedLogForStorage1) DecodeRLP(s *rlp.Stream) error {
+	blob, err := s.Raw()
+	if err != nil {
+		return err
+	}
+
+	// Try to decode log with previous definition.
+	var dec legacyRlpStorageLog
+	err = rlp.DecodeBytes(blob, &dec)
 	if err == nil {
-		*l = LogForStorage{
+		*l = DeprecatedLogForStorage1{
 			Address: dec.Address,
 			Topics:  dec.Topics,
 			Data:    dec.Data,
 		}
-	} else {
-		// Try to decode log with previous definition.
-		var dec legacyRlpStorageLog
-		err = rlp.DecodeBytes(blob, &dec)
-		if err == nil {
-			*l = LogForStorage{
-				Address: dec.Address,
-				Topics:  dec.Topics,
-				Data:    dec.Data,
-			}
-		}
 	}
+
 	return err
 }

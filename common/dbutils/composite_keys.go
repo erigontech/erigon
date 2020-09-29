@@ -57,9 +57,9 @@ func BlockBodyKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }
 
-// blockReceiptsKey = blockReceiptsPrefix + num (uint64 big endian) + hash
-func BlockReceiptsKey(number uint64, hash common.Hash) []byte {
-	return append(EncodeBlockNumber(number), hash.Bytes()...)
+// blockReceiptsKey = num (uint64 big endian)
+func BlockReceiptsKey(number uint64) []byte {
+	return EncodeBlockNumber(number)
 }
 
 // bloomBitsKey = bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash
