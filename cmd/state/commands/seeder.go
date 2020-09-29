@@ -16,4 +16,3 @@ var seedSnapshotCmd = &cobra.Command{
 		return generate.Seed(args)
 	},
 }
-

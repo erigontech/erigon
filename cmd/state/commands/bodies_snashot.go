@@ -16,7 +16,6 @@ var generateBodiesSnapshotCmd = &cobra.Command{
 	Use:   "bodiesSnapshot",
 	Short: "Generate bodies snapshot",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return generate.GenerateBodySnapshot(chaindata, snapshotFile, block)
+		return generate.BodySnapshot(chaindata, snapshotFile, block)
 	},
 }
-

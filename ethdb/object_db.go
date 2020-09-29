@@ -62,7 +62,6 @@ func MustOpen(path string) *ObjectDatabase {
 	return db
 }
 
-
 // Open - main method to open database. Choosing driver based on path suffix.
 // If env TEST_DB provided - choose driver based on it. Some test using this method to open non-in-memory db
 func Open(path string, snapshotsOpts ...SnapshotUsageOpt) (*ObjectDatabase, error) {

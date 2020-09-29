@@ -5,12 +5,11 @@ import "fmt"
 var DefaultSnapshotMode = SnapshotMode{}
 
 type SnapshotMode struct {
-	Headers   bool
-	Bodies  bool
-	State  bool
-	Receipts  bool
+	Headers  bool
+	Bodies   bool
+	State    bool
+	Receipts bool
 }
-
 
 func (m SnapshotMode) ToString() string {
 	var mode string

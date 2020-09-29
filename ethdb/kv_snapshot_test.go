@@ -137,36 +137,49 @@ func TestSnapshotGet(t *testing.T) {
 		t.Fatal(v)
 	}
 
-
-	headerCursor:=tx.Cursor(dbutils.HeaderPrefix)
-	k,v,err:=headerCursor.Last()
-	if err!=nil {
+	headerCursor := tx.Cursor(dbutils.HeaderPrefix)
+	k, v, err := headerCursor.Last()
+	if err != nil {
 		t.Fatal(err)
 	}
 	if !(bytes.Equal(dbutils.HeaderKey(3, common.Hash{3}), k) && bytes.Equal(v, []byte{33})) {
 		t.Fatal(k, v)
 	}
-	k,v,err=headerCursor.First()
+	k, v, err = headerCursor.First()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !(bytes.Equal(dbutils.HeaderKey(1, common.Hash{1}), k) && bytes.Equal(v, []byte{1})) {
 		t.Fatal(k, v)
 	}
 
-	k,v,err=headerCursor.Next()
+	k, v, err = headerCursor.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if !(bytes.Equal(dbutils.HeaderKey(2, common.Hash{2}), k) && bytes.Equal(v, []byte{22})) {
 		t.Fatal(k, v)
 	}
 
-	k,v,err=headerCursor.Next()
+	k, v, err = headerCursor.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if !(bytes.Equal(dbutils.HeaderKey(3, common.Hash{3}), k) && bytes.Equal(v, []byte{33})) {
 		t.Fatal(k, v)
 	}
 
-	k,v,err=headerCursor.Next()
+	k, v, err = headerCursor.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if !(bytes.Equal([]byte{}, k) && bytes.Equal(v, []byte{})) {
 		t.Fatal(k, v)
 	}
 }
-
 
 func TestSnapshotWritableTxAndGet(t *testing.T) {
 	sn1 := NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {

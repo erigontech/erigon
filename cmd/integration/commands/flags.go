@@ -8,7 +8,7 @@ import (
 var (
 	chaindata          string
 	snapshotMode       string
-	snapshotDir       string
+	snapshotDir        string
 	compact            bool
 	referenceChaindata string
 	block              uint64

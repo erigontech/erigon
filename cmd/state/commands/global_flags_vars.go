@@ -8,7 +8,7 @@ import (
 var (
 	chaindata       string
 	statsfile       string
-	snapshotFile       string
+	snapshotFile    string
 	block           uint64
 	privateApiAddr  string
 	changeSetBucket string

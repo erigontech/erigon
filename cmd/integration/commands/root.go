@@ -24,18 +24,18 @@ var rootCmd = &cobra.Command{
 			if err := migrations.NewMigrator().Apply(db, ""); err != nil {
 				panic(err)
 			}
-			if len(snapshotMode)>0 && len(snapshotDir)>0 {
+			if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
 
-				mode,err:=torrent.SnapshotModeFromString(snapshotMode)
-				if err!=nil {
+				mode, err := torrent.SnapshotModeFromString(snapshotMode)
+				if err != nil {
 					panic(err)
 				}
-				snapshotKV:=db.KV()
+				snapshotKV := db.KV()
 				if mode.Bodies {
-					snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+					snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 						return dbutils.BucketsCfg{
-							dbutils.BlockBodyPrefix:dbutils.BucketConfigItem{},
-							dbutils.SnapshotInfoBucket:dbutils.BucketConfigItem{},
+							dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
+							dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
 						}
 					}).ReadOnly().MustOpen()).
 						For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).
@@ -43,13 +43,13 @@ var rootCmd = &cobra.Command{
 						DB(snapshotKV).MustOpen()
 				}
 				if mode.Headers {
-					snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/headers").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+					snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/headers").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 						return dbutils.BucketsCfg{
-							dbutils.HeaderPrefix:dbutils.BucketConfigItem{},
-							dbutils.SnapshotInfoBucket:dbutils.BucketConfigItem{},
+							dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
+							dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
 						}
 					}).MustOpen()).
-						For(dbutils.HeaderPrefix,dbutils.BucketConfigItem{}).
+						For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).
 						For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
 						DB(snapshotKV).MustOpen()
 				}

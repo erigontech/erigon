@@ -2,21 +2,19 @@ package torrent
 
 //only for mainnet
 const (
-	HeadersSnapshotName = "headers"
-	HeadersSnapshotHashKey = "headersSnapshotKey"
+	HeadersSnapshotName        = "headers"
+	HeadersSnapshotHashKey     = "headersSnapshotKey"
 	HeadersSnapshotInfoDataKey = "headersSnapshotInfoDataKey"
-	BodiesSnapshotName = "bodies"
-	BodiesSnapshotHashKey = "bodiesSnapshotKey"
-	BodiesSnapshotInfoDataKey = "bodiesSnapshotInfoDataKey"
-	StateSnapshotName = "state"
-	ReceiptsSnapshotName = "receipts"
+	BodiesSnapshotName         = "bodies"
+	BodiesSnapshotHashKey      = "bodiesSnapshotKey"
+	BodiesSnapshotInfoDataKey  = "bodiesSnapshotInfoDataKey"
+	StateSnapshotName          = "state"
+	ReceiptsSnapshotName       = "receipts"
 
-
-	HeadersSnapshotHash = "460da4ffbc2b77f6662a8a7c15e21f4c5981656d" //10700k block 1mb chunk
-	BlocksSnapshotHash = "6353d013d614f1f8145d71e1479de9b4361d273f" //10700k block 1mb chunk
-	StateSnapshotHash = ""
+	HeadersSnapshotHash  = "460da4ffbc2b77f6662a8a7c15e21f4c5981656d" //10700k block 1mb chunk
+	BlocksSnapshotHash   = "6353d013d614f1f8145d71e1479de9b4361d273f" //10700k block 1mb chunk
+	StateSnapshotHash    = ""
 	ReceiptsSnapshotHash = ""
-
 )
 
 var Trackers = [][]string{{

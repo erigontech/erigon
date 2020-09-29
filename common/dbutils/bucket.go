@@ -167,9 +167,9 @@ var (
 	HeadHeaderKey = "LastHeader"
 
 	SnapshotHeadersHeadNumber = "SnapshotLastHeaderNumber"
-	SnapshotHeadersHeadHash = "SnapshotLastHeaderHash"
-	SnapshotBodyHeadNumber = "SnapshotLastBodyNumber"
-	SnapshotBodyHeadHash = "SnapshotLastBodyHash"
+	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
+	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
+	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
 )
 
 // Metrics

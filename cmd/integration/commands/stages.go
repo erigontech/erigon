@@ -168,18 +168,17 @@ func stageSenders(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-
-	if len(snapshotMode)>0 && len(snapshotDir)>0 {
-		mode,err:=torrent.SnapshotModeFromString(snapshotMode)
-		if err!=nil {
+	if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
+		mode, err := torrent.SnapshotModeFromString(snapshotMode)
+		if err != nil {
 			panic(err)
 		}
-		snapshotKV:=db.KV()
+		snapshotKV := db.KV()
 		if mode.Bodies {
-			snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 				return dbutils.BucketsCfg{
-					dbutils.BlockBodyPrefix:dbutils.BucketConfigItem{},
-					dbutils.SnapshotInfoBucket:dbutils.BucketConfigItem{},
+					dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
+					dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
 				}
 			}).ReadOnly().MustOpen()).
 				For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).
@@ -187,19 +186,18 @@ func stageSenders(ctx context.Context) error {
 				DB(snapshotKV).MustOpen()
 		}
 		if mode.Headers {
-			snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/headers").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/headers").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 				return dbutils.BucketsCfg{
-					dbutils.HeaderPrefix:dbutils.BucketConfigItem{},
-					dbutils.SnapshotInfoBucket:dbutils.BucketConfigItem{},
+					dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
+					dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
 				}
 			}).MustOpen()).
-				For(dbutils.HeaderPrefix,dbutils.BucketConfigItem{}).
+				For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).
 				For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
 				DB(snapshotKV).MustOpen()
 		}
 		db.SetKV(snapshotKV)
 	}
-
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
@@ -272,17 +270,17 @@ func stageIHash(ctx context.Context) error {
 	if err := migrations.NewMigrator().Apply(db, ""); err != nil {
 		panic(err)
 	}
-	if len(snapshotMode)>0 && len(snapshotDir)>0 {
-		mode,err:=torrent.SnapshotModeFromString(snapshotMode)
-		if err!=nil {
+	if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
+		mode, err := torrent.SnapshotModeFromString(snapshotMode)
+		if err != nil {
 			panic(err)
 		}
-		snapshotKV:=db.KV()
+		snapshotKV := db.KV()
 		if mode.Bodies {
-			snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 				return dbutils.BucketsCfg{
-					dbutils.BlockBodyPrefix:dbutils.BucketConfigItem{},
-					dbutils.SnapshotInfoBucket:dbutils.BucketConfigItem{},
+					dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
+					dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
 				}
 			}).ReadOnly().MustOpen()).
 				For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).
@@ -290,19 +288,18 @@ func stageIHash(ctx context.Context) error {
 				DB(snapshotKV).MustOpen()
 		}
 		if mode.Headers {
-			snapshotKV=ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/headers").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			snapshotKV = ethdb.NewSnapshotKV().SnapshotDB(ethdb.NewLMDB().Path(snapshotDir+"/headers").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 				return dbutils.BucketsCfg{
-					dbutils.HeaderPrefix:dbutils.BucketConfigItem{},
-					dbutils.SnapshotInfoBucket:dbutils.BucketConfigItem{},
+					dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
+					dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
 				}
 			}).MustOpen()).
-				For(dbutils.HeaderPrefix,dbutils.BucketConfigItem{}).
+				For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).
 				For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
 				DB(snapshotKV).MustOpen()
 		}
 		db.SetKV(snapshotKV)
 	}
-
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()

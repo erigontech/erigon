@@ -89,37 +89,38 @@ func TestDebugSnapshot(t *testing.T) {
 		}
 	}).MustOpen()
 	var prevHeader *types.Header
-	err:=snKV.View(context.Background(), func(tx ethdb.Tx) error {
-		c:=tx.Cursor(dbutils.HeaderPrefix)
-		k,v,err:=c.First()
-		for  {
-			if len(k)==0 && len(v)==0 {
+	err := snKV.View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.HeaderPrefix)
+		k, v, innerErr := c.First()
+		for {
+			if len(k) == 0 && len(v) == 0 {
 				break
 			}
-			if err!=nil {
-				t.Fatal(err)
+			if innerErr != nil {
+				t.Fatal(innerErr)
 			}
 
 			fmt.Println(common.Bytes2Hex(k), binary.BigEndian.Uint64(k))
 			header := new(types.Header)
-			if err := rlp.DecodeBytes(v, header); err != nil {
-				t.Fatal(err)
-				return nil
+			innerErr := rlp.DecodeBytes(v, header)
+			if innerErr != nil {
+				t.Fatal(innerErr)
 			}
-			if prevHeader!=nil {
-				if prevHeader.Number.Uint64()+1!=header.Number.Uint64() {
-					t.Fatal(prevHeader.Number.Uint64()!=header.Number.Uint64())
+
+			if prevHeader != nil {
+				if prevHeader.Number.Uint64()+1 != header.Number.Uint64() {
+					t.Fatal(prevHeader.Number.Uint64() != header.Number.Uint64())
 				}
-				if prevHeader.Hash()!=header.ParentHash {
+				if prevHeader.Hash() != header.ParentHash {
 					t.Fatal(prevHeader.Hash(), header.ParentHash)
 				}
 			}
-			k, v, err = c.Next()
-			prevHeader=header
+			k, v, innerErr = c.Next() //nolint
+			prevHeader = header
 		}
 		return nil
 	})
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
 }

@@ -31,11 +31,11 @@ func (s *snapshotTX) Comparator(bucket string) dbutils.CmpFunc {
 }
 
 func (s *snapshotTX) Cmp(bucket string, a, b []byte) int {
-	return s.dbTX.Cmp(bucket,a,b)
+	return s.dbTX.Cmp(bucket, a, b)
 }
 
 func (s *snapshotTX) DCmp(bucket string, a, b []byte) int {
-	return s.dbTX.DCmp(bucket,a,b)
+	return s.dbTX.DCmp(bucket, a, b)
 }
 
 func (v *lazyTx) CursorDupSort(bucket string) CursorDupSort {
@@ -130,10 +130,9 @@ func NewSnapshotKV() snapshotOpts {
 }
 
 type SnapshotKV struct {
-	db           KV
-	snapshotDB   KV
-	snapshotPath string
-	forBuckets   map[string]dbutils.BucketConfigItem
+	db         KV
+	snapshotDB KV
+	forBuckets map[string]dbutils.BucketConfigItem
 }
 
 type snapshotOpts struct {
@@ -289,7 +288,6 @@ type snapshotTX struct {
 	dbTX       Tx
 	snTX       Tx
 	forBuckets map[string]dbutils.BucketConfigItem
-	writable bool
 }
 
 func (s *snapshotTX) Commit(ctx context.Context) error {
@@ -303,7 +301,7 @@ func (s *snapshotTX) Rollback() {
 }
 
 func (s *snapshotTX) Cursor(bucket string) Cursor {
-	if _,ok:=s.forBuckets[bucket];!ok {
+	if _, ok := s.forBuckets[bucket]; !ok {
 		return s.dbTX.Cursor(bucket)
 	}
 	snCursor := s.snTX.Cursor(bucket)
@@ -326,7 +324,7 @@ func (s *snapshotTX) Get(bucket string, key []byte) (val []byte, err error) {
 	switch {
 	case err == nil && v != nil:
 		return v, nil
-	case err != nil && err != ErrKeyNotFound:
+	case err != nil && errors.Is(err, ErrKeyNotFound):
 		return nil, err
 	}
 	return s.snTX.Get(bucket, key)
@@ -339,7 +337,7 @@ func (s *snapshotTX) BucketSize(name string) (uint64, error) {
 	}
 	snSize, err := s.dbTX.BucketSize(name)
 	if err != nil {
-		return 0, fmt.Errorf("Snapshot db err %w", err)
+		return 0, fmt.Errorf("snapshot db err %w", err)
 	}
 	return dbSize + snSize, nil
 }
@@ -385,9 +383,9 @@ func (s *snapshotCursor) First() ([]byte, []byte, error) {
 	s.keyCmp = cmp
 	if cmp <= 0 {
 		return s.lastDBKey, s.lastDBVal, nil
-	} else {
-		return s.lastSNDBKey, s.lastSNDBVal, nil
 	}
+
+	return s.lastSNDBKey, s.lastSNDBVal, nil
 }
 
 func (s *snapshotCursor) Seek(seek []byte) ([]byte, []byte, error) {
@@ -408,9 +406,9 @@ func (s *snapshotCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	s.keyCmp = cmp
 	if cmp <= 0 {
 		return s.lastDBKey, s.lastDBVal, nil
-	} else {
-		return s.lastSNDBKey, s.lastSNDBVal, nil
 	}
+
+	return s.lastSNDBKey, s.lastSNDBVal, nil
 }
 
 func (s *snapshotCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
@@ -440,9 +438,9 @@ func (s *snapshotCursor) Next() ([]byte, []byte, error) {
 	s.keyCmp = cmp
 	if cmp <= 0 {
 		return s.lastDBKey, s.lastDBVal, nil
-	} else {
-		return s.lastSNDBKey, s.lastSNDBVal, nil
 	}
+
+	return s.lastSNDBKey, s.lastSNDBVal, nil
 }
 
 func (s *snapshotCursor) Walk(walker func(k []byte, v []byte) (bool, error)) error {
@@ -462,11 +460,11 @@ func (s *snapshotCursor) Append(key []byte, value []byte) error {
 }
 
 func (s *snapshotCursor) SeekExact(key []byte) ([]byte, error) {
-	v,err := s.dbCursor.SeekExact(key)
-	if err!=nil {
+	v, err := s.dbCursor.SeekExact(key)
+	if err != nil {
 		return nil, err
 	}
-	if v==nil {
+	if v == nil {
 		return s.snCursor.SeekExact(key)
 	}
 	return v, err
@@ -490,23 +488,7 @@ func (s *snapshotCursor) Last() ([]byte, []byte, error) {
 	s.keyCmp = cmp
 	if cmp >= 0 {
 		return s.lastDBKey, s.lastDBVal, nil
-	} else {
-		return s.lastSNDBKey, s.lastSNDBVal, nil
 	}
+
+	return s.lastSNDBKey, s.lastSNDBVal, nil
 }
-
-/*
-number=10487424
-
-WriteHeadHeaderHash - db.Put(dbutils.HeadHeaderKey, dbutils.HeadHeaderKey, hash.Bytes())
-DeleteCanonicalHash - db.Delete(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number))
-WriteCanonicalHash - db.Put(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number), hash.Bytes())
-WriteHeader - db.Put(dbutils.HeaderNumberPrefix, hash[:], encoded),  db.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash), data)
-WriteTd - db.Put(dbutils.HeaderPrefix, dbutils.HeaderTDKey(number, hash), data)
-
-ReadHeader
-ReadCanonicalHash
-ReadHeaderNumber
-ReadHeadHeaderHash
-ReadTd
-*/

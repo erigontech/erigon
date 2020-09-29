@@ -159,7 +159,7 @@ type Downloader struct {
 	receiptFetchHook func([]*types.Header) // Method to call upon starting a receipt fetch
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
 
-	storageMode  ethdb.StorageMode
+	storageMode ethdb.StorageMode
 	datadir     string
 	hdd         bool
 

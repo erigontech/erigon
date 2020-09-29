@@ -408,7 +408,7 @@ var (
 		Value: torrent.DefaultSnapshotMode.ToString(),
 	}
 	NoSeedSnapshotsFlag = cli.BoolFlag{
-		Name: "no-seed-snapshots",
+		Name:  "no-seed-snapshots",
 		Usage: `Disallows snapshot seeding`,
 	}
 	ArchiveSyncInterval = cli.IntFlag{
