@@ -358,31 +358,32 @@ func (l *FlatDBTrieLoader) iteration(c *StateCursor, ih *IHCursor, first bool) e
 func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{}) (common.Hash, error) {
 	var (
 		tx ethdb.Tx
-		kv ethdb.KV
 	)
+
+	var txDB ethdb.DbWithPendingMutations
+	var useExternalTx bool
 
 	// If method executed within transaction - use it, or open new read transaction
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		txDB = hasTx.(ethdb.DbWithPendingMutations)
 		tx = hasTx.Tx()
+		useExternalTx = true
 	} else {
-		if hasKV, ok := db.(ethdb.HasKV); ok {
-			kv = hasKV.KV()
-			var err error
-			tx, err = kv.Begin(context.Background(), nil, false)
-			if err != nil {
-				return EmptyRoot, err
-			}
-			defer tx.Rollback()
-		} else {
-			return EmptyRoot, fmt.Errorf("database doest not implement KV: %T", db)
+		var err error
+		txDB, err = db.Begin(context.Background())
+		if err != nil {
+			return EmptyRoot, err
 		}
+
+		defer txDB.Rollback()
+		tx = txDB.(ethdb.HasTx).Tx()
 	}
 
 	c := NewStateCursor(tx.Cursor(l.stateBucket))
 	var filter = func(k []byte) bool {
 		return !l.rd.Retain(k)
 	}
-	ih := IH(filter, tx.CursorDupSort(l.intermediateHashesBucket))
+	ih := IH(filter, tx.CursorDupSort(l.intermediateHashesBucket), tx.CursorDupSort(l.intermediateHashesBucket))
 	if err := l.iteration(c, ih, true /* first */); err != nil {
 		return EmptyRoot, err
 	}
@@ -411,6 +412,14 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{})
 			l.logProgress()
 		}
 	}
+
+	if !useExternalTx {
+		_, err := txDB.Commit()
+		if err != nil {
+			return EmptyRoot, err
+		}
+	}
+
 	return l.receiver.Root(), nil
 }
 
@@ -722,12 +731,13 @@ const IHDupKeyLen = 2 * (common.HashLength + common.IncarnationLength)
 
 // IHCursor - holds logic related to iteration over IH bucket
 type IHCursor struct {
-	c      ethdb.CursorDupSort
-	filter Filter
+	c          ethdb.CursorDupSort
+	cForDelete ethdb.CursorDupSort
+	filter     Filter
 }
 
-func IH(f Filter, c ethdb.CursorDupSort) *IHCursor {
-	return &IHCursor{c: c, filter: f}
+func IH(f Filter, c ethdb.CursorDupSort, cForDelete ethdb.CursorDupSort) *IHCursor {
+	return &IHCursor{c: c, filter: f, cForDelete: cForDelete}
 }
 
 func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
@@ -752,6 +762,7 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 		return nil, nil, nil
 	}
 
+	kCopy, vCopy := common.CopyBytes(k), common.CopyBytes(v)
 	if len(v) > common.HashLength {
 		keyPart := len(v) - common.HashLength
 		k = append(k, v[:keyPart]...)
@@ -760,7 +771,12 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 	if c.filter(k) { // if filter allow us, return. otherwise delete and go ahead.
 		return k, v, nil
 	}
-	err = c.c.DeleteCurrent()
+
+	_, _, err = c.cForDelete.SeekBothExact(kCopy, vCopy)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	err = c.cForDelete.DeleteCurrent()
 	if err != nil {
 		return []byte{}, nil, err
 	}
@@ -778,6 +794,7 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return nil, nil, nil
 		}
 
+		kCopy, vCopy := common.CopyBytes(k), common.CopyBytes(v)
 		if len(v) > common.HashLength {
 			keyPart := len(v) - common.HashLength
 			k = append(k, v[:keyPart]...)
@@ -788,7 +805,11 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return k, v, nil
 		}
 
-		err = c.c.DeleteCurrent()
+		_, _, err = c.cForDelete.SeekBothExact(kCopy, vCopy)
+		if err != nil {
+			return []byte{}, nil, err
+		}
+		err = c.cForDelete.DeleteCurrent()
 		if err != nil {
 			return []byte{}, nil, err
 		}
