@@ -77,7 +77,7 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 
 	// Regenerate genesis block in the fresh database
 	gspec.MustCommit(db)
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, eng, vm.Config{}, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}

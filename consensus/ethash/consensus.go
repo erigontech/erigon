@@ -199,6 +199,18 @@ func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, block *types.Blo
 	if len(block.Uncles()) == 0 {
 		return nil
 	}
+	uncles, ancestors := getUncles(chain, block)
+
+	// Verify each of the uncles that it's recent, but not an ancestor
+	for _, uncle := range block.Uncles() {
+		if err := ethash.VerifyUncle(chain, block, uncle, uncles, ancestors, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func getUncles(chain consensus.ChainReader, block *types.Block) (mapset.Set, map[common.Hash]*types.Header) {
 	// Gather the set of past uncles and ancestors
 	uncles, ancestors := mapset.NewSet(), make(map[common.Hash]*types.Header)
 
@@ -216,14 +228,7 @@ func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, block *types.Blo
 	}
 	ancestors[block.Hash()] = block.Header()
 	uncles.Add(block.Hash())
-
-	// Verify each of the uncles that it's recent, but not an ancestor
-	for _, uncle := range block.Uncles() {
-		if err := ethash.VerifyUncle(chain, block, uncle, uncles, ancestors, true); err != nil {
-			return err
-		}
-	}
-	return nil
+	return uncles, ancestors
 }
 
 func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Block, uncle *types.Header, uncles mapset.Set, ancestors map[common.Hash]*types.Header, seal bool) error {

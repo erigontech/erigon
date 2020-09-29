@@ -2,6 +2,7 @@ package ethash
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
@@ -54,10 +55,6 @@ func newFakeEth(mode Mode) Ethash {
 			Log:     log.Root(),
 		},
 	}
-}
-
-func (f *FakeEthash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Block, uncle *types.Header, uncles mapset.Set, ancestors map[common.Hash]*types.Header, _ bool) error {
-	return f.Ethash.VerifyUncle(chain, block, uncle, uncles, ancestors, false)
 }
 
 func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
@@ -120,6 +117,36 @@ func (f *FakeEthash) VerifyHeader(chain consensus.ChainHeaderReader, header *typ
 	return nil
 }
 
+func (f *FakeEthash) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
+	if len(block.Uncles()) > maxUncles {
+		return errTooManyUncles
+	}
+	if len(block.Uncles()) == 0 {
+		return nil
+	}
+
+	uncles, ancestors := getUncles(chain, block)
+
+	for _, uncle := range block.Uncles() {
+		if err := f.VerifyUncle(chain, block, uncle, uncles, ancestors, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *FakeEthash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Block, uncle *types.Header, uncles mapset.Set, ancestors map[common.Hash]*types.Header, seal bool) error {
+	err := f.Ethash.VerifyUncle(chain, block, uncle, uncles, ancestors, false)
+	if err != nil {
+		return err
+	}
+
+	if seal {
+		return f.VerifySeal(chain, uncle)
+	}
+	return nil
+}
+
 // If we're running a fake PoW, accept any seal as valid
 func (f *FakeEthash) VerifySeal(_ consensus.ChainHeaderReader, header *types.Header) error {
 	if f.fakeDelay > 0 {
@@ -146,6 +173,22 @@ func (f *FakeEthash) Seal(ctx consensus.Cancel, _ consensus.ChainHeaderReader, b
 	default:
 		f.Ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "fake", "sealhash", f.Ethash.SealHash(block.Header()))
 	}
+	return nil
+}
+
+func (f *FakeEthash) Verify(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, _ bool, seal bool) error {
+	if len(parents) == 0 {
+		return errors.New("need a parent to verify the header")
+	}
+	err := f.verifyHeader(chain, header, parents[0], false, false)
+	if err != nil {
+		return err
+	}
+
+	if seal {
+		return f.VerifySeal(chain, header)
+	}
+
 	return nil
 }
 
@@ -178,7 +221,13 @@ func (f *FullFakeEthash) VerifyHeaders(_ consensus.ChainHeaderReader, headers []
 	return func() {}, results
 }
 
-// If we're running a full engine faking, accept any input as valid
 func (f *FullFakeEthash) VerifyUncles(_ consensus.ChainReader, _ *types.Block) error {
+	return nil
+}
+
+func (f *FullFakeEthash) Verify(_ consensus.ChainHeaderReader, _ *types.Header, parents []*types.Header, _ bool, _ bool) error {
+	if len(parents) == 0 {
+		return errors.New("need a parent to verify the header")
+	}
 	return nil
 }
