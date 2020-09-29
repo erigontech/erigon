@@ -1,7 +1,6 @@
 package ethash
 
 import (
-	"context"
 	"errors"
 	"time"
 
@@ -62,14 +61,14 @@ func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []
 	fn, results := f.Ethash.VerifyHeaders(chain, headers, fakeSeals)
 
 	errs := make(chan error, cap(results))
-	ctx, cancel := context.WithCancel(context.Background())
+	isClosed := make(chan struct{})
 
 	go func() {
 		var i int
 		var sealErr error
 		for {
 			select {
-			case <-ctx.Done():
+			case <-isClosed:
 				return
 			case res := <-results:
 				if seals[i] {
@@ -81,7 +80,7 @@ func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []
 				}
 
 				select {
-				case <-ctx.Done():
+				case <-isClosed:
 					return
 				case errs <- res:
 					// nothing to do
@@ -96,7 +95,7 @@ func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []
 	}()
 
 	closeFn := func() {
-		cancel()
+		close(isClosed)
 		close(errs)
 		fn()
 	}

@@ -22,6 +22,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -40,41 +41,69 @@ var (
 	testAddress = crypto.PubkeyToAddress(testKey.PublicKey)
 	testDb      = ethdb.NewMemDatabase()
 	testGenesis = core.GenesisBlockForTesting(testDb, testAddress, big.NewInt(1000000000))
+
+	// The common prefix of all test chains:
+	// Different forks on top of the base chain:
+	testChainBase   *testChain
+	testChainBaseMu sync.Mutex
+
+	testChainForkLightA   *testChain
+	testChainForkLightAMu sync.Mutex
+
+	testChainForkLightB   *testChain
+	testChainForkLightBMu sync.Mutex
+
+	testChainForkHeavy   *testChain
+	testChainForkHeavyMu sync.Mutex
+
+	forkLen = int(fullMaxForkAncestry + 50)
 )
 
-// The common prefix of all test chains:
-var testChainBaseMu sync.Mutex
-var testChainBase *testChain
-
-// Different forks on top of the base chain:
-var testChainForkLightA, testChainForkLightB, testChainForkHeavy *testChain
-var forkLen = int(fullMaxForkAncestry + 50)
-
 func getTestChainForkLightA() *testChain {
-	testChainBaseMu.Lock()
-	defer testChainBaseMu.Unlock()
+	fmt.Println("In getTestChainForkLightA")
+	t := time.Now()
+	defer func() {
+		fmt.Println("getTestChainForkLightA", time.Since(t))
+	}()
+	testChainForkLightAMu.Lock()
+	defer testChainForkLightAMu.Unlock()
 	if testChainForkLightA == nil {
 		testChainForkLightA = getTestChainBase().makeFork(forkLen, false, 1)
 	}
 	return testChainForkLightA
 }
 func getTestChainForkLightB() *testChain {
-	testChainBaseMu.Lock()
-	defer testChainBaseMu.Unlock()
+	fmt.Println("In getTestChainForkLightB")
+	t := time.Now()
+	defer func() {
+		fmt.Println("getTestChainForkLightB", time.Since(t))
+	}()
+	testChainForkLightBMu.Lock()
+	defer testChainForkLightBMu.Unlock()
 	if testChainForkLightB == nil {
 		testChainForkLightB = getTestChainBase().makeFork(forkLen, false, 2)
 	}
 	return testChainForkLightB
 }
 func getTestChainForkHeavy() *testChain {
-	testChainBaseMu.Lock()
-	defer testChainBaseMu.Unlock()
+	fmt.Println("In getTestChainForkHeavy")
+	t := time.Now()
+	defer func() {
+		fmt.Println("getTestChainForkHeavy", time.Since(t))
+	}()
+	testChainForkHeavyMu.Lock()
+	defer testChainForkHeavyMu.Unlock()
 	if testChainForkHeavy == nil {
 		testChainForkHeavy = getTestChainBase().makeFork(forkLen+1, true, 3)
 	}
 	return testChainForkHeavy
 }
 func getTestChainBase() *testChain {
+	fmt.Println("In getTestChainBase")
+	t := time.Now()
+	defer func() {
+		fmt.Println("getTestChainBase", time.Since(t))
+	}()
 	testChainBaseMu.Lock()
 	defer testChainBaseMu.Unlock()
 	if testChainBase == nil {
@@ -118,8 +147,13 @@ func newTestChain(length int, db *ethdb.ObjectDatabase, genesis *types.Block) *t
 
 // makeFork creates a fork on top of the test chain.
 func (tc *testChain) makeFork(length int, heavy bool, seed byte) *testChain {
+	fmt.Println("In makeFork", length, heavy)
+	t := time.Now()
 	fork := tc.copy(tc.len() + length)
+	fmt.Println("In makeFork.copy", time.Since(t))
+	t = time.Now()
 	fork.generate(length, seed, tc.headBlock(), heavy)
+	fmt.Println("In makeFork.generate", time.Since(t))
 	return fork
 }
 
