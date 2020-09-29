@@ -36,16 +36,16 @@ func New(snapshotsDir string, snapshotMode SnapshotMode, seeding bool) *Client {
 	if err != nil {
 		log.Error("Fail to start torrnet client", "err", err)
 	}
-	fmt.Println(snapshotsDir)
+
 	return &Client{
-		cli:          torrentClient,
+		Cli:          torrentClient,
 		snMode:       snapshotMode,
 		snapshotsDir: snapshotsDir,
 	}
 }
 
 type Client struct {
-	cli          *torrent.Client
+	Cli          *torrent.Client
 	snMode       SnapshotMode
 	snapshotsDir string
 }
@@ -69,7 +69,7 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotNa
 		return err
 	}
 
-	t, _, err := cli.cli.AddTorrentSpec(&torrent.TorrentSpec{
+	t, _, err := cli.Cli.AddTorrentSpec(&torrent.TorrentSpec{
 		Trackers:    Trackers,
 		InfoHash:    ts.InfoHash,
 		DisplayName: snapshotName,
@@ -135,7 +135,10 @@ func (cli *Client) Run(db ethdb.Database) error {
 	}
 
 	log.Info("Start snapshot downloading")
-	for i := range cli.cli.Torrents() {
+	torrents := cli.Cli.Torrents()
+	for i := range torrents {
+		t := torrents[i]
+		fmt.Println(t.Name())
 		go func(t *torrent.Torrent) {
 			t.AllowDataDownload()
 			t.DownloadAll()
@@ -153,11 +156,11 @@ func (cli *Client) Run(db ethdb.Database) error {
 				}
 
 			}
-		}(cli.cli.Torrents()[i])
+		}(t)
 	}
-	cli.cli.WaitAll()
+	cli.Cli.WaitAll()
 
-	for _, t := range cli.cli.Torrents() {
+	for _, t := range cli.Cli.Torrents() {
 		log.Info("Snapshot seeding", "name", t.Name(), "seeding", t.Seeding())
 	}
 

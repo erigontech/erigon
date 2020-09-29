@@ -1567,6 +1567,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.SnapshotMode = snMode
+	cfg.SnapshotSeeding = !ctx.GlobalBool(NoSeedSnapshotsFlag.Name)
 
 	cfg.Hdd = ctx.GlobalBool(HddFlag.Name)
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
