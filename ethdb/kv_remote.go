@@ -479,8 +479,3 @@ func (back *RemoteBackend) NetVersion() (uint64, error) {
 
 	return res.Id, nil
 }
-
-func (back *RemoteBackend) BloomStatus() (uint64, uint64, common.Hash) {
-	res, _ := back.remoteEthBackend.BloomStatus(context.Background(), &remote.BloomStatusRequest{})
-	return res.Size, res.Sections, common.BytesToHash(res.Hash)
-}
