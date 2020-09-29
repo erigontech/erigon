@@ -22,6 +22,7 @@ Address represents the 20 byte address of an Ethereum account.
     type Hash [32]byte
 
 Hash represents the 32 byte Keccak256 hash of arbitrary data.
+Address repressents the 20 byte standard Ethereum Address
 
 Both Hash and Address are bytes arrays.
 
