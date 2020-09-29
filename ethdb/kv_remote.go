@@ -22,14 +22,14 @@ import (
 )
 
 // generate the messages
-//go:generate protoc --go_out=. "./remote/kv.proto"
-//go:generate protoc --go_out=. "./remote/db.proto"
-//go:generate protoc --go_out=. "./remote/ethbackend.proto"
+//go:generate protoc -I=./../build/include/google -I=. --go_out=. "./remote/kv.proto"
+//go:generate protoc -I=./../build/include/google -I=. --go_out=. "./remote/db.proto"
+//go:generate protoc -I=./../build/include/google -I=. --go_out=. "./remote/ethbackend.proto"
 
 // generate the services
-//go:generate protoc --go-grpc_out=. "./remote/kv.proto"
-//go:generate protoc --go-grpc_out=. "./remote/db.proto"
-//go:generate protoc --go-grpc_out=. "./remote/ethbackend.proto"
+//go:generate protoc -I=./../build/include/google -I=. --go-grpc_out=. "./remote/kv.proto"
+//go:generate protoc -I=./../build/include/google -I=. --go-grpc_out=. "./remote/db.proto"
+//go:generate protoc -I=./../build/include/google -I=. --go-grpc_out=. "./remote/ethbackend.proto"
 
 type remoteOpts struct {
 	DialAddress string

@@ -9,6 +9,16 @@ endif
 
 GIT_COMMIT=$(shell git rev-list -1 HEAD)
 
+OS = $(shell uname -s)
+ARCH = $(shell uname -m)
+
+ifeq ($(OS),Darwin)
+PROTOC_OS := osx
+endif
+ifeq ($(OS),Linux)
+PROTOC_OS = linux
+endif
+
 all: tg hack tester rpctest state restapi pics rpcdaemon integration
 
 docker:
@@ -147,6 +157,13 @@ bindings:
 
 grpc:
 	# See also: ./cmd/hack/binary-deps/main.go
+	rm -f ./build/bin/protoc*
+	rm -rf ./build/include*
+
+	$(eval PROTOC_TMP := $(shell mktemp -d))
+	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.13.0/protoc-3.13.0-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
+	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc $(GOBIN) && mv include $(GOBIN)/..
+
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	PATH=$(GOBIN):$(PATH) go generate ./ethdb  # add folder with binaries to temporary PATH, `protoc` will search there installed above plugins
