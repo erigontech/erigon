@@ -762,11 +762,7 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 		return nil, nil, nil
 	}
 
-	_, _, err = c.cForDelete.SeekBothExact(k, v)
-	if err != nil {
-		return []byte{}, nil, err
-	}
-
+	kCopy, vCopy := common.CopyBytes(k), common.CopyBytes(v)
 	if len(v) > common.HashLength {
 		keyPart := len(v) - common.HashLength
 		k = append(k, v[:keyPart]...)
@@ -776,6 +772,10 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 		return k, v, nil
 	}
 
+	_, _, err = c.cForDelete.SeekBothExact(kCopy, vCopy)
+	if err != nil {
+		return []byte{}, nil, err
+	}
 	err = c.cForDelete.DeleteCurrent()
 	if err != nil {
 		return []byte{}, nil, err
@@ -794,6 +794,7 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return nil, nil, nil
 		}
 
+		kCopy, vCopy := common.CopyBytes(k), common.CopyBytes(v)
 		if len(v) > common.HashLength {
 			keyPart := len(v) - common.HashLength
 			k = append(k, v[:keyPart]...)
@@ -804,7 +805,11 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return k, v, nil
 		}
 
-		err = c.c.DeleteCurrent()
+		_, _, err = c.cForDelete.SeekBothExact(kCopy, vCopy)
+		if err != nil {
+			return []byte{}, nil, err
+		}
+		err = c.cForDelete.DeleteCurrent()
 		if err != nil {
 			return []byte{}, nil, err
 		}
