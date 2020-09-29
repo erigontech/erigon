@@ -109,10 +109,7 @@ func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *ty
 // a results channel to retrieve the async verifications.
 func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
 	if len(headers) == 0 {
-		results := make(chan error, len(headers))
-		for i := 0; i < len(headers); i++ {
-			results <- nil
-		}
+		results := make(chan error)
 		return func() {}, results
 	}
 

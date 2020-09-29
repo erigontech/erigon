@@ -1,7 +1,7 @@
 package ethash
 
 import (
-	"fmt"
+	"context"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
@@ -61,23 +61,75 @@ func (f *FakeEthash) VerifyUncle(chain consensus.ChainHeaderReader, block *types
 }
 
 func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
-	for i := range seals {
-		seals[i] = false
+	fakeSeals := make([]bool, len(seals))
+	fn, results := f.Ethash.VerifyHeaders(chain, headers, fakeSeals)
+
+	errs := make(chan error, cap(results))
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go func() {
+		var i int
+		var sealErr error
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case res := <-results:
+				if seals[i] {
+					sealErr = f.VerifySeal(chain, headers[i])
+				}
+
+				if res == nil {
+					res = sealErr
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				case errs <- res:
+					// nothing to do
+				}
+
+				i++
+				if len(headers) == i {
+					return
+				}
+			}
+		}
+	}()
+
+	closeFn := func() {
+		cancel()
+		close(errs)
+		fn()
 	}
-	return f.Ethash.VerifyHeaders(chain, headers, seals)
+
+	return closeFn, errs
 }
 
-func (f *FakeEthash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
-	return f.Ethash.VerifyHeader(chain, header, false)
+func (f *FakeEthash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
+	err := f.Ethash.VerifyHeader(chain, header, false)
+	if err != nil {
+		return err
+	}
+
+	if seal {
+		return f.VerifySeal(chain, header)
+	}
+
+	return nil
 }
 
 // If we're running a fake PoW, accept any seal as valid
 func (f *FakeEthash) VerifySeal(_ consensus.ChainHeaderReader, header *types.Header) error {
-	fmt.Println("VerifySeal")
-	time.Sleep(f.fakeDelay)
+	if f.fakeDelay > 0 {
+		time.Sleep(f.fakeDelay)
+	}
+
 	if f.fakeFail == header.Number.Uint64() {
 		return errInvalidPoW
 	}
+
 	return nil
 }
 
@@ -85,10 +137,12 @@ func (f *FakeEthash) VerifySeal(_ consensus.ChainHeaderReader, header *types.Hea
 func (f *FakeEthash) Seal(ctx consensus.Cancel, _ consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
 	header := block.Header()
 	header.Nonce, header.MixDigest = types.BlockNonce{}, common.Hash{}
+
 	select {
 	case <-stop:
 		ctx.CancelFunc()
 	case results <- consensus.ResultWithContext{Cancel: ctx, Block: block.WithSeal(header)}:
+		// nothing to do
 	default:
 		f.Ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "fake", "sealhash", f.Ethash.SealHash(block.Header()))
 	}
