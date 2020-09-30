@@ -128,6 +128,7 @@ var (
 	LogAddressIndex = "log_address_index"
 
 	// Indices for call traces - have the same format as LogTopicIndex and LogAddressIndex
+	// Store bitmap indices - in which block number we saw calls from (CallFromIndex) or to (CallToIndex) some addresses
 	CallFromIndex = "call_from_index"
 	CallToIndex   = "call_to_index"
 

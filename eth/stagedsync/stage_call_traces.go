@@ -67,7 +67,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 	return nil
 }
 
-func promoteCallTraces(tx ethdb.DbWithPendingMutations, startBlock, endBlock uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quit <-chan struct{}) error {
+func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -195,7 +195,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 	return nil
 }
 
-func unwindCallTraces(tx ethdb.Database, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}) error {
+func unwindCallTraces(tx rawdb.DatabaseReader, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}) error {
 	froms := map[string]bool{}
 	tos := map[string]bool{}
 	fromIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CallFromIndex)
