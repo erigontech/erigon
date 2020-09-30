@@ -118,11 +118,6 @@ func (s *snapshotTX) ExistingBuckets() ([]string, error) {
 	return db.ExistingBuckets()
 }
 
-type SnapshotUsageOpt struct {
-	Path       string
-	ForBuckets map[string]struct{}
-}
-
 func NewSnapshotKV() snapshotOpts {
 	return snapshotOpts{
 		forBuckets: make(map[string]dbutils.BucketConfigItem),

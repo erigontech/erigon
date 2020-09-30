@@ -38,7 +38,7 @@ func SeedSnapshots(dir string) error {
 		t := t
 		go func() {
 			for {
-				log.Info("Snapshot stats", "snapshot", t.Name(), "active peers", t.Stats().ActivePeers, "seeding",t.Seeding())
+				log.Info("Snapshot stats", "snapshot", t.Name(), "active peers", t.Stats().ActivePeers, "seeding", t.Seeding())
 				if common.IsCanceled(ctx) {
 					return
 				}
