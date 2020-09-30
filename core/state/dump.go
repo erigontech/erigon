@@ -37,7 +37,7 @@ type trieHasher interface {
 
 type Dumper struct {
 	blockNumber uint64
-	db          ethdb.KV
+	db          ethdb.Tx
 	hashedState bool
 }
 
@@ -126,7 +126,7 @@ func (d iterativeDump) OnRoot(root common.Hash) {
 	}{root})
 }
 
-func NewDumper(db ethdb.KV, blockNumber uint64) *Dumper {
+func NewDumper(db ethdb.Tx, blockNumber uint64) *Dumper {
 	return &Dumper{
 		db:          db,
 		blockNumber: blockNumber,

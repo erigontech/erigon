@@ -48,12 +48,12 @@ func (a *storageItem) Less(b llrb.Item) bool {
 
 // Implements StateReader by wrapping database only, without trie
 type PlainDBState struct {
-	db      ethdb.KV
+	db      ethdb.Tx
 	blockNr uint64
 	storage map[common.Address]*llrb.LLRB
 }
 
-func NewPlainDBState(db ethdb.KV, blockNr uint64) *PlainDBState {
+func NewPlainDBState(db ethdb.Tx, blockNr uint64) *PlainDBState {
 	return &PlainDBState{
 		db:      db,
 		blockNr: blockNr,
@@ -183,13 +183,8 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 	//restore codehash
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		var codeHash []byte
-		if err := dbs.db.View(context.Background(), func(tx ethdb.Tx) error {
-			codeHash, err = tx.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation))
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
+		codeHash, err = dbs.db.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation))
+		if err != nil {
 			return nil, err
 		}
 		if len(codeHash) > 0 {

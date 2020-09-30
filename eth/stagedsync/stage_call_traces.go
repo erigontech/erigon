@@ -125,7 +125,7 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
 
-		stateReader = state.NewPlainDBState(tx.(ethdb.HasKV).KV(), blockNum-1)
+		stateReader = state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
 		stateWriter = state.NewNoopWriter()
 
 		tracer := NewCallTracer()
@@ -220,7 +220,7 @@ func unwindCallTraces(tx rawdb.DatabaseReader, from, to uint64, chainConfig *par
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
 
-		stateReader = state.NewPlainDBState(tx.(ethdb.HasKV).KV(), blockNum-1)
+		stateReader = state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
 		stateWriter = state.NewNoopWriter()
 
 		_, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
