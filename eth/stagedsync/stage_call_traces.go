@@ -74,7 +74,9 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 	froms := map[string]*gocroaring.Bitmap{}
 	tos := map[string]*gocroaring.Bitmap{}
 	callFromIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CallFromIndex)
+	defer callFromIndexCursor.Close()
 	callToIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CallToIndex)
+	defer callToIndexCursor.Close()
 	checkFlushEvery := time.NewTicker(callIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
 	engine := chainContext.Engine()

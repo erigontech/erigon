@@ -30,12 +30,12 @@ type PrivateDebugAPI interface {
 // APIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
 	db           ethdb.KV
-	dbReader     ethdb.Getter
+	dbReader     ethdb.Database
 	chainContext core.ChainContext
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Database) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
 		db:       db,
 		dbReader: dbReader,
@@ -48,7 +48,12 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	cc := adapter.NewChainContext(api.dbReader)
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
-	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, api.db, blockHash, txIndex)
+	tx, err1 := api.dbReader.Begin(ctx)
+	if err1 != nil {
+		return StorageRangeResult{}, fmt.Errorf("storageRangeAt cannot open tx: %v", err1)
+	}
+	defer tx.Rollback()
+	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -86,7 +91,12 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		maxResults = eth.AccountRangeMaxResults
 	}
 
-	dumper := state.NewDumper(api.db, blockNumber)
+	tx, err1 := api.dbReader.Begin(ctx)
+	if err1 != nil {
+		return state.IteratorDump{}, fmt.Errorf("accountRange cannot open tx: %v", err1)
+	}
+	defer tx.Rollback()
+	dumper := state.NewDumper(tx.(ethdb.HasTx).Tx(), blockNumber)
 	res, err := dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err

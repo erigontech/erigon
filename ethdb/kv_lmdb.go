@@ -571,6 +571,7 @@ func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
 		if err := c.initCursor(); err != nil {
 			return nil, err
 		}
+		defer c.Close()
 		_, v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if lmdb.IsNotFound(err) {
