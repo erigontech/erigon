@@ -114,7 +114,6 @@ func promoteLogIndex(tx ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 			}
 
 			if needFlush(addresses, logIndicesMemLimit) {
-				topics = map[string]*gocroaring.Bitmap{}
 				if err := flushBitmaps(logAddrIndexCursor, addresses); err != nil {
 					return err
 				}
