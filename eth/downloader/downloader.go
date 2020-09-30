@@ -267,6 +267,7 @@ func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, c
 		receiptWakeCh: make(chan bool, 1),
 		headerProcCh:  make(chan []*types.Header, 1),
 		quitCh:        make(chan struct{}),
+		storageMode:   sm,
 	}
 	go dl.qosTuner()
 	return dl
@@ -1088,7 +1089,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeight uint64) (uint6
 // can fill in the skeleton - not even the origin peer - it's assumed invalid and
 // the origin is dropped.
 func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) error {
-	p.log.Info("Directing header downloads", "origin", from)
+	p.log.Debug("Directing header downloads", "origin", from)
 	defer p.log.Debug("Header download terminated")
 
 	// Create a timeout timer, and the associated header fetcher
@@ -1547,7 +1548,7 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 // keeps processing and scheduling them into the header chain and downloader's
 // queue until the stream ends or a failure occurs.
 func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uint64) error {
-	log.Info("processHeaders", "origin", origin, "bn", blockNumber)
+	log.Debug("processHeaders", "origin", origin, "bn", blockNumber)
 	// Keep a count of uncertain headers to roll back
 	var (
 		rollback    uint64 // Zero means no rollback (fine as you can't unroll the genesis)
