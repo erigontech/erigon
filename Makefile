@@ -147,6 +147,9 @@ devtools:
 	env GOBIN= go install github.com/ugorji/go/codec/codecgen
 	env GOBIN= go install github.com/tinylib/msgp
 	env GOBIN= go install ./cmd/abigen
+	go generate ./common
+	go generate ./core/types
+	go generate ./ethdb/typedbucket
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
@@ -155,7 +158,6 @@ bindings:
 	go generate ./tests/contracts/
 	go generate ./cmd/tester/contracts/
 	go generate ./core/state/contracts/
-	go generate ./ethdb/typedbucket
 
 grpc:
 	# See also: ./cmd/hack/binary-deps/main.go

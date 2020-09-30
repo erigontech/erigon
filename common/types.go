@@ -32,6 +32,8 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+//go:generate msgp -o=types_msgp_gen.go
+
 // Lengths of hashes and addresses in bytes.
 const (
 	// HashLength is the expected length of the hash (in bytes)
