@@ -52,6 +52,7 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 		hBucket = dbutils.AccountsHistoryBucket
 	}
 	c := tx.Cursor(hBucket)
+	defer c.Close()
 	k, v, seekErr := c.Seek(dbutils.IndexChunkKey(key, timestamp))
 	if seekErr != nil {
 		return nil, seekErr

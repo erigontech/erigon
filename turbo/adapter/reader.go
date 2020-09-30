@@ -23,16 +23,16 @@ type StateReader struct {
 	storageReads map[common.Address]map[common.Hash]struct{}
 	codeReads    map[common.Address]struct{}
 	blockNr      uint64
-	db           ethdb.KV
+	tx           ethdb.Tx
 	storage      map[common.Address]*llrb.LLRB
 }
 
-func NewStateReader(db ethdb.KV, blockNr uint64) *StateReader {
+func NewStateReader(tx ethdb.Tx, blockNr uint64) *StateReader {
 	return &StateReader{
 		accountReads: make(map[common.Address]struct{}),
 		storageReads: make(map[common.Address]map[common.Hash]struct{}),
 		codeReads:    make(map[common.Address]struct{}),
-		db:           db,
+		tx:           tx,
 		blockNr:      blockNr,
 		storage:      make(map[common.Address]*llrb.LLRB),
 	}
@@ -66,7 +66,7 @@ func (r *StateReader) GetCodeReads() [][]byte {
 
 func (r *StateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	r.accountReads[address] = struct{}{}
-	enc, err := state.GetAsOf(r.db, false /* storage */, address[:], r.blockNr+1)
+	enc, err := state.GetAsOf(r.tx, false /* storage */, address[:], r.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -85,7 +85,7 @@ func (r *StateReader) ReadAccountStorage(address common.Address, incarnation uin
 	}
 	m[*key] = struct{}{}
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
-	enc, err := state.GetAsOf(r.db, true /* storage */, compositeKey, r.blockNr+1)
+	enc, err := state.GetAsOf(r.tx, true /* storage */, compositeKey, r.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -98,17 +98,11 @@ func (r *StateReader) ReadAccountCode(address common.Address, codeHash common.Ha
 		return nil, nil
 	}
 	var val []byte
-	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		v, err := tx.Get(dbutils.CodeBucket, codeHash[:])
-		if err != nil {
-			return err
-		}
-		val = common.CopyBytes(v)
-		return err
-	})
+	v, err := r.tx.Get(dbutils.CodeBucket, codeHash[:])
 	if err != nil {
 		return nil, err
 	}
+	val = common.CopyBytes(v)
 	return val, nil
 }
 
@@ -156,7 +150,7 @@ func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(
 	st := llrb.New()
 	var s [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addr[:])
-	accData, err := state.GetAsOf(r.db, false /* storage */, addr[:], r.blockNr+1)
+	accData, err := state.GetAsOf(r.tx, false /* storage */, addr[:], r.blockNr+1)
 	if err != nil {
 		if errors.Is(err, ethdb.ErrKeyNotFound) {
 			return fmt.Errorf("account %x not found at %d", addr, r.blockNr)
@@ -185,7 +179,7 @@ func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	if err := state.WalkAsOf(r.db, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.AddressLength+common.IncarnationLength), r.blockNr+1, func(ks, vs []byte) (bool, error) {
+	if err := state.WalkAsOf(r.tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.AddressLength+common.IncarnationLength), r.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if !bytes.HasPrefix(ks, addr[:]) {
 			return false, nil
 		}
@@ -242,9 +236,9 @@ func (a *storageItem) Less(b llrb.Item) bool {
 // computeIntraBlockState retrieves the state database associated with a certain block.
 // If no state is locally available for the given block, a number of blocks are
 // attempted to be reexecuted to generate the desired state.
-func ComputeIntraBlockState(chainKV ethdb.KV, block *types.Block) (*state.IntraBlockState, *StateReader) {
+func ComputeIntraBlockState(tx ethdb.Tx, block *types.Block) (*state.IntraBlockState, *StateReader) {
 	// If we have the state fully available, use that
-	reader := NewStateReader(chainKV, block.NumberU64())
+	reader := NewStateReader(tx, block.NumberU64())
 	statedb := state.New(reader)
 	return statedb, reader
 }

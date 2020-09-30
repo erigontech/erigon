@@ -391,6 +391,14 @@ func (c *remoteCursorDupSort) Prefetch(v uint) Cursor {
 	return c
 }
 
+func (c *remoteCursor) Close() error {
+	if c.stream == nil {
+		return nil
+	}
+	c.streamCancelFn()
+	return nil
+}
+
 //func (c *remoteCursorDupSort) initCursor() error {
 //	if c.initialized {
 //		return nil
