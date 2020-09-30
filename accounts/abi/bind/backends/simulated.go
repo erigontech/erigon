@@ -198,17 +198,12 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingState = state.New(b.pendingReader)
 }
 
-func (b *SimulatedBackend) prependingState() *state.IntraBlockState {
-	dbs := state.NewPlainDBState(b.kv, b.prependBlock.NumberU64())
-	return state.New(dbs)
-}
-
 // stateByBlockNumber retrieves a state by a given blocknumber.
-func (b *SimulatedBackend) stateByBlockNumber(ctx context.Context, blockNumber *big.Int) (*state.IntraBlockState, error) {
+func (b *SimulatedBackend) stateByBlockNumber(ctx context.Context, tx ethdb.Tx, blockNumber *big.Int) (*state.IntraBlockState, error) {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(state.NewPlainDBState(b.kv, b.pendingBlock.NumberU64())), nil
+		return state.New(state.NewPlainDBState(tx, b.pendingBlock.NumberU64())), nil
 	}
-	return state.New(state.NewPlainDBState(b.kv, uint64(blockNumber.Int64()))), nil
+	return state.New(state.NewPlainDBState(tx, uint64(blockNumber.Int64()))), nil
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -216,7 +211,12 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	stateDB, err := b.stateByBlockNumber(ctx, blockNumber)
+	dbtx, err1 := b.database.Begin(ctx)
+	if err1 != nil {
+		return nil, err1
+	}
+	defer dbtx.Rollback()
+	stateDB, err := b.stateByBlockNumber(ctx, dbtx.(ethdb.HasTx).Tx(), blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +228,12 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	stateDB, err := b.stateByBlockNumber(ctx, blockNumber)
+	dbtx, err1 := b.database.Begin(ctx)
+	if err1 != nil {
+		return nil, err1
+	}
+	defer dbtx.Rollback()
+	stateDB, err := b.stateByBlockNumber(ctx, dbtx.(ethdb.HasTx).Tx(), blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +245,12 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	stateDB, err := b.stateByBlockNumber(ctx, blockNumber)
+	dbtx, err1 := b.database.Begin(ctx)
+	if err1 != nil {
+		return 0, err1
+	}
+	defer dbtx.Rollback()
+	stateDB, err := b.stateByBlockNumber(ctx, dbtx.(ethdb.HasTx).Tx(), blockNumber)
 	if err != nil {
 		return 0, err
 	}
@@ -252,7 +262,12 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	stateDB, err := b.stateByBlockNumber(ctx, blockNumber)
+	dbtx, err1 := b.database.Begin(ctx)
+	if err1 != nil {
+		return nil, err1
+	}
+	defer dbtx.Rollback()
+	stateDB, err := b.stateByBlockNumber(ctx, dbtx.(ethdb.HasTx).Tx(), blockNumber)
 	if err != nil {
 		return nil, err
 	}
