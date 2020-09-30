@@ -9,11 +9,17 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-//const ShardLimit = 4 * datasize.KB
 const ShardLimit = 3 * datasize.KB
 
 var blockNBytes = make([]byte, 4)
 
+// AppendMergeByOr - appending delta to existing data in db, merge by Or
+// Method maintains sharding - because some bitmaps are >1Mb and when new incoming blocks process it
+//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (LMDB does copy-on-write).
+//
+// if last existing shard size merge it with delta
+// if serialized size of delta > ShardLimit - break down to multiple shards
+// shard number - it's biggest value in bitmap
 func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) error {
 	lastShardKey := make([]byte, len(key)+4)
 	copy(lastShardKey, key)
@@ -48,7 +54,7 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) error
 		return nil
 	}
 
-	// rename existing last shard and create new last shard
+	// rename existing last shard, then write delta to db
 	max := last.Maximum()
 	binary.BigEndian.PutUint32(blockNBytes, max)
 	err = c.Put(append(common.CopyBytes(key), blockNBytes...), currentLastV)
@@ -63,6 +69,7 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) error
 	return nil
 }
 
+// writeBitmapSharded - write bitmap to db, perform sharding if delta > ShardLimit
 func writeBitmapSharded(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) error {
 	shardKey := make([]byte, len(key)+4)
 	copy(shardKey, key)
@@ -218,6 +225,8 @@ func TruncateRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 	return nil
 }
 
+// Get - reading as much shards as needed to satisfy [from, to] condition
+// join all shards to 1 bitmap by Or operator
 func Get(c ethdb.Cursor, key []byte, from, to uint32) (*gocroaring.Bitmap, error) {
 	var shards []*gocroaring.Bitmap
 
