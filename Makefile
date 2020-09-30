@@ -1,4 +1,4 @@
-GOBIN = $(shell pwd)/build/bin
+GOBIN = $(CURDIR)/build/bin
 GOBUILD = env GO111MODULE=on go build -trimpath
 GOTEST = go test ./... -p 1
 
