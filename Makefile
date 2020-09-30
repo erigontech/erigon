@@ -144,6 +144,8 @@ devtools:
 	env GOBIN= go install golang.org/x/tools/cmd/stringer
 	env GOBIN= go install github.com/kevinburke/go-bindata/go-bindata
 	env GOBIN= go install github.com/fjl/gencodec
+	env GOBIN= go install github.com/ugorji/go/codec/codecgen
+	env GOBIN= go install github.com/tinylib/msgp
 	env GOBIN= go install ./cmd/abigen
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'

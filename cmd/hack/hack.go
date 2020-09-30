@@ -7,6 +7,10 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
+	"github.com/tinylib/msgp/msgp"
+	"github.com/ugorji/go/codec"
+	"github.com/valyala/gozstd"
 	"io/ioutil"
 	"math/big"
 	"os"
@@ -1657,6 +1661,328 @@ func iterateOverCode(chaindata string) error {
 	return nil
 }
 
+func zstd(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.Begin()
+	check(err)
+	defer tx.Rollback()
+
+	logEvery := time.NewTicker(5 * time.Second)
+	defer logEvery.Stop()
+
+	// train
+	var samples1 [][]byte
+	var samples2 [][]byte
+
+	total := 0
+	bucket := dbutils.BlockReceiptsPrefix
+	fmt.Printf("bucket: %s\n", bucket)
+	c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
+	count, _ := c.Count()
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		total += len(v)
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum > 8_000_000 && (blockNum%(2_000_000/4000)) == 0 {
+			samples2 = append(samples2, v)
+		}
+		if blockNum%(count/4000) == 0 {
+			samples1 = append(samples1, v)
+		}
+
+		//if blockNum >= 8_000_000 {
+		//	break
+		//}
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Progress", "blockNum", blockNum, "sz", common.StorageSize(total))
+		}
+	}
+
+	fmt.Printf("samples1: %d, samples2: %d, total: %s\n", len(samples1), len(samples2), common.StorageSize(total))
+	t := time.Now()
+	dict128 := gozstd.BuildDict(samples1, 64*1024)
+	fmt.Printf("dict128: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict128_100k := gozstd.BuildDict(samples2, 64*1024)
+	fmt.Printf("dict128_100k: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict64 := gozstd.BuildDict(samples1, 32*1024)
+	fmt.Printf("dict64: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict64_100k := gozstd.BuildDict(samples2, 32*1024)
+	fmt.Printf("dict64_100k: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict32 := gozstd.BuildDict(samples1, 16*1024)
+	fmt.Printf("dict32: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict32_100k := gozstd.BuildDict(samples2, 16*1024)
+	fmt.Printf("dict32_100k: %s\n", time.Since(t))
+
+	cd128_s1_minus2, err := gozstd.NewCDictLevel(dict128, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd128_s1_minus2.Release()
+
+	cd128_s100k_minus2, err := gozstd.NewCDictLevel(dict128_100k, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd128_s100k_minus2.Release()
+
+	cd64_minus2, err := gozstd.NewCDictLevel(dict64, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd64_minus2.Release()
+
+	cd64_s100k_minus2, err := gozstd.NewCDictLevel(dict64_100k, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd64_s100k_minus2.Release()
+
+	cd32_minus2, err := gozstd.NewCDictLevel(dict32, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd64_minus2.Release()
+
+	cd32_s100k_minus2, err := gozstd.NewCDictLevel(dict32_100k, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd32_s100k_minus2.Release()
+
+	//cd128_19, err := gozstd.NewCDictLevel(dict128, 19)
+	//if err != nil {
+	//	return err
+	//}
+	//defer cd128_19.Release()
+	//
+	//cd128_22, err := gozstd.NewCDictLevel(dict128, 22)
+	//if err != nil {
+	//	return err
+	//}
+	//defer cd128_22.Release()
+
+	t = time.Now()
+	//total32 := 0
+	//total64 := 0
+	//total64_minus3 := 0
+	total128_s1_minus2 := 0
+	total128_s2_minus2 := 0
+	total64_s1_minus2 := 0
+	total64_s2_minus2 := 0
+	total32_s1_minus2 := 0
+	total32_s2_minus2 := 0
+
+	total = 0
+	var d_s1_minus2 time.Duration
+	var d_s2_minus2 time.Duration
+
+	var d64_s1_minus2 time.Duration
+	var d64_s2_minus2 time.Duration
+
+	var d32_s1_minus2 time.Duration
+	var d32_s2_minus2 time.Duration
+
+	buf := make([]byte, 0, 1024)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		total += len(v)
+		blockNum := binary.BigEndian.Uint64(k)
+		//if blockNum >= 8_000_000 {
+		//	break
+		//}
+
+		t := time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd128_s1_minus2)
+		d_s1_minus2 += time.Since(t)
+		total128_s1_minus2 += len(buf)
+
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd128_s100k_minus2)
+		d_s2_minus2 += time.Since(t)
+		total128_s2_minus2 += len(buf)
+
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd64_minus2)
+		d64_s1_minus2 += time.Since(t)
+		total64_s1_minus2 += len(buf)
+
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd64_s100k_minus2)
+		d64_s2_minus2 += time.Since(t)
+		total64_s2_minus2 += len(buf)
+
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd32_minus2)
+		d32_s1_minus2 += time.Since(t)
+		total32_s1_minus2 += len(buf)
+
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd32_s100k_minus2)
+		d32_s2_minus2 += time.Since(t)
+		total32_s2_minus2 += len(buf)
+
+		select {
+		default:
+		case <-logEvery.C:
+			totalf := float64(total)
+			log.Info("Progress 8", "blockNum", blockNum, "before", common.StorageSize(total),
+				"128_s1_minus2", fmt.Sprintf("%.2f", totalf/float64(total128_s1_minus2)), "d_s1_minus2", d_s1_minus2,
+				"128_s2_minus2", fmt.Sprintf("%.2f", totalf/float64(total128_s2_minus2)), "d_s2_minus2", d_s2_minus2,
+
+				"64_s1_minus2", fmt.Sprintf("%.2f", totalf/float64(total64_s1_minus2)), "d64_s1_minus2", d64_s1_minus2,
+				"64_s2_minus2", fmt.Sprintf("%.2f", totalf/float64(total64_s2_minus2)), "d64_s2_minus2", d64_s2_minus2,
+
+				"32_s1_minus2", fmt.Sprintf("%.2f", totalf/float64(total32_s1_minus2)), "d32_s1_minus2", d32_s1_minus2,
+				"32_s2_minus2", fmt.Sprintf("%.2f", totalf/float64(total32_s2_minus2)), "d32_s2_minus2", d32_s2_minus2,
+			)
+		}
+	}
+
+	return nil
+}
+
+func benchRlp(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.Begin()
+	check(err)
+	defer tx.Rollback()
+
+	logEvery := time.NewTicker(5 * time.Second)
+	defer logEvery.Stop()
+
+	// train
+	total := 0
+	bucket := dbutils.BlockReceiptsPrefix
+	fmt.Printf("bucket: %s\n", bucket)
+	c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
+
+	total_rlp := 0
+	total_cbor := 0
+	total_msgp := 0
+	total_msgp2 := 0
+
+	total = 0
+	var rlp_encode time.Duration
+	var rlp_decode time.Duration
+
+	var cbor_encode time.Duration
+	var cbor_decode time.Duration
+
+	var msgp_encode time.Duration
+	var msgp_decode time.Duration
+
+	var msgp2_encode time.Duration
+	var msgp2_decode time.Duration
+
+	bufSlice := make([]byte, 0, 100_000)
+	buf := bytes.NewBuffer(bufSlice)
+
+	encoder := codecpool.Encoder(buf)
+	defer codecpool.Return(encoder)
+	decoder := codecpool.Decoder(buf)
+	defer codecpool.Return(decoder)
+
+	var handle codec.MsgpackHandle
+	handle.ReaderBufferSize = 64 * 1024
+	msgpackDecoder := codec.NewDecoder(buf, &handle)
+
+	var handle2 codec.MsgpackHandle
+	handle.WriterBufferSize = 64 * 1024
+	msgpackEncoder := codec.NewEncoder(buf, &handle2)
+
+	msgpDec := msgp.NewReader(buf)
+	msgpEnc := msgp.NewWriter(buf)
+
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		total += len(v)
+		blockNum := binary.BigEndian.Uint64(k)
+		//if blockNum >= 8_000_000 {
+		//	break
+		//}
+
+		storageReceipts := &types.ReceiptForStorages{}
+		err = rlp.DecodeBytes(v, storageReceipts)
+		check(err)
+
+		buf.Reset()
+		t := time.Now()
+		err = rlp.Encode(buf, storageReceipts)
+		rlp_encode += time.Since(t)
+
+		total_rlp += buf.Len()
+		t = time.Now()
+		err = rlp.Decode(buf, storageReceipts)
+		rlp_decode += time.Since(t)
+
+		buf.Reset()
+		t = time.Now()
+		encoder.MustEncode(storageReceipts)
+		cbor_encode += time.Since(t)
+		total_cbor += buf.Len()
+
+		t = time.Now()
+		decoder.MustDecode(storageReceipts)
+		cbor_decode += time.Since(t)
+
+		buf.Reset()
+		t = time.Now()
+		msgpackEncoder.MustEncode(storageReceipts)
+		msgp_encode += time.Since(t)
+		total_msgp += buf.Len()
+
+		t = time.Now()
+		msgpackDecoder.MustDecode(storageReceipts)
+		msgp_decode += time.Since(t)
+
+		buf.Reset()
+		t = time.Now()
+		err = storageReceipts.EncodeMsg(msgpEnc)
+		msgp2_encode += time.Since(t)
+		total_msgp2 += buf.Len()
+		check(err)
+
+		t = time.Now()
+		err = storageReceipts.DecodeMsg(msgpDec)
+		msgp2_decode += time.Since(t)
+
+		select {
+		default:
+		case <-logEvery.C:
+			totalf := float64(total)
+			log.Info("Progress 8", "blockNum", blockNum, "before", common.StorageSize(total),
+				"total_rlp", fmt.Sprintf("%.2f", totalf/float64(total_rlp)), "rlp_encode", rlp_encode, "rlp_decode", rlp_decode,
+				"total_cbor", fmt.Sprintf("%.2f", totalf/float64(total_cbor)), "cbor_encode", cbor_encode, "cbor_decode", cbor_decode,
+				"total_msgp", fmt.Sprintf("%.2f", totalf/float64(total_msgp)), "msgp_encode", msgp_encode, "msgp_decode", msgp_decode,
+				"total_msgp2", fmt.Sprintf("%.2f", totalf/float64(total_msgp2)), "msgp2_encode", msgp2_encode, "msgp2_decode", msgp2_decode,
+			)
+		}
+	}
+
+	return nil
+}
+
 func mint(chaindata string, block uint64) error {
 	f, err := os.Create("mint.csv")
 	if err != nil {
@@ -1913,6 +2239,16 @@ func main() {
 	}
 	if *action == "mint" {
 		if err := mint(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "zstd" {
+		if err := zstd(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "benchRlp" {
+		if err := benchRlp(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

@@ -6,7 +6,6 @@ require (
 	github.com/Azure/azure-pipeline-go v0.2.2 // indirect
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/Azure/go-autorest/autorest/adal v0.8.3 // indirect
-	github.com/DataDog/zstd v1.4.5 // indirect
 	github.com/JekaMas/notify v0.9.4
 	github.com/RoaringBitmap/gocroaring v0.2.66-0.20200926170445-4232533f8158
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
@@ -57,6 +56,7 @@ require (
 	github.com/pborman/uuid v0.0.0-20170112150404-1b00554d8222
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
 	github.com/peterh/liner v1.1.1-0.20190123174540-a2c9a5303de7
+	github.com/philhofer/fwd v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.7.1
 	github.com/prometheus/tsdb v0.10.0
 	github.com/rs/cors v0.0.0-20160617231935-a62a804a8a00
@@ -65,8 +65,11 @@ require (
 	github.com/spf13/cobra v1.0.0
 	github.com/status-im/keycard-go v0.0.0-20190424133014-d95853db0f48
 	github.com/stretchr/testify v1.6.1
+	github.com/tinylib/msgp v1.1.2
+	github.com/ttacon/chalk v0.0.0-20160626202418-22c06c80ed31 // indirect
 	github.com/tyler-smith/go-bip39 v1.0.2
-	github.com/ugorji/go/codec v1.1.7
+	github.com/ugorji/go/codec v1.1.9
+	github.com/ugorji/go/codec/codecgen v1.1.9 // indirect
 	github.com/urfave/cli v1.22.1
 	github.com/valyala/gozstd v1.8.3
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
