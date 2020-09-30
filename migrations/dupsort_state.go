@@ -141,7 +141,7 @@ var clearIndices = Migration{
 
 var resetIHBucketToRecoverDB = Migration{
 	Name: "reset_in_bucket_to_recover_db",
-	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.DbWithPendingMutations, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
 			return err
 		}
