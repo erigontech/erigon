@@ -378,9 +378,3 @@ Date:   Mon Oct 5 11:52:36 2020 +0300
     
     * core/state/snapshot: don't enable logging on the tests
 
-commit 9d1e2027a05ed099b9ef43021a6cb09839e94a3a
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Wed Sep 30 19:49:20 2020 +0200
-
-    trie: add Commit-sequence tests for stacktrie commit (#21643)
-
