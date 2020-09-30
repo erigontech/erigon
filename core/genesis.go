@@ -390,6 +390,22 @@ func GenesisBlockForTesting(db ethdb.Database, addr common.Address, balance *big
 	return block
 }
 
+type GenAccount struct {
+	Addr    common.Address
+	Balance *big.Int
+}
+
+func GenesisWithAccounts(db ethdb.Database, accs []GenAccount) *types.Block {
+	g := Genesis{Config: params.TestChainConfig}
+	allocs := make(map[common.Address]GenesisAccount)
+	for _, acc := range accs {
+		allocs[acc.Addr] = GenesisAccount{Balance: acc.Balance}
+	}
+	g.Alloc = allocs
+	block := g.MustCommit(db)
+	return block
+}
+
 // DefaultGenesisBlock returns the Ethereum main net genesis block.
 func DefaultGenesisBlock() *Genesis {
 	return &Genesis{

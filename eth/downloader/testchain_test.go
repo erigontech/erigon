@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -37,10 +38,31 @@ import (
 
 // Test chain parameters.
 var (
-	testKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	testAddress = crypto.PubkeyToAddress(testKey.PublicKey)
+	testKey, _    = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testAddress   = crypto.PubkeyToAddress(testKey.PublicKey)
+	testKey1, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f292")
+	testAddress1  = crypto.PubkeyToAddress(testKey.PublicKey)
+	testKey2, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f293")
+	testAddress2  = crypto.PubkeyToAddress(testKey.PublicKey)
+	testKey3, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f294")
+	testAddress3  = crypto.PubkeyToAddress(testKey.PublicKey)
+	testAddresses = []common.Address{testAddress, testAddress1, testAddress2, testAddress3}
+
 	testDb      = ethdb.NewMemDatabase()
-	testGenesis = core.GenesisBlockForTesting(testDb, testAddress, big.NewInt(1000000000))
+	testGenesis = core.GenesisWithAccounts(testDb, []core.GenAccount{
+		{testAddress,
+			big.NewInt(1000000000),
+		},
+		{testAddress1,
+			big.NewInt(1000000000),
+		},
+		{testAddress2,
+			big.NewInt(1000000000),
+		},
+		{testAddress3,
+			big.NewInt(1000000000),
+		},
+	})
 
 	// The common prefix of all test chains:
 	// Different forks on top of the base chain:
@@ -58,6 +80,28 @@ var (
 
 	forkLen = int(fullMaxForkAncestry + 50)
 )
+
+func init() {
+	getTestChainBase()
+
+	var g errgroup.Group
+
+	fmt.Println("INIT Started")
+	g.Go(func() error {
+		getTestChainForkLightA()
+		return nil
+	})
+	g.Go(func() error {
+		getTestChainForkLightB()
+		return nil
+	})
+	g.Go(func() error {
+		getTestChainForkHeavy()
+		return nil
+	})
+	fmt.Println("INIT DONE")
+	g.Wait()
+}
 
 func getTestChainForkLightA() *testChain {
 	fmt.Println("In getTestChainForkLightA")
@@ -169,9 +213,14 @@ func (tc *testChain) shorten(length int) *testChain {
 func (tc *testChain) copy(newlen int) *testChain {
 	tc.cpyLock.Lock()
 	defer tc.cpyLock.Unlock()
+	db := tc.db
+	if tc.db != nil {
+		fmt.Println("!!!!!!!!!!!!!!!!")
+		db = tc.db.MemCopy()
+	}
 	cpy := &testChain{
 		genesis:  tc.genesis,
-		db:       tc.db,
+		db:       db,
 		headerm:  make(map[common.Hash]*types.Header, newlen),
 		blockm:   make(map[common.Hash]*types.Block, newlen),
 		receiptm: make(map[common.Hash][]*types.Receipt, newlen),
@@ -202,31 +251,37 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	seedAddress := common.Address{seed}
 	amount := uint256.NewInt().SetUint64(1000)
 
-	var signer types.Signer
+	var parentBlock *types.Block
+	t := time.Now()
 	existingLen := len(tc.chain) - 1
-	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db, existingLen+n, func(i int, block *core.BlockGen) {
-		if i%500 == 0 {
-			fmt.Println("generated a chain of", i)
-		}
+	totalLen := existingLen + n
+	signer := types.MakeSigner(params.TestChainConfig, big.NewInt(1))
 
+	testGenesisNonce := int64(-1)
+	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db, totalLen, func(i int, block *core.BlockGen) {
 		if i < existingLen || existingLen == 0 {
 			block.SetCoinbase(zeroAddress)
 
 			// Include transactions to the miner to make blocks more interesting.
 			if i%22 == 0 {
-				signer = types.MakeSigner(params.TestChainConfig, block.Number())
-				tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), zeroAddress, amount, params.TxGas, nil, nil), signer, testKey)
+				if testGenesisNonce == -1 {
+					testGenesisNonce = int64(block.TxNonce(testAddresses[int(seed)%len(testAddresses)]))
+				}
+				tx, err := types.SignTx(types.NewTransaction(uint64(testGenesisNonce), zeroAddress, amount, params.TxGas, nil, nil), signer, testKey)
 				if err != nil {
 					panic(err)
 				}
+
 				block.AddTx(tx)
+				testGenesisNonce++
 			}
 
 			// if the block number is a multiple of 5, add a bonus uncle to the block
 			if i > 0 && i%5 == 0 {
+				parentBlock = block.GetParent()
 				block.AddUncle(&types.Header{
-					ParentHash: block.PrevBlock(i - 1).Hash(),
-					Number:     big.NewInt(block.Number().Int64() - 1),
+					ParentHash: parentBlock.Hash(),
+					Number:     parentBlock.Number(),
 				})
 			}
 		} else {
@@ -239,11 +294,17 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 
 			// if the block number is a multiple of 5, add a bonus uncle to the block
 			if i > existingLen && (i-existingLen)%5 == 0 {
+				parentBlock = block.GetParent()
 				block.AddUncle(&types.Header{
-					ParentHash: block.PrevBlock(i - existingLen - 1).Hash(),
-					Number:     big.NewInt(block.Number().Int64() - 1),
+					ParentHash: parentBlock.Hash(),
+					Number:     parentBlock.Number(),
 				})
 			}
+		}
+
+		if i%500 == 0 {
+			fmt.Println("generated a chain of", i, time.Since(t))
+			t = time.Now()
 		}
 	}, false /* intermediateHashes */)
 	if err != nil {

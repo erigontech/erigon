@@ -29,16 +29,6 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 	go func() {
 		for {
 			select {
-			case <-exit:
-				return
-			case <-c.RetryVerifyTicker.C:
-				select {
-				case req := <-c.RetryVerifyHeaderRequests:
-					c.VerifyHeaderRequests <- req
-				default:
-					// nothing to do
-				}
-
 			case req := <-c.VerifyHeaderRequests:
 				if req.Deadline == nil {
 					t := time.Now().Add(ttl)
@@ -70,6 +60,15 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				if parentResp.Header != nil {
 					c.AddVerifiedBlocks(parentResp.Header, parentResp.Header.Hash())
 				}
+			case <-c.RetryVerifyTicker.C:
+				select {
+				case req := <-c.RetryVerifyHeaderRequests:
+					c.VerifyHeaderRequests <- req
+				default:
+					// nothing to do
+				}
+			case <-exit:
+				return
 			}
 		}
 	}()

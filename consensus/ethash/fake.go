@@ -2,6 +2,7 @@ package ethash
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
@@ -57,6 +58,11 @@ func newFakeEth(mode Mode) Ethash {
 }
 
 func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
+	t := time.Now()
+	fmt.Println("VerifyHeaders")
+	defer func () {
+		fmt.Println("VerifyHeaders-1", time.Since(t))
+	}()
 	fakeSeals := make([]bool, len(seals))
 	fn, results := f.Ethash.VerifyHeaders(chain, headers, fakeSeals)
 
