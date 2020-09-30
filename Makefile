@@ -1,4 +1,4 @@
-GOBIN = ./build/bin
+GOBIN = $(CURDIR)/build/bin
 GOBUILD = env GO111MODULE=on go build -trimpath
 GOTEST = go test ./... -p 1
 
@@ -8,6 +8,16 @@ LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
 endif
 
 GIT_COMMIT=$(shell git rev-list -1 HEAD)
+
+OS = $(shell uname -s)
+ARCH = $(shell uname -m)
+
+ifeq ($(OS),Darwin)
+PROTOC_OS := osx
+endif
+ifeq ($(OS),Linux)
+PROTOC_OS = linux
+endif
 
 all: tg hack tester rpctest state restapi pics rpcdaemon integration
 
@@ -147,9 +157,16 @@ bindings:
 
 grpc:
 	# See also: ./cmd/hack/binary-deps/main.go
-	env GOBIN= go install google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
-	env GOBIN= go install google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
-	go generate ./ethdb
+	rm -f ./build/bin/protoc*
+	rm -rf ./build/include*
+
+	$(eval PROTOC_TMP := $(shell mktemp -d))
+	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.13.0/protoc-3.13.0-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
+	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc $(GOBIN) && mv include $(GOBIN)/..
+
+	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
+	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
+	PATH=$(GOBIN):$(PATH) go generate ./ethdb  # add folder with binaries to temporary PATH, `protoc` will search there installed above plugins
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json

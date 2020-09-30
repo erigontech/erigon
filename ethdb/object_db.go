@@ -349,9 +349,9 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 	return m
 }
 
-func (db *ObjectDatabase) Begin() (DbWithPendingMutations, error) {
+func (db *ObjectDatabase) Begin(ctx context.Context) (DbWithPendingMutations, error) {
 	batch := &TxDb{db: db}
-	if err := batch.begin(nil); err != nil {
+	if err := batch.begin(ctx, nil); err != nil {
 		panic(err)
 	}
 	return batch, nil
@@ -371,6 +371,10 @@ func (db *ObjectDatabase) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (db *ObjectDatabase) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+func (db *ObjectDatabase) Reserve(bucket string, key []byte, i int) ([]byte, error) {
+	panic("supported only by TxDb")
 }
 
 // Type which expecting sequence of triplets: dbi, key, value, ....

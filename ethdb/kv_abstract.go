@@ -3,6 +3,7 @@ package ethdb
 import (
 	"context"
 	"errors"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -127,17 +128,10 @@ type Cursor interface {
 	DeleteCurrent() error
 
 	// PutNoOverwrite(key, value []byte) error
-	// Reserve()
+	Reserve(k []byte, n int) ([]byte, error)
 
 	// PutCurrent - replace the item at the current cursor position.
-	// Warning! this method doesn't check order of keys, it means you can insert key in wrong place of bucket
-	//	The key parameter must still be provided, and must match it.
-	//	If using sorted duplicates (#MDB_DUPSORT) the data item must still
-	//	sort into the same place. This is intended to be used when the
-	//	new data is the same size as the old. Otherwise it will simply
-	//	perform a delete of the old record followed by an insert.
-	//
-	//PutCurrent(key, value []byte) error
+	PutCurrent(key, value []byte) error
 
 	Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
 }
@@ -152,7 +146,7 @@ type CursorDupSort interface {
 	FirstDup() ([]byte, error)          // FirstDup - position at first data item of current key
 	NextDup() ([]byte, []byte, error)   // NextDup - position at next data item of current key
 	NextNoDup() ([]byte, []byte, error) // NextNoDup - position at first data item of next key
-	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
+	LastDup(k []byte) ([]byte, error)   // LastDup - position at last data item of current key
 
 	CountDuplicates() (uint64, error)  // CountDuplicates - number of duplicates for the current key
 	DeleteCurrentDuplicates() error    // DeleteCurrentDuplicates - deletes all of the data items for the current key
@@ -176,7 +170,6 @@ type CursorDupFixed interface {
 	// Panics if len(page) is not a multiple of stride.
 	// The cursor's bucket must be DupFixed and DupSort.
 	PutMulti(key []byte, page []byte, stride int) error
-	// ReserveMulti()
 }
 
 type HasStats interface {
@@ -187,7 +180,6 @@ type Backend interface {
 	AddLocal([]byte) ([]byte, error)
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
-	BloomStatus() (uint64, uint64, common.Hash)
 }
 
 type DbProvider uint8

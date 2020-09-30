@@ -59,13 +59,13 @@ type EthAPI interface {
 type APIImpl struct {
 	db           ethdb.KV
 	ethBackend   ethdb.Backend
-	dbReader     ethdb.Getter
+	dbReader     ethdb.Database
 	chainContext core.ChainContext
 	GasCap       uint64
 }
 
 // NewAPI returns APIImpl instance
-func NewAPI(db ethdb.KV, dbReader ethdb.Getter, eth ethdb.Backend, gascap uint64) *APIImpl {
+func NewAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
 	return &APIImpl{
 		db:         db,
 		dbReader:   dbReader,

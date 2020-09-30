@@ -18,6 +18,14 @@ var (
 	_ Cursor         = &snapshotCursor{}
 )
 
+func (s *snapshotCursor) Reserve(k []byte, n int) ([]byte, error) {
+	return s.dbCursor.Reserve(k, n)
+}
+
+func (s *snapshotCursor) PutCurrent(key, value []byte) error {
+	return s.dbCursor.PutCurrent(key, value)
+}
+
 func (s *snapshotTX) CursorDupSort(bucket string) CursorDupSort {
 	return s.dbTX.CursorDupSort(bucket)
 }

@@ -8,7 +8,7 @@ import (
 )
 
 type DBServer struct {
-	remote.UnimplementedDBServer // must be embedded to have forward compatible implementations.
+	remote.UnstableDBService // must be embedded to have forward compatible implementations.
 
 	kv ethdb.KV
 }

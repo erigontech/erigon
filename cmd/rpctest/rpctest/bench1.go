@@ -21,7 +21,7 @@ var routes map[string]string
 // needCompare - if false - doesn't call TurboGeth and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Turbogeth
 // fullTest - if false - then call only methods which RPCDaemon currently supports
-func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool) {
+func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockNum uint64) {
 	setRoutes(tgURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -49,12 +49,9 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool) {
 		return
 	}
 	lastBlock := blockNumber.Number
-	if lastBlock > 5000000 {
-		lastBlock = 5000000
-	}
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 1700000
+	firstBn := int(blockNum)
 	prevBn := firstBn
 	storageCounter := 0
 	for bn := firstBn; bn <= int(lastBlock); bn++ {

@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -114,6 +115,40 @@ var dupSortIH = Migration{
 		// this Migration is empty, sync will regenerate IH bucket values automatically
 		// alternative is - to copy whole stage here
 		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.IntermediateTrieHashBucketOld1); err != nil {
+			return err
+		}
+		return OnLoadCommit(db, nil, true)
+	},
+}
+
+var clearIndices = Migration{
+	Name: "clear_log_indices6",
+	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.LogAddressIndex, dbutils.LogTopicIndex); err != nil {
+			return err
+		}
+
+		if err := stages.SaveStageProgress(db, stages.LogIndex, 0, nil); err != nil {
+			return err
+		}
+		if err := stages.SaveStageUnwind(db, stages.LogIndex, 0, nil); err != nil {
+			return err
+		}
+
+		return OnLoadCommit(db, nil, true)
+	},
+}
+
+var resetIHBucketToRecoverDB = Migration{
+	Name: "reset_in_bucket_to_recover_db",
+	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
+			return err
+		}
+		if err := stages.SaveStageUnwind(db, stages.IntermediateHashes, 0, nil); err != nil {
 			return err
 		}
 		return OnLoadCommit(db, nil, true)

@@ -1,10 +1,11 @@
 module github.com/ledgerwatch/turbo-geth
 
-go 1.14
+go 1.15
 
 require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/JekaMas/notify v0.9.4
+	github.com/RoaringBitmap/gocroaring v0.2.66-0.20200926170445-4232533f8158
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.5.7
 	github.com/anacrolix/log v0.7.0
@@ -32,7 +33,7 @@ require (
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.0
 	github.com/golang/protobuf v1.4.2
-	github.com/golang/snappy v0.0.1
+	github.com/golang/snappy v0.0.2-0.20200707131729-196ae77b8a26
 	github.com/gorilla/websocket v1.4.2
 	github.com/graph-gophers/graphql-go v0.0.0-20200819123640-3b5ddcd884ae
 	github.com/grpc-ecosystem/go-grpc-middleware v1.2.2
