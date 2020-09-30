@@ -174,11 +174,6 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 	return nil
 }
 
-/*headNumberBytes
-WARN [09-14|13:48:49.341] Header broke chain ancestry              peer=d52c7eeb2c2f2cf1 number=10355298 hash="219219…5dc387"
-
-*/
-
 func BuildInfoBytesForLMDBSnapshot(root string) (metainfo.Info, error) {
 	path := root + "/" + "data.mdb"
 	fi, err := os.Stat(path)

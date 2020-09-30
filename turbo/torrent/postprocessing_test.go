@@ -2,9 +2,6 @@ package torrent
 
 import (
 	"context"
-	"encoding/binary"
-	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -80,47 +77,4 @@ func generateHeaders(n int) []types.Header {
 		headers[i] = types.Header{Difficulty: new(big.Int).SetUint64(i), Number: new(big.Int).SetUint64(i)}
 	}
 	return headers
-}
-
-func TestDebugSnapshot(t *testing.T) {
-	snKV := ethdb.NewLMDB().Path("/media/b00ris/nvme/snapshots/headers/").ReadOnly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
-		}
-	}).MustOpen()
-	var prevHeader *types.Header
-	err := snKV.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.HeaderPrefix)
-		k, v, innerErr := c.First()
-		for {
-			if len(k) == 0 && len(v) == 0 {
-				break
-			}
-			if innerErr != nil {
-				t.Fatal(innerErr)
-			}
-
-			fmt.Println(common.Bytes2Hex(k), binary.BigEndian.Uint64(k))
-			header := new(types.Header)
-			innerErr := rlp.DecodeBytes(v, header)
-			if innerErr != nil {
-				t.Fatal(innerErr)
-			}
-
-			if prevHeader != nil {
-				if prevHeader.Number.Uint64()+1 != header.Number.Uint64() {
-					t.Fatal(prevHeader.Number.Uint64() != header.Number.Uint64())
-				}
-				if prevHeader.Hash() != header.ParentHash {
-					t.Fatal(prevHeader.Hash(), header.ParentHash)
-				}
-			}
-			k, v, innerErr = c.Next() //nolint
-			prevHeader = header
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }
