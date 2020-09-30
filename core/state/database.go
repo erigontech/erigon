@@ -101,6 +101,14 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 	return nil
 }
 
+func (nw *NoopWriter) WriteChangeSets() error {
+	return nil
+}
+
+func (nw *NoopWriter) WriteHistory() error {
+	return nil
+}
+
 // Buffer is a structure holding updates, deletes, and reads registered within one change period
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
