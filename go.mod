@@ -5,11 +5,14 @@ go 1.14
 require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/JekaMas/notify v0.9.4
+	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.5.7
 	github.com/anacrolix/log v0.7.0
 	github.com/anacrolix/torrent v1.15.2
 	github.com/aristanetworks/goarista v0.0.0-20200812190859-4cb0e71f3c0e
 	github.com/aws/aws-sdk-go v1.34.21
+	github.com/blend/go-sdk v1.1.1 // indirect
+	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/cespare/cp v1.1.1
 	github.com/cloudflare/cloudflare-go v0.13.2
@@ -41,6 +44,7 @@ require (
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/julienschmidt/httprouter v1.2.0
 	github.com/karalabe/usb v0.0.0-20191104083709-911d15fe12a9
+	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/ledgerwatch/lmdb-go v1.15.0
 	github.com/llgcode/draw2d v0.0.0-20200603164053-19660b984a28
 	github.com/logrusorgru/aurora v2.0.3+incompatible
@@ -68,8 +72,12 @@ require (
 	golang.org/x/sys v0.0.0-20200909081042-eff7692f9009
 	golang.org/x/text v0.3.3
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
+	golang.org/x/tools v0.0.0-20200221224223-e1da425f72fd
 	google.golang.org/grpc v1.32.0
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc v0.0.0-20200930005306-bb64fee312b4
 	google.golang.org/protobuf v1.25.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
+	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
+	gotest.tools v2.2.0+incompatible // indirect
 )
