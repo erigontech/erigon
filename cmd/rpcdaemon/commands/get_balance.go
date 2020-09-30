@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -12,13 +13,18 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
-func (api *APIImpl) GetBalance(_ context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
 	if err != nil {
 		return nil, err
 	}
 
-	acc, err := rpchelper.GetAccount(api.db, blockNumber, address)
+	tx, err1 := api.dbReader.Begin(ctx)
+	if err1 != nil {
+		return nil, fmt.Errorf("getBalance cannot open tx: %v", err1)
+	}
+	defer tx.Rollback()
+	acc, err := rpchelper.GetAccount(tx.(ethdb.HasTx).Tx(), blockNumber, address)
 	if err != nil {
 		return nil, fmt.Errorf("cant get a balance for account %q for block %v", address.String(), blockNumber)
 	}

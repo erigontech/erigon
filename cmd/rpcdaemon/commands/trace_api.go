@@ -36,13 +36,13 @@ type TraceAPI interface {
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
 type TraceAPIImpl struct {
 	db        ethdb.KV
-	dbReader  ethdb.Getter
+	dbReader  ethdb.Database
 	maxTraces uint64
 	traceType string
 }
 
 // NewTraceAPI returns NewTraceAPI instance
-func NewTraceAPI(db ethdb.KV, dbReader ethdb.Getter, cfg *cli.Flags) *TraceAPIImpl {
+func NewTraceAPI(db ethdb.KV, dbReader ethdb.Database, cfg *cli.Flags) *TraceAPIImpl {
 	return &TraceAPIImpl{
 		db:        db,
 		dbReader:  dbReader,

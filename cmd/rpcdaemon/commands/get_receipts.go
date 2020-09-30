@@ -30,7 +30,7 @@ func getReceipts(ctx context.Context, tx rawdb.DatabaseReader, kv ethdb.KV, numb
 	cc := adapter.NewChainContext(tx)
 	bc := adapter.NewBlockGetter(tx)
 	chainConfig := getChainConfig(tx)
-	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, kv, hash, 0)
+	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), hash, 0)
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
@@ -22,7 +23,12 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	getter := adapter.NewBlockGetter(api.dbReader)
 	chainContext := adapter.NewChainContext(api.dbReader)
-	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, params.MainnetChainConfig, chainContext, api.db, blockHash, txIndex)
+	dbtx, err1 := api.dbReader.Begin(ctx)
+	if err1 != nil {
+		return nil, fmt.Errorf("traceTransaction cannot open tx: %v", err1)
+	}
+	defer dbtx.Rollback()
+	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, params.MainnetChainConfig, chainContext, dbtx.(ethdb.HasTx).Tx(), blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

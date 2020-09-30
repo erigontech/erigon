@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
@@ -121,7 +122,7 @@ func (t ParityTrace) String() string {
 
 // Takes a hierarchical Geth trace with fields of different meaning stored in the same named fields depending on 'type'. Parity traces
 // are flattened depth first and each field is put in its proper place
-func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, tx *types.Transaction, txIndex uint64, depth []int) ParityTraces {
+func (api *TraceAPIImpl) convertToParityTrace(dbtx ethdb.Tx, gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, tx *types.Transaction, txIndex uint64, depth []int) ParityTraces {
 	var traces ParityTraces // nolint prealloc
 	var pt ParityTrace
 
@@ -157,7 +158,7 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 			// Since the account's balance at the end of this block is zero (it's selfdestructed), we can
 			// only pick up the balance at the end of the last block. While this may not be correct in every
 			// case (an account could spend ether during a block and then destruct), it's the best we can do.
-			acc, err := rpchelper.GetAccount(api.db, blockNumber-1, common.HexToAddress(gethTrace.From))
+			acc, err := rpchelper.GetAccount(dbtx, blockNumber-1, common.HexToAddress(gethTrace.From))
 			if err == nil {
 				if acc != nil {
 					val := acc.Balance.ToBig()
@@ -203,7 +204,7 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 
 	for i, item := range gethTrace.Calls {
 		newDepth := append(depth, i)
-		subTraces := api.convertToParityTrace(*item, blockHash, blockNumber, tx, txIndex, newDepth)
+		subTraces := api.convertToParityTrace(dbtx, *item, blockHash, blockNumber, tx, txIndex, newDepth)
 		traces = append(traces, subTraces...)
 	}
 
