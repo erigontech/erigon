@@ -94,7 +94,7 @@ type Receipt struct {
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
-	BlockHash        common.Hash `json:"blockHash,omitempty" codec:"-" codec:"-" msg:"-"`
+	BlockHash        common.Hash `json:"blockHash,omitempty" codec:"-" msg:"-"`
 	BlockNumber      *big.Int    `json:"blockNumber,omitempty" codec:"-" msg:"-"`
 	TransactionIndex uint        `json:"transactionIndex" codec:"-" msg:"-"`
 }

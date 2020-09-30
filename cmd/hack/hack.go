@@ -1664,8 +1664,8 @@ func iterateOverCode(chaindata string) error {
 func zstd(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.Begin()
-	check(err)
+	tx, errBegin := db.Begin()
+	check(errBegin)
 	defer tx.Rollback()
 
 	logEvery := time.NewTicker(5 * time.Second)
@@ -1930,11 +1930,13 @@ func benchRlp(chaindata string) error {
 		t := time.Now()
 		err = rlp.Encode(buf, storageReceipts)
 		rlp_encode += time.Since(t)
+		check(err)
 
 		total_rlp += buf.Len()
 		t = time.Now()
 		err = rlp.Decode(buf, storageReceipts)
 		rlp_decode += time.Since(t)
+		check(err)
 
 		buf.Reset()
 		t = time.Now()
@@ -1966,6 +1968,7 @@ func benchRlp(chaindata string) error {
 		t = time.Now()
 		err = storageReceipts.DecodeMsg(msgpDec)
 		msgp2_decode += time.Since(t)
+		check(err)
 
 		select {
 		default:
