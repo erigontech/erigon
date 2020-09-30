@@ -8,6 +8,11 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
 	//"github.com/anacrolix/torrent/storage"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -28,10 +33,10 @@ func New(snapshotsDir string, snapshotMode SnapshotMode, seeding bool) *Client {
 	torrentConfig.ListenPort = 0
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
-	//torrentConfig.NoDHT = true
+	torrentConfig.NoDHT = true
 	torrentConfig.DisableTrackers = false
 	torrentConfig.Debug = false
-	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Error)
+	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
 	torrentClient, err := torrent.NewClient(torrentConfig)
 	if err != nil {
 		log.Error("Fail to start torrnet client", "err", err)
@@ -227,4 +232,39 @@ func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.
 		}
 	}
 	return kv, nil
+}
+
+func BuildInfoBytesForLMDBSnapshot(root string) (metainfo.Info, error) {
+	path := root + "/" + LmdbFilename
+	fi, err := os.Stat(path)
+	if err != nil {
+		return metainfo.Info{}, err
+	}
+	relPath, err := filepath.Rel(root, path)
+	if err != nil {
+		return metainfo.Info{}, fmt.Errorf("error getting relative path: %s", err)
+	}
+
+	info := metainfo.Info{
+		Name:        filepath.Base(root),
+		PieceLength: DefaultChunkSize,
+		Length:      fi.Size(),
+		Files: []metainfo.FileInfo{
+			{
+				Length:   fi.Size(),
+				Path:     []string{relPath},
+				PathUTF8: nil,
+			},
+		},
+	}
+
+	err = info.GeneratePieces(func(fi metainfo.FileInfo) (io.ReadCloser, error) {
+		fmt.Println("info.GeneratePieces", filepath.Join(root, strings.Join(fi.Path, string(filepath.Separator))))
+		return os.Open(filepath.Join(root, strings.Join(fi.Path, string(filepath.Separator))))
+	})
+	if err != nil {
+		err = fmt.Errorf("error generating pieces: %s", err)
+		return metainfo.Info{}, err
+	}
+	return info, nil
 }

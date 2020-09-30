@@ -19,15 +19,25 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	headers := generateHeaders(10)
 	err := snVK.Update(context.Background(), func(tx ethdb.Tx) error {
 		for _, header := range headers {
-			headerBytes, err := rlp.EncodeToBytes(header)
-			if err != nil {
-				panic(err)
+			headerBytes, innerErr := rlp.EncodeToBytes(header)
+			if innerErr != nil {
+				panic(innerErr)
 			}
-			err = tx.Cursor(dbutils.HeaderPrefix).Put(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
-			if err != nil {
-				panic(err)
+			innerErr = tx.Cursor(dbutils.HeaderPrefix).Put(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
+			if innerErr != nil {
+				panic(innerErr)
 			}
 		}
+		c := tx.Cursor(dbutils.SnapshotInfoBucket)
+		innerErr := c.Put([]byte(dbutils.SnapshotHeadersHeadHash), headers[len(headers)-1].Hash().Bytes())
+		if innerErr != nil {
+			return innerErr
+		}
+		innerErr = c.Put([]byte(dbutils.SnapshotHeadersHeadNumber), headers[len(headers)-1].Number.Bytes())
+		if innerErr != nil {
+			return innerErr
+		}
+
 		return nil
 	})
 	if err != nil {
@@ -35,11 +45,12 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	}
 	snVK.Close()
 
-	//ethdb.NewLMDB().WithBucketsConfig()
 	db := ethdb.NewLMDB().InMem().WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
+	//we need genesis
+	rawdb.WriteCanonicalHash(ethdb.NewObjectDatabase(db), headers[0].Hash(), headers[0].Number.Uint64())
 	snKV := ethdb.NewLMDB().Path(snPath).ReadOnly().WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
 
-	snKV = ethdb.NewSnapshotKV().For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).SnapshotDB(snKV).DB(db).MustOpen()
+	snKV = ethdb.NewSnapshotKV().For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).SnapshotDB(snKV).DB(db).MustOpen()
 	err = GenerateHeaderIndexes(context.Background(), ethdb.NewObjectDatabase(snKV))
 	if err != nil {
 		t.Fatal(err)

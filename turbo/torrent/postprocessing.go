@@ -3,8 +3,8 @@ package torrent
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -14,11 +14,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"io"
 	"math/big"
 	"os"
-	"path/filepath"
-	"strings"
 )
 
 var (
@@ -70,13 +67,11 @@ func PostProcessBodies(db ethdb.Database) error {
 }
 
 func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
-	h := rawdb.ReadHeaderByNumber(db, 0)
-	td := h.Difficulty
 	var hash common.Hash
 	var number uint64
 
 	v, _, err := stages.GetStageProgress(db, HeaderNumber)
-	if err != nil {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return err
 	}
 
@@ -91,6 +86,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 		if innerErr != nil {
 			return innerErr
 		}
+
 		headNumber := big.NewInt(0).SetBytes(headNumberBytes).Uint64()
 		headHash := common.BytesToHash(headHashBytes)
 
@@ -115,10 +111,13 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 	}
 
 	v, _, err = stages.GetStageProgress(db, HeaderCanonical)
-	if err != nil {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return err
 	}
 	if v == 0 {
+		h := rawdb.ReadHeaderByNumber(db, 0)
+		td := h.Difficulty
+
 		log.Info("Generate TD index & canonical")
 		err = etl.Transform(db, dbutils.HeaderPrefix, dbutils.HeaderPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 			if len(k) != 8+common.HashLength {
@@ -172,39 +171,4 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 	}
 
 	return nil
-}
-
-func BuildInfoBytesForLMDBSnapshot(root string) (metainfo.Info, error) {
-	path := root + "/" + "data.mdb"
-	fi, err := os.Stat(path)
-	if err != nil {
-		return metainfo.Info{}, err
-	}
-	relPath, err := filepath.Rel(root, path)
-	if err != nil {
-		return metainfo.Info{}, fmt.Errorf("error getting relative path: %s", err)
-	}
-
-	info := metainfo.Info{
-		Name:        filepath.Base(root),
-		PieceLength: DefaultChunkSize,
-		Length:      fi.Size(),
-		Files: []metainfo.FileInfo{
-			{
-				Length:   fi.Size(),
-				Path:     []string{relPath},
-				PathUTF8: nil,
-			},
-		},
-	}
-
-	err = info.GeneratePieces(func(fi metainfo.FileInfo) (io.ReadCloser, error) {
-		fmt.Println("info.GeneratePieces", filepath.Join(root, strings.Join(fi.Path, string(filepath.Separator))))
-		return os.Open(filepath.Join(root, strings.Join(fi.Path, string(filepath.Separator))))
-	})
-	if err != nil {
-		err = fmt.Errorf("error generating pieces: %s", err)
-		return metainfo.Info{}, err
-	}
-	return info, nil
 }
