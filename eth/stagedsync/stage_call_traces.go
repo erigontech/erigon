@@ -104,12 +104,6 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 		codeSizeCache = fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
 	}
 
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	log.Info("Progress", "blockNum", startBlock,
-		"alloc", common.StorageSize(m.Alloc),
-		"sys", common.StorageSize(m.Sys),
-		"numGC", int(m.NumGC))
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
 			return err
