@@ -1169,6 +1169,16 @@ func (c *LmdbCursor) Append(k []byte, v []byte) error {
 func (c *LmdbCursor) Close() error {
 	if c.c != nil {
 		c.c.Close()
+		//TODO: Find a better solution to avoid the leak?
+		newCursors := make([]*lmdb.Cursor, len(c.tx.cursors)-1)
+		i := 0
+		for _, cc := range c.tx.cursors {
+			if cc != c.c {
+				newCursors[i] = cc
+				i++
+			}
+		}
+		c.tx.cursors = newCursors
 		c.c = nil
 	}
 	return nil

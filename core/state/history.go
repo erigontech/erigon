@@ -761,6 +761,7 @@ func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 	}, 0, to-from)
 
 	c := csd.tx.Cursor(csd.bucketName)
+	defer c.Close()
 	_, _, err := c.Seek(dbutils.EncodeTimestamp(from))
 	if err != nil {
 		return err
