@@ -29,19 +29,16 @@ func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, e
 	if !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
-	{
-		v, err := tx.Get(dbutils.PlainStateBucket, key)
-		if err != nil {
-			return nil, err
-		}
-		if v == nil {
-			return nil, ethdb.ErrKeyNotFound
-		}
-		dat = make([]byte, len(v))
-		copy(dat, v)
-		return dat, nil
+	v, err = tx.Get(dbutils.PlainStateBucket, key)
+	if err != nil {
+		return nil, err
 	}
-	return dat, err
+	if v == nil {
+		return nil, ethdb.ErrKeyNotFound
+	}
+	dat = make([]byte, len(v))
+	copy(dat, v)
+	return dat, nil
 }
 
 func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
