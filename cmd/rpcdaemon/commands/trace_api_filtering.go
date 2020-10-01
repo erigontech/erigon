@@ -231,7 +231,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
 	traceType := "callTracer" // nolint: goconst
 	traces := ParityTraces{}
-	dbtx, err1 := api.dbReader.Begin(ctx)
+	dbtx, err1 := api.db.Begin(ctx, nil, false)
 	if err1 != nil {
 		return nil, fmt.Errorf("traceFilter cannot open tx: %v", err1)
 	}
@@ -265,7 +265,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		} else {
 			// In this case, we're processing a transaction hash
 			tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, txOrBlockHash)
-			msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, dbtx.(ethdb.HasTx).Tx(), blockHash, txIndex)
+			msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, dbtx, blockHash, txIndex)
 			if err != nil {
 				return nil, err
 			}
@@ -355,13 +355,13 @@ func (api *TraceAPIImpl) getTransactionTraces(ctx context.Context, txHash common
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
 	traceType := "callTracer" // nolint: goconst
 
-	dbtx, err1 := api.dbReader.Begin(ctx)
+	dbtx, err1 := api.db.Begin(ctx, nil, false)
 	if err1 != nil {
 		return nil, fmt.Errorf("getTransactionTraces cannot open tx: %v", err1)
 	}
 	defer dbtx.Rollback()
 	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, txHash)
-	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, dbtx.(ethdb.HasTx).Tx(), blockHash, txIndex)
+	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, dbtx, blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +381,7 @@ func (api *TraceAPIImpl) getTransactionTraces(ctx context.Context, txHash common
 	json.Unmarshal(jsonStr, &gethTrace) // nolint errcheck
 
 	traces := ParityTraces{}
-	converted := api.convertToParityTrace(dbtx.(ethdb.HasTx).Tx(), gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
+	converted := api.convertToParityTrace(dbtx, gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
 	traces = append(traces, converted...)
 	return traces, nil
 }

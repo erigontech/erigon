@@ -87,7 +87,7 @@ func accountsReadWrites(blockNum uint64) {
 
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth-10/geth/chaindata")
 	defer ethDb.Close()
-	ethTx, err1 := ethDb.Begin(context.Background())
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, false)
 	check(err1)
 	defer ethTx.Rollback()
 	chainConfig := params.MainnetChainConfig
@@ -112,7 +112,7 @@ func accountsReadWrites(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewPlainDBState(ethTx.(ethdb.HasTx).Tx(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethTx, block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		statedb.SetTracer(at)
 		signer := types.MakeSigner(chainConfig, block.Number())

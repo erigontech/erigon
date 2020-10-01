@@ -199,11 +199,11 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
-func (b *SimulatedBackend) stateByBlockNumber(tx ethdb.Tx, blockNumber *big.Int) (*state.IntraBlockState, error) {
+func (b *SimulatedBackend) stateByBlockNumber(tx ethdb.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(state.NewPlainDBState(tx, b.pendingBlock.NumberU64())), nil
+		return state.New(state.NewPlainDBState(tx, b.pendingBlock.NumberU64()))
 	}
-	return state.New(state.NewPlainDBState(tx, uint64(blockNumber.Int64()))), nil
+	return state.New(state.NewPlainDBState(tx, uint64(blockNumber.Int64())))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -216,10 +216,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 		return nil, err1
 	}
 	defer dbtx.Rollback()
-	stateDB, err := b.stateByBlockNumber(dbtx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
+	stateDB := b.stateByBlockNumber(dbtx, blockNumber)
 	return stateDB.GetCode(contract), nil
 }
 
@@ -233,10 +230,7 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 		return nil, err1
 	}
 	defer dbtx.Rollback()
-	stateDB, err := b.stateByBlockNumber(dbtx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
+	stateDB := b.stateByBlockNumber(dbtx, blockNumber)
 	return stateDB.GetBalance(contract), nil
 }
 
@@ -250,10 +244,7 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 		return 0, err1
 	}
 	defer dbtx.Rollback()
-	stateDB, err := b.stateByBlockNumber(dbtx, blockNumber)
-	if err != nil {
-		return 0, err
-	}
+	stateDB := b.stateByBlockNumber(dbtx, blockNumber)
 	return stateDB.GetNonce(contract), nil
 }
 
@@ -267,10 +258,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 		return nil, err1
 	}
 	defer dbtx.Rollback()
-	stateDB, err := b.stateByBlockNumber(dbtx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
+	stateDB := b.stateByBlockNumber(dbtx, blockNumber)
 	var val uint256.Int
 	stateDB.GetState(contract, &key, &val)
 	return val.Bytes(), nil

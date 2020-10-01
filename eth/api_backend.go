@@ -158,11 +158,11 @@ func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.
 		return nil, nil, errors.New("header not found")
 	}
 	//WARNING - this will leak transaction
-	tx, err1 := b.eth.chainDb.Begin(context.Background())
+	tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, false)
 	if err1 != nil {
 		return nil, nil, err1
 	}
-	ds := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), bn)
+	ds := state.NewPlainDBState(tx, bn)
 	stateDb := state.New(ds)
 	return stateDb, header, nil
 
@@ -184,11 +184,11 @@ func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockN
 			return nil, nil, errors.New("hash is not currently canonical")
 		}
 		//WARNING - this will leak transaction
-		tx, err1 := b.eth.chainDb.Begin(context.Background())
+		tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, false)
 		if err1 != nil {
 			return nil, nil, err1
 		}
-		ds := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), header.Number.Uint64())
+		ds := state.NewPlainDBState(tx, header.Number.Uint64())
 		stateDb := state.New(ds)
 		return stateDb, header, nil
 	}
@@ -212,11 +212,11 @@ func (b *EthAPIBackend) GetReceipts(ctx context.Context, hash common.Hash) (type
 
 func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, number uint64) (types.Receipts, error) {
 	//WARNING - this will leak transaction
-	tx, err1 := b.eth.chainDb.Begin(context.Background())
+	tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, false)
 	if err1 != nil {
 		return nil, err1
 	}
-	dbstate := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), number-1)
+	dbstate := state.NewPlainDBState(tx, number-1)
 	statedb := state.New(dbstate)
 	header := block.Header()
 	var receipts types.Receipts
