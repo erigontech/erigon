@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"runtime"
 	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
@@ -112,7 +113,12 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 			if err != nil {
 				return err
 			}
-			log.Info("Progress", "blockNum", blockNum, dbutils.CallFromIndex, common.StorageSize(sz), dbutils.CallToIndex, common.StorageSize(sz2))
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Progress", "blockNum", blockNum, dbutils.CallFromIndex, common.StorageSize(sz), dbutils.CallToIndex, common.StorageSize(sz2),
+				"alloc", common.StorageSize(m.Alloc),
+				"sys", common.StorageSize(m.Sys),
+				"numGC", int(m.NumGC))
 		case <-checkFlushEvery.C:
 			if needFlush(froms, callIndicesMemLimit, bitmapdb.HotShardLimit/2) {
 				if err := flushBitmaps(callFromIndexCursor, froms); err != nil {
