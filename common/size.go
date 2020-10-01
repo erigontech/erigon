@@ -20,8 +20,6 @@ import (
 	"fmt"
 )
 
-//go:generate msgp -o=size_msgp_gen.go
-
 // StorageSize is a wrapper around a float value that supports user friendly
 // formatting.
 type StorageSize float64
