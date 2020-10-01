@@ -66,7 +66,6 @@ require (
 	github.com/stretchr/testify v1.6.1
 	github.com/tyler-smith/go-bip39 v1.0.2
 	github.com/ugorji/go/codec v1.1.9
-	github.com/ugorji/go/codec/codecgen v1.1.9 // indirect
 	github.com/urfave/cli v1.22.4
 	github.com/valyala/gozstd v1.8.3
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
