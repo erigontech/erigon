@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -81,6 +82,20 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 	defer checkFlushEvery.Stop()
 	engine := chainContext.Engine()
 
+	var caching bool = endBlock-startBlock > 100
+	var accountCache *fastcache.Cache
+	var storageCache *fastcache.Cache
+	var codeCache *fastcache.Cache
+	var codeSizeCache *fastcache.Cache
+	// Caching is not worth it for small runs of blocks
+	if caching {
+		// Caching is not worth it for small runs of blocks
+		accountCache = fastcache.New(512 * 1024 * 1024) // 512 Mb
+		storageCache = fastcache.New(512 * 1024 * 1024) // 512 Mb
+		codeCache = fastcache.New(32 * 1024 * 1024)     // 32 Mb (the minimum)
+		codeSizeCache = fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
+	}
+
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
 			return err
@@ -124,11 +139,19 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
-		var stateReader state.StateReader
-		var stateWriter state.WriterWithChangeSets
+		stateReader := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
+		stateWriter := state.NewCacheStateWriter()
 
-		stateReader = state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
-		stateWriter = state.NewNoopWriter()
+		if caching {
+			stateReader.SetAccountCache(accountCache)
+			stateReader.SetStorageCache(storageCache)
+			stateReader.SetCodeCache(codeCache)
+			stateReader.SetCodeSizeCache(codeSizeCache)
+			stateWriter.SetAccountCache(accountCache)
+			stateWriter.SetStorageCache(storageCache)
+			stateWriter.SetCodeCache(codeCache)
+			stateWriter.SetCodeSizeCache(codeSizeCache)
+		}
 
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, Tracer: tracer}
@@ -223,7 +246,7 @@ func unwindCallTraces(tx rawdb.DatabaseReader, from, to uint64, chainConfig *par
 		var stateWriter state.WriterWithChangeSets
 
 		stateReader = state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
-		stateWriter = state.NewNoopWriter()
+		stateWriter = state.NewCacheStateWriter()
 
 		_, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
 		if err != nil {
