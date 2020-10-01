@@ -591,16 +591,7 @@ func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
 	}
 	defer c.Close()
 
-	/*
-		val, err := tx.get(b.DBI, key)
-		if err != nil {
-			if lmdb.IsNotFound(err) {
-				return nil, nil
-			}
-			return nil, err
-		}
-	*/
-	val, err := c.SeekExact(key)
+	val, err := tx.get(b.DBI, key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
 			return nil, nil
