@@ -52,7 +52,7 @@ func TestLogIndex(t *testing.T) {
 	err = promoteLogIndex(tx, 0, nil)
 	require.NoError(err)
 
-	// Check indices cardinality (in how many blocks they meet)
+	// Check indices GetCardinality (in how many blocks they meet)
 	logTopicIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex)
 	logAddrIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
 

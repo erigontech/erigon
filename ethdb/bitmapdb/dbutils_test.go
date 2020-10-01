@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/RoaringBitmap/gocroaring"
+	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
@@ -26,7 +26,7 @@ func TestSharding(t *testing.T) {
 		k := []byte{1}
 		// Write/Read large bitmap works expected
 		for i := uint32(0); i < 3_000_000; i += 1_000_000 {
-			bm1 := gocroaring.New()
+			bm1 := roaring.New()
 			for j := i; j < i+1_000_000; j += 20 {
 				bm1.AddRange(uint64(j), uint64(j+10))
 			}
@@ -36,7 +36,7 @@ func TestSharding(t *testing.T) {
 
 		fromDb, err := bitmapdb.Get(c, k, 0, 10_000_000)
 		require.NoError(t, err)
-		expect := gocroaring.New()
+		expect := roaring.New()
 		for i := uint32(0); i < 3_000_000; i += 1_000_000 {
 			for j := i; j < i+1_000_000; j += 20 {
 				expect.AddRange(uint64(j), uint64(j+10))
@@ -53,7 +53,7 @@ func TestSharding(t *testing.T) {
 		fromDb, err = bitmapdb.Get(c, k, 0, 10_000_000)
 		require.NoError(t, err)
 
-		expect = gocroaring.New()
+		expect = roaring.New()
 		for i := uint32(0); i < 2_000_000; i += 1_000_000 {
 			for j := i; j < i+1_000_000; j += 20 {
 				expect.AddRange(uint64(j), uint64(j+10))
