@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -19,12 +18,12 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 		return nil, err
 	}
 
-	tx, err1 := api.dbReader.Begin(ctx)
+	tx, err1 := api.db.Begin(ctx, nil, false)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
-	acc, err := rpchelper.GetAccount(tx.(ethdb.HasTx).Tx(), blockNumber, address)
+	acc, err := rpchelper.GetAccount(tx, blockNumber, address)
 	if err != nil {
 		return nil, fmt.Errorf("cant get a balance for account %q for block %v", address.String(), blockNumber)
 	}

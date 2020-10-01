@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -22,12 +21,12 @@ import (
 )
 
 func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
-	tx, err1 := api.dbReader.Begin(ctx)
+	tx, err1 := api.db.Begin(ctx, nil, false)
 	if err1 != nil {
 		return nil, fmt.Errorf("call cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
-	result, err := transactions.DoCall(ctx, args, tx.(ethdb.HasTx).Tx(), api.dbReader, blockNrOrHash, overrides, api.GasCap)
+	result, err := transactions.DoCall(ctx, args, tx, api.dbReader, blockNrOrHash, overrides, api.GasCap)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +49,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexu
 }
 
 func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, gasCap *big.Int) (hexutil.Uint64, error) {
-	tx, err1 := api.dbReader.Begin(ctx)
+	tx, err1 := api.db.Begin(ctx, nil, false)
 	if err1 != nil {
 		return 0, fmt.Errorf("estimateGas cannot open tx: %v", err1)
 	}
@@ -81,7 +80,7 @@ func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blo
 	}
 	// Recap the highest gas limit with account's available balance.
 	if args.GasPrice != nil && args.GasPrice.ToInt().Uint64() != 0 {
-		ds := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNumber)
+		ds := state.NewPlainDBState(tx, blockNumber)
 		state := state.New(ds)
 		if state == nil {
 			return 0, fmt.Errorf("can't get the state for %d", blockNumber)
@@ -117,7 +116,7 @@ func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blo
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := transactions.DoCall(ctx, args, tx.(ethdb.HasTx).Tx(), api.dbReader, blockNrOrHash, nil, api.GasCap)
+		result, err := transactions.DoCall(ctx, args, tx, api.dbReader, blockNrOrHash, nil, api.GasCap)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit

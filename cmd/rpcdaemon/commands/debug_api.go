@@ -48,12 +48,12 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	cc := adapter.NewChainContext(api.dbReader)
 	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
-	tx, err1 := api.dbReader.Begin(ctx)
+	tx, err1 := api.db.Begin(ctx, nil, false)
 	if err1 != nil {
 		return StorageRangeResult{}, fmt.Errorf("storageRangeAt cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
-	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
+	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx, blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -91,12 +91,12 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		maxResults = eth.AccountRangeMaxResults
 	}
 
-	tx, err1 := api.dbReader.Begin(ctx)
+	tx, err1 := api.db.Begin(ctx, nil, false)
 	if err1 != nil {
 		return state.IteratorDump{}, fmt.Errorf("accountRange cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
-	dumper := state.NewDumper(tx.(ethdb.HasTx).Tx(), blockNumber)
+	dumper := state.NewDumper(tx, blockNumber)
 	res, err := dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
