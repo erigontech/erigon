@@ -61,18 +61,14 @@
 			if (this.callstack[left-1].calls === undefined) {
 				this.callstack[left-1].calls = [];
 			}
-			var toAddr = log.stack.peek(0).toString(16);
-			while (toAddr.length < 40) {
-				toAddr = '0' + toAddr;
-			}
-			var call = {
+			this.callstack[left-1].calls.push({
 				type:    op,
 				from:    toHex(log.contract.getAddress()),
-				to:      '0x' + toAddr,
-				//value:   '0x' + log.stack.peek(0).toString(16)
-			};
-			this.callstack[left-1].calls.push(call);
-			// TODO(tjayrush): This needs to return the balance of the destructed account, but where to get that?
+				to:      toHex(toAddress(log.stack.peek(0).toString(16))),
+				gasIn:   log.getGas(),
+				gasCost: log.getCost(),
+				value:   '0x' + db.getBalance(log.contract.getAddress()).toString(16)
+			});
 			return
 		}
 		// If a new method invocation is being done, add to the call stack
