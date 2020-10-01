@@ -199,7 +199,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
-func (b *SimulatedBackend) stateByBlockNumber(ctx context.Context, tx ethdb.Tx, blockNumber *big.Int) (*state.IntraBlockState, error) {
+func (b *SimulatedBackend) stateByBlockNumber(tx ethdb.Tx, blockNumber *big.Int) (*state.IntraBlockState, error) {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
 		return state.New(state.NewPlainDBState(tx, b.pendingBlock.NumberU64())), nil
 	}
@@ -216,7 +216,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 		return nil, err1
 	}
 	defer dbtx.Rollback()
-	stateDB, err := b.stateByBlockNumber(ctx, dbtx, blockNumber)
+	stateDB, err := b.stateByBlockNumber(dbtx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 		return nil, err1
 	}
 	defer dbtx.Rollback()
-	stateDB, err := b.stateByBlockNumber(ctx, dbtx, blockNumber)
+	stateDB, err := b.stateByBlockNumber(dbtx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 		return 0, err1
 	}
 	defer dbtx.Rollback()
-	stateDB, err := b.stateByBlockNumber(ctx, dbtx, blockNumber)
+	stateDB, err := b.stateByBlockNumber(dbtx, blockNumber)
 	if err != nil {
 		return 0, err
 	}
@@ -267,7 +267,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 		return nil, err1
 	}
 	defer dbtx.Rollback()
-	stateDB, err := b.stateByBlockNumber(ctx, dbtx, blockNumber)
+	stateDB, err := b.stateByBlockNumber(dbtx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
