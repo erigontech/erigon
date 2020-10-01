@@ -30,21 +30,7 @@ const (
 )
 
 func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, datadir string, quit <-chan struct{}) error {
-	var tx ethdb.DbWithPendingMutations
-	var useExternalTx bool
-	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		tx = db.(ethdb.DbWithPendingMutations)
-		useExternalTx = true
-	} else {
-		var err error
-		tx, err = db.Begin(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	endBlock, err := s.ExecutionAt(tx)
+	endBlock, err := s.ExecutionAt(db)
 	if err != nil {
 		return fmt.Errorf("call traces: getting last executed block: %w", err)
 	}
@@ -53,19 +39,40 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 		return nil
 	}
 
-	if err := promoteCallTraces(tx, s.BlockNumber+1, endBlock, chainConfig, chainContext, quit); err != nil {
-		return err
-	}
-
-	if err := s.DoneAndUpdate(tx, endBlock); err != nil {
-		return err
-	}
-	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+	sb := s.BlockNumber + 1
+	for eb := s.BlockNumber + 10000; ; eb += 10000 {
+		if eb > endBlock {
+			eb = endBlock
+		}
+		var tx ethdb.DbWithPendingMutations
+		var useExternalTx bool
+		if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+			tx = db.(ethdb.DbWithPendingMutations)
+			useExternalTx = true
+		} else {
+			var err error
+			tx, err = db.Begin(context.Background())
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+		}
+		if err := promoteCallTraces(tx, sb, eb, chainConfig, chainContext, quit); err != nil {
 			return err
 		}
+		if !useExternalTx {
+			if _, err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+		if eb == endBlock {
+			break
+		}
+		sb = eb + 1
 	}
-
+	if err := s.DoneAndUpdate(db, endBlock); err != nil {
+		return err
+	}
 	return nil
 }
 
