@@ -407,9 +407,9 @@ var (
 `,
 		Value: torrent.DefaultSnapshotMode.ToString(),
 	}
-	NoSeedSnapshotsFlag = cli.BoolFlag{
-		Name:  "no-seed-snapshots",
-		Usage: `Disallows snapshot seeding`,
+	SeedSnapshotsFlag = cli.BoolTFlag{
+		Name:  "seed-snapshots",
+		Usage: `Seed snapshot seeding`,
 	}
 	ArchiveSyncInterval = cli.IntFlag{
 		Name:  "archive-sync-interval",
@@ -1567,7 +1567,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.SnapshotMode = snMode
-	cfg.SnapshotSeeding = !ctx.GlobalBool(NoSeedSnapshotsFlag.Name)
+	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
 
 	cfg.Hdd = ctx.GlobalBool(HddFlag.Name)
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
