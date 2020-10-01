@@ -17,6 +17,7 @@
 package t8ntool
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -210,7 +211,7 @@ func Main(ctx *cli.Context) error {
 	//postAlloc := state.DumpGenesisFormat(false, false, false)
 	collector := make(Alloc)
 
-	tx, err1 := db.Begin(ctx, nil, false)
+	tx, err1 := db.Begin(context.Background(), nil, false)
 	if err1 != nil {
 		return fmt.Errorf("transition cannot open tx: %v", err1)
 	}

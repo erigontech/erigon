@@ -281,7 +281,12 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(state.NewDumper(db.KV(), 0).DefaultDump()))
+		tx, err1 := db.KV().Begin(context.Background(), nil, false)
+		if err1 != nil {
+			return fmt.Errorf("transition cannot open tx: %v", err1)
+		}
+		defer tx.Rollback()
+		fmt.Println(string(state.NewDumper(tx, 0).DefaultDump()))
 	}
 
 	if memProfilePath := ctx.GlobalString(MemProfileFlag.Name); memProfilePath != "" {

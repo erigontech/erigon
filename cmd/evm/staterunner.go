@@ -109,12 +109,13 @@ func stateTestCmd(ctx *cli.Context) error {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, *result.Error = false, err.Error()
 				if ctx.GlobalBool(DumpFlag.Name) && statedb != nil {
-					if hasKV, ok := tds.Database().(ethdb.HasKV); ok {
-						dump := state.NewDumper(hasKV.KV(), tds.GetBlockNr()).DefaultRawDump()
-						result.State = &dump
-					} else {
-						fmt.Fprintf(os.Stderr, "database does not implement KV: %T\n", tds.Database())
+					tx, err1 := tds.Database().(ethdb.HasKV).KV().Begin(context.Background(), nil, false)
+					if err1 != nil {
+						return fmt.Errorf("transition cannot open tx: %v", err1)
 					}
+					dump := state.NewDumper(tx, tds.GetBlockNr()).DefaultRawDump()
+					tx.Rollback()
+					result.State = &dump
 				}
 			}
 
