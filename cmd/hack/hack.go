@@ -1775,7 +1775,6 @@ func zstd(chaindata string) error {
 	//}
 	//defer cd128_22.Release()
 
-	t = time.Now()
 	//total32 := 0
 	//total64 := 0
 	//total64_minus3 := 0
