@@ -254,6 +254,8 @@ Error: %v
 }
 
 func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine consensus.EngineProcess, seals []bool) error {
+	fmt.Println("***** START VerifyHeaders")
+	defer fmt.Println("***** END VerifyHeaders")
 	toVerify := len(headers)
 	if toVerify == 0 {
 		return nil
@@ -268,12 +270,14 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 	})
 
 	requests := make(chan consensus.VerifyHeaderRequest, toVerify)
-	ids := make(map[uint64]struct{}, toVerify)
-	for _, n := range idxs {
-		id := rand.Uint64()
-		ids[id] = struct{}{}
-		requests <- consensus.VerifyHeaderRequest{id, headers[n], seals[n], nil}
-	}
+	//ids := make(map[uint64]struct{}, toVerify)
+	go func() {
+		for _, n := range idxs {
+			id := rand.Uint64()
+			// ids[id] = struct{}{}
+			requests <- consensus.VerifyHeaderRequest{id, headers[n], seals[n], nil}
+		}
+	}()
 
 	var verified int
 	for {
@@ -281,16 +285,22 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 		case req := <-requests:
 			engine.HeaderVerification() <- req
 		case result := <-engine.VerifyResults():
-			if _, ok := ids[result.ID]; !ok {
-				engine.VerifyResults() <- result
-			}
-			verified++
+			fmt.Println("=== <-VerifyResults()-1", result.ID, result.Err, len(engine.VerifyResults()))
+			//if _, ok := ids[result.ID]; !ok {
+			//	fmt.Println("=== <-VerifyResults()-XXX", result.ID)
+			//	engine.VerifyResults() <- result
+			//}
 
 			if result.Err != nil {
+				// fixme is it correct to exit here and don't care about previous succ validations?
 				return result.Err
 			}
 
+			verified++
+			fmt.Println("=== <-VerifyResults()-2", result.ID, verified, toVerify)
+
 			if verified == toVerify {
+				fmt.Println("=== <-VerifyResults()-EXIT", verified)
 				return nil
 			}
 		case result := <-engine.HeaderRequest():

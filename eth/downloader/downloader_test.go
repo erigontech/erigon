@@ -82,7 +82,7 @@ type downloadTester struct {
 func newTester() *downloadTester {
 	tester := &downloadTester{
 		genesis:     testGenesis,
-		peerDb:      ethdb.NewMemDatabase(),
+		peerDb:      ethdb.NewMemTestDatabase(),
 		peers:       make(map[string]*downloadTesterPeer),
 		ownHashes:   []common.Hash{testGenesis.Hash()},
 		ownHeaders:  map[common.Hash]*types.Header{testGenesis.Hash(): testGenesis.Header()},
@@ -97,7 +97,7 @@ func newTester() *downloadTester {
 		ancientChainTd:  map[common.Hash]*big.Int{testGenesis.Hash(): testGenesis.Difficulty()},
 		engine:          ethash.NewFaker(),
 	}
-	tester.stateDb = ethdb.NewMemDatabase()
+	tester.stateDb = ethdb.NewMemTestDatabase()
 	err := tester.stateDb.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(testGenesis.NumberU64(), testGenesis.Root()), []byte{0x00})
 	if err != nil {
 		panic(err)

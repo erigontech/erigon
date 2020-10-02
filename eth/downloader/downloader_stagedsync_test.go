@@ -37,7 +37,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 		peers:   make(map[string]*stagedSyncTesterPeer),
 		genesis: testGenesis,
 	}
-	tester.db = ethdb.NewMemDatabase()
+	tester.db = ethdb.NewMemTestDatabase()
 	// This needs to match the genesis in the file testchain_test.go
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
@@ -309,10 +309,12 @@ func TestUnwind(t *testing.T) {
 	if err := tester.sync("forkpeer", nil); err != nil {
 		t.Fatal(err)
 	}
+
 	currentHeader := tester.CurrentHeader()
-	expectedHash := getTestChainForkHeavy().chain[len(getTestChainForkHeavy().chain)-1]
-	if int(currentHeader.Number.Uint64()) != len(getTestChainForkHeavy().chain)-1 {
-		t.Errorf("last block expected number %d, got %d", len(getTestChainForkHeavy().chain)-1, currentHeader.Number.Uint64())
+	heavyChainLen := len(getTestChainForkHeavy().chain) - 1
+	expectedHash := getTestChainForkHeavy().chain[heavyChainLen]
+	if int(currentHeader.Number.Uint64()) != heavyChainLen {
+		t.Errorf("last block expected number %d, got %d", heavyChainLen, currentHeader.Number.Uint64())
 	}
 	if currentHeader.Hash() != expectedHash {
 		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())

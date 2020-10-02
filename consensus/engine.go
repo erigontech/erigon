@@ -56,7 +56,7 @@ type Process struct {
 }
 
 const (
-	size        = 128
+	size        = 65536
 	storageSize = 60000
 	retry       = 10 * time.Millisecond
 )

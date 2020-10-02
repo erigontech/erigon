@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -48,7 +47,7 @@ var (
 	testAddress3  = crypto.PubkeyToAddress(testKey.PublicKey)
 	testAddresses = []common.Address{testAddress, testAddress1, testAddress2, testAddress3}
 
-	testDb      = ethdb.NewMemDatabase()
+	testDb      = ethdb.NewMemTestDatabase()
 	testGenesis = core.GenesisWithAccounts(testDb, []core.GenAccount{
 		{testAddress,
 			big.NewInt(1000000000),
@@ -80,28 +79,6 @@ var (
 
 	forkLen = int(fullMaxForkAncestry + 50)
 )
-
-func init() {
-	getTestChainBase()
-
-	var g errgroup.Group
-
-	fmt.Println("INIT Started")
-	g.Go(func() error {
-		getTestChainForkLightA()
-		return nil
-	})
-	g.Go(func() error {
-		getTestChainForkLightB()
-		return nil
-	})
-	g.Go(func() error {
-		getTestChainForkHeavy()
-		return nil
-	})
-	fmt.Println("INIT DONE")
-	g.Wait()
-}
 
 func getTestChainForkLightA() *testChain {
 	fmt.Println("In getTestChainForkLightA")
