@@ -5,7 +5,7 @@ go 1.15
 require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/JekaMas/notify v0.9.4
-	github.com/RoaringBitmap/gocroaring v0.2.66-0.20200926170445-4232533f8158
+	github.com/RoaringBitmap/roaring v0.5.1
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.5.7
 	github.com/anacrolix/log v0.7.0
@@ -28,7 +28,7 @@ require (
 	github.com/fatih/color v1.7.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
-	github.com/gin-gonic/gin v1.6.2
+	github.com/gin-gonic/gin v1.6.3
 	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.0
@@ -63,8 +63,10 @@ require (
 	github.com/status-im/keycard-go v0.0.0-20200402102358-957c09536969
 	github.com/stretchr/testify v1.6.1
 	github.com/tyler-smith/go-bip39 v1.0.2
-	github.com/ugorji/go/codec v1.1.7
+	github.com/ugorji/go/codec v1.1.9
+	github.com/ugorji/go/codec/codecgen v1.1.9
 	github.com/urfave/cli v1.22.4
+	github.com/valyala/gozstd v1.8.3
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a

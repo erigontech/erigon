@@ -120,11 +120,9 @@ var (
 	// indices are sharded - because some bitmaps are >1Mb and when new incoming blocks process it
 	//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (LMDB does copy-on-write).
 	//
-	// 3 terms are used: cold_shard, hot_shard, delta
-	//   delta - most recent changes (appendable) - which need save into database
-	//   hot_shard - merge delta here until hot_shard size < HotShardLimit, otherwise merge hot to cold
-	//   cold_shard - merge hot_shard here until cold_shard size < ColdShardLimit, otherwise mark hot as cold, create new hot from delta
-	// cold shards never merged for compaction - because it's expensive operation (expensive means attackable)
+	// if last existing shard size merge it with delta
+	// if serialized size of delta > ShardLimit - break down to multiple shards
+	// shard number - it's biggest value in bitmap
 	LogTopicIndex   = "log_topic_index"
 	LogAddressIndex = "log_address_index"
 

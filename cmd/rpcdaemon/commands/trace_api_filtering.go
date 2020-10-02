@@ -356,6 +356,7 @@ func (api *TraceAPIImpl) getTransactionTraces(ctx context.Context, txHash common
 		return nil, err
 	}
 
+	// Time spent 176 out of 205
 	trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, &eth.TraceConfig{Tracer: &traceType})
 	if err != nil {
 		return nil, err
@@ -368,11 +369,14 @@ func (api *TraceAPIImpl) getTransactionTraces(ctx context.Context, txHash common
 
 	var gethTrace GethTrace
 	jsonStr, _ := traceJSON.MarshalJSON()
+	// Time spent 26 out of 205
 	json.Unmarshal(jsonStr, &gethTrace) // nolint errcheck
 
 	traces := ParityTraces{}
+	// Time spent 3 out of 205
 	converted := api.convertToParityTrace(gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
 	traces = append(traces, converted...)
+
 	return traces, nil
 }
 

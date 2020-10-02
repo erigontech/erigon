@@ -1,18 +1,16 @@
 Database Walkthrough
 ====================
 
-This document attempts to explain how Turbo-Geth organises its persistent data in its database,
-how this organisation is different from go-ethereum, the project from which it is derived.
-We start from a very simple genesis block, and then apply 7 blocks, each containing either
-ETH transfers, or interactions with smart contracts, or both. For each step, we use visualisation
-produced by the code available in turbo-geth, and the code which currently resides on a fork
-of go-ethereum, but there is an intention to feed it upstream, if there is interest.
+This document attempts to explain how Turbo-Geth organises its persistent data in its database, how this organisation is
+different from go-ethereum, the project from which it is derived. We start from a very simple genesis block and then
+apply one block containing a ether transfer. For each step, we show visualisations produced by the code available in
+turbo-geth and code added to a fork of go-ethereum.
 
 Genesis in Turbo-Geth
 ---------------------
 For the genesis block, we generate 3 different private keys and construct Ethereum addresses from them.
 Then, we endow one of the accounts with 9 ETH, and two others with 0.2 and 0.3 ETH, respectively.
-This is how the initial state trie looks like:
+This is how the initial state trie looks:
 
 ![genesis_state](state_0.png)
 
@@ -21,23 +19,22 @@ Here is the palette:
 
 ![hex_palette](hex_palette.png)
 
-First thing to note about the illustration of the state trie is that the leaves correspond to our accounts
-with their ETH endowments. Account nonces, in our case all 0s, are also shown. If you count number of coloured
-boxes you can to go through top to bottom to each any of the account leaves, you will get 64. If each nibble occupies
-half of a byte, that makes each "key" in the state trie 32 bytes long. But account addresses are only 20 bytes long.
-The reason why we get 32 and not 20 is that all the keys (in our case account addresses) are processed by `Keccak256`
-hash function (which has 32 byte output) before they are inserted into the trie.
-If we wanted to see what the corresponding account addresses were, we will have to look into the database. Here is
-what turbo-geth would persist after generating such a genesis block:
+First thing to note about the illustration of the state trie is that the leaves correspond to our accounts with their
+ETH endowments. Account nonces, in our case all 0s, are also shown. If you count the number of coloured boxes, from top
+to bottom, to any of the account leaves you will get 64. If each nibble occupies half of a byte, that makes each "key"
+in the state trie 32 bytes long. However, account addresses are only 20 bytes long. The reason we get 32 and not 20 is
+that all the keys (in our case account addresses) are processed by the `Keccak256` hash function (which has 32 byte
+output) before they are inserted into the trie. If we wanted to see what the corresponding account addresses were, we
+will have to look into the database. Here is what turbo-geth would persist after generating such a genesis block:
 
 ![genesis_db](changes_0.png)
 
-The database is organised in buckets (or some of you may be more used to the term "tables"). 
+The database is organised in buckets (also commonly referred to as "tables"). 
 
 Bucket "Headers"
 ----------------
 
-it records information about block headers from various angles.
+This bucket stores information about block headers.
 
 ![genesis_db_headers](changes_0_Headers.png)
 
@@ -101,8 +98,10 @@ Bucket "PlainState"
 ![genesis_db_accounts](changes_0_PlainState.png)
 
 Store together Accounts and Storage. 
-Accounts: key="account address" - value="current state of each account". 
-Storage: key="account address+incarnation+sorage hash" - value="current value of storage".
+
+Accounts: key="account address", value="current state of each account". 
+Storage: key="account address+incarnation+sorage hash", value="current value of storage".
+
 The accounts encoded by function `account.go:EncodeForStorage()` so that the first byte of a 
 field is its length and bytes afterward the field itself. 
 They all start with a fieldset of `0x02`, for each bit set into the fieldSet a field is present.
@@ -116,6 +115,7 @@ the order in the fieldset is the following:
 Therefore, immediately after the fieldset we have the length in byte of the balance: `0x08` (`8` bytes). 
 the following 8 bytes (aka. 16 nibbles) contains the hexadecimal value of the 
 balance that in the first record would be: `0x7ce66c50e2840000`.
+
 ````
 $ python
 Python 2.7.15
@@ -123,6 +123,7 @@ Type "help", "copyright", "credits" or "license" for more information.
 >>> 0x7ce66c50e2840000
 9000000000000000000
 ````
+
 Which is 9 followed by 18 zeros, which is 9 ETH (1 ETH = 10^18 wei).
 
 The third bit of the field set represent the Incarnation. The Incarnation is a turbo-geth specific attribute, which is
@@ -130,18 +131,19 @@ used to make removal and revival of contract accounts (now possible with `CREATE
 with turbo-geth's database layout. For now it will suffice to say that all non-contract accounts will have 
 incarnation 0 (not set), and all contract accounts will start their existence with incarnation 1.
 
-Contract accounts may also contract code hash and storage root, and these two pieces of information would make the record
-in the "Accounts" bucket contain 5 instead of 3 fields.
+Contract accounts may also contain a contract code hash and storage root. These two pieces of information would make
+the record in the "Accounts" bucket contain 5 instead of 3 fields.
 
 Bucket "History Of Accounts"
 ----------------------------
 
 ![genesis_db_history_of_accounts](changes_0_HistoryOfAccounts.png)
 
-Key - "account addresses + inverted incarnation". Value - encoded array of block numbers, where account changed/created. 
+key="account addresses + inverted incarnation", value="encoded array of block numbers, where account changed/created".
+
 The history of accounts records how the accounts changed at each block. But, instead of recording,
-at each change, the value that the accounts had AFTER the change, it records what value the accounts
-had BEFORE the change. That explains the empty values here - it records the fact that these
+at each change, the value that the accounts had *after* the change, it records what value the accounts
+had *before* the change. That explains the empty values here -- it records the fact that these
 three accounts in questions did not exist prior to the block 0.
 
 Bucket "Change Sets"
@@ -149,11 +151,11 @@ Bucket "Change Sets"
  
 Records the history of changes in accounts and contract storage. But, unlike in "History of Accounts"
 and "History of Storage", where keys are derived from accounts' addresses
-(key = address hash + block number), in the "Change Sets" bucket, keys are derived from the block numbers:
+(key="address hash + block number"), in the "Change Sets" bucket, keys are derived from the block numbers:
 
 ![genesis_db_change_sets](changes_0_AccountChanges.png)
 
-In the cases of our genesis block, the key is composed from the encoding of the block number (`0x20`), and the
+In the cases of our Genesis block, the key is composed from the encoding of the block number (`0x20`), and the
 ASCII-code of `hAT` (meaning **h**istory of **A**counts **T**rie).
 The "Change Set" bucket records changes that happen to accounts and contract storage slots at every block.
 It is important to note that the values recorded in the "Changes Set" bucket are not the values the accounts
@@ -184,8 +186,8 @@ Genesis in go-ethereum
 ------------------------------
 
 Now we will create the same Genesis state and block in go-ethereum (in archive mode to make sure we compare like for like).
-Here is how the database looks like. Since go-ethereum uses LevelDB, and LevelDB does not have a concept of "Buckets" (or
-"Tables"), go-ethereum emulates them by adding table-specific prefixes to all the keys, with the exception of the keys that
+Here is how the database looks like. Since go-ethereum uses LevelDB, and LevelDB does not have a concept of "buckets" (or
+"tables"), go-ethereum emulates them by adding table-specific prefixes to all the keys, with the exception of the keys that
 describe the state trie (bucket "Hashes" in our example). In the illustration, these prefixes are mostly removed for better
 comparison with turbo-geth. They were not removed only for the buckets "LastBlock", "LastHeader" and "LastFast", because
 othewise they key would be empty.
@@ -228,8 +230,8 @@ such traversal requires finding the corresponding record in the "Hashes" bucket.
 
 Block with 1 Ethereum transaction in Turbo-Geth
 ------------------------------
-The first block contains transaction that transfers 0.001 ETH from the account holding 9ETH to 
-a new account with the address `0x0100000000000000000000000000000000000000` (this is what one gets 
+The first block contains transaction that transfers 0.001 ETH from the account holding 9 ETH to
+a new account with the address `0x0100000000000000000000000000000000000000` (this is what one gets
 specifying `common.Address{1}` in the code).
 This is how the state trie after Block 1 is inserted looks like:
 
@@ -238,8 +240,8 @@ This is how the state trie after Block 1 is inserted looks like:
 First thing to note about the illustration of the state trie is that the nonce of the first account is now 1 since 
 a transaction from that address has been executed and the amount of ETH of that account is now 
 8.999 since the transaction had a value of 0.001 ETH. Usually, the transaction fee would also
-be paid, but in our simplified example, we set gas price to 0, therefore no fees are deducted. 
-A new account has been added to the state trie, the recipient of the transaction. 
+be paid, but in our simplified example, we set gas price to 0, therefore no fees are deducted.
+A new account has been added to the state trie, the recipient of the transaction.
 In fact, it has 0.001 ETH (the value of the transaction) and its nonce is set to 0.
 What follows are excerpts from the turbo-geth database after block 1 has been inserted. 
 These excerpts only show the records that have changed, and
@@ -253,8 +255,8 @@ Bucket "Receipts" now has some non-empty information for the block 1, because we
 
 The first 8 bytes of the key (or 16 nibbles, 15 zeroes followed by `1`) encode the block number, which is 1.
 The remaining 32 bytes of the key encode the block hash. 
-The value is the RLP-encoded list of receipts. In our case, there a transaction was sent and as a matter of fact, 
-instead of having `0xC0` (that represent an empty list) we have `0xc6c501825208c0` that his the receipt for the 0.001 ETH transaction.
+The value is the RLP-encoded list of receipts. In our case, a transaction was sent and as a matter of fact,
+instead of having `0xC0` (that represent an empty list) we have `0xc6c501825208c0` that is the receipt for the 0.001 ETH transaction.
 First prefix, `c6` means that the following 6 bytes is a sequence of RLP-encoded sub-structures. 
 In our case, there is only one sub-structure, and its
 prefix `c5` means that the following 5 bytes is a sequence of RLP-encoded sub-structures. 
@@ -269,9 +271,9 @@ Next bucket is "History Of Accounts":
 
 ![block1_db_history_of_accounts](changes_1_HistoryOfAccounts.png)
 
-The first entry has a non-empty value. This is the sender of 0.001ETH. 
-As history bucket records the value of this account BEFORE the change, we should
-expect the same value here as this account had at the geneis. 
+The first entry has a non-empty value. This is the sender of 0.001 ETH.
+As history bucket records the value of this account *before* the change, we should
+expect the same value here as this account had at the Genesis.
 The other two records contain empty values, which means these account were non-existent previously. 
 These are the account of the recepient of 0.001 ETH (`0x0100000000000000000000000000000000000000`), 
 and the miner account `0x0000000000000000000000000000000000000000`.
@@ -289,7 +291,7 @@ Next bucket is "Headers"
 A new header has been generated since a new block has been mined.
 As a matter of fact, the keys for the first two records start with a block number of 1 followed by
 the block hash (or header hash, which is the same thing) that is 
-different than the Genesis Block. Additionally, these two records for the new block 
+different than the Genesis block. Additionally, these two records for the new block
 that respectively represent the values in the headers and the mining difficulty differs from the Genesis Block.
 
 Next bucket is "Block Bodies":
@@ -301,8 +303,8 @@ The new record is the representation of block 1.
 
 ![block1_db_change_sets](changes_1_AccountChanges.png)
 
-Bucket "Change Sets" recorded the change in account that occurred BEFORE the 0.001 ETH transaction. you can notice that unlike the genesis block, this time the key has a prefix of `0x21` since now the blockchain is 1 block apart from the Genesis block.
-Like in the ChangeSet in the genesis block, there are 3 new records. But unlike the ChangeSet in the genesis block, one of the records (the last one) has
+Bucket "Change Sets" recorded the change in account that occurred *before* the 0.001 ETH transaction. You can notice that unlike the Genesis block, this time the key has a prefix of `0x21` since now the blockchain is 1 block apart from the Genesis block.
+Like in the ChangeSet in the Genesis block, there are 3 new records. But unlike the ChangeSet in the genesis block, one of the records (the last one) has
 a non-empty value.
 
 The next bucket is "PlainState":
@@ -310,7 +312,7 @@ The next bucket is "PlainState":
 ![block1_db_accounts](changes_1_PlainState.png)
 
 The values are the current state of each account. 
-* The first record has a field set of `0x3` (`11`) meaning that this time the accound has a nonce as well. the nonce legth is `0x01`. therefore the nonce is stored in the byte immediately after the length of the field: `0x01`. the balance is now changed to `0x7ce2ded23dbd8000`.
+* The first record has a field set of `0x3` (`11`) meaning that this time the accound has a nonce as well. The nonce length is `0x01`, therefore the nonce is stored in the byte immediately after the length of the field: `0x01`. The balance is now changed to `0x7ce2ded23dbd8000`.
 The value `0x7ce2ded23dbd8000` is the hexadecimal value for:
 ````
 $ python
