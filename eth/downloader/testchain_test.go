@@ -36,28 +36,12 @@ import (
 
 // Test chain parameters.
 var (
-	testKey, _    = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	testAddress   = crypto.PubkeyToAddress(testKey.PublicKey)
-	testKey1, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f292")
-	testAddress1  = crypto.PubkeyToAddress(testKey.PublicKey)
-	testKey2, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f293")
-	testAddress2  = crypto.PubkeyToAddress(testKey.PublicKey)
-	testKey3, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f294")
-	testAddress3  = crypto.PubkeyToAddress(testKey.PublicKey)
-	testAddresses = []common.Address{testAddress, testAddress1, testAddress2, testAddress3}
+	testKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testAddress = crypto.PubkeyToAddress(testKey.PublicKey)
 
 	testDb      = ethdb.NewMemDatabase()
 	testGenesis = core.GenesisWithAccounts(testDb, []core.GenAccount{
 		{testAddress,
-			big.NewInt(1000000000),
-		},
-		{testAddress1,
-			big.NewInt(1000000000),
-		},
-		{testAddress2,
-			big.NewInt(1000000000),
-		},
-		{testAddress3,
 			big.NewInt(1000000000),
 		},
 	})
@@ -214,7 +198,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 			// Include transactions to the miner to make blocks more interesting.
 			if i%22 == 0 {
 				if testGenesisNonce == -1 {
-					testGenesisNonce = int64(block.TxNonce(testAddresses[int(seed)%len(testAddresses)]))
+					testGenesisNonce = int64(block.TxNonce(testAddress))
 				}
 				tx, err := types.SignTx(types.NewTransaction(uint64(testGenesisNonce), zeroAddress, amount, params.TxGas, nil, nil), signer, testKey)
 				if err != nil {
