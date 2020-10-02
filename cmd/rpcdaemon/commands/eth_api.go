@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/eth"
@@ -62,15 +63,17 @@ type APIImpl struct {
 	dbReader     ethdb.Database
 	chainContext core.ChainContext
 	GasCap       uint64
+	chainConfig  *params.ChainConfig
 }
 
 // NewAPI returns APIImpl instance
-func NewAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
+func NewAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64, chainConfig *params.ChainConfig) *APIImpl {
 	return &APIImpl{
-		db:         db,
-		dbReader:   dbReader,
-		ethBackend: eth,
-		GasCap:     gascap,
+		db:          db,
+		dbReader:    dbReader,
+		ethBackend:  eth,
+		GasCap:      gascap,
+		chainConfig: chainConfig,
 	}
 }
 
@@ -133,8 +136,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 
 // ChainId returns the chain id from the config
 func (api *APIImpl) ChainId(_ context.Context) (hexutil.Uint64, error) {
-	chainConfig := getChainConfig(api.dbReader)
-	return hexutil.Uint64(chainConfig.ChainID.Uint64()), nil
+	return hexutil.Uint64(api.chainConfig.ChainID.Uint64()), nil
 }
 
 // ProtocolVersion returns the chain id from the config
