@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 
-	"github.com/RoaringBitmap/gocroaring"
+	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 )
 
 const (
@@ -73,8 +72,8 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	froms := map[string]*gocroaring.Bitmap{}
-	tos := map[string]*gocroaring.Bitmap{}
+	froms := map[string]*roaring.Bitmap{}
+	tos := map[string]*roaring.Bitmap{}
 	callFromIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CallFromIndex)
 	defer callFromIndexCursor.Close()
 	callToIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CallToIndex)
@@ -120,20 +119,20 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
 		case <-checkFlushEvery.C:
-			if needFlush(froms, callIndicesMemLimit, bitmapdb.HotShardLimit/2) {
+			if needFlush(froms, callIndicesMemLimit) {
 				if err := flushBitmaps(callFromIndexCursor, froms); err != nil {
 					return err
 				}
 
-				froms = map[string]*gocroaring.Bitmap{}
+				froms = map[string]*roaring.Bitmap{}
 			}
 
-			if needFlush(tos, callIndicesMemLimit, bitmapdb.HotShardLimit/2) {
+			if needFlush(tos, callIndicesMemLimit) {
 				if err := flushBitmaps(callToIndexCursor, tos); err != nil {
 					return err
 				}
 
-				tos = map[string]*gocroaring.Bitmap{}
+				tos = map[string]*roaring.Bitmap{}
 			}
 		}
 
@@ -160,7 +159,7 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 		}
 
 		tracer := NewCallTracer()
-		vmConfig := &vm.Config{Debug: false, Tracer: tracer}
+		vmConfig := &vm.Config{Debug: true, Tracer: tracer}
 		_, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
 		if err != nil {
 			return err
@@ -168,7 +167,7 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 		for addr := range tracer.froms {
 			m, ok := froms[string(addr[:])]
 			if !ok {
-				m = gocroaring.New()
+				m = roaring.New()
 				a := addr // To copy addr
 				froms[string(a[:])] = m
 			}
@@ -177,7 +176,7 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 		for addr := range tracer.tos {
 			m, ok := tos[string(addr[:])]
 			if !ok {
-				m = gocroaring.New()
+				m = roaring.New()
 				a := addr // To copy addr
 				tos[string(a[:])] = m
 			}
@@ -226,11 +225,10 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 	return nil
 }
 
-func unwindCallTraces(tx rawdb.DatabaseReader, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}) error {
+func unwindCallTraces(db ethdb.DbWithPendingMutations, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}) error {
 	froms := map[string]bool{}
 	tos := map[string]bool{}
-	fromIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CallFromIndex)
-	toIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CallToIndex)
+	tx := db.(ethdb.HasTx).Tx()
 	engine := chainContext.Engine()
 
 	tracer := NewCallTracer()
@@ -240,18 +238,18 @@ func unwindCallTraces(tx rawdb.DatabaseReader, from, to uint64, chainConfig *par
 			return err
 		}
 
-		blockHash := rawdb.ReadCanonicalHash(tx, blockNum)
-		block := rawdb.ReadBlock(tx, blockHash, blockNum)
+		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		block := rawdb.ReadBlock(db, blockHash, blockNum)
 		if block == nil {
 			break
 		}
-		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
+		senders := rawdb.ReadSenders(db, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
 
-		stateReader = state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
+		stateReader = state.NewPlainDBState(tx, blockNum-1)
 		stateWriter = state.NewCacheStateWriter()
 
 		_, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
@@ -268,10 +266,10 @@ func unwindCallTraces(tx rawdb.DatabaseReader, from, to uint64, chainConfig *par
 		tos[string(a[:])] = true
 	}
 
-	if err := truncateBitmaps(fromIndex, froms, to+1, from+1); err != nil {
+	if err := truncateBitmaps(tx, dbutils.CallFromIndex, froms, to+1, from+1); err != nil {
 		return err
 	}
-	if err := truncateBitmaps(toIndex, tos, to+1, from+1); err != nil {
+	if err := truncateBitmaps(tx, dbutils.CallToIndex, tos, to+1, from+1); err != nil {
 		return err
 	}
 	return nil

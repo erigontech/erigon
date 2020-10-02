@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 )
 
 type Uint64 struct {
@@ -24,8 +24,8 @@ func (b *Uint64) Get(key []byte) (uint64, bool) {
 	}
 
 	var v uint64
-	decoder := codecpool.Decoder(bytes.NewReader(value))
-	defer codecpool.Return(decoder)
+	decoder := cbor.Decoder(bytes.NewReader(value))
+	defer cbor.Return(decoder)
 
 	decoder.MustDecode(&v)
 	return v, true
@@ -66,8 +66,8 @@ func (b *Uint64) DecrementIfExist(key []byte) error {
 func (b *Uint64) Put(key []byte, value uint64) error {
 	var buf bytes.Buffer
 
-	encoder := codecpool.Encoder(&buf)
-	defer codecpool.Return(encoder)
+	encoder := cbor.Encoder(&buf)
+	defer cbor.Return(encoder)
 
 	encoder.MustEncode(&value)
 	return b.Cursor.Put(key, buf.Bytes())
@@ -76,8 +76,8 @@ func (b *Uint64) Put(key []byte, value uint64) error {
 func (b *Uint64) ForEach(fn func([]byte, uint64) error) error {
 	return ethdb.ForEach(b.Cursor, func(k, v []byte) (bool, error) {
 		var value uint64
-		decoder := codecpool.Decoder(bytes.NewReader(v))
-		defer codecpool.Return(decoder)
+		decoder := cbor.Decoder(bytes.NewReader(v))
+		defer cbor.Return(decoder)
 
 		decoder.MustDecode(&value)
 		return true, fn(k, value)
@@ -99,8 +99,8 @@ func (b *Int) Get(key []byte) (int, bool) {
 	}
 
 	var v int
-	decoder := codecpool.Decoder(bytes.NewReader(value))
-	defer codecpool.Return(decoder)
+	decoder := cbor.Decoder(bytes.NewReader(value))
+	defer cbor.Return(decoder)
 
 	decoder.MustDecode(&v)
 	return v, true
@@ -133,8 +133,8 @@ func (b *Int) DecrementIfExist(key []byte) error {
 func (b *Int) Put(key []byte, value int) error {
 	var buf bytes.Buffer
 
-	encoder := codecpool.Encoder(&buf)
-	defer codecpool.Return(encoder)
+	encoder := cbor.Encoder(&buf)
+	defer cbor.Return(encoder)
 
 	encoder.MustEncode(&value)
 	return b.Cursor.Put(key, buf.Bytes())
@@ -143,8 +143,8 @@ func (b *Int) Put(key []byte, value int) error {
 func (b *Int) ForEach(fn func([]byte, int) error) error {
 	return ethdb.ForEach(b.Cursor, func(k, v []byte) (bool, error) {
 		var value int
-		decoder := codecpool.Decoder(bytes.NewReader(v))
-		defer codecpool.Return(decoder)
+		decoder := cbor.Decoder(bytes.NewReader(v))
+		defer cbor.Return(decoder)
 
 		decoder.MustDecode(&value)
 		return true, fn(k, value)

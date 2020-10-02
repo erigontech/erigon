@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/RoaringBitmap/gocroaring"
+	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -16,11 +16,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-func getReceipts(ctx context.Context, db rawdb.DatabaseReader, tx ethdb.Tx, number uint64, hash common.Hash) (types.Receipts, error) {
+func getReceipts(ctx context.Context, db rawdb.DatabaseReader, tx ethdb.Tx, number uint64, hash common.Hash, chainConfig *params.ChainConfig) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(db, hash, number); cached != nil {
 		return cached, nil
 	}
@@ -29,7 +30,6 @@ func getReceipts(ctx context.Context, db rawdb.DatabaseReader, tx ethdb.Tx, numb
 
 	cc := adapter.NewChainContext(db)
 	bc := adapter.NewBlockGetter(db)
-	chainConfig := getChainConfig(db)
 	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx, hash, 0)
 	if err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*t
 		return nil, beginErr
 	}
 	defer tx.Rollback()
-	receipts, err := getReceipts(ctx, api.dbReader, tx, *number, hash)
+	receipts, err := getReceipts(ctx, api.dbReader, tx, *number, hash, api.chainConfig)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
@@ -111,10 +111,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 	}
 
-	blockNumbers := gocroaring.New()
+	blockNumbers := roaring.New()
 	blockNumbers.AddRange(begin, end+1) // [min,max)
 
-	topicsBitmap, err := getTopicsBitmap(tx.Cursor(dbutils.LogTopicIndex), crit.Topics)
+	topicsBitmap, err := getTopicsBitmap(tx.Cursor(dbutils.LogTopicIndex).Prefetch(1), crit.Topics, uint32(begin), uint32(end))
 	if err != nil {
 		return nil, err
 	}
@@ -126,17 +126,17 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 	}
 
-	logAddrIndex := tx.Cursor(dbutils.LogAddressIndex)
-	var addrBitmap *gocroaring.Bitmap
+	logAddrIndex := tx.Cursor(dbutils.LogAddressIndex).Prefetch(1)
+	var addrBitmap *roaring.Bitmap
 	for _, addr := range crit.Addresses {
-		m, err := bitmapdb.Get(logAddrIndex, addr[:])
+		m, err := bitmapdb.Get(logAddrIndex, addr[:], uint32(begin), uint32(end))
 		if err != nil {
 			return nil, err
 		}
 		if addrBitmap == nil {
 			addrBitmap = m
 		} else {
-			addrBitmap = gocroaring.Or(addrBitmap, m)
+			addrBitmap = roaring.Or(addrBitmap, m)
 		}
 	}
 
@@ -148,7 +148,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 	}
 
-	if blockNumbers.Cardinality() == 0 {
+	if blockNumbers.GetCardinality() == 0 {
 		return returnLogs(logs), nil
 	}
 
@@ -157,7 +157,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		if blockHash == (common.Hash{}) {
 			return returnLogs(logs), fmt.Errorf("block not found %d", uint64(blockNToMatch))
 		}
-		receipts, err := getReceipts(ctx, api.dbReader, tx, uint64(blockNToMatch), blockHash)
+		receipts, err := getReceipts(ctx, api.dbReader, tx, uint64(blockNToMatch), blockHash, api.chainConfig)
 		if err != nil {
 			return returnLogs(logs), err
 		}
@@ -183,19 +183,19 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c ethdb.Cursor, topics [][]common.Hash) (*gocroaring.Bitmap, error) {
-	var result *gocroaring.Bitmap
+func getTopicsBitmap(c ethdb.Cursor, topics [][]common.Hash, from, to uint32) (*roaring.Bitmap, error) {
+	var result *roaring.Bitmap
 	for _, sub := range topics {
-		var bitmapForORing *gocroaring.Bitmap
+		var bitmapForORing *roaring.Bitmap
 		for _, topic := range sub {
-			m, err := bitmapdb.Get(c, topic[:])
+			m, err := bitmapdb.Get(c, topic[:], from, to)
 			if err != nil {
 				return nil, err
 			}
 			if bitmapForORing == nil {
 				bitmapForORing = m
 			} else {
-				bitmapForORing = gocroaring.FastOr(bitmapForORing, m)
+				bitmapForORing = roaring.FastOr(bitmapForORing, m)
 			}
 		}
 
@@ -203,7 +203,7 @@ func getTopicsBitmap(c ethdb.Cursor, topics [][]common.Hash) (*gocroaring.Bitmap
 			if result == nil {
 				result = bitmapForORing
 			} else {
-				result = gocroaring.And(bitmapForORing, result)
+				result = roaring.And(bitmapForORing, result)
 			}
 		}
 	}
@@ -222,7 +222,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, beginErr
 	}
 	defer dbtx.Rollback()
-	receipts, err := getReceipts(ctx, api.dbReader, dbtx, blockNumber, blockHash)
+	receipts, err := getReceipts(ctx, api.dbReader, dbtx, blockNumber, blockHash, api.chainConfig)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}

@@ -7,8 +7,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
 // TODO:(tjayrush)
@@ -22,6 +22,7 @@ import (
 // GethTrace The trace as received from the existing Geth javascript tracer 'callTracer'
 type GethTrace struct {
 	Type    string     `json:"type"`
+	Error   string     `json:"error"`
 	From    string     `json:"from"`
 	To      string     `json:"to"`
 	Value   string     `json:"value"`
@@ -42,6 +43,7 @@ type ParityTrace struct {
 	Action              TraceAction `json:"action"`
 	BlockHash           common.Hash `json:"blockHash"`
 	BlockNumber         uint64      `json:"blockNumber"`
+	Error               string      `json:"error,omitempty"`
 	Result              TraceResult `json:"result"`
 	Subtraces           int         `json:"subtraces"`
 	TraceAddress        []int       `json:"traceAddress"`
@@ -142,31 +144,11 @@ func (api *TraceAPIImpl) convertToParityTrace(dbtx ethdb.Tx, gethTrace GethTrace
 		pt.Action.CallType = ""
 		pt.Action.Input = gethTrace.Input
 		pt.Result.Output = gethTrace.Output
-		pt.Action.Value = gethTrace.Value
+		pt.Action.Balance = gethTrace.Value
 		pt.Action.Gas = gethTrace.Gas
 		pt.Result.GasUsed = gethTrace.GasUsed
 		pt.Action.SelfDestructed = gethTrace.From
 		pt.Action.RefundAddress = gethTrace.To
-		// TODO(tjayrush): The Geth trace does not return the balance of the destructed account, but we need that
-		// TODO(tjayrush): value because the refundAddress receives those eth.
-		// TODO(tjayrush): Exceptions:
-		// TODO(tjayrush): -- the refundAddress is the same as the destructed address. In this case, there is no
-		// TODO(tjayrush):    account to refund to
-		// TODO(tjayrush): -- the refundAddress was created in this block or had a different balance before this block
-		// TODO(tjayrush): Best solution would be to fix the Geth trace
-		if pt.Action.RefundAddress != pt.Action.SelfDestructed {
-			// Since the account's balance at the end of this block is zero (it's selfdestructed), we can
-			// only pick up the balance at the end of the last block. While this may not be correct in every
-			// case (an account could spend ether during a block and then destruct), it's the best we can do.
-			acc, err := rpchelper.GetAccount(dbtx, blockNumber-1, common.HexToAddress(gethTrace.From))
-			if err == nil {
-				if acc != nil {
-					val := acc.Balance.ToBig()
-					pt.Action.Balance = hexutil.EncodeBig(val)
-				}
-			}
-		}
-
 	} else {
 		pt.Action.CallType = callType
 		pt.Action.Input = gethTrace.Input
@@ -188,6 +170,26 @@ func (api *TraceAPIImpl) convertToParityTrace(dbtx ethdb.Tx, gethTrace GethTrace
 			pt.Result.GasUsed = hexutil.EncodeUint64(0)
 		}
 	}
+
+	// This ugly code is here to convert Geth error messages to Parity error message. One day, when
+	// we figure out what we want to do, it will be removed
+	var (
+		ErrInvalidJumpParity       = "Bad jump destination"
+		ErrExecutionRevertedParity = "Reverted"
+	)
+	gethError := gethTrace.Error
+	if gethError == vm.ErrInvalidJump.Error() {
+		pt.Error = ErrInvalidJumpParity
+	} else if gethError == vm.ErrExecutionReverted.Error() {
+		pt.Error = ErrExecutionRevertedParity
+	} else {
+		pt.Error = gethTrace.Error
+	}
+	if pt.Error != "" {
+		pt.Result.GasUsed = "0"
+	}
+	// This ugly code is here to convert Geth error messages to Parity error message. One day, when
+	// we figure out what we want to do, it will be removed
 
 	pt.BlockHash = blockHash
 	pt.BlockNumber = blockNumber

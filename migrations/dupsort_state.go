@@ -2,10 +2,9 @@ package migrations
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
@@ -122,7 +121,7 @@ var dupSortIH = Migration{
 }
 
 var clearIndices = Migration{
-	Name: "clear_log_indices6",
+	Name: "clear_log_indices7",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.LogAddressIndex, dbutils.LogTopicIndex); err != nil {
 			return err

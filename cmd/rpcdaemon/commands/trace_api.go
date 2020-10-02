@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 
+	"github.com/ledgerwatch/turbo-geth/params"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -35,19 +37,21 @@ type TraceAPI interface {
 
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
 type TraceAPIImpl struct {
-	db        ethdb.KV
-	dbReader  ethdb.Database
-	maxTraces uint64
-	traceType string
+	db          ethdb.KV
+	dbReader    ethdb.Database
+	maxTraces   uint64
+	traceType   string
+	chainConfig *params.ChainConfig
 }
 
 // NewTraceAPI returns NewTraceAPI instance
-func NewTraceAPI(db ethdb.KV, dbReader ethdb.Database, cfg *cli.Flags) *TraceAPIImpl {
+func NewTraceAPI(db ethdb.KV, dbReader ethdb.Database, cfg *cli.Flags, chainConfig *params.ChainConfig) *TraceAPIImpl {
 	return &TraceAPIImpl{
-		db:        db,
-		dbReader:  dbReader,
-		maxTraces: cfg.MaxTraces,
-		traceType: cfg.TraceType,
+		db:          db,
+		dbReader:    dbReader,
+		maxTraces:   cfg.MaxTraces,
+		traceType:   cfg.TraceType,
+		chainConfig: chainConfig,
 	}
 }
 

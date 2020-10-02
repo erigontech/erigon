@@ -382,6 +382,14 @@ func (c *remoteCursor) Last() ([]byte, []byte, error) {
 	panic("not implemented yet")
 }
 
+func (c *remoteCursor) Close() {
+	if c.stream != nil {
+		c.streamCancelFn() // This will close the stream and free resources
+		c.stream = nil
+		c.streamingRequested = false
+	}
+}
+
 func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
 	return &remoteCursorDupSort{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
 }
@@ -389,14 +397,6 @@ func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
 func (c *remoteCursorDupSort) Prefetch(v uint) Cursor {
 	c.prefetch = uint32(v)
 	return c
-}
-
-func (c *remoteCursor) Close() error {
-	if c.stream == nil {
-		return nil
-	}
-	c.streamCancelFn()
-	return nil
 }
 
 //func (c *remoteCursorDupSort) initCursor() error {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/turbo-geth/params"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -32,13 +34,15 @@ type PrivateDebugAPIImpl struct {
 	db           ethdb.KV
 	dbReader     ethdb.Database
 	chainContext core.ChainContext
+	chainConfig  *params.ChainConfig
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Database) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Database, chainConfig *params.ChainConfig) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
-		db:       db,
-		dbReader: dbReader,
+		db:          db,
+		dbReader:    dbReader,
+		chainConfig: chainConfig,
 	}
 }
 
@@ -46,14 +50,12 @@ func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Database) *PrivateDebugAPIIm
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
 	bc := adapter.NewBlockGetter(api.dbReader)
 	cc := adapter.NewChainContext(api.dbReader)
-	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
 	tx, err1 := api.db.Begin(ctx, nil, false)
 	if err1 != nil {
 		return StorageRangeResult{}, fmt.Errorf("storageRangeAt cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
-	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx, blockHash, txIndex)
+	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, api.chainConfig, cc, tx, blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
