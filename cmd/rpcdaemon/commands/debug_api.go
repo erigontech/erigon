@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/params"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -32,13 +33,15 @@ type PrivateDebugAPIImpl struct {
 	db           ethdb.KV
 	dbReader     ethdb.Getter
 	chainContext core.ChainContext
+	chainConfig  *params.ChainConfig
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter, chainConfig *params.ChainConfig) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
-		db:       db,
-		dbReader: dbReader,
+		db:          db,
+		dbReader:    dbReader,
+		chainConfig: chainConfig,
 	}
 }
 
@@ -46,9 +49,7 @@ func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter) *PrivateDebugAPIImpl
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
 	bc := adapter.NewBlockGetter(api.dbReader)
 	cc := adapter.NewChainContext(api.dbReader)
-	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
-	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, api.db, blockHash, txIndex)
+	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, api.chainConfig, cc, api.db, blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
