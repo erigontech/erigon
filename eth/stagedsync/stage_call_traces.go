@@ -15,6 +15,7 @@ import (
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -78,6 +79,9 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 	defer callFromIndexCursor.Close()
 	callToIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CallToIndex)
 	defer callToIndexCursor.Close()
+	accountChangesCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainAccountChangeSetBucket)
+	defer accountChangesCursor.Close()
+	storageChangesCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStorageChangeSetBucket)
 	checkFlushEvery := time.NewTicker(callIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
 	engine := chainContext.Engine()
@@ -97,6 +101,14 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 	}
 
 	prev := startBlock
+	accountCsKey, accountCsVal, errAcc := accountChangesCursor.Seek(dbutils.EncodeTimestamp(startBlock))
+	if errAcc != nil {
+		return fmt.Errorf("seeking in account changeset cursor: %v", errAcc)
+	}
+	storageCsKey, storageCsVal, errSt := storageChangesCursor.Seek(dbutils.EncodeTimestamp(startBlock))
+	if errSt != nil {
+		return fmt.Errorf("seeking in storage changeset cursor: %v", errSt)
+	}
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
 			return err
@@ -149,6 +161,38 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
+		if accountCsKey != nil {
+			accountCsBlockNum, _ := dbutils.DecodeTimestamp(accountCsKey)
+			if accountCsBlockNum == blockNum {
+				cs := changeset.AccountChangeSetPlainBytes(accountCsVal)
+				accountCsKey, accountCsVal, errAcc = accountChangesCursor.Next()
+				if errAcc != nil {
+					return fmt.Errorf("seeking in account changeset cursor: %v", errAcc)
+				}
+				if errAcc = cs.Walk(func(k, v []byte) error {
+					accountCache.Set(k, v)
+					return nil
+				}); errAcc != nil {
+					return fmt.Errorf("walking in account changeset: %v", errAcc)
+				}
+			}
+		}
+		if storageCsKey != nil {
+			storageCsBlockNum, _ := dbutils.DecodeTimestamp(storageCsKey)
+			if storageCsBlockNum == blockNum {
+				cs := changeset.StorageChangeSetPlainBytes(storageCsVal)
+				storageCsKey, storageCsVal, errSt = storageChangesCursor.Next()
+				if errSt != nil {
+					return fmt.Errorf("seeking in storage changeset cursor: %v", errSt)
+				}
+				if errSt = cs.Walk(func(k, v []byte) error {
+					storageCache.Set(k, v)
+					return nil
+				}); errSt != nil {
+					return fmt.Errorf("walking in storage changeset: %v", errSt)
+				}
+			}
+		}
 		stateReader := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
 		stateWriter := state.NewCacheStateWriter()
 
