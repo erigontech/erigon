@@ -30,7 +30,6 @@ var (
 type BucketConfigsFunc func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg
 type LmdbOpts struct {
 	inMem      bool
-	test       bool
 	readOnly   bool
 	path       string
 	bucketsCfg BucketConfigsFunc
