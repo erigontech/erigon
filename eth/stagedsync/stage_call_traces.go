@@ -105,10 +105,12 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 	if errAcc != nil {
 		return fmt.Errorf("seeking in account changeset cursor: %v", errAcc)
 	}
+	accountsPreset := 0
 	storageCsKey, storageCsVal, errSt := storageChangesCursor.Seek(dbutils.EncodeTimestamp(startBlock))
 	if errSt != nil {
 		return fmt.Errorf("seeking in storage changeset cursor: %v", errSt)
 	}
+	storagePreset := 0
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
 			return err
@@ -132,9 +134,13 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 
 			log.Info("Progress", "blockNum", blockNum, dbutils.CallFromIndex, common.StorageSize(sz), dbutils.CallToIndex, common.StorageSize(sz2),
 				"blk/second", speed,
+				"accounts preset", accountsPreset,
+				"storage preset", storagePreset,
 				"alloc", common.StorageSize(m.Alloc),
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
+			accountsPreset = 0
+			storagePreset = 0
 		case <-checkFlushEvery.C:
 			if needFlush(froms, callIndicesMemLimit) {
 				if err := flushBitmaps(callFromIndexCursor, froms); err != nil {
@@ -171,6 +177,7 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 				}
 				if errAcc = cs.Walk(func(k, v []byte) error {
 					accountCache.Set(k, v)
+					accountsPreset++
 					return nil
 				}); errAcc != nil {
 					return fmt.Errorf("walking in account changeset: %v", errAcc)
@@ -187,6 +194,7 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 				}
 				if errSt = cs.Walk(func(k, v []byte) error {
 					storageCache.Set(k, v)
+					storagePreset++
 					return nil
 				}); errSt != nil {
 					return fmt.Errorf("walking in storage changeset: %v", errSt)
