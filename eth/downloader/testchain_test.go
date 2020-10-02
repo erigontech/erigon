@@ -22,7 +22,6 @@ import (
 	"os"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 
@@ -37,63 +36,69 @@ import (
 
 // Test chain parameters.
 var (
-	testKey, _    = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	testAddress   = crypto.PubkeyToAddress(testKey.PublicKey)
-	testKey1, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f292")
-	testAddress1  = crypto.PubkeyToAddress(testKey.PublicKey)
-	testKey2, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f293")
-	testAddress2  = crypto.PubkeyToAddress(testKey.PublicKey)
-	testKey3, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f294")
-	testAddress3  = crypto.PubkeyToAddress(testKey.PublicKey)
-	testAddresses = []common.Address{testAddress, testAddress1, testAddress2, testAddress3}
+	testKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testAddress = crypto.PubkeyToAddress(testKey.PublicKey)
 
-	testDb      = ethdb.NewMemTestDatabase()
+	testDb      = ethdb.NewMemDatabase()
 	testGenesis = core.GenesisWithAccounts(testDb, []core.GenAccount{
 		{testAddress,
 			big.NewInt(1000000000),
 		},
-		{testAddress1,
-			big.NewInt(1000000000),
-		},
-		{testAddress2,
-			big.NewInt(1000000000),
-		},
-		{testAddress3,
-			big.NewInt(1000000000),
-		},
 	})
 
-	forkLen = int(fullMaxForkAncestry + 50)
+	// The common prefix of all test chains:
+	// Different forks on top of the base chain:
+	testChainBase   *testChain
+	testChainBaseMu sync.Mutex
+
+	testChainForkLightA   *testChain
+	testChainForkLightAMu sync.Mutex
+
+	testChainForkLightB   *testChain
+	testChainForkLightBMu sync.Mutex
+
+	testChainForkHeavy   *testChain
+	testChainForkHeavyMu sync.Mutex
 )
 
-// The common prefix of all test chains:
-var testChainBase = newTestChain(OverwriteBlockCacheItems+200, testDb, testGenesis)
-
-func getTestChainBase() *testChain {
-	return testChainBase
-}
 func getTestChainForkLightA() *testChain {
+	testChainForkLightAMu.Lock()
+	defer testChainForkLightAMu.Unlock()
+	if testChainForkLightA == nil {
+		testChainForkLightA = getTestChainBase().makeFork(getForkLen(), false, 1)
+	}
 	return testChainForkLightA
 }
 func getTestChainForkLightB() *testChain {
+	testChainForkLightBMu.Lock()
+	defer testChainForkLightBMu.Unlock()
+	if testChainForkLightB == nil {
+		testChainForkLightB = getTestChainBase().makeFork(getForkLen(), false, 2)
+	}
 	return testChainForkLightB
 }
 func getTestChainForkHeavy() *testChain {
+	testChainForkHeavyMu.Lock()
+	defer testChainForkHeavyMu.Unlock()
+	if testChainForkHeavy == nil {
+		testChainForkHeavy = getTestChainBase().makeFork(getForkLen()+1, true, 3)
+	}
 	return testChainForkHeavy
 }
+func getTestChainBase() *testChain {
+	testChainBaseMu.Lock()
+	defer testChainBaseMu.Unlock()
+	if testChainBase == nil {
+		testChainBase = newTestChain(OverwriteBlockCacheItems+200, testDb, testGenesis)
+	}
+	return testChainBase
+}
 
-// Different forks on top of the base chain:
-var testChainForkLightA, testChainForkLightB, testChainForkHeavy *testChain
+func getForkLen() int {
+	return int(fullMaxForkAncestry + 50)
+}
 
 func TestMain(m *testing.M) {
-	var forkLen = int(fullMaxForkAncestry + 50)
-	var wg sync.WaitGroup
-	wg.Add(3)
-	go func() { testChainForkLightA = testChainBase.makeFork(forkLen, false, 1); wg.Done() }()
-	go func() { testChainForkLightB = testChainBase.makeFork(forkLen, false, 2); wg.Done() }()
-	go func() { testChainForkHeavy = testChainBase.makeFork(forkLen+1, true, 3); wg.Done() }()
-	wg.Wait()
-
 	result := m.Run()
 
 	// teardown
@@ -183,7 +188,6 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	amount := uint256.NewInt().SetUint64(1000)
 
 	var parentBlock *types.Block
-	t := time.Now()
 	existingLen := len(tc.chain) - 1
 	totalLen := existingLen + n
 	signer := types.MakeSigner(params.TestChainConfig, big.NewInt(1))
@@ -196,7 +200,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 			// Include transactions to the miner to make blocks more interesting.
 			if i%22 == 0 {
 				if testGenesisNonce == -1 {
-					testGenesisNonce = int64(block.TxNonce(testAddresses[int(seed)%len(testAddresses)]))
+					testGenesisNonce = int64(block.TxNonce(testAddress))
 				}
 				tx, err := types.SignTx(types.NewTransaction(uint64(testGenesisNonce), zeroAddress, amount, params.TxGas, nil, nil), signer, testKey)
 				if err != nil {
@@ -231,11 +235,6 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 					Number:     parentBlock.Number(),
 				})
 			}
-		}
-
-		if i%500 == 0 {
-			fmt.Println("generated a chain of", i, time.Since(t))
-			t = time.Now()
 		}
 	}, false /* intermediateHashes */)
 	if err != nil {

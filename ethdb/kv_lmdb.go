@@ -28,7 +28,6 @@ var (
 type BucketConfigsFunc func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg
 type LmdbOpts struct {
 	inMem      bool
-	test       bool
 	readOnly   bool
 	path       string
 	bucketsCfg BucketConfigsFunc
@@ -45,11 +44,6 @@ func (opts LmdbOpts) Set(opt LmdbOpts) LmdbOpts {
 
 func (opts LmdbOpts) InMem() LmdbOpts {
 	opts.inMem = true
-	return opts
-}
-
-func (opts LmdbOpts) Test() LmdbOpts {
-	opts.test = true
 	return opts
 }
 
@@ -80,7 +74,7 @@ func (opts LmdbOpts) Open() (KV, error) {
 	var logger log.Logger
 
 	if opts.inMem {
-		err = env.SetMapSize(64 << 21) // 64MB
+		err = env.SetMapSize(64 << 20) // 64MB
 		logger = log.New("lmdb", "inMem")
 		if err != nil {
 			return nil, err

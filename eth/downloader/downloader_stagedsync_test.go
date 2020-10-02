@@ -36,7 +36,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 		peers:   make(map[string]*stagedSyncTesterPeer),
 		genesis: testGenesis,
 	}
-	tester.db = ethdb.NewMemTestDatabase()
+	tester.db = ethdb.NewMemDatabase()
 	// This needs to match the genesis in the file testchain_test.go
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())

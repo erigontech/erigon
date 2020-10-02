@@ -310,9 +310,8 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	// Open the db and recover any potential corruptions
 	switch db.kv.(type) {
 	case *LmdbKV:
-		fmt.Println("*** 2")
 		opts := db.kv.(*LmdbKV).opts
-		mem = NewObjectDatabase(NewLMDB().InMem().Set(opts).MustOpen())
+		mem = NewObjectDatabase(NewLMDB().Set(opts).MustOpen())
 	}
 
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {
