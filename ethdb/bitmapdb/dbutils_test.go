@@ -15,11 +15,12 @@ func TestSharding(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	tx, err := db.Begin(context.Background())
+	txn, err := db.Begin(context.Background())
 	require.NoError(t, err)
-	defer tx.Rollback()
+	defer txn.Rollback()
 
-	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex)
+	tx := txn.(ethdb.HasTx).Tx()
+	c := tx.Cursor(dbutils.LogTopicIndex)
 
 	{
 		k := []byte{1}
@@ -46,7 +47,7 @@ func TestSharding(t *testing.T) {
 		require.Equal(t, 0, int(expect.GetCardinality()))
 
 		// TruncateRange can remove large part
-		err = bitmapdb.TruncateRange(c, k, 2_000_000, 3_000_000) // [from, to)
+		err = bitmapdb.TruncateRange(tx, dbutils.LogTopicIndex, k, 2_000_000, 3_000_000) // [from, to)
 		require.NoError(t, err)
 
 		fromDb, err = bitmapdb.Get(c, k, 0, 10_000_000)
@@ -63,7 +64,7 @@ func TestSharding(t *testing.T) {
 
 		// check that TruncateRange will preserve right interval: [from, to)
 		max := fromDb.Maximum()
-		err = bitmapdb.TruncateRange(c, k, 0, uint64(fromDb.Maximum())) // [from, to)
+		err = bitmapdb.TruncateRange(tx, dbutils.LogTopicIndex, k, 0, uint64(fromDb.Maximum())) // [from, to)
 		require.NoError(t, err)
 
 		fromDb, err = bitmapdb.Get(c, k, 0, 10_000_000)

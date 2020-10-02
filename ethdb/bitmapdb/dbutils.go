@@ -43,24 +43,7 @@ func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) error
 		return err
 	}
 
-	if len(currentLastV) < int(ShardLimit) { // merge delta to last shard
-		delta = gocroaring.Or(delta, last)
-
-		err = writeBitmapSharded(c, key, delta)
-		if err != nil {
-			return err
-		}
-
-		return nil
-	}
-
-	// rename existing last shard, then write delta to db
-	max := last.Maximum()
-	binary.BigEndian.PutUint32(blockNBytes, max)
-	err = c.Put(append(common.CopyBytes(key), blockNBytes...), currentLastV)
-	if err != nil {
-		return err
-	}
+	delta = gocroaring.Or(delta, last)
 
 	err = writeBitmapSharded(c, key, delta)
 	if err != nil {
@@ -143,10 +126,14 @@ func writeBitmapSharded(c ethdb.Cursor, key []byte, delta *gocroaring.Bitmap) er
 // TruncateRange - gets existing bitmap in db and call RemoveRange operator on it.
 // starts from hot shard, stops when shard not overlap with [from-to)
 // !Important: [from, to)
-func TruncateRange(c ethdb.Cursor, key []byte, from, to uint64) error {
+func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) error {
 	shardKey := make([]byte, len(key)+4)
 	copy(shardKey, key)
 	binary.BigEndian.PutUint32(shardKey[len(shardKey)-4:], uint32(from))
+	c := tx.Cursor(bucket)
+	defer c.Close()
+	cForDelete := tx.Cursor(bucket) // use dedicated cursor for delete operation, but in near future will change to ETL
+	defer cForDelete.Close()
 
 	for k, v, err := c.Seek(shardKey); k != nil; k, v, err = c.Next() {
 		if err != nil {
@@ -165,7 +152,7 @@ func TruncateRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 
 		bm.RemoveRange(from, to)
 		if bm.GetCardinality() == 0 { // don't store empty bitmaps
-			err = c.DeleteCurrent()
+			err := cForDelete.Delete(k)
 			if err != nil {
 				return err
 			}
@@ -211,7 +198,7 @@ func TruncateRange(c ethdb.Cursor, key []byte, from, to uint64) error {
 	}
 
 	copyV := common.CopyBytes(v)
-	err = c.DeleteCurrent()
+	err = cForDelete.Delete(k)
 	if err != nil {
 		return err
 	}

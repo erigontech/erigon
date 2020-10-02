@@ -69,15 +69,19 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 	return nil
 }
 
-func promoteLogIndex(tx ethdb.DbWithPendingMutations, start uint64, quit <-chan struct{}) error {
+func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
+	tx := db.(ethdb.HasTx).Tx()
 	topics := map[string]*gocroaring.Bitmap{}
 	addresses := map[string]*gocroaring.Bitmap{}
-	logTopicIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex)
-	logAddrIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
-	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
+	logTopicIndexCursor := tx.Cursor(dbutils.LogTopicIndex)
+	defer logTopicIndexCursor.Close()
+	logAddrIndexCursor := tx.Cursor(dbutils.LogAddressIndex)
+	defer logAddrIndexCursor.Close()
+	receipts := tx.Cursor(dbutils.BlockReceiptsPrefix)
+	defer receipts.Close()
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
 
@@ -94,11 +98,11 @@ func promoteLogIndex(tx ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 		select {
 		default:
 		case <-logEvery.C:
-			sz, err := tx.(ethdb.HasTx).Tx().BucketSize(dbutils.LogTopicIndex)
+			sz, err := tx.BucketSize(dbutils.LogTopicIndex)
 			if err != nil {
 				return err
 			}
-			sz2, err := tx.(ethdb.HasTx).Tx().BucketSize(dbutils.LogAddressIndex)
+			sz2, err := tx.BucketSize(dbutils.LogAddressIndex)
 			if err != nil {
 				return err
 			}
@@ -191,13 +195,13 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	return nil
 }
 
-func unwindLogIndex(tx ethdb.Database, from, to uint64, quitCh <-chan struct{}) error {
+func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-chan struct{}) error {
 	topics := map[string]bool{}
 	addrs := map[string]bool{}
-	addrIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
-	topicIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex)
 
-	receipts := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
+	tx := db.(ethdb.HasTx).Tx()
+	receipts := tx.Cursor(dbutils.BlockReceiptsPrefix)
+	defer receipts.Close()
 	start := dbutils.EncodeBlockNumber(to + 1)
 	for k, v, err := receipts.Seek(start); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
@@ -222,10 +226,10 @@ func unwindLogIndex(tx ethdb.Database, from, to uint64, quitCh <-chan struct{}) 
 		}
 	}
 
-	if err := truncateBitmaps(topicIndex, topics, to+1, from+1); err != nil {
+	if err := truncateBitmaps(tx.(ethdb.HasTx).Tx(), dbutils.LogTopicIndex, topics, to+1, from+1); err != nil {
 		return err
 	}
-	if err := truncateBitmaps(addrIndex, addrs, to+1, from+1); err != nil {
+	if err := truncateBitmaps(tx.(ethdb.HasTx).Tx(), dbutils.LogAddressIndex, addrs, to+1, from+1); err != nil {
 		return err
 	}
 	return nil
@@ -241,7 +245,6 @@ func needFlush(bitmaps map[string]*gocroaring.Bitmap, memLimit datasize.ByteSize
 }
 
 func flushBitmaps(c ethdb.Cursor, inMem map[string]*gocroaring.Bitmap) error {
-	defer func(t time.Time) { fmt.Printf("dbutils.go:258: %s\n", time.Since(t)) }(time.Now())
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
@@ -258,14 +261,14 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*gocroaring.Bitmap) error {
 	return nil
 }
 
-func truncateBitmaps(c ethdb.Cursor, inMem map[string]bool, from, to uint64) error {
+func truncateBitmaps(tx ethdb.Tx, bucket string, inMem map[string]bool, from, to uint64) error {
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		if err := bitmapdb.TruncateRange(c, []byte(k), from, to); err != nil {
+		if err := bitmapdb.TruncateRange(tx, bucket, []byte(k), from, to); err != nil {
 			return nil
 		}
 	}
