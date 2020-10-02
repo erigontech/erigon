@@ -11,8 +11,6 @@ import (
 
 const ShardLimit = 3 * datasize.KB
 
-var blockNBytes = make([]byte, 4)
-
 // AppendMergeByOr - appending delta to existing data in db, merge by Or
 // Method maintains sharding - because some bitmaps are >1Mb and when new incoming blocks process it
 //	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (LMDB does copy-on-write).
