@@ -69,7 +69,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 }
 
 func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quit <-chan struct{}) error {
-	logEvery := time.NewTicker(30 * time.Second)
+	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
 	froms := map[string]*roaring.Bitmap{}
@@ -90,12 +90,13 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 	// Caching is not worth it for small runs of blocks
 	if caching {
 		// Caching is not worth it for small runs of blocks
-		accountCache = fastcache.New(512 * 1024 * 1024) // 512 Mb
-		storageCache = fastcache.New(512 * 1024 * 1024) // 512 Mb
-		codeCache = fastcache.New(32 * 1024 * 1024)     // 32 Mb (the minimum)
-		codeSizeCache = fastcache.New(32 * 1024 * 1024) // 32 Mb (the minimum)
+		accountCache = fastcache.New(2 * 1024 * 1024 * 1024) // 2 Gb
+		storageCache = fastcache.New(2 * 1024 * 1024 * 1024) // 2 Gb
+		codeCache = fastcache.New(512 * 1024 * 1024)         // 512 Mb
+		codeSizeCache = fastcache.New(32 * 1024 * 1024)      // 32 Mb (the minimum)
 	}
 
+	prev := startBlock
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
 			return err
@@ -114,7 +115,11 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 			}
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
+			speed := float64(blockNum-prev) / float64(logInterval/time.Second)
+			prev = blockNum
+
 			log.Info("Progress", "blockNum", blockNum, dbutils.CallFromIndex, common.StorageSize(sz), dbutils.CallToIndex, common.StorageSize(sz2),
+				"blk/second", speed,
 				"alloc", common.StorageSize(m.Alloc),
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))

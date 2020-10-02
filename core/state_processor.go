@@ -244,7 +244,7 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
 	var receipt *types.Receipt
 	if !cfg.NoReceipts {
-		receipt := types.NewReceipt(result.Failed(), *usedGas)
+		receipt = types.NewReceipt(result.Failed(), *usedGas)
 		receipt.TxHash = tx.Hash()
 		receipt.GasUsed = result.UsedGas
 		// if the transaction created a contract, store the creation address in the receipt.
