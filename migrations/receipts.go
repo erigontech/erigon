@@ -55,7 +55,7 @@ var receiptsCborEncode = Migration{
 			return err
 		}
 
-		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.BlockReceiptsPrefix); err != nil {
+		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.BlockReceiptsPrefixOld1); err != nil {
 			return err
 		}
 		return OnLoadCommit(db, nil, true)
