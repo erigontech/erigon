@@ -52,63 +52,63 @@ func TestLogIndex(t *testing.T) {
 	err = promoteLogIndex(tx, 0, nil)
 	require.NoError(err)
 
-	// Check indices cardinality (in how many blocks they meet)
+	// Check indices GetCardinality (in how many blocks they meet)
 	logTopicIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex)
 	logAddrIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
 
-	m, err := bitmapdb.Get(logAddrIndex, addr1[:])
+	m, err := bitmapdb.Get(logAddrIndex, addr1[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(1, int(m.Cardinality()))
+	require.Equal(1, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logAddrIndex, addr2[:])
+	m, err = bitmapdb.Get(logAddrIndex, addr2[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(1, int(m.Cardinality()))
+	require.Equal(1, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logTopicIndex, topic1[:])
+	m, err = bitmapdb.Get(logTopicIndex, topic1[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(1, int(m.Cardinality()))
+	require.Equal(1, int(m.GetCardinality()), 0, 10_000_000)
 
-	m, err = bitmapdb.Get(logTopicIndex, topic2[:])
+	m, err = bitmapdb.Get(logTopicIndex, topic2[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(2, int(m.Cardinality()))
+	require.Equal(2, int(m.GetCardinality()))
 
 	// Unwind test
 	err = unwindLogIndex(tx, 2, 1, nil)
 	require.NoError(err)
 
-	m, err = bitmapdb.Get(logAddrIndex, addr1[:])
+	m, err = bitmapdb.Get(logAddrIndex, addr1[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(1, int(m.Cardinality()))
+	require.Equal(1, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logAddrIndex, addr2[:])
+	m, err = bitmapdb.Get(logAddrIndex, addr2[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(0, int(m.Cardinality()))
+	require.Equal(0, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logTopicIndex, topic1[:])
+	m, err = bitmapdb.Get(logTopicIndex, topic1[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(1, int(m.Cardinality()))
+	require.Equal(1, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logTopicIndex, topic2[:])
+	m, err = bitmapdb.Get(logTopicIndex, topic2[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(1, int(m.Cardinality()))
+	require.Equal(1, int(m.GetCardinality()))
 
 	// Unwind test
 	err = unwindLogIndex(tx, 1, 0, nil)
 	require.NoError(err)
 
-	m, err = bitmapdb.Get(logAddrIndex, addr1[:])
+	m, err = bitmapdb.Get(logAddrIndex, addr1[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(0, int(m.Cardinality()))
+	require.Equal(0, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logAddrIndex, addr2[:])
+	m, err = bitmapdb.Get(logAddrIndex, addr2[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(0, int(m.Cardinality()))
+	require.Equal(0, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logTopicIndex, topic1[:])
+	m, err = bitmapdb.Get(logTopicIndex, topic1[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(0, int(m.Cardinality()))
+	require.Equal(0, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logTopicIndex, topic2[:])
+	m, err = bitmapdb.Get(logTopicIndex, topic2[:], 0, 10_000_000)
 	require.NoError(err)
-	require.Equal(0, int(m.Cardinality()))
+	require.Equal(0, int(m.GetCardinality()))
 }

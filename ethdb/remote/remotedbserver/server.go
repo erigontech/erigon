@@ -51,8 +51,8 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 	var grpcServer *grpc.Server
 	if creds == nil {
 		grpcServer = grpc.NewServer(
-			grpc.NumStreamWorkers(20),    // reduce amount of goroutines
-			grpc.WriteBufferSize(114096), // reduce buffers to save mem
+			grpc.NumStreamWorkers(20),  // reduce amount of goroutines
+			grpc.WriteBufferSize(1024), // reduce buffers to save mem
 			grpc.ReadBufferSize(1024),
 			grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
 			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),

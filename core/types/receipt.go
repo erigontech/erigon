@@ -30,7 +30,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-//go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go
+// go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go
+//go:generate codecgen -o receipt_codecgen_gen.go -r="ReceiptsForStorage|ReceiptForStorage|Receipts|Receipt|Log" -rt="codec" -nx=true -d=2 receipt.go log.go
 
 var (
 	receiptStatusFailedRLP     = []byte{}
@@ -49,23 +50,23 @@ const (
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 type Receipt struct {
 	// Consensus fields: These fields are defined by the Yellow Paper
-	PostState         []byte `json:"root"`
-	Status            uint64 `json:"status"`
-	CumulativeGasUsed uint64 `json:"cumulativeGasUsed" gencodec:"required"`
-	Bloom             Bloom  `json:"logsBloom"         gencodec:"required"`
-	Logs              []*Log `json:"logs"              gencodec:"required"`
+	PostState         []byte `json:"root" codec:"1"`
+	Status            uint64 `json:"status" codec:"2"`
+	CumulativeGasUsed uint64 `json:"cumulativeGasUsed" gencodec:"required" codec:"3"`
+	Bloom             Bloom  `json:"logsBloom"         gencodec:"required" codec:"-"`
+	Logs              []*Log `json:"logs"              gencodec:"required" codec:"4"`
 
 	// Implementation fields: These fields are added by geth when processing a transaction.
 	// They are stored in the chain database.
-	TxHash          common.Hash    `json:"transactionHash" gencodec:"required"`
-	ContractAddress common.Address `json:"contractAddress"`
-	GasUsed         uint64         `json:"gasUsed" gencodec:"required"`
+	TxHash          common.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
+	ContractAddress common.Address `json:"contractAddress" codec:"-"`
+	GasUsed         uint64         `json:"gasUsed" gencodec:"required" codec:"-"`
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
-	BlockHash        common.Hash `json:"blockHash,omitempty"`
-	BlockNumber      *big.Int    `json:"blockNumber,omitempty"`
-	TransactionIndex uint        `json:"transactionIndex"`
+	BlockHash        common.Hash `json:"blockHash,omitempty" codec:"-"`
+	BlockNumber      *big.Int    `json:"blockNumber,omitempty" codec:"-"`
+	TransactionIndex uint        `json:"transactionIndex" codec:"-"`
 }
 
 type receiptMarshaling struct {
@@ -179,6 +180,8 @@ func (r *Receipt) Size() common.StorageSize {
 	}
 	return size
 }
+
+type ReceiptsForStorage []*ReceiptForStorage
 
 // ReceiptForStorage is a wrapper around a Receipt that flattens and parses the
 // entire content of a receipt, as opposed to only the consensus fields originally.

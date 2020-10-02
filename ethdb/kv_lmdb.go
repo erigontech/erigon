@@ -1171,12 +1171,11 @@ func (c *LmdbCursor) Append(k []byte, v []byte) error {
 	return c.append(k, v)
 }
 
-func (c *LmdbCursor) Close() error {
+func (c *LmdbCursor) Close() {
 	if c.c != nil {
 		c.c.Close()
 		c.c = nil
 	}
-	return nil
 }
 
 type LmdbDupSortCursor struct {

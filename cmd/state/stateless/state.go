@@ -33,7 +33,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"github.com/ledgerwatch/turbo-geth/ethdb/typedcursor"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -122,8 +122,8 @@ func commit(k []byte, tx ethdb.Tx, data interface{}) {
 	//defer func(t time.Time) { fmt.Println("Commit:", time.Since(t)) }(time.Now())
 	var buf bytes.Buffer
 
-	encoder := codecpool.Encoder(&buf)
-	defer codecpool.Return(encoder)
+	encoder := cbor.Encoder(&buf)
+	defer cbor.Return(encoder)
 
 	encoder.MustEncode(data)
 	if err := tx.Cursor(ReportsProgressBucket).Put(k, buf.Bytes()); err != nil {
@@ -140,7 +140,7 @@ func restore(k []byte, tx ethdb.Tx, data interface{}) {
 		return
 	}
 
-	decoder := codecpool.Decoder(bytes.NewReader(v))
+	decoder := cbor.Decoder(bytes.NewReader(v))
 	decoder.MustDecode(data)
 }
 
