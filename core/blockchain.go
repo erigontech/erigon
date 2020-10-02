@@ -2169,9 +2169,7 @@ func ExecuteBlockEphemerally(
 	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
-		return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
-	}
+	engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles())
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
