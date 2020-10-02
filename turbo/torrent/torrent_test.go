@@ -8,7 +8,7 @@ import (
 )
 
 func TestTorrentAddTorrent(t *testing.T) {
-	//t.Skip()
+	t.Skip()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	path := os.TempDir() + "/trnt_test3"
 	os.RemoveAll(path)

@@ -35,7 +35,7 @@ func New(snapshotsDir string, snapshotMode SnapshotMode, seeding bool) *Client {
 	torrentConfig.NoDHT = true
 	torrentConfig.DisableTrackers = false
 	torrentConfig.Debug = false
-	torrentConfig.Logger = NewLogger() //torrentConfig.Logger.FilterLevel(lg.Info)
+	torrentConfig.Logger = NewLogger()
 	torrentClient, err := torrent.NewClient(torrentConfig)
 	if err != nil {
 		log.Error("Fail to start torrnet client", "err", err)
