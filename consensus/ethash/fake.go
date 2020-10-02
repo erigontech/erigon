@@ -81,6 +81,7 @@ func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []
 
 				select {
 				case <-isClosed:
+					close(errs)
 					return
 				case errs <- res:
 					// nothing to do
@@ -96,7 +97,6 @@ func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []
 
 	closeFn := func() {
 		close(isClosed)
-		close(errs)
 		fn()
 	}
 
