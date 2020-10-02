@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/params"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -81,6 +82,11 @@ func (api *APIImpl) GetHeaderByHash(_ context.Context, hash common.Hash) (*types
 	}
 
 	return header, nil
+}
+
+func getChainConfig(db rawdb.DatabaseReader) *params.ChainConfig {
+	genesisHash := rawdb.ReadBlockByNumber(db, 0).Hash()
+	return rawdb.ReadChainConfig(db, genesisHash)
 }
 
 func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.API) []rpc.API {
