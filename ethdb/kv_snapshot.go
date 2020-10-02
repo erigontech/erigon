@@ -356,6 +356,11 @@ type snapshotCursor struct {
 	keyCmp      int
 }
 
+func (s *snapshotCursor) Close() {
+	defer s.dbCursor.Close()
+	defer s.snCursor.Close()
+}
+
 func (s *snapshotCursor) Prefix(v []byte) Cursor {
 	panic("implement me")
 }
