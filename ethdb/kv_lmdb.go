@@ -26,38 +26,48 @@ var (
 )
 
 type BucketConfigsFunc func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg
-type lmdbOpts struct {
+type LmdbOpts struct {
 	inMem      bool
+	test       bool
 	readOnly   bool
 	path       string
 	bucketsCfg BucketConfigsFunc
 }
 
-func (opts lmdbOpts) Path(path string) lmdbOpts {
+func (opts LmdbOpts) Path(path string) LmdbOpts {
 	opts.path = path
 	return opts
 }
 
-func (opts lmdbOpts) InMem() lmdbOpts {
+func (opts LmdbOpts) Set(opt LmdbOpts) LmdbOpts {
+	return opt
+}
+
+func (opts LmdbOpts) InMem() LmdbOpts {
 	opts.inMem = true
 	return opts
 }
 
-func (opts lmdbOpts) ReadOnly() lmdbOpts {
+func (opts LmdbOpts) Test() LmdbOpts {
+	opts.test = true
+	return opts
+}
+
+func (opts LmdbOpts) ReadOnly() LmdbOpts {
 	opts.readOnly = true
 	return opts
 }
 
-func (opts lmdbOpts) WithBucketsConfig(f BucketConfigsFunc) lmdbOpts {
+func (opts LmdbOpts) WithBucketsConfig(f BucketConfigsFunc) LmdbOpts {
 	opts.bucketsCfg = f
 	return opts
 }
 
-var DefaultBucketConfigs = func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+func DefaultBucketConfigs(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 	return defaultBuckets
 }
 
-func (opts lmdbOpts) Open() (KV, error) {
+func (opts LmdbOpts) Open() (KV, error) {
 	env, err := lmdb.NewEnv()
 	if err != nil {
 		return nil, err
@@ -70,7 +80,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 	var logger log.Logger
 
 	if opts.inMem {
-		err = env.SetMapSize(64 << 20) // 64MB
+		err = env.SetMapSize(64 << 21) // 64MB
 		logger = log.New("lmdb", "inMem")
 		if err != nil {
 			return nil, err
@@ -190,7 +200,7 @@ func (opts lmdbOpts) Open() (KV, error) {
 	return db, nil
 }
 
-func (opts lmdbOpts) MustOpen() KV {
+func (opts LmdbOpts) MustOpen() KV {
 	db, err := opts.Open()
 	if err != nil {
 		panic(fmt.Errorf("fail to open lmdb: %w", err))
@@ -199,7 +209,7 @@ func (opts lmdbOpts) MustOpen() KV {
 }
 
 type LmdbKV struct {
-	opts                lmdbOpts
+	opts                LmdbOpts
 	env                 *lmdb.Env
 	log                 log.Logger
 	buckets             dbutils.BucketsCfg
@@ -207,8 +217,8 @@ type LmdbKV struct {
 	wg                  *sync.WaitGroup
 }
 
-func NewLMDB() lmdbOpts {
-	return lmdbOpts{bucketsCfg: DefaultBucketConfigs}
+func NewLMDB() LmdbOpts {
+	return LmdbOpts{bucketsCfg: DefaultBucketConfigs}
 }
 
 // Close closes db
@@ -509,7 +519,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		log.Info("Batch", "commit", commitTook)
 	}
 
-	if !tx.isSubTx && !tx.db.opts.readOnly { // call fsync only after main transaction commit
+	if !tx.isSubTx && !tx.db.opts.readOnly && !tx.db.opts.inMem { // call fsync only after main transaction commit
 		fsyncTimer := time.Now()
 		if err := tx.db.env.Sync(true); err != nil {
 			log.Warn("fsync after commit failed", "err", err)
