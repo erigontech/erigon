@@ -278,7 +278,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 			var gethTrace GethTrace
 			jsonStr, _ := traceJSON.MarshalJSON()
 			json.Unmarshal(jsonStr, &gethTrace) // nolint errcheck
-			converted := api.convertToParityTrace(dbtx.(ethdb.HasTx).Tx(), gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
+			converted := api.convertToParityTrace(gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
 			traces = append(traces, converted...)
 		}
 	}
@@ -380,7 +380,7 @@ func (api *TraceAPIImpl) getTransactionTraces(ctx context.Context, txHash common
 
 	traces := ParityTraces{}
 	// Time spent 3 out of 205
-	converted := api.convertToParityTrace(dbtx, gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
+	converted := api.convertToParityTrace(gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
 	traces = append(traces, converted...)
 
 	return traces, nil

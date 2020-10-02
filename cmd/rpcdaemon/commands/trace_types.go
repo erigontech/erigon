@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 // TODO:(tjayrush)
@@ -124,7 +123,7 @@ func (t ParityTrace) String() string {
 
 // Takes a hierarchical Geth trace with fields of different meaning stored in the same named fields depending on 'type'. Parity traces
 // are flattened depth first and each field is put in its proper place
-func (api *TraceAPIImpl) convertToParityTrace(dbtx ethdb.Tx, gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, tx *types.Transaction, txIndex uint64, depth []int) ParityTraces {
+func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, tx *types.Transaction, txIndex uint64, depth []int) ParityTraces {
 	var traces ParityTraces // nolint prealloc
 	var pt ParityTrace
 
@@ -206,7 +205,7 @@ func (api *TraceAPIImpl) convertToParityTrace(dbtx ethdb.Tx, gethTrace GethTrace
 
 	for i, item := range gethTrace.Calls {
 		newDepth := append(depth, i)
-		subTraces := api.convertToParityTrace(dbtx, *item, blockHash, blockNumber, tx, txIndex, newDepth)
+		subTraces := api.convertToParityTrace(*item, blockHash, blockNumber, tx, txIndex, newDepth)
 		traces = append(traces, subTraces...)
 	}
 
