@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/RoaringBitmap/gocroaring"
+	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -74,8 +74,8 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 	defer logEvery.Stop()
 
 	tx := db.(ethdb.HasTx).Tx()
-	topics := map[string]*gocroaring.Bitmap{}
-	addresses := map[string]*gocroaring.Bitmap{}
+	topics := map[string]*roaring.Bitmap{}
+	addresses := map[string]*roaring.Bitmap{}
 	logTopicIndexCursor := tx.Cursor(dbutils.LogTopicIndex)
 	defer logTopicIndexCursor.Close()
 	logAddrIndexCursor := tx.Cursor(dbutils.LogAddressIndex)
@@ -114,14 +114,14 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 				if err := flushBitmaps(logTopicIndexCursor, topics); err != nil {
 					return err
 				}
-				topics = map[string]*gocroaring.Bitmap{}
+				topics = map[string]*roaring.Bitmap{}
 			}
 
 			if needFlush(addresses, logIndicesMemLimit) {
 				if err := flushBitmaps(logAddrIndexCursor, addresses); err != nil {
 					return err
 				}
-				addresses = map[string]*gocroaring.Bitmap{}
+				addresses = map[string]*roaring.Bitmap{}
 			}
 		}
 
@@ -137,7 +137,7 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 					topicStr := string(topic.Bytes())
 					m, ok := topics[topicStr]
 					if !ok {
-						m = gocroaring.New()
+						m = roaring.New()
 						topics[topicStr] = m
 					}
 					m.Add(uint32(blockNum))
@@ -146,7 +146,7 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 				accStr := string(log.Address.Bytes())
 				m, ok := addresses[accStr]
 				if !ok {
-					m = gocroaring.New()
+					m = roaring.New()
 					addresses[accStr] = m
 				}
 				m.Add(uint32(blockNum))
@@ -235,16 +235,16 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 	return nil
 }
 
-func needFlush(bitmaps map[string]*gocroaring.Bitmap, memLimit datasize.ByteSize) bool {
+func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) bool {
 	sz := uint64(0)
 	for _, m := range bitmaps {
-		sz += uint64(m.SerializedSizeInBytes())
+		sz += m.GetSerializedSizeInBytes()
 	}
 	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 
-func flushBitmaps(c ethdb.Cursor, inMem map[string]*gocroaring.Bitmap) error {
+func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
