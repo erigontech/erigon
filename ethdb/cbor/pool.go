@@ -1,4 +1,4 @@
-package codecpool
+package cbor
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
-var logger = log.New("package", "codecpool")
+var logger = log.New("package", "cbor")
 
 // Pool of decoders
 var decoderPool = make(chan *codec.Decoder, 128)
@@ -22,7 +22,24 @@ func Decoder(r io.Reader) *codec.Decoder {
 		{
 			var handle codec.CborHandle
 			handle.ReaderBufferSize = 64 * 1024
+			handle.ZeroCopy = true // if you need access to object outside of db transaction - please copy bytes before deserialization
 			d = codec.NewDecoder(r, &handle)
+		}
+	}
+	return d
+}
+
+func DecoderBytes(r []byte) *codec.Decoder {
+	var d *codec.Decoder
+	select {
+	case d = <-decoderPool:
+		d.ResetBytes(r)
+	default:
+		{
+			var handle codec.CborHandle
+			handle.ReaderBufferSize = 64 * 1024
+			handle.ZeroCopy = true // if you need access to object outside of db transaction - please copy bytes before deserialization
+			d = codec.NewDecoderBytes(r, &handle)
 		}
 	}
 	return d
@@ -48,7 +65,30 @@ func Encoder(w io.Writer) *codec.Encoder {
 		{
 			var handle codec.CborHandle
 			handle.WriterBufferSize = 64 * 1024
+			handle.StructToArray = true
+			handle.OptimumSize = true
+			handle.StringToRaw = true
+
 			e = codec.NewEncoder(w, &handle)
+		}
+	}
+	return e
+}
+
+func EncoderBytes(w *[]byte) *codec.Encoder {
+	var e *codec.Encoder
+	select {
+	case e = <-encoderPool:
+		e.ResetBytes(w)
+	default:
+		{
+			var handle codec.CborHandle
+			handle.WriterBufferSize = 64 * 1024
+			handle.StructToArray = true
+			handle.OptimumSize = true
+			handle.StringToRaw = true
+
+			e = codec.NewEncoderBytes(w, &handle)
 		}
 	}
 	return e

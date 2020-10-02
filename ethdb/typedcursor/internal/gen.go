@@ -40,7 +40,7 @@ import (
 	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 )
 `)
 
@@ -75,8 +75,8 @@ func (b *{{.BucketType}}) Get(key []byte) ({{.Type}}, bool) {
 	}
 
 	var v {{.Type}}
-	decoder := codecpool.Decoder(bytes.NewReader(value))
-	defer codecpool.Return(decoder)
+	decoder := cbor.Decoder(bytes.NewReader(value))
+	defer cbor.Return(decoder)
 
 	decoder.MustDecode(&v)
 	return v, true
@@ -121,8 +121,8 @@ func (b *{{.BucketType}}) DecrementIfExist(key []byte) error {
 func (b *{{.BucketType}}) Put(key []byte, value {{.Type}}) error {
 	var buf bytes.Buffer
 
-	encoder := codecpool.Encoder(&buf)
-	defer codecpool.Return(encoder)
+	encoder := cbor.Encoder(&buf)
+	defer cbor.Return(encoder)
 
 	encoder.MustEncode(&value)
 	return b.Cursor.Put(key, buf.Bytes())
@@ -131,8 +131,8 @@ func (b *{{.BucketType}}) Put(key []byte, value {{.Type}}) error {
 func (b *{{.BucketType}}) ForEach(fn func([]byte, {{.Type}}) error) error {
 	return ethdb.ForEach(b.Cursor, func(k, v []byte) (bool, error) {
 		var value {{.Type}}
-		decoder := codecpool.Decoder(bytes.NewReader(v))
-		defer codecpool.Return(decoder)
+		decoder := cbor.Decoder(bytes.NewReader(v))
+		defer cbor.Return(decoder)
 
 		decoder.MustDecode(&value)
 		return true, fn(k, value)

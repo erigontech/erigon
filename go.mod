@@ -28,7 +28,7 @@ require (
 	github.com/fatih/color v1.7.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
-	github.com/gin-gonic/gin v1.6.2
+	github.com/gin-gonic/gin v1.6.3
 	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.0
@@ -65,8 +65,10 @@ require (
 	github.com/status-im/keycard-go v0.0.0-20190424133014-d95853db0f48
 	github.com/stretchr/testify v1.6.1
 	github.com/tyler-smith/go-bip39 v1.0.2
-	github.com/ugorji/go/codec v1.1.7
-	github.com/urfave/cli v1.22.1
+	github.com/ugorji/go/codec v1.1.9
+	github.com/ugorji/go/codec/codecgen v1.1.9
+	github.com/urfave/cli v1.22.4
+	github.com/valyala/gozstd v1.8.3
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9

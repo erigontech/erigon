@@ -141,19 +141,23 @@ clean:
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
 
 devtools:
-	env GOBIN= go install golang.org/x/tools/cmd/stringer
-	env GOBIN= go install github.com/kevinburke/go-bindata/go-bindata
-	env GOBIN= go install github.com/fjl/gencodec
-	env GOBIN= go install ./cmd/abigen
+	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
+	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
+	$(GOBUILD) -o $(GOBIN)/go-bindata github.com/kevinburke/go-bindata/go-bindata
+	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
+	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
+	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
+	PATH=$(GOBIN):$(PATH) go generate ./common
+	PATH=$(GOBIN):$(PATH) go generate ./core/types
+	PATH=$(GOBIN):$(PATH) go generate ./ethdb/typedbucket
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
 
 bindings:
-	go generate ./tests/contracts/
-	go generate ./cmd/tester/contracts/
-	go generate ./core/state/contracts/
-	go generate ./ethdb/typedbucket
+	PATH=$(GOBIN):$(PATH) go generate ./tests/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./cmd/tester/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
 
 grpc:
 	# See also: ./cmd/hack/binary-deps/main.go
@@ -166,7 +170,7 @@ grpc:
 
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
-	PATH=$(GOBIN):$(PATH) go generate ./ethdb  # add folder with binaries to temporary PATH, `protoc` will search there installed above plugins
+	PATH=$(GOBIN):$(PATH) go generate ./ethdb
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
