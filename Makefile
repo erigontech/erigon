@@ -1,7 +1,7 @@
 GOBIN = $(CURDIR)/build/bin
 GOBUILD = env GO111MODULE=on go build -trimpath
 GOTEST = go test ./... -p 1
-export PATH := $(GOBIN):$(PATH) # add our build bin as first place to look for binaries
+PATH := $(GOBIN):$(PATH) # add our build bin as first place to look for binaries
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
 ifeq ($(LATEST_COMMIT),)
@@ -142,6 +142,7 @@ clean:
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
 
 devtools:
+	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
 	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
 	$(GOBUILD) -o $(GOBIN)/go-bindata github.com/kevinburke/go-bindata/go-bindata
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
