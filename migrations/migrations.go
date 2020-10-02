@@ -63,6 +63,7 @@ var migrations = []Migration{
 	dupSortIH,
 	clearIndices,
 	resetIHBucketToRecoverDB,
+	receiptsCborEncode,
 }
 
 type Migration struct {

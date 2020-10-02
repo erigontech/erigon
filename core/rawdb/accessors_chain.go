@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -407,15 +408,10 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 	if len(data) == 0 {
 		return nil
 	}
-	// Convert the receipts from their storage form to their internal representation
-	storageReceipts := []*types.ReceiptForStorage{}
-	if err := rlp.DecodeBytes(data, &storageReceipts); err != nil {
-		log.Error("Invalid receipt array RLP", "hash", hash, "err", err)
+	receipts := types.Receipts{}
+	if err := cbor.Unmarshal(&receipts, data); err != nil {
+		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
 		return nil
-	}
-	receipts := make(types.Receipts, len(storageReceipts))
-	for i, storageReceipt := range storageReceipts {
-		receipts[i] = (*types.Receipt)(storageReceipt)
 	}
 	return receipts
 }
@@ -448,17 +444,14 @@ func ReadReceipts(db DatabaseReader, hash common.Hash, number uint64) types.Rece
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
 func WriteReceipts(db DatabaseWriter, hash common.Hash, number uint64, receipts types.Receipts) {
-	// Convert the receipts into their storage form and serialize them
-	storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
-	for i, receipt := range receipts {
-		storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
-	}
-	bytes, err := rlp.EncodeToBytes(storageReceipts)
+	newV := make([]byte, 0, 1024)
+	err := cbor.Marshal(&newV, receipts)
 	if err != nil {
 		log.Crit("Failed to encode block receipts", "err", err)
 	}
+
 	// Store the flattened receipt slice
-	if err := db.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash), bytes); err != nil {
+	if err := db.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash), newV); err != nil {
 		log.Crit("Failed to store block receipts", "err", err)
 	}
 }
