@@ -1,7 +1,6 @@
 GOBIN = $(CURDIR)/build/bin
 GOBUILD = env GO111MODULE=on go build -trimpath
 GOTEST = go test ./... -p 1
-PATH := $(GOBIN):$(PATH) # add our build bin as first place to look for binaries
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
 ifeq ($(LATEST_COMMIT),)
@@ -148,17 +147,17 @@ devtools:
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
 	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
-	go generate ./common
-	go generate ./core/types
-	go generate ./ethdb/typedbucket
+	PATH=$(GOBIN):$(PATH) go generate ./common
+	PATH=$(GOBIN):$(PATH) go generate ./core/types
+	PATH=$(GOBIN):$(PATH) go generate ./ethdb/typedbucket
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
 
 bindings:
-	go generate ./tests/contracts/
-	go generate ./cmd/tester/contracts/
-	go generate ./core/state/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./tests/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./cmd/tester/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
 
 grpc:
 	# See also: ./cmd/hack/binary-deps/main.go
@@ -171,7 +170,7 @@ grpc:
 
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
-	go generate ./ethdb
+	PATH=$(GOBIN):$(PATH) go generate ./ethdb
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
