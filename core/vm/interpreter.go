@@ -34,6 +34,7 @@ type Config struct {
 	EnablePreimageRecording bool   // Enables recording of SHA3/keccak preimages
 	SkipAnalysis            bool   // Whether we can skip jumpdest analysis based on the checked history
 	TraceJumpDest           bool   // Print transaction hashes where jumpdest analysis was useful
+	NoReceipts              bool   // Do not calculate receipts
 
 	EWASMInterpreter string // External EWASM interpreter options
 	EVMInterpreter   string // External EVM interpreter options

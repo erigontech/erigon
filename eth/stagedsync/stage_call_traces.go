@@ -225,14 +225,14 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 	return nil
 }
 
-func unwindCallTraces(db ethdb.DbWithPendingMutations, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}) error {
+func unwindCallTraces(db rawdb.DatabaseReader, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}) error {
 	froms := map[string]bool{}
 	tos := map[string]bool{}
 	tx := db.(ethdb.HasTx).Tx()
 	engine := chainContext.Engine()
 
 	tracer := NewCallTracer()
-	vmConfig := &vm.Config{Debug: true, Tracer: tracer}
+	vmConfig := &vm.Config{Debug: true, NoReceipts: true, Tracer: tracer}
 	for blockNum := to + 1; blockNum <= from; blockNum++ {
 		if err := common.Stopped(quitCh); err != nil {
 			return err

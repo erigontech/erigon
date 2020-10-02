@@ -2156,10 +2156,12 @@ func ExecuteBlockEphemerally(
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
-		receipts = append(receipts, receipt)
+		if !vmConfig.NoReceipts {
+			receipts = append(receipts, receipt)
+		}
 	}
 
-	if chainConfig.IsByzantium(header.Number) {
+	if chainConfig.IsByzantium(header.Number) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.Header().ReceiptHash {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
