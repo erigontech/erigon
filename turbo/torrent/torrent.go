@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
@@ -36,7 +35,7 @@ func New(snapshotsDir string, snapshotMode SnapshotMode, seeding bool) *Client {
 	torrentConfig.NoDHT = true
 	torrentConfig.DisableTrackers = false
 	torrentConfig.Debug = false
-	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
+	torrentConfig.Logger = NewLogger() //torrentConfig.Logger.FilterLevel(lg.Info)
 	torrentClient, err := torrent.NewClient(torrentConfig)
 	if err != nil {
 		log.Error("Fail to start torrnet client", "err", err)
@@ -143,7 +142,6 @@ func (cli *Client) Run(db ethdb.Database) error {
 	torrents := cli.Cli.Torrents()
 	for i := range torrents {
 		t := torrents[i]
-		fmt.Println(t.Name())
 		go func(t *torrent.Torrent) {
 			t.AllowDataDownload()
 			t.DownloadAll()
