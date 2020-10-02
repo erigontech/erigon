@@ -19,18 +19,11 @@ import (
 var receiptsCborEncode = Migration{
 	Name: "receipts_cbor_encode",
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
-		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.BlockReceiptsPrefixOld1); err != nil {
-			return err
-		}
-		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.BlockReceiptsPrefix); err != nil {
-			return err
-		}
-
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
 		buf := make([]byte, 0, 100_000)
-		if err := db.Walk(dbutils.BlockReceiptsPrefixOld1, nil, 0, func(k, v []byte) (bool, error) {
+		if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
 			blockNum := binary.BigEndian.Uint64(k[:8])
 			select {
 			default:
@@ -50,14 +43,11 @@ var receiptsCborEncode = Migration{
 			if err := cbor.Marshal(&buf, storageReceipts); err != nil {
 				return false, err
 			}
-			return true, db.Append(dbutils.BlockReceiptsPrefix, common.CopyBytes(k), common.CopyBytes(buf))
+			return true, db.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(k), common.CopyBytes(buf))
 		}); err != nil {
 			return err
 		}
 
-		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.BlockReceiptsPrefixOld1); err != nil {
-			return err
-		}
 		return OnLoadCommit(db, nil, true)
 	},
 }
