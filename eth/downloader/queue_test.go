@@ -35,7 +35,7 @@ import (
 )
 
 var (
-	testdb  = ethdb.NewMemTestDatabase()
+	testdb  = ethdb.NewMemDatabase()
 	genesis = core.GenesisBlockForTesting(testdb, testAddress, big.NewInt(1000000000))
 )
 

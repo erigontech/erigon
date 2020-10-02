@@ -50,11 +50,6 @@ func (opts LmdbOpts) InMem() LmdbOpts {
 	return opts
 }
 
-func (opts LmdbOpts) Test() LmdbOpts {
-	opts.test = true
-	return opts
-}
-
 func (opts LmdbOpts) ReadOnly() LmdbOpts {
 	opts.readOnly = true
 	return opts
@@ -82,7 +77,7 @@ func (opts LmdbOpts) Open() (KV, error) {
 	var logger log.Logger
 
 	if opts.inMem {
-		err = env.SetMapSize(64 << 22) // 64MB
+		err = env.SetMapSize(64 << 20) // 64MB
 		logger = log.New("lmdb", "inMem")
 		if err != nil {
 			return nil, err
@@ -521,7 +516,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		log.Info("Batch", "commit", commitTook)
 	}
 
-	if !tx.isSubTx && !tx.db.opts.readOnly && !tx.db.opts.test { // call fsync only after main transaction commit
+	if !tx.isSubTx && !tx.db.opts.readOnly && !tx.db.opts.inMem { // call fsync only after main transaction commit
 		fsyncTimer := time.Now()
 		if err := tx.db.env.Sync(true); err != nil {
 			log.Warn("fsync after commit failed", "err", err)

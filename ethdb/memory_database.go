@@ -28,7 +28,3 @@ func NewMemDatabase() *ObjectDatabase {
 		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	}
 }
-
-func NewMemTestDatabase() *ObjectDatabase {
-	return NewObjectDatabase(NewLMDB().InMem().Test().MustOpen())
-}

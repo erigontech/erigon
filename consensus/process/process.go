@@ -2,7 +2,6 @@ package process
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -52,9 +51,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				}
 
 				err := c.Verify(c.Process.Chain, req.Header, parents, false, req.Seal)
-				fmt.Println("=== VerifyHeaderResponse-1", req.ID, req.Header.Number.Int64(), len(c.VerifyHeaderResponses))
 				c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, req.Header.Hash(), err}
-				fmt.Println("=== VerifyHeaderResponse-2", req.ID, req.Header.Number.Int64(), err)
 				if err == nil {
 					c.AddVerifiedBlocks(req.Header, req.Header.Hash())
 				}
@@ -126,7 +123,7 @@ func (c *Consensus) requestHeader(parentHash common.Hash) (*types.Header, bool, 
 	return parent, false, nil
 }
 
-func (c *Consensus) VerifyResults() chan consensus.VerifyHeaderResponse {
+func (c *Consensus) VerifyResults() <-chan consensus.VerifyHeaderResponse {
 	return c.VerifyHeaderResponses
 }
 

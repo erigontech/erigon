@@ -156,7 +156,6 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, erro
 		return nil, nil, err
 	}
 
-	fmt.Println("RemoteKV")
 	db := &RemoteKV{
 		opts:     opts,
 		conn:     conn,

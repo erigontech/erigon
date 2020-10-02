@@ -22,7 +22,6 @@ import (
 	"os"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 
@@ -47,7 +46,7 @@ var (
 	testAddress3  = crypto.PubkeyToAddress(testKey.PublicKey)
 	testAddresses = []common.Address{testAddress, testAddress1, testAddress2, testAddress3}
 
-	testDb      = ethdb.NewMemTestDatabase()
+	testDb      = ethdb.NewMemDatabase()
 	testGenesis = core.GenesisWithAccounts(testDb, []core.GenAccount{
 		{testAddress,
 			big.NewInt(1000000000),
@@ -76,61 +75,43 @@ var (
 
 	testChainForkHeavy   *testChain
 	testChainForkHeavyMu sync.Mutex
-
-	forkLen = int(fullMaxForkAncestry + 50)
 )
 
 func getTestChainForkLightA() *testChain {
-	fmt.Println("In getTestChainForkLightA")
-	t := time.Now()
-	defer func() {
-		fmt.Println("getTestChainForkLightA", time.Since(t))
-	}()
 	testChainForkLightAMu.Lock()
 	defer testChainForkLightAMu.Unlock()
 	if testChainForkLightA == nil {
-		testChainForkLightA = getTestChainBase().makeFork(forkLen, false, 1)
+		testChainForkLightA = getTestChainBase().makeFork(getForkLen(), false, 1)
 	}
 	return testChainForkLightA
 }
 func getTestChainForkLightB() *testChain {
-	fmt.Println("In getTestChainForkLightB")
-	t := time.Now()
-	defer func() {
-		fmt.Println("getTestChainForkLightB", time.Since(t))
-	}()
 	testChainForkLightBMu.Lock()
 	defer testChainForkLightBMu.Unlock()
 	if testChainForkLightB == nil {
-		testChainForkLightB = getTestChainBase().makeFork(forkLen, false, 2)
+		testChainForkLightB = getTestChainBase().makeFork(getForkLen(), false, 2)
 	}
 	return testChainForkLightB
 }
 func getTestChainForkHeavy() *testChain {
-	fmt.Println("In getTestChainForkHeavy")
-	t := time.Now()
-	defer func() {
-		fmt.Println("getTestChainForkHeavy", time.Since(t))
-	}()
 	testChainForkHeavyMu.Lock()
 	defer testChainForkHeavyMu.Unlock()
 	if testChainForkHeavy == nil {
-		testChainForkHeavy = getTestChainBase().makeFork(forkLen+1, true, 3)
+		testChainForkHeavy = getTestChainBase().makeFork(getForkLen()+1, true, 3)
 	}
 	return testChainForkHeavy
 }
 func getTestChainBase() *testChain {
-	fmt.Println("In getTestChainBase")
-	t := time.Now()
-	defer func() {
-		fmt.Println("getTestChainBase", time.Since(t))
-	}()
 	testChainBaseMu.Lock()
 	defer testChainBaseMu.Unlock()
 	if testChainBase == nil {
 		testChainBase = newTestChain(OverwriteBlockCacheItems+200, testDb, testGenesis)
 	}
 	return testChainBase
+}
+
+func getForkLen() int {
+	return int(fullMaxForkAncestry + 50)
 }
 
 func TestMain(m *testing.M) {
@@ -168,13 +149,8 @@ func newTestChain(length int, db *ethdb.ObjectDatabase, genesis *types.Block) *t
 
 // makeFork creates a fork on top of the test chain.
 func (tc *testChain) makeFork(length int, heavy bool, seed byte) *testChain {
-	fmt.Println("In makeFork", length, heavy)
-	t := time.Now()
 	fork := tc.copy(tc.len() + length)
-	fmt.Println("In makeFork.copy", time.Since(t))
-	t = time.Now()
 	fork.generate(length, seed, tc.headBlock(), heavy)
-	fmt.Println("In makeFork.generate", time.Since(t))
 	return fork
 }
 
@@ -192,7 +168,6 @@ func (tc *testChain) copy(newlen int) *testChain {
 	defer tc.cpyLock.Unlock()
 	db := tc.db
 	if tc.db != nil {
-		fmt.Println("!!!!!!!!!!!!!!!!")
 		db = tc.db.MemCopy()
 	}
 	cpy := &testChain{
@@ -219,8 +194,6 @@ func (tc *testChain) copy(newlen int) *testChain {
 // contains a transaction and every 5th an uncle to allow testing correct block
 // reassembly.
 func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool) {
-	// start := time.Now()
-	// defer func() { fmt.Printf("test chain generated in %v\n", time.Since(start)) }()
 	tc.cpyLock.Lock()
 	defer tc.cpyLock.Unlock()
 
@@ -229,7 +202,6 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	amount := uint256.NewInt().SetUint64(1000)
 
 	var parentBlock *types.Block
-	t := time.Now()
 	existingLen := len(tc.chain) - 1
 	totalLen := existingLen + n
 	signer := types.MakeSigner(params.TestChainConfig, big.NewInt(1))
@@ -277,11 +249,6 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 					Number:     parentBlock.Number(),
 				})
 			}
-		}
-
-		if i%500 == 0 {
-			fmt.Println("generated a chain of", i, time.Since(t))
-			t = time.Now()
 		}
 	}, false /* intermediateHashes */)
 	if err != nil {
