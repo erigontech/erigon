@@ -63,77 +63,37 @@ var (
 		},
 	})
 
-	// The common prefix of all test chains:
-	// Different forks on top of the base chain:
-	testChainBase   *testChain
-	testChainBaseMu sync.Mutex
-
-	testChainForkLightA   *testChain
-	testChainForkLightAMu sync.Mutex
-
-	testChainForkLightB   *testChain
-	testChainForkLightBMu sync.Mutex
-
-	testChainForkHeavy   *testChain
-	testChainForkHeavyMu sync.Mutex
-
 	forkLen = int(fullMaxForkAncestry + 50)
 )
 
+// The common prefix of all test chains:
+var testChainBase = newTestChain(OverwriteBlockCacheItems+200, testDb, testGenesis)
+
+func getTestChainBase() *testChain {
+	return testChainBase
+}
 func getTestChainForkLightA() *testChain {
-	fmt.Println("In getTestChainForkLightA")
-	t := time.Now()
-	defer func() {
-		fmt.Println("getTestChainForkLightA", time.Since(t))
-	}()
-	testChainForkLightAMu.Lock()
-	defer testChainForkLightAMu.Unlock()
-	if testChainForkLightA == nil {
-		testChainForkLightA = getTestChainBase().makeFork(forkLen, false, 1)
-	}
 	return testChainForkLightA
 }
 func getTestChainForkLightB() *testChain {
-	fmt.Println("In getTestChainForkLightB")
-	t := time.Now()
-	defer func() {
-		fmt.Println("getTestChainForkLightB", time.Since(t))
-	}()
-	testChainForkLightBMu.Lock()
-	defer testChainForkLightBMu.Unlock()
-	if testChainForkLightB == nil {
-		testChainForkLightB = getTestChainBase().makeFork(forkLen, false, 2)
-	}
 	return testChainForkLightB
 }
 func getTestChainForkHeavy() *testChain {
-	fmt.Println("In getTestChainForkHeavy")
-	t := time.Now()
-	defer func() {
-		fmt.Println("getTestChainForkHeavy", time.Since(t))
-	}()
-	testChainForkHeavyMu.Lock()
-	defer testChainForkHeavyMu.Unlock()
-	if testChainForkHeavy == nil {
-		testChainForkHeavy = getTestChainBase().makeFork(forkLen+1, true, 3)
-	}
 	return testChainForkHeavy
 }
-func getTestChainBase() *testChain {
-	fmt.Println("In getTestChainBase")
-	t := time.Now()
-	defer func() {
-		fmt.Println("getTestChainBase", time.Since(t))
-	}()
-	testChainBaseMu.Lock()
-	defer testChainBaseMu.Unlock()
-	if testChainBase == nil {
-		testChainBase = newTestChain(OverwriteBlockCacheItems+200, testDb, testGenesis)
-	}
-	return testChainBase
-}
+
+// Different forks on top of the base chain:
+var testChainForkLightA, testChainForkLightB, testChainForkHeavy *testChain
 
 func TestMain(m *testing.M) {
+	var forkLen = int(fullMaxForkAncestry + 50)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { testChainForkLightA = testChainBase.makeFork(forkLen, false, 1); wg.Done() }()
+	go func() { testChainForkLightB = testChainBase.makeFork(forkLen, false, 2); wg.Done() }()
+	go func() { testChainForkHeavy = testChainBase.makeFork(forkLen+1, true, 3); wg.Done() }()
+	wg.Wait()
+
 	result := m.Run()
 
 	// teardown
@@ -187,7 +147,6 @@ func (tc *testChain) copy(newlen int) *testChain {
 	defer tc.cpyLock.Unlock()
 	db := tc.db
 	if tc.db != nil {
-		fmt.Println("!!!!!!!!!!!!!!!!")
 		db = tc.db.MemCopy()
 	}
 	cpy := &testChain{
