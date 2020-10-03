@@ -1748,7 +1748,7 @@ func zstd(chaindata string) error {
 		}
 	}
 
-	trainTo -= 2_000_000
+	trainFrom -= 2_000_000
 	for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 4_000 {
 		binary.BigEndian.PutUint64(blockNBytes, blockN)
 		var v []byte
