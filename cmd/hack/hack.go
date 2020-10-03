@@ -1688,9 +1688,9 @@ func zstd(chaindata string) error {
 	blockNBytes := make([]byte, 8)
 
 	total := 0
-	var d1, d2, d3 *gozstd.CDict
-	var d_d1, d_d2, d_d3 time.Duration
-	var t_d1, t_d2, t_d3 int
+	var d1, d2, d3, d4, d5 *gozstd.CDict
+	var d_d1, d_d2, d_d3, d_d4, d_d5 time.Duration
+	var t_d1, t_d2, t_d3, t_d4, t_d5 int
 	trainFrom := uint64(9_000_000)
 	trainTo := uint64(10_000_000)
 	samples1 = samples1[:0]
@@ -1713,37 +1713,49 @@ func zstd(chaindata string) error {
 
 	fmt.Printf("samples1: %d\n", len(samples1))
 	t := time.Now()
-	dict128 := gozstd.BuildDict(samples1, 4*1024)
+	dict1 := gozstd.BuildDict(samples1, 64*1024)
 	fmt.Printf("dict128: %s\n", time.Since(t))
 
 	t = time.Now()
-	dict64 := gozstd.BuildDict(samples1, 64*1024)
+	dict2 := gozstd.BuildDict(samples1, 32*1024)
 	fmt.Printf("dict64: %s\n", time.Since(t))
 
 	t = time.Now()
-	dict32 := gozstd.BuildDict(samples1, 4*1024)
+	dict3 := gozstd.BuildDict(samples1, 8*1024)
 	fmt.Printf("dict32: %s\n", time.Since(t))
 
-	_ = dict128
-	_ = dict64
+	_ = dict1
+	_ = dict2
 
-	d1, err = gozstd.NewCDictLevel(dict32, -42)
+	d1, err = gozstd.NewCDictLevel(dict1, -42)
 	if err != nil {
 		panic(err)
 	}
 	defer d1.Release()
 
-	d2, err = gozstd.NewCDictLevel(dict32, -2)
+	d2, err = gozstd.NewCDictLevel(dict1, -2)
 	if err != nil {
 		panic(err)
 	}
 	defer d2.Release()
 
-	d3, err = gozstd.NewCDictLevel(dict32, -2)
+	d3, err = gozstd.NewCDictLevel(dict2, -2)
 	if err != nil {
 		panic(err)
 	}
 	defer d3.Release()
+
+	d4, err = gozstd.NewCDictLevel(dict3, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer d4.Release()
+
+	d5, err = gozstd.NewCDictLevel(dict2, 3)
+	if err != nil {
+		panic(err)
+	}
+	defer d5.Release()
 
 	buf := make([]byte, 0, 1024)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
@@ -1769,6 +1781,16 @@ func zstd(chaindata string) error {
 		d_d3 += time.Since(t)
 		t_d3 += len(buf)
 
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, d4)
+		d_d4 += time.Since(t)
+		t_d4 += len(buf)
+
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, d5)
+		d_d5 += time.Since(t)
+		t_d5 += len(buf)
+
 		select {
 		default:
 		case <-logEvery.C:
@@ -1777,6 +1799,8 @@ func zstd(chaindata string) error {
 				"d1", fmt.Sprintf("%.2f", totalf/float64(t_d1)), "d_d1", d_d1,
 				"d2", fmt.Sprintf("%.2f", totalf/float64(t_d2)), "d_d2", d_d2,
 				"d3", fmt.Sprintf("%.2f", totalf/float64(t_d3)), "d_d3", d_d3,
+				"d4", fmt.Sprintf("%.2f", totalf/float64(t_d4)), "d_d4", d_d4,
+				"d5", fmt.Sprintf("%.2f", totalf/float64(t_d5)), "d_d5", d_d5,
 			)
 		}
 	}
