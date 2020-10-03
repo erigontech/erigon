@@ -3,6 +3,7 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"math/big"
 	"os"
 	"sync"
@@ -41,7 +42,11 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
-	tester.downloader = New(uint64(StagedSync), tester.db, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
+	dicts, err := dbutils.CompressionDictionaries()
+	if err != nil {
+		panic(err)
+	}
+	tester.downloader = New(uint64(StagedSync), tester.db, new(event.TypeMux), params.TestChainConfig, dicts, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	tester.downloader.SetStagedSync(
 		stagedsync.New(
 			stagedsync.DefaultStages(),

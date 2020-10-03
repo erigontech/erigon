@@ -18,7 +18,6 @@ package rawdb
 
 import (
 	"encoding/json"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -96,27 +95,3 @@ func WritePreimages(db DatabaseWriter, preimages map[common.Hash][]byte) {
 	dbutils.PreimageCounter.Inc(int64(len(preimages)))
 	dbutils.PreimageHitCounter.Inc(int64(len(preimages)))
 }
-
-// ReadCompressionDictionaries - return typed compression dictionaries. Source of truth for compressionLevel.
-// there is no method to write dictionaries, because it's very rare operation and must be hand-crafted.
-//func ReadCompressionDictionaries(db DatabaseReader) (*types.CompressionDicts, error) {
-//	d := &types.CompressionDicts{}
-//
-//	{
-//		v, err := db.Get(dbutils.CompressionDictionary, []byte("db_receipts"))
-//		if err != nil {
-//			return nil, err
-//		}
-//		d.CReceipts, err = gozstd.NewCDictLevel(v, -2)
-//		if err != nil {
-//			return nil, err
-//		}
-//		d.DReceipts, err = gozstd.NewDDict(v)
-//		if err != nil {
-//			return nil, err
-//
-//		}
-//	}
-//
-//	return d, nil
-//}

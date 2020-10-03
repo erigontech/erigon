@@ -24,17 +24,16 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
-
+	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-
-	"github.com/golang/snappy"
+	"github.com/valyala/gozstd"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -420,23 +419,6 @@ func HasReceipts(db DatabaseReader, hash common.Hash, number uint64) bool {
 	return true
 }
 
-// ReadReceiptsRLP retrieves all the transaction receipts belonging to a block in RLP encoding.
-func ReadReceiptsRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue {
-	data := []byte{}
-	//data, _ := db.Ancient(freezerReceiptTable, number)
-	if len(data) == 0 {
-		data, _ = db.Get(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash))
-		// In the background freezer is moving data from leveldb to flatten files.
-		// So during the first check for ancient db, the data is not yet in there,
-		// but when we reach into leveldb, the data was already moved. That would
-		// result in a not found error.
-		if len(data) == 0 {
-			//data, _ = db.Ancient(freezerReceiptTable, number)
-		}
-	}
-	return nil // Can't find the data anywhere.
-}
-
 // ReadRawReceipts retrieves all the transaction receipts belonging to a block.
 // The receipt metadata fields are not guaranteed to be populated, so they
 // should not be used. Use ReadReceipts instead if the metadata is needed.
@@ -449,8 +431,17 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 	if len(data) == 0 {
 		return nil
 	}
+
+	var err error
+	data, err = gozstd.DecompressDict(nil, data, dbutils.CompressionDictionaries.DReceipts)
+	if err != nil {
+		log.Error("receipt uncompress failed", "hash", hash, "err", err)
+		return nil
+	}
+
 	receipts := types.Receipts{}
-	if err := cbor.Unmarshal(&receipts, data); err != nil {
+	err = cbor.Unmarshal(&receipts, data)
+	if err != nil {
 		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
 		return nil
 	}
@@ -490,6 +481,8 @@ func WriteReceipts(db DatabaseWriter, hash common.Hash, number uint64, receipts 
 	if err != nil {
 		log.Crit("Failed to encode block receipts", "err", err)
 	}
+
+	newV = gozstd.CompressDict(nil, newV, dbutils.CompressionDictionaries.CReceipts)
 
 	// Store the flattened receipt slice
 	if err := db.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash), newV); err != nil {

@@ -269,7 +269,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	receipt, _, _, _ := rawdb.ReadReceipt(b.database, txHash)
+	receipt, _, _, _ := rawdb.ReadReceipt(b.database, txHash, nil)
 	return receipt, nil
 }
 
@@ -837,7 +837,7 @@ func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (typ
 	if number == nil {
 		return nil, nil
 	}
-	return rawdb.ReadReceipts(fb.db, hash, *number), nil
+	return rawdb.ReadReceipts(fb.db, hash, *number, nil), nil
 }
 
 func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
@@ -845,7 +845,7 @@ func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*ty
 	if number == nil {
 		return nil, nil
 	}
-	receipts := rawdb.ReadReceipts(fb.db, hash, *number)
+	receipts := rawdb.ReadReceipts(fb.db, hash, *number, nil)
 	if receipts == nil {
 		return nil, nil
 	}

@@ -245,6 +245,7 @@ func (b *EthAPIBackend) tryGetReceiptsFromDb(block *types.Block) types.Receipts 
 		b.eth.chainDb,
 		block.Hash(),
 		block.NumberU64(),
+		nil,
 	)
 }
 
