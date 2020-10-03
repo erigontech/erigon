@@ -1679,9 +1679,9 @@ func zstd(chaindata string) error {
 
 	// train
 	var samples1 [][]byte
-	var samples2 [][]byte
-	var samples3 [][]byte
-	var samples4 [][]byte
+	//var samples2 [][]byte
+	//var samples3 [][]byte
+	//var samples4 [][]byte
 
 	bucket := dbutils.BlockReceiptsPrefix
 	fmt.Printf("bucket: %s\n", bucket)
@@ -1714,72 +1714,21 @@ func zstd(chaindata string) error {
 		}
 	}
 
-	for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 4_000 {
-		binary.BigEndian.PutUint64(blockNBytes, blockN)
-		var v []byte
-		_, v, err := c2.Seek(blockNBytes)
-		if err != nil {
-			return err
-		}
-
-		samples2 = append(samples2, v)
-
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("Progress sampling", "blockNum", blockN)
-		}
-	}
-
-	for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 3_000 {
-		binary.BigEndian.PutUint64(blockNBytes, blockN)
-		var v []byte
-		_, v, err := c2.Seek(blockNBytes)
-		if err != nil {
-			return err
-		}
-
-		samples3 = append(samples3, v)
-
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("Progress sampling", "blockNum", blockN)
-		}
-	}
-
-	for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 6_000 {
-		binary.BigEndian.PutUint64(blockNBytes, blockN)
-		var v []byte
-		_, v, err := c2.Seek(blockNBytes)
-		if err != nil {
-			return err
-		}
-
-		samples4 = append(samples4, v)
-
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("Progress sampling", "blockNum", blockN)
-		}
-	}
-
 	fmt.Printf("samples1: %d\n", len(samples1))
 	t := time.Now()
 	dict1 := gozstd.BuildDict(samples1, 32*1024)
 	fmt.Printf("dict1: %s\n", time.Since(t))
 
 	t = time.Now()
-	dict2 := gozstd.BuildDict(samples2, 32*1024)
+	dict2 := gozstd.BuildDict(samples1, 64*1024)
 	fmt.Printf("dict2: %s\n", time.Since(t))
 
 	t = time.Now()
-	dict3 := gozstd.BuildDict(samples3, 32*1024)
+	dict3 := gozstd.BuildDict(samples1, 128*1024)
 	fmt.Printf("dict3: %s\n", time.Since(t))
 
 	t = time.Now()
-	dict4 := gozstd.BuildDict(samples4, 32*1024)
+	dict4 := gozstd.BuildDict(samples1, 16*1024)
 	fmt.Printf("dict4: %s\n", time.Since(t))
 
 	_ = dict1
