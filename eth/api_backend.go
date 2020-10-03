@@ -158,6 +158,7 @@ func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.
 		return nil, nil, errors.New("header not found")
 	}
 	//WARNING - this will leak transaction
+	fmt.Printf("LEAK!\n")
 	tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, false)
 	if err1 != nil {
 		return nil, nil, err1
@@ -184,6 +185,7 @@ func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockN
 			return nil, nil, errors.New("hash is not currently canonical")
 		}
 		//WARNING - this will leak transaction
+		fmt.Printf("LEAK!\n")
 		tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, false)
 		if err1 != nil {
 			return nil, nil, err1
@@ -212,6 +214,7 @@ func (b *EthAPIBackend) GetReceipts(ctx context.Context, hash common.Hash) (type
 
 func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, number uint64) (types.Receipts, error) {
 	//WARNING - this will leak transaction
+	fmt.Printf("LEAK!\n")
 	tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, false)
 	if err1 != nil {
 		return nil, err1
@@ -381,8 +384,7 @@ func (b *EthAPIBackend) RPCTxFeeCap() float64 {
 }
 
 func (b *EthAPIBackend) BloomStatus() (uint64, uint64) {
-	sections, _, _ := b.eth.bloomIndexer.Sections()
-	return params.BloomBitsBlocks, sections
+	return 0, 0
 }
 
 func (b *EthAPIBackend) ServiceFilter(ctx context.Context, session *bloombits.MatcherSession) {

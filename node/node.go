@@ -557,8 +557,10 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 	var err error
 
 	if n.config.DataDir == "" {
+		fmt.Printf("Opening In-memory Database (LMDB): %s\n", name)
 		db = ethdb.NewMemDatabase()
 	} else {
+		fmt.Printf("Opening Database (LMDB): %s\n", name)
 		log.Info("Opening Database (LMDB)")
 		db, err = ethdb.Open(n.config.ResolvePath(name))
 	}

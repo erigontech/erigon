@@ -81,9 +81,7 @@ type Ethereum struct {
 	engine         consensus.Engine
 	accountManager *accounts.Manager
 
-	bloomRequests     chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
-	bloomIndexer      *core.ChainIndexer             // Bloom indexer operating during block imports
-	closeBloomHandler chan struct{}
+	bloomRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
 
 	APIBackend *EthAPIBackend
 
@@ -152,19 +150,17 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	eth := &Ethereum{
-		config:            config,
-		chainDb:           chainDb,
-		chainKV:           chainDb.KV(),
-		eventMux:          stack.EventMux(),
-		accountManager:    stack.AccountManager(),
-		engine:            CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
-		closeBloomHandler: make(chan struct{}),
-		networkID:         config.NetworkID,
-		gasPrice:          config.Miner.GasPrice,
-		etherbase:         config.Miner.Etherbase,
-		bloomRequests:     make(chan chan *bloombits.Retrieval),
-		bloomIndexer:      NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
-		p2pServer:         stack.Server(),
+		config:         config,
+		chainDb:        chainDb,
+		chainKV:        chainDb.KV(),
+		eventMux:       stack.EventMux(),
+		accountManager: stack.AccountManager(),
+		engine:         CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
+		networkID:      config.NetworkID,
+		gasPrice:       config.Miner.GasPrice,
+		etherbase:      config.Miner.Etherbase,
+		bloomRequests:  make(chan chan *bloombits.Retrieval),
+		p2pServer:      stack.Server(),
 	}
 
 	log.Info("Initialising Ethereum protocol", "versions", ProtocolVersions, "network", config.NetworkID)
@@ -218,9 +214,6 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
 		eth.blockchain.SetHead(compat.RewindTo)
 		rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
-	}
-	if config.SyncMode != downloader.StagedSync {
-		eth.bloomIndexer.Start(eth.blockchain)
 	}
 
 	if config.TxPool.Journal != "" {
@@ -630,9 +623,8 @@ func (s *Ethereum) Downloader() *downloader.Downloader { return s.protocolManage
 func (s *Ethereum) SyncProgress() ethereum.SyncProgress {
 	return s.protocolManager.downloader.Progress()
 }
-func (s *Ethereum) Synced() bool                     { return atomic.LoadUint32(&s.protocolManager.acceptTxs) == 1 }
-func (s *Ethereum) ArchiveMode() bool                { return !s.config.Pruning }
-func (s *Ethereum) BloomIndexer() *core.ChainIndexer { return s.bloomIndexer }
+func (s *Ethereum) Synced() bool      { return atomic.LoadUint32(&s.protocolManager.acceptTxs) == 1 }
+func (s *Ethereum) ArchiveMode() bool { return !s.config.Pruning }
 
 // Protocols returns all the currently configured
 // network protocols to start.
@@ -656,11 +648,6 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
 	s.startEthEntryUpdate(s.p2pServer.LocalNode())
-
-	// Start the bloom bits servicing goroutines
-	if s.config.SyncMode != downloader.StagedSync {
-		s.startBloomHandlers(params.BloomBitsBlocks)
-	}
 
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers
@@ -706,8 +693,6 @@ func (s *Ethereum) Stop() error {
 	s.protocolManager.Stop()
 
 	// Then stop everything else.
-	s.bloomIndexer.Close()
-	close(s.closeBloomHandler)
 	if err := s.StopTxPool(); err != nil {
 		log.Warn("error while stopping transaction pool", "err", err)
 	}

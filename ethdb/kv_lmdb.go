@@ -589,12 +589,6 @@ func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
 		return v[from-to:], nil
 	}
 
-	c := tx.Cursor(bucket).(*LmdbCursor)
-	if err := c.initCursor(); err != nil {
-		return nil, err
-	}
-	defer c.Close()
-
 	val, err := tx.get(b.DBI, key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
