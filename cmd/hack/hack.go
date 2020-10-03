@@ -1683,91 +1683,13 @@ func zstd(chaindata string) error {
 	bucket := dbutils.BlockReceiptsPrefix
 	fmt.Printf("bucket: %s\n", bucket)
 	c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
-	count, _ := c.Count()
+	c2 := tx.(ethdb.HasTx).Tx().Cursor(bucket)
 	blockNBytes := make([]byte, 8)
-	trainFrom := count - 2_000_000
-	for blockN := trainFrom; blockN < count; blockN += 2_000_000 / 4_000 {
-		binary.BigEndian.PutUint64(blockNBytes, blockN)
-		var v []byte
-		_, v, err := c.Seek(blockNBytes)
-		if err != nil {
-			return err
-		}
-
-		samples1 = append(samples1, v)
-
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("Progress sampling", "blockNum", blockN)
-		}
-	}
-
-	fmt.Printf("samples1: %d\n", len(samples1))
-	t := time.Now()
-	dict128 := gozstd.BuildDict(samples1, 32*1024)
-	fmt.Printf("dict128: %s\n", time.Since(t))
-
-	t = time.Now()
-	dict64 := gozstd.BuildDict(samples1, 8*1024)
-	fmt.Printf("dict64: %s\n", time.Since(t))
-
-	t = time.Now()
-	dict32 := gozstd.BuildDict(samples1, 4*1024)
-	fmt.Printf("dict32: %s\n", time.Since(t))
-
-	_ = dict128
-	_ = dict64
-
-	cd128_s1_minus2, err := gozstd.NewCDictLevel(dict32, -2)
-	if err != nil {
-		panic(err)
-	}
-	defer cd128_s1_minus2.Release()
-
-	cd64_minus2, err := gozstd.NewCDictLevel(dict32, -2)
-	if err != nil {
-		panic(err)
-	}
-	defer cd64_minus2.Release()
-
-	cd32_minus2, err := gozstd.NewCDictLevel(dict32, -2)
-	if err != nil {
-		panic(err)
-	}
-	defer cd64_minus2.Release()
-
-	//cd128_19, err := gozstd.NewCDictLevel(dict128, 19)
-	//if err != nil {
-	//	return err
-	//}
-	//defer cd128_19.Release()
-	//
-	//cd128_22, err := gozstd.NewCDictLevel(dict128, 22)
-	//if err != nil {
-	//	return err
-	//}
-	//defer cd128_22.Release()
-
-	//total32 := 0
-	//total64 := 0
-	//total64_minus3 := 0
-	total128_s1_minus2 := 0
-	total128_s2_minus2 := 0
-	total64_s1_minus2 := 0
-	total64_s2_minus2 := 0
-	total32_s1_minus2 := 0
-	total32_s2_minus2 := 0
 
 	total := 0
-	var d_s1_minus2 time.Duration
-	var d_s2_minus2 time.Duration
-
-	var d64_s1_minus2 time.Duration
-	var d64_s2_minus2 time.Duration
-
-	var d32_s1_minus2 time.Duration
-	var d32_s2_minus2 time.Duration
+	var d1, d2, d3 *gozstd.CDict
+	var d_d1, d_d2, d_d3 time.Duration
+	var t_d1, t_d2, t_d3 int
 
 	buf := make([]byte, 0, 1024)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
@@ -1778,49 +1700,89 @@ func zstd(chaindata string) error {
 		blockNum := binary.BigEndian.Uint64(k)
 		_ = v
 
-		//t = time.Now()
-		//buf = gozstd.CompressDict(buf[:0], v, cd128_s100k_minus2)
-		//d_s2_minus2 += time.Since(t)
-		//total128_s2_minus2 += len(buf)
+		if blockNum%1_000_000 == 1 {
+			trainFrom := blockNum - 1_000_000
+			trainTo := blockNum
+			if blockNum < 1_000_000 {
+				trainFrom = 1
+				trainTo = 1_000_000
+			}
+			samples1 = samples1[:0]
+			for blockN := trainFrom; blockN < trainTo; blockN += 1_000_000 / 4_000 {
+				binary.BigEndian.PutUint64(blockNBytes, blockN)
+				var v []byte
+				_, v, err := c2.Seek(blockNBytes)
+				if err != nil {
+					return err
+				}
+
+				samples1 = append(samples1, v)
+
+				select {
+				default:
+				case <-logEvery.C:
+					log.Info("Progress sampling", "blockNum", blockN)
+				}
+			}
+
+			fmt.Printf("samples1: %d\n", len(samples1))
+			t := time.Now()
+			dict128 := gozstd.BuildDict(samples1, 4*1024)
+			fmt.Printf("dict128: %s\n", time.Since(t))
+
+			t = time.Now()
+			dict64 := gozstd.BuildDict(samples1, 32*1024)
+			fmt.Printf("dict64: %s\n", time.Since(t))
+
+			t = time.Now()
+			dict32 := gozstd.BuildDict(samples1, 4*1024)
+			fmt.Printf("dict32: %s\n", time.Since(t))
+
+			_ = dict128
+			_ = dict64
+
+			d1, err = gozstd.NewCDictLevel(dict32, -42)
+			if err != nil {
+				panic(err)
+			}
+			defer d1.Release()
+
+			d2, err = gozstd.NewCDictLevel(dict32, -2)
+			if err != nil {
+				panic(err)
+			}
+			defer d2.Release()
+
+			d3, err = gozstd.NewCDictLevel(dict32, -2)
+			if err != nil {
+				panic(err)
+			}
+			defer d3.Release()
+		}
 
 		t := time.Now()
-		buf = gozstd.CompressDict(buf[:0], v, cd64_minus2)
-		d64_s1_minus2 += time.Since(t)
-		total64_s1_minus2 += len(buf)
+		buf = gozstd.CompressDict(buf[:0], v, d1)
+		d_d1 += time.Since(t)
+		t_d1 += len(buf)
 
 		t = time.Now()
-		buf = gozstd.CompressDict(buf[:0], v, cd128_s1_minus2)
-		d_s1_minus2 += time.Since(t)
-		total128_s1_minus2 += len(buf)
-
-		//t = time.Now()
-		//buf = gozstd.CompressDict(buf[:0], v, cd64_s100k_minus2)
-		//d64_s2_minus2 += time.Since(t)
-		//total64_s2_minus2 += len(buf)
+		buf = gozstd.CompressDict(buf[:0], v, d2)
+		d_d2 += time.Since(t)
+		t_d2 += len(buf)
 
 		t = time.Now()
-		buf = gozstd.CompressDict(buf[:0], v, cd32_minus2)
-		d32_s1_minus2 += time.Since(t)
-		total32_s1_minus2 += len(buf)
-
-		//t = time.Now()
-		//buf = gozstd.CompressDict(buf[:0], v, cd32_s100k_minus2)
-		//d32_s2_minus2 += time.Since(t)
-		//total32_s2_minus2 += len(buf)
+		buf = gozstd.CompressDict(buf[:0], v, d3)
+		d_d3 += time.Since(t)
+		t_d3 += len(buf)
 
 		select {
 		default:
 		case <-logEvery.C:
 			totalf := float64(total)
 			log.Info("Progress 8", "blockNum", blockNum, "before", common.StorageSize(total),
-				"128_s1_minus2", fmt.Sprintf("%.2f", totalf/float64(total128_s1_minus2)), "d_s1_minus2", d_s1_minus2,
-				"128_s2_minus2", fmt.Sprintf("%.2f", totalf/float64(total128_s2_minus2)), "d_s2_minus2", d_s2_minus2,
-
-				"64_s1_minus2", fmt.Sprintf("%.2f", totalf/float64(total64_s1_minus2)), "d64_s1_minus2", d64_s1_minus2,
-				"64_s2_minus2", fmt.Sprintf("%.2f", totalf/float64(total64_s2_minus2)), "d64_s2_minus2", d64_s2_minus2,
-
-				"32_s1_minus2", fmt.Sprintf("%.2f", totalf/float64(total32_s1_minus2)), "d32_s1_minus2", d32_s1_minus2,
-				"32_s2_minus2", fmt.Sprintf("%.2f", totalf/float64(total32_s2_minus2)), "d32_s2_minus2", d32_s2_minus2,
+				"d1", fmt.Sprintf("%.2f", totalf/float64(t_d1)), "d_d1", d_d1,
+				"d2", fmt.Sprintf("%.2f", totalf/float64(t_d2)), "d_d2", d_d2,
+				"d3", fmt.Sprintf("%.2f", totalf/float64(t_d3)), "d_d3", d_d3,
 			)
 		}
 	}
