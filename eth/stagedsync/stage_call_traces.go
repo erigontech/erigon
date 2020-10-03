@@ -216,7 +216,7 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 		}
 
 		tracer := NewCallTracer()
-		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: true, Tracer: tracer}
+		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
 		_, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
 		if err != nil {
 			return err
