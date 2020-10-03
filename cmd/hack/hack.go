@@ -1679,6 +1679,7 @@ func zstd(chaindata string) error {
 
 	// train
 	var samples1 [][]byte
+	//var samples2 [][]byte
 
 	bucket := dbutils.BlockReceiptsPrefix
 	fmt.Printf("bucket: %s\n", bucket)
@@ -1727,7 +1728,7 @@ func zstd(chaindata string) error {
 	_ = dict1
 	_ = dict2
 	var err error
-	d2, err = gozstd.NewCDictLevel(dict1, -2)
+	d2, err = gozstd.NewCDictLevel(dict1, -8)
 	if err != nil {
 		panic(err)
 	}
@@ -1745,7 +1746,7 @@ func zstd(chaindata string) error {
 	}
 	defer d4.Release()
 
-	d5, err = gozstd.NewCDictLevel(dict2, -3)
+	d5, err = gozstd.NewCDictLevel(dict2, 0)
 	if err != nil {
 		panic(err)
 	}
@@ -1790,7 +1791,7 @@ func zstd(chaindata string) error {
 		case <-logEvery.C:
 			totalf := float64(total)
 			log.Info("Progress 8", "blockNum", blockNum, "before", common.StorageSize(total),
-				"d1", fmt.Sprintf("%.2f", totalf/float64(t_d1)), "d_d1", d_d1,
+				//"d1", fmt.Sprintf("%.2f", totalf/float64(t_d1)), "d_d1", d_d1,
 				"d2", fmt.Sprintf("%.2f", totalf/float64(t_d2)), "d_d2", d_d2,
 				"d3", fmt.Sprintf("%.2f", totalf/float64(t_d3)), "d_d3", d_d3,
 				"d4", fmt.Sprintf("%.2f", totalf/float64(t_d4)), "d_d4", d_d4,
