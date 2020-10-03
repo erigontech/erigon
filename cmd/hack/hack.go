@@ -1680,7 +1680,7 @@ func zstd(chaindata string) error {
 	// train
 	var samples1 [][]byte
 
-	bucket := dbutils.BlockReceiptsPrefix
+	bucket := dbutils.BlockBodyPrefix
 	fmt.Printf("bucket: %s\n", bucket)
 	c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
 	c2 := tx.(ethdb.HasTx).Tx().Cursor(bucket)
