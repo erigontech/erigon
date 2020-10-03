@@ -1674,14 +1674,14 @@ func zstd(chaindata string) error {
 	check(errBegin)
 	defer tx.Rollback()
 
-	logEvery := time.NewTicker(5 * time.Second)
+	logEvery := time.NewTicker(15 * time.Second)
 	defer logEvery.Stop()
 	var err error
 
 	// train
 	var samples1 [][]byte
 
-	bucket := dbutils.BlockReceiptsPrefix
+	bucket := dbutils.BlockBodyPrefix
 	fmt.Printf("bucket: %s\n", bucket)
 	c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
 	c2 := tx.(ethdb.HasTx).Tx().Cursor(bucket)
@@ -1694,7 +1694,7 @@ func zstd(chaindata string) error {
 	trainFrom := uint64(9_000_000)
 	trainTo := uint64(10_000_000)
 	samples1 = samples1[:0]
-	for blockN := trainFrom; blockN < trainTo; blockN += 1_000_000 / 4_000 {
+	for blockN := trainFrom; blockN < trainTo; blockN += (trainFrom - trainTo) / 4_000 {
 		binary.BigEndian.PutUint64(blockNBytes, blockN)
 		var v []byte
 		_, v, err := c2.Seek(blockNBytes)
