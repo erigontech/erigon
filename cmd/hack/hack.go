@@ -1727,7 +1727,7 @@ func zstd(chaindata string) error {
 	_ = dict1
 	_ = dict2
 
-	d1, err = gozstd.NewCDictLevel(dict1, -42)
+	d1, err = gozstd.NewCDictLevel(dict1, -9)
 	if err != nil {
 		panic(err)
 	}
