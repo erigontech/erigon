@@ -1691,6 +1691,66 @@ func zstd(chaindata string) error {
 	var d_d1, d_d2, d_d3, d_d4, d_d5 time.Duration
 	var t_d1, t_d2, t_d3, t_d4, t_d5 int
 
+	trainFrom := uint64(9_000_000)
+	trainTo := uint64(11_000_000)
+	samples1 = samples1[:0]
+	for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 4_000 {
+		binary.BigEndian.PutUint64(blockNBytes, blockN)
+		var v []byte
+		_, v, err := c2.Seek(blockNBytes)
+		if err != nil {
+			return err
+		}
+
+		samples1 = append(samples1, v)
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Progress sampling", "blockNum", blockN)
+		}
+	}
+
+	fmt.Printf("samples1: %d\n", len(samples1))
+	t := time.Now()
+	dict1 := gozstd.BuildDict(samples1, 32*1024)
+	fmt.Printf("dict128: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict2 := gozstd.BuildDict(samples1, 32*1024)
+	fmt.Printf("dict64: %s\n", time.Since(t))
+
+	//t = time.Now()
+	//dict3 := gozstd.BuildDict(samples1, 8*1024)
+	//fmt.Printf("dict32: %s\n", time.Since(t))
+
+	_ = dict1
+	_ = dict2
+	var err error
+	d2, err = gozstd.NewCDictLevel(dict1, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer d2.Release()
+
+	d3, err = gozstd.NewCDictLevel(dict2, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer d3.Release()
+
+	d4, err = gozstd.NewCDictLevel(dict2, -1)
+	if err != nil {
+		panic(err)
+	}
+	defer d4.Release()
+
+	d5, err = gozstd.NewCDictLevel(dict2, -3)
+	if err != nil {
+		panic(err)
+	}
+	defer d5.Release()
+
 	buf := make([]byte, 0, 1024)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
@@ -1700,73 +1760,6 @@ func zstd(chaindata string) error {
 		blockNum := binary.BigEndian.Uint64(k)
 		_ = v
 
-		if blockNum%2_000_000 == 1 {
-			trainFrom := blockNum
-			trainTo := blockNum + 2_000_000
-			samples1 = samples1[:0]
-			for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 4_000 {
-				binary.BigEndian.PutUint64(blockNBytes, blockN)
-				var v []byte
-				_, v, err := c2.Seek(blockNBytes)
-				if err != nil {
-					return err
-				}
-
-				samples1 = append(samples1, v)
-
-				select {
-				default:
-				case <-logEvery.C:
-					log.Info("Progress sampling", "blockNum", blockN)
-				}
-			}
-
-			fmt.Printf("samples1: %d\n", len(samples1))
-			t := time.Now()
-			dict1 := gozstd.BuildDict(samples1, 64*1024)
-			fmt.Printf("dict128: %s\n", time.Since(t))
-
-			t = time.Now()
-			dict2 := gozstd.BuildDict(samples1, 32*1024)
-			fmt.Printf("dict64: %s\n", time.Since(t))
-
-			//t = time.Now()
-			//dict3 := gozstd.BuildDict(samples1, 8*1024)
-			//fmt.Printf("dict32: %s\n", time.Since(t))
-
-			_ = dict1
-			_ = dict2
-
-			d1, err = gozstd.NewCDictLevel(dict1, -9)
-			if err != nil {
-				panic(err)
-			}
-			defer d1.Release()
-
-			d2, err = gozstd.NewCDictLevel(dict1, -2)
-			if err != nil {
-				panic(err)
-			}
-			defer d2.Release()
-
-			d3, err = gozstd.NewCDictLevel(dict2, -2)
-			if err != nil {
-				panic(err)
-			}
-			defer d3.Release()
-
-			d4, err = gozstd.NewCDictLevel(dict2, -3)
-			if err != nil {
-				panic(err)
-			}
-			defer d4.Release()
-
-			d5, err = gozstd.NewCDictLevel(dict2, 1)
-			if err != nil {
-				panic(err)
-			}
-			defer d5.Release()
-		}
 		t := time.Now()
 		buf = gozstd.CompressDict(buf[:0], v, d1)
 		d_d1 += time.Since(t)
