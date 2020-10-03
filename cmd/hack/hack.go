@@ -1679,7 +1679,6 @@ func zstd(chaindata string) error {
 
 	// train
 	var samples1 [][]byte
-	var samples2 [][]byte
 
 	bucket := dbutils.BlockReceiptsPrefix
 	fmt.Printf("bucket: %s\n", bucket)
@@ -1695,10 +1694,6 @@ func zstd(chaindata string) error {
 			return err
 		}
 
-		storageReceipts := types.Receipts{}
-		err = cbor.Unmarshal(&storageReceipts, v)
-		check(err)
-
 		samples1 = append(samples1, v)
 
 		select {
@@ -1708,66 +1703,39 @@ func zstd(chaindata string) error {
 		}
 	}
 
-	fmt.Printf("samples1: %d, samples2: %d\n", len(samples1), len(samples2))
+	fmt.Printf("samples1: %d\n", len(samples1))
 	t := time.Now()
-	dict128 := gozstd.BuildDict(samples1, 64*1024)
+	dict128 := gozstd.BuildDict(samples1, 32*1024)
 	fmt.Printf("dict128: %s\n", time.Since(t))
 
 	t = time.Now()
-	dict128_100k := gozstd.BuildDict(samples2, 64*1024)
-	fmt.Printf("dict128_100k: %s\n", time.Since(t))
-
-	t = time.Now()
-	dict64 := gozstd.BuildDict(samples1, 32*1024)
+	dict64 := gozstd.BuildDict(samples1, 8*1024)
 	fmt.Printf("dict64: %s\n", time.Since(t))
 
 	t = time.Now()
-	dict64_100k := gozstd.BuildDict(samples2, 32*1024)
-	fmt.Printf("dict64_100k: %s\n", time.Since(t))
-
-	t = time.Now()
-	dict32 := gozstd.BuildDict(samples1, 16*1024)
+	dict32 := gozstd.BuildDict(samples1, 4*1024)
 	fmt.Printf("dict32: %s\n", time.Since(t))
 
-	t = time.Now()
-	dict32_100k := gozstd.BuildDict(samples2, 16*1024)
-	fmt.Printf("dict32_100k: %s\n", time.Since(t))
+	_ = dict128
+	_ = dict64
 
-	cd128_s1_minus2, err := gozstd.NewCDictLevel(dict128, -2)
+	cd128_s1_minus2, err := gozstd.NewCDictLevel(dict32, -2)
 	if err != nil {
 		panic(err)
 	}
 	defer cd128_s1_minus2.Release()
 
-	cd128_s100k_minus2, err := gozstd.NewCDictLevel(dict128_100k, -2)
-	if err != nil {
-		panic(err)
-	}
-	defer cd128_s100k_minus2.Release()
-
-	cd64_minus2, err := gozstd.NewCDictLevel(dict64, -2)
+	cd64_minus2, err := gozstd.NewCDictLevel(dict32, -2)
 	if err != nil {
 		panic(err)
 	}
 	defer cd64_minus2.Release()
-
-	cd64_s100k_minus2, err := gozstd.NewCDictLevel(dict64_100k, -2)
-	if err != nil {
-		panic(err)
-	}
-	defer cd64_s100k_minus2.Release()
 
 	cd32_minus2, err := gozstd.NewCDictLevel(dict32, -2)
 	if err != nil {
 		panic(err)
 	}
 	defer cd64_minus2.Release()
-
-	cd32_s100k_minus2, err := gozstd.NewCDictLevel(dict32_100k, -2)
-	if err != nil {
-		panic(err)
-	}
-	defer cd32_s100k_minus2.Release()
 
 	//cd128_19, err := gozstd.NewCDictLevel(dict128, 19)
 	//if err != nil {
@@ -1808,36 +1776,37 @@ func zstd(chaindata string) error {
 		}
 		total += len(v)
 		blockNum := binary.BigEndian.Uint64(k)
+		_ = v
+
+		//t = time.Now()
+		//buf = gozstd.CompressDict(buf[:0], v, cd128_s100k_minus2)
+		//d_s2_minus2 += time.Since(t)
+		//total128_s2_minus2 += len(buf)
 
 		t := time.Now()
-		buf = gozstd.CompressDict(buf[:0], v, cd128_s1_minus2)
-		d_s1_minus2 += time.Since(t)
-		total128_s1_minus2 += len(buf)
-
-		t = time.Now()
-		buf = gozstd.CompressDict(buf[:0], v, cd128_s100k_minus2)
-		d_s2_minus2 += time.Since(t)
-		total128_s2_minus2 += len(buf)
-
-		t = time.Now()
 		buf = gozstd.CompressDict(buf[:0], v, cd64_minus2)
 		d64_s1_minus2 += time.Since(t)
 		total64_s1_minus2 += len(buf)
 
 		t = time.Now()
-		buf = gozstd.CompressDict(buf[:0], v, cd64_s100k_minus2)
-		d64_s2_minus2 += time.Since(t)
-		total64_s2_minus2 += len(buf)
+		buf = gozstd.CompressDict(buf[:0], v, cd128_s1_minus2)
+		d_s1_minus2 += time.Since(t)
+		total128_s1_minus2 += len(buf)
+
+		//t = time.Now()
+		//buf = gozstd.CompressDict(buf[:0], v, cd64_s100k_minus2)
+		//d64_s2_minus2 += time.Since(t)
+		//total64_s2_minus2 += len(buf)
 
 		t = time.Now()
 		buf = gozstd.CompressDict(buf[:0], v, cd32_minus2)
 		d32_s1_minus2 += time.Since(t)
 		total32_s1_minus2 += len(buf)
 
-		t = time.Now()
-		buf = gozstd.CompressDict(buf[:0], v, cd32_s100k_minus2)
-		d32_s2_minus2 += time.Since(t)
-		total32_s2_minus2 += len(buf)
+		//t = time.Now()
+		//buf = gozstd.CompressDict(buf[:0], v, cd32_s100k_minus2)
+		//d32_s2_minus2 += time.Since(t)
+		//total32_s2_minus2 += len(buf)
 
 		select {
 		default:
@@ -1885,8 +1854,8 @@ func benchRlp(chaindata string) error {
 	var cbor_decode3 time.Duration
 	var cbor_compress time.Duration
 
-	bufSlice := make([]byte, 0, 100_000)
-	compressBuf := make([]byte, 0, 100_000)
+	//bufSlice := make([]byte, 0, 100_000)
+	//compressBuf := make([]byte, 0, 100_000)
 
 	var samplesCbor [][]byte
 
@@ -1901,9 +1870,7 @@ func benchRlp(chaindata string) error {
 			return err
 		}
 
-		receipts := types.Receipts{}
-		err = cbor.Unmarshal(&receipts, v)
-		check(err)
+		samplesCbor = append(samplesCbor, v)
 
 		select {
 		default:
@@ -1917,6 +1884,34 @@ func benchRlp(chaindata string) error {
 	defer compressorCbor.Release()
 
 	binary.BigEndian.PutUint64(blockNBytes, trainFrom)
+	tt := time.Now()
+	buf := bytes.NewReader(nil)
+	d := cbor.Decoder(buf)
+	defer cbor.Return(d)
+
+	//ch := make(chan []byte, 10_000)
+	//res := make(chan types.Receipts, 10_000)
+	//wg := sync.WaitGroup{}
+	//for i := 0; i < runtime.GOMAXPROCS(-1)-1; i++ {
+	//	wg.Add(1)
+	//	go func() {
+	//		buf := bytes.NewReader(nil)
+	//		d := cbor.Decoder(buf)
+	//		defer cbor.Return(d)
+	//
+	//		defer wg.Done()
+	//		runtime.LockOSThread()
+	//		for v := range ch {
+	//			storageReceipts := types.Receipts{}
+	//			buf.Reset(v)
+	//			err := d.Decode(&storageReceipts)
+	//			check(err)
+	//			res <- storageReceipts
+	//		}
+	//	}()
+	//}
+
+	ttt := 0
 	for k, v, err := c.Seek(blockNBytes); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -1924,32 +1919,49 @@ func benchRlp(chaindata string) error {
 		total += len(v)
 		blockNum := binary.BigEndian.Uint64(k)
 
+		//ch <- v
 		storageReceipts := types.Receipts{}
-		err = cbor.Unmarshal(&storageReceipts, v)
-		check(err)
-
 		t := time.Now()
-		err = cbor.Marshal(&bufSlice, storageReceipts)
-		cbor_encode += time.Since(t)
-		total_cbor += len(bufSlice)
-		check(err)
-
-		t = time.Now()
-		//compressBuf = gozstd.CompressDict(compressBuf[:0], buf.Bytes(), compressorCbor)
-		cbor_compress += time.Since(t)
-		total_compress_cbor += len(compressBuf)
-
-		storageReceipts2 := types.Receipts{}
-		t = time.Now()
-		err = cbor.Unmarshal(&storageReceipts2, bufSlice)
+		buf.Reset(v)
+		d.MustDecode(&storageReceipts)
+		//err = cbor.Unmarshal(&storageReceipts, v)
 		cbor_decode += time.Since(t)
 		check(err)
+		ttt += storageReceipts.Len()
+
+		//t := time.Now()
+		//err = cbor.Marshal(&bufSlice, storageReceipts)
+		//cbor_encode += time.Since(t)
+		//total_cbor += len(bufSlice)
+		//check(err)
+		//
+		//t = time.Now()
+		////compressBuf = gozstd.CompressDict(compressBuf[:0], buf.Bytes(), compressorCbor)
+		//cbor_compress += time.Since(t)
+		//total_compress_cbor += len(compressBuf)
+		//
+		//storageReceipts2 := types.Receipts{}
+		//t = time.Now()
+		//err = cbor.Unmarshal(&storageReceipts2, bufSlice)
+		//cbor_decode += time.Since(t)
+		//check(err)
+
+		//L1:
+		//	for {
+		//		select {
+		//		case r := <-res:
+		//			ttt += r.Len()
+		//		default:
+		//			break L1
+		//		}
+		//	}
 
 		select {
 		default:
 		case <-logEvery.C:
 			totalf := float64(total)
-			log.Info("Progress 8", "blockNum", blockNum, "before", common.StorageSize(total),
+			log.Info("Progress 8", "blockNum", blockNum, "before", common.StorageSize(total), "ttt", common.StorageSize(ttt),
+				//"len(ch)", len(ch), "len(res)", len(res),
 				//"rlp_decode", rlp_decode,
 				"total_cbor", fmt.Sprintf("%.2f", float64(total_cbor)/totalf), "cbor_encode", cbor_encode, "cbor_decode", cbor_decode,
 				"cbor_decode2", cbor_decode2, "cbor_decode3", cbor_decode3,
@@ -1958,7 +1970,26 @@ func benchRlp(chaindata string) error {
 			)
 		}
 	}
+	//	close(ch)
+	//	wg.Wait()
+	//	fmt.Printf("finish L1\n")
+	//L2:
+	//	for {
+	//		select {
+	//		case r := <-res:
+	//			ttt += r.Len()
+	//		default:
+	//			break L2
+	//		}
+	//	}
+	//	fmt.Printf("finish L2\n")
+	//
+	//	close(res)
+	//	for r := range res {
+	//		ttt += r.Len()
+	//	}
 
+	fmt.Printf("took: %s %d\n", time.Since(tt), ttt)
 	return nil
 }
 
