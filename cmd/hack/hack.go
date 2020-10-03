@@ -1679,7 +1679,9 @@ func zstd(chaindata string) error {
 
 	// train
 	var samples1 [][]byte
-	//var samples2 [][]byte
+	var samples2 [][]byte
+	var samples3 [][]byte
+	var samples4 [][]byte
 
 	bucket := dbutils.BlockReceiptsPrefix
 	fmt.Printf("bucket: %s\n", bucket)
@@ -1712,23 +1714,85 @@ func zstd(chaindata string) error {
 		}
 	}
 
+	for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 5_000 {
+		binary.BigEndian.PutUint64(blockNBytes, blockN)
+		var v []byte
+		_, v, err := c2.Seek(blockNBytes)
+		if err != nil {
+			return err
+		}
+
+		samples2 = append(samples2, v)
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Progress sampling", "blockNum", blockN)
+		}
+	}
+
+	for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 6_000 {
+		binary.BigEndian.PutUint64(blockNBytes, blockN)
+		var v []byte
+		_, v, err := c2.Seek(blockNBytes)
+		if err != nil {
+			return err
+		}
+
+		samples3 = append(samples3, v)
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Progress sampling", "blockNum", blockN)
+		}
+	}
+
+	trainTo -= 2_000_000
+	for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 4_000 {
+		binary.BigEndian.PutUint64(blockNBytes, blockN)
+		var v []byte
+		_, v, err := c2.Seek(blockNBytes)
+		if err != nil {
+			return err
+		}
+
+		samples4 = append(samples4, v)
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Progress sampling", "blockNum", blockN)
+		}
+	}
+
 	fmt.Printf("samples1: %d\n", len(samples1))
 	t := time.Now()
 	dict1 := gozstd.BuildDict(samples1, 32*1024)
-	fmt.Printf("dict128: %s\n", time.Since(t))
+	fmt.Printf("dict1: %s\n", time.Since(t))
 
 	t = time.Now()
-	dict2 := gozstd.BuildDict(samples1, 32*1024)
-	fmt.Printf("dict64: %s\n", time.Since(t))
+	dict2 := gozstd.BuildDict(samples2, 32*1024)
+	fmt.Printf("dict2: %s\n", time.Since(t))
 
-	//t = time.Now()
-	//dict3 := gozstd.BuildDict(samples1, 8*1024)
-	//fmt.Printf("dict32: %s\n", time.Since(t))
+	t = time.Now()
+	dict3 := gozstd.BuildDict(samples3, 32*1024)
+	fmt.Printf("dict3: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict4 := gozstd.BuildDict(samples4, 32*1024)
+	fmt.Printf("dict4: %s\n", time.Since(t))
 
 	_ = dict1
 	_ = dict2
 	var err error
-	d2, err = gozstd.NewCDictLevel(dict1, -8)
+	d1, err = gozstd.NewCDictLevel(dict1, -8)
+	if err != nil {
+		panic(err)
+	}
+	defer d2.Release()
+
+	d2, err = gozstd.NewCDictLevel(dict1, -2)
 	if err != nil {
 		panic(err)
 	}
@@ -1740,13 +1804,13 @@ func zstd(chaindata string) error {
 	}
 	defer d3.Release()
 
-	d4, err = gozstd.NewCDictLevel(dict2, -1)
+	d4, err = gozstd.NewCDictLevel(dict3, -2)
 	if err != nil {
 		panic(err)
 	}
 	defer d4.Release()
 
-	d5, err = gozstd.NewCDictLevel(dict2, 0)
+	d5, err = gozstd.NewCDictLevel(dict4, -3)
 	if err != nil {
 		panic(err)
 	}
