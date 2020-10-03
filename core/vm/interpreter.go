@@ -35,6 +35,7 @@ type Config struct {
 	SkipAnalysis            bool   // Whether we can skip jumpdest analysis based on the checked history
 	TraceJumpDest           bool   // Print transaction hashes where jumpdest analysis was useful
 	NoReceipts              bool   // Do not calculate receipts
+	ReadOnly                bool   // Do no perform any block finalisation
 
 	EWASMInterpreter string // External EWASM interpreter options
 	EVMInterpreter   string // External EVM interpreter options

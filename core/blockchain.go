@@ -2151,7 +2151,9 @@ func ExecuteBlockEphemerally(
 	}
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		if !vmConfig.NoReceipts {
+			ibs.Prepare(tx.Hash(), block.Hash(), i)
+		}
 		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
@@ -2168,16 +2170,18 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles())
+	if !vmConfig.ReadOnly {
+		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+		engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles())
 
-	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-		return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
-	}
+		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+		if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
+		}
 
-	if err := stateWriter.WriteChangeSets(); err != nil {
-		return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		if err := stateWriter.WriteChangeSets(); err != nil {
+			return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		}
 	}
 
 	return receipts, nil
