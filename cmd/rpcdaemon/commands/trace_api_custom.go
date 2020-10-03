@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
@@ -25,7 +26,9 @@ func (api *TraceAPIImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) 
 }
 
 func (api *TraceAPIImpl) rewardCalc(blockNr rpc.BlockNumber, which string) (Issuance, error) {
-	if api.chainConfig.Ethash == nil {
+	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
+	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+	if chainConfig.Ethash == nil {
 		// Clique for example has no issuance
 		return Issuance{}, nil
 	}
@@ -34,7 +37,7 @@ func (api *TraceAPIImpl) rewardCalc(blockNr rpc.BlockNumber, which string) (Issu
 	if err != nil {
 		return Issuance{}, err
 	}
-	minerReward, uncleRewards := ethash.AccumulateRewards(api.chainConfig, block.Header(), block.Uncles())
+	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
 	issuance := minerReward
 	for _, r := range uncleRewards {
 		p := r // avoids warning?

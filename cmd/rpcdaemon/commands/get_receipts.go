@@ -16,12 +16,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-func getReceipts(ctx context.Context, db rawdb.DatabaseReader, tx ethdb.Tx, number uint64, hash common.Hash, chainConfig *params.ChainConfig) (types.Receipts, error) {
+func getReceipts(ctx context.Context, db rawdb.DatabaseReader, tx ethdb.Tx, number uint64, hash common.Hash) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(db, hash, number); cached != nil {
 		return cached, nil
 	}
@@ -30,6 +29,7 @@ func getReceipts(ctx context.Context, db rawdb.DatabaseReader, tx ethdb.Tx, numb
 
 	cc := adapter.NewChainContext(db)
 	bc := adapter.NewBlockGetter(db)
+	chainConfig := getChainConfig(db)
 	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx, hash, 0)
 	if err != nil {
 		return nil, err
@@ -59,13 +59,12 @@ func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*t
 	if number == nil {
 		return nil, fmt.Errorf("block not found: %x", hash)
 	}
-
 	tx, beginErr := api.db.Begin(ctx, nil, false)
 	if beginErr != nil {
 		return nil, beginErr
 	}
 	defer tx.Rollback()
-	receipts, err := getReceipts(ctx, api.dbReader, tx, *number, hash, api.chainConfig)
+	receipts, err := getReceipts(ctx, api.dbReader, tx, *number, hash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
@@ -157,7 +156,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		if blockHash == (common.Hash{}) {
 			return returnLogs(logs), fmt.Errorf("block not found %d", uint64(blockNToMatch))
 		}
-		receipts, err := getReceipts(ctx, api.dbReader, tx, uint64(blockNToMatch), blockHash, api.chainConfig)
+		receipts, err := getReceipts(ctx, api.dbReader, tx, uint64(blockNToMatch), blockHash)
 		if err != nil {
 			return returnLogs(logs), err
 		}
@@ -222,7 +221,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, beginErr
 	}
 	defer dbtx.Rollback()
-	receipts, err := getReceipts(ctx, api.dbReader, dbtx, blockNumber, blockHash, api.chainConfig)
+	receipts, err := getReceipts(ctx, api.dbReader, dbtx, blockNumber, blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
