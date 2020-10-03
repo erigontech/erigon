@@ -1701,12 +1701,8 @@ func zstd(chaindata string) error {
 		_ = v
 
 		if blockNum%1_000_000 == 1 {
-			trainFrom := blockNum - 1_000_000
-			trainTo := blockNum
-			if blockNum < 1_000_000 {
-				trainFrom = 1
-				trainTo = 1_000_000
-			}
+			trainFrom := blockNum
+			trainTo := blockNum + 1_000_000
 			samples1 = samples1[:0]
 			for blockN := trainFrom; blockN < trainTo; blockN += 1_000_000 / 4_000 {
 				binary.BigEndian.PutUint64(blockNBytes, blockN)
