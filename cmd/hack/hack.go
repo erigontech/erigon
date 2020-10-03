@@ -1718,6 +1718,7 @@ func zstd(chaindata string) error {
 	t := time.Now()
 	dict1 := gozstd.BuildDict(samples1, 32*1024)
 	fmt.Printf("dict1: %s\n", time.Since(t))
+	fmt.Printf("%x\n", dict1)
 
 	t = time.Now()
 	dict2 := gozstd.BuildDict(samples1, 64*1024)
