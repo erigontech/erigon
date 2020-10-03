@@ -1809,7 +1809,7 @@ func zstd(chaindata string) error {
 	}
 	defer d4.Release()
 
-	d5, err = gozstd.NewCDictLevel(dict4, -3)
+	d5, err = gozstd.NewCDictLevel(dict4, -2)
 	if err != nil {
 		panic(err)
 	}
