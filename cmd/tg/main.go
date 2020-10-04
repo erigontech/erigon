@@ -2,14 +2,14 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"os"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/log"
-	turbocli "github.com/ledgerwatch/turbo-geth/turbo/cli"
 	"github.com/ledgerwatch/turbo-geth/turbo/node"
+
+	turbocli "github.com/ledgerwatch/turbo-geth/turbo/cli"
+
 	"github.com/urfave/cli"
 )
 
@@ -26,22 +26,15 @@ func main() {
 		os.Exit(1)
 	}
 }
-
-func runTurboGeth(cliCtx *cli.Context) {
+func runTurboGeth(ctx *cli.Context) {
 	// creating staged sync with all default parameters
 	sync := stagedsync.New(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 	)
 
-	ctx := utils.RootContext()
-
 	// initializing the node and providing the current git commit there
-	tg := node.New(cliCtx, sync, node.Params{GitCommit: gitCommit})
-	tg.SetP2PListenFunc(func(network, addr string) (net.Listener, error) {
-		var lc net.ListenConfig
-		return lc.Listen(ctx, network, addr)
-	})
+	tg := node.New(ctx, sync, node.Params{GitCommit: gitCommit})
 	// running the node
 	err := tg.Serve()
 

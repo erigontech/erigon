@@ -19,7 +19,6 @@ package node
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -141,10 +140,6 @@ func New(conf *Config) (*Node, error) {
 	node.ipc = newIPCServer(node.log, conf.IPCEndpoint())
 
 	return node, nil
-}
-
-func (n *Node) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
-	n.server.SetP2PListenFunc(listenFunc)
 }
 
 // Start starts all registered lifecycles, RPC services and p2p networking.
