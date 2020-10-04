@@ -132,9 +132,9 @@ If the hashed state is not empty, then we are looking at the History ChangeSets 
 
 This stage doesn't use a network connection.
 
-### Stages 8, 9, 10: Generate Indexes Stages [7](/eth/stagedsync/stage_txlookup.go), [8, 9](/eth/stagedsync/stage_indexes.go)
+### Stages 8, 9, 10, 11: Generate Indexes Stages [8, 9](/eth/stagedsync/stage_indexes.go), [10](/eth/stagedsync/stage_log_index.go), and [11](/eth/stagedsync/stage_txlookup.go)
 
-There are 3 indexes that are generated during sync.
+There are 4 indexes that are generated during sync.
 
 They might be disabled because they aren't used for all the APIs.
 
@@ -148,11 +148,15 @@ This index stores the mapping from the account address to the list of blocks whe
 
 This index stores the mapping from the storage item address to the list of blocks where this storage item was changed in some way.
 
+**Log Index**
+
+This index sets up a link from the [TODO] to [TODO].
+
 **Tx Lookup Index**
 
 This index sets up a link from the transaction hash to the block number.
 
-### Stage 11: [Transaction Pool Stage](/eth/stagedsync/stage_txpool.go)
+### Stage 12: [Transaction Pool Stage](/eth/stagedsync/stage_txpool.go)
 
 During this stage we start the transaction pool or update its state. For instance, we remove the transactions from the blocks we have downloaded from the pool.
 
@@ -160,6 +164,6 @@ On unwinds, we add the transactions from the blocks we unwind, back to the pool.
 
 This stage doesn't use a network connection.
 
-### Stage 12: Finish
+### Stage 13: Finish
 
 This stage sets the current block number that is then used by [RPC calls](../../cmd/rpcdaemon/Readme.md), such as [`eth_blockNumber`](../../README.md).
