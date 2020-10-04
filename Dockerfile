@@ -8,6 +8,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
+# https://github.com/valyala/gozstd/issues/20#issuecomment-557499034
+RUN GOZSTD_VER=$(cat go.mod | fgrep github.com/valyala/gozstd | awk '{print $NF}'); cd ${GOPATH}/pkg/mod/github.com/valyala/gozstd@${GOZSTD_VER}; if [[ ! -f _rebuilt ]]; then chmod -R +w .; make -j8 clean; make -j8 libzstd.a; touch _rebuilt; fi;
+
 ADD . .
 RUN make all
 
