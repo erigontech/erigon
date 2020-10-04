@@ -376,6 +376,10 @@ func stageCallTraces(ctx context.Context) error {
 	execStage := progress(stages.Execution)
 	s := progress(stages.CallTraces)
 	log.Info("Stage exec", "progress", execStage.BlockNumber)
+	if block != 0 {
+		s.BlockNumber = block
+		log.Info("Overriding initial state", "block", block)
+	}
 	log.Info("Stage call traces", "progress", s.BlockNumber)
 	ch := ctx.Done()
 
