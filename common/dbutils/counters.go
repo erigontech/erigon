@@ -19,7 +19,7 @@ type IDs struct {
 
 // Aggregates - store some statistical aggregates of data: for example min/max of values in some bucket
 type Aggregates struct {
-	ExampleMax uint64 `codec:"1"`
+	ExampleAvg uint64 `codec:"1"`
 }
 
 func (c *IDs) Unmarshal(data []byte) error {

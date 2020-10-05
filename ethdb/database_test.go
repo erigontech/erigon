@@ -325,3 +325,44 @@ func TestCounters(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 5, int(ids4.Example))
 }
+
+func TestAggregates(t *testing.T) {
+	db := newTestLmdb()
+	defer db.Close()
+	tx, err := db.Begin(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	aggs, err := Aggregates(tx)
+	require.NoError(t, err)
+	aggs.ExampleAvg++
+	aggs.ExampleAvg++
+	aggs.ExampleAvg++
+
+	err = tx.CommitAndBegin(context.Background())
+	require.NoError(t, err)
+
+	aggs2, err := Aggregates(tx)
+	require.NoError(t, err)
+	require.Equal(t, 3, int(aggs2.ExampleAvg))
+	aggs2.ExampleAvg++
+	aggs2.ExampleAvg++
+
+	err = tx.CommitAndBegin(context.Background())
+	require.NoError(t, err)
+
+	aggs3, err := Aggregates(tx)
+	require.NoError(t, err)
+	require.Equal(t, 5, int(aggs3.ExampleAvg))
+
+	aggs3.ExampleAvg++
+	tx.Rollback()
+
+	tx, err = db.Begin(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	aggs4, err := Aggregates(tx)
+	require.NoError(t, err)
+	require.Equal(t, 5, int(aggs4.ExampleAvg))
+}
