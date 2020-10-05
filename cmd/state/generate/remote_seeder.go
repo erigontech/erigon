@@ -33,19 +33,18 @@ func SeedSnapshots(dir string) error {
 	if err != nil {
 		return err
 	}
-	torrents := client.Cli.Torrents()
-	for _, t := range torrents {
-		t := t
-		go func() {
-			for {
+
+	go func() {
+		ticker:=time.Tick(10*time.Second)
+		for _=range ticker{
+			for _, t := range client.Cli.Torrents() {
 				log.Info("Snapshot stats", "snapshot", t.Name(), "active peers", t.Stats().ActivePeers, "seeding", t.Seeding())
-				if common.IsCanceled(ctx) {
-					return
-				}
-				time.Sleep(time.Second * 10)
 			}
-		}()
-	}
+			if common.IsCanceled(ctx) {
+				return
+			}
+		}
+	}()
 
 	<-ctx.Done()
 	return nil

@@ -205,8 +205,8 @@ func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.
 			return nil, err
 		} else { //nolint
 			kv = ethdb.NewSnapshotKV().SnapshotDB(snapshotKV).
-				For(dbutils.BlockBodyPrefix, dbutils.BucketConfigItem{}).
-				For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
+				For(dbutils.BlockBodyPrefix).
+				For(dbutils.SnapshotInfoBucket).
 				DB(kv).MustOpen()
 		}
 	}
@@ -224,8 +224,8 @@ func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.
 			return nil, err
 		} else { //nolint
 			kv = ethdb.NewSnapshotKV().SnapshotDB(snapshotKV).
-				For(dbutils.HeaderPrefix, dbutils.BucketConfigItem{}).
-				For(dbutils.SnapshotInfoBucket, dbutils.BucketConfigItem{}).
+				For(dbutils.HeaderPrefix).
+				For(dbutils.SnapshotInfoBucket).
 				DB(kv).MustOpen()
 		}
 	}

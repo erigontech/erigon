@@ -264,7 +264,7 @@ func stageIHash(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	if err := migrations.NewMigrator().Apply(db, ""); err != nil {
+	if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
 		panic(err)
 	}
 

@@ -83,6 +83,7 @@ func Seed(pathes []string) error {
 			return err
 		}
 
+		tt := time.Now()
 		torrents[i], _, err = cl.AddTorrentSpec(&torrent.TorrentSpec{
 			Trackers:  trnt.Trackers,
 			InfoHash:  mi.HashInfoBytes(),
@@ -92,6 +93,9 @@ func Seed(pathes []string) error {
 		if err != nil {
 			return err
 		}
+
+		log.Info("Torrent added", "name", torrents[i].Info().Name, "path",  v, "t", time.Since(tt))
+
 		if !torrents[i].Seeding() {
 			log.Warn(torrents[i].Name() + " not seeding")
 		}
@@ -101,19 +105,21 @@ func Seed(pathes []string) error {
 		}
 
 		torrents[i].VerifyData()
-
-		go func() {
-			tt := time.Now()
-			peerID := cl.PeerID()
-			for {
-				fmt.Println(common.Bytes2Hex(peerID[:]), torrents[i].Name(), torrents[i].InfoHash(), torrents[i].PeerConns(), "Swarm", len(torrents[i].KnownSwarm()), torrents[i].Seeding(), time.Since(tt))
-				if common.IsCanceled(ctx) {
-					return
-				}
-				time.Sleep(time.Second * 10)
-			}
-		}()
 	}
+
+	go func() {
+		ticker:=time.Tick(10*time.Second)
+		for _=range ticker{
+			for _, t := range cl.Torrents() {
+				log.Info("Snapshot stats", "snapshot", t.Name(), "active peers", t.Stats().ActivePeers, "seeding", t.Seeding())
+			}
+
+			if common.IsCanceled(ctx) {
+				return
+			}
+		}
+	}()
+
 
 	<-ctx.Done()
 	return nil

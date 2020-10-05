@@ -128,20 +128,20 @@ func (s *snapshotTX) ExistingBuckets() ([]string, error) {
 
 func NewSnapshotKV() snapshotOpts {
 	return snapshotOpts{
-		forBuckets: make(map[string]dbutils.BucketConfigItem),
+		forBuckets: make(map[string]struct{}),
 	}
 }
 
 type SnapshotKV struct {
 	db         KV
 	snapshotDB KV
-	forBuckets map[string]dbutils.BucketConfigItem
+	forBuckets map[string]struct{}
 }
 
 type snapshotOpts struct {
 	db         KV
 	snapshot   KV
-	forBuckets map[string]dbutils.BucketConfigItem
+	forBuckets map[string]struct{}
 }
 
 func (opts snapshotOpts) SnapshotDB(db KV) snapshotOpts {
@@ -154,8 +154,8 @@ func (opts snapshotOpts) DB(db KV) snapshotOpts {
 	return opts
 }
 
-func (opts snapshotOpts) For(bucket string, config dbutils.BucketConfigItem) snapshotOpts {
-	opts.forBuckets[bucket] = config
+func (opts snapshotOpts) For(bucket string) snapshotOpts {
+	opts.forBuckets[bucket] = struct{}{}
 	return opts
 }
 
@@ -211,7 +211,7 @@ func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx,
 	return t, nil
 }
 
-func newVirtualTx(construct func() (Tx, error), forBucket map[string]dbutils.BucketConfigItem) *lazyTx {
+func newVirtualTx(construct func() (Tx, error), forBucket map[string]struct{}) *lazyTx {
 	return &lazyTx{
 		construct:  construct,
 		forBuckets: forBucket,
@@ -223,7 +223,7 @@ var ErrNotSnapshotBucket = errors.New("not snapshot bucket")
 //lazyTx is used for lazy transaction creation.
 type lazyTx struct {
 	construct  func() (Tx, error)
-	forBuckets map[string]dbutils.BucketConfigItem
+	forBuckets map[string]struct{}
 	tx         Tx
 	sync.Mutex
 }
@@ -290,7 +290,7 @@ func (v *lazyTx) BucketSize(bucket string) (uint64, error) {
 type snapshotTX struct {
 	dbTX       Tx
 	snTX       Tx
-	forBuckets map[string]dbutils.BucketConfigItem
+	forBuckets map[string]struct{}
 }
 
 func (s *snapshotTX) Commit(ctx context.Context) error {
@@ -417,10 +417,6 @@ func (s *snapshotCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	}
 
 	return s.lastSNDBKey, s.lastSNDBVal, nil
-}
-
-func (s *snapshotCursor) SeekTo(seek []byte) ([]byte, []byte, error) {
-	panic("implement me")
 }
 
 func (s *snapshotCursor) Next() ([]byte, []byte, error) {
