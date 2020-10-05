@@ -184,6 +184,8 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir stri
 			return nil
 		}
 
+		// TODO: get last shard from db
+
 		for {
 			lft := bitmapdb.CutLeft(currentBitmap, bitmapdb.ShardLimit, 500)
 			buf.Reset()
