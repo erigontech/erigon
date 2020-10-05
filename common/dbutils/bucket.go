@@ -166,14 +166,6 @@ var (
 	// it stores stages progress to understand in which context was executed migration
 	// in case of bug-report developer can ask content of this bucket
 	Migrations = "migrations"
-
-	// [dict_name] -> dictionary bytes
-	// some buckets are compressed and to un-compress them you need dictionary stored here
-	// it's possible to change compression settings of buckets:
-	//	- use migrations mechanism to un-compress data by existing dictionary
-	//  - compress data by new dictionary
-	//  - store new dictionary here
-	CompressionDictionary = "compression_dictionary"
 )
 
 // Keys

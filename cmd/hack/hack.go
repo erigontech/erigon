@@ -1679,22 +1679,22 @@ func zstd(chaindata string) error {
 
 	// train
 	var samples1 [][]byte
-	//var samples2 [][]byte
-	//var samples3 [][]byte
+	var samples2 [][]byte
+	var samples3 [][]byte
 	//var samples4 [][]byte
 
-	bucket := dbutils.BlockReceiptsPrefix
+	bucket := dbutils.BlockBodyPrefix
 	fmt.Printf("bucket: %s\n", bucket)
 	c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
 	c2 := tx.(ethdb.HasTx).Tx().Cursor(bucket)
 	blockNBytes := make([]byte, 8)
 
 	total := 0
-	var d1, d2, d3, d4, d5 *gozstd.CDict
+	var d0, d1, d2, d3, d4, d5 *gozstd.CDict
 	var d_d1, d_d2, d_d3, d_d4, d_d5 time.Duration
 	var t_d1, t_d2, t_d3, t_d4, t_d5 int
 
-	trainFrom := uint64(8_000_000)
+	trainFrom := uint64(7_000_000)
 	trainTo := uint64(11_000_000)
 	samples1 = samples1[:0]
 	for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 5_000 {
@@ -1714,58 +1714,108 @@ func zstd(chaindata string) error {
 		}
 	}
 
-	fmt.Printf("samples1: %d\n", len(samples1))
+	samples2 = samples2[:0]
+	for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 15_000 {
+		binary.BigEndian.PutUint64(blockNBytes, blockN)
+		var v []byte
+		_, v, err := c2.Seek(blockNBytes)
+		if err != nil {
+			return err
+		}
+
+		samples2 = append(samples2, v)
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Progress sampling", "blockNum", blockN)
+		}
+	}
+
+	trainFrom = uint64(10_000_000)
+	samples3 = samples3[:0]
+	for blockN := trainFrom; blockN < trainTo; blockN += (trainTo - trainFrom) / 5_000 {
+		binary.BigEndian.PutUint64(blockNBytes, blockN)
+		var v []byte
+		_, v, err := c2.Seek(blockNBytes)
+		if err != nil {
+			return err
+		}
+
+		samples3 = append(samples3, v)
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Progress sampling", "blockNum", blockN)
+		}
+	}
+
+	//fmt.Printf("samples1: %d\n", len(samples1))
 	t := time.Now()
-	dict1 := gozstd.BuildDict(samples1, 32*1024)
+	dict1 := gozstd.BuildDict(samples1, 100*1024)
 	fmt.Printf("dict1: %s\n", time.Since(t))
-	fmt.Printf("%x\n", dict1)
+	//fmt.Printf("%x\n", dict1)
 
 	t = time.Now()
-	dict2 := gozstd.BuildDict(samples1, 64*1024)
+	dict2 := gozstd.BuildDict(samples1, 200*1024)
 	fmt.Printf("dict2: %s\n", time.Since(t))
 
 	t = time.Now()
-	dict3 := gozstd.BuildDict(samples1, 128*1024)
+	dict3 := gozstd.BuildDict(samples2, 100*1024)
 	fmt.Printf("dict3: %s\n", time.Since(t))
 
 	t = time.Now()
-	dict4 := gozstd.BuildDict(samples1, 16*1024)
+	dict4 := gozstd.BuildDict(samples2, 200*1024)
 	fmt.Printf("dict4: %s\n", time.Since(t))
 
-	_ = dict1
-	_ = dict2
+	t = time.Now()
+	dict5 := gozstd.BuildDict(samples3, 8*1024)
+	fmt.Printf("dict4: %s\n", time.Since(t))
+
+	//t = time.Now()
+	//dict5 := gozstd.BuildDict(samples3, 100*1024)
+	//fmt.Printf("dict4: %s\n", time.Since(t))
+
 	var err error
-	d1, err = gozstd.NewCDictLevel(dict1, -8)
+	d0, err = gozstd.NewCDictLevel(dict1, -8) // don't use results of first deserialization for benchmarks - lazyIO happening there
+	if err != nil {
+		panic(err)
+	}
+	defer d0.Release()
+
+	d1, err = gozstd.NewCDictLevel(dict1, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer d1.Release()
+
+	d2, err = gozstd.NewCDictLevel(dict2, -2)
 	if err != nil {
 		panic(err)
 	}
 	defer d2.Release()
 
-	d2, err = gozstd.NewCDictLevel(dict1, -2)
-	if err != nil {
-		panic(err)
-	}
-	defer d2.Release()
-
-	d3, err = gozstd.NewCDictLevel(dict2, -2)
+	d3, err = gozstd.NewCDictLevel(dict3, -2)
 	if err != nil {
 		panic(err)
 	}
 	defer d3.Release()
 
-	d4, err = gozstd.NewCDictLevel(dict3, -2)
+	d4, err = gozstd.NewCDictLevel(dict4, -2)
 	if err != nil {
 		panic(err)
 	}
 	defer d4.Release()
 
-	d5, err = gozstd.NewCDictLevel(dict4, -2)
+	d5, err = gozstd.NewCDictLevel(dict5, 5)
 	if err != nil {
 		panic(err)
 	}
 	defer d5.Release()
 
 	buf := make([]byte, 0, 1024)
+	//buf2 := make([]byte, 0, 1024)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -1773,6 +1823,8 @@ func zstd(chaindata string) error {
 		total += len(v)
 		blockNum := binary.BigEndian.Uint64(k)
 		_ = v
+
+		buf = gozstd.CompressDict(buf[:0], v, d0) // don't use results of first deserialization for benchmarks - lazyIO happening there
 
 		t := time.Now()
 		buf = gozstd.CompressDict(buf[:0], v, d1)
@@ -1804,7 +1856,7 @@ func zstd(chaindata string) error {
 		case <-logEvery.C:
 			totalf := float64(total)
 			log.Info("Progress 8", "blockNum", blockNum, "before", common.StorageSize(total),
-				//"d1", fmt.Sprintf("%.2f", totalf/float64(t_d1)), "d_d1", d_d1,
+				"d1", fmt.Sprintf("%.2f", totalf/float64(t_d1)), "d_d1", d_d1,
 				"d2", fmt.Sprintf("%.2f", totalf/float64(t_d2)), "d_d2", d_d2,
 				"d3", fmt.Sprintf("%.2f", totalf/float64(t_d3)), "d_d3", d_d3,
 				"d4", fmt.Sprintf("%.2f", totalf/float64(t_d4)), "d_d4", d_d4,
@@ -1813,6 +1865,9 @@ func zstd(chaindata string) error {
 		}
 	}
 
+	_ = samples3
+	_ = dict3
+	_ = dict4
 	return nil
 }
 

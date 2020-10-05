@@ -7,8 +7,10 @@ import (
 )
 
 var (
-	compressBlocks    bool
-	getCompressBlocks sync.Once
+	compressBlocks      bool
+	getCompressBlocks   sync.Once
+	compressReceipts    bool
+	getCompressReceipts sync.Once
 )
 
 // atomic: bit 0 is the value, bit 1 is the initialized flag
@@ -52,6 +54,13 @@ func IsBlockCompressionEnabled() bool {
 		_, compressBlocks = os.LookupEnv("COMPRESS_BLOCKS")
 	})
 	return compressBlocks
+}
+
+func IsReceiptsCompressionEnabled() bool {
+	getCompressReceipts.Do(func() {
+		_, compressReceipts = os.LookupEnv("COMPRESS_RECEIPTS")
+	})
+	return compressReceipts
 }
 
 var (

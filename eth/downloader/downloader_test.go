@@ -100,11 +100,7 @@ func newTester() *downloadTester {
 	if err != nil {
 		panic(err)
 	}
-	dicts, err := dbutils.CompressionDictionaries()
-	if err != nil {
-		panic(err)
-	}
-	tester.downloader = New(uint64(FullSync), tester.stateDb, new(event.TypeMux), params.TestChainConfig, dicts, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader = New(uint64(FullSync), tester.stateDb, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	return tester
 }
 

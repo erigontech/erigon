@@ -9,10 +9,9 @@ import (
 	"runtime/pprof"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -21,8 +20,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/valyala/gozstd"
 )
 
 const (
@@ -235,6 +236,11 @@ func appendReceipts(tx ethdb.DbWithPendingMutations, receipts types.Receipts, bl
 	if err != nil {
 		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
 	}
+
+	if debug.IsReceiptsCompressionEnabled() {
+		newV = gozstd.CompressDict(nil, newV, dbutils.CompressionDicts.CReceipts)
+	}
+
 	// Store the flattened receipt slice
 	if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(blockNumber, blockHash), newV); err != nil {
 		return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)

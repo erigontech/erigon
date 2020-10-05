@@ -25,9 +25,7 @@ docs/readthedocs/build
 .settings
 
 # used by the Makefile
-/build/_workspace/
-/build/cache/
-/build/bin/
+/build
 /geth*.zip
 
 # travis

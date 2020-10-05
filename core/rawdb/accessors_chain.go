@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/golang/snappy"
@@ -432,15 +431,17 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 		return nil
 	}
 
-	var err error
-	data, err = gozstd.DecompressDict(nil, data, dbutils.CompressionDictionaries.DReceipts)
-	if err != nil {
-		log.Error("receipt uncompress failed", "hash", hash, "err", err)
-		return nil
+	if debug.IsReceiptsCompressionEnabled() {
+		var err error
+		data, err = gozstd.DecompressDict(nil, data, dbutils.CompressionDicts.DReceipts)
+		if err != nil {
+			log.Error("receipt uncompress failed", "hash", hash, "err", err)
+			return nil
+		}
 	}
 
 	receipts := types.Receipts{}
-	err = cbor.Unmarshal(&receipts, data)
+	err := cbor.Unmarshal(&receipts, data)
 	if err != nil {
 		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
 		return nil
@@ -482,7 +483,9 @@ func WriteReceipts(db DatabaseWriter, hash common.Hash, number uint64, receipts 
 		log.Crit("Failed to encode block receipts", "err", err)
 	}
 
-	newV = gozstd.CompressDict(nil, newV, dbutils.CompressionDictionaries.CReceipts)
+	if debug.IsReceiptsCompressionEnabled() {
+		newV = gozstd.CompressDict(nil, newV, dbutils.CompressionDicts.CReceipts)
+	}
 
 	// Store the flattened receipt slice
 	if err := db.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash), newV); err != nil {

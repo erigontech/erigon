@@ -4,6 +4,10 @@ go 1.15
 
 require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
+	github.com/AskAlexSharov/dictionaries v1.0.0
+	github.com/Azure/azure-pipeline-go v0.2.2 // indirect
+	github.com/Azure/azure-storage-blob-go v0.8.0
+	github.com/Azure/go-autorest/autorest/adal v0.8.3 // indirect
 	github.com/JekaMas/notify v0.9.4
 	github.com/RoaringBitmap/roaring v0.5.1
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
