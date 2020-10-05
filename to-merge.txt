@@ -1,0 +1,491 @@
+commit c71a7e26a8b1e332bbf3262d88ba3ff32071456c
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Sep 28 11:21:47 2020 +0300
+
+    params: release Geth v1.9.22
+
+commit 7ddb44b80e6cc534495090a063d56224ef3f92f0
+Merge: fdd42d425 b5d362b2b
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Sep 28 11:21:17 2020 +0300
+
+    Merge pull request #21635 from karalabe/cht-1.9.22
+    
+    params: update CHTs for Geth v1.9.22
+
+commit b5d362b2bf1ef6aece6d0d54b89d2e7ea4b86c0e
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Sep 28 11:19:22 2020 +0300
+
+    params: update CHTs for Geth v1.9.22
+
+commit fdd42d425b49383c4544314eba69b26f450b537b
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Thu Sep 24 10:46:43 2020 +0200
+
+    cmd/devp2p/internal/ethtest: lower protocol version to 64 (#21604)
+
+commit 39f8268147b5f4f0e42ce56dea8e1cd37aeedb75
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Wed Sep 23 17:48:47 2020 +0200
+
+    cmd/devp2p/internal/ethtest: update version in handshake (#21603)
+
+commit a25899f3dc2494cad515ed1a65b0c4e28db951a9
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Wed Sep 23 15:18:17 2020 +0200
+
+    cmd/devp2p: add eth protocol test suite (#21598)
+    
+    This change adds a test framework for the "eth" protocol and some basic
+    tests. The tests can be run using the './devp2p rlpx eth-test' command.
+
+commit c1544423d655f540b55bb6ec0e7167dad9683c42
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Sep 23 13:08:40 2020 +0200
+
+    internal/ethapi: fix nil deref + fix estimateGas console bindings (#21601)
+    
+    * tried to fix
+    
+    * fix for js api
+    
+    * fix for nil pointer ex
+    
+    * rev space
+    
+    * rev space
+    
+    * input call formatter
+
+commit e5defccd581880101aa0897705e3e9c3735a8186
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Sep 23 17:44:09 2020 +0800
+
+    trie: extend range proof (#21250)
+    
+    * trie: support non-existent right proof
+    
+    * trie: improve test
+    
+    * trie: minor linter fix
+    
+    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
+
+commit 0921f8a74f1c050792453fc241eef67d7400d94c
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Sep 23 10:29:48 2020 +0200
+
+    internal/ethapi: add optional parameter blockNrOrHash to estimateGas (#21545)
+    
+    This allows users to estimate gas on top of arbitrary blocks as well as pending and latest.
+    Tracing on pending is useful for most users as it takes into account the current txpool while
+    tracing on latest might be useful for users that have little to know knowledge of the current
+    transactions in the network.
+    
+    If blockNrOrHash is not specified, estimateGas defaults to pending
+
+commit 25b16085da1bab4b84f52de7275ea481ea923d68
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Sep 23 16:03:21 2020 +0800
+
+    trie: support empty range proof (#21199)
+
+commit e1365b24647481ca92d95f678f6f8ee9773202cb
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Sep 23 15:59:11 2020 +0800
+
+    trie: fix gaped range proof test case (#21484)
+
+commit fdb742419e6ff8373e57bdf99836c22f689b0e55
+Author: Binacs <bin646891055@gmail.com>
+Date:   Wed Sep 23 05:22:54 2020 +0800
+
+    cmd/clef, cmd/geth: use SplitAndTrim from cmd/utils (#21579)
+
+commit 129cf075e963df10f42da81d817a4c12f7d4bf16
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Tue Sep 22 10:17:39 2020 +0200
+
+    p2p: move rlpx into separate package (#21464)
+    
+    This change moves the RLPx protocol implementation into a separate package,
+    p2p/rlpx. The new package can be used to establish RLPx connections for
+    protocol testing purposes.
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit 2c097bb7a2f6e048dd9a0c4f6d74c10c07ec12df
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Mon Sep 21 16:33:35 2020 +0200
+
+    mobile: better api for java users (#21580)
+    
+    * (mobile): Adds string representations for types
+    
+    * mobile: better interfaces add stringer to types
+    
+    Co-authored-by: sarath <sarath@melvault.com>
+
+commit 9a39c6bcb1fe11a252ac832d995a72e5f2210fbe
+Author: Osoro Bironga <fanosoro@gmail.com>
+Date:   Sun Sep 20 11:43:57 2020 +0300
+
+    accounts/abi: improve documentation and names (#21540)
+    
+    * accounts: abi/bid/backends; cleaned doc errors, camelCase refactors and anonymous variable assignments
+    
+    * acounts/abi/bind: doc errors, anonymous parameter assignments
+    
+    * accounts/abi: doc edits, camelCase refactors
+    
+    * accounts/abi/bind: review fix
+    
+    * reverted name changes
+    
+    * name revert
+    
+    Co-authored-by: Osoro Bironga <osoro@doctaroo.com>
+
+commit f354c622ca05289d9190d3718fd0da3aa4e18f27
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Fri Sep 18 14:26:19 2020 +0200
+
+    core: fix a typo in comment (#21439)
+
+commit 2482ba016eb063db3a35fea2d4b56c1d354fc027
+Merge: 07751c3d2 fb835c024
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Fri Sep 18 12:29:33 2020 +0300
+
+    Merge pull request #21529 from karalabe/dynamic-pivot
+    
+    eth/downloader: dynamically move pivot even during chain sync
+
+commit fb835c024c9e9c02edd2351f20e7b8efcbe99543
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue Sep 8 11:13:16 2020 +0300
+
+    eth/downloader: dynamically move pivot even during chain sync
+
+commit 07751c3d26a9c740fa1bf792199a47065db8aa8a
+Author: Giuseppe Bertone <bertone.giuseppe@gmail.com>
+Date:   Thu Sep 17 10:23:56 2020 +0200
+
+    cmd/geth: added counters to the geth inspect report (#21495)
+    
+    * database: added counters
+    
+    * Improved stats for ancient db
+    
+    * Small improvement
+    
+    * Better message and added percentage while counting receipts
+    
+    * Fast counting for receipts
+    
+    * added info message
+    
+    * Show both receips itemscount  from ancient db and counted receipts
+    
+    * Fixed default case
+    
+    * Removed counter for receipts in ancient store
+    
+    * Removed counting of receipts present in leveldb
+
+commit faba018b29fa35e668e98926526cbaad5863e297
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Sep 16 13:17:50 2020 +0200
+
+    cmd/utils: use preconfigured testnet flags instead of networkid (#21561)
+    
+    * cmd/utils: use preconfigured testnet flags instead of networkid
+    
+    * cmd/utils: shorter description
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+    
+    * Update flags.go
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+
+commit 89884dc3531c3766ba7c0b29be33d3c3af4d1674
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Sep 16 13:15:22 2020 +0200
+
+    tests/fuzzers/abi: add fuzzer for fuzzing package accounts/abi (#21217)
+    
+    * tests/fuzzers/abi: added abi fuzzer
+    
+    * accounts/abi: fixed issues found by fuzzing
+    
+    * tests/fuzzers/abi: update fuzzers, added repro test
+    
+    * tests/fuzzers/abi: renamed abi_fuzzer to abifuzzer
+    
+    * tests/fuzzers/abi: updated abi fuzzer
+    
+    * tests/fuzzers/abi: updated abi fuzzer
+    
+    * accounts/abi: minor style fix
+    
+    * go.mod: added go-fuzz dependency
+    
+    * tests/fuzzers/abi: updated abi fuzzer
+    
+    * tests/fuzzers/abi: make linter happy
+    
+    * tests/fuzzers/abi: make linter happy
+    
+    * tests/fuzzers/abi: comment out false positives
+
+commit 93f047023f8569e95b767cd000c7c95640dfcad7
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Sep 16 17:51:16 2020 +0800
+
+    les/lespay/server: bump database version (#21571)
+
+commit 8696dd39cbb5664a4a6900993e113713e56f3def
+Author: Vinod Damle <vdamle@users.noreply.github.com>
+Date:   Wed Sep 16 02:39:35 2020 -0400
+
+    params: allow setting Petersburg block before chain head (#21473)
+    
+    * Allow setting PetersburgBlock before chainhead
+    
+    if it is at the same block as ConstantinopleBlock
+    
+    * Add a negative test
+
+commit cf2a77af28e58359f3ec1c0376c3b834f9ad8fb5
+Author: Mason Fischer <mason@kissr.co>
+Date:   Tue Sep 15 05:29:51 2020 -0400
+
+    ethclient: fix BlockNumber (#21565)
+    
+    It didn't actually work because it called a method that doesn't
+    exist. This fixes it also adds a test.
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit 0185ee09936a3657cdd6d03e2c0c630e66954f33
+Author: Giuseppe Bertone <bertone.giuseppe@gmail.com>
+Date:   Tue Sep 15 10:37:01 2020 +0200
+
+    core/rawdb: single point of maintenance for writing and deleting tx lookup indexes (#21480)
+
+commit 4764b2f0be91b05395f6c25b0f74bd8d65aaa590
+Author: Kirill Elagin <kirelagin@gmail.com>
+Date:   Tue Sep 15 02:27:17 2020 -0400
+
+    COYPING: restore the full text text of GPL (#21568)
+    
+    When the license was added to the repository, its text was changed (some
+    sections at the end removed) and, worse, the authors of go-ethereum
+    tried to claim copyright on the license text.
+    
+    The correct way to apply GPL to a project is to copy it verbatim.
+    This change reverts the text of the GPL to the original.
+
+commit b65c3841815ed4d12a6904d18efe39bbff5eb676
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Sep 15 08:22:47 2020 +0200
+
+    eth/tracers: regenerate assets from #21549 (#21564)
+
+commit 4996fce25a5d137aa570663e80be168ba37ce983
+Author: Zsolt Felföldi <zsfelfoldi@gmail.com>
+Date:   Mon Sep 14 22:44:20 2020 +0200
+
+    les, les/lespay/server: refactor client pool (#21236)
+    
+    * les, les/lespay/server: refactor client pool
+    
+    * les: use ns.Operation and sub calls where needed
+    
+    * les: fixed tests
+    
+    * les: removed active/inactive logic from peerSet
+    
+    * les: removed active/inactive peer logic
+    
+    * les: fixed linter warnings
+    
+    * les: fixed more linter errors and added missing metrics
+    
+    * les: addressed comments
+    
+    * cmd/geth: fixed TestPriorityClient
+    
+    * les: simplified clientPool state machine
+    
+    * les/lespay/server: do not use goroutine for balance callbacks
+    
+    * internal/web3ext: fix addBalance required parameters
+    
+    * les: removed freeCapacity, always connect at minCapacity initially
+    
+    * les: only allow capacity change with priority status
+    
+    Co-authored-by: rjl493456442 <garyrong0905@gmail.com>
+
+commit f7112cc182ec9ec43ff56d4ff3c84d2518aa30ff
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon Sep 14 19:23:01 2020 +0200
+
+    rlp: add SplitUint64 (#21563)
+    
+    This can be useful when working with raw RLP data.
+
+commit 71c37d82adaa2b69ea98ce0c5505489d6b711c1e
+Author: Julian Koh <jk2698@cornell.edu>
+Date:   Mon Sep 14 13:57:28 2020 +0100
+
+    js/tracers: make calltracer report value in selfdestructs  (#21549)
+
+commit 4eb92969109184c3ccec426d5190a2c183509f5d
+Author: Zsolt Felföldi <zsfelfoldi@gmail.com>
+Date:   Mon Sep 14 14:01:18 2020 +0200
+
+    p2p/nodestate: ensure correct callback order (#21436)
+    
+    This PR adds an extra guarantee to NodeStateMachine: it ensures that all
+    immediate effects of a certain change are processed before any subsequent
+    effects of any of the immediate effects on the same node. In the original
+    version, if a cascaded change caused a subscription callback to be called
+    multiple times for the same node then these calls might have happened in a
+    wrong chronological order.
+    
+    For example:
+    
+    - a subscription to flag0 changes flag1 and flag2
+    - a subscription to flag1 changes flag3
+    - a subscription to flag1, flag2 and flag3 was called in the following order:
+    
+       [flag1] -> [flag1, flag3]
+       [] -> [flag1]
+       [flag1, flag3] -> [flag1, flag2, flag3]
+    
+    This happened because the tree of changes was traversed in a "depth-first
+    order". Now it is traversed in a "breadth-first order"; each node has a
+    FIFO queue for pending callbacks and each triggered subscription callback
+    is added to the end of the list. The already existing guarantees are
+    retained; no SetState or SetField returns until the callback queue of the
+    node is empty again. Just like before, it is the responsibility of the
+    state machine design to ensure that infinite state loops are not possible.
+    Multiple changes affecting the same node can still happen simultaneously;
+    in this case the changes can be interleaved in the FIFO of the node but the
+    correct order is still guaranteed.
+    
+    A new unit test is also added to verify callback order in the above scenario.
+
+commit a99ac5335c631c72fb0d1142a121520d7cf9a950
+Author: Shude Li <islishude@gmail.com>
+Date:   Mon Sep 14 04:25:15 2020 +0800
+
+    Dockerfile: unexpose port 8547 as GraphQL was merged into HTTP endpoint (#21556)
+
+commit 4e2641319be2fd33a8cd61f0258456b7cef07957
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Fri Sep 11 18:35:38 2020 +0000
+
+    p2p/discover: fix typo in comments (#21554)
+
+commit df219e23df94008a168f1c7cc539c41320527c39
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Fri Sep 11 18:17:09 2020 +0200
+
+    miner: fix regression, add test for starting while download (#21547)
+    
+    Fixes a regression introduced in #21536
+
+commit 7cf56d6f064869cb62b1673f9ee437020c595391
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Thu Sep 10 19:27:42 2020 +0200
+
+    miner: use channels instead of atomics in update loop (#21536)
+    
+    This PR changes several different things:
+    
+    - Adds test cases for the miner loop
+    - Stops the worker if it wasn't already stopped in worker.Close()
+    - Uses channels instead of atomics in the miner.update() loop
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit d7f02b448a929d6c9e4934ebbee87355336aeeb1
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Thu Sep 10 13:14:19 2020 +0000
+
+    cmd/geth: print warning when whisper config is present in toml (#21544)
+    
+    * cmd/geth: print warning when whisper config is present in toml
+    
+    * Update cmd/geth/config.go
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+
+commit 116763952498d9c1b852fa94542df1b3f03e2812
+Author: Dan Sosedoff <dan.sosedoff@gmail.com>
+Date:   Thu Sep 10 07:24:21 2020 -0500
+
+    ethclient: add BlockNumber method (#21500)
+    
+    This adds a new client method BlockNumber to fetch the most recent
+    block number of the chain.
+
+commit 4ea9737de6ec616ee9bc948b59e454cc211ca580
+Author: Shude Li <islishude@gmail.com>
+Date:   Thu Sep 10 20:21:51 2020 +0800
+
+    go.mod: remove golang.org/x/sync (#21541)
+
+commit a3cd8a040a4ffe04a7b455f11a6c049a9b29b1c5
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu Sep 10 09:19:30 2020 +0200
+
+    core/vm: fix benchmark overflow + prep for precompile repricings (#21530)
+    
+    * core/vm/testdata: add gascost expectations to testcases
+    
+    * core/vm: verify expected gas in tests for precompiles
+    
+    * core/vm: fix overflow flaw in gas/s calculation
+
+commit 328901c24cdcbfe57ad983248b2fd481f495db3d
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Sep 9 23:38:47 2020 +0800
+
+    cmd, eth: offer maxprice flag for overwritting price cap (#21531)
+    
+    * cmd, eth: offer maxprice flag for overwritting price cap
+    
+    * eth: rename default price cap
+
+commit 3a98c6f6e6613f8fe5380971fd113917c7b1ed37
+Merge: d81c9d9b7 367f12f73
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Sep 9 18:37:37 2020 +0300
+
+    Merge pull request #21537 from karalabe/les-reorg-fix
+    
+    eth/downloader: only roll back light sync if not fully validating
+
+commit d81c9d9b76f4255a258c1a6d93b3392ac0e8fd5f
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Sep 9 15:21:20 2020 +0200
+
+    accounts/abi/bind/backends: reverted some stylistic changes (#21535)
+
+commit 367f12f73495b30c17c7d358cf71575f34f79757
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Sep 9 14:06:32 2020 +0300
+
+    eth/downloader: only roll back light sync if not fully validating
+
+commit 8d35b1eb2b4b844b45cf504cc05704b1a3004e04
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Sep 9 11:23:37 2020 +0300
+
+    params: begin v1.9.22 release cycle
