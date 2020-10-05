@@ -1685,17 +1685,14 @@ func zstd(chaindata string) error {
 	count, _ := c.Count()
 	blockNBytes := make([]byte, 8)
 	trainFrom := count - 2_000_000
+
 	for blockN := trainFrom; blockN < count; blockN += 2_000_000 / 4_000 {
-		binary.BigEndian.PutUint64(blockNBytes, blockN)
 		var v []byte
+		binary.BigEndian.PutUint64(blockNBytes, blockN)
 		_, v, err := c.Seek(blockNBytes)
 		if err != nil {
 			return err
 		}
-
-		storageReceipts := types.Receipts{}
-		err = cbor.Unmarshal(&storageReceipts, v)
-		check(err)
 
 		samples1 = append(samples1, v)
 
@@ -1896,12 +1893,12 @@ func benchRlp(chaindata string) error {
 
 		storageReceipts := types.Receipts{}
 		reader.Reset(v)
-		err = cbor.UnmarshalReader(&storageReceipts, reader) // don't use first unmarshal in benchmark, to avoid lazyIO impact
+		err = cbor.Unmarshal(&storageReceipts, reader) // don't use first unmarshal in benchmark, to avoid lazyIO impact
 		check(err)
 
 		writer.Reset()
 		t := time.Now()
-		err = cbor.MarshalWriter(writer, storageReceipts)
+		err = cbor.Marshal(writer, storageReceipts)
 		cbor_encode += time.Since(t)
 		total_cbor += len(bufSlice)
 		check(err)
@@ -1909,7 +1906,7 @@ func benchRlp(chaindata string) error {
 		reader.Reset(writer.Bytes())
 		storageReceipts2 := types.Receipts{}
 		t = time.Now()
-		err = cbor.UnmarshalReader(&storageReceipts2, reader)
+		err = cbor.Unmarshal(&storageReceipts2, reader)
 		cbor_decode += time.Since(t)
 		check(err)
 

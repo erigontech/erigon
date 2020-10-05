@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"runtime"
@@ -22,7 +23,7 @@ var receiptsCborEncode = Migration{
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
-		buf := make([]byte, 0, 100_000)
+		buf := bytes.NewBuffer(make([]byte, 0, 100_000))
 		if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
 			blockNum := binary.BigEndian.Uint64(k[:8])
 			select {
@@ -39,11 +40,11 @@ var receiptsCborEncode = Migration{
 				return false, fmt.Errorf("invalid receipt array RLP: %w, k=%x", err, k)
 			}
 
-			buf = buf[:0]
-			if err := cbor.Marshal(&buf, storageReceipts); err != nil {
+			buf.Reset()
+			if err := cbor.Marshal(buf, storageReceipts); err != nil {
 				return false, err
 			}
-			return true, db.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(k), common.CopyBytes(buf))
+			return true, db.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(k), common.CopyBytes(buf.Bytes()))
 		}); err != nil {
 			return err
 		}

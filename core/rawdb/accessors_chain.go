@@ -453,7 +453,7 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 	}
 	receipts := types.Receipts{}
 	rawReceiptsReader.Reset(data)
-	if err := cbor.UnmarshalReader(&receipts, rawReceiptsReader); err != nil {
+	if err := cbor.Unmarshal(&receipts, rawReceiptsReader); err != nil {
 		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
 		return nil
 	}
@@ -486,16 +486,18 @@ func ReadReceipts(db DatabaseReader, hash common.Hash, number uint64) types.Rece
 	return receipts
 }
 
+var receiptWriter = bytes.NewBuffer(nil)
+
 // WriteReceipts stores all the transaction receipts belonging to a block.
 func WriteReceipts(db DatabaseWriter, hash common.Hash, number uint64, receipts types.Receipts) {
-	newV := make([]byte, 0, 1024)
-	err := cbor.Marshal(&newV, receipts)
+	receiptWriter.Reset()
+	err := cbor.Marshal(receiptWriter, receipts)
 	if err != nil {
 		log.Crit("Failed to encode block receipts", "err", err)
 	}
 
 	// Store the flattened receipt slice
-	if err := db.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash), newV); err != nil {
+	if err := db.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash), common.CopyBytes(receiptWriter.Bytes())); err != nil {
 		log.Crit("Failed to store block receipts", "err", err)
 	}
 }

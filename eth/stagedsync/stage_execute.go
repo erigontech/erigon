@@ -232,7 +232,7 @@ var receiptsWriter = bytes.NewBuffer(make([]byte, 0, 1024))
 
 func appendReceipts(tx ethdb.DbWithPendingMutations, receipts types.Receipts, blockNumber uint64, blockHash common.Hash) error {
 	receiptsWriter.Reset()
-	err := cbor.MarshalWriter(receiptsWriter, receipts)
+	err := cbor.Marshal(receiptsWriter, receipts)
 	if err != nil {
 		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
 	}
