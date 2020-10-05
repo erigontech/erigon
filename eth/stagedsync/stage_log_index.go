@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -8,15 +9,15 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
-
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -54,7 +55,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 		start++
 	}
 
-	if err := promoteLogIndex(tx, start, quit); err != nil {
+	if err := promoteLogIndex(tx, start, datadir, quit); err != nil {
 		return err
 	}
 
@@ -70,7 +71,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 	return nil
 }
 
-func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan struct{}) error {
+func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir string, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -85,6 +86,9 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 	defer receipts.Close()
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
+
+	collectorTopics := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorAddrs := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(start)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
@@ -112,14 +116,14 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 			log.Info("Progress", "blockNum", blockNum, dbutils.LogTopicIndex, common.StorageSize(sz), dbutils.LogAddressIndex, common.StorageSize(sz2), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush(topics, logIndicesMemLimit) {
-				if err := flushBitmaps(logTopicIndexCursor, topics); err != nil {
+				if err := flushBitmaps2(collectorTopics, topics); err != nil {
 					return err
 				}
 				topics = map[string]*roaring.Bitmap{}
 			}
 
 			if needFlush(addresses, logIndicesMemLimit) {
-				if err := flushBitmaps(logAddrIndexCursor, addresses); err != nil {
+				if err := flushBitmaps2(collectorAddrs, addresses); err != nil {
 					return err
 				}
 				addresses = map[string]*roaring.Bitmap{}
@@ -257,6 +261,19 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 		}
 	}
 
+	return nil
+}
+
+func flushBitmaps2(c *etl.Collector, inMem map[string]*roaring.Bitmap) error {
+	for k, v := range inMem {
+		newV := bytes.NewBuffer(make([]byte, 0, v.GetSerializedSizeInBytes()))
+		if _, err := v.WriteTo(newV); err != nil {
+			return err
+		}
+		if err := c.Collect([]byte(k), newV.Bytes()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
