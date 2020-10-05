@@ -294,27 +294,27 @@ func TestCounters(t *testing.T) {
 
 	ids, err := Ids(tx)
 	require.NoError(t, err)
-	ids.Topic++
-	ids.Topic++
-	ids.Topic++
+	ids.Example++
+	ids.Example++
+	ids.Example++
 
 	err = tx.CommitAndBegin(context.Background())
 	require.NoError(t, err)
 
 	ids2, err := Ids(tx)
 	require.NoError(t, err)
-	require.Equal(t, 3, int(ids2.Topic))
-	ids2.Topic++
-	ids2.Topic++
+	require.Equal(t, 3, int(ids2.Example))
+	ids2.Example++
+	ids2.Example++
 
 	err = tx.CommitAndBegin(context.Background())
 	require.NoError(t, err)
 
 	ids3, err := Ids(tx)
 	require.NoError(t, err)
-	require.Equal(t, 5, int(ids3.Topic))
+	require.Equal(t, 5, int(ids3.Example))
 
-	ids.Topic++
+	ids.Example++
 	tx.Rollback()
 
 	tx, err = db.Begin(context.Background())
@@ -323,5 +323,5 @@ func TestCounters(t *testing.T) {
 
 	ids4, err := Ids(tx)
 	require.NoError(t, err)
-	require.Equal(t, 5, int(ids4.Topic))
+	require.Equal(t, 5, int(ids4.Example))
 }

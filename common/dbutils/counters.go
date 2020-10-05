@@ -14,12 +14,12 @@ const (
 
 // IDs - store id of last inserted entity to db - increment before use
 type IDs struct {
-	// Example uint64 `codec:"1"`
+	Example uint64 `codec:"1"`
 }
 
 // Aggregates - store some statistical aggregates of data: for example min/max of values in some bucket
 type Aggregates struct {
-	// Example uint64 `codec:"1"`
+	ExampleMax uint64 `codec:"1"`
 }
 
 func (c *IDs) Unmarshal(data []byte) error {
