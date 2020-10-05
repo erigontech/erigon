@@ -1874,47 +1874,16 @@ func benchRlp(chaindata string) error {
 	c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
 
 	total_cbor := 0
-	total_compress_cbor := 0
 
 	total = 0
 	var cbor_encode time.Duration
 	var cbor_decode time.Duration
 	var cbor_decode2 time.Duration
 	var cbor_decode3 time.Duration
-	var cbor_compress time.Duration
 
 	bufSlice := make([]byte, 0, 100_000)
-	compressBuf := make([]byte, 0, 100_000)
 
-	var samplesCbor [][]byte
-
-	count, _ := c.Count()
 	blockNBytes := make([]byte, 8)
-	trainFrom := count - 2_000_000
-	for blockN := trainFrom; blockN < count; blockN += 2_000_000 / 4_000 {
-		binary.BigEndian.PutUint64(blockNBytes, blockN)
-		var v []byte
-		_, v, err = c.Seek(blockNBytes)
-		if err != nil {
-			return err
-		}
-
-		receipts := types.Receipts{}
-		err = cbor.Unmarshal(&receipts, v)
-		check(err)
-
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("Progress sampling", "blockNum", blockN)
-		}
-	}
-
-	compressorCbor, err := gozstd.NewCDictLevel(gozstd.BuildDict(samplesCbor, 32*1024), -2)
-	check(err)
-	defer compressorCbor.Release()
-
-	binary.BigEndian.PutUint64(blockNBytes, trainFrom)
 	for k, v, err := c.Seek(blockNBytes); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -1923,7 +1892,7 @@ func benchRlp(chaindata string) error {
 		blockNum := binary.BigEndian.Uint64(k)
 
 		storageReceipts := types.Receipts{}
-		err = cbor.Unmarshal(&storageReceipts, v)
+		err = cbor.Unmarshal(&storageReceipts, v) // don't use first unmarshal in benchmark, to avoid lazyIO impact
 		check(err)
 
 		t := time.Now()
@@ -1931,11 +1900,6 @@ func benchRlp(chaindata string) error {
 		cbor_encode += time.Since(t)
 		total_cbor += len(bufSlice)
 		check(err)
-
-		t = time.Now()
-		//compressBuf = gozstd.CompressDict(compressBuf[:0], buf.Bytes(), compressorCbor)
-		cbor_compress += time.Since(t)
-		total_compress_cbor += len(compressBuf)
 
 		storageReceipts2 := types.Receipts{}
 		t = time.Now()
@@ -1951,8 +1915,6 @@ func benchRlp(chaindata string) error {
 				//"rlp_decode", rlp_decode,
 				"total_cbor", fmt.Sprintf("%.2f", float64(total_cbor)/totalf), "cbor_encode", cbor_encode, "cbor_decode", cbor_decode,
 				"cbor_decode2", cbor_decode2, "cbor_decode3", cbor_decode3,
-				//"compress_rlp_ratio", fmt.Sprintf("%.2f", totalf/float64(total_compress_rlp)), "rlp_compress", rlp_compress,
-				"compress_cbor_ratio", fmt.Sprintf("%.2f", totalf/float64(total_compress_cbor)), "cbor_compress", cbor_compress,
 			)
 		}
 	}
