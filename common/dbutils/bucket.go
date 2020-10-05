@@ -166,6 +166,8 @@ var (
 	// it stores stages progress to understand in which context was executed migration
 	// in case of bug-report developer can ask content of this bucket
 	Migrations = "migrations"
+
+	Counters = "counters"
 )
 
 // Keys
@@ -238,6 +240,7 @@ var Buckets = []string{
 	SnapshotInfoBucket,
 	CallFromIndex,
 	CallToIndex,
+	Counters,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

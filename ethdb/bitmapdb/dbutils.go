@@ -215,6 +215,14 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 	return nil
 }
 
+func Has(c ethdb.Cursor, key []byte) (bool, error) {
+	k, _, err := c.Seek(key)
+	if err != nil {
+		return false, err
+	}
+	return bytes.HasPrefix(k, key), nil
+}
+
 // Get - reading as much shards as needed to satisfy [from, to] condition
 // join all shards to 1 bitmap by Or operator
 func Get(c ethdb.Cursor, key []byte, from, to uint32) (*roaring.Bitmap, error) {

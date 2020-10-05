@@ -148,6 +148,21 @@ type DbWithPendingMutations interface {
 	Rollback()
 	BatchSize() int
 
+	// WithCounters - helps manage Counters/Ids in application
+	// if pass there key and struct it will automatically:
+	//  - get data from db
+	//  - unmarshal into provided pointer
+	// 	- on commit - marshal and put to db
+	// Second parameter should be pointer, method returns variable of same type as passed in parameter.
+	// Don't use variable which you pass to second parameter, use variable which returns this method.
+	// It allows internal caching and make sure that all callers will receive same pointer during transaction.
+	// Multiple calls of this func with same key will return same pointer.
+	//
+	// It's generic method - please write your own typed wrapper to use in app code. For example:
+	// ids, err := ethdb.Ids(tx)
+	// aggregates, err := ethdb.Aggregates(tx)
+	WithCounters(key []byte, counters Counters) (Counters, error)
+
 	Reserve(bucket string, key []byte, i int) ([]byte, error)
 }
 
@@ -167,6 +182,11 @@ type BucketsMigrator interface {
 	BucketExists(bucket string) (bool, error) // makes them empty
 	ClearBuckets(buckets ...string) error     // makes them empty
 	DropBuckets(buckets ...string) error      // drops them, use of them after drop will panic
+}
+
+type Counters interface {
+	Marshal() (data []byte, err error)
+	Unmarshal(data []byte) error
 }
 
 var errNotSupported = errors.New("not supported")

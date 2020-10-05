@@ -379,6 +379,10 @@ func (db *ObjectDatabase) Reserve(bucket string, key []byte, i int) ([]byte, err
 	panic("supported only by TxDb")
 }
 
+func (db *ObjectDatabase) WithCounters(key []byte, counters Counters) (Counters, error) {
+	panic("only TxDb supports this method")
+}
+
 // Type which expecting sequence of triplets: dbi, key, value, ....
 // It sorts entries by dbi name, then inside dbi clusters sort by keys
 type MultiPutTuples [][]byte

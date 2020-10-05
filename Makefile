@@ -154,6 +154,7 @@ devtools:
 	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
 	PATH=$(GOBIN):$(PATH) go generate ./common
+	PATH=$(GOBIN):$(PATH) go generate ./common/dbutils
 	PATH=$(GOBIN):$(PATH) go generate ./core/types
 	PATH=$(GOBIN):$(PATH) go generate ./ethdb/typedbucket
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
