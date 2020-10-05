@@ -89,9 +89,9 @@ func (x *Log) CodecEncodeSelf(e *codec1978.Encoder) {
 				z.EncWriteMapStart(3)
 				z.EncWriteMapElemKey()
 				if z.IsJSONHandle() {
-					z.WriteStr("\"addr\"")
+					z.WriteStr("\"1\"")
 				} else {
-					r.EncodeString(`addr`)
+					r.EncodeString(`1`)
 				}
 				z.EncWriteMapElemValue()
 				yy10 := &x.Address
@@ -178,7 +178,7 @@ func (x *Log) codecDecodeSelfFromMap(l int, d *codec1978.Decoder) {
 		yys3 := z.StringView(r.DecodeStringAsBytes())
 		z.DecReadMapElemValue()
 		switch yys3 {
-		case "addr":
+		case "1":
 			if !z.DecBinary() && z.IsJSONHandle() {
 				z.DecJSONUnmarshal(&x.Address)
 			} else {
@@ -502,7 +502,6 @@ func (x codecSelfer2) deccommon_Address(v *pkg1_common.Address, d *codec1978.Dec
 	var h codecSelfer2
 	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
-
 	r.DecodeBytes(((*[20]byte)(v))[:], true)
 }
 
