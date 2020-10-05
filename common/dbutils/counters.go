@@ -2,10 +2,9 @@ package dbutils
 
 import "github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 
+//go:generate codecgen -o counters_codecgen_gen.go -r "IDs|Aggregates" -rt "codec" -nx=1 -d=1 counters.go
+
 // This file helps to manage AutoIncrements and other Counters
-//
-//
-//go:generate codecgen -o counters_codecgen_gen.go -r="IDs|Aggregates" -rt="codec" -nx=true -d=1 counters.go
 
 const (
 	KeyIDs        = "ids"
