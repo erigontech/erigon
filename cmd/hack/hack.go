@@ -1883,6 +1883,9 @@ func benchRlp(chaindata string) error {
 
 	bufSlice := make([]byte, 0, 100_000)
 
+	writer := bytes.NewBuffer(bufSlice)
+	reader := bytes.NewReader(nil)
+
 	blockNBytes := make([]byte, 8)
 	for k, v, err := c.Seek(blockNBytes); k != nil; k, v, err = c.Next() {
 		if err != nil {
@@ -1892,18 +1895,21 @@ func benchRlp(chaindata string) error {
 		blockNum := binary.BigEndian.Uint64(k)
 
 		storageReceipts := types.Receipts{}
-		err = cbor.Unmarshal(&storageReceipts, v) // don't use first unmarshal in benchmark, to avoid lazyIO impact
+		reader.Reset(v)
+		err = cbor.UnmarshalReader(&storageReceipts, reader) // don't use first unmarshal in benchmark, to avoid lazyIO impact
 		check(err)
 
+		writer.Reset()
 		t := time.Now()
-		err = cbor.Marshal(&bufSlice, storageReceipts)
+		err = cbor.MarshalWriter(writer, storageReceipts)
 		cbor_encode += time.Since(t)
 		total_cbor += len(bufSlice)
 		check(err)
 
+		reader.Reset(writer.Bytes())
 		storageReceipts2 := types.Receipts{}
 		t = time.Now()
-		err = cbor.Unmarshal(&storageReceipts2, bufSlice)
+		err = cbor.UnmarshalReader(&storageReceipts2, reader)
 		cbor_decode += time.Since(t)
 		check(err)
 
