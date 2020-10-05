@@ -437,6 +437,8 @@ func ReadReceiptsRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.Raw
 	return nil // Can't find the data anywhere.
 }
 
+var rawReceiptsReader = bytes.NewReader(nil)
+
 // ReadRawReceipts retrieves all the transaction receipts belonging to a block.
 // The receipt metadata fields are not guaranteed to be populated, so they
 // should not be used. Use ReadReceipts instead if the metadata is needed.
@@ -450,7 +452,8 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 		return nil
 	}
 	receipts := types.Receipts{}
-	if err := cbor.Unmarshal(&receipts, data); err != nil {
+	rawReceiptsReader.Reset(data)
+	if err := cbor.UnmarshalReader(&receipts, rawReceiptsReader); err != nil {
 		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
 		return nil
 	}

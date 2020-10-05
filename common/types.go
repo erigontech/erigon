@@ -32,8 +32,6 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-//go:generate codecgen -o types_codecgen_gen.go -r "Hashes|Hash|Address|StorageKeys" -rt "codec" -nx=1 -d=1 types.go
-
 // Lengths of hashes and addresses in bytes.
 const (
 	// HashLength is the expected length of the hash (in bytes)
