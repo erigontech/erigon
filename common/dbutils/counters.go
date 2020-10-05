@@ -25,15 +25,14 @@ type Aggregates struct {
 	ExampleAvg uint64 `codec:"1"`
 }
 
-var countersWriter = bytes.NewBuffer(nil)
-
 func (c *IDs) Unmarshal(data []byte) error {
 	return cbor.Unmarshal(c, bytes.NewReader(data))
 }
 
 func (c *IDs) Marshal() ([]byte, error) {
-	err := cbor.Marshal(countersWriter, c)
-	return common.CopyBytes(countersWriter.Bytes()), err
+	buf := bytes.NewBuffer(nil)
+	err := cbor.Marshal(buf, c)
+	return common.CopyBytes(buf.Bytes()), err
 }
 
 func (c *Aggregates) Unmarshal(data []byte) error {
