@@ -94,7 +94,7 @@ func Seed(pathes []string) error {
 			return err
 		}
 
-		log.Info("Torrent added", "name", torrents[i].Info().Name, "path",  v, "t", time.Since(tt))
+		log.Info("Torrent added", "name", torrents[i].Info().Name, "path", v, "t", time.Since(tt))
 
 		if !torrents[i].Seeding() {
 			log.Warn(torrents[i].Name() + " not seeding")
@@ -108,18 +108,18 @@ func Seed(pathes []string) error {
 	}
 
 	go func() {
-		ticker:=time.Tick(10*time.Second)
-		for _=range ticker{
+		ticker := time.NewTicker(10 * time.Second)
+		for range ticker.C {
 			for _, t := range cl.Torrents() {
 				log.Info("Snapshot stats", "snapshot", t.Name(), "active peers", t.Stats().ActivePeers, "seeding", t.Seeding())
 			}
 
 			if common.IsCanceled(ctx) {
+				ticker.Stop()
 				return
 			}
 		}
 	}()
-
 
 	<-ctx.Done()
 	return nil

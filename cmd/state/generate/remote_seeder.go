@@ -35,12 +35,13 @@ func SeedSnapshots(dir string) error {
 	}
 
 	go func() {
-		ticker:=time.Tick(10*time.Second)
-		for _=range ticker{
+		ticker := time.NewTicker(10 * time.Second)
+		for range ticker.C {
 			for _, t := range client.Cli.Torrents() {
 				log.Info("Snapshot stats", "snapshot", t.Name(), "active peers", t.Stats().ActivePeers, "seeding", t.Seeding())
 			}
 			if common.IsCanceled(ctx) {
+				ticker.Stop()
 				return
 			}
 		}
