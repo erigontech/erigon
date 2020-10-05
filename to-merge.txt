@@ -366,15 +366,3 @@ Date:   Mon Oct 5 12:50:26 2020 +0200
 
     cmd/faucet: enable DNS discovery for known networks (#21636)
 
-commit a15d71a255686541e04f446dd92aadbf9ff496a8
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Mon Oct 5 11:52:36 2020 +0300
-
-    core/state/snapshot: stop generator if it hits missing trie nodes (#21649)
-    
-    * core/state/snapshot: exit Geth if generator hits missing trie nodes
-    
-    * core/state/snapshot: error instead of hard die on generator fault
-    
-    * core/state/snapshot: don't enable logging on the tests
-
