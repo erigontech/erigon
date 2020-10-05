@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-const ShardLimit = 3 * datasize.KB
+const ShardLimit = uint64(3 * datasize.KB)
 
 // AppendMergeByOr - appending delta to existing data in db, merge by Or
 // Method maintains sharding - because some bitmaps are >1Mb and when new incoming blocks process it
@@ -123,6 +123,46 @@ func writeBitmapSharded(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error
 	}
 
 	return nil
+}
+
+// CutLeft - cut from bitmap `target+-precision` bytes from left
+func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
+	maxLimit := target + precision
+	minLimit := target - precision
+
+	sz := bm.GetSerializedSizeInBytes()
+	if sz <= maxLimit {
+		return bm
+	}
+
+	lft := roaring.New()
+	from := uint64(bm.Minimum())
+	denominator := uint64(2)
+	to := from + 10_000
+	step := (to - from) / denominator
+
+	for {
+		lft.Clear()
+		lft.AddRange(from, to)
+		lft.And(bm)
+		sz = lft.GetSerializedSizeInBytes()
+		if sz >= maxLimit {
+			to -= step
+			denominator *= 2
+			step = (to - from) / denominator
+			continue
+		}
+
+		if sz <= minLimit {
+			to += step
+			denominator *= 2
+			step = (to - from) / denominator
+			continue
+		}
+
+		bm.RemoveRange(from, to+1)
+		return lft
+	}
 }
 
 // TruncateRange - gets existing bitmap in db and call RemoveRange operator on it.

@@ -78,10 +78,6 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir stri
 	tx := db.(ethdb.HasTx).Tx()
 	topics := map[string]*roaring.Bitmap{}
 	addresses := map[string]*roaring.Bitmap{}
-	logTopicIndexCursor := tx.Cursor(dbutils.LogTopicIndex)
-	defer logTopicIndexCursor.Close()
-	logAddrIndexCursor := tx.Cursor(dbutils.LogAddressIndex)
-	defer logAddrIndexCursor.Close()
 	receipts := tx.Cursor(dbutils.BlockReceiptsPrefix)
 	defer receipts.Close()
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
@@ -158,12 +154,72 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir stri
 		}
 	}
 
-	if err := flushBitmaps(logTopicIndexCursor, topics); err != nil {
+	if err := flushBitmaps2(collectorTopics, topics); err != nil {
 		return err
 	}
-	if err := flushBitmaps(logAddrIndexCursor, addresses); err != nil {
+	if err := flushBitmaps2(collectorAddrs, addresses); err != nil {
 		return err
 	}
+
+	var currentKey []byte
+	var currentBitmap = roaring.New()
+	var tmp = roaring.New()
+	var buf = bytes.NewBuffer(nil)
+
+	var loaderFunc = func(k []byte, v []byte, state etl.State, next etl.LoadNextFunc) error {
+		if currentKey == nil {
+			currentKey = k
+			if _, err := currentBitmap.FromBuffer(v); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		if bytes.Equal(k, currentKey) {
+			tmp.Clear()
+			if _, err := tmp.FromBuffer(v); err != nil {
+				return err
+			}
+			currentBitmap.Or(tmp)
+			return nil
+		}
+
+		for {
+			lft := bitmapdb.CutLeft(currentBitmap, bitmapdb.ShardLimit, 500)
+			buf.Reset()
+			if _, err := lft.WriteTo(buf); err != nil {
+				return err
+			}
+
+			shardKey := make([]byte, len(k)+2)
+			copy(shardKey, currentKey)
+			if currentBitmap == nil {
+				binary.BigEndian.PutUint32(shardKey[:len(k)], ^uint32(0))
+			} else {
+				binary.BigEndian.PutUint32(shardKey[:len(k)], lft.Maximum())
+			}
+
+			if err := next(currentKey, shardKey, common.CopyBytes(buf.Bytes())); err != nil {
+				return err
+			}
+
+			if currentBitmap == nil {
+				break
+			}
+		}
+
+		currentKey = k
+		currentBitmap.Clear()
+
+		return nil
+	}
+	if err := collectorTopics.Load(db, dbutils.LogTopicIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+		return err
+	}
+	if err := collectorAddrs.Load(db, dbutils.LogAddressIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+		return err
+	}
+
 	return nil
 }
 

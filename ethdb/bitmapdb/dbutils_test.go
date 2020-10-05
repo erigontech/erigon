@@ -73,3 +73,50 @@ func TestSharding(t *testing.T) {
 		require.Equal(t, int(max), int(fromDb.Maximum()))
 	}
 }
+
+func TestCutLeft(t *testing.T) {
+	bm := roaring.New()
+	for j := 0; j < 1_000_000; j += 20 {
+		bm.AddRange(uint64(j), uint64(j+10))
+	}
+	N := uint64(1024)
+	Precision := uint64(256)
+	for {
+		lft := bitmapdb.CutLeft(bm, N, Precision)
+		lftSz := lft.GetSerializedSizeInBytes()
+		require.True(t, lftSz > N-Precision && lftSz < N+Precision)
+		if bm == nil {
+			require.True(t, lft.GetSerializedSizeInBytes() > 0)
+			break
+		}
+	}
+
+	bm = roaring.New()
+	for j := 0; j < 1_000_000; j += 20 {
+		bm.AddRange(uint64(j), uint64(j+10))
+	}
+	N = uint64(2048)
+	Precision = uint64(128)
+	for {
+		lft := bitmapdb.CutLeft(bm, N, Precision)
+		lftSz := lft.GetSerializedSizeInBytes()
+		require.True(t, lftSz > N-Precision && lftSz < N+Precision)
+		if bm == nil {
+			require.True(t, lft.GetSerializedSizeInBytes() > 0)
+			break
+		}
+	}
+
+	bm = roaring.New()
+	bm.Add(1)
+	lft := bitmapdb.CutLeft(bm, N, Precision)
+	require.True(t, lft.GetSerializedSizeInBytes() > 0)
+	require.True(t, lft.GetCardinality() == 1)
+	require.True(t, bm.GetCardinality() == 0)
+
+	bm = roaring.New()
+	lft = bitmapdb.CutLeft(bm, N, Precision)
+	require.True(t, lft.GetSerializedSizeInBytes() > 0)
+	require.True(t, lft.GetCardinality() == 0)
+	require.True(t, bm.GetCardinality() == 0)
+}
