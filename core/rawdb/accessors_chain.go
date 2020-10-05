@@ -87,6 +87,9 @@ func ReadHeaderNumber(db DatabaseReader, hash common.Hash) *uint64 {
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		log.Error("ReadHeaderNumber failed", "err", err)
 	}
+	if len(data) == 0 {
+		return nil
+	}
 	if len(data) != 8 {
 		log.Error("ReadHeaderNumber got wrong data len", "len", len(data))
 		return nil
@@ -264,7 +267,7 @@ func deleteHeaderWithoutNumber(db DatabaseDeleter, hash common.Hash, number uint
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
 func ReadBodyRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue {
 	data, err1 := db.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
-	if err1 != nil && errors.Is(err1, ethdb.ErrKeyNotFound) {
+	if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
 		log.Error("ReadBodyRLP failed", "err", err1)
 	}
 	bodyRlp, err := DecompressBlockBody(data)
