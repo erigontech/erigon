@@ -2,8 +2,6 @@ package commands
 
 import (
 	"context"
-	"github.com/ledgerwatch/turbo-geth/migrations"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"runtime"
 	"time"
 
@@ -186,11 +184,6 @@ func stageSenders(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
-
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
@@ -231,11 +224,6 @@ func stageExec(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
-
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
@@ -263,15 +251,6 @@ func stageIHash(ctx context.Context) error {
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-
-	if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
-		panic(err)
-	}
-
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
@@ -301,11 +280,6 @@ func stageHashState(ctx context.Context) error {
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
@@ -368,11 +342,6 @@ func stageHistory(ctx context.Context) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
-
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
@@ -408,11 +377,6 @@ func stageTxLookup(ctx context.Context) error {
 
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
@@ -487,21 +451,4 @@ func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, er
 		return nil, nil, err1
 	}
 	return params.MainnetChainConfig, blockchain, nil
-}
-
-func SetSnapshotKV(db *ethdb.ObjectDatabase, snapshotDir, snapshotMode string) error {
-	if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
-		mode, err := torrent.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			panic(err)
-		}
-
-		snapshotKV := db.KV()
-		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, snapshotDir, mode)
-		if err != nil {
-			return err
-		}
-		db.SetKV(snapshotKV)
-	}
-	return nil
 }
