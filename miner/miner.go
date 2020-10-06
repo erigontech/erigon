@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -63,8 +62,8 @@ type Miner struct {
 	eth        Backend
 	engine     consensus.Engine
 	exitCh     chan struct{}
-	startCh  chan common.Address
-	stopCh   chan struct{}
+	startCh    chan common.Address
+	stopCh     chan struct{}
 }
 
 func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, isLocalBlock func(block *types.Block) bool) *Miner {
@@ -74,10 +73,8 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 		engine:  engine,
 		exitCh:  make(chan struct{}),
 		startCh: make(chan common.Address),
-		exitCh:   make(chan struct{}),
-		worker:   newWorker(config, chainConfig, engine, eth, mux, hooks{isLocalBlock: isLocalBlock}, false),
 		stopCh:  make(chan struct{}),
-		worker:  newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, true),
+		worker:  newWorker(config, chainConfig, engine, eth, mux, hooks{isLocalBlock: isLocalBlock}, false),
 	}
 	go miner.update()
 

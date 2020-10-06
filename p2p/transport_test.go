@@ -23,8 +23,8 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/p2p/simulations/pipes"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/p2p/simulations/pipes"
 )
 
 func TestProtocolHandshake(t *testing.T) {
@@ -139,7 +139,7 @@ func TestProtocolHandshakeErrors(t *testing.T) {
 
 	for i, test := range tests {
 		p1, p2 := MsgPipe()
-		go Send(p1, test.code, test.msg)
+		go Send(p1, test.code, test.msg) //nolint:errcheck
 		_, err := readProtocolHandshake(p2)
 		if !reflect.DeepEqual(err, test.err) {
 			t.Errorf("test %d: error mismatch: got %q, want %q", i, err, test.err)

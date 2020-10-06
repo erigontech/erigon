@@ -7,13 +7,13 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/internal/utesting"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/rlpx"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/internal/utesting"
+	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/p2p/rlpx"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -79,6 +79,7 @@ func (c *Conn) Write(msg Message) error {
 }
 
 // handshake checks to make sure a `HELLO` is received.
+// nolint:unparam
 func (c *Conn) handshake(t *utesting.T) Message {
 	// write protoHandshake to client
 	pub0 := crypto.FromECDSAPub(&c.ourKey.PublicKey)[1:]

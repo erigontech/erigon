@@ -32,7 +32,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
-	"golang.org/x/crypto/sha3"
+	"github.com/ledgerwatch/turbo-geth/p2p/rlpx"
 )
 
 type testTransport struct {
@@ -436,7 +436,7 @@ func TestServerSetupConn(t *testing.T) {
 			}
 			srv := &Server{
 				Config:       cfg,
-				newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return test.tt },
+				newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return test.tt }, //nolint:scopelint
 				log:          cfg.Logger,
 			}
 			if !test.dontstart {

@@ -10,11 +10,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/forkid"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type Chain struct {
@@ -88,7 +88,7 @@ func loadChain(chainfile string, genesis string) (*Chain, error) {
 	var blocks []*types.Block
 	for i := 0; ; i++ {
 		var b types.Block
-		if err := stream.Decode(&b); err == io.EOF {
+		if err = stream.Decode(&b); err == io.EOF {
 			break
 		} else if err != nil {
 			return nil, fmt.Errorf("at block %d: %v", i, err)

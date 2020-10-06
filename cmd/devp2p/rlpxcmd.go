@@ -21,13 +21,14 @@ import (
 	"net"
 	"os"
 
-	"github.com/ethereum/go-ethereum/cmd/devp2p/internal/ethtest"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/internal/utesting"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/rlpx"
-	"github.com/ethereum/go-ethereum/rlp"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/ledgerwatch/turbo-geth/cmd/devp2p/internal/ethtest"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/internal/utesting"
+	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/p2p/rlpx"
+	"github.com/ledgerwatch/turbo-geth/rlp"
+
+	"github.com/urfave/cli"
 )
 
 var (
@@ -72,14 +73,14 @@ func rlpxPing(ctx *cli.Context) error {
 	switch code {
 	case 0:
 		var h ethtest.Hello
-		if err := rlp.DecodeBytes(data, &h); err != nil {
+		if err = rlp.DecodeBytes(data, &h); err != nil {
 			return fmt.Errorf("invalid handshake: %v", err)
 		}
 		fmt.Printf("%+v\n", h)
 	case 1:
 		var msg []p2p.DiscReason
-		if rlp.DecodeBytes(data, &msg); len(msg) == 0 {
-			return fmt.Errorf("invalid disconnect message")
+		if err = rlp.DecodeBytes(data, &msg); len(msg) == 0 || err != nil {
+			return fmt.Errorf("invalid disconnect message: %v", err)
 		}
 		return fmt.Errorf("received disconnect message: %v", msg[0])
 	default:
@@ -102,7 +103,7 @@ func rlpxEthTest(ctx *cli.Context) error {
 	}
 	results := utesting.RunTests(tests, os.Stdout)
 	if fails := utesting.CountFailures(results); fails > 0 {
-		return fmt.Errorf("%v of %v tests passed.", len(tests)-fails, len(tests))
+		return fmt.Errorf("tests passed: %v of %v", len(tests)-fails, len(tests))
 	}
 	fmt.Printf("all tests passed\n")
 	return nil

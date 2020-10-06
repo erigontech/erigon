@@ -490,18 +490,10 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	}(time.Now())
 
 	// Look up the sync boundaries: the common ancestor and the target block
-	latest, pivot, err := d.fetchHead(p)
+	height, err := d.fetchHeight(p)
 	if err != nil {
 		return err
 	}
-	if mode == FastSync && pivot == nil {
-		// If no pivot block was returned, the head is below the min full block
-		// threshold (i.e. new chian). In that case we won't really fast sync
-		// anyway, but still need a valid pivot block to avoid some code hitting
-		// nil panics on an access.
-		pivot = d.blockchain.CurrentBlock().Header()
-	}
-	height := latest.Number.Uint64()
 
 	origin, err := d.findAncestor(p, height)
 	if err != nil {
@@ -517,75 +509,19 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 	d.SetSyncStatsChainHeight(height)
 
 	// Ensure our origin point is below any fast sync pivot point
-	if mode == FastSync {
-		if height <= uint64(fsMinFullBlocks) {
-			origin = 0
-		} else {
-			pivotNumber := pivot.Number.Uint64()
-			if pivotNumber <= origin {
-				origin = pivotNumber - 1
-			}
-			// Write out the pivot into the database so a rollback beyond it will
-			// reenable fast sync
-			//rawdb.WriteLastPivotNumber(d.stateDB, pivot)
-		}
-	}
-	d.committed = 1
-	if mode == FastSync && pivot.Number.Uint64() != 0 {
-		d.committed = 0
-	}
-	if mode == FastSync {
-		// Set the ancient data limitation.
-		// If we are running fast sync, all block data older than ancientLimit will be
-		// written to the ancient store. More recent data will be written to the active
-		// database and will wait for the freezer to migrate.
-		//
-		// If there is a checkpoint available, then calculate the ancientLimit through
-		// that. Otherwise calculate the ancient limit through the advertised height
-		// of the remote peer.
-		//
-		// The reason for picking checkpoint first is that a malicious peer can give us
-		// a fake (very high) height, forcing the ancient limit to also be very high.
-		// The peer would start to feed us valid blocks until head, resulting in all of
-		// the blocks might be written into the ancient store. A following mini-reorg
-		// could cause issues.
-		if d.checkpoint != 0 && d.checkpoint > fullMaxForkAncestry+1 {
-			d.ancientLimit = d.checkpoint
-		} else if height > fullMaxForkAncestry+1 {
-			d.ancientLimit = height - fullMaxForkAncestry - 1
-		}
-		frozen, _ := d.stateDB.Ancients() // Ignore the error here since light client can also hit here.
+	pivot := uint64(0)
 
-		// If a part of blockchain data has already been written into active store,
-		// disable the ancient style insertion explicitly.
-		if origin >= frozen && frozen != 0 {
-			d.ancientLimit = 0
-			log.Info("Disabling direct-ancient mode", "origin", origin, "ancient", frozen-1)
-		} else if d.ancientLimit > 0 {
-			log.Debug("Enabling direct-ancient mode", "ancient", d.ancientLimit)
-		}
-		// Rewind the ancient store and blockchain if reorg happens.
-		if origin+1 < frozen {
-			if err := d.lightchain.SetHead(origin + 1); err != nil {
-				return err
-			}
-		}
-	}
+	d.committed = 1
 	// Initiate the sync using a concurrent header and content retrieval algorithm
 	d.queue.Prepare(origin+1, mode)
 	if d.syncInitHook != nil {
 		d.syncInitHook(origin, height)
 	}
+
 	fetchers := []func() error{
 		func() error { return d.fetchHeaders(p, origin+1) }, // Headers are always retrieved
-		func() error { return d.fetchBodies(origin + 1) },   // Bodies are retrieved during normal and fast sync
 		func() error { return d.processHeaders(origin+1, pivot, blockNumber) },
-		func() error { return d.processHeaders(origin+1, td) },
 	}
-	if mode == FastSync {
-		d.pivotLock.Lock()
-		d.pivotHeader = pivot
-		d.pivotLock.Unlock()
 
 	// Turbo-Geth's staged sync goes here
 	if mode == StagedSync {
@@ -692,7 +628,11 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 	fetchers = append(fetchers, func() error { return d.fetchBodies(origin + 1) })   // Bodies are retrieved during normal and fast sync
 	fetchers = append(fetchers, func() error { return d.fetchReceipts(origin + 1) }) // Receipts are retrieved during fast sync
-	if mode == FullSync {
+
+	if mode == FastSync {
+		// fast sync is not supported by turbo-geth
+		panic("fast sync should never be called")
+	} else if mode == FullSync {
 		fetchers = append(fetchers, d.processFullSyncContent)
 	}
 	return d.spawnSync(fetchers)
@@ -701,7 +641,9 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 // spawnSync runs d.process and all given fetcher functions to completion in
 // separate goroutines, returning the first error that appears.
 func (d *Downloader) spawnSync(fetchers []func() error) error {
+	fmt.Println("spawn sync", len(fetchers))
 	errc := make(chan error, len(fetchers))
+
 	d.cancelWg.Add(len(fetchers))
 	for _, fn := range fetchers {
 		fn := fn
@@ -772,8 +714,6 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 	p.log.Debug("Retrieving remote chain height")
 	mode := d.getMode()
 
-	// Request the advertised remote head block and wait for the response
-	latest, _ := p.peer.Head()
 	fetch := 1
 	if d.getMode() == StagedSync {
 		_, headNumber := p.peer.Head()
@@ -807,20 +747,7 @@ func (d *Downloader) fetchHeight(p *peerConnection) (uint64, error) {
 			// or there was not one requested.
 			head := headers[0]
 			if (mode == FastSync || mode == LightSync) && head.Number.Uint64() < d.checkpoint {
-				return nil, nil, fmt.Errorf("%w: remote head %d below checkpoint %d", errUnsyncedPeer, head.Number, d.checkpoint)
-			}
-			if len(headers) == 1 {
-				if mode == FastSync && head.Number.Uint64() > uint64(fsMinFullBlocks) {
-					return nil, nil, fmt.Errorf("%w: no pivot included along head header", errBadPeer)
-				}
-				p.log.Warn("Remote head below checkpoint", "number", head.Number, "hash", head.Hash())
-				return 0, errUnsyncedPeer
-			}
-			// At this point we have 2 headers in total and the first is the
-			// validated head of the chian. Check the pivot number and return,
-			pivot := headers[1]
-			if pivot.Number.Uint64() != head.Number.Uint64()-uint64(fsMinFullBlocks) {
-				return nil, nil, fmt.Errorf("%w: remote pivot %d != requested %d", errInvalidChain, pivot.Number, head.Number.Uint64()-uint64(fsMinFullBlocks))
+				return 0, fmt.Errorf("%w: remote head %d below checkpoint %d", errUnsyncedPeer, head.Number, d.checkpoint)
 			}
 			return head.Number.Uint64(), nil
 
@@ -1159,7 +1086,8 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64) error {
 		d.pivotLock.RUnlock()
 
 		p.log.Trace("Fetching next pivot header", "number", pivot+uint64(fsMinFullBlocks))
-		go p.peer.RequestHeadersByNumber(pivot+uint64(fsMinFullBlocks), 2, fsMinFullBlocks-9, false) // move +64 when it's 2x64-8 deep
+		//move +64 when it's 2x64-8 deep
+		go p.peer.RequestHeadersByNumber(pivot+uint64(fsMinFullBlocks), 2, fsMinFullBlocks-9, false) //nolint:errcheck
 	}
 	// Start pulling the header chain skeleton until all is done
 	ancestor := from
@@ -1203,16 +1131,18 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64) error {
 						return fmt.Errorf("%w: next pivot confirmer number %d != requested %d", errInvalidChain, have, want)
 					}
 					log.Warn("Pivot seemingly stale, moving", "old", pivot, "new", headers[0].Number)
-					pivot = headers[0].Number.Uint64()
 
 					d.pivotLock.Lock()
 					d.pivotHeader = headers[0]
 					d.pivotLock.Unlock()
 
+					// turbo-geth: this code is commented out because turbo-geth does not support
+					// fast sync
+					//
 					// Write out the pivot into the database so a rollback beyond
 					// it will reenable fast sync and update the state root that
 					// the state syncer will be downloading.
-					rawdb.WriteLastPivotNumber(d.stateDB, pivot)
+					// rawdb.WriteLastPivotNumber(d.stateDB, pivot)
 				}
 				pivoting = false
 				getHeaders(from)
@@ -1890,105 +1820,15 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 			// of the blocks delivered from the downloader, and the indexing will be off.
 			log.Debug("Downloaded item processing failed on sidechain import", "index", index, "err", err)
 		}
-		return fmt.Errorf("%w: %v", errInvalidChain, err)
-	}
-	return nil
-}
-
-// processFastSyncContent takes fetch results from the queue and writes them to the
-// database. It also controls the synchronisation of state nodes of the pivot block.
-func (d *Downloader) processFastSyncContent() error {
-	// Start syncing state of the reported head block. This should get us most of
-	// the state of the pivot block.
-	d.pivotLock.RLock()
-	sync := d.syncState(d.pivotHeader.Root)
-	d.pivotLock.RUnlock()
-
-	defer func() {
-		// The `sync` object is replaced every time the pivot moves. We need to
-		// defer close the very last active one, hence the lazy evaluation vs.
-		// calling defer sync.Cancel() !!!
-		sync.Cancel()
-	}()
-
-	closeOnErr := func(s *stateSync) {
-		if err := s.Wait(); err != nil && err != errCancelStateFetch && err != errCanceled {
-			d.queue.Close() // wake up Results
-		}
 		return 0, fmt.Errorf("%w: %v", errInvalidChain, err)
 	}
 	if d.getMode() == StagedSync && index > 0 && d.bodiesState != nil {
-			d.chainInsertHook(results)
-		}
-		// If we haven't downloaded the pivot block yet, check pivot staleness
-		// notifications from the header downloader
-		d.pivotLock.RLock()
-		pivot := d.pivotHeader
-		d.pivotLock.RUnlock()
-
-		if oldPivot == nil {
-			if pivot.Root != sync.root {
-				sync.Cancel()
-				sync = d.syncState(pivot.Root)
-
-				go closeOnErr(sync)
-			}
-		} else {
-			results = append(append([]*fetchResult{oldPivot}, oldTail...), results...)
-		}
-		// Split around the pivot block and process the two sides via fast/full sync
-		if atomic.LoadInt32(&d.committed) == 0 {
-			latest := results[len(results)-1].Header
-			// If the height is above the pivot block by 2 sets, it means the pivot
-			// become stale in the network and it was garbage collected, move to a
-			// new pivot.
-			//
-			// Note, we have `reorgProtHeaderDelay` number of blocks withheld, Those
-			// need to be taken into account, otherwise we're detecting the pivot move
-			// late and will drop peers due to unavailable state!!!
-			if height := latest.Number.Uint64(); height >= pivot.Number.Uint64()+2*uint64(fsMinFullBlocks)-uint64(reorgProtHeaderDelay) {
-				log.Warn("Pivot became stale, moving", "old", pivot.Number.Uint64(), "new", height-uint64(fsMinFullBlocks)+uint64(reorgProtHeaderDelay))
-				pivot = results[len(results)-1-fsMinFullBlocks+reorgProtHeaderDelay].Header // must exist as lower old pivot is uncommitted
-
-				d.pivotLock.Lock()
-				d.pivotHeader = pivot
-				d.pivotLock.Unlock()
-
-				// Write out the pivot into the database so a rollback beyond it will
-				// reenable fast sync
-				rawdb.WriteLastPivotNumber(d.stateDB, pivot.Number.Uint64())
-			}
-		}
-		P, beforeP, afterP := splitAroundPivot(pivot.Number.Uint64(), results)
 		if err1 := d.bodiesState.Update(d.stateDB, blocks[index-1].NumberU64()); err1 != nil {
 			return 0, fmt.Errorf("saving SyncStage Bodies progress: %v", err1)
 		}
 		return blocks[index-1].NumberU64() + 1, nil
 	}
 	return 0, nil
-}
-
-func splitAroundPivot(pivot uint64, results []*fetchResult) (p *fetchResult, before, after []*fetchResult) {
-	if len(results) == 0 {
-		return nil, nil, nil
-	}
-	if lastNum := results[len(results)-1].Header.Number.Uint64(); lastNum < pivot {
-		// the pivot is somewhere in the future
-		return nil, results, nil
-	}
-	// This can also be optimized, but only happens very seldom
-	for _, result := range results {
-		num := result.Header.Number.Uint64()
-		switch {
-		case num < pivot:
-			before = append(before, result)
-		case num == pivot:
-			p = result
-		default:
-			after = append(after, result)
-		}
-	}
-	return p, before, after
 }
 
 func (d *Downloader) commitPivotBlock(result *fetchResult) error {
