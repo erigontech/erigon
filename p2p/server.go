@@ -314,6 +314,10 @@ func (srv *Server) Peers() []*Peer {
 	return ps
 }
 
+func (srv *Server) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
+	srv.listenFunc = listenFunc
+}
+
 // PeerCount returns the number of connected peers.
 func (srv *Server) PeerCount() int {
 	var count int
