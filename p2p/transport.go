@@ -25,10 +25,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/bitutil"
-	"github.com/ethereum/go-ethereum/metrics"
-	"github.com/ethereum/go-ethereum/p2p/rlpx"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/common/bitutil"
+	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/turbo-geth/p2p/rlpx"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -59,7 +59,10 @@ func (t *rlpxTransport) ReadMsg() (Msg, error) {
 	defer t.rmu.Unlock()
 
 	var msg Msg
-	t.conn.SetReadDeadline(time.Now().Add(frameReadTimeout))
+	err1 := t.conn.SetReadDeadline(time.Now().Add(frameReadTimeout))
+	if err1 != nil {
+		return msg, err1
+	}
 	code, data, wireSize, err := t.conn.Read()
 	if err == nil {
 		msg = Msg{
@@ -84,7 +87,9 @@ func (t *rlpxTransport) WriteMsg(msg Msg) error {
 	}
 
 	// Write the message.
-	t.conn.SetWriteDeadline(time.Now().Add(frameWriteTimeout))
+	if err := t.conn.SetWriteDeadline(time.Now().Add(frameWriteTimeout)); err != nil {
+		return err
+	}
 	size, err := t.conn.Write(msg.Code, t.wbuf.Bytes())
 	if err != nil {
 		return err
@@ -113,16 +118,18 @@ func (t *rlpxTransport) close(err error) {
 			if err := t.conn.SetWriteDeadline(deadline); err == nil {
 				// Connection supports write deadline.
 				t.wbuf.Reset()
-				rlp.Encode(&t.wbuf, []DiscReason{r})
-				t.conn.Write(discMsg, t.wbuf.Bytes())
+				rlp.Encode(&t.wbuf, []DiscReason{r})  //nolint:errcheck
+				t.conn.Write(discMsg, t.wbuf.Bytes()) //nolint:errcheck
 			}
 		}
 	}
-	t.conn.Close()
+	t.conn.Close() //nolint:errcheck
 }
 
 func (t *rlpxTransport) doEncHandshake(prv *ecdsa.PrivateKey) (*ecdsa.PublicKey, error) {
-	t.conn.SetDeadline(time.Now().Add(handshakeTimeout))
+	if err := t.conn.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
+		return nil, err
+	}
 	return t.conn.Handshake(prv)
 }
 
@@ -160,7 +167,9 @@ func readProtocolHandshake(rw MsgReader) (*protoHandshake, error) {
 		// We can't return the reason directly, though, because it is echoed
 		// back otherwise. Wrap it in a string instead.
 		var reason [1]DiscReason
-		rlp.Decode(msg.Payload, &reason)
+		if err = rlp.Decode(msg.Payload, &reason); err != nil {
+			return nil, err
+		}
 		return nil, reason[0]
 	}
 	if msg.Code != handshakeMsg {

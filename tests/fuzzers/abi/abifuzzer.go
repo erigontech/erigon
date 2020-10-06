@@ -23,9 +23,9 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/crypto"
 	fuzz "github.com/google/gofuzz"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 func unpackPack(abi abi.ABI, method string, inputType []interface{}, input []byte) bool {
@@ -85,7 +85,7 @@ func createABI(name string, stateMutability, payable *string, inputs []args) (ab
 				sig += ","
 			}
 		}
-		sig += "} ]"
+		sig += "} ]" //nolint:goconst
 		sig += `, "outputs" : [ {`
 		for i, inp := range inputs {
 			sig += fmt.Sprintf(`"name" : "%v", "type" : "%v" `, inp.name, inp.typ)

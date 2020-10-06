@@ -235,7 +235,7 @@ func (stp *stagedSyncTesterPeer) RequestHeadersByHash(origin common.Hash, amount
 		panic("reverse header requests not supported")
 	}
 
-	result := stp.chain.headersByHash(origin, amount, skip)
+	result := stp.chain.headersByHash(origin, amount, skip, false /*reverse */)
 	return stp.st.downloader.DeliverHeaders(stp.id, result)
 }
 
@@ -245,7 +245,7 @@ func (stp *stagedSyncTesterPeer) RequestHeadersByNumber(origin uint64, amount in
 		panic("reverse header requests not supported")
 	}
 
-	result := stp.chain.headersByNumber(origin, amount, skip)
+	result := stp.chain.headersByNumber(origin, amount, skip, false /* reverse */)
 	return stp.st.downloader.DeliverHeaders(stp.id, result)
 }
 

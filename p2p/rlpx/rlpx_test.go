@@ -30,9 +30,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/crypto/ecies"
-	"github.com/ledgerwatch/turbo-geth/p2p/simulations/pipes"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"golang.org/x/crypto/sha3"
+	"github.com/stretchr/testify/assert"
 )
 
 type message struct {
@@ -77,10 +76,6 @@ func checkMsgReadWrite(t *testing.T, p1, p2 *Conn, msgCode uint64, msgData []byt
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r2.err != nil {
-		return fmt.Errorf("%s side error: %v", r2.side, r2.err)
-	}
-
 	// Check it was received correctly.
 	msg := <-ch
 	assert.Equal(t, msgCode, msg.code, "wrong message code returned from ReadMsg")

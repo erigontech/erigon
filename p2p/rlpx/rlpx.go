@@ -35,10 +35,8 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/turbo-geth/common/bitutil"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/crypto/ecies"
-	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
 )
@@ -154,9 +152,12 @@ func (h *handshakeState) readFrame(conn io.Reader) ([]byte, error) {
 	}
 
 	// read and validate frame MAC. we can re-use headbuf for that.
-	h.ingressMAC.Write(framebuf)
+	_, err := h.ingressMAC.Write(framebuf)
+	if err != nil {
+		return nil, err
+	}
 	fmacseed := h.ingressMAC.Sum(nil)
-	if _, err := io.ReadFull(conn, headbuf[:16]); err != nil {
+	if _, err = io.ReadFull(conn, headbuf[:16]); err != nil {
 		return nil, err
 	}
 	shouldMAC = updateMAC(h.ingressMAC, h.macCipher, fmacseed)
@@ -249,7 +250,7 @@ func updateMAC(mac hash.Hash, block cipher.Block, seed []byte) []byte {
 	for i := range aesbuf {
 		aesbuf[i] ^= seed[i]
 	}
-	mac.Write(aesbuf)
+	mac.Write(aesbuf) //nolint:errcheck
 	return mac.Sum(nil)[:16]
 }
 
@@ -383,7 +384,7 @@ func receiverEncHandshake(conn io.ReadWriter, prv *ecdsa.PrivateKey) (s Secrets,
 		return s, err
 	}
 	h := new(encHandshake)
-	if err := h.handleAuthMsg(authMsg, prv); err != nil {
+	if err = h.handleAuthMsg(authMsg, prv); err != nil {
 		return s, err
 	}
 
