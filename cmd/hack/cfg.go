@@ -151,7 +151,7 @@ func si64(milliseconds int64) string {
 }
 
 func testGenCfg() {
-
+/*
 	args := os.Args
 	if len(args) == 4 {
 		fmt.Printf("%v\n", args[3])
@@ -163,13 +163,13 @@ func testGenCfg() {
 	_ = testCfgByUsed()
 	if true {
 		return
-	}
+	}*/
 
 
 	//absIntTestSimple00()
 	//absIntTestRequires00()
 	//absIntTestCall01()
-	//absIntTestDiv00()
+	absIntTestDiv00()
 	//absIntTestEcrecoverLoop02()
 	//absIntTestStorageVar03()
 	//absIntTestStaticLoop00()
@@ -181,7 +181,7 @@ func testGenCfg() {
 	//absIntTestSmallImprecision()
 	//absIntTestSmallInvalidJumpDest()
 	//absIntTestSmallImprecision2()
-	absIntAndJumpImprecision()
+	//absIntAndJumpImprecision()
 }
 
 /*
@@ -414,6 +414,13 @@ func runCfgAnly(testName string, code string) {
 			cfg.GetCoverageStats().Instructions,
 			cfg.GetCoverageStats().Uncovered,
 			cfg.GetCoverageStats().Epilogue)
+
+		check := vm.CheckCfg(contract.Code, cfg.D)
+		if check {
+			fmt.Printf("Proof checker successfully checked proof")
+		} else {
+			fmt.Printf("Proof checker failed to check proof")
+		}
 	}
 }
 
