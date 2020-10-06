@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"runtime"
 	"sort"
 	"time"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -125,13 +125,12 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 			}
 		}
 
-		// Convert the receipts from their storage form to their internal representation
-		storageReceipts := []*types.ReceiptForStorage{}
-		if err := rlp.DecodeBytes(v, &storageReceipts); err != nil {
-			return fmt.Errorf("invalid receipt array RLP: %w, blocl=%d", err, blockNum)
+		receipts := types.Receipts{}
+		if err := cbor.Unmarshal(&receipts, v); err != nil {
+			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
 		}
 
-		for _, receipt := range storageReceipts {
+		for _, receipt := range receipts {
 			for _, log := range receipt.Logs {
 				for _, topic := range log.Topics {
 					topicStr := string(topic.Bytes())
@@ -210,14 +209,13 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
-		// Convert the receipts from their storage form to their internal representation
-		storageReceipts := []*types.ReceiptForStorage{}
-		if err := rlp.DecodeBytes(v, &storageReceipts); err != nil {
-			return fmt.Errorf("invalid receipt array RLP: %w, k=%x", err, k)
+		receipts := types.Receipts{}
+		if err := cbor.Unmarshal(&receipts, v); err != nil {
+			return fmt.Errorf("receipt unmarshal failed: %w, k=%x", err, k)
 		}
 
-		for _, storageReceipt := range storageReceipts {
-			for _, log := range storageReceipt.Logs {
+		for _, receipt := range receipts {
+			for _, log := range receipt.Logs {
 				for _, topic := range log.Topics {
 					topics[string(topic.Bytes())] = true
 				}

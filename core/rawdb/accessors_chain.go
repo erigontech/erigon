@@ -20,7 +20,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"math/big"
+
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -34,7 +38,10 @@ import (
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
 func ReadCanonicalHash(db DatabaseReader, number uint64) common.Hash {
-	data, _ := db.Get(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number))
+	data, err := db.Get(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("ReadCanonicalHash failed", "err", err)
+	}
 	if len(data) == 0 {
 		return common.Hash{}
 	}
@@ -76,8 +83,15 @@ func ReadAllHashes(db DatabaseReader, number uint64) []common.Hash {
 
 // ReadHeaderNumber returns the header number assigned to a hash.
 func ReadHeaderNumber(db DatabaseReader, hash common.Hash) *uint64 {
-	data, _ := db.Get(dbutils.HeaderNumberPrefix, hash.Bytes())
+	data, err := db.Get(dbutils.HeaderNumberPrefix, hash.Bytes())
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("ReadHeaderNumber failed", "err", err)
+	}
+	if len(data) == 0 {
+		return nil
+	}
 	if len(data) != 8 {
+		log.Error("ReadHeaderNumber got wrong data len", "len", len(data))
 		return nil
 	}
 	number := binary.BigEndian.Uint64(data)
@@ -101,7 +115,10 @@ func DeleteHeaderNumber(db DatabaseDeleter, hash common.Hash) {
 
 // ReadHeadHeaderHash retrieves the hash of the current canonical head header.
 func ReadHeadHeaderHash(db DatabaseReader) common.Hash {
-	data, _ := db.Get(dbutils.HeadHeaderKey, []byte(dbutils.HeadHeaderKey))
+	data, err := db.Get(dbutils.HeadHeaderKey, []byte(dbutils.HeadHeaderKey))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("ReadHeadHeaderHash failed", "err", err)
+	}
 	if len(data) == 0 {
 		return common.Hash{}
 	}
@@ -117,7 +134,10 @@ func WriteHeadHeaderHash(db DatabaseWriter, hash common.Hash) {
 
 // ReadHeadBlockHash retrieves the hash of the current canonical head block.
 func ReadHeadBlockHash(db DatabaseReader) common.Hash {
-	data, _ := db.Get(dbutils.HeadBlockKey, []byte(dbutils.HeadBlockKey))
+	data, err := db.Get(dbutils.HeadBlockKey, []byte(dbutils.HeadBlockKey))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("ReadHeadBlockHash failed", "err", err)
+	}
 	if len(data) == 0 {
 		return common.Hash{}
 	}
@@ -133,7 +153,10 @@ func WriteHeadBlockHash(db DatabaseWriter, hash common.Hash) {
 
 // ReadHeadFastBlockHash retrieves the hash of the current fast-sync head block.
 func ReadHeadFastBlockHash(db DatabaseReader) common.Hash {
-	data, _ := db.Get(dbutils.HeadFastBlockKey, []byte(dbutils.HeadFastBlockKey))
+	data, err := db.Get(dbutils.HeadFastBlockKey, []byte(dbutils.HeadFastBlockKey))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("ReadHeadFastBlockHash failed", "err", err)
+	}
 	if len(data) == 0 {
 		return common.Hash{}
 	}
@@ -150,7 +173,10 @@ func WriteHeadFastBlockHash(db DatabaseWriter, hash common.Hash) {
 // ReadFastTrieProgress retrieves the number of tries nodes fast synced to allow
 // reporting correct numbers across restarts.
 func ReadFastTrieProgress(db DatabaseReader) uint64 {
-	data, _ := db.Get(dbutils.FastTrieProgressKey, []byte(dbutils.FastTrieProgressKey))
+	data, err := db.Get(dbutils.FastTrieProgressKey, []byte(dbutils.FastTrieProgressKey))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("ReadFastTrieProgress failed", "err", err)
+	}
 	if len(data) == 0 {
 		return 0
 	}
@@ -167,7 +193,10 @@ func WriteFastTrieProgress(db DatabaseWriter, count uint64) {
 
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
 func ReadHeaderRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue {
-	data, _ := db.Get(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash))
+	data, err := db.Get(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("ReadHeaderRLP failed", "err", err)
+	}
 	return data
 }
 
@@ -237,7 +266,10 @@ func deleteHeaderWithoutNumber(db DatabaseDeleter, hash common.Hash, number uint
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
 func ReadBodyRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue {
-	data, _ := db.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
+	data, err1 := db.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
+	if err1 != nil && !errors.Is(err1, ethdb.ErrKeyNotFound) {
+		log.Error("ReadBodyRLP failed", "err", err1)
+	}
 	bodyRlp, err := DecompressBlockBody(data)
 	if err != nil {
 		log.Warn("err on decode block", "err", err)
@@ -281,7 +313,10 @@ func ReadBody(db DatabaseReader, hash common.Hash, number uint64) *types.Body {
 }
 
 func ReadSenders(db DatabaseReader, hash common.Hash, number uint64) []common.Address {
-	data, _ := db.Get(dbutils.Senders, dbutils.BlockBodyKey(number, hash))
+	data, err := db.Get(dbutils.Senders, dbutils.BlockBodyKey(number, hash))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("ReadSenders failed", "err", err)
+	}
 	senders := make([]common.Address, len(data)/common.AddressLength)
 	for i := 0; i < len(senders); i++ {
 		copy(senders[i][:], data[i*common.AddressLength:])
@@ -342,7 +377,10 @@ func ReadTdRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue 
 
 // ReadTd retrieves a block's total difficulty corresponding to the hash.
 func ReadTd(db DatabaseReader, hash common.Hash, number uint64) *big.Int {
-	data, _ := db.Get(dbutils.HeaderPrefix, dbutils.HeaderTDKey(number, hash))
+	data, err := db.Get(dbutils.HeaderPrefix, dbutils.HeaderTDKey(number, hash))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("ReadTd failed", "err", err)
+	}
 	if len(data) == 0 {
 		return nil
 	}
@@ -403,19 +441,17 @@ func ReadReceiptsRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.Raw
 // should not be used. Use ReadReceipts instead if the metadata is needed.
 func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.Receipts {
 	// Retrieve the flattened receipt slice
-	data, _ := db.Get(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash))
+	data, err := db.Get(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("ReadRawReceipts failed", "err", err)
+	}
 	if len(data) == 0 {
 		return nil
 	}
-	// Convert the receipts from their storage form to their internal representation
-	storageReceipts := []*types.ReceiptForStorage{}
-	if err := rlp.DecodeBytes(data, &storageReceipts); err != nil {
-		log.Error("Invalid receipt array RLP", "hash", hash, "err", err)
+	receipts := types.Receipts{}
+	if err := cbor.Unmarshal(&receipts, data); err != nil {
+		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
 		return nil
-	}
-	receipts := make(types.Receipts, len(storageReceipts))
-	for i, storageReceipt := range storageReceipts {
-		receipts[i] = (*types.Receipt)(storageReceipt)
 	}
 	return receipts
 }
@@ -448,17 +484,14 @@ func ReadReceipts(db DatabaseReader, hash common.Hash, number uint64) types.Rece
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
 func WriteReceipts(db DatabaseWriter, hash common.Hash, number uint64, receipts types.Receipts) {
-	// Convert the receipts into their storage form and serialize them
-	storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
-	for i, receipt := range receipts {
-		storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
-	}
-	bytes, err := rlp.EncodeToBytes(storageReceipts)
+	newV := make([]byte, 0, 1024)
+	err := cbor.Marshal(&newV, receipts)
 	if err != nil {
 		log.Crit("Failed to encode block receipts", "err", err)
 	}
+
 	// Store the flattened receipt slice
-	if err := db.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash), bytes); err != nil {
+	if err := db.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash), newV); err != nil {
 		log.Crit("Failed to store block receipts", "err", err)
 	}
 }

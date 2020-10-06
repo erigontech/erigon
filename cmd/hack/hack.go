@@ -1679,7 +1679,6 @@ func zstd(chaindata string) error {
 	count, _ := c.Count()
 	blockNBytes := make([]byte, 8)
 	trainFrom := count - 2_000_000
-	readerForRlp := bytes.NewReader(nil)
 	for blockN := trainFrom; blockN < count; blockN += 2_000_000 / 4_000 {
 		binary.BigEndian.PutUint64(blockNBytes, blockN)
 		var v []byte
@@ -1688,9 +1687,8 @@ func zstd(chaindata string) error {
 			return err
 		}
 
-		storageReceipts := []*types.ReceiptForStorage{}
-		readerForRlp.Reset(v)
-		err = rlp.Decode(readerForRlp, &storageReceipts)
+		storageReceipts := types.Receipts{}
+		err = cbor.Unmarshal(&storageReceipts, v)
 		check(err)
 
 		samples1 = append(samples1, v)
@@ -1869,16 +1867,10 @@ func benchRlp(chaindata string) error {
 	fmt.Printf("bucket: %s\n", bucket)
 	c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
 
-	//total_rlp := 0
-	total_compress_rlp := 0
 	total_cbor := 0
 	total_compress_cbor := 0
 
 	total = 0
-	//var rlp_encode time.Duration
-	var rlp_decode time.Duration
-	var rlp_compress time.Duration
-
 	var cbor_encode time.Duration
 	var cbor_decode time.Duration
 	var cbor_decode2 time.Duration
@@ -1889,8 +1881,6 @@ func benchRlp(chaindata string) error {
 	compressBuf := make([]byte, 0, 100_000)
 
 	var samplesCbor [][]byte
-
-	readerForRlp := bytes.NewReader(nil)
 
 	count, _ := c.Count()
 	blockNBytes := make([]byte, 8)
@@ -1903,13 +1893,9 @@ func benchRlp(chaindata string) error {
 			return err
 		}
 
-		storageReceipts := []*types.ReceiptForStorage{}
-		readerForRlp.Reset(v)
-		err = rlp.Decode(readerForRlp, &storageReceipts)
+		receipts := types.Receipts{}
+		err = cbor.Unmarshal(&receipts, v)
 		check(err)
-
-		cbor.MustMarshal(&bufSlice, storageReceipts)
-		samplesCbor = append(samplesCbor, common.CopyBytes(bufSlice))
 
 		select {
 		default:
@@ -1930,14 +1916,11 @@ func benchRlp(chaindata string) error {
 		total += len(v)
 		blockNum := binary.BigEndian.Uint64(k)
 
-		storageReceipts := make([]*types.ReceiptForStorage, 0, 1024)
-		readerForRlp.Reset(v)
-		t := time.Now()
-		err = rlp.Decode(readerForRlp, &storageReceipts)
-		rlp_decode += time.Since(t)
+		storageReceipts := types.Receipts{}
+		err = cbor.Unmarshal(&storageReceipts, v)
 		check(err)
 
-		t = time.Now()
+		t := time.Now()
 		err = cbor.Marshal(&bufSlice, storageReceipts)
 		cbor_encode += time.Since(t)
 		total_cbor += len(bufSlice)
@@ -1959,10 +1942,10 @@ func benchRlp(chaindata string) error {
 		case <-logEvery.C:
 			totalf := float64(total)
 			log.Info("Progress 8", "blockNum", blockNum, "before", common.StorageSize(total),
-				"rlp_decode", rlp_decode,
+				//"rlp_decode", rlp_decode,
 				"total_cbor", fmt.Sprintf("%.2f", float64(total_cbor)/totalf), "cbor_encode", cbor_encode, "cbor_decode", cbor_decode,
 				"cbor_decode2", cbor_decode2, "cbor_decode3", cbor_decode3,
-				"compress_rlp_ratio", fmt.Sprintf("%.2f", totalf/float64(total_compress_rlp)), "rlp_compress", rlp_compress,
+				//"compress_rlp_ratio", fmt.Sprintf("%.2f", totalf/float64(total_compress_rlp)), "rlp_compress", rlp_compress,
 				"compress_cbor_ratio", fmt.Sprintf("%.2f", totalf/float64(total_compress_cbor)), "cbor_compress", cbor_compress,
 			)
 		}
@@ -1999,7 +1982,11 @@ func mint(chaindata string, block uint64) error {
 				continue
 			}
 			canonical[common.BytesToHash(v)] = struct{}{}
+			if len(canonical)%100_000 == 0 {
+				log.Info("Read canonical hashes", "count", len(canonical))
+			}
 		}
+		log.Info("Read canonical hashes", "count", len(canonical))
 		c = tx.Cursor(dbutils.BlockBodyPrefix)
 		var prevBlock uint64
 		var burntGas uint64
@@ -2046,6 +2033,9 @@ func mint(chaindata string, block uint64) error {
 				gasPrice := ethSpentTotal.Uint64()
 				burntGas += header.GasUsed
 				fmt.Fprintf(w, "%d, %d\n", burntGas, gasPrice)
+			}
+			if blockNumber%100_000 == 0 {
+				log.Info("Processed", "blocks", blockNumber)
 			}
 		}
 		return nil

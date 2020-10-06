@@ -119,7 +119,7 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | eth_getFilterChanges                    | -       |                                            |
 | eth_getFilterLogs                       | -       |                                            |
 | eth_uninstallFilter                     | -       |                                            |
-| eth_getLogs                             | Yes     | remote only                                |
+| eth_getLogs                             | Yes     |                                            |
 |                                         |         |                                            |
 | eth_accounts                            | -       |                                            |
 | eth_sendRawTransaction                  | Yes     | remote only                                |

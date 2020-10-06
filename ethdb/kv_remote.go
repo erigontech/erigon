@@ -384,7 +384,7 @@ func (c *remoteCursor) Last() ([]byte, []byte, error) {
 
 func (c *remoteCursor) Close() {
 	if c.stream != nil {
-		c.streamCancelFn() // This will close the stream and free resources
+		//c.streamCancelFn() // Commented out because this causes "context cancelled issue" on RPC daemon
 		c.stream = nil
 		c.streamingRequested = false
 	}

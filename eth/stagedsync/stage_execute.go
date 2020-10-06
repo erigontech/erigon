@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -21,7 +22,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -202,18 +202,13 @@ func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 }
 
 func appendReceipts(tx ethdb.DbWithPendingMutations, receipts types.Receipts, blockNumber uint64, blockHash common.Hash) error {
-	// Convert the receipts into their storage form and serialize them
-	storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
-	for i, receipt := range receipts {
-		storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
-	}
-	var bytes []byte
-	var err error
-	if bytes, err = rlp.EncodeToBytes(storageReceipts); err != nil {
+	newV := make([]byte, 0, 1024)
+	err := cbor.Marshal(&newV, receipts)
+	if err != nil {
 		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
 	}
 	// Store the flattened receipt slice
-	if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(blockNumber, blockHash), bytes); err != nil {
+	if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(blockNumber, blockHash), newV); err != nil {
 		return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
 	}
 	return nil
