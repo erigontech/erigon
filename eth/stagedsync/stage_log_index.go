@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"runtime"
 	"sort"
@@ -22,7 +23,7 @@ import (
 )
 
 const (
-	logIndicesMemLimit       = 512 * datasize.MB
+	logIndicesMemLimit       = 4 * datasize.MB
 	logIndicesCheckSizeEvery = 10 * time.Second
 )
 
@@ -112,14 +113,14 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir stri
 			log.Info("Progress", "blockNum", blockNum, dbutils.LogTopicIndex, common.StorageSize(sz), dbutils.LogAddressIndex, common.StorageSize(sz2), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush(topics, logIndicesMemLimit) {
-				if err := flushBitmaps2(collectorTopics, topics); err != nil {
+				if err := flushBitmaps2(db, dbutils.LogTopicIndex, collectorTopics, topics); err != nil {
 					return err
 				}
 				topics = map[string]*roaring.Bitmap{}
 			}
 
 			if needFlush(addresses, logIndicesMemLimit) {
-				if err := flushBitmaps2(collectorAddrs, addresses); err != nil {
+				if err := flushBitmaps2(db, dbutils.LogAddressIndex, collectorAddrs, addresses); err != nil {
 					return err
 				}
 				addresses = map[string]*roaring.Bitmap{}
@@ -154,73 +155,55 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir stri
 		}
 	}
 
-	if err := flushBitmaps2(collectorTopics, topics); err != nil {
+	if err := flushBitmaps2(db, dbutils.LogTopicIndex, collectorTopics, topics); err != nil {
 		return err
 	}
-	if err := flushBitmaps2(collectorAddrs, addresses); err != nil {
+	if err := flushBitmaps2(db, dbutils.LogAddressIndex, collectorAddrs, addresses); err != nil {
 		return err
 	}
 
-	var currentKey []byte
 	var currentBitmap = roaring.New()
-	var tmp = roaring.New()
 	var buf = bytes.NewBuffer(nil)
 
 	var loaderFunc = func(k []byte, v []byte, state etl.State, next etl.LoadNextFunc) error {
-		if currentKey == nil {
-			currentKey = k
-			if _, err := currentBitmap.FromBuffer(v); err != nil {
-				return err
-			}
-			return nil
+		if _, err := currentBitmap.FromBuffer(v); err != nil {
+			return err
 		}
-
-		if bytes.Equal(k, currentKey) {
-			tmp.Clear()
-			if _, err := tmp.FromBuffer(v); err != nil {
-				return err
-			}
-			currentBitmap.Or(tmp)
-			return nil
-		}
-
-		// TODO: get last shard from db
-
-		for {
-			lft := bitmapdb.CutLeft(currentBitmap, bitmapdb.ShardLimit, 500)
+		nextShard := bitmapdb.ShardIterator(currentBitmap, bitmapdb.ShardLimit, 512)
+		for shard := nextShard(); shard != nil; shard = nextShard() {
 			buf.Reset()
-			if _, err := lft.WriteTo(buf); err != nil {
+			if _, err := shard.WriteTo(buf); err != nil {
 				return err
 			}
-
-			shardKey := make([]byte, len(k)+2)
-			copy(shardKey, currentKey)
-			if currentBitmap == nil {
-				binary.BigEndian.PutUint32(shardKey[:len(k)], ^uint32(0))
-			} else {
-				binary.BigEndian.PutUint32(shardKey[:len(k)], lft.Maximum())
-			}
-
-			if err := next(currentKey, shardKey, common.CopyBytes(buf.Bytes())); err != nil {
-				return err
-			}
-
-			if currentBitmap == nil {
+			shardKey := make([]byte, len(k)+4)
+			copy(shardKey, k)
+			if currentBitmap.GetCardinality() == 0 {
+				binary.BigEndian.PutUint32(shardKey[len(k):], ^uint32(0))
+				if err := next(k, shardKey, common.CopyBytes(buf.Bytes())); err != nil {
+					return err
+				}
 				break
 			}
+			binary.BigEndian.PutUint32(shardKey[len(k):], shard.Maximum())
+			if err := next(k, shardKey, common.CopyBytes(buf.Bytes())); err != nil {
+				return err
+			}
 		}
 
-		currentKey = k
 		currentBitmap.Clear()
-
 		return nil
 	}
+
+	t := time.Now()
 	if err := collectorTopics.Load(db, dbutils.LogTopicIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
+	fmt.Printf("stage_log_index.go:197: %s\n", time.Since(t))
+	t = time.Now()
 	if err := collectorAddrs.Load(db, dbutils.LogAddressIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
+	fmt.Printf("stage_log_index.go:197: %s\n", time.Since(t))
 
 	return nil
 }
@@ -299,7 +282,7 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) bool {
 	sz := uint64(0)
 	for _, m := range bitmaps {
-		sz += m.GetSerializedSizeInBytes()
+		sz += m.GetSizeInBytes()
 	}
 	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
@@ -322,8 +305,33 @@ func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
 	return nil
 }
 
-func flushBitmaps2(c *etl.Collector, inMem map[string]*roaring.Bitmap) error {
+func flushBitmaps2(db ethdb.Getter, bucket string, c *etl.Collector, inMem map[string]*roaring.Bitmap) error {
+	defer func(t time.Time) { fmt.Printf("flushBitmaps2: %s\n", time.Since(t)) }(time.Now())
+	keyLen := 0
+	for k := range inMem {
+		keyLen = len(k)
+		break
+	}
+	lastShardKey := make([]byte, keyLen+4)
+	binary.BigEndian.PutUint32(lastShardKey[keyLen:], ^uint32(0))
+
 	for k, v := range inMem {
+		// put last shard to collector also, it will be merged into bigger bitmap
+		// and then re-write lastShard to fill it until shard size limit
+		copy(lastShardKey, k)
+		lastShard, err := db.Get(bucket, lastShardKey)
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return err
+		}
+		if len(lastShard) != 0 {
+			tmp := roaring.New()
+			if _, err := tmp.FromBuffer(lastShard); err != nil {
+				return err
+			}
+			v.Or(tmp)
+		}
+
+		v.RunOptimize()
 		newV := bytes.NewBuffer(make([]byte, 0, v.GetSerializedSizeInBytes()))
 		if _, err := v.WriteTo(newV); err != nil {
 			return err

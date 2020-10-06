@@ -49,7 +49,7 @@ func TestLogIndex(t *testing.T) {
 	err = appendReceipts(tx, receipts2, 2, common.Hash{})
 	require.NoError(err)
 
-	err = promoteLogIndex(tx, 0, nil)
+	err = promoteLogIndex(tx, 0, "", nil)
 	require.NoError(err)
 
 	// Check indices GetCardinality (in how many blocks they meet)

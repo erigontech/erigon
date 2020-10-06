@@ -81,13 +81,14 @@ func TestCutLeft(t *testing.T) {
 	}
 	N := uint64(1024)
 	Precision := uint64(256)
-	for {
+	for bm.GetCardinality() > 0 {
 		lft := bitmapdb.CutLeft(bm, N, Precision)
 		lftSz := lft.GetSerializedSizeInBytes()
-		require.True(t, lftSz > N-Precision && lftSz < N+Precision)
-		if bm == nil {
+		if bm.GetCardinality() > 0 {
+			require.True(t, lftSz > N-Precision && lftSz < N+Precision)
+		} else {
 			require.True(t, lft.GetSerializedSizeInBytes() > 0)
-			break
+			require.True(t, lftSz < N+Precision)
 		}
 	}
 
@@ -97,13 +98,14 @@ func TestCutLeft(t *testing.T) {
 	}
 	N = uint64(2048)
 	Precision = uint64(128)
-	for {
+	for bm.GetCardinality() > 0 {
 		lft := bitmapdb.CutLeft(bm, N, Precision)
 		lftSz := lft.GetSerializedSizeInBytes()
-		require.True(t, lftSz > N-Precision && lftSz < N+Precision)
-		if bm == nil {
+		if bm.GetCardinality() > 0 {
+			require.True(t, lftSz > N-Precision && lftSz < N+Precision)
+		} else {
 			require.True(t, lft.GetSerializedSizeInBytes() > 0)
-			break
+			require.True(t, lftSz < N+Precision)
 		}
 	}
 

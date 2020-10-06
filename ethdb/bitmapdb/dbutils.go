@@ -125,14 +125,29 @@ func writeBitmapSharded(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error
 	return nil
 }
 
+func ShardIterator(bm *roaring.Bitmap, target, precision uint64) func() *roaring.Bitmap {
+	return func() *roaring.Bitmap {
+		return CutLeft(bm, target, precision)
+	}
+}
+
 // CutLeft - cut from bitmap `target+-precision` bytes from left
+// removing lft part from `bm`
+// returns nil on zero cardinality
 func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 	maxLimit := target + precision
 	minLimit := target - precision
 
+	if bm.GetCardinality() == 0 {
+		return nil
+	}
+
 	sz := bm.GetSerializedSizeInBytes()
 	if sz <= maxLimit {
-		return bm
+		lft := roaring.New()
+		lft.Or(bm)
+		bm.Clear()
+		return lft
 	}
 
 	lft := roaring.New()
@@ -141,19 +156,19 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 	to := from + 10_000
 	step := (to - from) / denominator
 
-	for {
+	for sz > maxLimit {
 		lft.Clear()
-		lft.AddRange(from, to)
+		lft.AddRange(from, to+1)
 		lft.And(bm)
-		sz = lft.GetSerializedSizeInBytes()
-		if sz >= maxLimit {
+		lftSz := lft.GetSerializedSizeInBytes()
+		if lftSz >= maxLimit {
 			to -= step
 			denominator *= 2
 			step = (to - from) / denominator
 			continue
 		}
 
-		if sz <= minLimit {
+		if lftSz <= minLimit {
 			to += step
 			denominator *= 2
 			step = (to - from) / denominator
@@ -161,8 +176,14 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 		}
 
 		bm.RemoveRange(from, to+1)
+		sz = bm.GetSerializedSizeInBytes()
 		return lft
 	}
+
+	lft.Clear()
+	lft.Or(bm)
+	bm.Clear()
+	return lft
 }
 
 // TruncateRange - gets existing bitmap in db and call RemoveRange operator on it.
