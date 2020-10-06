@@ -11,6 +11,7 @@ Welcome to Turbo Geth's documentation!
 
    installation
    types
+   rpcdaemon
 
 Indices and tables
 ==================

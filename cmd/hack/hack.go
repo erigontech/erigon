@@ -1982,7 +1982,11 @@ func mint(chaindata string, block uint64) error {
 				continue
 			}
 			canonical[common.BytesToHash(v)] = struct{}{}
+			if len(canonical)%100_000 == 0 {
+				log.Info("Read canonical hashes", "count", len(canonical))
+			}
 		}
+		log.Info("Read canonical hashes", "count", len(canonical))
 		c = tx.Cursor(dbutils.BlockBodyPrefix)
 		var prevBlock uint64
 		var burntGas uint64
@@ -2029,6 +2033,9 @@ func mint(chaindata string, block uint64) error {
 				gasPrice := ethSpentTotal.Uint64()
 				burntGas += header.GasUsed
 				fmt.Fprintf(w, "%d, %d\n", burntGas, gasPrice)
+			}
+			if blockNumber%100_000 == 0 {
+				log.Info("Processed", "blocks", blockNumber)
 			}
 		}
 		return nil

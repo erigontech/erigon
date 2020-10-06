@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"os"
 	"os/user"
@@ -39,12 +40,14 @@ import (
 var DefaultFullGPOConfig = gasprice.Config{
 	Blocks:     20,
 	Percentile: 60,
+	MaxPrice:   gasprice.DefaultMaxPrice,
 }
 
 // DefaultLightGPOConfig contains default gasprice oracle settings for light client.
 var DefaultLightGPOConfig = gasprice.Config{
 	Blocks:     2,
 	Percentile: 60,
+	MaxPrice:   gasprice.DefaultMaxPrice,
 }
 
 // DefaultConfig contains default settings for use on the Ethereum main net.
@@ -124,6 +127,8 @@ type Config struct {
 
 	StorageMode ethdb.StorageMode
 	Hdd         bool // Whether to use warm up strategy to deal with the high latency of HDD
+	SnapshotMode    torrent.SnapshotMode
+	SnapshotSeeding bool
 
 	// DownloadOnly is set when the node does not need to process the blocks, but simply
 	// download them
