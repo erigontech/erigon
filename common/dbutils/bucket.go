@@ -101,6 +101,7 @@ var (
 
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = "DBINFO"
+	SnapshotInfoBucket = "SNINFO"
 
 	// databaseVerisionKey tracks the current database version.
 	DatabaseVerisionKey = "DatabaseVersion"
@@ -175,6 +176,11 @@ var (
 	StorageModeTxIndex = []byte("smTxIndex")
 
 	HeadHeaderKey = "LastHeader"
+
+	SnapshotHeadersHeadNumber = "SnapshotLastHeaderNumber"
+	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
+	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
+	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
 )
 
 // Metrics
@@ -223,6 +229,7 @@ var Buckets = []string{
 	Migrations,
 	LogTopicIndex,
 	LogAddressIndex,
+	SnapshotInfoBucket,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
