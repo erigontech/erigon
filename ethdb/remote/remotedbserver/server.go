@@ -1,6 +1,7 @@
 package remotedbserver
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -27,12 +28,11 @@ type KvServer struct {
 	kv ethdb.KV
 }
 
-func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.TransportCredentials) {
+func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Error("Could not create listener", "address", addr, "err", err)
-		return
+		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
 	}
 
 	kvSrv := NewKvServer(kv)
@@ -82,6 +82,8 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 			log.Error("private RPC server fail", "err", err)
 		}
 	}()
+
+	return grpcServer, nil
 }
 
 func NewKvServer(kv ethdb.KV) *KvServer {
