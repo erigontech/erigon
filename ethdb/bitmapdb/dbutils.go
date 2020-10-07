@@ -159,7 +159,10 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 	to := from + minMax/denominator
 
 	// binary search left part of right size
-	for lftSz < minLimit || lftSz > maxLimit || denominator < math.MaxInt32 {
+	for lftSz < minLimit || lftSz > maxLimit {
+		if denominator > math.MaxInt32 {
+			break
+		}
 		lft.Clear()
 		lft.AddRange(from, to+1)
 		lft.And(bm)
