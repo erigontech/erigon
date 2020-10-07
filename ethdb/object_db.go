@@ -74,6 +74,7 @@ func Open(path string) (*ObjectDatabase, error) {
 	default:
 		kv, err = NewLMDB().Path(path).Open()
 	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -303,6 +304,10 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 
 func (db *ObjectDatabase) KV() KV {
 	return db.kv
+}
+
+func (db *ObjectDatabase) SetKV(kv KV) {
+	db.kv = kv
 }
 
 func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
