@@ -133,9 +133,9 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 
 	defer func() {
 		srv.Stop()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = listener.Shutdown(ctx)
+		_ = listener.Shutdown(shutdownCtx)
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
 	}()
 	<-ctx.Done()
