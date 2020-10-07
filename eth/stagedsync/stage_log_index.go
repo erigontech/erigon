@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	logIndicesMemLimit       = 512 * datasize.MB
+	logIndicesMemLimit       = 32 * datasize.MB
 	logIndicesCheckSizeEvery = 30 * time.Second
 )
 
@@ -87,6 +87,7 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir stri
 	collectorTopics := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	collectorAddrs := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
+	i := 0
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(start)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
 			return err
@@ -153,6 +154,11 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir stri
 				m.Add(uint32(blockNum))
 			}
 		}
+
+		i++
+		if i > 3_000_000 {
+			break
+		}
 	}
 
 	if err := flushBitmaps(collectorTopics, topics); err != nil {
@@ -175,9 +181,11 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir stri
 		}
 
 		lastChunk := roaring.New()
-		_, err = lastChunk.FromBuffer(lastChunkBytes)
-		if err != nil {
-			return err
+		if len(lastChunkBytes) > 0 {
+			_, err = lastChunk.FromBuffer(lastChunkBytes)
+			if err != nil {
+				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
+			}
 		}
 
 		if _, err := currentBitmap.FromBuffer(v); err != nil {
@@ -187,6 +195,9 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir stri
 		nextChunk := bitmapdb.ChunkIterator(currentBitmap, bitmapdb.ChunkLimit, 512)
 		for chunk := nextChunk(); chunk != nil; chunk = nextChunk() {
 			buf.Reset()
+			if chunk.GetCardinality() == 0 {
+				fmt.Printf("a? %d\n", chunk.GetCardinality())
+			}
 			if _, err := chunk.WriteTo(buf); err != nil {
 				return err
 			}
@@ -315,6 +326,9 @@ func flushBitmaps(c *etl.Collector, inMem map[string]*roaring.Bitmap) error {
 	defer func(t time.Time) { fmt.Printf("stage_log_index.go:315: %s\n", time.Since(t)) }(time.Now())
 	for k, v := range inMem {
 		v.RunOptimize()
+		if v.GetCardinality() == 0 {
+			continue
+		}
 		newV := bytes.NewBuffer(make([]byte, 0, v.GetSerializedSizeInBytes()))
 		if _, err := v.WriteTo(newV); err != nil {
 			return err
