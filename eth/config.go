@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"os"
 	"os/user"
@@ -127,8 +126,6 @@ type Config struct {
 
 	StorageMode ethdb.StorageMode
 	Hdd         bool // Whether to use warm up strategy to deal with the high latency of HDD
-	SnapshotMode    torrent.SnapshotMode
-	SnapshotSeeding bool
 
 	// DownloadOnly is set when the node does not need to process the blocks, but simply
 	// download them
