@@ -3,6 +3,7 @@ package bitmapdb
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -166,12 +167,18 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 		if lftSz > maxLimit {
 			denominator *= 2
 			to -= minMax / denominator
+			if denominator > 8*1024 {
+				fmt.Printf("1: denominator=%d, lftSz=%d, minMax=%d, from=%d, to=%d, sz=%d\n", denominator, lftSz, minMax, from, to, sz)
+			}
 			continue
 		}
 
 		if lftSz < minLimit {
 			denominator *= 2
 			to += minMax / denominator
+			if denominator > 8*1024 {
+				fmt.Printf("2: denominator=%d, lftSz=%d, minMax=%d, from=%d, to=%d, sz=%d\n", denominator, lftSz, minMax, from, to, sz)
+			}
 			continue
 		}
 	}
