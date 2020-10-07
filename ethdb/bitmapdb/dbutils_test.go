@@ -76,7 +76,7 @@ func TestSharding(t *testing.T) {
 
 func TestCutLeft(t *testing.T) {
 	bm := roaring.New()
-	for j := 0; j < 1_000_000; j += 20 {
+	for j := 0; j < 10_000; j += 20 {
 		bm.AddRange(uint64(j), uint64(j+10))
 	}
 	N := uint64(1024)
@@ -93,7 +93,7 @@ func TestCutLeft(t *testing.T) {
 	}
 
 	bm = roaring.New()
-	for j := 0; j < 1_000_000; j += 20 {
+	for j := 0; j < 10_000; j += 20 {
 		bm.AddRange(uint64(j), uint64(j+10))
 	}
 	N = uint64(2048)
@@ -118,7 +118,6 @@ func TestCutLeft(t *testing.T) {
 
 	bm = roaring.New()
 	lft = bitmapdb.CutLeft(bm, N, Precision)
-	require.True(t, lft.GetSerializedSizeInBytes() > 0)
-	require.True(t, lft.GetCardinality() == 0)
+	require.True(t, lft == nil)
 	require.True(t, bm.GetCardinality() == 0)
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -150,37 +151,32 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 	}
 
 	lft := roaring.New()
+	lftSz := lft.GetSerializedSizeInBytes()
 	from := uint64(bm.Minimum())
 	denominator := uint64(2)
 	minMax := uint64(bm.Maximum()) - uint64(bm.Minimum())
 	to := from + minMax/denominator
 
 	// binary search left part of right size
-	for sz > maxLimit {
+	for lftSz < minLimit || lftSz > maxLimit || denominator < math.MaxInt32 {
 		lft.Clear()
 		lft.AddRange(from, to+1)
 		lft.And(bm)
-		lftSz := lft.GetSerializedSizeInBytes()
-		if lftSz >= maxLimit {
+		lftSz = lft.GetSerializedSizeInBytes()
+		if lftSz > maxLimit {
 			denominator *= 2
 			to -= minMax / denominator
 			continue
 		}
 
-		if lftSz <= minLimit {
+		if lftSz < minLimit {
 			denominator *= 2
 			to += minMax / denominator
 			continue
 		}
-
-		bm.RemoveRange(from, to+1)
-		sz = bm.GetSerializedSizeInBytes()
-		return lft
 	}
 
-	lft.Clear()
-	lft.Or(bm)
-	bm.Clear()
+	bm.RemoveRange(from, to+1)
 	return lft
 }
 
