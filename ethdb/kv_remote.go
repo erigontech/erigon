@@ -339,7 +339,6 @@ func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 
 	pair, err := c.stream.Recv()
 	if err != nil {
-		fmt.Printf("eee1: %s\n", err)
 		return []byte{}, nil, err
 	}
 
@@ -356,7 +355,6 @@ func (c *remoteCursor) Next() ([]byte, []byte, error) {
 	if !c.streamingRequested {
 		doStream := c.prefetch > 0
 		if err := c.stream.Send(&remote.SeekRequest{StartSreaming: doStream}); err != nil {
-			fmt.Printf("111: %s\n", err)
 			return []byte{}, nil, err
 		}
 		c.streamingRequested = doStream
@@ -364,7 +362,6 @@ func (c *remoteCursor) Next() ([]byte, []byte, error) {
 
 	pair, err := c.stream.Recv()
 	if err != nil {
-		fmt.Printf("22222: %s\n", err)
 		return []byte{}, nil, err
 	}
 	return pair.Key, pair.Value, nil
