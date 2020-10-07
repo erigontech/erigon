@@ -63,3 +63,5 @@ jobs:
 
       - store_test_results:
           path: /tmp/test-results
+
+      - run: docker build .
