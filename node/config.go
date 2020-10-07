@@ -19,6 +19,7 @@ package node
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -180,7 +181,8 @@ type Config struct {
 	Logger log.Logger `toml:",omitempty"`
 
 	// Whether to use LMDB.
-	LMDB bool
+	LMDB         bool
+	SnapshotMode torrent.SnapshotMode
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener
