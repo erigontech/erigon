@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -132,10 +133,12 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 
 	defer func() {
 		srv.Stop()
-		listener.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = listener.Shutdown(ctx)
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
 	}()
-	sig := <-ctx.Done()
-	log.Info("Exiting...", "signal", sig)
+	<-ctx.Done()
+	log.Info("Exiting...")
 	return nil
 }
