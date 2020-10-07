@@ -24,7 +24,6 @@ var DefaultFlags = []cli.Flag{
 	utils.TxPoolLifetimeFlag,
 	utils.TxLookupLimitFlag,
 	utils.StorageModeFlag,
-	utils.SnapshotModeFlag,
 	utils.HddFlag,
 	utils.DatabaseFlag,
 	utils.LMDBMapSizeFlag,
