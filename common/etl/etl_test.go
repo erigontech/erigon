@@ -355,7 +355,7 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	return next(k, k2, buf.Bytes())
 }
 
-func testLoadFromMapFunc(k []byte, v []byte, _ State, next LoadNextFunc) error {
+func testLoadFromMapFunc(k []byte, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	decoder.ResetBytes(v)
 	valueMap := make(map[string][]byte)
@@ -367,7 +367,7 @@ func testLoadFromMapFunc(k []byte, v []byte, _ State, next LoadNextFunc) error {
 	return next(k, k, realValue)
 }
 
-func testLoadFromMapDoubleFunc(k []byte, v []byte, _ State, next LoadNextFunc) error {
+func testLoadFromMapDoubleFunc(k []byte, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	decoder.ResetBytes(v)
 
