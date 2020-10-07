@@ -271,16 +271,7 @@ func (tx *remoteTx) BucketSize(name string) (uint64, error) {
 
 func (tx *remoteTx) Get(bucket string, key []byte) (val []byte, err error) {
 	c := tx.Cursor(bucket)
-	defer func() {
-		if v, ok := c.(*remoteCursor); ok {
-			if v.stream == nil {
-				return
-			}
-			_ = v.stream.CloseSend()
-			v.streamCancelFn()
-		}
-	}()
-
+	defer c.Close()
 	return c.SeekExact(key)
 }
 
