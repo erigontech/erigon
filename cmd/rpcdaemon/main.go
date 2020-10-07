@@ -23,6 +23,7 @@ func main() {
 			log.Error("Could not connect to remoteDb", "error", err)
 			return nil
 		}
+		defer db.Close()
 
 		var apiList = commands.APIList(db, backend, *cfg, nil)
 		return cli.StartRpcServer(cmd.Context(), *cfg, apiList)

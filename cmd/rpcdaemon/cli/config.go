@@ -121,7 +121,6 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	})
 
 	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
-
 	if err != nil {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
@@ -132,6 +131,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	log.Info("HTTP endpoint opened", "url", httpEndpoint, "ws", cfg.WebsocketEnabled)
 
 	defer func() {
+		srv.Stop()
 		listener.Close()
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
 	}()
