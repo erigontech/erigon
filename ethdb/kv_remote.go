@@ -333,6 +333,7 @@ func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 		var streamCtx context.Context
 		streamCtx, c.streamCancelFn = context.WithCancel(c.ctx) // We create child context for the stream so we can cancel it to prevent leak
 		c.stream, err = c.tx.db.remoteKV.Seek(streamCtx)
+		fmt.Printf("eee: %s\n", err)
 	}
 
 	if err != nil {
@@ -345,6 +346,7 @@ func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 
 	pair, err := c.stream.Recv()
 	if err != nil {
+		fmt.Printf("eee1: %s\n", err)
 		return []byte{}, nil, err
 	}
 
@@ -361,6 +363,7 @@ func (c *remoteCursor) Next() ([]byte, []byte, error) {
 	if !c.streamingRequested {
 		doStream := c.prefetch > 0
 		if err := c.stream.Send(&remote.SeekRequest{StartSreaming: doStream}); err != nil {
+			fmt.Printf("111: %s\n", err)
 			return []byte{}, nil, err
 		}
 		c.streamingRequested = doStream
@@ -368,6 +371,7 @@ func (c *remoteCursor) Next() ([]byte, []byte, error) {
 
 	pair, err := c.stream.Recv()
 	if err != nil {
+		fmt.Printf("22222: %s\n", err)
 		return []byte{}, nil, err
 	}
 	return pair.Key, pair.Value, nil
