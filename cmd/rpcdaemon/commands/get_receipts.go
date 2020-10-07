@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"math/big"
+
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -16,7 +18,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
-	"math/big"
 )
 
 func getReceipts(ctx context.Context, tx rawdb.DatabaseReader, kv ethdb.KV, number uint64, hash common.Hash) (types.Receipts, error) {
@@ -108,7 +109,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	blockNumbers := roaring.New()
 	blockNumbers.AddRange(begin, end+1) // [min,max)
 
-	topicsBitmap, err := getTopicsBitmap(tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex).Prefetch(1), crit.Topics, uint32(begin), uint32(end))
+	topicsBitmap, err := getTopicsBitmap(tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex), crit.Topics, uint32(begin), uint32(end))
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +121,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 	}
 
-	logAddrIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex).Prefetch(1)
+	logAddrIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
 	var addrBitmap *roaring.Bitmap
 	for _, addr := range crit.Addresses {
 		m, err := bitmapdb.Get(logAddrIndex, addr[:], uint32(begin), uint32(end))
