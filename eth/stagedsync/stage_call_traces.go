@@ -176,7 +176,11 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 					return fmt.Errorf("seeking in account changeset cursor: %v", errAcc)
 				}
 				if errAcc = cs.Walk(func(k, v []byte) error {
-					accountCache.Set(k, v)
+					if len(v) == 0 {
+						accountCache.Set(k, nil)
+					} else {
+						accountCache.Set(k, v)
+					}
 					accountsPreset++
 					return nil
 				}); errAcc != nil {
@@ -193,7 +197,11 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 					return fmt.Errorf("seeking in storage changeset cursor: %v", errSt)
 				}
 				if errSt = cs.Walk(func(k, v []byte) error {
-					storageCache.Set(k, v)
+					if len(v) == 0 {
+						storageCache.Set(k, nil)
+					} else {
+						storageCache.Set(k, v)
+					}
 					storagePreset++
 					return nil
 				}); errSt != nil {

@@ -228,8 +228,8 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 	return &acc, nil
 }
 
-func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
+func (dbs *PlainDBState) ReadAccountStorage(address common.Address, _ uint64, key *common.Hash) ([]byte, error) {
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, 1, *key)
 	if dbs.storageCache != nil {
 		if enc, ok := dbs.storageCache.HasGet(nil, compositeKey); ok {
 			return enc, nil
