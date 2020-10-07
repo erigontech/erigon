@@ -87,7 +87,6 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir stri
 	collectorTopics := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	collectorAddrs := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
-	i := 0
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(start)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
 			return err
@@ -153,11 +152,6 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir stri
 				}
 				m.Add(uint32(blockNum))
 			}
-		}
-
-		i++
-		if i > 3_000_000 {
-			break
 		}
 	}
 
