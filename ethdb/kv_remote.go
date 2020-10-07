@@ -336,7 +336,7 @@ func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	var err error
 	if c.stream == nil {
 		var streamCtx context.Context
-		streamCtx, c.streamCancelFn = context.WithCancel(context.Background()) // We create child context for the stream so we can cancel it to prevent leak
+		streamCtx, c.streamCancelFn = context.WithCancel(c.ctx) // We create child context for the stream so we can cancel it to prevent leak
 		c.stream, err = c.tx.db.remoteKV.Seek(streamCtx)
 	}
 
@@ -430,7 +430,7 @@ func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, []byte, 
 	var err error
 	if c.stream == nil {
 		var streamCtx context.Context
-		streamCtx, c.streamCancelFn = context.WithCancel(context.Background()) // We create child context for the stream so we can cancel it to prevent leak
+		streamCtx, c.streamCancelFn = context.WithCancel(c.ctx) // We create child context for the stream so we can cancel it to prevent leak
 		c.stream, err = c.tx.db.remoteKV.Seek(streamCtx)
 		if err != nil {
 			return []byte{}, nil, err
