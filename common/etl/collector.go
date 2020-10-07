@@ -20,7 +20,7 @@ import (
 )
 
 type LoadNextFunc func(originalK, k, v []byte) error
-type LoadFunc func(k []byte, value []byte, state CurrentTableReader, next LoadNextFunc) error
+type LoadFunc func(k []byte, value []byte, table CurrentTableReader, next LoadNextFunc) error
 
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
 // as a Collect Transform Load
