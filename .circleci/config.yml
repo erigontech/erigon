@@ -64,4 +64,7 @@ jobs:
       - store_test_results:
           path: /tmp/test-results
 
+      - setup_remote_docker:
+          docker_layer_caching: true
+
       - run: docker build .
