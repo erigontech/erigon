@@ -247,16 +247,7 @@ func (tx *remoteTx) Rollback() {
 	// signal server for graceful shutdown
 	// after signaling need wait for .Recv() or cancel context to ensure that resources are free
 	for _, c := range tx.cursors {
-		if c.stream != nil {
-			_ = c.stream.CloseSend()
-		}
-	}
-
-	for _, c := range tx.cursors {
-		if c.stream != nil {
-			c.streamCancelFn() // cancel to free mem
-			c.stream = nil
-		}
+		c.Close()
 	}
 }
 
@@ -336,12 +327,7 @@ func (c *remoteCursor) First() ([]byte, []byte, error) {
 // Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
-	if c.stream != nil {
-		_ = c.stream.CloseSend()
-		c.streamCancelFn() // This will close the stream and free resources
-		c.stream = nil
-		c.streamingRequested = false
-	}
+	c.closeGrpcStream()
 	c.initialized = true
 
 	var err error
@@ -396,21 +382,33 @@ func (c *remoteCursor) Last() ([]byte, []byte, error) {
 	panic("not implemented yet")
 }
 
-func (c *remoteCursor) Close() {
-	if c.stream != nil {
-		defer c.streamCancelFn()
+func (c *remoteCursor) closeGrpcStream() {
+	if c.stream == nil {
+		return
+	}
+	defer c.streamCancelFn() // hard cancel stream if graceful wasn't successful
 
+	// try graceful close cursor
+	if c.streamingRequested {
 		err := c.stream.CloseSend()
 		if err != nil {
 			log.Warn("couldn't send msg CloseSend to server", "err", err)
+		} else {
+			_, err = c.stream.Recv()
+			if err != nil && err != io.EOF {
+				log.Warn("received unexpected error from server after CloseSend", "err", err)
+			}
 		}
-		_, err = c.stream.Recv()
-		if err != nil && err != io.EOF {
-			log.Warn("received unexpected error from server after CloseSend", "err", err)
-		}
-		c.stream = nil
-		c.streamingRequested = false
+	} else {
+		_ = c.stream.CloseSend()
+		c.streamCancelFn()
 	}
+	c.stream = nil
+	c.streamingRequested = false
+}
+
+func (c *remoteCursor) Close() {
+	c.closeGrpcStream()
 }
 
 func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
@@ -443,12 +441,7 @@ func (c *remoteCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, 
 }
 
 func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
-	if c.stream != nil {
-		_ = c.stream.CloseSend()
-		c.streamCancelFn() // This will close the stream and free resources
-		c.stream = nil
-		c.streamingRequested = false
-	}
+	c.closeGrpcStream() // TODO: if streaming not requested then no reason to close
 	c.initialized = true
 
 	var err error
