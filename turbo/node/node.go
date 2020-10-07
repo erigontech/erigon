@@ -3,6 +3,7 @@ package node
 
 import (
 	"math"
+	"net"
 	"runtime/debug"
 	"strconv"
 	"time"
@@ -26,6 +27,10 @@ import (
 type TurboGethNode struct {
 	stack   *node.Node
 	backend *eth.Ethereum
+}
+
+func (tg *TurboGethNode) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
+	tg.stack.SetP2PListenFunc(listenFunc)
 }
 
 // Serve runs the node and blocks the execution. It returns when the node is existed.

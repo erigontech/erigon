@@ -203,12 +203,11 @@ func (opts LmdbOpts) MustOpen() KV {
 }
 
 type LmdbKV struct {
-	opts                LmdbOpts
-	env                 *lmdb.Env
-	log                 log.Logger
-	buckets             dbutils.BucketsCfg
-	stopStaleReadsCheck context.CancelFunc
-	wg                  *sync.WaitGroup
+	opts    LmdbOpts
+	env     *lmdb.Env
+	log     log.Logger
+	buckets dbutils.BucketsCfg
+	wg      *sync.WaitGroup
 }
 
 func NewLMDB() LmdbOpts {
@@ -248,7 +247,7 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages), nil
 }
 
-func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
+func (db *LmdbKV) Begin(_ context.Context, parent Tx, writable bool) (Tx, error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -276,7 +275,6 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 	tx.RawRead = true
 	return &lmdbTx{
 		db:      db,
-		ctx:     ctx,
 		tx:      tx,
 		isSubTx: isSubTx,
 	}, nil
@@ -285,13 +283,11 @@ func (db *LmdbKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, erro
 type lmdbTx struct {
 	isSubTx bool
 	tx      *lmdb.Txn
-	ctx     context.Context
 	db      *LmdbKV
 	cursors []*lmdb.Cursor
 }
 
 type LmdbCursor struct {
-	ctx        context.Context
 	tx         *lmdbTx
 	bucketName string
 	dbi        lmdb.DBI
@@ -626,7 +622,7 @@ func (tx *lmdbTx) Cursor(bucket string) Cursor {
 
 func (tx *lmdbTx) stdCursor(bucket string) Cursor {
 	b := tx.db.buckets[bucket]
-	return &LmdbCursor{bucketName: bucket, ctx: tx.ctx, tx: tx, bucketCfg: b, dbi: tx.db.buckets[bucket].DBI}
+	return &LmdbCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: tx.db.buckets[bucket].DBI}
 }
 
 func (tx *lmdbTx) CursorDupSort(bucket string) CursorDupSort {
