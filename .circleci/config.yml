@@ -16,6 +16,7 @@ jobs:
               source $BASH_ENV
 
       - checkout
+      - setup_remote_docker
       - run: mkdir -p ${TEST_RESULTS}
       - run: go env
       - run: git submodule update --init --recursive
@@ -64,7 +65,5 @@ jobs:
       - store_test_results:
           path: /tmp/test-results
 
-      - setup_remote_docker:
-          docker_layer_caching: true
 
       - run: docker build .
