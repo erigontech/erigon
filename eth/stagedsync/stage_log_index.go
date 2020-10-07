@@ -72,7 +72,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 	return nil
 }
 
-func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, datadir string, quit <-chan struct{}) error {
+func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
