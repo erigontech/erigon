@@ -248,12 +248,6 @@ func (tx *remoteTx) Rollback() {
 	// signal server for graceful shutdown
 	// after signaling need wait for .Recv() or cancel context to ensure that resources are free
 	for _, c := range tx.cursors {
-		if c.stream != nil {
-			_ = c.stream.CloseSend()
-		}
-	}
-
-	for _, c := range tx.cursors {
 		c.Close()
 	}
 }
