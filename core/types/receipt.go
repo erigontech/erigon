@@ -31,7 +31,7 @@ import (
 )
 
 // go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go
-//go:generate codecgen -o receipt_codecgen_gen.go -r "^Log$|^Receipt$|^Receipts$" -rt="codec" -nx=true -d=2 log.go receipt.go
+//go:generate codecgen -o receipt_codecgen_gen.go -r="Receipts|Receipt|Log" -rt="codec" -nx=true -d=2 receipt.go log.go
 
 var (
 	receiptStatusFailedRLP     = []byte{}
