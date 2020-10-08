@@ -384,7 +384,7 @@ func (c *remoteCursor) closeGrpcStream() {
 		// try graceful close stream
 		err := c.stream.CloseSend()
 		if err != nil {
-			if !errors.Is(err, context.Canceled) {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
 				log.Warn("couldn't send msg CloseSend to server", "err", err)
 			}
 		} else {
