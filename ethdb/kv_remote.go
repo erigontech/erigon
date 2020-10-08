@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -99,12 +100,15 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 
 func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, error) {
 	var dialOpts []grpc.DialOption
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Timeout: 10 * time.Minute,
+		}),
+	}
 	if certFile == "" {
-		dialOpts = []grpc.DialOption{
-			grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
-			grpc.WithInsecure(),
-			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
-		}
+		dialOpts = append(dialOpts, grpc.WithInsecure())
 	} else {
 		var creds credentials.TransportCredentials
 		var err error
@@ -137,11 +141,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, erro
 			})
 		}
 
-		dialOpts = []grpc.DialOption{
-			grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
-			grpc.WithTransportCredentials(creds),
-			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
-		}
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
 	}
 
 	if opts.inMemConn != nil {
