@@ -3,7 +3,6 @@ package ethash
 import (
 	"errors"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
@@ -15,6 +14,6 @@ func (ethash *Ethash) Verify(chain consensus.ChainHeaderReader, header *types.He
 	return ethash.verifyHeader(chain, header, parents[0], uncle, seal)
 }
 
-func (ethash *Ethash) NeededForVerification(header *types.Header) []common.Hash {
-	return []common.Hash{header.ParentHash}
+func (ethash *Ethash) NeededForVerification(header *types.Header) int {
+	return 1
 }

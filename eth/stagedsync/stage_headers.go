@@ -291,8 +291,8 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 				return nil
 			}
 		case result := <-engine.HeaderRequest():
-			h := rawdb.ReadHeaderByHash(db, result.Hash)
-			engine.HeaderResponse() <- consensus.HeaderResponse{h, result.Hash}
+			h := rawdb.ReadHeaderByNumber(db, result.Number)
+			engine.HeaderResponse() <- consensus.HeaderResponse{h, result.Number}
 		}
 	}
 }

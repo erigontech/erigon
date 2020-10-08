@@ -372,10 +372,6 @@ func makeExtraData(extra []byte) []byte {
 // CreateConsensusEngine creates the required type of consensus engine instance for an Ethereum service
 func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) *process.RemoteEngine {
 	var eng consensus.Engine
-	// If proof-of-authority is requested, set it up
-	if chainConfig.Clique != nil {
-		eng = clique.New(chainConfig.Clique, db) //nolint:ineffassign
-	}
 	// Otherwise assume proof-of-work
 	switch config.PowMode {
 	case ethash.ModeFake:
@@ -388,16 +384,20 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 		log.Warn("Ethash used in shared mode")
 		eng = ethash.NewShared()
 	default:
-		engine := ethash.New(ethash.Config{
-			CachesInMem:      config.CachesInMem,
-			CachesLockMmap:   config.CachesLockMmap,
-			DatasetDir:       config.DatasetDir,
-			DatasetsInMem:    config.DatasetsInMem,
-			DatasetsOnDisk:   config.DatasetsOnDisk,
-			DatasetsLockMmap: config.DatasetsLockMmap,
-		}, notify, noverify)
-		engine.SetThreads(-1) // Disable CPU mining
-		eng = engine
+		if chainConfig.Clique != nil {
+			eng = clique.New(chainConfig.Clique, db)
+		} else {
+			engine := ethash.New(ethash.Config{
+				CachesInMem:      config.CachesInMem,
+				CachesLockMmap:   config.CachesLockMmap,
+				DatasetDir:       config.DatasetDir,
+				DatasetsInMem:    config.DatasetsInMem,
+				DatasetsOnDisk:   config.DatasetsOnDisk,
+				DatasetsLockMmap: config.DatasetsLockMmap,
+			}, notify, noverify)
+			engine.SetThreads(-1) // Disable CPU mining
+			eng = engine
+		}
 	}
 
 	return process.NewRemoteEngine(eng, stagedsync.NewChainReader(chainConfig, db))

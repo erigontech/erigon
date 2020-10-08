@@ -73,7 +73,7 @@ func (c *powEngine) Verify(chain consensus.ChainHeaderReader, header *types.Head
 	panic("must not be called")
 }
 
-func (c *powEngine) NeededForVerification(header *types.Header) []common.Hash {
+func (c *powEngine) NeededForVerification(header *types.Header) int {
 	panic("must not be called")
 }
 
