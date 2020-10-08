@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -383,10 +384,12 @@ func (c *remoteCursor) closeGrpcStream() {
 		// try graceful close stream
 		err := c.stream.CloseSend()
 		if err != nil {
-			log.Warn("couldn't send msg CloseSend to server", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Warn("couldn't send msg CloseSend to server", "err", err)
+			}
 		} else {
 			_, err = c.stream.Recv()
-			if err != nil && err != io.EOF {
+			if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
 				log.Warn("received unexpected error from server after CloseSend", "err", err)
 			}
 		}
