@@ -1,4 +1,4 @@
-FROM golang:1.15-alpine as builder
+FROM golang:1.15-alpine3.12 as builder
 
 RUN apk add --no-cache make gcc musl-dev linux-headers git g++
 
@@ -14,7 +14,7 @@ RUN GOZSTD_VER=$(cat go.mod | fgrep github.com/valyala/gozstd | awk '{print $NF}
 ADD . .
 RUN make all
 
-FROM alpine:3
+FROM alpine:3.12
 
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /app/build/bin/* /usr/local/bin/
