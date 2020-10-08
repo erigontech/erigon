@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"math/big"
+
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -14,13 +16,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
-	"math/big"
 )
 
-func getReceipts(ctx context.Context, tx rawdb.DatabaseReader, kv ethdb.KV, number uint64, hash common.Hash, chainConfig *params.ChainConfig) (types.Receipts, error) {
+func getReceipts(ctx context.Context, tx rawdb.DatabaseReader, kv ethdb.KV, number uint64, hash common.Hash) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, hash, number); cached != nil {
 		return cached, nil
 	}
@@ -29,6 +29,7 @@ func getReceipts(ctx context.Context, tx rawdb.DatabaseReader, kv ethdb.KV, numb
 
 	cc := adapter.NewChainContext(tx)
 	bc := adapter.NewBlockGetter(tx)
+	chainConfig := getChainConfig(tx)
 	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, kv, hash, 0)
 	if err != nil {
 		return nil, err
@@ -59,7 +60,7 @@ func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*t
 		return nil, fmt.Errorf("block not found: %x", hash)
 	}
 
-	receipts, err := getReceipts(ctx, api.dbReader, api.db, *number, hash, api.chainConfig)
+	receipts, err := getReceipts(ctx, api.dbReader, api.db, *number, hash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
@@ -108,7 +109,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	blockNumbers := roaring.New()
 	blockNumbers.AddRange(begin, end+1) // [min,max)
 
-	topicsBitmap, err := getTopicsBitmap(tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex).Prefetch(1), crit.Topics, uint32(begin), uint32(end))
+	topicsBitmap, err := getTopicsBitmap(tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex), crit.Topics, uint32(begin), uint32(end))
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +121,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 	}
 
-	logAddrIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex).Prefetch(1)
+	logAddrIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
 	var addrBitmap *roaring.Bitmap
 	for _, addr := range crit.Addresses {
 		m, err := bitmapdb.Get(logAddrIndex, addr[:], uint32(begin), uint32(end))
@@ -151,7 +152,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		if blockHash == (common.Hash{}) {
 			return returnLogs(logs), fmt.Errorf("block not found %d", uint64(blockNToMatch))
 		}
-		receipts, err := getReceipts(ctx, tx, api.db, uint64(blockNToMatch), blockHash, api.chainConfig)
+		receipts, err := getReceipts(ctx, tx, api.db, uint64(blockNToMatch), blockHash)
 		if err != nil {
 			return returnLogs(logs), err
 		}
@@ -211,7 +212,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
 
-	receipts, err := getReceipts(ctx, api.dbReader, api.db, blockNumber, blockHash, api.chainConfig)
+	receipts, err := getReceipts(ctx, api.dbReader, api.db, blockNumber, blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}

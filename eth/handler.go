@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
@@ -102,9 +101,10 @@ type ProtocolManager struct {
 	// Test fields or hooks
 	broadcastTxAnnouncesOnly bool // Testing field, disable transaction propagation
 
-	mode    downloader.SyncMode // Sync mode passed from the command line
-	datadir string
-	hdd     bool
+	mode          downloader.SyncMode // Sync mode passed from the command line
+	datadir       string
+	hdd           bool
+	currentHeight uint64 // Atomic variable to contain chain height
 }
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
@@ -198,9 +198,7 @@ func initPm(manager *ProtocolManager, engine *process.RemoteEngine, chainConfig 
 		return engine.VerifyHeader(blockchain, header, true)
 	}
 	heighter := func() uint64 {
-		headHash := rawdb.ReadHeadHeaderHash(chaindb)
-		headNumber := rawdb.ReadHeaderNumber(chaindb, headHash)
-		return *headNumber
+		return atomic.LoadUint64(&manager.currentHeight)
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
@@ -413,8 +411,8 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		number  = head.Number.Uint64()
 		td      = pm.blockchain.GetTd(hash, number)
 	)
-
-	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkid.NewID(pm.chainConfig, genesis.Hash(), number), pm.forkFilter); err != nil {
+	forkID := forkid.NewID(pm.blockchain.Config(), pm.blockchain.Genesis().Hash(), pm.blockchain.CurrentHeader().Number.Uint64())
+	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkID, pm.forkFilter); err != nil {
 		p.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}

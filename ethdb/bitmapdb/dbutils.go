@@ -3,6 +3,7 @@ package bitmapdb
 import (
 	"bytes"
 	"encoding/binary"
+
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -75,6 +76,9 @@ func writeBitmapSharded(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error
 	}
 	step := (delta.Maximum() - delta.Minimum()) / shardsAmount
 	step = step / 16
+	if step == 0 {
+		step = 1
+	}
 	shard, tmp := roaring.New(), roaring.New() // shard will write to db, tmp will use to add data to shard
 	for delta.GetCardinality() > 0 {
 		from := uint64(delta.Minimum())

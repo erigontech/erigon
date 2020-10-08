@@ -384,7 +384,7 @@ func (c *remoteCursor) Last() ([]byte, []byte, error) {
 
 func (c *remoteCursor) Close() {
 	if c.stream != nil {
-		c.streamCancelFn() // This will close the stream and free resources
+		c.streamCancelFn()
 		c.stream = nil
 		c.streamingRequested = false
 	}

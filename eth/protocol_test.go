@@ -114,7 +114,7 @@ func TestStatusMsgErrors65(t *testing.T) {
 		genesis = pm.blockchain.Genesis()
 		head    = pm.blockchain.CurrentHeader()
 		td      = pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
-		forkID  = forkid.NewID(pm.blockchain.Config(), genesis.Hash(), head.Number.Uint64())
+		forkID  = forkid.NewID(pm.blockchain.Config(), pm.blockchain.Genesis().Hash(), pm.blockchain.CurrentHeader().Number.Uint64())
 	)
 
 	tests := []struct {
