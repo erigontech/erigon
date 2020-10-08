@@ -385,7 +385,9 @@ func (api *SignerAPI) startUSBListener() {
 // List returns the set of wallet this signer manages. Each wallet can contain
 // multiple accounts.
 func (api *SignerAPI) List(ctx context.Context) ([]common.Address, error) {
-	var accs []accounts.Account
+	var accs = make([]accounts.Account, 0)
+	// accs is initialized as empty list, not nil. We use 'nil' to signal
+	// rejection, as opposed to an empty list.
 	for _, wallet := range api.am.Wallets() {
 		accs = append(accs, wallet.Accounts()...)
 	}
@@ -395,13 +397,11 @@ func (api *SignerAPI) List(ctx context.Context) ([]common.Address, error) {
 	}
 	if result.Accounts == nil {
 		return nil, ErrRequestDenied
-
 	}
 	addresses := make([]common.Address, 0)
 	for _, acc := range result.Accounts {
 		addresses = append(addresses, acc.Address)
 	}
-
 	return addresses, nil
 }
 
