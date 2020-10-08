@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-const MaxTxTTL = 10 * 30 * time.Second
+const MaxTxTTL = 30 * time.Second
 
 type KvServer struct {
 	remote.UnstableKVService // must be embedded to have forward compatible implementations.
