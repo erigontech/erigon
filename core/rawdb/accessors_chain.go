@@ -441,7 +441,7 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 	}
 
 	receipts := types.Receipts{}
-	err := cbor.Unmarshal(&receipts, data)
+	err = cbor.Unmarshal(&receipts, data)
 	if err != nil {
 		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
 		return nil
