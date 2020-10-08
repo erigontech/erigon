@@ -2,6 +2,21 @@
 RPCDaemon Code
 ==============
 
+`web3_`
+=======
+
+.. code-block:: go
+
+    func (api *Web3APIImpl) ClientVersion(_ context.Context) (string, error)
+
+ClientVersion returns the node name
+
+.. code-block:: go
+
+    func (api *Web3APIImpl) Sha3(_ context.Context, input hexutil.Bytes) hexutil.Bytes
+
+Sha3 applies the ethereum sha3 implementation on the input.
+
 `eth_`
 ======
 

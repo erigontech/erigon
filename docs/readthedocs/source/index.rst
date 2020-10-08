@@ -11,7 +11,7 @@ Welcome to Turbo Geth's documentation!
 
    installation
    types
-   rpcdaemon
+   rpc/index
 
 Indices and tables
 ==================
