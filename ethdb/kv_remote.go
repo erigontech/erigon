@@ -374,8 +374,13 @@ func (c *remoteCursor) closeGrpcStream() {
 	}
 	defer c.streamCancelFn() // hard cancel stream if graceful wasn't successful
 
-	// try graceful close cursor
 	if c.streamingRequested {
+		// if streaming is in progress, can't use `CloseSend` - because
+		// server will not read it right not - it busy with streaming data
+		// TODO: set flag 'c.streamingRequested' to false when got terminator from server (nil key or os.EOF)
+		c.streamCancelFn()
+	} else {
+		// try graceful close stream
 		err := c.stream.CloseSend()
 		if err != nil {
 			log.Warn("couldn't send msg CloseSend to server", "err", err)
@@ -385,9 +390,6 @@ func (c *remoteCursor) closeGrpcStream() {
 				log.Warn("received unexpected error from server after CloseSend", "err", err)
 			}
 		}
-	} else {
-		_ = c.stream.CloseSend()
-		c.streamCancelFn()
 	}
 	c.stream = nil
 	c.streamingRequested = false
