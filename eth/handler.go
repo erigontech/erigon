@@ -105,8 +105,6 @@ type ProtocolManager struct {
 	datadir       string
 	hdd           bool
 	currentHeight uint64 // Atomic variable to contain chain height
-
-	compressionDicts *dbutils.CompressionDicts
 }
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable

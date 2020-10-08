@@ -432,7 +432,6 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 	}
 
 	if debug.IsReceiptsCompressionEnabled() {
-		var err error
 		data, err = gozstd.DecompressDict(nil, data, dbutils.CompressionDicts.DReceipts)
 		if err != nil {
 			log.Error("receipt uncompress failed", "hash", hash, "err", err)
