@@ -67,7 +67,11 @@ func ReadTransaction(db DatabaseReader, hash common.Hash) (*types.Transaction, c
 	if blockNumber == nil {
 		return nil, common.Hash{}, 0, 0
 	}
-	blockHash := ReadCanonicalHash(db, *blockNumber)
+	blockHash, err := ReadCanonicalHash(db, *blockNumber)
+	if err != nil {
+		log.Error("ReadCanonicalHash failed", "err", err)
+		return nil, common.Hash{}, 0, 0
+	}
 	if blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0
 	}
@@ -93,7 +97,11 @@ func ReadReceipt(db DatabaseReader, hash common.Hash) (*types.Receipt, common.Ha
 	if blockNumber == nil {
 		return nil, common.Hash{}, 0, 0
 	}
-	blockHash := ReadCanonicalHash(db, *blockNumber)
+	blockHash, err := ReadCanonicalHash(db, *blockNumber)
+	if err != nil {
+		log.Error("ReadCanonicalHash failed", "err", err)
+		return nil, common.Hash{}, 0, 0
+	}
 	if blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0
 	}

@@ -44,7 +44,11 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader rawdb.Database
 		}
 		blockNumber = block.NumberU64()
 
-		if blockNrOrHash.RequireCanonical && rawdb.ReadCanonicalHash(dbReader, blockNumber) != hash {
+		ch, err := rawdb.ReadCanonicalHash(dbReader, blockNumber)
+		if err != nil {
+			return 0, common.Hash{}, err
+		}
+		if blockNrOrHash.RequireCanonical && ch != hash {
 			return 0, common.Hash{}, fmt.Errorf("hash %q is not currently canonical", hash.String())
 		}
 	}
@@ -58,7 +62,7 @@ func GetAccount(chainKV ethdb.KV, blockNumber uint64, address common.Address) (*
 
 func GetHashByNumber(blockNumber uint64, requireCanonical bool, dbReader rawdb.DatabaseReader) (common.Hash, error) {
 	if requireCanonical {
-		return rawdb.ReadCanonicalHash(dbReader, blockNumber), nil
+		return rawdb.ReadCanonicalHash(dbReader, blockNumber)
 	}
 
 	block := rawdb.ReadBlockByNumber(dbReader, blockNumber)

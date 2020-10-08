@@ -92,7 +92,10 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		return state.IteratorDump{}, err
 	}
 
-	hash := rawdb.ReadCanonicalHash(api.dbReader, blockNumber)
+	hash, err := rawdb.ReadCanonicalHash(api.dbReader, blockNumber)
+	if err != nil {
+		return state.IteratorDump{}, err
+	}
 	if hash != (common.Hash{}) {
 		header := rawdb.ReadHeader(api.dbReader, hash, blockNumber)
 		if header != nil {
