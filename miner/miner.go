@@ -140,7 +140,8 @@ func (miner *Miner) Stop() {
 }
 
 func (miner *Miner) Close() {
-	close(miner.exitCh)
+	common.SafeClose(miner.exitCh)
+	miner.engine.Close()
 }
 
 func (miner *Miner) Mining() bool {

@@ -23,10 +23,12 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -74,6 +76,7 @@ func (bc *testBlockChain) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent)
 func TestMiner(t *testing.T) {
 	t.Skip("skipped for turbo-geth")
 	miner, mux := createMiner(t)
+	defer miner.Close()
 	miner.Start(common.HexToAddress("0x12345"))
 	waitForMiningState(t, miner, true)
 	// Start the downloader
@@ -93,6 +96,7 @@ func TestMiner(t *testing.T) {
 func TestStartWhileDownload(t *testing.T) {
 	t.Skip("skipped for turbo-geth")
 	miner, mux := createMiner(t)
+	defer miner.Close()
 	waitForMiningState(t, miner, false)
 	miner.Start(common.HexToAddress("0x12345"))
 	waitForMiningState(t, miner, true)
@@ -107,6 +111,7 @@ func TestStartWhileDownload(t *testing.T) {
 func TestStartStopMiner(t *testing.T) {
 	t.Skip("skipped for turbo-geth")
 	miner, _ := createMiner(t)
+	defer miner.Close()
 	waitForMiningState(t, miner, false)
 	miner.Start(common.HexToAddress("0x12345"))
 	waitForMiningState(t, miner, true)
@@ -167,8 +172,11 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux) {
 	if err != nil {
 		t.Fatalf("can't create new chain %v", err)
 	}
-	pool := core.NewTxPool(testTxPoolConfig, params.TestChainConfig, ethdb.NewMemDatabase(), nil)
+	db := ethdb.NewMemDatabase()
+	pool := core.NewTxPool(testTxPoolConfig, params.TestChainConfig, db, nil)
 	backend := NewMockBackend(bc, pool)
 	// Create Miner
-	return New(backend, &config, chainConfig, mux, engine, isLocalBlock), mux
+
+	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(chainConfig, db))
+	return New(backend, &config, chainConfig, mux, eng, isLocalBlock), mux
 }
