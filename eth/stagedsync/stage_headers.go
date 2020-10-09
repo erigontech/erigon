@@ -226,11 +226,15 @@ Error: %v
 		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 		forkBlockNumber = forkHeader.Number.Uint64() - 1
 		forkHash := forkHeader.ParentHash
-		ch, err := rawdb.ReadCanonicalHash(batch, forkBlockNumber)
-		if err != nil {
-			return false, 0, err
-		}
-		for forkHash != ch {
+		for {
+			ch, err := rawdb.ReadCanonicalHash(batch, forkBlockNumber)
+			if err != nil {
+				return false, 0, err
+			}
+			if forkHash == ch {
+				break
+			}
+
 			rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber)
 			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)
 			forkBlockNumber = forkHeader.Number.Uint64() - 1
