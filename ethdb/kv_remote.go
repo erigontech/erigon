@@ -317,9 +317,7 @@ func (c *remoteCursor) First() ([]byte, []byte, error) {
 // Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
-	if c.streamingRequested {
-		c.closeGrpcStream()
-	}
+	c.closeGrpcStream()
 	c.initialized = true
 
 	var err error
@@ -434,9 +432,7 @@ func (c *remoteCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, 
 }
 
 func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
-	if c.streamingRequested {
-		c.closeGrpcStream() // TODO: if streaming not requested then no reason to close
-	}
+	c.closeGrpcStream() // TODO: if streaming not requested then no reason to close
 	c.initialized = true
 
 	var err error
