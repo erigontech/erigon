@@ -1,6 +1,6 @@
 {
 	"info": {
-		"_postman_id": "6aadf58e-7800-4ba8-93d9-bcfe967e5dc3",
+		"_postman_id": "99d122e3-9071-447d-b7ed-3e2924572610",
 		"name": "RPC_Testing",
 		"description": "A collection holding all the Ethereum JSON RPC API calls",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -15,13 +15,13 @@
 						{
 							"listen": "test",
 							"script": {
-								"id": "39ea8793-d388-499d-ae38-3b8edbde0bb9",
+								"id": "6ff5e736-ed50-44ff-8bba-57e660afb969",
 								"exec": [
-									"pm.test('Sucess!', function() {",
+									"pm.test('Sucess', function() {",
 									"    pm.response.to.have.status(200);",
 									"})",
 									"",
-									"pm.test('Has response!', function() {",
+									"pm.test('Has response', function() {",
 									"    const jsonData = pm.response.json();",
 									"    pm.expect(!jsonData != null)",
 									"})",
@@ -96,7 +96,7 @@
 								}
 							],
 							"cookie": [],
-							"body": "{\n    \"jsonrpc\": \"2.0\",\n    \"result\": \"Parity-Ethereum//v2.6.7-beta-b463487-20191231/x86_64-linux-gnu/rustc1.40.0\",\n    \"id\": 1\n}"
+							"body": "{\n    \"jsonrpc\": \"2.0\",\n    \"result\": \"TurboGeth/version-git_commit/os/go_version\",\n    \"id\": 1\n}"
 						}
 					]
 				},
@@ -106,16 +106,36 @@
 						{
 							"listen": "test",
 							"script": {
-								"id": "c28cc589-b348-43fe-81aa-e1ceb69cb972",
+								"id": "a3e5ae04-9584-4fb0-8ca9-02fe7e52b395",
 								"exec": [
-									"pm.test('Sucess!', function() {",
+									"pm.test('Sucess', function() {",
 									"    pm.response.to.have.status(200);",
 									"})",
 									"",
-									"pm.test('Has correct result!', function() {",
+									"pm.test('Has response', function() {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(!jsonData != null)",
+									"})",
+									"",
+									"pm.test('No error', function() {",
+									"    const jsonData = pm.response.json();",
+									"    jsonData.errors == null || pm.expect(jsonData.errors).to.be.empty;",
+									"})",
+									"",
+									"pm.test('Has correct result', function() {",
 									"    const jsonData = pm.response.json();",
 									"    pm.expect(jsonData.result == \"0x47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad\")",
 									"})"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"id": "8c1d4d07-f48d-490b-a239-5122adcdbae4",
+								"exec": [
+									""
 								],
 								"type": "text/javascript"
 							}
@@ -150,31 +170,22 @@
 			"name": "net",
 			"item": [
 				{
-					"name": "version",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"net_version\",\n\t\"params\":[],\n\t\"id\":67\n}"
-						},
-						"url": {
-							"raw": "{{HOST}}",
-							"host": [
-								"{{HOST}}"
-							]
-						},
-						"description": "Returns the current network id.\r\n\r\n**Parameters**\r\n\r\nnone\r\n\r\n**Returns**\r\n\r\n`String` - The current network id.\r\n\r\n`\"1\"`: Ethereum Mainnet\r\n\r\n`\"2\"`: Morden Testnet (deprecated)\r\n\r\n`\"3\"`: Ropsten Testnet\r\n\r\n`\"4\"`: Rinkeby Testnet\r\n\r\n`\"42\"`: Kovan Testnet"
-					},
-					"response": []
-				},
-				{
 					"name": "listening",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "7e4ba149-9d71-4523-83a8-b85aed6a9759",
+								"exec": [
+									"pm.test('Sucess', function() {",
+									"    pm.response.to.have.status(200);",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "POST",
 						"header": [
@@ -199,6 +210,20 @@
 				},
 				{
 					"name": "peerCount",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "0b4b774f-2e36-48ae-9d48-8eeecbe675d5",
+								"exec": [
+									"pm.test('Sucess', function() {",
+									"    pm.response.to.have.status(200);",
+									"})"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "POST",
 						"header": [
@@ -218,6 +243,44 @@
 							]
 						},
 						"description": "Returns number of peers currently connected to the client.\r\n\r\n**Parameters**\r\n\r\nnone\r\n\r\n**Returns**\r\n\r\n`QUANTITY` - integer of the number of connected peers."
+					},
+					"response": []
+				},
+				{
+					"name": "version",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "3d2ec3f8-4a95-407e-a780-d46eafb21a31",
+								"exec": [
+									"pm.test('Sucess', function() {",
+									"    pm.response.to.have.status(200);",
+									"})"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"net_version\",\n\t\"params\":[],\n\t\"id\":67\n}"
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						},
+						"description": "Returns the current network id.\r\n\r\n**Parameters**\r\n\r\nnone\r\n\r\n**Returns**\r\n\r\n`String` - The current network id.\r\n\r\n`\"1\"`: Ethereum Mainnet\r\n\r\n`\"2\"`: Morden Testnet (deprecated)\r\n\r\n`\"3\"`: Ropsten Testnet\r\n\r\n`\"4\"`: Rinkeby Testnet\r\n\r\n`\"42\"`: Kovan Testnet"
 					},
 					"response": []
 				}
@@ -1103,10 +1166,29 @@
 			"name": "depreciated",
 			"item": [
 				{
-					"name": "eth_",
+					"name": "eth",
 					"item": [
 						{
 							"name": "getCompilers",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "24d46eee-7f5c-4b0e-91e1-7114462a54de",
+										"exec": [
+											"pm.test('Sucess!', function() {",
+											"    pm.response.to.have.status(200);",
+											"})",
+											"",
+											"pm.test('Is depreciated', function(){",
+											"    const jsonData = pm.response.json();",
+											"    console.log(jsonData)",
+											"})"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1131,6 +1213,20 @@
 						},
 						{
 							"name": "compileLLL",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "2f7709e6-59c3-4abd-a1e6-41ff2e4118f3",
+										"exec": [
+											"pm.test('Sucess!', function() {",
+											"    pm.response.to.have.status(200);",
+											"})"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1155,6 +1251,20 @@
 						},
 						{
 							"name": "compileSolidity",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "2708d7ed-f68d-4a9d-9f15-fed960eb687e",
+										"exec": [
+											"pm.test('Sucess!', function() {",
+											"    pm.response.to.have.status(200);",
+											"})"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1179,6 +1289,20 @@
 						},
 						{
 							"name": "compileSerpent",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "3d40cb36-cc23-49fa-b455-0a4c1643f71c",
+										"exec": [
+											"pm.test('Sucess!', function() {",
+											"    pm.response.to.have.status(200);",
+											"})"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1210,6 +1334,20 @@
 					"item": [
 						{
 							"name": "putString",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "f8b0cc2c-44ba-408f-b96e-554725d37bba",
+										"exec": [
+											"pm.test('Sucess!', function() {",
+											"    pm.response.to.have.status(200);",
+											"})"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1234,6 +1372,20 @@
 						},
 						{
 							"name": "getString",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "6ae52cd7-14b0-4071-865b-fddf43778787",
+										"exec": [
+											"pm.test('Sucess!', function() {",
+											"    pm.response.to.have.status(200);",
+											"})"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1258,6 +1410,20 @@
 						},
 						{
 							"name": "putHex",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "f327fef2-e9da-4331-a2b1-d06fe71b062f",
+										"exec": [
+											"pm.test('Sucess!', function() {",
+											"    pm.response.to.have.status(200);",
+											"})"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1282,6 +1448,20 @@
 						},
 						{
 							"name": "getHex",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "904b8a53-5bc8-476f-a66a-ad40779a51d8",
+										"exec": [
+											"pm.test('Sucess!', function() {",
+											"    pm.response.to.have.status(200);",
+											"})"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1313,6 +1493,32 @@
 					"item": [
 						{
 							"name": "post",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "ae01f1f2-7836-4cf9-ab69-256b6798e628",
+										"exec": [
+											"pm.test('Sucess', function() {",
+											"    pm.response.to.have.status(200);",
+											"})",
+											"",
+											"pm.test('Is depreciated', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var method = \"shh_post\";",
+											"    var errorMsgs = {",
+											"        \"{{NETHERMIND}}\": \"Method \" + method + \" is not supported\",",
+											"        \"{{TURBOGETH}}\": \"the function \" + method + \" has been depreciated\",",
+											"        \"{{PARITY}}\": \"Method not found\",",
+											"    }",
+											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get(\"HOST\")])",
+											"})",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1337,6 +1543,32 @@
 						},
 						{
 							"name": "version",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "f6e0bf07-81e9-4093-a89f-74dad0d58f89",
+										"exec": [
+											"pm.test('Sucess', function() {",
+											"    pm.response.to.have.status(200);",
+											"})",
+											"",
+											"pm.test('Is depreciated', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var method = \"shh_version\";",
+											"    var errorMsgs = {",
+											"        \"{{NETHERMIND}}\": \"Method \" + method + \" is not supported\",",
+											"        \"{{TURBOGETH}}\": \"the function \" + method + \" has been depreciated\",",
+											"        \"{{PARITY}}\": \"Method not found\",",
+											"    }",
+											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get(\"HOST\")])",
+											"})",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1361,6 +1593,32 @@
 						},
 						{
 							"name": "newIdentity",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "953b113b-2377-40b2-9598-9eff88263639",
+										"exec": [
+											"pm.test('Sucess', function() {",
+											"    pm.response.to.have.status(200);",
+											"})",
+											"",
+											"pm.test('Is depreciated', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var method = \"shh_newIdentity\";",
+											"    var errorMsgs = {",
+											"        \"{{NETHERMIND}}\": \"Method \" + method + \" is not supported\",",
+											"        \"{{TURBOGETH}}\": \"the function \" + method + \" has been depreciated\",",
+											"        \"{{PARITY}}\": \"Method not found\",",
+											"    }",
+											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get(\"HOST\")])",
+											"})",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1385,6 +1643,32 @@
 						},
 						{
 							"name": "hasIdentity",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "ad72bf99-c8d1-49c1-bf72-918fe107865d",
+										"exec": [
+											"pm.test('Sucess', function() {",
+											"    pm.response.to.have.status(200);",
+											"})",
+											"",
+											"pm.test('Is depreciated', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var method = \"shh_hasIdentity\";",
+											"    var errorMsgs = {",
+											"        \"{{NETHERMIND}}\": \"Method \" + method + \" is not supported\",",
+											"        \"{{TURBOGETH}}\": \"the function \" + method + \" has been depreciated\",",
+											"        \"{{PARITY}}\": \"Method not found\",",
+											"    }",
+											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get(\"HOST\")])",
+											"})",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1409,6 +1693,32 @@
 						},
 						{
 							"name": "newGroup",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "e8bdee05-4c5d-4f04-b811-da0eb505099b",
+										"exec": [
+											"pm.test('Sucess', function() {",
+											"    pm.response.to.have.status(200);",
+											"})",
+											"",
+											"pm.test('Is depreciated', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var method = \"shh_newGroup\";",
+											"    var errorMsgs = {",
+											"        \"{{NETHERMIND}}\": \"Method \" + method + \" is not supported\",",
+											"        \"{{TURBOGETH}}\": \"the function \" + method + \" has been depreciated\",",
+											"        \"{{PARITY}}\": \"Method not found\",",
+											"    }",
+											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get(\"HOST\")])",
+											"})",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1433,6 +1743,32 @@
 						},
 						{
 							"name": "addToGroup",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "20518cee-1680-4000-aed7-590f128d63ae",
+										"exec": [
+											"pm.test('Sucess', function() {",
+											"    pm.response.to.have.status(200);",
+											"})",
+											"",
+											"pm.test('Is depreciated', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var method = \"shh_addToGroup\";",
+											"    var errorMsgs = {",
+											"        \"{{NETHERMIND}}\": \"Method \" + method + \" is not supported\",",
+											"        \"{{TURBOGETH}}\": \"the function \" + method + \" has been depreciated\",",
+											"        \"{{PARITY}}\": \"Method not found\",",
+											"    }",
+											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get(\"HOST\")])",
+											"})",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1457,6 +1793,32 @@
 						},
 						{
 							"name": "newFilter",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "49c81f5d-37a6-41c6-af6b-fad3f6ecc0e7",
+										"exec": [
+											"pm.test('Sucess', function() {",
+											"    pm.response.to.have.status(200);",
+											"})",
+											"",
+											"pm.test('Is depreciated', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var method = \"shh_newFilter\";",
+											"    var errorMsgs = {",
+											"        \"{{NETHERMIND}}\": \"Method \" + method + \" is not supported\",",
+											"        \"{{TURBOGETH}}\": \"the function \" + method + \" has been depreciated\",",
+											"        \"{{PARITY}}\": \"Method not found\",",
+											"    }",
+											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get(\"HOST\")])",
+											"})",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1481,6 +1843,32 @@
 						},
 						{
 							"name": "uninstallFilter",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "523601e8-84d0-4feb-9358-39861e43a13c",
+										"exec": [
+											"pm.test('Sucess', function() {",
+											"    pm.response.to.have.status(200);",
+											"})",
+											"",
+											"pm.test('Is depreciated', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var method = \"shh_uninstallFilter\";",
+											"    var errorMsgs = {",
+											"        \"{{NETHERMIND}}\": \"Method \" + method + \" is not supported\",",
+											"        \"{{TURBOGETH}}\": \"the function \" + method + \" has been depreciated\",",
+											"        \"{{PARITY}}\": \"Method not found\",",
+											"    }",
+											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get(\"HOST\")])",
+											"})",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1505,6 +1893,32 @@
 						},
 						{
 							"name": "getFilterChanges",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "9fa9ac11-7665-4fd4-9416-6847de9a1d6e",
+										"exec": [
+											"pm.test('Sucess', function() {",
+											"    pm.response.to.have.status(200);",
+											"})",
+											"",
+											"pm.test('Is depreciated', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var method = \"shh_getFilterChanges\";",
+											"    var errorMsgs = {",
+											"        \"{{NETHERMIND}}\": \"Method \" + method + \" is not supported\",",
+											"        \"{{TURBOGETH}}\": \"the function \" + method + \" has been depreciated\",",
+											"        \"{{PARITY}}\": \"Method not found\",",
+											"    }",
+											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get(\"HOST\")])",
+											"})",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1529,6 +1943,32 @@
 						},
 						{
 							"name": "getMessages",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "ba324550-ffa6-482a-85f3-6c9ccb27af71",
+										"exec": [
+											"pm.test('Sucess', function() {",
+											"    pm.response.to.have.status(200);",
+											"})",
+											"",
+											"pm.test('Is depreciated', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var method = \"shh_getMessages\";",
+											"    var errorMsgs = {",
+											"        \"{{NETHERMIND}}\": \"Method \" + method + \" is not supported\",",
+											"        \"{{TURBOGETH}}\": \"the function \" + method + \" has been depreciated\",",
+											"        \"{{PARITY}}\": \"Method not found\",",
+											"    }",
+											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get(\"HOST\")])",
+											"})",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1561,7 +2001,7 @@
 				{
 					"listen": "prerequest",
 					"script": {
-						"id": "ccc1577d-a370-41d7-a44b-f36c015fa98a",
+						"id": "8ccd5444-71b4-4b7b-94a0-d8dc3e18196d",
 						"type": "text/javascript",
 						"exec": [
 							""
@@ -1571,7 +2011,7 @@
 				{
 					"listen": "test",
 					"script": {
-						"id": "c9bc9600-2764-474d-aa45-1dc9be949850",
+						"id": "b1352233-ece6-43c7-a145-426bff95df11",
 						"type": "text/javascript",
 						"exec": [
 							""
@@ -1586,7 +2026,7 @@
 		{
 			"listen": "prerequest",
 			"script": {
-				"id": "58bc3422-61ea-4372-8718-1a05529dbbdc",
+				"id": "f0e6da37-b0ae-44f7-b350-2c6022064983",
 				"type": "text/javascript",
 				"exec": [
 					""
@@ -1596,7 +2036,7 @@
 		{
 			"listen": "test",
 			"script": {
-				"id": "66e27850-7517-410e-b19c-a7f9c92a07c7",
+				"id": "e9d547f3-5df3-4795-a293-19ce921f82f3",
 				"type": "text/javascript",
 				"exec": [
 					""
@@ -1606,9 +2046,19 @@
 	],
 	"variable": [
 		{
-			"id": "58f1cf6d-2cf1-4849-99d1-ab6de9d7888d",
+			"id": "5dcf1e2e-52a7-4980-a9ab-401013a8c979",
 			"key": "HOST",
 			"value": "http://localhost:23456"
+		},
+		{
+			"id": "f30a44a0-4c64-42dc-a12c-ba7a6d5c162b",
+			"key": "MESSAGE_IN",
+			"value": "0x68656c6c6f20776f726c64"
+		},
+		{
+			"id": "434d40cc-23bf-4c70-89cb-c1f8aec6b4f4",
+			"key": "MESSAGE_IN",
+			"value": ""
 		}
 	],
 	"protocolProfileBehavior": {}
