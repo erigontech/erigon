@@ -64,8 +64,8 @@ type APIImpl struct {
 	GasCap       uint64
 }
 
-// NewAPI returns APIImpl instance
-func NewAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
+// NewEthAPI returns APIImpl instance
+func NewEthAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
 	return &APIImpl{
 		db:         db,
 		dbReader:   dbReader,

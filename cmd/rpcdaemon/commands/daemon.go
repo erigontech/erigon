@@ -83,15 +83,18 @@ func (api *APIImpl) GetHeaderByHash(_ context.Context, hash common.Hash) (*types
 	return header, nil
 }
 
-func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.API) []rpc.API {
+// APIList describes the list of available RPC apis
+func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
 	dbReader := ethdb.NewObjectDatabase(db)
-	apiImpl := NewAPI(db, dbReader, eth, cfg.Gascap)
+
+	ethImpl := NewEthAPI(db, dbReader, eth, cfg.Gascap)
 	netImpl := NewNetAPIImpl(eth)
-	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader)
-	traceAPIImpl := NewTraceAPI(db, dbReader, &cfg)
+	debugImpl := NewPrivateDebugAPI(db, dbReader)
+	traceImpl := NewTraceAPI(db, dbReader, &cfg)
 	web3Impl := NewWeb3APIImpl()
+	shhImpl := NewSHHAPIImpl()
 
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
@@ -99,14 +102,14 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.
 			defaultAPIList = append(defaultAPIList, rpc.API{
 				Namespace: "eth",
 				Public:    true,
-				Service:   EthAPI(apiImpl),
+				Service:   EthAPI(ethImpl),
 				Version:   "1.0",
 			})
 		case "debug":
 			defaultAPIList = append(defaultAPIList, rpc.API{
 				Namespace: "debug",
 				Public:    true,
-				Service:   PrivateDebugAPI(dbgAPIImpl),
+				Service:   PrivateDebugAPI(debugImpl),
 				Version:   "1.0",
 			})
 		case "net":
@@ -127,11 +130,18 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.
 			defaultAPIList = append(defaultAPIList, rpc.API{
 				Namespace: "trace",
 				Public:    true,
-				Service:   TraceAPI(traceAPIImpl),
+				Service:   TraceAPI(traceImpl),
+				Version:   "1.0",
+			})
+		case "shh":
+			defaultAPIList = append(defaultAPIList, rpc.API{
+				Namespace: "shh",
+				Public:    true,
+				Service:   SHHAPI(shhImpl),
 				Version:   "1.0",
 			})
 		}
 	}
 
-	return append(defaultAPIList, customApiList...)
+	return append(defaultAPIList, customAPIList...)
 }

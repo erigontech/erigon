@@ -22,7 +22,7 @@ Sha3 applies the ethereum sha3 implementation on the input.
 
 .. code-block:: go
 
-    func NewAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl
+    func NewEthAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl
 
 EthAPI is the **eth_** container and contains every json rpc that starts with **eth_**. ApiImpl its just the implementation of EthAPI interface.
 
