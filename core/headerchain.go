@@ -184,7 +184,7 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 			if err != nil {
 				return NonStatTy, err
 			}
-			if h != headHash {
+			if h == headHash {
 				break
 			}
 			rawdb.WriteCanonicalHash(markerBatch, headHash, headNumber)
