@@ -236,8 +236,12 @@ func (s *Kv2Server) Tx(stream remote.KV2_TxServer) error {
 	defer rollback()
 
 	var CursorID uint32
-	cursors := map[uint32]ethdb.Cursor{}
-	cursorPositioins := map[uint32]remote.Pair{}
+	type CursorInfo struct {
+		bucket string
+		c      ethdb.Cursor
+		k, v   []byte //fields to save current position of cursor - used when Tx reopen
+	}
+	cursors := map[uint32]*CursorInfo{}
 
 	txTicker := time.NewTicker(MaxTxTTL)
 	defer txTicker.Stop()
@@ -255,56 +259,80 @@ func (s *Kv2Server) Tx(stream remote.KV2_TxServer) error {
 		//TODO: protect against client - which doesn't send any requests
 		//TODO: save all cursors position cursorPositioins
 		//TODO: reopen all cursors and point to cursorPositioins
-		_ = cursorPositioins
 		select {
 		default:
 		case <-txTicker.C:
+			for _, c := range cursors { // save positions of cursor, will restore after Tx reopening
+				k, v, err := c.c.Current()
+				if err != nil {
+					return err
+				}
+				c.k = common.CopyBytes(k)
+				c.v = common.CopyBytes(v)
+			}
+
 			tx.Rollback()
 			tx, err = s.kv.Begin(stream.Context(), nil, false)
 			if err != nil {
 				return fmt.Errorf("server-side error: %w", err)
 			}
-			//if isDupsort {
-			//	dc := tx.CursorDupSort(bucketName)
-			//	k, v, err = dc.SeekBothRange(k, v)
-			//	if err != nil {
-			//		return fmt.Errorf("server-side error: %w", err)
-			//	}
-			//	if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
-			//		k, v, err = dc.Next()
-			//		if err != nil {
-			//			return fmt.Errorf("server-side error: %w", err)
-			//		}
-			//	}
-			//	c = dc
-			//} else {
-			//	c = tx.Cursor(bucketName).Prefix(prefix)
-			//	k, v, err = c.Seek(k)
-			//	if err != nil {
-			//		return fmt.Errorf("server-side error: %w", err)
-			//	}
-			//}
+
+			for _, c := range cursors { // restore all cursors position
+				c.c = tx.Cursor(c.bucket)
+				switch casted := c.c.(type) {
+				case ethdb.CursorDupFixed:
+					k, _, err := casted.SeekBothRange(c.k, c.v)
+					if err != nil {
+						return fmt.Errorf("server-side error: %w", err)
+					}
+					if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
+						k, _, err = casted.Next()
+						if err != nil {
+							return fmt.Errorf("server-side error: %w", err)
+						}
+					}
+				case ethdb.CursorDupSort:
+					k, _, err := casted.SeekBothRange(c.k, c.v)
+					if err != nil {
+						return fmt.Errorf("server-side error: %w", err)
+					}
+					if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
+						k, _, err = casted.Next()
+						if err != nil {
+							return fmt.Errorf("server-side error: %w", err)
+						}
+					}
+				case ethdb.Cursor:
+					_, _, err = c.c.Seek(c.k)
+					if err != nil {
+						return fmt.Errorf("server-side error: %w", err)
+					}
+				}
+			}
 		}
 
 		var c ethdb.Cursor
 		if in.BucketName == "" {
-			var ok bool
-			c, ok = cursors[in.Cursor]
+			cInfo, ok := cursors[in.Cursor]
 			if !ok {
 				return fmt.Errorf("server-side error: unknown Cursor=%d", in.Cursor)
 			}
+			c = cInfo.c
 		}
 
 		switch in.Op {
 		case remote.Op_OPEN:
 			CursorID++
-			cursors[CursorID] = tx.Cursor(in.BucketName)
+			cursors[CursorID] = &CursorInfo{
+				c: tx.Cursor(in.BucketName),
+			}
 			if err := stream.Send(&remote.Pair2{CursorID: CursorID}); err != nil {
 				return fmt.Errorf("server-side error: %w", err)
 			}
 			continue
 		case remote.Op_CLOSE:
-			cursors[in.Cursor].Close()
+			cursors[in.Cursor].c.Close()
+			delete(cursors, in.Cursor)
 			if err := stream.Send(&remote.Pair2{}); err != nil {
 				return fmt.Errorf("server-side error: %w", err)
 			}
