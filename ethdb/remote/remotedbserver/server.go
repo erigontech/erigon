@@ -49,32 +49,23 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 	var grpcServer *grpc.Server
-	if creds == nil {
-		grpcServer = grpc.NewServer(
-			grpc.NumStreamWorkers(20),  // reduce amount of goroutines
-			grpc.WriteBufferSize(1024), // reduce buffers to save mem
-			grpc.ReadBufferSize(1024),
-			grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
-			grpc.KeepaliveParams(keepalive.ServerParameters{
-				Time: 10 * time.Minute,
-			}),
-			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
-		)
-	} else {
-		grpcServer = grpc.NewServer(
-			grpc.NumStreamWorkers(20),  // reduce amount of goroutines
-			grpc.WriteBufferSize(1024), // reduce buffers to save mem
-			grpc.ReadBufferSize(1024),
-			grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
-			grpc.KeepaliveParams(keepalive.ServerParameters{
-				Time: 10 * time.Minute,
-			}),
-			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
-			grpc.Creds(*creds),
-		)
+	opts := []grpc.ServerOption{
+		grpc.NumStreamWorkers(20),  // reduce amount of goroutines
+		grpc.WriteBufferSize(1024), // reduce buffers to save mem
+		grpc.ReadBufferSize(1024),
+		grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time: 10 * time.Minute,
+		}),
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
+	if creds == nil {
+		// no specific opts
+	} else {
+		opts = append(opts, grpc.Creds(*creds))
+	}
+	grpcServer = grpc.NewServer(opts...)
 	remote.RegisterKVService(grpcServer, remote.NewKVService(kvSrv))
 	remote.RegisterDBService(grpcServer, remote.NewDBService(dbSrv))
 	remote.RegisterETHBACKENDService(grpcServer, remote.NewETHBACKENDService(ethBackendSrv))
