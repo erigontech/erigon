@@ -186,7 +186,7 @@ func (c *kV2Client) Tx(ctx context.Context, opts ...grpc.CallOption) (KV2_TxClie
 }
 
 type KV2_TxClient interface {
-	Send(*TxReq) error
+	Send(*Cursor) error
 	Recv() (*Pair2, error)
 	grpc.ClientStream
 }
@@ -195,7 +195,7 @@ type kV2TxClient struct {
 	grpc.ClientStream
 }
 
-func (x *kV2TxClient) Send(m *TxReq) error {
+func (x *kV2TxClient) Send(m *Cursor) error {
 	return x.ClientStream.SendMsg(m)
 }
 
@@ -224,7 +224,7 @@ func (s *KV2Service) tx(_ interface{}, stream grpc.ServerStream) error {
 
 type KV2_TxServer interface {
 	Send(*Pair2) error
-	Recv() (*TxReq, error)
+	Recv() (*Cursor, error)
 	grpc.ServerStream
 }
 
@@ -236,8 +236,8 @@ func (x *kV2TxServer) Send(m *Pair2) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func (x *kV2TxServer) Recv() (*TxReq, error) {
-	m := new(TxReq)
+func (x *kV2TxServer) Recv() (*Cursor, error) {
+	m := new(Cursor)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}

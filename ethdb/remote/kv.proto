@@ -17,7 +17,7 @@ service KV {
 }
 
 service KV2 {
-  rpc Tx(stream TxReq) returns (stream Pair2);
+  rpc Tx(stream Cursor) returns (stream Pair2);
 }
 
 message SeekRequest {
@@ -33,33 +33,33 @@ message Pair {
   bytes value = 2;
 }
 
-message TxReq {
-  enum Op {
-    FIRST = 0;
-    FIRST_DUP = 1;
-    SEEK = 2;
-    SEEK_BOTH = 3;
-    CURRENT = 4;
-    MULTIPLE = 5;
-    LAST = 6;
-    LAST_DUP = 7;
-    NEXT = 8;
-    NEXT_DUP = 9;
-    NEXT_MULTIPLE = 10;
-    NEXT_NO_DUP = 11;
-    PREV = 12;
-    PREV_DUP = 13;
-    PREV_NO_DUP = 14;
-    SEEK_EXACT = 15;
-    SEEK_BOTH_EXACT = 16;
+enum Op {
+  FIRST = 0;
+  FIRST_DUP = 1;
+  SEEK = 2;
+  SEEK_BOTH = 3;
+  CURRENT = 4;
+  MULTIPLE = 5;
+  LAST = 6;
+  LAST_DUP = 7;
+  NEXT = 8;
+  NEXT_DUP = 9;
+  NEXT_MULTIPLE = 10;
+  NEXT_NO_DUP = 11;
+  PREV = 12;
+  PREV_DUP = 13;
+  PREV_NO_DUP = 14;
+  SEEK_EXACT = 15;
+  SEEK_BOTH_EXACT = 16;
 
-    OPEN = 30;
-    CLOSE = 31;
-  }
+  OPEN = 30;
+  CLOSE = 31;
+}
 
+message Cursor {
   Op op = 1;
   string bucketName = 2;
-  uint32 cursorID = 3;
+  uint32 cursor = 3;
   bytes k = 4;
   bytes v = 5;
 }
