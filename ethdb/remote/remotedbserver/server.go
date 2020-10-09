@@ -50,8 +50,8 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 	var grpcServer *grpc.Server
 	opts := []grpc.ServerOption{
-		grpc.NumStreamWorkers(1024), // reduce amount of goroutines
-		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
+		grpc.NumStreamWorkers(30),  // reduce amount of goroutines
+		grpc.WriteBufferSize(1024), // reduce buffers to save mem
 		grpc.ReadBufferSize(1024),
 		grpc.MaxConcurrentStreams(60), // to force clients reduce concurrency level
 		grpc.KeepaliveParams(keepalive.ServerParameters{
