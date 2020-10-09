@@ -154,3 +154,133 @@ type UnstableKVService interface {
 	// no full consistency guarantee - server implementation can close/open underlying db transaction at any time
 	Seek(KV_SeekServer) error
 }
+
+// KV2Client is the client API for KV2 service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type KV2Client interface {
+	Tx(ctx context.Context, opts ...grpc.CallOption) (KV2_TxClient, error)
+}
+
+type kV2Client struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewKV2Client(cc grpc.ClientConnInterface) KV2Client {
+	return &kV2Client{cc}
+}
+
+var kV2TxStreamDesc = &grpc.StreamDesc{
+	StreamName:    "Tx",
+	ServerStreams: true,
+	ClientStreams: true,
+}
+
+func (c *kV2Client) Tx(ctx context.Context, opts ...grpc.CallOption) (KV2_TxClient, error) {
+	stream, err := c.cc.NewStream(ctx, kV2TxStreamDesc, "/remote.KV2/Tx", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &kV2TxClient{stream}
+	return x, nil
+}
+
+type KV2_TxClient interface {
+	Send(*TxReq) error
+	Recv() (*Pair2, error)
+	grpc.ClientStream
+}
+
+type kV2TxClient struct {
+	grpc.ClientStream
+}
+
+func (x *kV2TxClient) Send(m *TxReq) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *kV2TxClient) Recv() (*Pair2, error) {
+	m := new(Pair2)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// KV2Service is the service API for KV2 service.
+// Fields should be assigned to their respective handler implementations only before
+// RegisterKV2Service is called.  Any unassigned fields will result in the
+// handler for that method returning an Unimplemented error.
+type KV2Service struct {
+	Tx func(KV2_TxServer) error
+}
+
+func (s *KV2Service) tx(_ interface{}, stream grpc.ServerStream) error {
+	if s.Tx == nil {
+		return status.Errorf(codes.Unimplemented, "method Tx not implemented")
+	}
+	return s.Tx(&kV2TxServer{stream})
+}
+
+type KV2_TxServer interface {
+	Send(*Pair2) error
+	Recv() (*TxReq, error)
+	grpc.ServerStream
+}
+
+type kV2TxServer struct {
+	grpc.ServerStream
+}
+
+func (x *kV2TxServer) Send(m *Pair2) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *kV2TxServer) Recv() (*TxReq, error) {
+	m := new(TxReq)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// RegisterKV2Service registers a service implementation with a gRPC server.
+func RegisterKV2Service(s grpc.ServiceRegistrar, srv *KV2Service) {
+	sd := grpc.ServiceDesc{
+		ServiceName: "remote.KV2",
+		Methods:     []grpc.MethodDesc{},
+		Streams: []grpc.StreamDesc{
+			{
+				StreamName:    "Tx",
+				Handler:       srv.tx,
+				ServerStreams: true,
+				ClientStreams: true,
+			},
+		},
+		Metadata: "remote/kv.proto",
+	}
+
+	s.RegisterService(&sd, nil)
+}
+
+// NewKV2Service creates a new KV2Service containing the
+// implemented methods of the KV2 service in s.  Any unimplemented
+// methods will result in the gRPC server returning an UNIMPLEMENTED status to the client.
+// This includes situations where the method handler is misspelled or has the wrong
+// signature.  For this reason, this function should be used with great care and
+// is not recommended to be used by most users.
+func NewKV2Service(s interface{}) *KV2Service {
+	ns := &KV2Service{}
+	if h, ok := s.(interface{ Tx(KV2_TxServer) error }); ok {
+		ns.Tx = h.Tx
+	}
+	return ns
+}
+
+// UnstableKV2Service is the service API for KV2 service.
+// New methods may be added to this interface if they are added to the service
+// definition, which is not a backward-compatible change.  For this reason,
+// use of this type is not recommended.
+type UnstableKV2Service interface {
+	Tx(KV2_TxServer) error
+}

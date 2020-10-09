@@ -28,6 +28,12 @@ type KvServer struct {
 	kv ethdb.KV
 }
 
+type Kv2Server struct {
+	remote.UnstableKV2Service // must be embedded to have forward compatible implementations.
+
+	kv ethdb.KV
+}
+
 func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
@@ -211,4 +217,199 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 			}
 		}
 	}
+}
+
+func NewKv2Server(kv ethdb.KV) *Kv2Server {
+	return &Kv2Server{kv: kv}
+}
+
+func (s *Kv2Server) Tx(stream remote.KV2_TxServer) error {
+	tx, errBegin := s.kv.Begin(stream.Context(), nil, false)
+	if errBegin != nil {
+		return fmt.Errorf("server-side error: %w", errBegin)
+	}
+	rollback := func() {
+		tx.Rollback()
+	}
+	defer rollback()
+
+	var cursorID uint32 = 1
+	cursors := map[uint32]ethdb.Cursor{}
+	cursorPositioins := map[uint32]*remote.Pair{}
+
+	txTicker := time.NewTicker(MaxTxTTL)
+	defer txTicker.Stop()
+
+	// send all items to client, if k==nil - still send it to client and break loop
+	for {
+		in, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF { // termination
+				return nil
+			}
+			return fmt.Errorf("server-side error: %w", err)
+		}
+
+		//TODO: protect against client - which doesn't send any requests
+		//TODO: save all cursors position cursorPositioins
+		//TODO: reopen all cursors and point to cursorPositioins
+		_ = cursorPositioins
+		select {
+		default:
+		case <-txTicker.C:
+			tx.Rollback()
+			tx, err = s.kv.Begin(stream.Context(), nil, false)
+			if err != nil {
+				return fmt.Errorf("server-side error: %w", err)
+			}
+			//if isDupsort {
+			//	dc := tx.CursorDupSort(bucketName)
+			//	k, v, err = dc.SeekBothRange(k, v)
+			//	if err != nil {
+			//		return fmt.Errorf("server-side error: %w", err)
+			//	}
+			//	if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
+			//		k, v, err = dc.Next()
+			//		if err != nil {
+			//			return fmt.Errorf("server-side error: %w", err)
+			//		}
+			//	}
+			//	c = dc
+			//} else {
+			//	c = tx.Cursor(bucketName).Prefix(prefix)
+			//	k, v, err = c.Seek(k)
+			//	if err != nil {
+			//		return fmt.Errorf("server-side error: %w", err)
+			//	}
+			//}
+		}
+
+		var c ethdb.Cursor
+		if in.BucketName == "" {
+			var ok bool
+			c, ok = cursors[in.CursorID]
+			if !ok {
+				return fmt.Errorf("server-side error: unknown cursorID=%d", in.CursorID)
+			}
+		}
+
+		switch in.Op {
+		case remote.TxReq_OPEN:
+			cursors[cursorID] = tx.Cursor(in.BucketName)
+			cursorID++
+			if err := stream.Send(&remote.Pair2{CursorID: cursorID}); err != nil {
+				return fmt.Errorf("server-side error: %w", err)
+			}
+		case remote.TxReq_CLOSE:
+			cursors[in.CursorID].Close()
+			if err := stream.Send(&remote.Pair2{}); err != nil {
+				return fmt.Errorf("server-side error: %w", err)
+			}
+		default:
+		}
+
+		if err := handleOp(c, stream, in); err != nil {
+			return fmt.Errorf("server-side error: %w", err)
+		}
+	}
+}
+
+func handleOp(c ethdb.Cursor, stream remote.KV2_TxServer, in *remote.TxReq) error {
+	var k, v []byte
+	var err error
+	switch in.Op {
+	case remote.TxReq_FIRST:
+		k, v, err = c.First()
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_FIRST_DUP:
+		v, err = c.(ethdb.CursorDupSort).FirstDup()
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_SEEK:
+		k, v, err = c.Seek(in.K)
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_SEEK_BOTH:
+		k, v, err = c.(ethdb.CursorDupSort).SeekBothRange(in.K, in.V)
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_CURRENT:
+		k, v, err = c.Current()
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_MULTIPLE:
+		v, err = c.(ethdb.CursorDupFixed).GetMulti()
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_LAST:
+		k, v, err = c.Last()
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_LAST_DUP:
+		v, err = c.(ethdb.CursorDupSort).LastDup(in.K)
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_NEXT:
+		k, v, err = c.Next()
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_NEXT_DUP:
+		k, v, err = c.(ethdb.CursorDupSort).NextDup()
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_NEXT_MULTIPLE:
+		k, v, err = c.(ethdb.CursorDupFixed).NextMulti()
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_NEXT_NO_DUP:
+		k, v, err = c.(ethdb.CursorDupSort).NextNoDup()
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_PREV:
+		k, v, err = c.Prev()
+		if err != nil {
+			return err
+		}
+	//case remote.TxReq_PREV_DUP:
+	//	k, v, err = c.(ethdb.CursorDupSort).Prev()
+	//	if err != nil {
+	//		return err
+	//	}
+	//case remote.TxReq_PREV_NO_DUP:
+	//	k, v, err = c.Prev()
+	//	if err != nil {
+	//		return err
+	//	}
+	case remote.TxReq_SEEK_EXACT:
+		v, err = c.SeekExact(in.K)
+		if err != nil {
+			return err
+		}
+	case remote.TxReq_SEEK_BOTH_EXACT:
+		k, v, err = c.(ethdb.CursorDupSort).SeekBothExact(in.K, in.V)
+		if err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown operation: %s", in.Op)
+	}
+
+	if err := stream.Send(&remote.Pair2{K: common.CopyBytes(k), V: common.CopyBytes(v)}); err != nil {
+		return err
+	}
+
+	return nil
 }
