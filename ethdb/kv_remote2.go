@@ -550,13 +550,8 @@ func (tx *remote2Tx) closeGrpcStream() {
 
 func (c *remote2Cursor) Close() {
 	if c.initialized {
-		if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_CLOSE}); err != nil {
-			//return err
-		} else {
-			_, err := c.stream.Recv()
-			if err != nil {
-				//return err
-			}
+		if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_CLOSE}); err == nil {
+			_, _ = c.stream.Recv()
 		}
 		c.initialized = false
 	}

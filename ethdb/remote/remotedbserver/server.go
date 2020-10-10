@@ -251,17 +251,15 @@ func (s *Kv2Server) Tx(stream remote.KV2_TxServer) error {
 
 	// send all items to client, if k==nil - still send it to client and break loop
 	for {
-		in, err := stream.Recv()
-		if err != nil {
-			if err == io.EOF { // termination
+		in, recvErr := stream.Recv()
+		if recvErr != nil {
+			if recvErr == io.EOF { // termination
 				return nil
 			}
-			return fmt.Errorf("server-side error: %w", err)
+			return fmt.Errorf("server-side error: %w", recvErr)
 		}
 
 		//TODO: protect against client - which doesn't send any requests
-		//TODO: save all cursors position cursorPositioins
-		//TODO: reopen all cursors and point to cursorPositioins
 		select {
 		default:
 		case <-txTicker.C:
@@ -275,9 +273,9 @@ func (s *Kv2Server) Tx(stream remote.KV2_TxServer) error {
 			}
 
 			tx.Rollback()
-			tx, err = s.kv.Begin(stream.Context(), nil, false)
-			if err != nil {
-				return fmt.Errorf("server-side error: %w", err)
+			tx, errBegin = s.kv.Begin(stream.Context(), nil, false)
+			if errBegin != nil {
+				return fmt.Errorf("server-side error: %w", errBegin)
 			}
 
 			for _, c := range cursors { // restore all cursors position
@@ -289,7 +287,7 @@ func (s *Kv2Server) Tx(stream remote.KV2_TxServer) error {
 						return fmt.Errorf("server-side error: %w", err)
 					}
 					if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
-						k, _, err = casted.Next()
+						_, _, err = casted.Next()
 						if err != nil {
 							return fmt.Errorf("server-side error: %w", err)
 						}
@@ -300,13 +298,13 @@ func (s *Kv2Server) Tx(stream remote.KV2_TxServer) error {
 						return fmt.Errorf("server-side error: %w", err)
 					}
 					if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
-						k, _, err = casted.Next()
+						_, _, err = casted.Next()
 						if err != nil {
 							return fmt.Errorf("server-side error: %w", err)
 						}
 					}
 				case ethdb.Cursor:
-					_, _, err = c.c.Seek(c.k)
+					_, _, err := c.c.Seek(c.k)
 					if err != nil {
 						return fmt.Errorf("server-side error: %w", err)
 					}
@@ -318,7 +316,7 @@ func (s *Kv2Server) Tx(stream remote.KV2_TxServer) error {
 		if in.BucketName == "" {
 			cInfo, ok := cursors[in.Cursor]
 			if !ok {
-				return fmt.Errorf("server-side error: unknown Cursor=%d, Op=%s", in.Op)
+				return fmt.Errorf("server-side error: unknown Cursor=%d, Op=%s", in.Cursor, in.Op)
 			}
 			c = cInfo.c
 		}
