@@ -39,7 +39,7 @@ enum Op {
   SEEK = 2;
   SEEK_BOTH = 3;
   CURRENT = 4;
-  MULTIPLE = 5;
+  GET_MULTIPLE = 5;
   LAST = 6;
   LAST_DUP = 7;
   NEXT = 8;

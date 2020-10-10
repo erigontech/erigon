@@ -361,7 +361,7 @@ func handleOp(c ethdb.Cursor, stream remote.KV2_TxServer, in *remote.Cursor) err
 		k, v, err = c.(ethdb.CursorDupSort).SeekBothRange(in.K, in.V)
 	case remote.Op_CURRENT:
 		k, v, err = c.Current()
-	case remote.Op_MULTIPLE:
+	case remote.Op_GET_MULTIPLE:
 		v, err = c.(ethdb.CursorDupFixed).GetMulti()
 	case remote.Op_LAST:
 		k, v, err = c.Last()
