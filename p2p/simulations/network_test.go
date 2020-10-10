@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
@@ -36,6 +37,9 @@ import (
 // Tests that a created snapshot with a minimal service only contains the expected connections
 // and that a network when loaded with this snapshot only contains those same connections
 func TestSnapshot(t *testing.T) {
+	if _, err := fdlimit.Raise(2048); err != nil {
+		panic(err)
+	}
 
 	// PART I
 	// create snapshot from ring network

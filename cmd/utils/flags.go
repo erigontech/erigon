@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ethereum/go-ethereum/common/fdlimit"
 	pcsclite "github.com/gballet/go-libpcsclite"
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
@@ -1065,6 +1066,20 @@ func setLes(ctx *cli.Context, cfg *eth.Config) {
 	}
 }
 
+// makeDatabaseHandles raises out the number of allowed file handles per process
+// for Geth and returns half of the allowance to assign to the database.
+func makeDatabaseHandles() int {
+	limit, err := fdlimit.Maximum()
+	if err != nil {
+		Fatalf("Failed to retrieve file descriptor allowance: %v", err)
+	}
+	raised, err := fdlimit.Raise(uint64(limit))
+	if err != nil {
+		Fatalf("Failed to raise file descriptor allowance: %v", err)
+	}
+	return int(raised / 2) // Leave half for networking and other stuff
+}
+
 // MakeAddress converts an account specified directly as a hex encoded string or
 // a key index in the key store to an internal account representation.
 func MakeAddress(ks *keystore.KeyStore, account string) (accounts.Account, error) {
@@ -1545,6 +1560,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheDatabaseFlag.Name) {
 		cfg.DatabaseCache = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheDatabaseFlag.Name) / 100
 	}
+	cfg.DatabaseHandles = makeDatabaseHandles()
 	if ctx.GlobalIsSet(AncientFlag.Name) {
 		cfg.DatabaseFreezer = ctx.GlobalString(AncientFlag.Name)
 	}
