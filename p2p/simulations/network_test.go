@@ -37,7 +37,9 @@ import (
 // Tests that a created snapshot with a minimal service only contains the expected connections
 // and that a network when loaded with this snapshot only contains those same connections
 func TestSnapshot(t *testing.T) {
-	fdlimit.Raise(1024)
+	if _, err := fdlimit.Raise(2048); err != nil {
+		panic(err)
+	}
 
 	// PART I
 	// create snapshot from ring network
