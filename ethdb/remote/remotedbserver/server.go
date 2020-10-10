@@ -1,6 +1,7 @@
 package remotedbserver
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -8,15 +9,15 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 )
 
 const MaxTxTTL = 30 * time.Second
@@ -27,12 +28,11 @@ type KvServer struct {
 	kv ethdb.KV
 }
 
-func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.TransportCredentials) {
+func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Error("Could not create listener", "address", addr, "err", err)
-		return
+		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
 	}
 
 	kvSrv := NewKvServer(kv)
@@ -49,26 +49,22 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 	var grpcServer *grpc.Server
-	if creds == nil {
-		grpcServer = grpc.NewServer(
-			grpc.NumStreamWorkers(20),  // reduce amount of goroutines
-			grpc.WriteBufferSize(1024), // reduce buffers to save mem
-			grpc.ReadBufferSize(1024),
-			grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
-			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
-		)
-	} else {
-		grpcServer = grpc.NewServer(
-			grpc.NumStreamWorkers(20),  // reduce amount of goroutines
-			grpc.WriteBufferSize(1024), // reduce buffers to save mem
-			grpc.ReadBufferSize(1024),
-			grpc.MaxConcurrentStreams(40), // to force clients reduce concurency level
-			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
-			grpc.Creds(*creds),
-		)
+	opts := []grpc.ServerOption{
+		grpc.WriteBufferSize(1024), // reduce buffers to save mem
+		grpc.ReadBufferSize(1024),
+		grpc.MaxConcurrentStreams(60), // to force clients reduce concurrency level
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time: 10 * time.Minute,
+		}),
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
+	if creds == nil {
+		// no specific opts
+	} else {
+		opts = append(opts, grpc.Creds(*creds))
+	}
+	grpcServer = grpc.NewServer(opts...)
 	remote.RegisterKVService(grpcServer, remote.NewKVService(kvSrv))
 	remote.RegisterDBService(grpcServer, remote.NewDBService(dbSrv))
 	remote.RegisterETHBACKENDService(grpcServer, remote.NewETHBACKENDService(ethBackendSrv))
@@ -82,6 +78,8 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 			log.Error("private RPC server fail", "err", err)
 		}
 	}()
+
+	return grpcServer, nil
 }
 
 func NewKvServer(kv ethdb.KV) *KvServer {
@@ -95,7 +93,7 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 	}
 	tx, err := s.kv.Begin(stream.Context(), nil, false)
 	if err != nil {
-		return err
+		return fmt.Errorf("server-side error: %w", err)
 	}
 	rollback := func() {
 		tx.Rollback()
@@ -115,18 +113,18 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 		c = tx.Cursor(bucketName).Prefix(prefix)
 		k, v, err = c.Seek(in.SeekKey)
 		if err != nil {
-			return err
+			return fmt.Errorf("server-side error: %w", err)
 		}
 	} else {
 		cd := tx.CursorDupSort(bucketName)
 		k, v, err = cd.SeekBothRange(in.SeekKey, in.SeekValue)
 		if err != nil {
-			return err
+			return fmt.Errorf("server-side error: %w", err)
 		}
 		if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
 			k, v, err = cd.Next()
 			if err != nil {
-				return err
+				return fmt.Errorf("server-side error: %w", err)
 			}
 		}
 		c = cd
@@ -136,7 +134,7 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 	for {
 		err = stream.Send(&remote.Pair{Key: common.CopyBytes(k), Value: common.CopyBytes(v)})
 		if err != nil {
-			return err
+			return fmt.Errorf("server-side error: %w", err)
 		}
 		if k == nil {
 			return nil
@@ -149,35 +147,35 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 				if err == io.EOF {
 					return nil
 				}
-				return err
+				return fmt.Errorf("server-side error: %w", err)
 			}
 
 			if len(in.SeekValue) > 0 {
 				k, v, err = c.(ethdb.CursorDupSort).SeekBothRange(in.SeekKey, in.SeekValue)
 				if err != nil {
-					return err
+					return fmt.Errorf("server-side error: %w", err)
 				}
 				if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
 					k, v, err = c.Next()
 					if err != nil {
-						return err
+						return fmt.Errorf("server-side error: %w", err)
 					}
 				}
 			} else if len(in.SeekKey) > 0 {
 				k, v, err = c.Seek(in.SeekKey)
 				if err != nil {
-					return err
+					return fmt.Errorf("server-side error: %w", err)
 				}
 			} else {
 				k, v, err = c.Next()
 				if err != nil {
-					return err
+					return fmt.Errorf("server-side error: %w", err)
 				}
 			}
 		} else {
 			k, v, err = c.Next()
 			if err != nil {
-				return err
+				return fmt.Errorf("server-side error: %w", err)
 			}
 		}
 
@@ -188,18 +186,19 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 			tx.Rollback()
 			tx, err = s.kv.Begin(stream.Context(), nil, false)
 			if err != nil {
-				return err
+				return fmt.Errorf("server-side error: %w", err)
+
 			}
 			if isDupsort {
 				dc := tx.CursorDupSort(bucketName)
 				k, v, err = dc.SeekBothRange(k, v)
 				if err != nil {
-					return err
+					return fmt.Errorf("server-side error: %w", err)
 				}
 				if k == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
 					k, v, err = dc.Next()
 					if err != nil {
-						return err
+						return fmt.Errorf("server-side error: %w", err)
 					}
 				}
 				c = dc
@@ -207,7 +206,7 @@ func (s *KvServer) Seek(stream remote.KV_SeekServer) error {
 				c = tx.Cursor(bucketName).Prefix(prefix)
 				k, v, err = c.Seek(k)
 				if err != nil {
-					return err
+					return fmt.Errorf("server-side error: %w", err)
 				}
 			}
 		}

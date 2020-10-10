@@ -20,7 +20,7 @@ go get -u github.com/tsenart/vegeta
 ### Run vegeta
 ``` 
 tmpDir = "/var/folders/x_/1mnbt25s3291zr5_fxhjfnq9n86kng/T/"
-cat $(tmpDir)/turbo_geth_stress_test/vegeta_geth_debug_storageRangeAt.csv | vegeta attack -rate=600 -format=json -duration=20s | vegeta plot > plot.html
+cat $(tmpDir)/turbo_geth_stress_test/vegeta_geth_debug_storageRangeAt.csv | vegeta attack -rate=600 -format=json -duration=20s -timeout=300s | vegeta plot > plot.html
 open plot.html
 ```
 
@@ -37,7 +37,7 @@ GODEBUG=remotedb.debug=1 go run ./cmd/rpcdaemon --rpcapi eth,debug,net --rpcport
 
 On simple requests `eth_getBlockByNumber` RPC Daemon looks well:  
 ```
-cat /tmp/turbo_geth_stress_test/vegeta_turbo_geth_eth_getBlockByNumber.txt | vegeta attack -rate=1000 -format=json -duration=20s | vegeta report
+cat /tmp/turbo_geth_stress_test/vegeta_turbo_geth_eth_getBlockByNumber.txt | vegeta attack -rate=1000 -format=json -duration=20s -timeout=300s | vegeta report
 
 300rps: 
 - Geth Alone: 80% of CPU, 95-Latency 2ms
@@ -61,7 +61,7 @@ cat /tmp/turbo_geth_stress_test/vegeta_turbo_geth_eth_getBlockByNumber.txt | veg
 
 On complex request - `debug_storageRangeAt` producing >600 db.View calls with twice more .Bucket/.Cursor/.Seek calls:
 ```
-echo "POST http://localhost:9545 \n Content-Type: application/json \n @$(pwd)/cmd/rpctest/heavyStorageRangeAt.json" | vegeta attack -rate=20 -duration=20s | vegeta report
+echo "POST http://localhost:8545 \n Content-Type: application/json \n @$(pwd)/cmd/rpctest/heavyStorageRangeAt.json" | vegeta attack -rate=20 -duration=20s -timeout=300s | vegeta report
 
 10rps, batchSize 10K:
 - Geth Alone: 100% of CPU, 95-Latency 15ms 
