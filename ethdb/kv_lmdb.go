@@ -366,7 +366,10 @@ func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	for k, _, _ := c.Get(nil, nil, lmdb.First); k != nil; k, _, _ = c.Get(nil, nil, lmdb.Next) {
+	for k, _, err := c.Get(nil, nil, lmdb.First); k != nil; k, _, err = c.Get(nil, nil, lmdb.Next) {
+		if err != nil {
+			return nil, err
+		}
 		res = append(res, string(k))
 	}
 	c.Close()
