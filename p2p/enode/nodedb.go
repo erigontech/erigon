@@ -93,7 +93,11 @@ func newMemoryDB() (*DB, error) {
 // newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(path string) (*DB, error) {
-	kv, err := ethdb.NewLMDB().Path(path).MapSize(64 * datasize.MB).Open()
+	kv, err := ethdb.NewLMDB().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.InodesBucket: {},
+		}
+	}).Open()
 	if err != nil {
 		return nil, err
 	}
