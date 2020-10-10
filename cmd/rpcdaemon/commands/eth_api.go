@@ -47,8 +47,8 @@ type EthAPI interface {
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error)
-	GetUncleCountByBlockNumber(ctx context.Context, blockNr rpc.BlockNumber) *hexutil.Uint
-	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) *hexutil.Uint
+	GetUncleCountByBlockNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
+	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
 	// These three commands worked anyway, but were not in this interface. Temporarily adding them for discussion
 	GetHeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error)
 	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
@@ -108,12 +108,18 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 
 // GetBlockTransactionCountByNumber returns the number of transactions in the block
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
-	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+	block := rawdb.ReadBlockByNumber(tx, blockNum)
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
@@ -123,7 +129,13 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 
 // GetBlockTransactionCountByHash returns the number of transactions in the block
 func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
-	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	block := rawdb.ReadBlockByHash(tx, blockHash)
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %x", blockHash)
 	}
@@ -132,8 +144,14 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 }
 
 // ChainId returns the chain id from the config
-func (api *APIImpl) ChainId(_ context.Context) (hexutil.Uint64, error) {
-	chainConfig := getChainConfig(api.dbReader)
+func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	chainConfig := getChainConfig(tx)
 	return hexutil.Uint64(chainConfig.ChainID.Uint64()), nil
 }
 
@@ -201,18 +219,30 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 
 // GetTransactionByHash returns the transaction for the given hash
 func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error) {
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
-	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, hash)
-	if tx == nil {
+	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, hash)
+	if txn == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	return newRPCTransaction(tx, blockHash, blockNumber, txIndex), nil
+	return newRPCTransaction(txn, blockHash, blockNumber, txIndex), nil
 }
 
 // GetTransactionByBlockHashAndIndex returns the transaction for the given block hash and index.
 func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error) {
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
-	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
+	block := rawdb.ReadBlockByHash(tx, blockHash)
 	if block == nil {
 		return nil, fmt.Errorf("block %#x not found", blockHash)
 	}
@@ -227,13 +257,19 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 
 // GetTransactionByBlockNumberAndIndex returns the transaction for the given block number and index.
 func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error) {
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockNumberAndIndex
-	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+	block := rawdb.ReadBlockByNumber(tx, blockNum)
 	if block == nil {
 		return nil, fmt.Errorf("block %d not found", blockNum)
 	}

@@ -55,12 +55,18 @@ func getReceipts(ctx context.Context, tx rawdb.DatabaseReader, kv ethdb.KV, numb
 // GetLogsByHash non-standard RPC that returns all logs in a block
 // TODO(tjayrush): Since this is non-standard we could rename it to GetLogsByBlockHash to be more consistent and avoid confusion
 func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
-	number := rawdb.ReadHeaderNumber(api.dbReader, hash)
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	number := rawdb.ReadHeaderNumber(tx, hash)
 	if number == nil {
 		return nil, fmt.Errorf("block not found: %x", hash)
 	}
 
-	receipts, err := getReceipts(ctx, api.dbReader, api.db, *number, hash)
+	receipts, err := getReceipts(ctx, tx, api.db, *number, hash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
@@ -209,13 +215,19 @@ func getTopicsBitmap(c ethdb.Cursor, topics [][]common.Hash, from, to uint32) (*
 }
 
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	// Retrieve the transaction and assemble its EVM context
-	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, hash)
+	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, hash)
 	if tx == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
 
-	receipts, err := getReceipts(ctx, api.dbReader, api.db, blockNumber, blockHash)
+	receipts, err := getReceipts(ctx, tx, api.db, blockNumber, blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
@@ -225,10 +237,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	receipt := receipts[txIndex]
 
 	var signer types.Signer = types.FrontierSigner{}
-	if tx.Protected() {
-		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
+	if txn.Protected() {
+		signer = types.NewEIP155Signer(txn.ChainID().ToBig())
 	}
-	from, _ := types.Sender(signer, tx)
+	from, _ := types.Sender(signer, txn)
 
 	// Fill in the derived information in the logs
 	if receipt.Logs != nil {
@@ -247,7 +259,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		"transactionHash":   hash,
 		"transactionIndex":  hexutil.Uint64(txIndex),
 		"from":              from,
-		"to":                tx.To(),
+		"to":                txn.To(),
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,

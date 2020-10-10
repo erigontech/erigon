@@ -71,14 +71,33 @@ Content-Type: application/json
 {
   "jsonrpc": "2.0",
   "method": "eth_getTransactionReceipt",
-  "params": ["0xc05ce241bec59900356ede868d170bc01d743c3cd5ecb129ca99596593022771"],
+  "params": [
+    "0xc05ce241bec59900356ede868d170bc01d743c3cd5ecb129ca99596593022771"
+  ],
   "id": 537758
 }
 
 
 ###
 
-POST 192.168.255.138:8545
+#POST 192.168.255.138:8545
+POST localhost:8545
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "method": "eth_getLogsByHash",
+  "params": [
+    "0x343f85f13356e138152d77287fda5ae0818c514119119ad439f81d69c59fc2f6"
+  ],
+  "id": 537758
+}
+
+
+###
+
+#POST 192.168.255.138:8545
+POST localhost:8545
 Content-Type: application/json
 
 {
