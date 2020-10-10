@@ -315,7 +315,7 @@ func (s *Kv2Server) Tx(stream remote.KV2_TxServer) error {
 		if in.BucketName == "" {
 			cInfo, ok := cursors[in.Cursor]
 			if !ok {
-				return fmt.Errorf("server-side error: unknown Cursor=%d", in.Cursor)
+				return fmt.Errorf("server-side error: unknown Cursor=%d, Op=%s", in.Op)
 			}
 			c = cInfo.c
 		}

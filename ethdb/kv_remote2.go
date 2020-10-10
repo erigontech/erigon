@@ -1,7 +1,6 @@
 package ethdb
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -275,14 +274,10 @@ func (tx *remote2Tx) Get(bucket string, key []byte) (val []byte, err error) {
 }
 
 func (c *remote2Cursor) SeekExact(key []byte) (val []byte, err error) {
-	k, v, err := c.Seek(key)
-	if err != nil {
+	if err := c.initCursor(); err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(key, k) {
-		return nil, nil
-	}
-	return v, nil
+	return c.seekExact(key)
 }
 
 func (c *remote2Cursor) Prev() ([]byte, []byte, error) {
@@ -404,16 +399,6 @@ func (c *remote2Cursor) last() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-
-//func (c *remote2Cursor) delCurrent() error                       { return c.c.Del(0) }
-//func (c *remote2Cursor) delNoDupData() error                     { return c.c.Del(lmdb.NoDupData) }
-//func (c *remote2Cursor) put(k, v []byte) error                   { return c.c.Put(k, v, 0) }
-//func (c *remote2Cursor) putCurrent(k, v []byte) error            { return c.c.Put(k, v, lmdb.Current) }
-//func (c *remote2Cursor) putNoOverwrite(k, v []byte) error        { return c.c.Put(k, v, lmdb.NoOverwrite) }
-//func (c *remote2Cursor) putNoDupData(k, v []byte) error          { return c.c.Put(k, v, lmdb.NoDupData) }
-//func (c *remote2Cursor) append(k, v []byte) error                { return c.c.Put(k, v, lmdb.Append) }
-//func (c *remote2Cursor) appendDup(k, v []byte) error             { return c.c.Put(k, v, lmdb.AppendDup) }
-//func (c *remote2Cursor) reserve(k []byte, n int) ([]byte, error) { return c.c.PutReserve(k, n, 0) }
 func (c *remote2Cursor) getBoth(k, v []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH_EXACT, K: k, V: v}); err != nil {
 		return []byte{}, nil, err
@@ -434,8 +419,28 @@ func (c *remote2Cursor) setRange(k []byte) ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
+func (c *remote2Cursor) seekExact(k []byte) ([]byte, error) {
+	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_EXACT, K: k}); err != nil {
+		return nil, err
+	}
+	pair, err := c.stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+	return pair.V, nil
+}
 func (c *remote2Cursor) getBothRange(k, v []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH, K: k, V: v}); err != nil {
+		return []byte{}, nil, err
+	}
+	pair, err := c.stream.Recv()
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	return pair.K, pair.V, nil
+}
+func (c *remote2Cursor) seekBothExact(k []byte) ([]byte, []byte, error) {
+	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH_EXACT, K: k}); err != nil {
 		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
@@ -508,6 +513,9 @@ func (c *remote2Cursor) Next() ([]byte, []byte, error) {
 }
 
 func (c *remote2Cursor) Last() ([]byte, []byte, error) {
+	if err := c.initCursor(); err != nil {
+		return []byte{}, nil, err
+	}
 	return c.last()
 }
 
@@ -541,15 +549,17 @@ func (tx *remote2Tx) closeGrpcStream() {
 }
 
 func (c *remote2Cursor) Close() {
-	if err := c.stream.Send(&remote.Cursor{Op: remote.Op_CLOSE, Cursor: c.id}); err != nil {
-		//return err
-	} else {
-		_, err := c.stream.Recv()
-		if err != nil {
+	if c.initialized {
+		if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_CLOSE}); err != nil {
 			//return err
+		} else {
+			_, err := c.stream.Recv()
+			if err != nil {
+				//return err
+			}
 		}
+		c.initialized = false
 	}
-	c.initialized = false
 }
 
 func (tx *remote2Tx) CursorDupSort(bucket string) CursorDupSort {
