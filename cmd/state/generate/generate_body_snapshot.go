@@ -38,8 +38,7 @@ func BodySnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 		tuples = append(tuples, []byte(dbutils.BlockBodyPrefix), dbutils.BlockBodyKey(i, hash), body)
 		if len(tuples) >= chunkFile {
 			log.Info("Committed", "block", i)
-			_, err := sndb.MultiPut(tuples...)
-			if err != nil {
+			if _, err = sndb.MultiPut(tuples...); err != nil {
 				log.Crit("Multiput error", "err", err)
 				return err
 			}
