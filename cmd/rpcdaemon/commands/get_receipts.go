@@ -148,7 +148,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	}
 
 	for _, blockNToMatch := range blockNumbers.ToArray() {
-		blockHash := rawdb.ReadCanonicalHash(tx, uint64(blockNToMatch))
+		blockHash, err := rawdb.ReadCanonicalHash(tx, uint64(blockNToMatch))
+		if err != nil {
+			return returnLogs(logs), err
+		}
 		if blockHash == (common.Hash{}) {
 			return returnLogs(logs), fmt.Errorf("block not found %d", uint64(blockNToMatch))
 		}

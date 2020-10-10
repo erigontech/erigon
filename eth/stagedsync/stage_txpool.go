@@ -25,7 +25,10 @@ func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolSt
 	}
 	if pool != nil && !pool.IsStarted() {
 		log.Info("Starting tx pool after sync", "from", s.BlockNumber, "to", to)
-		headHash := rawdb.ReadCanonicalHash(db, to)
+		headHash, err := rawdb.ReadCanonicalHash(db, to)
+		if err != nil {
+			return err
+		}
 		headHeader := rawdb.ReadHeader(db, headHash, to)
 		if err := pool.Start(headHeader.GasLimit, to); err != nil {
 			return fmt.Errorf("txPoolUpdate start pool phase 1: %w", err)
@@ -45,7 +48,11 @@ func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolSt
 }
 
 func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
-	headHash := rawdb.ReadCanonicalHash(db, to)
+	headHash, err := rawdb.ReadCanonicalHash(db, to)
+	if err != nil {
+		return err
+	}
+
 	headHeader := rawdb.ReadHeader(db, headHash, to)
 	pool.ResetHead(headHeader.GasLimit, to)
 	canonical := make([]common.Hash, to-from)
@@ -127,7 +134,10 @@ func unwindTxPool(u *UnwindState, s *StageState, db ethdb.GetterPutter, pool *co
 }
 
 func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
-	headHash := rawdb.ReadCanonicalHash(db, from)
+	headHash, err := rawdb.ReadCanonicalHash(db, from)
+	if err != nil {
+		return err
+	}
 	headHeader := rawdb.ReadHeader(db, headHash, from)
 	pool.ResetHead(headHeader.GasLimit, from)
 	canonical := make([]common.Hash, to-from)

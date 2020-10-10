@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -37,15 +38,15 @@ import (
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
-func ReadCanonicalHash(db DatabaseReader, number uint64) common.Hash {
+func ReadCanonicalHash(db DatabaseReader, number uint64) (common.Hash, error) {
 	data, err := db.Get(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number))
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		log.Error("ReadCanonicalHash failed", "err", err)
+		return common.Hash{}, fmt.Errorf("failed ReadCanonicalHash: %w, number=%d", err, number)
 	}
 	if len(data) == 0 {
-		return common.Hash{}
+		return common.Hash{}, nil
 	}
-	return common.BytesToHash(data)
+	return common.BytesToHash(data), nil
 }
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
@@ -605,7 +606,11 @@ func FindCommonAncestor(db DatabaseReader, a, b *types.Header) *types.Header {
 }
 
 func ReadBlockByNumber(db DatabaseReader, number uint64) *types.Block {
-	hash := ReadCanonicalHash(db, number)
+	hash, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		log.Error("ReadCanonicalHash failed", "err", err)
+		return nil
+	}
 	if hash == (common.Hash{}) {
 		return nil
 	}
@@ -622,7 +627,11 @@ func ReadBlockByHash(db DatabaseReader, hash common.Hash) *types.Block {
 }
 
 func ReadHeaderByNumber(db DatabaseReader, number uint64) *types.Header {
-	hash := ReadCanonicalHash(db, number)
+	hash, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		log.Error("ReadCanonicalHash failed", "err", err)
+		return nil
+	}
 	if hash == (common.Hash{}) {
 		return nil
 	}

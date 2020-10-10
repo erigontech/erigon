@@ -1679,7 +1679,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 			// Check if we have an already initialized chain and fall back to
 			// that if so. Otherwise we need to generate a new genesis spec.
 			chaindb := MakeChainDatabase(ctx, stack)
-			if rawdb.ReadCanonicalHash(chaindb, 0) != (common.Hash{}) {
+			h, err := rawdb.ReadCanonicalHash(chaindb, 0)
+			if err != nil {
+				panic(err)
+			}
+			if h != (common.Hash{}) {
 				cfg.Genesis = nil // fallback to db content
 			}
 			chaindb.Close()
