@@ -25,7 +25,6 @@ require (
 	github.com/edsrzf/mmap-go v0.0.0-20160512033002-935e0e8a636c
 	github.com/emicklei/dot v0.11.0
 	github.com/ethereum/evmc/v7 v7.3.0
-	github.com/ethereum/go-ethereum v1.9.22
 	github.com/fatih/color v1.7.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
@@ -74,10 +73,10 @@ require (
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
-	golang.org/x/net v0.0.0-20200822124328-c89045814202
+	golang.org/x/net v0.0.0-20200625001655-4c5254603344
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e
-	golang.org/x/sys v0.0.0-20200824131525-c12d262b63d8
-	golang.org/x/text v0.3.3
+	golang.org/x/sys v0.0.0-20200615200032-f1bc736245b1
+	golang.org/x/text v0.3.2
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
 	golang.org/x/tools v0.0.0-20200207183749-b753a1ba74fa
 	google.golang.org/grpc v1.32.0
