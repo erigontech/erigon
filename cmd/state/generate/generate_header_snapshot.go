@@ -3,6 +3,11 @@ package generate
 import (
 	"errors"
 	"fmt"
+	"math/big"
+	"os"
+	"os/signal"
+	"time"
+
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -11,10 +16,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
-	"math/big"
-	"os"
-	"os/signal"
-	"time"
 )
 
 func HeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
@@ -51,7 +52,10 @@ func HeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 		default:
 
 		}
-		hash = rawdb.ReadCanonicalHash(db, i)
+		hash, err = rawdb.ReadCanonicalHash(db, i)
+		if err != nil {
+			return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
+		}
 		header = rawdb.ReadHeaderRLP(db, hash, i)
 		tuples = append(tuples, []byte(dbutils.HeaderPrefix), dbutils.HeaderKey(i, hash), header)
 		if len(tuples) >= chunkFile {

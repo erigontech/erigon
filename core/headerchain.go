@@ -163,8 +163,11 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 		// Delete any canonical number assignments above the new head
 		markerBatch := hc.chainDb.NewBatch()
 		for i := number + 1; ; i++ {
-			hash := rawdb.ReadCanonicalHash(hc.chainDb, i)
-			if hash == (common.Hash{}) {
+			ch, err := rawdb.ReadCanonicalHash(hc.chainDb, i)
+			if err != nil {
+				return NonStatTy, err
+			}
+			if ch == (common.Hash{}) {
 				break
 			}
 			rawdb.DeleteCanonicalHash(markerBatch, i)
@@ -176,7 +179,14 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 			headNumber = header.Number.Uint64() - 1
 			headHeader = hc.GetHeader(headHash, headNumber)
 		)
-		for rawdb.ReadCanonicalHash(hc.chainDb, headNumber) != headHash {
+		for {
+			h, err := rawdb.ReadCanonicalHash(hc.chainDb, headNumber)
+			if err != nil {
+				return NonStatTy, err
+			}
+			if h == headHash {
+				break
+			}
 			rawdb.WriteCanonicalHash(markerBatch, headHash, headNumber)
 
 			headHash = headHeader.ParentHash
@@ -351,9 +361,20 @@ func (hc *HeaderChain) GetAncestor(hash common.Hash, number, ancestor uint64, ma
 		}
 	}
 	for ancestor != 0 {
-		if rawdb.ReadCanonicalHash(hc.chainDb, number) == hash {
-			ancestorHash := rawdb.ReadCanonicalHash(hc.chainDb, number-ancestor)
-			if rawdb.ReadCanonicalHash(hc.chainDb, number) == hash {
+		h, err := rawdb.ReadCanonicalHash(hc.chainDb, number)
+		if err != nil {
+			panic(err)
+		}
+		if h == hash {
+			ancestorHash, err := rawdb.ReadCanonicalHash(hc.chainDb, number-ancestor)
+			if err != nil {
+				panic(err)
+			}
+			h, err := rawdb.ReadCanonicalHash(hc.chainDb, number)
+			if err != nil {
+				panic(err)
+			}
+			if h == hash {
 				number -= ancestor
 				return ancestorHash, number
 			}
@@ -423,7 +444,11 @@ func (hc *HeaderChain) HasHeader(hash common.Hash, number uint64) bool {
 // GetHeaderByNumber retrieves a block header from the database by number,
 // caching it (associated with its hash) if found.
 func (hc *HeaderChain) GetHeaderByNumber(number uint64) *types.Header {
-	hash := rawdb.ReadCanonicalHash(hc.chainDb, number)
+	hash, err := rawdb.ReadCanonicalHash(hc.chainDb, number)
+	if err != nil {
+		panic(err)
+	}
+
 	if hash == (common.Hash{}) {
 		return nil
 	}
@@ -431,7 +456,11 @@ func (hc *HeaderChain) GetHeaderByNumber(number uint64) *types.Header {
 }
 
 func (hc *HeaderChain) GetCanonicalHash(number uint64) common.Hash {
-	return rawdb.ReadCanonicalHash(hc.chainDb, number)
+	h, err := rawdb.ReadCanonicalHash(hc.chainDb, number)
+	if err != nil {
+		panic(err)
+	}
+	return h
 }
 
 // CurrentHeader retrieves the current head header of the canonical chain. The

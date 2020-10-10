@@ -220,7 +220,6 @@ var Buckets = []string{
 	PlainContractCodeBucket,
 	PlainAccountChangeSetBucket,
 	PlainStorageChangeSetBucket,
-	InodesBucket,
 	Senders,
 	FastTrieProgressKey,
 	HeadBlockKey,

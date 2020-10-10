@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"github.com/c2h5oh/datasize"
 	"net"
 	"os"
 	"sync"
@@ -80,9 +81,15 @@ func OpenDB(path string) (*DB, error) {
 	return newPersistentDB(path)
 }
 
+var bucketsConfig = func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	return dbutils.BucketsCfg{
+		dbutils.InodesBucket: {},
+	}
+}
+
 // newMemoryNodeDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB() (*DB, error) {
-	db, err := ethdb.NewLMDB().InMem().Open()
+	db, err := ethdb.NewLMDB().InMem().WithBucketsConfig(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}
@@ -92,11 +99,10 @@ func newMemoryDB() (*DB, error) {
 // newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(path string) (*DB, error) {
-	db, err := ethdb.Open(path)
+	kv, err := ethdb.NewLMDB().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}
-	kv := db.KV()
 	// The nodes contained in the cache correspond to a certain protocol version.
 	// Flush all nodes if the version doesn't match.
 	currentVer := make([]byte, binary.MaxVarintLen64)
@@ -120,7 +126,7 @@ func newPersistentDB(path string) (*DB, error) {
 		return nil, err
 	}
 	if blob != nil && !bytes.Equal(blob, currentVer) {
-		db.Close()
+		kv.Close()
 		if err := os.Remove(path); err != nil {
 			return nil, err
 		}

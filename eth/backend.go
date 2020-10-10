@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
@@ -75,8 +76,9 @@ type Ethereum struct {
 	dialCandidates  enode.Iterator
 
 	// DB interfaces
-	chainDb *ethdb.ObjectDatabase // Block chain database
-	chainKV ethdb.KV              // Same as chainDb, but different interface
+	chainDb    *ethdb.ObjectDatabase // Block chain database
+	chainKV    ethdb.KV              // Same as chainDb, but different interface
+	privateAPI *grpc.Server
 
 	eventMux       *event.TypeMux
 	engine         consensus.Engine
@@ -286,9 +288,15 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds)
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -729,6 +737,9 @@ func (s *Ethereum) StopTxPool() error {
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.protocolManager.Stop()
+	if s.privateAPI != nil {
+		s.privateAPI.GracefulStop()
+	}
 
 	// Then stop everything else.
 	s.bloomIndexer.Close()
@@ -743,6 +754,5 @@ func (s *Ethereum) Stop() error {
 	if s.txPool != nil {
 		s.txPool.Stop()
 	}
-	//s.chainDb.Close()
 	return nil
 }
