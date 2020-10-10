@@ -2,14 +2,15 @@ package torrent
 
 import (
 	"context"
+	"math/big"
+	"os"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"math/big"
-	"os"
-	"testing"
 )
 
 func TestHeadersGenerateIndex(t *testing.T) {
@@ -59,7 +60,10 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	td := big.NewInt(0)
 	for i, header := range headers {
 		td = td.Add(td, header.Difficulty)
-		canonical := rawdb.ReadCanonicalHash(snDB, header.Number.Uint64())
+		canonical, err1 := rawdb.ReadCanonicalHash(snDB, header.Number.Uint64())
+		if err1 != nil {
+			t.Errorf("reading canonical hash for block %d: %v", header.Number.Uint64(), err1)
+		}
 		if canonical != header.Hash() {
 			t.Error(i, "canonical not correct", canonical)
 		}
