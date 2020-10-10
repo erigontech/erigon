@@ -109,7 +109,6 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	jobs := make(chan *senderRecoveryJob, cfg.BatchSize)
 	go func() {
 		defer close(jobs)
-
 		if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(s.BlockNumber+1), 0, func(k, v []byte) (bool, error) {
 			if err := common.Stopped(quitCh); err != nil {
 				return false, err
@@ -192,7 +191,6 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		index := int(binary.BigEndian.Uint32(k))
 		return next(k, dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), value)
 	}
-
 	if err := collector.Load(db,
 		dbutils.Senders,
 		loadFunc,
@@ -208,7 +206,6 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	); err != nil {
 		return err
 	}
-
 	return s.DoneAndUpdate(db, to)
 }
 

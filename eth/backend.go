@@ -30,9 +30,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
-
 	ethereum "github.com/ledgerwatch/turbo-geth"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
@@ -76,8 +75,9 @@ type Ethereum struct {
 	dialCandidates  enode.Iterator
 
 	// DB interfaces
-	chainDb *ethdb.ObjectDatabase // Block chain database
-	chainKV ethdb.KV              // Same as chainDb, but different interface
+	chainDb    *ethdb.ObjectDatabase // Block chain database
+	chainKV    ethdb.KV              // Same as chainDb, but different interface
+	privateAPI *grpc.Server
 
 	eventMux       *event.TypeMux
 	engine         consensus.Engine
@@ -96,8 +96,6 @@ type Ethereum struct {
 
 	p2pServer     *p2p.Server
 	txPoolStarted bool
-
-	torrentClient *torrent.Client
 
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 }
@@ -153,27 +151,6 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
-	var torrentClient *torrent.Client
-	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
-		config.SnapshotSeeding = true
-		torrentClient = torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
-		err = torrentClient.Run(chainDb)
-		if err != nil {
-			return nil, err
-		}
-
-		snapshotKV := chainDb.KV()
-		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, stack.Config().ResolvePath("snapshots"), config.SnapshotMode)
-		if err != nil {
-			return nil, err
-		}
-		chainDb.SetKV(snapshotKV)
-		err = torrent.PostProcessing(chainDb, config.SnapshotMode)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	eth := &Ethereum{
 		config:         config,
 		chainDb:        chainDb,
@@ -186,7 +163,6 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		etherbase:      config.Miner.Etherbase,
 		bloomRequests:  make(chan chan *bloombits.Retrieval),
 		p2pServer:      stack.Server(),
-		torrentClient:  torrentClient,
 	}
 
 	log.Info("Initialising Ethereum protocol", "versions", ProtocolVersions, "network", config.NetworkID)
@@ -280,9 +256,15 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds)
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -717,6 +699,9 @@ func (s *Ethereum) StopTxPool() error {
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.protocolManager.Stop()
+	if s.privateAPI != nil {
+		s.privateAPI.GracefulStop()
+	}
 
 	// Then stop everything else.
 	if err := s.StopTxPool(); err != nil {
@@ -729,6 +714,5 @@ func (s *Ethereum) Stop() error {
 	if s.txPool != nil {
 		s.txPool.Stop()
 	}
-	//s.chainDb.Close()
 	return nil
 }

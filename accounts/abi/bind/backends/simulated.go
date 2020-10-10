@@ -325,7 +325,10 @@ func (b *SimulatedBackend) blockByNumberNoLock(_ context.Context, number *big.In
 		return b.prependBlock, nil
 	}
 
-	hash := rawdb.ReadCanonicalHash(b.database, number.Uint64())
+	hash, err := rawdb.ReadCanonicalHash(b.database, number.Uint64())
+	if err != nil {
+		return nil, err
+	}
 	block := rawdb.ReadBlock(b.database, hash, number.Uint64())
 	if block == nil {
 		return nil, errBlockDoesNotExist
@@ -364,7 +367,10 @@ func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *big.Int) 
 	if number == nil || number.Cmp(b.prependBlock.Number()) == 0 {
 		return b.prependBlock.Header(), nil
 	}
-	hash := rawdb.ReadCanonicalHash(b.database, number.Uint64())
+	hash, err := rawdb.ReadCanonicalHash(b.database, number.Uint64())
+	if err != nil {
+		return nil, err
+	}
 	header := rawdb.ReadHeader(b.database, hash, number.Uint64())
 	return header, nil
 }
@@ -511,7 +517,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 	// Determine the lowest and highest possible gas limits to binary search in between
 	var (
-		lo  uint64 = params.TxGas - 1
+		lo  = params.TxGas - 1
 		hi  uint64
 		cap uint64
 	)

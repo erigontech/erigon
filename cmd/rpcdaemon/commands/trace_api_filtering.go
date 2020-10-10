@@ -23,7 +23,13 @@ import (
 // Transaction Implements trace_transaction
 // TODO(tjayrush): I think this should return an []interface{}, so we can return both Parity and Geth traces
 func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error) {
-	traces, err := api.getTransactionTraces(ctx, txHash)
+	tx, err := api.db.Begin(ctx, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	traces, err := api.getTransactionTraces(tx, ctx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -37,12 +43,18 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 // TODO(tjayrush): only accepts a single one
 // TODO(tjayrush): I think this should return an interface{}, so we can return both Parity and Geth traces
 func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64) (*ParityTrace, error) {
+	tx, err := api.db.Begin(ctx, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	// TODO(tjayrush): Parity fails if it gets more than a single index. Returns nothing in this case.
 	if len(indicies) > 1 {
 		return nil, nil
 	}
 
-	traces, err := api.getTransactionTraces(ctx, txHash)
+	traces, err := api.getTransactionTraces(tx, ctx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -348,19 +360,14 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 // -- For convienience, we return both Parity and Geth traces for now. In the future we will either separate
 //    these functions or eliminate Geth traces
 // -- The function convertToParityTraces takes a hierarchical Geth trace and returns a flattened Parity trace
-func (api *TraceAPIImpl) getTransactionTraces(ctx context.Context, txHash common.Hash) (ParityTraces, error) {
-	getter := adapter.NewBlockGetter(api.dbReader)
-	chainContext := adapter.NewChainContext(api.dbReader)
-	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+func (api *TraceAPIImpl) getTransactionTraces(dbtx ethdb.Tx, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
+	getter := adapter.NewBlockGetter(dbtx)
+	chainContext := adapter.NewChainContext(dbtx)
+	genesisHash := rawdb.ReadBlockByNumber(dbtx, 0).Hash()
+	chainConfig := rawdb.ReadChainConfig(dbtx, genesisHash)
 	traceType := "callTracer" // nolint: goconst
 
-	dbtx, err1 := api.db.Begin(ctx, nil, false)
-	if err1 != nil {
-		return nil, fmt.Errorf("getTransactionTraces cannot open tx: %v", err1)
-	}
-	defer dbtx.Rollback()
-	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, txHash)
+	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(dbtx, txHash)
 	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, dbtx, blockHash, txIndex)
 	if err != nil {
 		return nil, err

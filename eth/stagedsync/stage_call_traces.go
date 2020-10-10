@@ -158,8 +158,10 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 				tos = map[string]*roaring.Bitmap{}
 			}
 		}
-
-		blockHash := rawdb.ReadCanonicalHash(tx, blockNum)
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return fmt.Errorf("getting canonical blockhadh for block %d: %v", blockNum, err)
+		}
 		block := rawdb.ReadBlock(tx, blockHash, blockNum)
 		if block == nil {
 			break
@@ -225,8 +227,7 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
-		_, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
-		if err != nil {
+		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
 			return err
 		}
 		for addr := range tracer.froms {
@@ -303,7 +304,10 @@ func unwindCallTraces(db rawdb.DatabaseReader, from, to uint64, chainConfig *par
 			return err
 		}
 
-		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		blockHash, err := rawdb.ReadCanonicalHash(db, blockNum)
+		if err != nil {
+			return fmt.Errorf("getting canonical blockhadh for block %d: %v", blockNum, err)
+		}
 		block := rawdb.ReadBlock(db, blockHash, blockNum)
 		if block == nil {
 			break
@@ -317,8 +321,7 @@ func unwindCallTraces(db rawdb.DatabaseReader, from, to uint64, chainConfig *par
 		stateReader = state.NewPlainDBState(tx, blockNum-1)
 		stateWriter = state.NewCacheStateWriter()
 
-		_, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
-		if err != nil {
+		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
 			return err
 		}
 	}

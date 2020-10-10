@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -97,12 +100,15 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 
 func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, error) {
 	var dialOpts []grpc.DialOption
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Timeout: 10 * time.Minute,
+		}),
+	}
 	if certFile == "" {
-		dialOpts = []grpc.DialOption{
-			grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
-			grpc.WithInsecure(),
-			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
-		}
+		dialOpts = append(dialOpts, grpc.WithInsecure())
 	} else {
 		var creds credentials.TransportCredentials
 		var err error
@@ -135,11 +141,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, erro
 			})
 		}
 
-		dialOpts = []grpc.DialOption{
-			grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig}),
-			grpc.WithTransportCredentials(creds),
-			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
-		}
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
 	}
 
 	if opts.inMemConn != nil {
@@ -244,10 +246,7 @@ func (tx *remoteTx) Commit(ctx context.Context) error {
 
 func (tx *remoteTx) Rollback() {
 	for _, c := range tx.cursors {
-		if c.stream != nil {
-			c.streamCancelFn()
-			c.stream = nil
-		}
+		c.Close()
 	}
 }
 
@@ -271,16 +270,18 @@ func (tx *remoteTx) BucketSize(name string) (uint64, error) {
 
 func (tx *remoteTx) Get(bucket string, key []byte) (val []byte, err error) {
 	c := tx.Cursor(bucket)
-	defer func() {
-		if v, ok := c.(*remoteCursor); ok {
-			if v.stream == nil {
-				return
-			}
-			v.streamCancelFn()
-		}
-	}()
-
+	defer c.Close()
 	return c.SeekExact(key)
+}
+
+func (tx *remoteTx) Has(bucket string, key []byte) (bool, error) {
+	c := tx.Cursor(bucket)
+	defer c.Close()
+	k, _, err := c.Seek(key)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(key, k), nil
 }
 
 func (c *remoteCursor) SeekExact(key []byte) (val []byte, err error) {
@@ -326,17 +327,13 @@ func (c *remoteCursor) First() ([]byte, []byte, error) {
 // Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
-	if c.stream != nil {
-		c.streamCancelFn() // This will close the stream and free resources
-		c.stream = nil
-		c.streamingRequested = false
-	}
+	c.closeGrpcStream()
 	c.initialized = true
 
 	var err error
 	if c.stream == nil {
 		var streamCtx context.Context
-		streamCtx, c.streamCancelFn = context.WithCancel(context.Background()) // We create child context for the stream so we can cancel it to prevent leak
+		streamCtx, c.streamCancelFn = context.WithCancel(c.ctx) // We create child context for the stream so we can cancel it to prevent leak
 		c.stream, err = c.tx.db.remoteKV.Seek(streamCtx)
 	}
 
@@ -382,12 +379,37 @@ func (c *remoteCursor) Last() ([]byte, []byte, error) {
 	panic("not implemented yet")
 }
 
-func (c *remoteCursor) Close() {
-	if c.stream != nil {
-		c.streamCancelFn()
-		c.stream = nil
-		c.streamingRequested = false
+func (c *remoteCursor) closeGrpcStream() {
+	if c.stream == nil {
+		return
 	}
+	defer c.streamCancelFn() // hard cancel stream if graceful wasn't successful
+
+	if c.streamingRequested {
+		// if streaming is in progress, can't use `CloseSend` - because
+		// server will not read it right not - it busy with streaming data
+		// TODO: set flag 'c.streamingRequested' to false when got terminator from server (nil key or os.EOF)
+		c.streamCancelFn()
+	} else {
+		// try graceful close stream
+		err := c.stream.CloseSend()
+		if err != nil {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+				log.Warn("couldn't send msg CloseSend to server", "err", err)
+			}
+		} else {
+			_, err = c.stream.Recv()
+			if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+				log.Warn("received unexpected error from server after CloseSend", "err", err)
+			}
+		}
+	}
+	c.stream = nil
+	c.streamingRequested = false
+}
+
+func (c *remoteCursor) Close() {
+	c.closeGrpcStream()
 }
 
 func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
@@ -420,17 +442,13 @@ func (c *remoteCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, 
 }
 
 func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
-	if c.stream != nil {
-		c.streamCancelFn() // This will close the stream and free resources
-		c.stream = nil
-		c.streamingRequested = false
-	}
+	c.closeGrpcStream() // TODO: if streaming not requested then no reason to close
 	c.initialized = true
 
 	var err error
 	if c.stream == nil {
 		var streamCtx context.Context
-		streamCtx, c.streamCancelFn = context.WithCancel(context.Background()) // We create child context for the stream so we can cancel it to prevent leak
+		streamCtx, c.streamCancelFn = context.WithCancel(c.ctx) // We create child context for the stream so we can cancel it to prevent leak
 		c.stream, err = c.tx.db.remoteKV.Seek(streamCtx)
 		if err != nil {
 			return []byte{}, nil, err

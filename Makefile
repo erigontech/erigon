@@ -19,7 +19,7 @@ ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
-all: tg hack tester rpctest state restapi pics rpcdaemon integration
+all: tg hack tester rpctest state restapi pics rpcdaemon integration lmdb-tools
 
 docker:
 	docker build -t turbo-geth:latest .
@@ -98,6 +98,12 @@ headers:
 	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
+
+lmdb-tools:
+	$(GOBUILD) -o $(GOBIN)/lmdb_stat github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
+	$(GOBUILD) -o $(GOBIN)/lmdb_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
 test: semantics/z3/build/libz3.a
 	$(GOTEST)

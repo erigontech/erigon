@@ -22,15 +22,18 @@ const (
 )
 
 var (
-	LMDBMapSize = 2 * datasize.TB
+	LMDBDefaultMapSize          = 2 * datasize.TB
+	LMDBDefaultMaxFreelistReuse = uint(10_000) // measured in pages
 )
 
 type BucketConfigsFunc func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg
 type LmdbOpts struct {
-	inMem      bool
-	readOnly   bool
-	path       string
-	bucketsCfg BucketConfigsFunc
+	inMem            bool
+	readOnly         bool
+	path             string
+	bucketsCfg       BucketConfigsFunc
+	mapSize          datasize.ByteSize
+	maxFreelistReuse uint
 }
 
 func (opts LmdbOpts) Path(path string) LmdbOpts {
@@ -44,6 +47,16 @@ func (opts LmdbOpts) Set(opt LmdbOpts) LmdbOpts {
 
 func (opts LmdbOpts) InMem() LmdbOpts {
 	opts.inMem = true
+	return opts
+}
+
+func (opts LmdbOpts) MapSize(sz datasize.ByteSize) LmdbOpts {
+	opts.mapSize = sz
+	return opts
+}
+
+func (opts LmdbOpts) MaxFreelistReuse(pages uint) LmdbOpts {
+	opts.maxFreelistReuse = pages
 	return opts
 }
 
@@ -72,21 +85,34 @@ func (opts LmdbOpts) Open() (KV, error) {
 	}
 
 	var logger log.Logger
-
 	if opts.inMem {
-		err = env.SetMapSize(64 << 20) // 64MB
 		logger = log.New("lmdb", "inMem")
+		opts.path, err = ioutil.TempDir(os.TempDir(), "lmdb")
 		if err != nil {
 			return nil, err
 		}
-		opts.path, _ = ioutil.TempDir(os.TempDir(), "lmdb")
 	} else {
-		err = env.SetMapSize(int64(LMDBMapSize.Bytes()))
 		logger = log.New("lmdb", path.Base(opts.path))
-		if err != nil {
-			return nil, err
+	}
+
+	if opts.mapSize == 0 {
+		if opts.inMem {
+			opts.mapSize = 64 * datasize.MB
+		} else {
+			opts.mapSize = LMDBDefaultMapSize
 		}
 	}
+	if err = env.SetMapSize(int64(opts.mapSize.Bytes())); err != nil {
+		return nil, err
+	}
+
+	if opts.maxFreelistReuse == 0 {
+		opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
+	}
+	if err = env.SetMaxFreelistReuse(opts.maxFreelistReuse); err != nil {
+		return nil, err
+	}
+
 	if err = os.MkdirAll(opts.path, 0744); err != nil {
 		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 	}
@@ -343,7 +369,6 @@ func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 	for k, _, _ := c.Get(nil, nil, lmdb.First); k != nil; k, _, _ = c.Get(nil, nil, lmdb.Next) {
 		res = append(res, string(k))
 	}
-	c.Close()
 	return res, nil
 }
 
@@ -594,6 +619,34 @@ func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
 		return nil, err
 	}
 	return val, nil
+}
+
+func (tx *lmdbTx) Has(bucket string, key []byte) (bool, error) {
+	b := tx.db.buckets[bucket]
+	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
+		from, to := b.DupFromLen, b.DupToLen
+		c := tx.Cursor(bucket).(*LmdbCursor)
+		if err := c.initCursor(); err != nil {
+			return false, err
+		}
+		defer c.Close()
+		_, v, err := c.getBothRange(key[:to], key[to:])
+		if err != nil {
+			if lmdb.IsNotFound(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		return bytes.Equal(key[to:], v[:from-to]), nil
+	}
+
+	if _, err := tx.get(b.DBI, key); err == nil {
+		return true, nil
+	} else if lmdb.IsNotFound(err) {
+		return false, nil
+	} else {
+		return false, err
+	}
 }
 
 func (tx *lmdbTx) BucketSize(name string) (uint64, error) {

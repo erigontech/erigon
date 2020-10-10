@@ -51,10 +51,10 @@ func NewTraceAPI(db ethdb.KV, dbReader ethdb.Database, cfg *cli.Flags) *TraceAPI
 	}
 }
 
-func (api *TraceAPIImpl) getBlockByRPCNumber(blockNr rpc.BlockNumber) (*types.Block, error) {
-	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+func (api *TraceAPIImpl) getBlockByRPCNumber(db rawdb.DatabaseReader, blockNr rpc.BlockNumber) (*types.Block, error) {
+	blockNum, err := getBlockNumber(blockNr, db)
 	if err != nil {
 		return nil, err
 	}
-	return rawdb.ReadBlockByNumber(api.dbReader, blockNum), nil
+	return rawdb.ReadBlockByNumber(db, blockNum), nil
 }

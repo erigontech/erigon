@@ -68,7 +68,11 @@ func (b *testBackend) HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumbe
 		num = *number
 	} else {
 		num = uint64(blockNr)
-		hash = rawdb.ReadCanonicalHash(b.db, num)
+		var err error
+		hash, err = rawdb.ReadCanonicalHash(b.db, num)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return rawdb.ReadHeader(b.db, hash, num), nil
 }
@@ -143,7 +147,11 @@ func (b *testBackend) ServiceFilter(ctx context.Context, session *bloombits.Matc
 				task.Bitsets = make([][]byte, len(task.Sections))
 				for i, section := range task.Sections {
 					if rand.Int()%4 != 0 { // Handle occasional missing deliveries
-						head := rawdb.ReadCanonicalHash(b.db, (section+1)*params.BloomBitsBlocks-1)
+						head, err := rawdb.ReadCanonicalHash(b.db, (section+1)*params.BloomBitsBlocks-1)
+						if err != nil {
+							task.Error = err
+							continue
+						}
 						task.Bitsets[i], _ = rawdb.ReadBloomBits(b.db, task.Bit, section, head)
 					}
 				}

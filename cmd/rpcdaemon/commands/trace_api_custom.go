@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -12,28 +11,46 @@ import (
 
 // BlockReward returns the block reward for this block
 func (api *TraceAPIImpl) BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	return api.rewardCalc(blockNr, "block") // nolint goconst
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return Issuance{}, err
+	}
+	defer tx.Rollback()
+
+	return api.rewardCalc(tx, blockNr, "block") // nolint goconst
 }
 
 // UncleReward returns the uncle reward for this block
 func (api *TraceAPIImpl) UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	return api.rewardCalc(blockNr, "uncle") // nolint goconst
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return Issuance{}, err
+	}
+	defer tx.Rollback()
+
+	return api.rewardCalc(tx, blockNr, "uncle") // nolint goconst
 }
 
 // Issuance returns the issuance for this block
 func (api *TraceAPIImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	return api.rewardCalc(blockNr, "issuance")
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return Issuance{}, err
+	}
+	defer tx.Rollback()
+
+	return api.rewardCalc(tx, blockNr, "issuance")
 }
 
-func (api *TraceAPIImpl) rewardCalc(blockNr rpc.BlockNumber, which string) (Issuance, error) {
-	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+func (api *TraceAPIImpl) rewardCalc(db rawdb.DatabaseReader, blockNr rpc.BlockNumber, which string) (Issuance, error) {
+	genesisHash := rawdb.ReadBlockByNumber(db, 0).Hash()
+	chainConfig := rawdb.ReadChainConfig(db, genesisHash)
 	if chainConfig.Ethash == nil {
 		// Clique for example has no issuance
 		return Issuance{}, nil
 	}
 
-	block, err := api.getBlockByRPCNumber(blockNr)
+	block, err := api.getBlockByRPCNumber(db, blockNr)
 	if err != nil {
 		return Issuance{}, err
 	}
