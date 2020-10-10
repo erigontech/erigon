@@ -770,7 +770,12 @@ var (
 	LMDBMapSizeFlag = cli.StringFlag{
 		Name:  "lmdb.mapSize",
 		Usage: "Sets Memory map size. Lower it if you have issues with opening the DB",
-		Value: ethdb.LMDBMapSize.String(),
+		Value: ethdb.LMDBDefaultMapSize.String(),
+	}
+	LMDBMaxFreelistReuseFlag = cli.UintFlag{
+		Name:  "lmdb.maxFreelistReuse",
+		Usage: "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.",
+		Value: ethdb.LMDBDefaultMaxFreelistReuse,
 	}
 )
 
@@ -1250,23 +1255,29 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
 	cfg.LMDB = strings.EqualFold(databaseFlag, "lmdb") //case insensitive
 	if cfg.LMDB && ctx.GlobalString(LMDBMapSizeFlag.Name) != "" {
-		var size datasize.ByteSize
-		err := size.UnmarshalText([]byte(ctx.GlobalString(LMDBMapSizeFlag.Name)))
+		err := cfg.LMDBMapSize.UnmarshalText([]byte(ctx.GlobalString(LMDBMapSizeFlag.Name)))
 		if err != nil {
 			log.Error("Invalid LMDB map size provided. Will use defaults",
-				"lmdb.mapSize", ethdb.LMDBMapSize.HumanReadable(),
+				"lmdb.mapSize", ethdb.LMDBDefaultMapSize.HumanReadable(),
 				"err", err,
 			)
 		} else {
-			if size < 1*datasize.GB {
+			if cfg.LMDBMapSize < 1*datasize.GB {
 				log.Error("Invalid LMDB map size provided. Will use defaults",
-					"lmdb.mapSize", ethdb.LMDBMapSize.HumanReadable(),
+					"lmdb.mapSize", ethdb.LMDBDefaultMapSize.HumanReadable(),
 					"err", "the value should be at least 1 GB",
 				)
-			} else {
-				ethdb.LMDBMapSize = size
-				log.Info("Set LMDB map size", "lmdb.mapSize", ethdb.LMDBMapSize.HumanReadable())
 			}
+		}
+	}
+
+	if cfg.LMDB {
+		cfg.LMDBMaxFreelistReuse = ctx.GlobalUint(LMDBMaxFreelistReuseFlag.Name)
+		if cfg.LMDBMapSize < 16 {
+			log.Error("Invalid LMDB MaxFreelistReuse provided. Will use defaults",
+				"lmdb.maxFreelistReuse", ethdb.LMDBDefaultMaxFreelistReuse,
+				"err", "the value should be at least 16",
+			)
 		}
 	}
 }
