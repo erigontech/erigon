@@ -81,9 +81,15 @@ func OpenDB(path string) (*DB, error) {
 	return newPersistentDB(path)
 }
 
+var bucketsConfig = func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	return dbutils.BucketsCfg{
+		dbutils.InodesBucket: {},
+	}
+}
+
 // newMemoryNodeDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB() (*DB, error) {
-	db, err := ethdb.NewLMDB().InMem().Open()
+	db, err := ethdb.NewLMDB().InMem().WithBucketsConfig(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +99,7 @@ func newMemoryDB() (*DB, error) {
 // newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(path string) (*DB, error) {
-	kv, err := ethdb.NewLMDB().Path(path).MapSize(64 * datasize.MB).Open()
+	kv, err := ethdb.NewLMDB().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}
