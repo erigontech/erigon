@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
@@ -101,10 +102,9 @@ type ProtocolManager struct {
 	// Test fields or hooks
 	broadcastTxAnnouncesOnly bool // Testing field, disable transaction propagation
 
-	mode          downloader.SyncMode // Sync mode passed from the command line
-	datadir       string
-	hdd           bool
-	currentHeight uint64 // Atomic variable to contain chain height
+	mode    downloader.SyncMode // Sync mode passed from the command line
+	datadir string
+	hdd     bool
 }
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
@@ -198,7 +198,9 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		return engine.VerifyHeader(blockchain, header, true)
 	}
 	heighter := func() uint64 {
-		return atomic.LoadUint64(&manager.currentHeight)
+		headHash := rawdb.ReadHeadHeaderHash(chaindb)
+		headNumber := rawdb.ReadHeaderNumber(chaindb, headHash)
+		return *headNumber
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import

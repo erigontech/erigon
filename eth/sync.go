@@ -165,10 +165,10 @@ type chainSyncer struct {
 
 // chainSyncOp is a scheduled sync operation.
 type chainSyncOp struct {
-	mode   downloader.SyncMode
-	peer   *peer
+	mode downloader.SyncMode
+	peer *peer
 	number uint64
-	head   common.Hash
+	head common.Hash
 }
 
 // newChainSyncer creates a chainSyncer.
@@ -277,7 +277,9 @@ func peerToSyncOp(mode downloader.SyncMode, p *peer) *chainSyncOp {
 }
 
 func (cs *chainSyncer) modeAndLocalHead() (downloader.SyncMode, uint64) {
-	return cs.pm.mode, atomic.LoadUint64(&cs.pm.currentHeight)
+	headHash := rawdb.ReadHeadHeaderHash(cs.pm.chaindb)
+	headNumber := rawdb.ReadHeaderNumber(cs.pm.chaindb, headHash)
+	return cs.pm.mode, *headNumber
 }
 
 // startSync launches doSync in a new goroutine.
@@ -325,7 +327,6 @@ func (pm *ProtocolManager) doSync(op *chainSyncOp) error {
 	// enable accepting transactions from the network.
 	headHash := rawdb.ReadHeadHeaderHash(pm.chaindb)
 	headNumber := rawdb.ReadHeaderNumber(pm.chaindb, headHash)
-	atomic.StoreUint64(&pm.currentHeight, *headNumber) // this will be read by the block fetcher when required
 	head := rawdb.ReadBlock(pm.chaindb, headHash, *headNumber)
 	if *headNumber >= pm.checkpointNumber && head != nil {
 		// Checkpoint passed, sanity check the timestamp to have a fallback mechanism
