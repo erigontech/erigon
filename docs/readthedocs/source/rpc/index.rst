@@ -2,12 +2,27 @@
 RPCDaemon Code
 ==============
 
+`web3_`
+=======
+
+.. code-block:: go
+
+    func (api *Web3APIImpl) ClientVersion(_ context.Context) (string, error)
+
+ClientVersion returns the node name
+
+.. code-block:: go
+
+    func (api *Web3APIImpl) Sha3(_ context.Context, input hexutil.Bytes) hexutil.Bytes
+
+Sha3 applies the ethereum sha3 implementation on the input.
+
 `eth_`
 ======
 
 .. code-block:: go
 
-    func NewAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl
+    func NewEthAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl
 
 EthAPI is the **eth_** container and contains every json rpc that starts with **eth_**. ApiImpl its just the implementation of EthAPI interface.
 
