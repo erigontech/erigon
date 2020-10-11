@@ -62,7 +62,7 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
 		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
 		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(cpus * 3), // to force clients reduce concurrency level
+		grpc.MaxConcurrentStreams(100), // to force clients reduce concurrency level
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time: 10 * time.Minute,
 		}),
