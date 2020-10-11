@@ -118,7 +118,8 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customAPIList []rpc.
 	debugImpl := NewPrivateDebugAPI(db, dbReader)
 	traceImpl := NewTraceAPI(db, dbReader, &cfg)
 	web3Impl := NewWeb3APIImpl()
-	dbImpl := NewDBAPIImpl() /* deprecated */
+	dbImpl := NewDBAPIImpl()   /* deprecated */
+	shhImpl := NewSHHAPIImpl() /* deprecated */
 
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
@@ -162,6 +163,13 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customAPIList []rpc.
 				Namespace: "db",
 				Public:    true,
 				Service:   DBAPI(dbImpl),
+				Version:   "1.0",
+			})
+		case "shh":
+			defaultAPIList = append(defaultAPIList, rpc.API{
+				Namespace: "shh",
+				Public:    true,
+				Service:   SHHAPI(shhImpl),
 				Version:   "1.0",
 			})
 		}
