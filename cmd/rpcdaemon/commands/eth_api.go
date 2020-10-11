@@ -50,7 +50,7 @@ type EthAPI interface {
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
 
 	// Account related (proposed file: ./eth_accounts.go)
-	Accounts(_ context.Context) (string, error) /* deprecated */
+	// Accounts(_ context.Context) (string, error) /* deprecated */
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
@@ -68,7 +68,7 @@ type EthAPI interface {
 	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	// SendTransaction(ctx context.Context) (string, error)
-	Sign(_ context.Context, _ string, _ string) (string, error) /* deprecated */
+	// Sign(_ context.Context, _ string, _ string) (string, error) /* deprecated */
 
 	// Mining related (proposed file: ./eth_mining.go)
 	Coinbase(ctx context.Context) (common.Address, error)
@@ -84,10 +84,10 @@ type EthAPI interface {
 	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 
 	// Deprecated commands in eth_ (proposed file: ./eth_deprecated.go)
-	GetCompilers(_ context.Context) (string, error)                /* deprecated */
-	CompileLLL(_ context.Context, _ string) (string, error)        /* deprecated */
-	CompileSolidity(ctx context.Context, _ string) (string, error) /* deprecated */
-	CompileSerpent(ctx context.Context, _ string) (string, error)  /* deprecated */
+	// GetCompilers(_ context.Context) (string, error)                /* deprecated */
+	// CompileLLL(_ context.Context, _ string) (string, error)        /* deprecated */
+	// CompileSolidity(ctx context.Context, _ string) (string, error) /* deprecated */
+	// CompileSerpent(ctx context.Context, _ string) (string, error)  /* deprecated */
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -99,8 +99,8 @@ type APIImpl struct {
 	GasCap       uint64
 }
 
-// NewAPI returns APIImpl instance
-func NewAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
+// NewEthAPI returns APIImpl instance
+func NewEthAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
 	return &APIImpl{
 		db:         db,
 		dbReader:   dbReader,

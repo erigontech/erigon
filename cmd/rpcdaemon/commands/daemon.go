@@ -111,7 +111,8 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.
 	var defaultAPIList []rpc.API
 
 	dbReader := ethdb.NewObjectDatabase(db)
-	apiImpl := NewAPI(db, dbReader, eth, cfg.Gascap)
+
+	ethImpl := NewEthAPI(db, dbReader, eth, cfg.Gascap)
 	netImpl := NewNetAPIImpl(eth)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader)
 	traceAPIImpl := NewTraceAPI(db, dbReader, &cfg)
@@ -123,7 +124,7 @@ func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customApiList []rpc.
 			defaultAPIList = append(defaultAPIList, rpc.API{
 				Namespace: "eth",
 				Public:    true,
-				Service:   EthAPI(apiImpl),
+				Service:   EthAPI(ethImpl),
 				Version:   "1.0",
 			})
 		case "debug":
