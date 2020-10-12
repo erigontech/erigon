@@ -17,7 +17,11 @@ type StagedSync struct {
 	params           OptionalParameters
 }
 
+// OptionalParameters contains any non-necessary parateres you can specify to fine-tune
+// and experiment on StagedSync.
 type OptionalParameters struct {
+	// StateReaderBuilder is a function that returns state reader for the block execution stage.
+	// It can be used to add someting like bloom filters to figure out non-existing accounts and similar experiments.
 	StateReaderBuilder StateReaderBuilder
 }
 
