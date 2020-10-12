@@ -3,11 +3,11 @@ package bitmapdb
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"sort"
 )
 
 const ChunkLimit = uint64(3500 * datasize.B)
@@ -140,7 +140,7 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 	}
 
 	sz := bm.GetSerializedSizeInBytes()
-	if sz <= target+256 {
+	if sz <= target {
 		lft := roaring.New()
 		lft.Or(bm)
 		bm.Clear()
@@ -148,69 +148,16 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 	}
 
 	lft := roaring.New()
-	lftSz := lft.GetSerializedSizeInBytes()
 	from := uint64(bm.Minimum())
-	//max := uint64(bm.Maximum())
-	//minMax := bm.Maximum() - bm.Minimum()
-	//to := sort.Search(int(minMax), func(i int) bool {
-	//	lft.Clear()
-	//	lft.AddRange(from, from+uint64(i)+1)
-	//	lft.And(bm)
-	//	lftSz = lft.GetSerializedSizeInBytes()
-	//	smallStep := i < 256 || max-uint64(i) < 256
-	//	if smallStep && lftSz > target {
-	//		fmt.Printf("1: min=%d, max=%d, from+i=%d, lftSz=%d, sz=%d\n", from, max, i, lftSz, sz)
-	//		return true
-	//	} else if smallStep && lftSz < target {
-	//		cpy := lftSz
-	//		lft.Clear()
-	//		lft.Or(bm)
-	//		fmt.Printf("2: min=%d, max=%d, from+i=%d, cpy=%d, lftSz=%d, sz=%d\n", from, max, i, cpy, lftSz, sz)
-	//		return true
-	//	}
-	//	return !(lftSz < target-256 || lftSz > target+256)
-	//})
-	//
-	//bm.RemoveRange(from, from+uint64(to)) // [from,to)
-	//return lft
-
-	denominator := uint64(2)
-	minMax := uint64(bm.Maximum()) - uint64(bm.Minimum())
-	step := minMax / denominator
-	to := from + step
-
-	// binary search left part of right size
-	for lftSz < target-256 || lftSz > target+256 {
-		// don't go for too small steps. protection against infinity loop.
-		if step <= 128 && lftSz > target {
-			fmt.Printf("1: step=%d, lftSz=%d, minMax=%d, from=%d, to=%d, max=%d, sz=%d\n", step, lftSz, minMax, from, to, uint64(bm.Maximum()), sz)
-			break
-		} else if step <= 128 && lftSz < target {
-			cpy := lftSz
-			//lft.Clear()
-			//to = uint64(bm.Maximum())
-			//lft.Or(bm)
-			fmt.Printf("2: cpy=%d, step=%d, lftSz=%d, minMax=%d, from=%d, to=%d, max=%d, sz=%d\n", cpy, step, lft.GetSerializedSizeInBytes(), minMax, from, to, uint64(bm.Maximum()), sz)
-			break
-		}
+	minMax := bm.Maximum() - bm.Minimum() + 1
+	to := sort.Search(int(minMax), func(i int) bool {
 		lft.Clear()
-		lft.AddRange(from, to+1)
+		lft.AddRange(from, from+uint64(i))
 		lft.And(bm)
-		lftSz = lft.GetSerializedSizeInBytes()
+		return lft.GetSerializedSizeInBytes() > target
+	})
 
-		denominator *= 2
-		step = minMax / denominator
-		//fmt.Printf("3: min=%d, max=%d, from=%d, to=%d, step=%d, lftSz=%d\n", uint64(bm.Minimum()), uint64(bm.Maximum()), from, to, step, lftSz)
-		if lftSz > target {
-			to -= step
-		}
-
-		if lftSz < target {
-			to += step
-		}
-	}
-
-	bm.RemoveRange(from, to+1) // [from,to)
+	bm.RemoveRange(from, from+uint64(to)) // [from,to)
 	return lft
 }
 
