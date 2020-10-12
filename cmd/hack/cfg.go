@@ -18,8 +18,8 @@ import (
 	"time"
 )
 
-var maxStackLen = 2560
-var maxStackCount = 2560
+var maxStackLen = 1024
+var maxStackCount = 25600000
 var maxAnlyCounterLimit = 1048756
 var maxSecs int64 = 600
 var maxMBs uint64 = 1000
@@ -632,7 +632,7 @@ func (eval *CfgEval) printStats() {
 		percent(eval.numInvalidOpcode,eval.numProgramsAnalyzed),
 		percent(eval.numInvalidJumpDest,eval.numProgramsAnalyzed),
 		percent(eval.numLowCoverage,eval.numProgramsAnalyzed),
-		percent(eval.numOOM,eval.numProgramsAnalyzed))
+		eval.numOOM)
 }
 
 func (eval *CfgEval) update(result *cfgJobResult, count int)  {
