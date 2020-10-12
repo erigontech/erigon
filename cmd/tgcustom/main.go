@@ -5,8 +5,10 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/turbo/node"
 
@@ -72,7 +74,12 @@ func runTurboGeth(ctx *cli.Context) {
 	sync := stagedsync.New(
 		syncStages(ctx),
 		stagedsync.DefaultUnwindOrder(),
-		stagedsync.OptionalParameters{},
+		stagedsync.OptionalParameters{
+			StateReaderBuilder: func(getter ethdb.Getter) state.StateReader {
+				// put your custom caching code here
+				return state.NewPlainStateReader(getter)
+			},
+		},
 	)
 
 	// running a node and initializing a custom bucket with all default settings

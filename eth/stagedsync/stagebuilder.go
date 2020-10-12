@@ -173,6 +173,7 @@ func DefaultStages() StageBuilders {
 								WriteReceipts: world.storageMode.Receipts,
 								Hdd:           world.hdd,
 								ChangeSetHook: world.changeSetHook,
+								ReaderBuilder: world.stateReaderBuilder,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
