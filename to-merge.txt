@@ -237,25 +237,4 @@ Date:   Mon Oct 12 21:02:38 2020 +0800
 
     accouts, consensus, core: fix some comments (#21617)
 
-commit 86dd005544179818edd78ef6c9396b9574e8a614
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Mon Oct 12 18:08:04 2020 +0800
-
-    trie: polish commit function (#21692)
-    
-    * trie: polish commit function
-    
-    * trie: fix typo
-
-commit 706f5e3b98a419e8b93653d21876b74a60ab3ee6
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Fri Oct 9 11:23:46 2020 +0200
-
-    core: fix txpool off-by-one error (#21683)
-
-commit 19a1c950467db58171532bbfcdc354f50a6e5f8e
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Fri Oct 9 09:09:10 2020 +0200
-
-    eth/downloader: cache parent hash instead of recomputing (#21678)
 
