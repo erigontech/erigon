@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-const ChunkLimit = uint64(3 * datasize.KB)
+const ChunkLimit = uint64(3500 * datasize.B)
 
 // AppendMergeByOr - appending delta to existing data in db, merge by Or
 // Method maintains sharding - because some bitmaps are >1Mb and when new incoming blocks process it
@@ -182,14 +182,14 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 	// binary search left part of right size
 	for lftSz < target-256 || lftSz > target+256 {
 		// don't go for too small steps. protection against infinity loop.
-		if step <= 1024 && lftSz > target {
+		if step <= 128 && lftSz > target {
 			fmt.Printf("1: step=%d, lftSz=%d, minMax=%d, from=%d, to=%d, max=%d, sz=%d\n", step, lftSz, minMax, from, to, uint64(bm.Maximum()), sz)
 			break
-		} else if step <= 1024 && lftSz < target {
+		} else if step <= 128 && lftSz < target {
 			cpy := lftSz
-			lft.Clear()
-			to = uint64(bm.Maximum())
-			lft.Or(bm)
+			//lft.Clear()
+			//to = uint64(bm.Maximum())
+			//lft.Or(bm)
 			fmt.Printf("2: cpy=%d, step=%d, lftSz=%d, minMax=%d, from=%d, to=%d, max=%d, sz=%d\n", cpy, step, lft.GetSerializedSizeInBytes(), minMax, from, to, uint64(bm.Maximum()), sz)
 			break
 		}
@@ -200,7 +200,7 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 
 		denominator *= 2
 		step = minMax / denominator
-		fmt.Printf("3: min=%d, max=%d, from=%d, to=%d, step=%d\n", uint64(bm.Minimum()), uint64(bm.Maximum()), from, to, step)
+		fmt.Printf("3: min=%d, max=%d, from=%d, to=%d, step=%d, lftSz=%d\n", uint64(bm.Minimum()), uint64(bm.Maximum()), from, to, step, lftSz)
 		if lftSz > target {
 			to -= step
 		}
