@@ -2,7 +2,6 @@ package vm
 
 import (
 	"errors"
-	"fmt"
 	"github.com/holiman/uint256"
 )
 
@@ -84,6 +83,10 @@ func CheckCfg(code []byte, proof map[int]*astate) bool {
 
 	var workList []edgec
 
+	if len(proof[0].stackset) != 1 || len(proof[0].stackset[0].values) != 0 {
+		return false
+	}
+
 	edges, err := resolveCheck(sem, code, proof, 0)
 	if err != nil {
 		return false
@@ -107,21 +110,15 @@ func CheckCfg(code []byte, proof map[int]*astate) bool {
 		postPrf := proof[e.pc1]
 		post, err := postCheck(sem, code, prePrf, e)
 		if err != nil {
-			print("Here1")
 			return false
 		}
 
 		if !Leq(post, postPrf) {
-			fmt.Printf("Here2\n")
-			fmt.Printf("pc0->pc1: %v->%v\n", e.pc0, e.pc1)
-			fmt.Printf("post: %v\n", post.String(true))
-			fmt.Printf("postPrf: %v\n", postPrf.String(true))
 			return false
 		}
 
 		edges, err := resolveCheck(sem, code, proof, e.pc1)
 		if err != nil {
-			print("Here3")
 			return false
 		}
 

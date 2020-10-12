@@ -68,7 +68,11 @@ func worker(code []byte) {
 	start := time.Now()
 
 	go func() {
-		_, _ = vm.GenCfg(code, maxAnlyCounterLimit, maxStackLen, maxStackCount, &metrics)
+		cfg, _ := vm.GenCfg(code, maxAnlyCounterLimit, maxStackLen, maxStackCount, &metrics)
+
+		check := vm.CheckCfg(code, cfg.D)
+		metrics.CheckerFailed = !check
+
 		mon <- 0
 	}()
 
@@ -206,6 +210,7 @@ func batchServer() error {
 							"OOM",
 							"Elapsed (ms)",
 							"MemUsed (MB)",
+							"Checker",
 							"Bytecode"}
 	_, err = resultsFile.WriteString(strings.Join(headers, "|") + "\n")
 	check(err)
@@ -228,6 +233,7 @@ func batchServer() error {
 							sb(result.metrics.OOM),
 							si64(result.metrics.TimeMillis.Milliseconds()),
 							sui64(result.metrics.MemUsedMBs),
+							sb(result.metrics.Checker),
 							hex.EncodeToString(result.job.code)}
 
 		_, err = resultsFile.WriteString(strings.Join(line,"|") + "\n")
@@ -613,11 +619,12 @@ type CfgEval struct {
 	numAddressesPassed   int
 	numAddressesAnalyzed int
 	numTimeouts          int
-	numOOM		         int
+	numOOM               int
+	numCheckerFailed     int
 }
 
 func (eval *CfgEval) printStats() {
-	fmt.Printf("ProgramsPass=%v ProgramsAnalyzed=%v Programs=%v ProgramsPassRate=%v Timeouts=%v Panic=%v CounterLimit=%v ShortStack=%v StackCountLimit=%v Unresolved=%v Imprecision=%v InvalidOp=%v InvalidJumpDest=%v DeadCode=%v OOM=%v\n",
+	fmt.Printf("ProgramsPass=%v ProgramsAnalyzed=%v Programs=%v ProgramsPassRate=%v Timeouts=%v Panic=%v CounterLimit=%v ShortStack=%v StackCountLimit=%v Unresolved=%v Imprecision=%v InvalidOp=%v InvalidJumpDest=%v DeadCode=%v OOM=%v CheckerFailed=%v\n",
 		eval.numProgramsPassed,
 		eval.numProgramsAnalyzed,
 		eval.numPrograms,
@@ -627,12 +634,13 @@ func (eval *CfgEval) printStats() {
 		eval.numAnlyCounterLimit,
 		eval.numShortStack,
 		eval.numStackLimitReached,
-		percent(eval.numUnresolved,eval.numProgramsAnalyzed),
-		percent(eval.numImprecision,eval.numProgramsAnalyzed),
-		percent(eval.numInvalidOpcode,eval.numProgramsAnalyzed),
-		percent(eval.numInvalidJumpDest,eval.numProgramsAnalyzed),
-		percent(eval.numLowCoverage,eval.numProgramsAnalyzed),
-		eval.numOOM)
+		eval.numUnresolved,
+		eval.numImprecision,
+		eval.numInvalidOpcode,
+		eval.numInvalidJumpDest,
+		eval.numLowCoverage,
+		eval.numOOM,
+		eval.numCheckerFailed)
 }
 
 func (eval *CfgEval) update(result *cfgJobResult, count int)  {
@@ -680,6 +688,9 @@ func (eval *CfgEval) update(result *cfgJobResult, count int)  {
 	}
 	if metrics.BadJumpInvalidJumpDest {
 		eval.numInvalidJumpDest++
+	}
+	if metrics.CheckerFailed {
+		eval.numCheckerFailed++
 	}
 }
 

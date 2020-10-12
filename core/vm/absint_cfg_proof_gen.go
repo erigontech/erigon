@@ -459,7 +459,9 @@ type CfgMetrics struct {
 	OOM                    bool
 	Timeout                bool
 	MemUsedMBs             uint64
-	TimeMillis			   time.Duration
+	TimeMillis             time.Duration
+	Checker                bool
+	CheckerFailed          bool
 }
 
 type Cfg struct {
