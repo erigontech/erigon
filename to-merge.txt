@@ -231,10 +231,5 @@ Date:   Tue Oct 13 16:55:57 2020 +0800
 
     console: fix admin.sleepBlocks (#21629)
 
-commit 66c3eb2f1a5c6bb4b5a678ce819f9984ac09e246
-Author: mr_franklin <mr_franklin@126.com>
-Date:   Mon Oct 12 21:02:38 2020 +0800
-
-    accouts, consensus, core: fix some comments (#21617)
 
 
