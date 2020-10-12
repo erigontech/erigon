@@ -10,7 +10,7 @@ import (
 	"sort"
 )
 
-const ChunkLimit = uint64(3500 * datasize.B)
+const ChunkLimit = uint64(1900 * datasize.B) // threshold after which appear LMDB OverflowPages
 
 // AppendMergeByOr - appending delta to existing data in db, merge by Or
 // Method maintains sharding - because some bitmaps are >1Mb and when new incoming blocks process it
