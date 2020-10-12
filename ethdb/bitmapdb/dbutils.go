@@ -125,25 +125,22 @@ func writeBitmapChunked(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error
 	return nil
 }
 
-func ChunkIterator(bm *roaring.Bitmap, target, precision uint64) func() *roaring.Bitmap {
+func ChunkIterator(bm *roaring.Bitmap, target uint64) func() *roaring.Bitmap {
 	return func() *roaring.Bitmap {
-		return CutLeft(bm, target, precision)
+		return CutLeft(bm, target)
 	}
 }
 
 // CutLeft - cut from bitmap `target+-precision` bytes from left
 // removing lft part from `bm`
 // returns nil on zero cardinality
-func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
-	maxLimit := target + precision
-	minLimit := target - precision
-
+func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 	if bm.GetCardinality() == 0 {
 		return nil
 	}
 
 	sz := bm.GetSerializedSizeInBytes()
-	if sz <= maxLimit {
+	if sz <= target {
 		lft := roaring.New()
 		lft.Or(bm)
 		bm.Clear()
@@ -159,7 +156,7 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 	to := from + step
 
 	// binary search left part of right size
-	for lftSz < minLimit || lftSz > maxLimit {
+	for lftSz < target || lftSz > target {
 		if step <= 512 { // if no much data left, stop search and just store everything in shard. protection against infinity loop.
 			lft.Clear()
 			to = uint64(bm.Maximum())
@@ -170,7 +167,7 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 		lft.AddRange(from, to+1)
 		lft.And(bm)
 		lftSz = lft.GetSerializedSizeInBytes()
-		if lftSz > maxLimit {
+		if lftSz > target {
 			denominator *= 2
 			step = minMax / denominator
 			to -= step
@@ -180,7 +177,7 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 			continue
 		}
 
-		if lftSz < minLimit {
+		if lftSz < target {
 			denominator *= 2
 			step = minMax / denominator
 			to += step

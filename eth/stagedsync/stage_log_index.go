@@ -178,7 +178,7 @@ func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-cha
 			return err
 		}
 		currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
-		nextChunk := bitmapdb.ChunkIterator(currentBitmap, bitmapdb.ChunkLimit, 512)
+		nextChunk := bitmapdb.ChunkIterator(currentBitmap, bitmapdb.ChunkLimit)
 		for chunk := nextChunk(); chunk != nil; chunk = nextChunk() {
 			buf.Reset()
 			if _, err := chunk.WriteTo(buf); err != nil {
