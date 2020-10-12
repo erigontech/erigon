@@ -148,7 +148,6 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 		pt.Result.GasUsed = gethTrace.GasUsed
 		pt.Action.SelfDestructed = gethTrace.From
 		pt.Action.RefundAddress = gethTrace.To
-
 	} else {
 		pt.Action.CallType = callType
 		pt.Action.Input = gethTrace.Input

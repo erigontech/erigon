@@ -55,8 +55,8 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader rawdb.Database
 	return blockNumber, hash, nil
 }
 
-func GetAccount(chainKV ethdb.KV, blockNumber uint64, address common.Address) (*accounts.Account, error) {
-	reader := adapter.NewStateReader(chainKV, blockNumber)
+func GetAccount(tx ethdb.Tx, blockNumber uint64, address common.Address) (*accounts.Account, error) {
+	reader := adapter.NewStateReader(tx, blockNumber)
 	return reader.ReadAccountData(address)
 }
 

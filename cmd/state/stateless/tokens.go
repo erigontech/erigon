@@ -132,6 +132,9 @@ func makeTokens(blockNum uint64) {
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, false)
+	check(err1)
+	defer ethTx.Rollback()
 	chainConfig := params.MainnetChainConfig
 	tt := NewTokenTracer()
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
@@ -154,7 +157,7 @@ func makeTokens(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethTx, block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		for _, tx := range block.Transactions() {
@@ -195,6 +198,9 @@ func makeTokenBalances() {
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, false)
+	check(err1)
+	defer ethTx.Rollback()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	bc, errf := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	check(errf)
@@ -241,7 +247,7 @@ func makeTokenBalances() {
 		fmt.Printf("Analysing token %x...", token)
 		count := 0
 		addrCount := 0
-		dbstate := state.NewPlainDBState(ethDb.KV(), currentBlockNr)
+		dbstate := state.NewPlainDBState(ethTx, currentBlockNr)
 		statedb := state.New(dbstate)
 		msg := types.NewMessage(
 			caller,
@@ -418,6 +424,9 @@ func makeTokenAllowances() {
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, false)
+	check(err1)
+	defer ethTx.Rollback()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	bc, errf := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	check(errf)
@@ -464,7 +473,7 @@ func makeTokenAllowances() {
 		fmt.Printf("Analysing token %x...", token)
 		count := 0
 		addrCount := 0
-		dbstate := state.NewPlainDBState(ethDb.KV(), currentBlockNr)
+		dbstate := state.NewPlainDBState(ethTx, currentBlockNr)
 		statedb := state.New(dbstate)
 		msg := types.NewMessage(
 			caller,

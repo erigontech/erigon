@@ -274,6 +274,16 @@ func (tx *remoteTx) Get(bucket string, key []byte) (val []byte, err error) {
 	return c.SeekExact(key)
 }
 
+func (tx *remoteTx) Has(bucket string, key []byte) (bool, error) {
+	c := tx.Cursor(bucket)
+	defer c.Close()
+	k, _, err := c.Seek(key)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(key, k), nil
+}
+
 func (c *remoteCursor) SeekExact(key []byte) (val []byte, err error) {
 	k, v, err := c.Seek(key)
 	if err != nil {

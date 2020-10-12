@@ -15,7 +15,7 @@ import (
 // TraceTransaction returns the structured logs created during the execution of EVM
 // and returns them as a JSON object.
 func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *eth.TraceConfig) (interface{}, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.db.Begin(ctx, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +28,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	getter := adapter.NewBlockGetter(tx)
 	chainContext := adapter.NewChainContext(tx)
-	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, params.MainnetChainConfig, chainContext, api.db, blockHash, txIndex)
+	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, params.MainnetChainConfig, chainContext, tx, blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

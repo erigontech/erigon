@@ -2170,33 +2170,37 @@ func ExecuteBlockEphemerally(
 	}
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		if !vmConfig.NoReceipts {
+			ibs.Prepare(tx.Hash(), block.Hash(), i)
+		}
 		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
-		receipts = append(receipts, receipt)
+		if !vmConfig.NoReceipts {
+			receipts = append(receipts, receipt)
+		}
 	}
 
-	if chainConfig.IsByzantium(header.Number) {
+	if chainConfig.IsByzantium(header.Number) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.Header().ReceiptHash {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
-	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
-		return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
-	}
+	if !vmConfig.ReadOnly {
+		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+		engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles())
 
-	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-		return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
-	}
+		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+		if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
+		}
 
-	if err := stateWriter.WriteChangeSets(); err != nil {
-		return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		if err := stateWriter.WriteChangeSets(); err != nil {
+			return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		}
 	}
 
 	return receipts, nil

@@ -291,7 +291,12 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
 	}
 
-	reader := adapter.NewStateReader(api.db, blockNumber)
+	tx, err1 := api.db.Begin(ctx, nil, false)
+	if err1 != nil {
+		return "", fmt.Errorf("getStorageAt cannot open tx: %v", err1)
+	}
+	defer tx.Rollback()
+	reader := adapter.NewStateReader(tx, blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
@@ -312,7 +317,12 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return nil, err
 	}
 
-	reader := adapter.NewStateReader(api.db, blockNumber)
+	tx, err1 := api.db.Begin(ctx, nil, false)
+	if err1 != nil {
+		return nil, fmt.Errorf("getCode cannot open tx: %v", err1)
+	}
+	defer tx.Rollback()
+	reader := adapter.NewStateReader(tx, blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return hexutil.Bytes(""), nil
@@ -331,7 +341,12 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		return nil, err
 	}
 	nonce := hexutil.Uint64(0)
-	reader := adapter.NewStateReader(api.db, blockNumber)
+	tx, err1 := api.db.Begin(ctx, nil, false)
+	if err1 != nil {
+		return nil, fmt.Errorf("getTransactionCount cannot open tx: %v", err1)
+	}
+	defer tx.Rollback()
+	reader := adapter.NewStateReader(tx, blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return &nonce, err
