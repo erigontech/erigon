@@ -3,7 +3,6 @@ package bitmapdb
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -157,7 +156,7 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 
 	// binary search left part of right size
 	for lftSz < target || lftSz > target {
-		if step <= 512 { // if no much data left, stop search and just store everything in shard. protection against infinity loop.
+		if step <= 256 { // if no much data left, stop search and just store everything in shard. protection against infinity loop.
 			lft.Clear()
 			to = uint64(bm.Maximum())
 			lft.Or(bm)
@@ -167,25 +166,20 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 		lft.AddRange(from, to+1)
 		lft.And(bm)
 		lftSz = lft.GetSerializedSizeInBytes()
+
+		denominator *= 2
+		step = minMax / denominator
 		if lftSz > target {
-			denominator *= 2
-			step = minMax / denominator
 			to -= step
-			if denominator > 2^6 {
-				fmt.Printf("1: denominator=%d, lftSz=%d, minMax=%d, from=%d, to=%d, sz=%d\n", denominator, lftSz, minMax, from, to, sz)
-			}
 			continue
 		}
 
 		if lftSz < target {
-			denominator *= 2
-			step = minMax / denominator
 			to += step
-			if denominator > 2^6 {
-				fmt.Printf("2: denominator=%d, lftSz=%d, minMax=%d, from=%d, to=%d, sz=%d\n", denominator, lftSz, minMax, from, to, sz)
-			}
 			continue
 		}
+
+		break
 	}
 
 	bm.RemoveRange(from, to+1) // [from,to)
