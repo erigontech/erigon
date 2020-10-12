@@ -203,7 +203,6 @@ func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-cha
 		return nil
 	}
 
-	t := time.Now()
 	if err := collectorTopics.Load(db, dbutils.LogTopicIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
@@ -212,7 +211,6 @@ func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-cha
 		return err
 	}
 
-	fmt.Printf("a: %s\n", time.Since(t))
 	return nil
 }
 
