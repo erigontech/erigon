@@ -92,7 +92,7 @@ func writeBitmapChunked(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error
 		if delta.GetCardinality() == 0 {
 			break
 		}
-		if shard.GetSerializedSizeInBytes() >= uint64(ChunkLimit) {
+		if shard.GetSerializedSizeInBytes() >= ChunkLimit {
 			newV := bytes.NewBuffer(make([]byte, 0, shard.GetSerializedSizeInBytes()))
 			_, err := shard.WriteTo(newV)
 			if err != nil {
