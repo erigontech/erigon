@@ -131,7 +131,7 @@ func ChunkIterator(bm *roaring.Bitmap, target uint64) func() *roaring.Bitmap {
 	}
 }
 
-// CutLeft - cut from bitmap `target+-precision` bytes from left
+// CutLeft - cut from bitmap `target` bytes from left
 // removing lft part from `bm`
 // returns nil on zero cardinality
 func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
@@ -149,15 +149,15 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 
 	lft := roaring.New()
 	from := uint64(bm.Minimum())
-	minMax := bm.Maximum() - bm.Minimum() + 1
-	to := sort.Search(int(minMax), func(i int) bool {
+	minMax := bm.Maximum() - bm.Minimum() + 1         // +1 because AddRange has semantic [from,to)
+	to := sort.Search(int(minMax), func(i int) bool { // can be optimized to avoid "too small steps", but let's leave it for readability
 		lft.Clear()
 		lft.AddRange(from, from+uint64(i))
 		lft.And(bm)
 		return lft.GetSerializedSizeInBytes() > target
 	})
 
-	bm.RemoveRange(from, from+uint64(to)) // [from,to)
+	bm.RemoveRange(from, from+uint64(to))
 	return lft
 }
 
