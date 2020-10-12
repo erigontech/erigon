@@ -264,6 +264,9 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 		idxs[i] = i
 	}
 	sort.SliceStable(idxs, func(i, j int) bool {
+		return idxs[i] < idxs[j]
+	})
+	sort.SliceStable(idxs, func(i, j int) bool {
 		return headers[idxs[i]].Number.Cmp(headers[idxs[j]].Number) == -1
 	})
 
@@ -271,13 +274,15 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 	go func() {
 		for _, n := range idxs {
 			requests <- consensus.VerifyHeaderRequest{rand.Uint64(), headers[n], seals[n], nil}
-
 		}
 	}()
+
+	fmt.Println("REQUESTED", headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64())
 
 	var verified int
 	for {
 		select {
+		// fixme change to slices of headers
 		case req := <-requests:
 			engine.HeaderVerification() <- req
 		case result := <-engine.VerifyResults():
@@ -292,7 +297,11 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 			}
 		case result := <-engine.HeaderRequest():
 			h := rawdb.ReadHeaderByNumber(db, result.Number)
-			engine.HeaderResponse() <- consensus.HeaderResponse{h, result.Number}
+			if h != nil {
+				engine.HeaderResponse() <- consensus.HeaderResponse{h, result.Number}
+			} else {
+				engine.HeaderRequest() <- result
+			}
 		}
 	}
 }

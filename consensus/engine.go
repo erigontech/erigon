@@ -37,7 +37,7 @@ type EngineProcess interface {
 	HeaderVerification() chan<- VerifyHeaderRequest
 	VerifyResults() <-chan VerifyHeaderResponse
 
-	HeaderRequest() <-chan HeadersRequest
+	HeaderRequest() chan HeadersRequest
 	HeaderResponse() chan<- HeaderResponse
 }
 
@@ -92,7 +92,7 @@ func (p *Process) GetVerifyHeader() <-chan VerifyHeaderResponse {
 	return p.VerifyHeaderResponses
 }
 
-func (p *Process) HeaderRequest() <-chan HeadersRequest {
+func (p *Process) HeaderRequest() chan HeadersRequest {
 	return p.HeadersRequests
 }
 
@@ -199,4 +199,12 @@ func (p *Process) DeleteRequestedBlocks(num uint64) {
 	} else {
 		p.RequestedBlocks[num] = n
 	}
+}
+
+
+func (p *Process) IsRequestedBlocks(num uint64) bool {
+	p.RequestedBlocksMu.RLock()
+	defer p.RequestedBlocksMu.RUnlock()
+	_, ok := p.RequestedBlocks[num]
+	return ok
 }
