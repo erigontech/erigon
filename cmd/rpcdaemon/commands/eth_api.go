@@ -23,36 +23,71 @@ import (
 
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
-	ChainId(ctx context.Context) (hexutil.Uint64, error)
-	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
-	// GasPrice(_ context.Context) (*hexutil.Big, error)
-	Coinbase(ctx context.Context) (common.Address, error)
-	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
+	// Block related (proposed file: ./eth_blocks.go)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
 	GetBlockByHash(ctx context.Context, hash common.Hash, fullTx bool) (map[string]interface{}, error)
-	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
-	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
-	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
-	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
-	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
-	Syncing(ctx context.Context) (interface{}, error)
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
+
+	// Transaction related (proposed file: ./eth_txs.go)
 	GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error)
 	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error)
 	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
-	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
-	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
-	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
+	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
+
+	// Uncle related (proposed file: ./eth_uncles.go)
 	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleCountByBlockNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
+
+	// Filter related (proposed file: ./eth_filters.go)
+	// newPendingTransactionFilter(ctx context.Context) (string, error)
+	// newBlockFilter(ctx context.Context) (string, error)
+	// newFilter(ctx context.Context) (string, error)
+	// uninstallFilter(ctx context.Context) (string, error)
+	// getFilterChanges(ctx context.Context) (string, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
+
+	// Account related (proposed file: ./eth_accounts.go)
+	Accounts(_ context.Context) (string, error) /* deprecated */
+	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
+	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
+	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
+	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
+
+	// System related (proposed file: ./eth_system.go)
+	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
+	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
+	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
+	Syncing(ctx context.Context) (interface{}, error)
+	// GasPrice(_ context.Context) (*hexutil.Big, error)
+
+	// Sending related (proposed file: ./eth_sending.go)
+	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
+	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
+	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
+	// SendTransaction(ctx context.Context) (string, error)
+	Sign(_ context.Context, _ string, _ string) (string, error) /* deprecated */
+
+	// Mining related (proposed file: ./eth_mining.go)
+	Coinbase(ctx context.Context) (common.Address, error)
+	// HashRate(ctx context.Context) (string, error)
+	// Mining(ctx context.Context) (string, error)
+	// GetWork(ctx context.Context) (string, error)
+	// SubmitWork(ctx context.Context) (string, error)
+	// SubmitHashrate(ctx context.Context) (string, error)
+
 	// These three commands worked anyway, but were not in this interface. Temporarily adding them for discussion
 	GetHeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error)
 	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
 	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
+
+	// Deprecated commands in eth_ (proposed file: ./eth_deprecated.go)
+	GetCompilers(_ context.Context) (string, error)                /* deprecated */
+	CompileLLL(_ context.Context, _ string) (string, error)        /* deprecated */
+	CompileSolidity(ctx context.Context, _ string) (string, error) /* deprecated */
+	CompileSerpent(ctx context.Context, _ string) (string, error)  /* deprecated */
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -64,8 +99,8 @@ type APIImpl struct {
 	GasCap       uint64
 }
 
-// NewAPI returns APIImpl instance
-func NewAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
+// NewEthAPI returns APIImpl instance
+func NewEthAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
 	return &APIImpl{
 		db:         db,
 		dbReader:   dbReader,
