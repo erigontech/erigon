@@ -100,17 +100,9 @@ func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-cha
 		select {
 		default:
 		case <-logEvery.C:
-			sz, err := tx.BucketSize(dbutils.LogTopicIndex)
-			if err != nil {
-				return err
-			}
-			sz2, err := tx.BucketSize(dbutils.LogAddressIndex)
-			if err != nil {
-				return err
-			}
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info("Progress", "blockNum", blockNum, dbutils.LogTopicIndex, common.StorageSize(sz), dbutils.LogAddressIndex, common.StorageSize(sz2), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info("Progress", "blockNum", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush(topics, logIndicesMemLimit) {
 				if err := flushBitmaps(collectorTopics, topics); err != nil {
