@@ -165,7 +165,14 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnExecuteBlocksStage(s, world.TX, world.chainConfig, world.chainContext, world.vmConfig, 0 /* limit (meaning no limit) */, world.QuitCh, world.storageMode.Receipts, world.hdd, world.changeSetHook)
+						return SpawnExecuteBlocksStage(s, world.TX,
+							world.chainConfig, world.chainContext, world.vmConfig,
+							world.QuitCh,
+							ExecuteBlockStageParams{
+								WriteReceipts: world.storageMode.Receipts,
+								Hdd:           world.hdd,
+								ChangeSetHook: world.changeSetHook,
+							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindExecutionStage(u, s, world.TX, world.storageMode.Receipts)

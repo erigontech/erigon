@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"os"
 	"runtime"
 	"runtime/pprof"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -34,14 +35,24 @@ type HasChangeSetWriter interface {
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, vmConfig *vm.Config, toBlock uint64, quit <-chan struct{}, writeReceipts bool, hdd bool, changeSetHook ChangeSetHook) error {
+type ReaderBuilder func(ethdb.Getter) state.StateReader
+
+type ExecuteBlockStageParams struct {
+	ToBlock       uint64 // not setting this params means no limit
+	WriteReceipts bool
+	Hdd           bool
+	ChangeSetHook ChangeSetHook
+	ReaderBuilder ReaderBuilder
+}
+
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
 	prevStageProgress, _, errStart := stages.GetStageProgress(stateDB, stages.Senders)
 	if errStart != nil {
 		return errStart
 	}
 	var to = prevStageProgress
-	if toBlock > 0 {
-		to = min(prevStageProgress, toBlock)
+	if params.ToBlock > 0 {
+		to = min(prevStageProgress, params.ToBlock)
 	}
 	if to <= s.BlockNumber {
 		s.Done()
@@ -85,7 +96,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
 	// Warmup only works for HDD sync, and for long ranges
-	var warmup = hdd && (to-s.BlockNumber) > 30000
+	var warmup = params.Hdd && (to-s.BlockNumber) > 30000
 
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
@@ -122,7 +133,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
 
-		stateReader = state.NewPlainStateReader(batch)
+		if params.ReaderBuilder != nil {
+			stateReader = params.ReaderBuilder(batch)
+		} else {
+			stateReader = state.NewPlainStateReader(batch)
+		}
 		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
 
 		// where the magic happens
@@ -131,7 +146,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			return err
 		}
 
-		if writeReceipts {
+		if params.WriteReceipts {
 			if err = appendReceipts(tx, receipts, block.NumberU64(), block.Hash()); err != nil {
 				return err
 			}
@@ -149,7 +164,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					return err
 				}
 			}
-			warmup = hdd && (to-blockNum) > 30000
+			warmup = params.Hdd && (to-blockNum) > 30000
 		}
 
 		if prof {
@@ -159,9 +174,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			}
 		}
 
-		if changeSetHook != nil {
+		if params.ChangeSetHook != nil {
 			if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
-				changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
+				params.ChangeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
 			}
 		}
 
