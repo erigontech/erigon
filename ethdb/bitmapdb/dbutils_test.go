@@ -80,15 +80,14 @@ func TestCutLeft(t *testing.T) {
 		bm.AddRange(uint64(j), uint64(j+10))
 	}
 	N := uint64(1024)
-	Precision := uint64(256)
 	for bm.GetCardinality() > 0 {
-		lft := bitmapdb.CutLeft(bm, N, Precision)
+		lft := bitmapdb.CutLeft(bm, N)
 		lftSz := lft.GetSerializedSizeInBytes()
 		if bm.GetCardinality() > 0 {
-			require.True(t, lftSz > N-Precision && lftSz < N+Precision)
+			require.True(t, lftSz > N-256 && lftSz < N+256)
 		} else {
 			require.True(t, lft.GetSerializedSizeInBytes() > 0)
-			require.True(t, lftSz < N+Precision)
+			require.True(t, lftSz < N+256)
 		}
 	}
 
@@ -97,27 +96,26 @@ func TestCutLeft(t *testing.T) {
 		bm.AddRange(uint64(j), uint64(j+10))
 	}
 	N = uint64(2048)
-	Precision = uint64(128)
 	for bm.GetCardinality() > 0 {
-		lft := bitmapdb.CutLeft(bm, N, Precision)
+		lft := bitmapdb.CutLeft(bm, N)
 		lftSz := lft.GetSerializedSizeInBytes()
 		if bm.GetCardinality() > 0 {
-			require.True(t, lftSz > N-Precision && lftSz < N+Precision)
+			require.True(t, lftSz > N-256 && lftSz < N+256)
 		} else {
 			require.True(t, lft.GetSerializedSizeInBytes() > 0)
-			require.True(t, lftSz < N+Precision)
+			require.True(t, lftSz < N+256)
 		}
 	}
 
 	bm = roaring.New()
 	bm.Add(1)
-	lft := bitmapdb.CutLeft(bm, N, Precision)
+	lft := bitmapdb.CutLeft(bm, N)
 	require.True(t, lft.GetSerializedSizeInBytes() > 0)
 	require.True(t, lft.GetCardinality() == 1)
 	require.True(t, bm.GetCardinality() == 0)
 
 	bm = roaring.New()
-	lft = bitmapdb.CutLeft(bm, N, Precision)
+	lft = bitmapdb.CutLeft(bm, N)
 	require.True(t, lft == nil)
 	require.True(t, bm.GetCardinality() == 0)
 }

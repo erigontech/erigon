@@ -3,10 +3,12 @@ package bitmapdb
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"sort"
 )
 
 const ChunkLimit = uint64(3 * datasize.KB)
@@ -139,7 +141,7 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 	}
 
 	sz := bm.GetSerializedSizeInBytes()
-	if sz <= target {
+	if sz <= target+256 {
 		lft := roaring.New()
 		lft.Or(bm)
 		bm.Clear()
@@ -149,41 +151,71 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 	lft := roaring.New()
 	lftSz := lft.GetSerializedSizeInBytes()
 	from := uint64(bm.Minimum())
-	denominator := uint64(2)
-	minMax := uint64(bm.Maximum()) - uint64(bm.Minimum())
-	step := minMax / denominator
-	to := from + step
-
-	// binary search left part of right size
-	for lftSz < target || lftSz > target {
-		if step <= 256 { // if no much data left, stop search and just store everything in shard. protection against infinity loop.
-			lft.Clear()
-			to = uint64(bm.Maximum())
-			lft.Or(bm)
-			break
-		}
+	max := uint64(bm.Maximum())
+	minMax := bm.Maximum() - bm.Minimum()
+	to := sort.Search(int(minMax), func(i int) bool {
 		lft.Clear()
-		lft.AddRange(from, to+1)
+		lft.AddRange(from, from+uint64(i)+1)
 		lft.And(bm)
 		lftSz = lft.GetSerializedSizeInBytes()
-
-		denominator *= 2
-		step = minMax / denominator
-		if lftSz > target {
-			to -= step
-			continue
+		smallStep := i < 256 || max-uint64(i) < 256
+		if smallStep && lftSz > target {
+			fmt.Printf("1: min=%d, max=%d, from+i=%d, lftSz=%d, sz=%d\n", from, max, i, lftSz, sz)
+			return true
+		} else if smallStep && lftSz < target {
+			cpy := lftSz
+			lft.Clear()
+			lft.Or(bm)
+			fmt.Printf("2: min=%d, max=%d, from+i=%d, cpy=%d, lftSz=%d, sz=%d\n", from, max, i, cpy, lftSz, sz)
+			return true
 		}
+		return !(lftSz < target-256 || lftSz > target+256)
+	})
 
-		if lftSz < target {
-			to += step
-			continue
-		}
-
-		break
-	}
-
-	bm.RemoveRange(from, to+1) // [from,to)
+	bm.RemoveRange(from, from+uint64(to)) // [from,to)
 	return lft
+
+	//fmt.Printf("%s")
+	//
+	//lft := roaring.New()
+	//denominator := uint64(2)
+	//minMax := uint64(bm.Maximum()) - uint64(bm.Minimum())
+	//step := minMax / denominator
+	//to := from + step
+	//
+	//// binary search left part of right size
+	//for lftSz < target-256 || lftSz > target+256 {
+	//	// don't go for too small steps. protection against infinity loop.
+	//	if step <= 1024 && lftSz > target {
+	//		fmt.Printf("1: step=%d, lftSz=%d, minMax=%d, from=%d, to=%d, max=%d, sz=%d\n", step, lftSz, minMax, from, to, uint64(bm.Maximum()), sz)
+	//		break
+	//	} else if step <= 1024 && lftSz < target {
+	//		cpy := lftSz
+	//		lft.Clear()
+	//		to = uint64(bm.Maximum())
+	//		lft.Or(bm)
+	//		fmt.Printf("2: cpy=%d, step=%d, lftSz=%d, minMax=%d, from=%d, to=%d, max=%d, sz=%d\n", cpy, step, lft.GetSerializedSizeInBytes(), minMax, from, to, uint64(bm.Maximum()), sz)
+	//		break
+	//	}
+	//	lft.Clear()
+	//	lft.AddRange(from, to+1)
+	//	lft.And(bm)
+	//	lftSz = lft.GetSerializedSizeInBytes()
+	//
+	//	denominator *= 2
+	//	step = minMax / denominator
+	//	fmt.Printf("3: min=%d, max=%d, from=%d, to=%d, step=%d\n", uint64(bm.Minimum()), uint64(bm.Maximum()), from, to, step)
+	//	if lftSz > target {
+	//		to -= step
+	//	}
+	//
+	//	if lftSz < target {
+	//		to += step
+	//	}
+	//}
+	//
+	//bm.RemoveRange(from, to+1) // [from,to)
+	//return lft
 }
 
 // TruncateRange - gets existing bitmap in db and call RemoveRange operator on it.
