@@ -3,13 +3,15 @@ package main
 import (
 	"bufio"
 	"encoding/hex"
+	"encoding/json"
+	"flag"
 	"fmt"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"log"
 	"math/big"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -18,9 +20,112 @@ import (
 
 var maxStackLen = 256
 var maxStackCount = 256
+var maxAnlyCounterLimit = 1048756
+var maxSecs int64 = 60
+var maxMBs uint64 = 1000
 
+var mode = flag.String("mode", "test", "Mode for cfg analysis.")
+var bytecode = flag.String("bytecode", "0x00", "Bytecode for cfg analysis")
+var quiet = flag.Bool("quiet", false, "Quiet for cfg analysis")
 
-func testCfgByUsed() error {
+func testGenCfg() {
+	if *mode == "worker" {
+		code, _ := hex.DecodeString(*bytecode)
+		worker(code)
+		return
+	}
+
+	if *mode == "server" {
+		_ = batchServer()
+		return
+	}
+
+	if *mode == "test" {
+		absIntTestSimple00()
+		//absIntTestRequires00()
+		//absIntTestCall01()
+		//absIntTestDiv00()
+		//absIntTestEcrecoverLoop02()
+		//absIntTestStorageVar03()
+		//absIntTestStaticLoop00()
+		//absIntTestPrivateFunction01()
+		//absIntTestPrivateFunction02()
+		//absIntTestStaticLoop01()
+		//absIntTestDepositContract()
+		//absIntTestPanic00()
+		//absIntTestSmallImprecision()
+		//absIntTestSmallInvalidJumpDest()
+		//absIntTestSmallImprecision2()
+		//absIntAndJumpImprecision()
+		return
+	}
+}
+
+func worker(code []byte) {
+	metrics := vm.CfgMetrics{}
+	mon := make(chan int, 1)
+
+	start := time.Now()
+
+	go func() {
+		_, _ = vm.GenCfg(code, maxAnlyCounterLimit, maxStackLen, maxStackCount, &metrics)
+		mon <- 0
+	}()
+
+	oom := make(chan int, 1)
+
+	go func() {
+		for {
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			// For info on each, see: https://golang.org/pkg/runtime/#MemStats
+			if !*quiet {
+				fmt.Printf("Alloc = %v MiB", bToMb(m.Alloc))
+				fmt.Printf("\tTotalAlloc = %v MiB", bToMb(m.TotalAlloc))
+				fmt.Printf("\tSys = %v MiB", bToMb(m.Sys))
+				fmt.Printf("\tNumGC = %v\n", m.NumGC)
+				time.Sleep(2 * time.Second)
+			}
+
+			metrics.MemUsedMBs = bToMb(m.Alloc)
+			if metrics.MemUsedMBs > maxMBs {
+				oom <- 0
+			}
+		}
+	}()
+
+	select {
+	case <-mon:
+		if !*quiet {
+			fmt.Printf("Done\n")
+		}
+		metrics.TimeMillis = time.Since(start)
+	case <-time.After(time.Duration(maxSecs) * time.Second):
+		if !*quiet {
+			fmt.Printf("Timed out\n")
+		}
+		metrics.Timeout = true
+		metrics.TimeMillis = time.Since(start)
+	case <-oom:
+		if !*quiet {
+			fmt.Printf("OOM\n")
+		}
+		metrics.OOM = true
+	}
+
+	b, err := json.Marshal(metrics)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("%v", string(b))
+}
+
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
+}
+
+func batchServer() error {
 	numWorkers := runtime.NumCPU() - 2
 	fmt.Printf("Number of cores: %v\n", numWorkers)
 
@@ -60,25 +165,27 @@ func testCfgByUsed() error {
 	for i := 0; i < numWorkers; i++ {
 		go func(id int) {
 			for job := range jobs {
-				mon := make(chan int, 1)
+				cmd := exec.Command("/Users/suhabebugrara/turbo-geth/build/bin/hack",
+											"--action", "cfg",
+													"--mode", "worker",
+													"--quiet",
+													"--bytecode", hex.EncodeToString(job.code))
 
-				go func() {
-					contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
-					contract.Code = job.code
-					start := time.Now()
-					cfg, _ := vm.GenCfg(contract, 1048756, maxStackLen, maxStackCount)
-					cfg.Clear()
-					elapsed := time.Since(start)
-					results <- &cfgJobResult{job, cfg, false, &elapsed}
-					mon <- 0
-				}()
-
-				select {
-				case <-mon:
-				case <-time.After(60 * time.Second):
-					fmt.Printf("Timed out: %v %v %v\n", job.txcnt, len(job.code), hex.EncodeToString(job.code))
-					results <- &cfgJobResult{job, nil, true, nil}
+				metrics := vm.CfgMetrics{}
+				out, oerr := cmd.Output()
+				if oerr != nil {
+					panic(oerr)
 				}
+				lines := strings.Split(string(out), "\n")
+				merr := json.Unmarshal([]byte(lines[len(lines)-1]), &metrics)
+				if merr != nil {
+					fmt.Printf("Output:\n")
+					fmt.Printf("%v\n", string(out))
+					fmt.Printf("Bytecode:\n")
+					fmt.Printf(hex.EncodeToString(job.code))
+					panic(merr)
+				}
+				results <- &cfgJobResult{job, &metrics}
 			}
 		}(i)
 	}
@@ -96,7 +203,9 @@ func testCfgByUsed() error {
 							"StackCountLimitReached",
 							"ShortStack",
 							"Timeout",
+							"OOM",
 							"Elapsed (ms)",
+							"MemUsed (MB)",
 							"Bytecode"}
 	_, err = resultsFile.WriteString(strings.Join(headers, "|") + "\n")
 	check(err)
@@ -104,30 +213,21 @@ func testCfgByUsed() error {
 	check(err)
 
 	eval := CfgEval{numPrograms: 191400}
-	for j := 0; j < len(jobList); j++ {
+	//numJobs := len(jobList)
+	numJobs := len(jobList)
+	for j := 0; j < numJobs; j++ {
 		result := <- results
-
-		valid := ""
-		badJumpReason := ""
-		stackLimitReached := ""
-		shortStack := ""
-		elapsed := ""
-		if result.cfg != nil {
-			valid = sb(result.cfg.Valid)
-			badJumpReason = result.cfg.GetBadJumpReason()
-			stackLimitReached = sb(result.cfg.StackCountLimitReached)
-			shortStack = sb(result.cfg.ShortStack)
-			elapsed = si64(result.elapsed.Milliseconds())
-		}
 
 		line := []string{	si(result.job.txcnt),
 							si(len(result.job.code)),
-							valid,
-							badJumpReason,
-							stackLimitReached,
-							shortStack,
-							sb(result.timeout),
-							elapsed,
+							sb(result.metrics.Valid),
+							result.metrics.GetBadJumpReason(),
+							sb(result.metrics.StackCountLimitReached),
+							sb(result.metrics.ShortStack),
+							sb(result.metrics.Timeout),
+							sb(result.metrics.OOM),
+							si64(result.metrics.TimeMillis.Milliseconds()),
+							sui64(result.metrics.MemUsedMBs),
 							hex.EncodeToString(result.job.code)}
 
 		_, err = resultsFile.WriteString(strings.Join(line,"|") + "\n")
@@ -146,42 +246,12 @@ func testCfgByUsed() error {
 	return nil
 }
 
-func si64(milliseconds int64) string {
-	return fmt.Sprintf("%v", milliseconds)
+func si64(n int64) string {
+	return fmt.Sprintf("%v", n)
 }
 
-func testGenCfg() {
-/*
-	args := os.Args
-	if len(args) == 4 {
-		fmt.Printf("%v\n", args[3])
-		runCfgAnly("cli", args[3])
-		print("Finished running on program from command line.")
-		return
-	}
-
-	_ = testCfgByUsed()
-	if true {
-		return
-	}*/
-
-
-	//absIntTestSimple00()
-	//absIntTestRequires00()
-	//absIntTestCall01()
-	absIntTestDiv00()
-	//absIntTestEcrecoverLoop02()
-	//absIntTestStorageVar03()
-	//absIntTestStaticLoop00()
-	//absIntTestPrivateFunction01()
-	//absIntTestPrivateFunction02()
-	//absIntTestStaticLoop01()
-	//absIntTestDepositContract()
-	//absIntTestPanic00()
-	//absIntTestSmallImprecision()
-	//absIntTestSmallInvalidJumpDest()
-	//absIntTestSmallImprecision2()
-	//absIntAndJumpImprecision()
+func sui64(n uint64) string {
+	return fmt.Sprintf("%v", n)
 }
 
 /*
@@ -393,19 +463,17 @@ func absIntTestStaticLoop00() {
 }
 
 func runCfgAnly(testName string, code string) {
-	decoded, err := hex.DecodeString(code)
-	if err != nil {
-		log.Fatal(err)
+	decoded, derr := hex.DecodeString(code)
+	if derr != nil {
+		log.Fatal(derr)
 	}
 
-	contract := vm.NewContract(dummyAccount{}, dummyAccount{}, uint256.NewInt(), 10000, false)
-	contract.Code = decoded
-	var cfg *vm.Cfg
-	cfg, err = vm.GenCfg(contract, 0, maxStackLen, maxStackCount)
+	metrics := vm.CfgMetrics{}
+	cfg, err := vm.GenCfg(decoded, 0, maxStackLen, maxStackCount, &metrics)
 	cfg.PrintAnlyState()
-	if !cfg.Valid || err != nil {
+	if !cfg.Metrics.Valid || err != nil {
 		fmt.Printf("Test failed: %v %v\n", testName, err, )
-		fmt.Printf("Bad jump reason: %v\n", cfg.GetBadJumpReason())
+		fmt.Printf("Bad jump reason: %v\n", cfg.Metrics.GetBadJumpReason())
 		fmt.Printf("# bad jumps: %v\n", len(cfg.BadJumps))
 	} else {
 		fmt.Printf("Test passed: %v Covered=%v Instructions=%v Uncovered=%v Epilogue=%v\n",
@@ -415,7 +483,7 @@ func runCfgAnly(testName string, code string) {
 			cfg.GetCoverageStats().Uncovered,
 			cfg.GetCoverageStats().Epilogue)
 
-		check := vm.CheckCfg(contract.Code, cfg.D)
+		check := vm.CheckCfg(decoded, cfg.D)
 		if check {
 			fmt.Printf("Proof checker successfully checked proof")
 		} else {
@@ -545,10 +613,11 @@ type CfgEval struct {
 	numAddressesPassed   int
 	numAddressesAnalyzed int
 	numTimeouts          int
+	numOOM		         int
 }
 
 func (eval *CfgEval) printStats() {
-	fmt.Printf("ProgramsPass=%v ProgramsAnalyzed=%v Programs=%v ProgramsPassRate=%v Timeouts=%v Panic=%v CounterLimit=%v ShortStack=%v StackCountLimit=%v Unresolved=%v Imprecision=%v InvalidOp=%v InvalidJumpDest=%v DeadCode=%v\n",
+	fmt.Printf("ProgramsPass=%v ProgramsAnalyzed=%v Programs=%v ProgramsPassRate=%v Timeouts=%v Panic=%v CounterLimit=%v ShortStack=%v StackCountLimit=%v Unresolved=%v Imprecision=%v InvalidOp=%v InvalidJumpDest=%v DeadCode=%v OOM=%v\n",
 		eval.numProgramsPassed,
 		eval.numProgramsAnalyzed,
 		eval.numPrograms,
@@ -562,51 +631,54 @@ func (eval *CfgEval) printStats() {
 		percent(eval.numImprecision,eval.numProgramsAnalyzed),
 		percent(eval.numInvalidOpcode,eval.numProgramsAnalyzed),
 		percent(eval.numInvalidJumpDest,eval.numProgramsAnalyzed),
-		percent(eval.numLowCoverage,eval.numProgramsAnalyzed))
+		percent(eval.numLowCoverage,eval.numProgramsAnalyzed),
+		percent(eval.numOOM,eval.numProgramsAnalyzed))
 }
 
 func (eval *CfgEval) update(result *cfgJobResult, count int)  {
 	eval.numProgramsAnalyzed++
 	eval.numAddressesAnalyzed += count
-	if result.timeout {
+	if result.metrics.Timeout {
 		eval.numTimeouts++
 		return
 	}
 
-	cfg := result.cfg
-	if cfg == nil {
+	if result.metrics.OOM {
+		eval.numOOM++
 		return
 	}
 
-	if cfg.Valid {
+	metrics := result.metrics
+
+	if metrics.Valid {
 		eval.numProgramsPassed++
 		eval.numAddressesPassed += count
 	}
-	if cfg.Panic {
+	if metrics.Panic {
 		eval.numPanic++
 	}
-	if cfg.AnlyCounterLimit {
+	if metrics.AnlyCounterLimit {
 		eval.numAnlyCounterLimit++
 	}
-	if cfg.ShortStack {
+	if metrics.ShortStack {
 		eval.numShortStack++
 	}
-	if cfg.StackCountLimitReached {
+	if metrics.StackCountLimitReached {
 		eval.numStackLimitReached++
 	}
-	if cfg.Unresolved {
+	if metrics.Unresolved {
 		eval.numUnresolved++
 	}
-	if cfg.LowCoverage {
+	if metrics.LowCoverage {
 		eval.numLowCoverage++
 	}
-	if cfg.BadJumpImprecision {
+	if metrics.BadJumpImprecision {
 		eval.numImprecision++
 	}
-	if cfg.BadJumpInvalidOp {
+	if metrics.BadJumpInvalidOp {
 		eval.numInvalidOpcode++
 	}
-	if cfg.BadJumpInvalidJumpDest {
+	if metrics.BadJumpInvalidJumpDest {
 		eval.numInvalidJumpDest++
 	}
 }
@@ -618,9 +690,7 @@ type cfgJob struct {
 
 type cfgJobResult struct {
 	job     *cfgJob
-	cfg     *vm.Cfg
-	timeout bool
-	elapsed *time.Duration
+	metrics *vm.CfgMetrics
 }
 
 

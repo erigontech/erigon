@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //////////////////////////////////////////////////
@@ -43,7 +44,7 @@ func (stmt *Astmt) String() string {
 }
 
 type Program struct {
-	Contract    *Contract
+	Code 		[]byte
 	Stmts       []*Astmt
 	Blocks      []*Block
 	Entry2block map[int]*Block
@@ -51,7 +52,7 @@ type Program struct {
 }
 
 func (program *Program) GetCodeHex() string {
-	return hex.EncodeToString(program.Contract.Code)
+	return hex.EncodeToString(program.Code)
 }
 
 func (program *Program) isJumpDest(value *uint256.Int) bool {
@@ -72,19 +73,19 @@ func (program *Program) isJumpDest(value *uint256.Int) bool {
 	return stmt.opcode == JUMPDEST
 }
 
-func toProgram(contract *Contract) *Program {
+func toProgram(code []byte) *Program {
 	jt := newIstanbulInstructionSet()
 
-	program := &Program{Contract: contract}
+	program := &Program{Code: code}
 
-	codeLen := len(contract.Code)
+	codeLen := len(code)
 	inferIsData := make(map[int]bool)
 	for pc := 0; pc < codeLen; pc++ {
 		stmt := Astmt{}
 		stmt.pc = pc
 		stmt.inferredAsData = inferIsData[pc]
 
-		op := contract.GetOp(uint64(pc))
+		op := OpCode(code[pc])
 		stmt.opcode = op
 		stmt.operation = jt[op]
 		stmt.ends = stmt.operation == nil || stmt.operation.halts || stmt.operation.reverts
@@ -101,7 +102,7 @@ func toProgram(contract *Contract) *Program {
 				endMin = codeLen
 			}
 			integer := new(uint256.Int)
-			integer.SetBytes(contract.Code[startMin:endMin])
+			integer.SetBytes(code[startMin:endMin])
 			stmt.value = *integer
 			stmt.numBytes = pushByteSize + 1
 
@@ -225,7 +226,7 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 		return nil, nil
 	}
 
-	codeLen := len(cfg.Program.Contract.Code)
+	codeLen := len(cfg.Program.Code)
 
 	var edges []edge
 	isBadJump := false
@@ -239,7 +240,7 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 					//program terminates, don't add edges
 				} else if jumpDest.kind == TopValue {
 					isBadJump = true
-					cfg.BadJumpImprecision = true
+					cfg.Metrics.BadJumpImprecision = true
 				} else if jumpDest.kind == ConcreteValue {
 					if cfg.Program.isJumpDest(jumpDest.value) {
 						pc1 := int(jumpDest.value.Uint64())
@@ -268,13 +269,13 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 	}
 
 	if isStackTooShort {
-		cfg.ShortStack = true
+		cfg.Metrics.ShortStack = true
 		return nil, errors.New("abstract stack too short: reached unmodelled depth")
 	}
 
 	if isBadJump {
 		cfg.BadJumps[stmt.pc] = true
-		cfg.Unresolved = true
+		cfg.Metrics.Unresolved = true
 		cfg.checkRep()
 		return nil, errors.New("unresolvable jumps found")
 	}
@@ -393,7 +394,7 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 
 	for _, stack := range st1.stackset {
 		if len(stack.values) > maxStackLen {
-			cfg.ShortStack = true
+			cfg.Metrics.ShortStack = true
 			return nil, errors.New("Max stack length reached")
 		}
 	}
@@ -442,26 +443,31 @@ type Block struct {
 }
 
 
+type CfgMetrics struct {
+	Valid                  bool
+	Panic                  bool
+	Unresolved             bool
+	ShortStack             bool
+	AnlyCounterLimit       bool
+	AnlyCounter            int
+	LowCoverage            bool
+	BadJumpImprecision     bool
+	BadJumpInvalidOp       bool
+	BadJumpInvalidJumpDest bool
+	StackCountLimitReached bool
+	NumStacks              int
+	OOM                    bool
+	Timeout                bool
+	MemUsedMBs             uint64
+	TimeMillis			   time.Duration
+}
+
 type Cfg struct {
-	Valid            bool
-	Panic            bool
-	Unresolved       bool
-	ShortStack       bool
-	AnlyCounterLimit bool
-	AnlyCounter      int
 	Program          *Program
 	BadJumps         map[int]bool
 	PrevEdgeMap      map[int]map[int]bool
 	D                map[int]*astate
-	LowCoverage      bool
-
-	BadJumpImprecision 		bool
-	BadJumpInvalidOp   		bool
-	BadJumpInvalidJumpDest 	bool
-
-	StackCountLimitReached 	bool
-
-	NumStacks int
+	Metrics			 *CfgMetrics
 }
 
 type CfgCoverageStats struct {
@@ -615,33 +621,32 @@ func (cfg *Cfg) PrintAnlyState() {
 	_ = w.Flush()
 }
 
-func (cfg *Cfg) GetBadJumpReason() string {
-	if cfg.Valid {
+func (metrics *CfgMetrics) GetBadJumpReason() string {
+	if metrics.Valid {
 		return ""
 	}
 
-	if cfg.ShortStack {
+	if metrics.ShortStack {
 		return "ShortStack"
 	}
 
-	if cfg.AnlyCounterLimit {
+	if metrics.AnlyCounterLimit {
 		return "AnlyCounterLimit"
 	}
 
-	if cfg.BadJumpImprecision {
+	if metrics.BadJumpImprecision {
 		return "Imprecision"
 	}
 
-	if cfg.BadJumpInvalidJumpDest {
+	if metrics.BadJumpInvalidJumpDest {
 		return "InvalidJumpDest"
 	}
 
-	if cfg.BadJumpInvalidOp {
+	if metrics.BadJumpInvalidOp {
 		return "InvalidOpcode"
 	}
 
-
-	if cfg.Panic {
+	if metrics.Panic {
 		return "Panic"
 	}
 
@@ -665,22 +670,16 @@ func pushNewEdges(workList []edge, edges []edge) []edge {
 }
 
 
-func GenCfg(contract *Contract, anlyCounterLimit int, maxStackLen int, maxStackCount int) (cfg *Cfg, err error) {
-	/*defer func() {
-		if err := recover(); err != nil {
-			fmt.Println(err)
-			err = errors.New("internal panic")
-			cfg.Panic = true
-		}
-	}()*/
-
-	program := toProgram(contract)
-	cfg = &Cfg{BadJumps: make(map[int]bool)}
+func GenCfg(code []byte, anlyCounterLimit int, maxStackLen int, maxStackCount int, metrics *CfgMetrics) (cfg *Cfg, err error) {
+	program := toProgram(code)
+	cfg = &Cfg{Metrics: metrics}
+	cfg.BadJumps = make(map[int]bool)
+	cfg.Metrics = metrics
 	cfg.Program = program
 	cfg.PrevEdgeMap = make(map[int]map[int]bool)
 
 	startPC := 0
-	codeLen := len(program.Contract.Code)
+	codeLen := len(program.Code)
 	cfg.D = make(map[int]*astate)
 	for pc := 0; pc < codeLen; pc++ {
 		cfg.D[pc] = emptyState()
@@ -696,8 +695,8 @@ func GenCfg(contract *Contract, anlyCounterLimit int, maxStackLen int, maxStackC
 	workList = pushNewEdges(workList, edgesR1)
 
 	for len(workList) > 0 {
-		if anlyCounterLimit > 0 && cfg.AnlyCounter > anlyCounterLimit {
-			cfg.AnlyCounterLimit = true
+		if anlyCounterLimit > 0 && cfg.Metrics.AnlyCounter > anlyCounterLimit {
+			cfg.Metrics.AnlyCounterLimit = true
 			return cfg, errors.New("reached analysis counter limit")
 		}
 
@@ -722,7 +721,7 @@ func GenCfg(contract *Contract, anlyCounterLimit int, maxStackLen int, maxStackC
 				//for _, stack := range postDpc1.stackset {
 				//	fmt.Printf("%v\n", stack.String(false))
 				//}
-				cfg.StackCountLimitReached = true
+				cfg.Metrics.StackCountLimitReached = true
 				return cfg, errors.New("stack count limit reach")
 			}
 
@@ -734,25 +733,25 @@ func GenCfg(contract *Contract, anlyCounterLimit int, maxStackLen int, maxStackC
 		}
 
 		decp1Copy := cfg.D[e.pc1]
-		decp1Copy.anlyCounter = cfg.AnlyCounter
+		decp1Copy.anlyCounter = cfg.Metrics.AnlyCounter
 		decp1Copy.worklistLen = len(workList)
 		cfg.D[e.pc1] = decp1Copy
-		cfg.AnlyCounter++
+		cfg.Metrics.AnlyCounter++
 
 		cfg.checkRep()
 	}
 
 	if len(cfg.BadJumps) > 0 {
-		cfg.Unresolved = true
+		cfg.Metrics.Unresolved = true
 		return cfg, errors.New("unresolvable jumps found")
 	}
 
 	cov := cfg.GetCoverageStats()
 	if cov.Uncovered > cov.Epilogue {
-		cfg.LowCoverage = true
+		cfg.Metrics.LowCoverage = true
 		//return cfg, errors.New("low coverage")
 	}
 
-	cfg.Valid = true
+	cfg.Metrics.Valid = true
 	return cfg, nil
 }
