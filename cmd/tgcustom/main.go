@@ -72,6 +72,7 @@ func runTurboGeth(ctx *cli.Context) {
 	sync := stagedsync.New(
 		syncStages(ctx),
 		stagedsync.DefaultUnwindOrder(),
+		stagedsync.OptionalParameters{},
 	)
 
 	// running a node and initializing a custom bucket with all default settings

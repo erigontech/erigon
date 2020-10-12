@@ -32,6 +32,7 @@ func runTurboGeth(cliCtx *cli.Context) {
 	sync := stagedsync.New(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
+		stagedsync.OptionalParameters{},
 	)
 
 	ctx := utils.RootContext()

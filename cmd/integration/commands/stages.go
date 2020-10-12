@@ -488,6 +488,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	st, err := stagedsync.New(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
+		stagedsync.OptionalParameters{},
 	).Prepare(nil, chainConfig, bc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", false, quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)

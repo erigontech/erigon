@@ -30,12 +30,13 @@ type StageParameters struct {
 	datadir     string
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
 	// the stage can take significant time and gracefully shutdown at Ctrl+C.
-	QuitCh           <-chan struct{}
-	headersFetchers  []func() error
-	txPool           *core.TxPool
-	poolStart        func() error
-	changeSetHook    ChangeSetHook
-	prefetchedBlocks *PrefetchedBlocks
+	QuitCh             <-chan struct{}
+	headersFetchers    []func() error
+	txPool             *core.TxPool
+	poolStart          func() error
+	changeSetHook      ChangeSetHook
+	prefetchedBlocks   *PrefetchedBlocks
+	stateReaderBuilder StateReaderBuilder
 }
 
 // StageBuilder represent an object to create a single stage for staged sync

@@ -35,14 +35,14 @@ type HasChangeSetWriter interface {
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
-type ReaderBuilder func(ethdb.Getter) state.StateReader
+type StateReaderBuilder func(ethdb.Getter) state.StateReader
 
 type ExecuteBlockStageParams struct {
 	ToBlock       uint64 // not setting this params means no limit
 	WriteReceipts bool
 	Hdd           bool
 	ChangeSetHook ChangeSetHook
-	ReaderBuilder ReaderBuilder
+	ReaderBuilder StateReaderBuilder
 }
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
