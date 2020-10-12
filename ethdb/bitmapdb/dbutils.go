@@ -155,11 +155,12 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 	from := uint64(bm.Minimum())
 	denominator := uint64(2)
 	minMax := uint64(bm.Maximum()) - uint64(bm.Minimum())
-	to := from + minMax/denominator
+	step := minMax / denominator
+	to := from + step
 
 	// binary search left part of right size
 	for lftSz < minLimit || lftSz > maxLimit {
-		if denominator > 2^10 { // protection against infinity loop
+		if step <= 512 { // if no much data left, stop search and just store everything in shard. protection against infinity loop.
 			lft.Clear()
 			to = uint64(bm.Maximum())
 			lft.Or(bm)
@@ -171,7 +172,8 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 		lftSz = lft.GetSerializedSizeInBytes()
 		if lftSz > maxLimit {
 			denominator *= 2
-			to -= minMax / denominator
+			step = minMax / denominator
+			to -= step
 			if denominator > 2^7 {
 				fmt.Printf("1: denominator=%d, lftSz=%d, minMax=%d, from=%d, to=%d, sz=%d\n", denominator, lftSz, minMax, from, to, sz)
 			}
@@ -180,7 +182,8 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 
 		if lftSz < minLimit {
 			denominator *= 2
-			to += minMax / denominator
+			step = minMax / denominator
+			to += step
 			if denominator > 2^7 {
 				fmt.Printf("2: denominator=%d, lftSz=%d, minMax=%d, from=%d, to=%d, sz=%d\n", denominator, lftSz, minMax, from, to, sz)
 			}
@@ -188,7 +191,7 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 		}
 	}
 
-	bm.RemoveRange(from, to+1)
+	bm.RemoveRange(from, to+1) // [from,to)
 	return lft
 }
 
