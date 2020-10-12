@@ -1,6 +1,8 @@
 package stagedsync
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -46,6 +48,29 @@ type StageBuilder struct {
 
 // StageBuilders represents an ordered list of builders to build different stages. It also contains helper methods to change the list of stages.
 type StageBuilders []StageBuilder
+
+// MustReplace finds a stage with a specific ID and then sets the new one instead of that.
+// Chainable but panics if it can't find stage to replace.
+func (bb StageBuilders) MustReplace(id stages.SyncStage, newBuilder StageBuilder) StageBuilders {
+	result := make([]StageBuilder, len(bb))
+
+	found := false
+
+	for i, originalBuilder := range bb {
+		if strings.EqualFold(string(originalBuilder.ID), string(id)) {
+			found = true
+			result[i] = newBuilder
+		} else {
+			result[i] = originalBuilder
+		}
+	}
+
+	if !found {
+		panic(fmt.Sprintf("StageBuilders#Replace can't find the stage with id %s", string(id)))
+	}
+
+	return result
+}
 
 // Build creates sync states out of builders
 func (bb StageBuilders) Build(world StageParameters) []*Stage {
