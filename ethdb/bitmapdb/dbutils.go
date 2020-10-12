@@ -174,7 +174,7 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 			denominator *= 2
 			step = minMax / denominator
 			to -= step
-			if denominator > 2^7 {
+			if denominator > 2^6 {
 				fmt.Printf("1: denominator=%d, lftSz=%d, minMax=%d, from=%d, to=%d, sz=%d\n", denominator, lftSz, minMax, from, to, sz)
 			}
 			continue
@@ -184,7 +184,7 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 			denominator *= 2
 			step = minMax / denominator
 			to += step
-			if denominator > 2^7 {
+			if denominator > 2^6 {
 				fmt.Printf("2: denominator=%d, lftSz=%d, minMax=%d, from=%d, to=%d, sz=%d\n", denominator, lftSz, minMax, from, to, sz)
 			}
 			continue
