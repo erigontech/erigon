@@ -1869,6 +1869,25 @@ func benchRlp(chaindata string) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 
+	max := 0
+	tx.Walk(dbutils.LogTopicIndex, nil, 0, func(k, v []byte) (bool, error) {
+		if max < len(v) {
+			max = len(v)
+		}
+		return true, nil
+	})
+
+	fmt.Printf("A: %s, %d\n", dbutils.LogTopicIndex, max)
+
+	max = 0
+	tx.Walk(dbutils.LogAddressIndex, nil, 0, func(k, v []byte) (bool, error) {
+		if max < len(v) {
+			max = len(v)
+		}
+		return true, nil
+	})
+	fmt.Printf("A: %s, %d\n", dbutils.LogAddressIndex, max)
+	return nil
 	// train
 	total := 0
 	bucket := dbutils.BlockReceiptsPrefix
