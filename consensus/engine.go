@@ -201,7 +201,6 @@ func (p *Process) DeleteRequestedBlocks(num uint64) {
 	}
 }
 
-
 func (p *Process) IsRequestedBlocks(num uint64) bool {
 	p.RequestedBlocksMu.RLock()
 	defer p.RequestedBlocksMu.RUnlock()

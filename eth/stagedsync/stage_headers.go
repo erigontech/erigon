@@ -277,8 +277,6 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 		}
 	}()
 
-	fmt.Println("REQUESTED", headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64())
-
 	var verified int
 	for {
 		select {

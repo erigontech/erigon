@@ -2,7 +2,6 @@ package process
 
 import (
 	"errors"
-	"fmt"
 	"sort"
 	"time"
 
@@ -27,7 +26,6 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 		for {
 			select {
 			case req := <-c.VerifyHeaderRequests:
-				fmt.Println("<-c.VerifyHeaderRequests-1", req.ID, req.Header.Number.Uint64())
 				if req.Deadline == nil {
 					t := time.Now().Add(ttl)
 					req.Deadline = &t
@@ -56,14 +54,12 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					c.AddVerifiedBlocks(req.Header)
 
 					if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
-						fmt.Println("<-c.VerifyHeaderRequests-!!!!!!!!")
 						c.RequestsMu.Lock()
 						c.verifyByParentHeader(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64()})
 						c.RequestsMu.Unlock()
 					}
 				}
 			case parentResp := <-c.HeaderResponses:
-				fmt.Println("parentResp := <-c.HeaderResponses", parentResp.Number, "start")
 				if parentResp.Header == nil {
 					c.DeleteRequestedBlocks(parentResp.Number)
 					continue
@@ -72,7 +68,6 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				c.verifyByParentHeader(parentResp)
 				c.RequestsMu.Unlock()
 			case <-c.CleanupTicker.C:
-				fmt.Println("<-c.CleanupTicker.C-1")
 				c.RequestsMu.Lock()
 				for blockNum, reqMap := range c.RequestsToParents {
 					for reqID, req := range reqMap {
@@ -89,7 +84,6 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				}
 				c.RequestsMu.Unlock()
 			case <-exit:
-				fmt.Println("<-exit")
 				return
 			}
 		}
