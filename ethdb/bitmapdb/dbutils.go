@@ -200,7 +200,7 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 
 		denominator *= 2
 		step = minMax / denominator
-		fmt.Printf("3: min=%d, max=%d, from=%d, to=%d, step=%d, lftSz=%d\n", uint64(bm.Minimum()), uint64(bm.Maximum()), from, to, step, lftSz)
+		//fmt.Printf("3: min=%d, max=%d, from=%d, to=%d, step=%d, lftSz=%d\n", uint64(bm.Minimum()), uint64(bm.Maximum()), from, to, step, lftSz)
 		if lftSz > target {
 			to -= step
 		}
