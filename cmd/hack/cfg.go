@@ -18,10 +18,10 @@ import (
 	"time"
 )
 
-var maxStackLen = 256
-var maxStackCount = 256
+var maxStackLen = 2560
+var maxStackCount = 2560
 var maxAnlyCounterLimit = 1048756
-var maxSecs int64 = 60
+var maxSecs int64 = 600
 var maxMBs uint64 = 1000
 
 var mode = flag.String("mode", "test", "Mode for cfg analysis.")
@@ -84,8 +84,8 @@ func worker(code []byte) {
 				fmt.Printf("\tTotalAlloc = %v MiB", bToMb(m.TotalAlloc))
 				fmt.Printf("\tSys = %v MiB", bToMb(m.Sys))
 				fmt.Printf("\tNumGC = %v\n", m.NumGC)
-				time.Sleep(2 * time.Second)
 			}
+			time.Sleep(10 * time.Second)
 
 			metrics.MemUsedMBs = bToMb(m.Alloc)
 			if metrics.MemUsedMBs > maxMBs {
@@ -165,7 +165,7 @@ func batchServer() error {
 	for i := 0; i < numWorkers; i++ {
 		go func(id int) {
 			for job := range jobs {
-				cmd := exec.Command("/Users/suhabebugrara/turbo-geth/build/bin/hack",
+				cmd := exec.Command("./build/bin/hack",
 											"--action", "cfg",
 													"--mode", "worker",
 													"--quiet",
