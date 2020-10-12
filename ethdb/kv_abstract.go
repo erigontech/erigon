@@ -72,6 +72,7 @@ type Tx interface {
 	CursorDupSort(bucket string) CursorDupSort   // CursorDupSort - can be used if bucket has lmdb.DupSort flag
 	CursorDupFixed(bucket string) CursorDupFixed // CursorDupSort - can be used if bucket has lmdb.DupFixed flag
 	Get(bucket string, key []byte) (val []byte, err error)
+	Has(bucket string, key []byte) (bool, error)
 
 	Commit(ctx context.Context) error // Commit all the operations of a transaction into the database.
 	Rollback()                        // Rollback - abandon all the operations of the transaction instead of saving them.
@@ -134,6 +135,7 @@ type Cursor interface {
 	PutCurrent(key, value []byte) error
 
 	Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
+
 	Close()
 }
 

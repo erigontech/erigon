@@ -103,6 +103,9 @@ func resetState(_ context.Context) error {
 	if err := resetLogIndex(db); err != nil {
 		return err
 	}
+	if err := resetCallTraces(db); err != nil {
+		return err
+	}
 	if err := resetTxLookup(db); err != nil {
 		return err
 	}
@@ -199,6 +202,23 @@ func resetLogIndex(db *ethdb.ObjectDatabase) error {
 		return err
 	}
 	if err := stages.SaveStageUnwind(db, stages.LogIndex, 0, nil); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func resetCallTraces(db *ethdb.ObjectDatabase) error {
+	if err := db.ClearBuckets(
+		dbutils.CallFromIndex,
+		dbutils.CallToIndex,
+	); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(db, stages.CallTraces, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.CallTraces, 0, nil); err != nil {
 		return err
 	}
 

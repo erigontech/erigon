@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"runtime"
 	"sort"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
@@ -182,7 +183,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	}
 
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("unwind AccountHistorytIndex: %w", err)
+		return fmt.Errorf("unwind LogIndex: %w", err)
 	}
 
 	if !useExternalTx {

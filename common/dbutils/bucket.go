@@ -126,6 +126,11 @@ var (
 	LogTopicIndex   = "log_topic_index"
 	LogAddressIndex = "log_address_index"
 
+	// Indices for call traces - have the same format as LogTopicIndex and LogAddressIndex
+	// Store bitmap indices - in which block number we saw calls from (CallFromIndex) or to (CallToIndex) some addresses
+	CallFromIndex = "call_from_index"
+	CallToIndex   = "call_to_index"
+
 	TxLookupPrefix  = "l" // txLookupPrefix + hash -> transaction/receipt lookup metadata
 	BloomBitsPrefix = "B" // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
 
@@ -174,6 +179,8 @@ var (
 	StorageModeReceipts = []byte("smReceipts")
 	//StorageModeTxIndex - does node save transactions index.
 	StorageModeTxIndex = []byte("smTxIndex")
+	//StorageModeCallTraces - does not build index of call traces
+	StorageModeCallTraces = []byte("smCallTraces")
 
 	HeadHeaderKey = "LastHeader"
 
@@ -229,6 +236,8 @@ var Buckets = []string{
 	LogTopicIndex,
 	LogAddressIndex,
 	SnapshotInfoBucket,
+	CallFromIndex,
+	CallToIndex,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

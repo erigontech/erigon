@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"sync"
 )
 
 var (
@@ -264,6 +265,17 @@ func (v *lazyTx) Get(bucket string, key []byte) (val []byte, err error) {
 	return tx.Get(bucket, key)
 }
 
+func (v *lazyTx) Has(bucket string, key []byte) (bool, error) {
+	if _, ok := v.forBuckets[bucket]; !ok {
+		return false, ErrNotSnapshotBucket
+	}
+	tx, err := v.getTx()
+	if err != nil {
+		return false, err
+	}
+	return tx.Has(bucket, key)
+}
+
 func (v *lazyTx) Commit(ctx context.Context) error {
 	return nil
 }
@@ -327,10 +339,25 @@ func (s *snapshotTX) Get(bucket string, key []byte) (val []byte, err error) {
 	switch {
 	case err == nil && v != nil:
 		return v, nil
-	case err != nil && errors.Is(err, ErrKeyNotFound):
+	case err != nil && !errors.Is(err, ErrKeyNotFound):
 		return nil, err
 	}
 	return s.snTX.Get(bucket, key)
+}
+
+func (s *snapshotTX) Has(bucket string, key []byte) (bool, error) {
+	_, ok := s.forBuckets[bucket]
+	if !ok {
+		return s.dbTX.Has(bucket, key)
+	}
+	v, err := s.dbTX.Has(bucket, key)
+	switch {
+	case err == nil && v:
+		return true, nil
+	case err != nil && !errors.Is(err, ErrKeyNotFound):
+		return false, err
+	}
+	return s.snTX.Has(bucket, key)
 }
 
 func (s *snapshotTX) BucketSize(name string) (uint64, error) {

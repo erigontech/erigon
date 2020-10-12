@@ -22,14 +22,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
-	"strings"
-	"time"
 )
 
 var (
@@ -403,20 +404,17 @@ func (t MultiPutTuples) Swap(i, j int) {
 	t[i3+2], t[j3+2] = t[j3+2], t[i3+2]
 }
 
-func Get(db KV, bucket string, key []byte) ([]byte, error) {
+func Get(tx Tx, bucket string, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
-	err := db.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(bucket, key)
-		if err != nil {
-			return err
-		}
-		if v != nil {
-			dat = make([]byte, len(v))
-			copy(dat, v)
-		}
-		return nil
-	})
+	v, err := tx.Get(bucket, key)
+	if err != nil {
+		return nil, err
+	}
+	if v != nil {
+		dat = make([]byte, len(v))
+		copy(dat, v)
+	}
 	if dat == nil {
 		return nil, ErrKeyNotFound
 	}

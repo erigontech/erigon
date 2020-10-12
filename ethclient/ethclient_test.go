@@ -279,9 +279,10 @@ func TestHeader(t *testing.T) {
 }
 
 func TestBalanceAt(t *testing.T) {
+	t.Skip("Leaks")
 	backend, _ := newTestBackend(t)
-	client, _ := backend.Attach()
 	defer backend.Close()
+	client, _ := backend.Attach()
 	defer client.Close()
 
 	tests := map[string]struct {
@@ -312,7 +313,6 @@ func TestBalanceAt(t *testing.T) {
 			ec := NewClient(client)
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
-
 			got, err := ec.BalanceAt(ctx, tt.account, tt.block)
 			if tt.wantErr != nil && (err == nil || err.Error() != tt.wantErr.Error()) {
 				t.Fatalf("BalanceAt(%x, %v) error = %q, want %q", tt.account, tt.block, err, tt.wantErr)

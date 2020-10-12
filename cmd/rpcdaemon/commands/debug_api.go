@@ -54,7 +54,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	cc := adapter.NewChainContext(tx)
 	genesisHash := rawdb.ReadBlockByNumber(tx, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(tx, genesisHash)
-	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, api.db, blockHash, txIndex)
+	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -63,7 +63,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 
 // AccountRange re-implementation of eth/api.go:AccountRange
 func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.db.Begin(ctx, nil, false)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -98,7 +98,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		maxResults = eth.AccountRangeMaxResults
 	}
 
-	dumper := state.NewDumper(api.db, blockNumber)
+	dumper := state.NewDumper(tx, blockNumber)
 	res, err := dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err

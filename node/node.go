@@ -560,6 +560,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 
 	var db *ethdb.ObjectDatabase
 	if n.config.DataDir == "" {
+		fmt.Printf("Opening In-memory Database (LMDB): %s\n", name)
 		db = ethdb.NewMemDatabase()
 	} else {
 		log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR(), "maxFreelistReuse", n.config.LMDBMaxFreelistReuse)

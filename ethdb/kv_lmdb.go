@@ -23,7 +23,7 @@ const (
 
 var (
 	LMDBDefaultMapSize          = 2 * datasize.TB
-	LMDBDefaultMaxFreelistReuse = uint(10_000) // measured in pages
+	LMDBDefaultMaxFreelistReuse = uint(16) // measured in pages
 )
 
 type BucketConfigsFunc func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg
@@ -598,6 +598,7 @@ func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
 		if err := c.initCursor(); err != nil {
 			return nil, err
 		}
+		defer c.Close()
 		_, v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if lmdb.IsNotFound(err) {
@@ -619,6 +620,34 @@ func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
 		return nil, err
 	}
 	return val, nil
+}
+
+func (tx *lmdbTx) Has(bucket string, key []byte) (bool, error) {
+	b := tx.db.buckets[bucket]
+	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
+		from, to := b.DupFromLen, b.DupToLen
+		c := tx.Cursor(bucket).(*LmdbCursor)
+		if err := c.initCursor(); err != nil {
+			return false, err
+		}
+		defer c.Close()
+		_, v, err := c.getBothRange(key[:to], key[to:])
+		if err != nil {
+			if lmdb.IsNotFound(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		return bytes.Equal(key[to:], v[:from-to]), nil
+	}
+
+	if _, err := tx.get(b.DBI, key); err == nil {
+		return true, nil
+	} else if lmdb.IsNotFound(err) {
+		return false, nil
+	} else {
+		return false, err
+	}
 }
 
 func (tx *lmdbTx) BucketSize(name string) (uint64, error) {
@@ -1189,6 +1218,16 @@ func (c *LmdbCursor) Append(k []byte, v []byte) error {
 func (c *LmdbCursor) Close() {
 	if c.c != nil {
 		c.c.Close()
+		//TODO: Find a better solution to avoid the leak?
+		newCursors := make([]*lmdb.Cursor, len(c.tx.cursors)-1)
+		i := 0
+		for _, cc := range c.tx.cursors {
+			if cc != c.c {
+				newCursors[i] = cc
+				i++
+			}
+		}
+		c.tx.cursors = newCursors
 		c.c = nil
 	}
 }

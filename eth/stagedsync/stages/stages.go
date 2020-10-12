@@ -43,6 +43,7 @@ var (
 	AccountHistoryIndex SyncStage = []byte("AccountHistoryIndex") // Generating history index for accounts
 	StorageHistoryIndex SyncStage = []byte("StorageHistoryIndex") // Generating history index for storage
 	LogIndex            SyncStage = []byte("LogIndex")            // Generating logs index (from receipts)
+	CallTraces          SyncStage = []byte("CallTraces")          // Generating call traces index
 	TxLookup            SyncStage = []byte("TxLookup")            // Generating transactions lookup index
 	TxPool              SyncStage = []byte("TxPool")              // Starts Backend
 	Finish              SyncStage = []byte("Finish")              // Nominal stage after all other stages
@@ -59,6 +60,7 @@ var AllStages = []SyncStage{
 	AccountHistoryIndex,
 	StorageHistoryIndex,
 	LogIndex,
+	CallTraces,
 	TxLookup,
 	TxPool,
 	Finish,

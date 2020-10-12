@@ -28,6 +28,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common/fdlimit"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -45,6 +46,7 @@ import (
 
 func main() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	fdlimit.Raise(2048)
 
 	// Generate a batch of accounts to seal and fund with
 	faucets := make([]*ecdsa.PrivateKey, 128)

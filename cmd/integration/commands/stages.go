@@ -96,6 +96,20 @@ var cmdLogIndex = &cobra.Command{
 		return nil
 	},
 }
+
+var cmdCallTraces = &cobra.Command{
+	Use:   "stage_call_traces",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		if err := stageCallTraces(ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
+
 var cmdStageTxLookup = &cobra.Command{
 	Use:   "stage_tx_lookup",
 	Short: "",
@@ -172,6 +186,14 @@ func init() {
 	withDatadir(cmdLogIndex)
 
 	rootCmd.AddCommand(cmdLogIndex)
+
+	withChaindata(cmdCallTraces)
+	withReset(cmdCallTraces)
+	withBlock(cmdCallTraces)
+	withUnwind(cmdCallTraces)
+	withDatadir(cmdCallTraces)
+
+	rootCmd.AddCommand(cmdCallTraces)
 
 	withChaindata(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
@@ -357,6 +379,42 @@ func stageLogIndex(ctx context.Context) error {
 	}
 
 	if err := stagedsync.SpawnLogIndex(s, db, datadir, ch); err != nil {
+		return err
+	}
+	return nil
+}
+
+func stageCallTraces(ctx context.Context) error {
+	core.UsePlainStateExecution = true
+
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	defer bc.Stop()
+
+	if reset {
+		if err := resetCallTraces(db); err != nil {
+			return err
+		}
+		return nil
+	}
+	execStage := progress(stages.Execution)
+	s := progress(stages.CallTraces)
+	log.Info("Stage exec", "progress", execStage.BlockNumber)
+	if block != 0 {
+		s.BlockNumber = block
+		log.Info("Overriding initial state", "block", block)
+	}
+	log.Info("Stage call traces", "progress", s.BlockNumber)
+	ch := ctx.Done()
+
+	if unwind > 0 {
+		u := &stagedsync.UnwindState{Stage: stages.CallTraces, UnwindPoint: s.BlockNumber - unwind}
+		return stagedsync.UnwindCallTraces(u, s, db, bc.Config(), bc, ch)
+	}
+
+	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, datadir, ch); err != nil {
 		return err
 	}
 	return nil

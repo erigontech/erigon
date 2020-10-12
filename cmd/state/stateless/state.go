@@ -1113,6 +1113,9 @@ func makeCreators(blockNum uint64) {
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, false)
+	check(err1)
+	defer ethTx.Rollback()
 	f, err := os.OpenFile("/Volumes/tb41/turbo-geth/creators.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer f.Close()
@@ -1131,7 +1134,7 @@ func makeCreators(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethTx, block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		for _, tx := range block.Transactions() {

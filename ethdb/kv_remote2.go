@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -274,6 +275,16 @@ func (tx *remote2Tx) Get(bucket string, key []byte) (val []byte, err error) {
 	c := tx.Cursor(bucket)
 	defer c.Close()
 	return c.SeekExact(key)
+}
+
+func (tx *remote2Tx) Has(bucket string, key []byte) (bool, error) {
+	c := tx.Cursor(bucket)
+	defer c.Close()
+	k, _, err := c.Seek(key)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(key, k), nil
 }
 
 func (c *remote2Cursor) SeekExact(key []byte) (val []byte, err error) {
