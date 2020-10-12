@@ -63,7 +63,7 @@ type EthAPI interface {
 	Syncing(ctx context.Context) (interface{}, error)
 	// GasPrice(_ context.Context) (*hexutil.Big, error)
 
-	// Sending related (proposed file: ./eth_sending.go)
+	// Sending related (proposed file: ./eth_call.go)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
