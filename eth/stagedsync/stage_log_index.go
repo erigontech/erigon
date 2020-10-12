@@ -189,9 +189,6 @@ func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-cha
 		nextChunk := bitmapdb.ChunkIterator(currentBitmap, bitmapdb.ChunkLimit, 512)
 		for chunk := nextChunk(); chunk != nil; chunk = nextChunk() {
 			buf.Reset()
-			if chunk.GetCardinality() == 0 {
-				fmt.Printf("a? %d\n", chunk.GetCardinality())
-			}
 			if _, err := chunk.WriteTo(buf); err != nil {
 				return err
 			}
@@ -214,24 +211,13 @@ func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-cha
 		return nil
 	}
 
-	t := time.Now()
 	if err := collectorTopics.Load(db, dbutils.LogTopicIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
-	if currentBitmap.GetCardinality() > 0 {
-		fmt.Printf("Cardinalyty aftre load???? %d\n", currentBitmap.GetCardinality())
-	}
 
-	fmt.Printf("stage_log_index.go:197: %s\n", time.Since(t))
-	t = time.Now()
 	if err := collectorAddrs.Load(db, dbutils.LogAddressIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
-	if currentBitmap.GetCardinality() > 0 {
-		fmt.Printf("Cardinalyty aftre load???? %d\n", currentBitmap.GetCardinality())
-	}
-
-	fmt.Printf("stage_log_index.go:197: %s\n", time.Since(t))
 
 	return nil
 }
@@ -317,7 +303,6 @@ func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) b
 }
 
 func flushBitmaps(c *etl.Collector, inMem map[string]*roaring.Bitmap) error {
-	defer func(t time.Time) { fmt.Printf("stage_log_index.go:315: %s\n", time.Since(t)) }(time.Now())
 	for k, v := range inMem {
 		v.RunOptimize()
 		if v.GetCardinality() == 0 {
