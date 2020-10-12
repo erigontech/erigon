@@ -259,7 +259,7 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 	addrs := map[string]struct{}{}
 
 	start := dbutils.EncodeBlockNumber(to + 1)
-	db.Walk(dbutils.BlockReceiptsPrefix, start, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.BlockReceiptsPrefix, start, 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
 		}
@@ -277,7 +277,9 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 			}
 		}
 		return true, nil
-	})
+	}); err != nil {
+		return err
+	}
 
 	if err := truncateBitmaps(db.(ethdb.HasTx).Tx(), dbutils.LogTopicIndex, topics, to+1, from+1); err != nil {
 		return err
