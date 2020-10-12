@@ -46,6 +46,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 		stagedsync.New(
 			stagedsync.DefaultStages(),
 			stagedsync.DefaultUnwindOrder(),
+			stagedsync.OptionalParameters{},
 		),
 	)
 	clear := func() {

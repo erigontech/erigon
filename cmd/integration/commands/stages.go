@@ -265,7 +265,15 @@ func stageExec(ctx context.Context) error {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
 		return stagedsync.UnwindExecutionStage(u, stage4, db, false)
 	}
-	return stagedsync.SpawnExecuteBlocksStage(stage4, db, bc.Config(), bc, bc.GetVMConfig(), block, ch, sm.Receipts, hdd, nil)
+	return stagedsync.SpawnExecuteBlocksStage(stage4, db,
+		bc.Config(), bc, bc.GetVMConfig(),
+		ch,
+		stagedsync.ExecuteBlockStageParams{
+			ToBlock:       block, // limit execution to the specified block
+			WriteReceipts: sm.Receipts,
+			Hdd:           hdd,
+		})
+
 }
 
 func stageIHash(ctx context.Context) error {
@@ -480,6 +488,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	st, err := stagedsync.New(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
+		stagedsync.OptionalParameters{},
 	).Prepare(nil, chainConfig, bc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", false, quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
