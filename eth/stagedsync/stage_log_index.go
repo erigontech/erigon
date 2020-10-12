@@ -255,39 +255,34 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 }
 
 func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-chan struct{}) error {
-	topics := map[string]bool{}
-	addrs := map[string]bool{}
+	topics := map[string]struct{}{}
+	addrs := map[string]struct{}{}
 
-	tx := db.(ethdb.HasTx).Tx()
-	receipts := tx.Cursor(dbutils.BlockReceiptsPrefix)
-	defer receipts.Close()
 	start := dbutils.EncodeBlockNumber(to + 1)
-	for k, v, err := receipts.Seek(start); k != nil; k, v, err = receipts.Next() {
-		if err != nil {
-			return err
-		}
+	db.Walk(dbutils.BlockReceiptsPrefix, start, 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
-			return err
+			return false, err
 		}
 		receipts := types.Receipts{}
 		if err := cbor.Unmarshal(&receipts, v); err != nil {
-			return fmt.Errorf("receipt unmarshal failed: %w, k=%x", err, k)
+			return false, fmt.Errorf("receipt unmarshal failed: %w, k=%x", err, k)
 		}
 
 		for _, receipt := range receipts {
 			for _, log := range receipt.Logs {
 				for _, topic := range log.Topics {
-					topics[string(topic.Bytes())] = true
+					topics[string(topic.Bytes())] = struct{}{}
 				}
-				addrs[string(log.Address.Bytes())] = true
+				addrs[string(log.Address.Bytes())] = struct{}{}
 			}
 		}
-	}
+		return true, nil
+	})
 
-	if err := truncateBitmaps(tx, dbutils.LogTopicIndex, topics, to+1, from+1); err != nil {
+	if err := truncateBitmaps(db.(ethdb.HasTx).Tx(), dbutils.LogTopicIndex, topics, to+1, from+1); err != nil {
 		return err
 	}
-	if err := truncateBitmaps(tx, dbutils.LogAddressIndex, addrs, to+1, from+1); err != nil {
+	if err := truncateBitmaps(db.(ethdb.HasTx).Tx(), dbutils.LogAddressIndex, addrs, to+1, from+1); err != nil {
 		return err
 	}
 	return nil
@@ -319,7 +314,7 @@ func flushBitmaps(c *etl.Collector, inMem map[string]*roaring.Bitmap) error {
 	return nil
 }
 
-func truncateBitmaps(tx ethdb.Tx, bucket string, inMem map[string]bool, from, to uint64) error {
+func truncateBitmaps(tx ethdb.Tx, bucket string, inMem map[string]struct{}, from, to uint64) error {
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
