@@ -7,7 +7,6 @@ import (
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -160,7 +159,10 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 
 	// binary search left part of right size
 	for lftSz < minLimit || lftSz > maxLimit {
-		if denominator > math.MaxInt32 {
+		if denominator > 2^10 { // protection against infinity loop
+			lft.Clear()
+			to = uint64(bm.Maximum())
+			lft.Or(bm)
 			break
 		}
 		lft.Clear()
@@ -170,7 +172,7 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 		if lftSz > maxLimit {
 			denominator *= 2
 			to -= minMax / denominator
-			if denominator > 8*1024 {
+			if denominator > 2^7 {
 				fmt.Printf("1: denominator=%d, lftSz=%d, minMax=%d, from=%d, to=%d, sz=%d\n", denominator, lftSz, minMax, from, to, sz)
 			}
 			continue
@@ -179,7 +181,7 @@ func CutLeft(bm *roaring.Bitmap, target, precision uint64) *roaring.Bitmap {
 		if lftSz < minLimit {
 			denominator *= 2
 			to += minMax / denominator
-			if denominator > 8*1024 {
+			if denominator > 2^7 {
 				fmt.Printf("2: denominator=%d, lftSz=%d, minMax=%d, from=%d, to=%d, sz=%d\n", denominator, lftSz, minMax, from, to, sz)
 			}
 			continue
