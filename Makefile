@@ -19,7 +19,7 @@ ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
-all: tg hack tester rpctest state pics rpcdaemon integration lmdb-tools
+all: tg hack tester rpctest state pics rpcdaemon integration db-tools
 
 docker:
 	docker build -t turbo-geth:latest .
@@ -99,27 +99,34 @@ headers:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
 
-lmdb-tools:
+db-tools:
 	$(GOBUILD) -o $(GOBIN)/lmdb_stat github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
 	$(GOBUILD) -o $(GOBIN)/lmdb_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
+
+	cd ethdb/mdbx/dist/ && make tools
+	cp ethdb/mdbx/dist/mdbx_stat $(GOBUILD)
+	cp ethdb/mdbx/dist/mdbx_copy $(GOBUILD)
+	cp ethdb/mdbx/dist/mdbx_dump $(GOBUILD)
+	cp ethdb/mdbx/dist/mdbx_load $(GOBUILD)
+	cp ethdb/mdbx/dist/mdbx_chk $(GOBUILD)
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
 ethdb/mdbx/dist/libmdbx.a:
 	cd ethdb/mdbx/dist/ && make mdbx
 
-test: semantics/z3/build/libz3.a
+test: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
 	$(GOTEST)
 
-test-lmdb: semantics/z3/build/libz3.a
+test-lmdb: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
 	TEST_DB=lmdb $(GOTEST)
 
-test-bolt: semantics/z3/build/libz3.a
+test-bolt: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
 	TEST_DB=bolt $(GOTEST)
 
 lint: lintci
 
-lintci: semantics/z3/build/libz3.a
+lintci: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
