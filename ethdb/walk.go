@@ -18,6 +18,7 @@ package ethdb
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
@@ -93,39 +94,41 @@ func (sc *splitCursor) Next() (key1, key2, key3, val []byte, err error) {
 
 var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
-func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]common.Address, error) {
-	keys := make(map[common.Address]struct{})
-	startCode := dbutils.EncodeTimestamp(startTimestamp)
-	if err := db.Walk(dbutils.PlainAccountChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
-		keyTimestamp, _ := dbutils.DecodeTimestamp(k)
+// GetModifiedAccounts returns a list of addresses that were modified in the block range
+func GetModifiedAccounts(tx Tx, startNum, endNum uint64) ([]common.Address, error) {
 
-		if keyTimestamp > endTimestamp {
-			return false, nil
+	changedAddrs := make(map[common.Address]struct{})
+	startCode := dbutils.EncodeTimestamp(startNum)
+
+	c := tx.Cursor(dbutils.PlainAccountChangeSetBucket)
+	for k, v, err := c.Seek(startCode); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, fmt.Errorf("iterating over account changeset for %v: %w", k, err)
+		}
+		currentNum, _ := dbutils.DecodeTimestamp(k)
+		if currentNum > endNum {
+			break
 		}
 
 		walker := func(addr, _ []byte) error {
-			keys[common.BytesToAddress(addr)] = struct{}{}
+			changedAddrs[common.BytesToAddress(addr)] = struct{}{}
 			return nil
 		}
-
-		if innerErr := changeset.AccountChangeSetPlainBytes(v).Walk(walker); innerErr != nil {
-			return false, innerErr
+		if err := changeset.AccountChangeSetPlainBytes(v).Walk(walker); err != nil {
+			return nil, fmt.Errorf("iterating over account changeset for %v: %w", k, err)
 		}
-
-		return true, nil
-	}); err != nil {
-		return nil, err
 	}
 
-	if len(keys) == 0 {
+	if len(changedAddrs) == 0 {
 		return nil, nil
 	}
-	accounts := make([]common.Address, len(keys))
-	idx := 0
 
-	for key := range keys {
-		copy(accounts[idx][:], key[:])
+	idx := uint64(0)
+	result := make([]common.Address, len(changedAddrs))
+	for addr := range changedAddrs {
+		copy(result[idx][:], addr[:])
 		idx++
 	}
-	return accounts, nil
+
+	return result, nil
 }
