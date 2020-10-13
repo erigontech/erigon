@@ -269,6 +269,10 @@ func toMdbx(ctx context.Context, from, to string) error {
 					return err
 				}
 				c = dstTx.Cursor(name)
+				appendFunc = c.Append
+				if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
+					appendFunc = c.(ethdb.CursorDupSort).AppendDup
+				}
 			case <-ctx.Done():
 				return ctx.Err()
 			}
