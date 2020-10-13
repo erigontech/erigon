@@ -35,7 +35,7 @@ geth:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
-tg:
+tg: ethdb/mdbx/dist/libmdbx.a
 	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
@@ -104,6 +104,9 @@ lmdb-tools:
 	$(GOBUILD) -o $(GOBIN)/lmdb_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
+
+ethdb/mdbx/dist/libmdbx.a:
+	cd ethdb/mdbx/dist/ && make mdbx
 
 test: semantics/z3/build/libz3.a
 	$(GOTEST)
