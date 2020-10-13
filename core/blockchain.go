@@ -595,7 +595,12 @@ func (bc *BlockChain) ExportN(w io.Writer, first uint64, last uint64) error {
 // Note, this function assumes that the `mu` mutex is held!
 func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	// If the block is on a side chain or an unknown one, force other heads onto it too
-	updateHeads := rawdb.ReadCanonicalHash(bc.db, block.NumberU64()) != block.Hash()
+	h, err := rawdb.ReadCanonicalHash(bc.db, block.NumberU64())
+	if err != nil {
+		log.Warn("ReadCanonicalHash failed", "err", err)
+	}
+
+	updateHeads := h != block.Hash()
 
 	// Add the block to the canonical chain number scheme and mark as the head
 	rawdb.WriteCanonicalHash(bc.db, block.Hash(), block.NumberU64())
@@ -701,7 +706,12 @@ func (bc *BlockChain) GetBlockByHash(hash common.Hash) *types.Block {
 // GetBlockByNumber retrieves a block from the database by number, caching it
 // (associated with its hash) if found.
 func (bc *BlockChain) GetBlockByNumber(number uint64) *types.Block {
-	hash := rawdb.ReadCanonicalHash(bc.db, number)
+	hash, err := rawdb.ReadCanonicalHash(bc.db, number)
+	if err != nil {
+		log.Warn("ReadCanonicalHash failed", "err", err)
+		return nil
+	}
+
 	if hash == (common.Hash{}) {
 		return nil
 	}
@@ -1459,7 +1469,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 	}
 
-	canonicalHash := rawdb.ReadCanonicalHash(bc.db, parentNumber)
+	canonicalHash, err := rawdb.ReadCanonicalHash(bc.db, parentNumber)
+	if err != nil {
+		return 0, err
+	}
 	for canonicalHash != parentHash {
 		log.Warn("Chain segment's parent not on canonical hash, adding to pre-blocks", "block", parentNumber, "hash", parentHash)
 		preBlocks = append(preBlocks, parent)
@@ -1471,7 +1484,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
 			return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 		}
-		canonicalHash = rawdb.ReadCanonicalHash(bc.db, parentNumber)
+		canonicalHash, err = rawdb.ReadCanonicalHash(bc.db, parentNumber)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	for left, right := 0, len(preBlocks)-1; left < right; left, right = left+1, right-1 {
@@ -1849,7 +1865,10 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	// Delete any canonical number assignments above the new head
 	number := bc.CurrentBlock().NumberU64()
 	for i := number + 1; ; i++ {
-		hash := rawdb.ReadCanonicalHash(bc.db, i)
+		hash, err := rawdb.ReadCanonicalHash(bc.db, i)
+		if err != nil {
+			return err
+		}
 		if hash == (common.Hash{}) {
 			break
 		}
@@ -2151,33 +2170,37 @@ func ExecuteBlockEphemerally(
 	}
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		if !vmConfig.NoReceipts {
+			ibs.Prepare(tx.Hash(), block.Hash(), i)
+		}
 		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
-		receipts = append(receipts, receipt)
+		if !vmConfig.NoReceipts {
+			receipts = append(receipts, receipt)
+		}
 	}
 
-	if chainConfig.IsByzantium(header.Number) {
+	if chainConfig.IsByzantium(header.Number) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.Header().ReceiptHash {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
-	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
-		return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
-	}
+	if !vmConfig.ReadOnly {
+		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+		engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles())
 
-	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-		return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
-	}
+		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+		if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
+		}
 
-	if err := stateWriter.WriteChangeSets(); err != nil {
-		return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		if err := stateWriter.WriteChangeSets(); err != nil {
+			return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		}
 	}
 
 	return receipts, nil

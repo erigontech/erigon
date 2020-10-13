@@ -782,10 +782,26 @@ func TestFastVsFullChains(t *testing.T) {
 	}
 	// Check that the canonical chains are the same between the databases
 	for i := 0; i < len(blocks)+1; i++ {
-		if fhash, ahash := rawdb.ReadCanonicalHash(fastDb, uint64(i)), rawdb.ReadCanonicalHash(archiveDb, uint64(i)); fhash != ahash {
+		fhash, err := rawdb.ReadCanonicalHash(fastDb, uint64(i))
+		if err != nil {
+			panic(err)
+		}
+		ahash, err := rawdb.ReadCanonicalHash(archiveDb, uint64(i))
+		if err != nil {
+			panic(err)
+		}
+		if fhash != ahash {
 			t.Errorf("block #%d: canonical hash mismatch: fastdb %v, archivedb %v", i, fhash, ahash)
 		}
-		if anhash, arhash := rawdb.ReadCanonicalHash(ancientDb, uint64(i)), rawdb.ReadCanonicalHash(archiveDb, uint64(i)); anhash != arhash {
+		anhash, err := rawdb.ReadCanonicalHash(ancientDb, uint64(i))
+		if err != nil {
+			panic(err)
+		}
+		arhash, err := rawdb.ReadCanonicalHash(archiveDb, uint64(i))
+		if err != nil {
+			panic(err)
+		}
+		if anhash != arhash {
 			t.Errorf("block #%d: canonical hash mismatch: ancientdb %v, archivedb %v", i, anhash, arhash)
 		}
 	}
@@ -1029,7 +1045,8 @@ func TestChainTxReorgs(t *testing.T) {
 	}
 
 	// removed tx
-	for i, tx := range (types.Transactions{pastDrop, freshDrop}) {
+	txs := types.Transactions{pastDrop, freshDrop}
+	for i, tx := range txs {
 		if txn, _, _, _ := rawdb.ReadTransaction(db, tx.Hash()); txn != nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
@@ -1038,7 +1055,8 @@ func TestChainTxReorgs(t *testing.T) {
 		}
 	}
 	// added tx
-	for i, tx := range (types.Transactions{pastAdd, freshAdd, futureAdd}) {
+	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
+	for i, tx := range txs {
 		if txn, _, _, _ := rawdb.ReadTransaction(db, tx.Hash()); txn == nil {
 			t.Errorf("add %d: expected tx to be found", i)
 		}
@@ -1047,7 +1065,8 @@ func TestChainTxReorgs(t *testing.T) {
 		}
 	}
 	// shared tx
-	for i, tx := range (types.Transactions{postponed, swapped}) {
+	txs = types.Transactions{postponed, swapped}
+	for i, tx := range txs {
 		if txn, _, _, _ := rawdb.ReadTransaction(db, tx.Hash()); txn == nil {
 			t.Errorf("share %d: expected tx to be found", i)
 		}
@@ -1410,7 +1429,10 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 
 			// try to retrieve a block by its canonical hash and see if the block data can be retrieved.
 			for {
-				ch := rawdb.ReadCanonicalHash(blockchain.db, block.NumberU64())
+				ch, err := rawdb.ReadCanonicalHash(blockchain.db, block.NumberU64())
+				if err != nil {
+					panic(err)
+				}
 				if ch == (common.Hash{}) {
 					continue // busy wait for canonical hash to be written
 				}

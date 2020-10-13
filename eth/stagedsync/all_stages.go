@@ -73,7 +73,7 @@ func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, engine c
 	if err := SpawnExecuteBlocksStage(&StageState{
 		Stage:       stages.Execution,
 		BlockNumber: num - 1,
-	}, db, config, bc, bc.GetVMConfig(), 0, nil, true, false, nil); err != nil {
+	}, db, config, bc, bc.GetVMConfig(), nil, ExecuteBlockStageParams{WriteReceipts: true}); err != nil {
 		return err
 	}
 

@@ -38,7 +38,10 @@ func ValidateTxLookups(chaindata string) error {
 		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
-		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		blockHash, err := rawdb.ReadCanonicalHash(db, blockNum)
+		if err != nil {
+			return err
+		}
 		body := rawdb.ReadBody(db, blockHash, blockNum)
 
 		if body == nil {

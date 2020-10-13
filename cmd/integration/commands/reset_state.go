@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/c2h5oh/datasize"
 	"os"
 	"path"
 	"sync"
@@ -100,6 +101,9 @@ func resetState(_ context.Context) error {
 		return err
 	}
 	if err := resetLogIndex(db); err != nil {
+		return err
+	}
+	if err := resetCallTraces(db); err != nil {
 		return err
 	}
 	if err := resetTxLookup(db); err != nil {
@@ -204,6 +208,23 @@ func resetLogIndex(db *ethdb.ObjectDatabase) error {
 	return nil
 }
 
+func resetCallTraces(db *ethdb.ObjectDatabase) error {
+	if err := db.ClearBuckets(
+		dbutils.CallFromIndex,
+		dbutils.CallToIndex,
+	); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(db, stages.CallTraces, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.CallTraces, 0, nil); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func resetTxLookup(db *ethdb.ObjectDatabase) error {
 	if err := db.ClearBuckets(
 		dbutils.TxLookupPrefix,
@@ -276,7 +297,14 @@ func copyCompact() error {
 	if err := os.MkdirAll(to, 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", to, err)
 	}
-	if err := env.SetMapSize(int64(ethdb.LMDBMapSize.Bytes())); err != nil {
+
+	f1, err := os.Stat(path.Join(from, "data.mdb"))
+	if err != nil {
+		return err
+	}
+
+	err = env.SetMapSize(f1.Size() + int64((1 * datasize.GB).Bytes()))
+	if err != nil {
 		return err
 	}
 

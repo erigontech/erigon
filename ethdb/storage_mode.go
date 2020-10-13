@@ -8,12 +8,13 @@ import (
 )
 
 type StorageMode struct {
-	History  bool
-	Receipts bool
-	TxIndex  bool
+	History    bool
+	Receipts   bool
+	TxIndex    bool
+	CallTraces bool
 }
 
-var DefaultStorageMode = StorageMode{History: true, Receipts: true, TxIndex: true}
+var DefaultStorageMode = StorageMode{History: true, Receipts: true, TxIndex: true, CallTraces: false}
 
 func (m StorageMode) ToString() string {
 	modeString := ""
@@ -25,6 +26,9 @@ func (m StorageMode) ToString() string {
 	}
 	if m.TxIndex {
 		modeString += "t"
+	}
+	if m.CallTraces {
+		modeString += "c"
 	}
 	return modeString
 }
@@ -39,6 +43,8 @@ func StorageModeFromString(flags string) (StorageMode, error) {
 			mode.Receipts = true
 		case 't':
 			mode.TxIndex = true
+		case 'c':
+			mode.CallTraces = true
 		default:
 			return mode, fmt.Errorf("unexpected flag found: %c", flag)
 		}
@@ -71,6 +77,12 @@ func GetStorageModeFromDB(db Database) (StorageMode, error) {
 	}
 	sm.TxIndex = len(v) == 1 && v[0] == 1
 
+	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeCallTraces)
+	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+		return StorageMode{}, err
+	}
+	sm.CallTraces = len(v) == 1 && v[0] == 1
+
 	return sm, nil
 }
 
@@ -89,6 +101,11 @@ func SetStorageModeIfNotExist(db Database, sm StorageMode) error {
 	}
 
 	err = setModeOnEmpty(db, dbutils.StorageModeTxIndex, sm.TxIndex)
+	if err != nil {
+		return err
+	}
+
+	err = setModeOnEmpty(db, dbutils.StorageModeCallTraces, sm.CallTraces)
 	if err != nil {
 		return err
 	}

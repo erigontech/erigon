@@ -828,7 +828,10 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 	defer ethDb.Close()
 	blocksToSearch := 10000000
 	for i := uint64(block); i < uint64(block+blocksToSearch); i++ {
-		hash := rawdb.ReadCanonicalHash(ethDb, i)
+		hash, err := rawdb.ReadCanonicalHash(ethDb, i)
+		if err != nil {
+			panic(err)
+		}
 		header := rawdb.ReadHeader(ethDb, hash, i)
 		if header.Root == stateRoot || stateRoot == (common.Hash{}) {
 			fmt.Printf("\n===============\nCanonical hash for %d: %x\n", i, hash)
@@ -851,7 +854,8 @@ func printTxHashes() {
 	ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
 	defer ethDb.Close()
 	for b := uint64(0); b < uint64(100000); b++ {
-		hash := rawdb.ReadCanonicalHash(ethDb, b)
+		hash, err := rawdb.ReadCanonicalHash(ethDb, b)
+		check(err)
 		block := rawdb.ReadBlock(ethDb, hash, b)
 		if block == nil {
 			break
@@ -1130,7 +1134,8 @@ func validateTxLookups2(db rawdb.DatabaseReader, startBlock uint64, interruptCh 
 	// Validation Process
 	blockBytes := big.NewInt(0)
 	for !interrupt {
-		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		blockHash, err := rawdb.ReadCanonicalHash(db, blockNum)
+		check(err)
 		body := rawdb.ReadBody(db, blockHash, blockNum)
 
 		if body == nil {
@@ -1409,7 +1414,8 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	runtime.ReadMemStats(&m)
 	log.Info("Loaded subtries",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	hash := rawdb.ReadCanonicalHash(db, block)
+	hash, err := rawdb.ReadCanonicalHash(db, block)
+	check(err)
 	header := rawdb.ReadHeader(db, hash, block)
 	tr := trie.New(common.Hash{})
 	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
@@ -2058,7 +2064,8 @@ func extracHeaders(chaindata string, block uint64) error {
 	defer w.Flush()
 	var hBuffer [headerdownload.HeaderSerLength]byte
 	for {
-		hash := rawdb.ReadCanonicalHash(db, b)
+		hash, err := rawdb.ReadCanonicalHash(db, b)
+		check(err)
 		if hash == (common.Hash{}) {
 			break
 		}

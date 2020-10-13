@@ -347,8 +347,8 @@ func RootContext() context.Context {
 		defer signal.Stop(ch)
 
 		select {
-		case <-ch:
-			log.Info("Got interrupt, shutting down...")
+		case sig := <-ch:
+			log.Info("Got interrupt, shutting down...", "sig", sig)
 		case <-ctx.Done():
 		}
 	}()

@@ -133,8 +133,12 @@ func TestNewSimulatedBackend(t *testing.T) {
 	if sim.blockchain.Config() != params.AllEthashProtocolChanges {
 		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.config)
 	}
-
-	statedb := state.New(state.NewPlainDBState(sim.KV(), sim.blockchain.CurrentBlock().NumberU64()))
+	tx, err1 := sim.KV().Begin(context.Background(), nil, false)
+	if err1 != nil {
+		t.Errorf("TestNewSimulatedBackend create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	statedb := state.New(state.NewPlainDBState(tx, sim.blockchain.CurrentBlock().NumberU64()))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)

@@ -46,7 +46,10 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 		defer tx.Rollback()
 	}
 
-	hash := rawdb.ReadCanonicalHash(tx, to)
+	hash, err := rawdb.ReadCanonicalHash(tx, to)
+	if err != nil {
+		return err
+	}
 	syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
 	expectedRootHash := syncHeadHeader.Root
 
@@ -288,7 +291,10 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 }
 
 func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
-	hash := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
+	hash, err := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
+	if err != nil {
+		return err
+	}
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
 

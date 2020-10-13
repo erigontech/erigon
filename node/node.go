@@ -559,17 +559,16 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 	}
 
 	var db *ethdb.ObjectDatabase
-	var err error
-
 	if n.config.DataDir == "" {
+		fmt.Printf("Opening In-memory Database (LMDB): %s\n", name)
 		db = ethdb.NewMemDatabase()
 	} else {
-		log.Info("Opening Database (LMDB)")
-		db, err = ethdb.Open(n.config.ResolvePath(name))
-	}
-
-	if err != nil {
-		return nil, err
+		log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR(), "maxFreelistReuse", n.config.LMDBMaxFreelistReuse)
+		kv, err := ethdb.NewLMDB().Path(n.config.ResolvePath(name)).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Open()
+		if err != nil {
+			return nil, err
+		}
+		db = ethdb.NewObjectDatabase(kv)
 	}
 
 	n.databases = append(n.databases, db)

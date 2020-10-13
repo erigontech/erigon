@@ -2,6 +2,7 @@ package stateless
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"math/big"
 	"os"
@@ -125,6 +126,10 @@ func dataDependencies(blockNum uint64) {
 
 	ethDb := ethdb.MustOpen("/Volumes/tb4/turbo-geth-10/geth/chaindata")
 	defer ethDb.Close()
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, false)
+	check(err1)
+	defer ethTx.Rollback()
+
 	chainConfig := params.MainnetChainConfig
 	depFile, err := os.OpenFile("/Volumes/tb4/turbo-geth/data_dependencies.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
@@ -143,7 +148,7 @@ func dataDependencies(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethTx, block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		statedb.SetTracer(dt)
 		signer := types.MakeSigner(chainConfig, block.Number())

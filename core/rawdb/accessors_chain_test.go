@@ -225,19 +225,31 @@ func TestCanonicalMappingStorage(t *testing.T) {
 
 	// Create a test canonical number and assinged hash to move around
 	hash, number := common.Hash{0: 0xff}, uint64(314)
-	if entry := ReadCanonicalHash(db, number); entry != (common.Hash{}) {
+	entry, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		panic(err)
+	}
+	if entry != (common.Hash{}) {
 		t.Fatalf("Non existent canonical mapping returned: %v", entry)
 	}
 	// Write and verify the TD in the database
 	WriteCanonicalHash(db, hash, number)
-	if entry := ReadCanonicalHash(db, number); entry == (common.Hash{}) {
+	entry, err = ReadCanonicalHash(db, number)
+	if err != nil {
+		panic(err)
+	}
+	if entry == (common.Hash{}) {
 		t.Fatalf("Stored canonical mapping not found")
 	} else if entry != hash {
 		t.Fatalf("Retrieved canonical mapping mismatch: have %v, want %v", entry, hash)
 	}
 	// Delete the TD and verify the execution
 	DeleteCanonicalHash(db, number)
-	if entry := ReadCanonicalHash(db, number); entry != (common.Hash{}) {
+	entry, err = ReadCanonicalHash(db, number)
+	if err != nil {
+		panic(err)
+	}
+	if entry != (common.Hash{}) {
 		t.Fatalf("Deleted canonical mapping returned: %v", entry)
 	}
 }

@@ -207,7 +207,9 @@ func (m *StandardMeter) Count() int64 {
 
 // Mark records the occurrence of n events.
 func (m *StandardMeter) Mark(n int64) {
-	atomic.AddInt64(&m.snapshot.temp, n)
+	m.lock.Lock()
+	m.snapshot.temp = n
+	m.lock.Unlock()
 }
 
 // Rate1 returns the one-minute moving average rate of events per second.

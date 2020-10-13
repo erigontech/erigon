@@ -129,7 +129,7 @@ func (r *RemoteReader) ReadAccountData(address common.Address) (*accounts.Accoun
 	if err != nil {
 		return nil, err
 	}
-	enc, err := state.GetAsOf(r.db, false /* storage */, addrHash[:], r.blockNr+1)
+	enc, err := state.GetAsOf(r.db.(ethdb.HasTx).Tx(), false /* storage */, addrHash[:], r.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -158,7 +158,7 @@ func (r *RemoteReader) ReadAccountStorage(address common.Address, incarnation ui
 	}
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
-	enc, err := state.GetAsOf(r.db, true /* storage */, compositeKey, r.blockNr+1)
+	enc, err := state.GetAsOf(r.db.(ethdb.HasTx).Tx(), true /* storage */, compositeKey, r.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}

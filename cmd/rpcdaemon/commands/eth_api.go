@@ -23,36 +23,71 @@ import (
 
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
-	ChainId(ctx context.Context) (hexutil.Uint64, error)
-	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
-	// GasPrice(_ context.Context) (*hexutil.Big, error)
-	Coinbase(ctx context.Context) (common.Address, error)
-	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
+	// Block related (proposed file: ./eth_blocks.go)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
 	GetBlockByHash(ctx context.Context, hash common.Hash, fullTx bool) (map[string]interface{}, error)
-	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
-	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
-	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
-	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
-	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
-	Syncing(ctx context.Context) (interface{}, error)
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
+
+	// Transaction related (proposed file: ./eth_txs.go)
 	GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error)
 	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error)
 	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
-	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
-	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
-	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
+	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
+
+	// Uncle related (proposed file: ./eth_uncles.go)
 	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error)
-	GetUncleCountByBlockNumber(ctx context.Context, blockNr rpc.BlockNumber) *hexutil.Uint
-	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) *hexutil.Uint
+	GetUncleCountByBlockNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
+	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
+
+	// Filter related (proposed file: ./eth_filters.go)
+	// newPendingTransactionFilter(ctx context.Context) (string, error)
+	// newBlockFilter(ctx context.Context) (string, error)
+	// newFilter(ctx context.Context) (string, error)
+	// uninstallFilter(ctx context.Context) (string, error)
+	// getFilterChanges(ctx context.Context) (string, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
+
+	// Account related (proposed file: ./eth_accounts.go)
+	Accounts(_ context.Context) (string, error) /* deprecated */
+	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
+	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
+	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
+	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
+
+	// System related (proposed file: ./eth_system.go)
+	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
+	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
+	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
+	Syncing(ctx context.Context) (interface{}, error)
+	// GasPrice(_ context.Context) (*hexutil.Big, error)
+
+	// Sending related (proposed file: ./eth_call.go)
+	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
+	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
+	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
+	// SendTransaction(ctx context.Context) (string, error)
+	Sign(_ context.Context, _ string, _ string) (string, error) /* deprecated */
+
+	// Mining related (proposed file: ./eth_mining.go)
+	Coinbase(ctx context.Context) (common.Address, error)
+	// HashRate(ctx context.Context) (string, error)
+	// Mining(ctx context.Context) (string, error)
+	// GetWork(ctx context.Context) (string, error)
+	// SubmitWork(ctx context.Context) (string, error)
+	// SubmitHashrate(ctx context.Context) (string, error)
+
 	// These three commands worked anyway, but were not in this interface. Temporarily adding them for discussion
 	GetHeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error)
 	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
 	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
+
+	// Deprecated commands in eth_ (proposed file: ./eth_deprecated.go)
+	GetCompilers(_ context.Context) (string, error)                /* deprecated */
+	CompileLLL(_ context.Context, _ string) (string, error)        /* deprecated */
+	CompileSolidity(ctx context.Context, _ string) (string, error) /* deprecated */
+	CompileSerpent(ctx context.Context, _ string) (string, error)  /* deprecated */
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -64,8 +99,8 @@ type APIImpl struct {
 	GasCap       uint64
 }
 
-// NewAPI returns APIImpl instance
-func NewAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
+// NewEthAPI returns APIImpl instance
+func NewEthAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
 	return &APIImpl{
 		db:         db,
 		dbReader:   dbReader,
@@ -108,12 +143,18 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 
 // GetBlockTransactionCountByNumber returns the number of transactions in the block
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
-	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+	block := rawdb.ReadBlockByNumber(tx, blockNum)
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
@@ -123,7 +164,13 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 
 // GetBlockTransactionCountByHash returns the number of transactions in the block
 func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
-	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	block := rawdb.ReadBlockByHash(tx, blockHash)
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %x", blockHash)
 	}
@@ -132,8 +179,14 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 }
 
 // ChainId returns the chain id from the config
-func (api *APIImpl) ChainId(_ context.Context) (hexutil.Uint64, error) {
-	chainConfig := getChainConfig(api.dbReader)
+func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	chainConfig := getChainConfig(tx)
 	return hexutil.Uint64(chainConfig.ChainID.Uint64()), nil
 }
 
@@ -201,18 +254,30 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 
 // GetTransactionByHash returns the transaction for the given hash
 func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error) {
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
-	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, hash)
-	if tx == nil {
+	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, hash)
+	if txn == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	return newRPCTransaction(tx, blockHash, blockNumber, txIndex), nil
+	return newRPCTransaction(txn, blockHash, blockNumber, txIndex), nil
 }
 
 // GetTransactionByBlockHashAndIndex returns the transaction for the given block hash and index.
 func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error) {
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
-	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
+	block := rawdb.ReadBlockByHash(tx, blockHash)
 	if block == nil {
 		return nil, fmt.Errorf("block %#x not found", blockHash)
 	}
@@ -227,13 +292,19 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 
 // GetTransactionByBlockNumberAndIndex returns the transaction for the given block number and index.
 func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error) {
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockNumberAndIndex
-	blockNum, err := getBlockNumber(blockNr, api.dbReader)
+	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+	block := rawdb.ReadBlockByNumber(tx, blockNum)
 	if block == nil {
 		return nil, fmt.Errorf("block %d not found", blockNum)
 	}
@@ -255,7 +326,12 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
 	}
 
-	reader := adapter.NewStateReader(api.db, blockNumber)
+	tx, err1 := api.db.Begin(ctx, nil, false)
+	if err1 != nil {
+		return "", fmt.Errorf("getStorageAt cannot open tx: %v", err1)
+	}
+	defer tx.Rollback()
+	reader := adapter.NewStateReader(tx, blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
@@ -276,7 +352,12 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return nil, err
 	}
 
-	reader := adapter.NewStateReader(api.db, blockNumber)
+	tx, err1 := api.db.Begin(ctx, nil, false)
+	if err1 != nil {
+		return nil, fmt.Errorf("getCode cannot open tx: %v", err1)
+	}
+	defer tx.Rollback()
+	reader := adapter.NewStateReader(tx, blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return hexutil.Bytes(""), nil
@@ -295,7 +376,12 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		return nil, err
 	}
 	nonce := hexutil.Uint64(0)
-	reader := adapter.NewStateReader(api.db, blockNumber)
+	tx, err1 := api.db.Begin(ctx, nil, false)
+	if err1 != nil {
+		return nil, fmt.Errorf("getTransactionCount cannot open tx: %v", err1)
+	}
+	defer tx.Rollback()
+	reader := adapter.NewStateReader(tx, blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return &nonce, err

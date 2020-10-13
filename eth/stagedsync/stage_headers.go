@@ -73,7 +73,11 @@ func (cr ChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 
 // GetHeaderByNumber retrieves a block header from the database by number.
 func (cr ChainReader) GetHeaderByNumber(number uint64) *types.Header {
-	hash := rawdb.ReadCanonicalHash(cr.db, number)
+	hash, err := rawdb.ReadCanonicalHash(cr.db, number)
+	if err != nil {
+		log.Error("ReadCanonicalHash failed", "err", err)
+		return nil
+	}
 	return rawdb.ReadHeader(cr.db, hash, number)
 }
 
@@ -95,7 +99,11 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, engine consen
 	alreadyCanonicalIndex := 0
 	for _, h := range headers {
 		number := h.Number.Uint64()
-		if h.Hash() == rawdb.ReadCanonicalHash(db, number) {
+		ch, err := rawdb.ReadCanonicalHash(db, number)
+		if err != nil {
+			return false, 0, err
+		}
+		if h.Hash() == ch {
 			alreadyCanonicalIndex++
 		} else {
 			break
@@ -169,7 +177,11 @@ Error: %v
 	}
 
 	var deepFork bool // Whether the forkBlock is outside this header chain segment
-	if newCanonical && headers[0].ParentHash != rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1) {
+	ch, err := rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1)
+	if err != nil {
+		return false, 0, err
+	}
+	if newCanonical && headers[0].ParentHash != ch {
 		deepFork = true
 	}
 	var forkBlockNumber uint64
@@ -187,7 +199,11 @@ Error: %v
 			continue
 		}
 		number := header.Number.Uint64()
-		hashesMatch := header.Hash() == rawdb.ReadCanonicalHash(batch, number)
+		ch, err := rawdb.ReadCanonicalHash(batch, number)
+		if err != nil {
+			return false, 0, err
+		}
+		hashesMatch := header.Hash() == ch
 		if newCanonical && !deepFork && forkBlockNumber == 0 && !hashesMatch {
 			forkBlockNumber = number - 1
 		} else if newCanonical && hashesMatch {
@@ -209,7 +225,15 @@ Error: %v
 		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 		forkBlockNumber = forkHeader.Number.Uint64() - 1
 		forkHash := forkHeader.ParentHash
-		for forkHash != rawdb.ReadCanonicalHash(batch, forkBlockNumber) {
+		for {
+			ch, err := rawdb.ReadCanonicalHash(batch, forkBlockNumber)
+			if err != nil {
+				return false, 0, err
+			}
+			if forkHash == ch {
+				break
+			}
+
 			rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber)
 			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)
 			forkBlockNumber = forkHeader.Number.Uint64() - 1

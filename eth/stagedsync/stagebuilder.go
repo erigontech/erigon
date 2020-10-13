@@ -1,6 +1,8 @@
 package stagedsync
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -28,12 +30,13 @@ type StageParameters struct {
 	datadir     string
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
 	// the stage can take significant time and gracefully shutdown at Ctrl+C.
-	QuitCh           <-chan struct{}
-	headersFetchers  []func() error
-	txPool           *core.TxPool
-	poolStart        func() error
-	changeSetHook    ChangeSetHook
-	prefetchedBlocks *PrefetchedBlocks
+	QuitCh             <-chan struct{}
+	headersFetchers    []func() error
+	txPool             *core.TxPool
+	poolStart          func() error
+	changeSetHook      ChangeSetHook
+	prefetchedBlocks   *PrefetchedBlocks
+	stateReaderBuilder StateReaderBuilder
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -46,6 +49,29 @@ type StageBuilder struct {
 
 // StageBuilders represents an ordered list of builders to build different stages. It also contains helper methods to change the list of stages.
 type StageBuilders []StageBuilder
+
+// MustReplace finds a stage with a specific ID and then sets the new one instead of that.
+// Chainable but panics if it can't find stage to replace.
+func (bb StageBuilders) MustReplace(id stages.SyncStage, newBuilder StageBuilder) StageBuilders {
+	result := make([]StageBuilder, len(bb))
+
+	found := false
+
+	for i, originalBuilder := range bb {
+		if strings.EqualFold(string(originalBuilder.ID), string(id)) {
+			found = true
+			result[i] = newBuilder
+		} else {
+			result[i] = originalBuilder
+		}
+	}
+
+	if !found {
+		panic(fmt.Sprintf("StageBuilders#Replace can't find the stage with id %s", string(id)))
+	}
+
+	return result
+}
 
 // Build creates sync states out of builders
 func (bb StageBuilders) Build(world StageParameters) []*Stage {
@@ -140,7 +166,15 @@ func DefaultStages() StageBuilders {
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnExecuteBlocksStage(s, world.TX, world.chainConfig, world.chainContext, world.vmConfig, 0 /* limit (meaning no limit) */, world.QuitCh, world.storageMode.Receipts, world.hdd, world.changeSetHook)
+						return SpawnExecuteBlocksStage(s, world.TX,
+							world.chainConfig, world.chainContext, world.vmConfig,
+							world.QuitCh,
+							ExecuteBlockStageParams{
+								WriteReceipts: world.storageMode.Receipts,
+								Hdd:           world.hdd,
+								ChangeSetHook: world.changeSetHook,
+								ReaderBuilder: world.stateReaderBuilder,
+							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindExecutionStage(u, s, world.TX, world.storageMode.Receipts)
@@ -230,6 +264,23 @@ func DefaultStages() StageBuilders {
 			},
 		},
 		{
+			ID: stages.CallTraces,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:                  stages.CallTraces,
+					Description:         "Generate call traces index",
+					Disabled:            !world.storageMode.CallTraces,
+					DisabledDescription: "Work In Progress",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.datadir, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh)
+					},
+				}
+			},
+		},
+		{
 			ID: stages.TxLookup,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
@@ -303,10 +354,10 @@ func DefaultUnwindOrder() UnwindOrder {
 		0, 1, 2,
 		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		// also tx pool is before senders because senders unwind is inside cycle transaction
-		11,
+		12,
 		3, 4,
 		// Unwinding of IHashes needs to happen after unwinding HashState
 		6, 5,
-		7, 8, 9, 10,
+		7, 8, 9, 10, 11,
 	}
 }

@@ -2,7 +2,6 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -19,32 +18,27 @@ import (
 //MaxChangesetsSearch -
 const MaxChangesetsSearch = 256
 
-func GetAsOf(db ethdb.KV, storage bool, key []byte, timestamp uint64) ([]byte, error) {
+func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
-	err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		v, err := FindByHistory(tx, storage, key, timestamp)
-		if err == nil {
-			dat = make([]byte, len(v))
-			copy(dat, v)
-			return nil
-		}
-		if !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return err
-		}
-		{
-			v, err := tx.Get(dbutils.PlainStateBucket, key)
-			if err != nil {
-				return err
-			}
-			if v == nil {
-				return ethdb.ErrKeyNotFound
-			}
-			dat = make([]byte, len(v))
-			copy(dat, v)
-			return nil
-		}
-	})
-	return dat, err
+	v, err := FindByHistory(tx, storage, key, timestamp)
+	if err == nil {
+		dat = make([]byte, len(v))
+		copy(dat, v)
+		return dat, nil
+	}
+	if !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return nil, err
+	}
+	v, err = tx.Get(dbutils.PlainStateBucket, key)
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, ethdb.ErrKeyNotFound
+	}
+	dat = make([]byte, len(v))
+	copy(dat, v)
+	return dat, nil
 }
 
 func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
@@ -55,6 +49,7 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 		hBucket = dbutils.AccountsHistoryBucket
 	}
 	c := tx.Cursor(hBucket)
+	defer c.Close()
 	k, v, seekErr := c.Seek(dbutils.IndexChunkKey(key, timestamp))
 	if seekErr != nil {
 		return nil, seekErr
@@ -130,7 +125,7 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 	return data, nil
 }
 
-func WalkAsOf(db ethdb.KV, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+func WalkAsOf(db ethdb.Tx, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", bucket, hBucket, startkey, fixedbits, timestamp)
 	if !(bucket == dbutils.PlainStateBucket || bucket == dbutils.CurrentStateBucket) {
 		return fmt.Errorf("unsupported state bucket: %s", string(bucket))
@@ -146,249 +141,244 @@ func WalkAsOf(db ethdb.KV, bucket string, hBucket string, startkey []byte, fixed
 	panic(fmt.Sprintf("Not implemented for arbitrary buckets: %s, %s", string(bucket), string(hBucket)))
 }
 
-func walkAsOfThinStorage(db ethdb.KV, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
-	err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		csBucket := dbutils.StorageChangeSetBucket
-		if bucket == dbutils.PlainStateBucket {
-			csBucket = dbutils.PlainStorageChangeSetBucket
+func walkAsOfThinStorage(tx ethdb.Tx, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
+	csBucket := dbutils.StorageChangeSetBucket
+	if bucket == dbutils.PlainStateBucket {
+		csBucket = dbutils.PlainStorageChangeSetBucket
+	}
+
+	generatedTo, executedTo, innerErr := getIndexGenerationProgress(tx, stages.StorageHistoryIndex)
+	if innerErr != nil {
+		return innerErr
+	}
+	if executedTo > generatedTo+MaxChangesetsSearch {
+		return fmt.Errorf("too high difference between last generated index block(%v) and last executed block(%v)", generatedTo, executedTo)
+	}
+
+	startkeyNoInc := dbutils.CompositeKeyWithoutIncarnation(startkey)
+	part1End := common.HashLength
+	part2Start := common.HashLength + common.IncarnationLength
+	part3Start := common.HashLength + common.IncarnationLength + common.HashLength
+	if bucket == dbutils.PlainStateBucket {
+		part1End = common.AddressLength
+		part2Start = common.AddressLength + common.IncarnationLength
+		part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
+	}
+
+	//for storage
+	mainCursor := ethdb.NewSplitCursor(
+		tx.Cursor(bucket),
+		startkey,
+		fixedbits,
+		part1End,
+		part2Start,
+		part3Start,
+	)
+	fixetBitsForHistory := fixedbits - 8*common.IncarnationLength
+	if fixetBitsForHistory < 0 {
+		fixetBitsForHistory = 0
+	}
+
+	part1End = common.HashLength
+	part2Start = common.HashLength
+	part3Start = common.HashLength * 2
+	if bucket == dbutils.PlainStateBucket {
+		part1End = common.AddressLength
+		part2Start = common.AddressLength
+		part3Start = common.AddressLength + common.HashLength
+	}
+
+	//for historic data
+	var historyCursor historyCursor = ethdb.NewSplitCursor(
+		tx.Cursor(dbutils.StorageHistoryBucket),
+		startkeyNoInc,
+		fixetBitsForHistory,
+		part1End,   /* part1end */
+		part2Start, /* part2start */
+		part3Start, /* part3start */
+	)
+
+	part1End = common.HashLength
+	part2Start = common.HashLength + common.IncarnationLength
+	part3Start = common.HashLength + common.IncarnationLength + common.HashLength
+	if bucket == dbutils.PlainStateBucket {
+		part1End = common.AddressLength
+		part2Start = common.AddressLength + common.IncarnationLength
+		part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
+	}
+
+	decorator := NewChangesetSearchDecorator(historyCursor, tx, csBucket, startkey, fixetBitsForHistory, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
+	err := decorator.buildChangeset(generatedTo, executedTo)
+	if err != nil {
+		return err
+	}
+	historyCursor = decorator
+
+	addrHash, keyHash, _, v, err1 := mainCursor.Seek()
+	if err1 != nil {
+		return err1
+	}
+
+	hAddrHash, hKeyHash, _, hV, err2 := historyCursor.Seek()
+	if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
+		return err2
+	}
+
+	goOn := true
+	for goOn {
+		cmp, br := common.KeyCmp(addrHash, hAddrHash)
+		if br {
+			break
+		}
+		if cmp == 0 {
+			cmp, br = common.KeyCmp(keyHash, hKeyHash)
+		}
+		if br {
+			break
 		}
 
-		generatedTo, executedTo, innerErr := getIndexGenerationProgress(tx, stages.StorageHistoryIndex)
-		if innerErr != nil {
-			return innerErr
+		//next key in state
+		if cmp < 0 {
+			goOn, err = walker(addrHash, keyHash, v)
+		} else {
+			if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
+				return err2
+			}
+			if len(hV) > 0 && err2 == nil { // Skip accounts did not exist
+				goOn, err = walker(hAddrHash, hKeyHash, hV)
+			} else if errors.Is(err2, ErrNotInHistory) && cmp == 0 {
+				goOn, err = walker(addrHash, keyHash, v)
+			}
 		}
-		if executedTo > generatedTo+MaxChangesetsSearch {
-			return fmt.Errorf("too high difference between last generated index block(%v) and last executed block(%v)", generatedTo, executedTo)
-		}
-
-		startkeyNoInc := dbutils.CompositeKeyWithoutIncarnation(startkey)
-		part1End := common.HashLength
-		part2Start := common.HashLength + common.IncarnationLength
-		part3Start := common.HashLength + common.IncarnationLength + common.HashLength
-		if bucket == dbutils.PlainStateBucket {
-			part1End = common.AddressLength
-			part2Start = common.AddressLength + common.IncarnationLength
-			part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
-		}
-
-		//for storage
-		mainCursor := ethdb.NewSplitCursor(
-			tx.Cursor(bucket),
-			startkey,
-			fixedbits,
-			part1End,
-			part2Start,
-			part3Start,
-		)
-		fixetBitsForHistory := fixedbits - 8*common.IncarnationLength
-		if fixetBitsForHistory < 0 {
-			fixetBitsForHistory = 0
-		}
-
-		part1End = common.HashLength
-		part2Start = common.HashLength
-		part3Start = common.HashLength * 2
-		if bucket == dbutils.PlainStateBucket {
-			part1End = common.AddressLength
-			part2Start = common.AddressLength
-			part3Start = common.AddressLength + common.HashLength
-		}
-
-		//for historic data
-		var historyCursor historyCursor = ethdb.NewSplitCursor(
-			tx.Cursor(dbutils.StorageHistoryBucket),
-			startkeyNoInc,
-			fixetBitsForHistory,
-			part1End,   /* part1end */
-			part2Start, /* part2start */
-			part3Start, /* part3start */
-		)
-
-		part1End = common.HashLength
-		part2Start = common.HashLength + common.IncarnationLength
-		part3Start = common.HashLength + common.IncarnationLength + common.HashLength
-		if bucket == dbutils.PlainStateBucket {
-			part1End = common.AddressLength
-			part2Start = common.AddressLength + common.IncarnationLength
-			part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
-		}
-
-		decorator := NewChangesetSearchDecorator(historyCursor, tx, csBucket, startkey, fixetBitsForHistory, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
-		err := decorator.buildChangeset(generatedTo, executedTo)
 		if err != nil {
 			return err
 		}
-		historyCursor = decorator
-
-		addrHash, keyHash, _, v, err1 := mainCursor.Seek()
-		if err1 != nil {
-			return err1
-		}
-
-		hAddrHash, hKeyHash, _, hV, err2 := historyCursor.Seek()
-		if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
-			return err2
-		}
-
-		goOn := true
-		for goOn {
-			cmp, br := common.KeyCmp(addrHash, hAddrHash)
-			if br {
-				break
+		if goOn {
+			if cmp <= 0 {
+				addrHash, keyHash, _, v, err1 = mainCursor.Next()
+				if err1 != nil {
+					return err1
+				}
 			}
-			if cmp == 0 {
-				cmp, br = common.KeyCmp(keyHash, hKeyHash)
-			}
-			if br {
-				break
-			}
-
-			//next key in state
-			if cmp < 0 {
-				goOn, err = walker(addrHash, keyHash, v)
-			} else {
+			if cmp >= 0 {
+				hAddrHash, hKeyHash, _, hV, err2 = historyCursor.Next()
 				if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
 					return err2
 				}
-				if len(hV) > 0 && err2 == nil { // Skip accounts did not exist
-					goOn, err = walker(hAddrHash, hKeyHash, hV)
-				} else if errors.Is(err2, ErrNotInHistory) && cmp == 0 {
-					goOn, err = walker(addrHash, keyHash, v)
-				}
-			}
-			if err != nil {
-				return err
-			}
-			if goOn {
-				if cmp <= 0 {
-					addrHash, keyHash, _, v, err1 = mainCursor.Next()
-					if err1 != nil {
-						return err1
-					}
-				}
-				if cmp >= 0 {
-					hAddrHash, hKeyHash, _, hV, err2 = historyCursor.Next()
-					if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
-						return err2
-					}
-				}
 			}
 		}
-		return err
-	})
+	}
 	return err
 }
 
-func walkAsOfThinAccounts(db ethdb.KV, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+func walkAsOfThinAccounts(tx ethdb.Tx, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
-	err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		csBucket := dbutils.AccountChangeSetBucket
-		if bucket == dbutils.PlainStateBucket {
-			csBucket = dbutils.PlainAccountChangeSetBucket
-		}
+	csBucket := dbutils.AccountChangeSetBucket
+	if bucket == dbutils.PlainStateBucket {
+		csBucket = dbutils.PlainAccountChangeSetBucket
+	}
 
-		generatedTo, executedTo, innerErr := getIndexGenerationProgress(tx, stages.AccountHistoryIndex)
-		if innerErr != nil {
-			return innerErr
-		}
-		if executedTo > generatedTo+MaxChangesetsSearch {
-			return fmt.Errorf("too high difference between last generated index block(%v) and last executed block(%v)", generatedTo, executedTo)
-		}
+	generatedTo, executedTo, innerErr := getIndexGenerationProgress(tx, stages.AccountHistoryIndex)
+	if innerErr != nil {
+		return innerErr
+	}
+	if executedTo > generatedTo+MaxChangesetsSearch {
+		return fmt.Errorf("too high difference between last generated index block(%v) and last executed block(%v)", generatedTo, executedTo)
+	}
 
-		mainCursor := tx.Cursor(bucket)
-		part1End := common.HashLength
-		part2Start := common.HashLength
-		part3Start := common.HashLength
-		maxKeyLen := common.HashLength
-		if bucket == dbutils.PlainStateBucket {
-			part1End = common.AddressLength
-			part2Start = common.AddressLength
-			part3Start = common.AddressLength
-			maxKeyLen = common.AddressLength
-		}
+	mainCursor := tx.Cursor(bucket)
+	part1End := common.HashLength
+	part2Start := common.HashLength
+	part3Start := common.HashLength
+	maxKeyLen := common.HashLength
+	if bucket == dbutils.PlainStateBucket {
+		part1End = common.AddressLength
+		part2Start = common.AddressLength
+		part3Start = common.AddressLength
+		maxKeyLen = common.AddressLength
+	}
 
-		var hCursor historyCursor = ethdb.NewSplitCursor(
-			tx.Cursor(dbutils.AccountsHistoryBucket),
-			startkey,
-			fixedbits,
-			part1End,   /* part1end */
-			part2Start, /* part2start */
-			part3Start, /* part3start */
-		)
+	var hCursor historyCursor = ethdb.NewSplitCursor(
+		tx.Cursor(dbutils.AccountsHistoryBucket),
+		startkey,
+		fixedbits,
+		part1End,   /* part1end */
+		part2Start, /* part2start */
+		part3Start, /* part3start */
+	)
 
-		decorator := NewChangesetSearchDecorator(hCursor, tx, csBucket, startkey, fixedbits, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
-		innerErr = decorator.buildChangeset(generatedTo, executedTo)
-		if innerErr != nil {
-			return innerErr
-		}
-		hCursor = decorator
+	decorator := NewChangesetSearchDecorator(hCursor, tx, csBucket, startkey, fixedbits, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
+	innerErr = decorator.buildChangeset(generatedTo, executedTo)
+	if innerErr != nil {
+		return innerErr
+	}
+	hCursor = decorator
 
-		k, v, err1 := mainCursor.Seek(startkey)
+	k, v, err1 := mainCursor.Seek(startkey)
+	if err1 != nil {
+		return err1
+	}
+	for k != nil && len(k) > maxKeyLen {
+		k, v, err1 = mainCursor.Next()
 		if err1 != nil {
 			return err1
 		}
-		for k != nil && len(k) > maxKeyLen {
-			k, v, err1 = mainCursor.Next()
-			if err1 != nil {
-				return err1
-			}
-		}
-		hK, _, _, hV, err2 := hCursor.Seek()
-		if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
-			return err2
-		}
+	}
+	hK, _, _, hV, err2 := hCursor.Seek()
+	if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
+		return err2
+	}
 
-		goOn := true
-		var err error
-		for goOn {
-			//exit or next conditions
-			if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
-				k = nil
+	goOn := true
+	var err error
+	for goOn {
+		//exit or next conditions
+		if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
+			k = nil
+		}
+		if k != nil && fixedbits > 0 && (k[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
+			k = nil
+		}
+		var cmp int
+		cmp, br := common.KeyCmp(k, hK)
+		if br {
+			break
+		}
+		if cmp < 0 {
+			goOn, err = walker(k, v)
+		} else {
+			if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
+				return err2
 			}
-			if k != nil && fixedbits > 0 && (k[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
-				k = nil
-			}
-			var cmp int
-			cmp, br := common.KeyCmp(k, hK)
-			if br {
-				break
-			}
-			if cmp < 0 {
+			if len(hV) > 0 && err2 == nil { // Skip accounts did not exist
+				goOn, err = walker(hK, hV)
+			} else if errors.Is(err2, ErrNotInHistory) && cmp == 0 {
 				goOn, err = walker(k, v)
-			} else {
-				if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
-					return err2
-				}
-				if len(hV) > 0 && err2 == nil { // Skip accounts did not exist
-					goOn, err = walker(hK, hV)
-				} else if errors.Is(err2, ErrNotInHistory) && cmp == 0 {
-					goOn, err = walker(k, v)
-				}
 			}
-			if goOn {
-				if cmp <= 0 {
+		}
+		if goOn {
+			if cmp <= 0 {
+				k, v, err1 = mainCursor.Next()
+				if err1 != nil {
+					return err1
+				}
+				for k != nil && len(k) > maxKeyLen {
 					k, v, err1 = mainCursor.Next()
 					if err1 != nil {
 						return err1
 					}
-					for k != nil && len(k) > maxKeyLen {
-						k, v, err1 = mainCursor.Next()
-						if err1 != nil {
-							return err1
-						}
-					}
 				}
-				if cmp >= 0 {
-					hK, _, _, hV, err2 = hCursor.Next()
-					if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
-						return err2
-					}
+			}
+			if cmp >= 0 {
+				hK, _, _, hV, err2 = hCursor.Next()
+				if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
+					return err2
 				}
 			}
 		}
-		return err
-	})
+	}
 	return err
+
 }
 
 func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte) ([]byte, error), adapter func(v []byte) changeset.Walker) ([]byte, bool, error) {
@@ -771,6 +761,7 @@ func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 	}, 0, to-from)
 
 	c := csd.tx.Cursor(csd.bucketName)
+	defer c.Close()
 	_, _, err := c.Seek(dbutils.EncodeTimestamp(from))
 	if err != nil {
 		return err

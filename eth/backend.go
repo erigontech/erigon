@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
@@ -77,16 +78,15 @@ type Ethereum struct {
 	dialCandidates  enode.Iterator
 
 	// DB interfaces
-	chainDb *ethdb.ObjectDatabase // Block chain database
-	chainKV ethdb.KV              // Same as chainDb, but different interface
+	chainDb    *ethdb.ObjectDatabase // Block chain database
+	chainKV    ethdb.KV              // Same as chainDb, but different interface
+	privateAPI *grpc.Server
 
 	eventMux       *event.TypeMux
 	engine         *process.RemoteEngine
 	accountManager *accounts.Manager
 
-	bloomRequests     chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
-	bloomIndexer      *core.ChainIndexer             // Bloom indexer operating during block imports
-	closeBloomHandler chan struct{}
+	bloomRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
 
 	APIBackend *EthAPIBackend
 
@@ -155,18 +155,17 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	eth := &Ethereum{
-		config:            config,
-		chainDb:           chainDb,
-		chainKV:           chainDb.KV(),
-		eventMux:          stack.EventMux(),
-		accountManager:    stack.AccountManager(),
-		closeBloomHandler: make(chan struct{}),
-		networkID:         config.NetworkID,
-		gasPrice:          config.Miner.GasPrice,
-		etherbase:         config.Miner.Etherbase,
-		bloomRequests:     make(chan chan *bloombits.Retrieval),
-		bloomIndexer:      NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
-		p2pServer:         stack.Server(),
+		config:         config,
+		chainDb:        chainDb,
+		chainKV:        chainDb.KV(),
+		eventMux:       stack.EventMux(),
+		accountManager: stack.AccountManager(),
+		engine:         CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
+		networkID:      config.NetworkID,
+		gasPrice:       config.Miner.GasPrice,
+		etherbase:      config.Miner.Etherbase,
+		bloomRequests:  make(chan chan *bloombits.Retrieval),
+		p2pServer:      stack.Server(),
 	}
 
 	eth.engine = CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb)
@@ -223,9 +222,6 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		eth.blockchain.SetHead(compat.RewindTo)
 		rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
 	}
-	if config.SyncMode != downloader.StagedSync {
-		eth.bloomIndexer.Start(eth.blockchain)
-	}
 
 	if config.TxPool.Journal != "" {
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
@@ -265,9 +261,15 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds)
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -637,9 +639,8 @@ func (s *Ethereum) Downloader() *downloader.Downloader { return s.protocolManage
 func (s *Ethereum) SyncProgress() ethereum.SyncProgress {
 	return s.protocolManager.downloader.Progress()
 }
-func (s *Ethereum) Synced() bool                     { return atomic.LoadUint32(&s.protocolManager.acceptTxs) == 1 }
-func (s *Ethereum) ArchiveMode() bool                { return !s.config.Pruning }
-func (s *Ethereum) BloomIndexer() *core.ChainIndexer { return s.bloomIndexer }
+func (s *Ethereum) Synced() bool      { return atomic.LoadUint32(&s.protocolManager.acceptTxs) == 1 }
+func (s *Ethereum) ArchiveMode() bool { return !s.config.Pruning }
 
 // Protocols returns all the currently configured
 // network protocols to start.
@@ -663,11 +664,6 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
 	s.startEthEntryUpdate(s.p2pServer.LocalNode())
-
-	// Start the bloom bits servicing goroutines
-	if s.config.SyncMode != downloader.StagedSync {
-		s.startBloomHandlers(params.BloomBitsBlocks)
-	}
 
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers
@@ -711,10 +707,11 @@ func (s *Ethereum) StopTxPool() error {
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.protocolManager.Stop()
+	if s.privateAPI != nil {
+		s.privateAPI.GracefulStop()
+	}
 
 	// Then stop everything else.
-	s.bloomIndexer.Close()
-	close(s.closeBloomHandler)
 	if err := s.StopTxPool(); err != nil {
 		log.Warn("error while stopping transaction pool", "err", err)
 	}
@@ -725,6 +722,5 @@ func (s *Ethereum) Stop() error {
 	if s.txPool != nil {
 		s.txPool.Stop()
 	}
-	//s.chainDb.Close()
 	return nil
 }

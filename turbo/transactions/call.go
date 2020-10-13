@@ -23,7 +23,7 @@ import (
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, kv ethdb.KV, dbReader ethdb.Getter, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, dbReader ethdb.Getter, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -39,7 +39,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, kv ethdb.KV, dbReader eth
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(dbReader)
 	} else {
-		stateReader = state.NewPlainDBState(kv, blockNumber)
+		stateReader = state.NewPlainDBState(tx, blockNumber)
 	}
 	state := state.New(stateReader)
 

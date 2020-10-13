@@ -164,7 +164,10 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, errGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
-	stored := rawdb.ReadCanonicalHash(db, 0)
+	stored, err := rawdb.ReadCanonicalHash(db, 0)
+	if err != nil {
+		return nil, common.Hash{}, nil, err
+	}
 	if overwrite || (stored == common.Hash{}) {
 		if genesis == nil {
 			log.Info("Writing default main-net genesis block")
