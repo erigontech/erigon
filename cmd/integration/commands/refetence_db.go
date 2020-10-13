@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"os"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -63,6 +65,20 @@ var cmdCompareStates = &cobra.Command{
 	},
 }
 
+var cmdToMdbx = &cobra.Command{
+	Use:   "to_mdbx",
+	Short: "copy data from '--chaindata' to '--reference_chaindata'",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		err := toMdbx(ctx, chaindata, toChaindata)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(cmdCompareBucket)
 	withReferenceChaindata(cmdCompareBucket)
@@ -75,6 +91,12 @@ func init() {
 	withBucket(cmdCompareStates)
 
 	rootCmd.AddCommand(cmdCompareStates)
+
+	withChaindata(cmdToMdbx)
+	withToChaindata(cmdToMdbx)
+	withBucket(cmdToMdbx)
+
+	rootCmd.AddCommand(cmdToMdbx)
 }
 
 func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {
@@ -186,5 +208,57 @@ func compareBuckets(ctx context.Context, tx ethdb.Tx, b string, refTx ethdb.Tx, 
 			}
 		}
 	}
+	return nil
+}
+
+func toMdbx(ctx context.Context, from, to string) error {
+	_ = os.RemoveAll(to)
+
+	src := ethdb.NewLMDB().Path(from).MustOpen()
+	dst := ethdb.NewMDBX().Path(to).MustOpen()
+	srcTx, err1 := src.Begin(ctx, nil, false)
+	if err1 != nil {
+		return err1
+	}
+	defer srcTx.Rollback()
+	dstTx, err1 := dst.Begin(ctx, nil, true)
+	if err1 != nil {
+		return err1
+	}
+	defer dstTx.Rollback()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	for name, b := range dbutils.BucketsConfigs {
+		c := dstTx.Cursor(name)
+		if err := ethdb.ForEach(srcTx.Cursor(name), func(k, v []byte) (bool, error) {
+			if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
+				if err := c.(ethdb.CursorDupSort).AppendDup(k, v); err != nil {
+					return false, err
+				}
+			}
+			if err := c.Append(k, v); err != nil {
+				return false, err
+			}
+
+			select {
+			default:
+			case <-logEvery.C:
+				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
+			case <-ctx.Done():
+				return false, ctx.Err()
+			}
+			return true, nil
+		}); err != nil {
+			return err
+		}
+	}
+
+	err := dstTx.Commit(context.Background())
+	if err != nil {
+		return err
+	}
+	srcTx.Rollback()
 	return nil
 }

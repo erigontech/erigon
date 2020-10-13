@@ -75,7 +75,7 @@ func openCursor(txn *Txn, db DBI) (*Cursor, error) {
 // See mdb_cursor_renew.
 func (c *Cursor) Renew(txn *Txn) error {
 	ret := C.mdbx_cursor_renew(txn._txn, c._c)
-	err := operrno("mdb_cursor_renew", ret)
+	err := operrno("mdbx_cursor_renew", ret)
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func (c *Cursor) Get(setkey, setval []byte, op uint) (key, val []byte, err error
 // See mdb_cursor_get.
 func (c *Cursor) getVal0(op uint) error {
 	ret := C.mdbx_cursor_get(c._c, c.txn.key, c.txn.val, C.MDBX_cursor_op(op))
-	return operrno("mdb_cursor_get", ret)
+	return operrno("mdbx_cursor_get", ret)
 }
 
 // getVal1 retrieves items from the database using key data for reference
@@ -201,7 +201,7 @@ func (c *Cursor) getVal1(setkey []byte, op uint) error {
 		c.txn.key, c.txn.val,
 		C.MDBX_cursor_op(op),
 	)
-	return operrno("mdb_cursor_get", ret)
+	return operrno("mdbx_cursor_get", ret)
 }
 
 // getVal2 retrieves items from the database using key and value data for
@@ -216,12 +216,12 @@ func (c *Cursor) getVal2(setkey, setval []byte, op uint) error {
 		c.txn.key, c.txn.val,
 		C.MDBX_cursor_op(op),
 	)
-	return operrno("mdb_cursor_get", ret)
+	return operrno("mdbx_cursor_get", ret)
 }
 
 func (c *Cursor) putNilKey(flags uint) error {
 	ret := C.mdbxgo_cursor_put2(c._c, nil, 0, nil, 0, C.MDBX_put_flags_t(flags))
-	return operrno("mdb_cursor_put", ret)
+	return operrno("mdbx_cursor_put", ret)
 }
 
 // Put stores an item in the database.
@@ -241,7 +241,7 @@ func (c *Cursor) Put(key, val []byte, flags uint) error {
 		(*C.char)(unsafe.Pointer(&val[0])), C.size_t(len(val)),
 		C.MDBX_put_flags_t(flags),
 	)
-	return operrno("mdb_cursor_put", ret)
+	return operrno("mdbx_cursor_put", ret)
 }
 
 // PutReserve returns a []byte of length n that can be written to, potentially
@@ -259,7 +259,7 @@ func (c *Cursor) PutReserve(key []byte, n int, flags uint) ([]byte, error) {
 		c.txn.val,
 		C.MDBX_put_flags_t(flags|C.MDBX_RESERVE),
 	)
-	err := operrno("mdb_cursor_put", ret)
+	err := operrno("mdbx_cursor_put", ret)
 	if err != nil {
 		*c.txn.val = C.MDBX_val{}
 		return nil, err
@@ -297,7 +297,7 @@ func (c *Cursor) PutMulti(key []byte, page []byte, stride int, flags uint) error
 // See mdb_cursor_del.
 func (c *Cursor) Del(flags uint) error {
 	ret := C.mdbx_cursor_del(c._c, C.MDBX_put_flags_t(flags))
-	return operrno("mdb_cursor_del", ret)
+	return operrno("mdbx_cursor_del", ret)
 }
 
 // Count returns the number of duplicates for the current key.
@@ -307,7 +307,7 @@ func (c *Cursor) Count() (uint64, error) {
 	var _size C.size_t
 	ret := C.mdbx_cursor_count(c._c, &_size)
 	if ret != success {
-		return 0, operrno("mdb_cursor_count", ret)
+		return 0, operrno("mdbx_cursor_count", ret)
 	}
 	return uint64(_size), nil
 }

@@ -12,7 +12,7 @@ func TestTest1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cannot create environment: %s", err)
 	}
-	err = env.SetDefaultGeometry()
+	err = env.SetGeometry(-1, -1, 1024*1024, -1, -1, 4096)
 	if err != nil {
 		t.Fatalf("Cannot set mapsize: %s", err)
 	}

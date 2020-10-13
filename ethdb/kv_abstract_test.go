@@ -47,27 +47,28 @@ func TestManagedTx(t *testing.T) {
 
 	for _, db := range writeDBs {
 		db := db
-		if err := db.Update(ctx, func(tx ethdb.Tx) error {
-			c := tx.Cursor(bucket1)
-			c1 := tx.Cursor(bucket2)
-			require.NoError(t, c.Append([]byte{0}, []byte{1}))
-			require.NoError(t, c1.Append([]byte{0}, []byte{1}))
-			require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1})) // prefixes of len=FromLen for DupSort test (other keys must be <ToLen)
-			require.NoError(t, c1.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1}))
-			require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 2}, []byte{1}))
-			require.NoError(t, c1.Append([]byte{0, 0, 0, 0, 0, 2}, []byte{1}))
-			require.NoError(t, c.Append([]byte{0, 0, 1}, []byte{1}))
-			require.NoError(t, c1.Append([]byte{0, 0, 1}, []byte{1}))
-			for i := uint8(1); i < 10; i++ {
-				require.NoError(t, c.Append([]byte{i}, []byte{1}))
-				require.NoError(t, c1.Append([]byte{i}, []byte{1}))
-			}
-			require.NoError(t, c.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
-			require.NoError(t, c1.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
-			return nil
-		}); err != nil {
-			require.NoError(t, err)
+		tx, err := db.Begin(ctx, nil, true)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		c := tx.Cursor(bucket1)
+		c1 := tx.Cursor(bucket2)
+		require.NoError(t, c.Append([]byte{0}, []byte{1}))
+		require.NoError(t, c1.Append([]byte{0}, []byte{1}))
+		require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1})) // prefixes of len=FromLen for DupSort test (other keys must be <ToLen)
+		require.NoError(t, c1.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1}))
+		require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 2}, []byte{1}))
+		require.NoError(t, c1.Append([]byte{0, 0, 0, 0, 0, 2}, []byte{1}))
+		require.NoError(t, c.Append([]byte{0, 0, 1}, []byte{1}))
+		require.NoError(t, c1.Append([]byte{0, 0, 1}, []byte{1}))
+		for i := uint8(1); i < 10; i++ {
+			require.NoError(t, c.Append([]byte{i}, []byte{1}))
+			require.NoError(t, c1.Append([]byte{i}, []byte{1}))
 		}
+		require.NoError(t, c.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
+		require.NoError(t, c1.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
+		tx.Commit(context.Background())
+
 	}
 
 	for _, db := range readDBs {

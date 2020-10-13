@@ -378,8 +378,14 @@ func (env *Env) Path() (string, error) {
 //	return operrno("mdbx_env_set_mapsize", ret)
 //}
 
-func (env *Env) SetDefaultGeometry() error {
-	ret := C.mdbx_env_set_geometry(env._env, -1, -1, -1, -1, -1, 4096)
+func (env *Env) SetGeometry(sizeLower int, sizeNow int, sizeUpper int, growthStep int, shrinkThreshold int, pageSize int) error {
+	ret := C.mdbx_env_set_geometry(env._env,
+		C.intptr_t(sizeLower),
+		C.intptr_t(sizeNow),
+		C.intptr_t(sizeUpper),
+		C.intptr_t(growthStep),
+		C.intptr_t(shrinkThreshold),
+		C.intptr_t(pageSize))
 	return operrno("mdbx_env_set_geometry", ret)
 }
 

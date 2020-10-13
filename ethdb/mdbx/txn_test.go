@@ -1274,7 +1274,7 @@ func BenchmarkTxn_Put_append(b *testing.B) {
 	}
 	defer os.RemoveAll(path)
 	defer env.Close()
-	err = env.SetDefaultGeometry()
+	err = env.SetGeometry(-1, -1, 1024*1024, -1, -1, 4096)
 	if err != nil {
 		b.Error(err)
 		return
@@ -1322,7 +1322,10 @@ func BenchmarkTxn_Put_append_noflag(b *testing.B) {
 	}
 	defer os.RemoveAll(path)
 	defer env.Close()
-	env.SetDefaultGeometry()
+	err = env.SetGeometry(-1, -1, 1024*1024, -1, -1, 4096)
+	if err != nil {
+		b.Fatalf("Cannot set mapsize: %s", err)
+	}
 
 	var db DBI
 

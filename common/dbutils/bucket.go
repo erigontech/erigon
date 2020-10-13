@@ -275,7 +275,13 @@ type DBI uint
 type BucketFlags uint
 
 const (
-	DupSort BucketFlags = 0
+	Default    BucketFlags = 0x00
+	ReverseKey             = 0x02
+	DupSort                = 0x04
+	IntegerKey             = 0x08
+	DupFixed               = 0x10
+	IntegerDup             = 0x20
+	ReverseDup             = 0x40
 )
 
 type BucketConfigItem struct {

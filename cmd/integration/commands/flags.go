@@ -10,6 +10,7 @@ var (
 	snapshotMode       string
 	snapshotDir        string
 	compact            bool
+	toChaindata        string
 	referenceChaindata string
 	block              uint64
 	unwind             uint64
@@ -52,6 +53,11 @@ func withCompact(cmd *cobra.Command) {
 func withReferenceChaindata(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&referenceChaindata, "reference_chaindata", "", "path to the 2nd (reference/etalon) db")
 	must(cmd.MarkFlagDirname("reference_chaindata"))
+}
+
+func withToChaindata(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&toChaindata, "to_chaindata", "", "target chaindata")
+	must(cmd.MarkFlagDirname("to_chaindata"))
 }
 
 func withBlock(cmd *cobra.Command) {

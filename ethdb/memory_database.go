@@ -24,7 +24,9 @@ func NewMemDatabase() *ObjectDatabase {
 	switch debug.TestDB() {
 	case "lmdb":
 		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
+	case "mdbx":
+		return NewObjectDatabase(NewMDBX().InMem().MustOpen())
 	default:
-		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
+		return NewObjectDatabase(NewMDBX().InMem().MustOpen())
 	}
 }
