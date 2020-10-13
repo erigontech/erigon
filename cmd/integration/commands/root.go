@@ -18,14 +18,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		if len(chaindata) > 0 {
-			var db *ethdb.ObjectDatabase
-			if mapSizeStr != "" {
-				var mapSize datasize.ByteSize
-				must(mapSize.UnmarshalText([]byte(mapSizeStr)))
-				db = ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
-			} else {
-				db = ethdb.MustOpen(chaindata)
-			}
+			db := openDatabase()
 			defer db.Close()
 			if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
 				panic(err)
@@ -45,4 +38,14 @@ var rootCmd = &cobra.Command{
 func RootCommand() *cobra.Command {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 	return rootCmd
+}
+
+func openDatabase() *ethdb.ObjectDatabase {
+	if mapSizeStr != "" {
+		var mapSize datasize.ByteSize
+		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
+		return ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
+	} else {
+		return ethdb.MustOpen(chaindata)
+	}
 }
