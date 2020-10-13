@@ -18,6 +18,7 @@ var (
 	reset              bool
 	bucket             string
 	datadir            string
+	mapSizeStr         string
 )
 
 func must(err error) {
@@ -32,6 +33,10 @@ func withChaindata(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("chaindata"))
 	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
 	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
+}
+
+func withMapSize(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
 }
 
 func withCompact(cmd *cobra.Command) {

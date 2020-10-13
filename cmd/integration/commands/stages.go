@@ -2,10 +2,11 @@ package commands
 
 import (
 	"context"
-	"github.com/ledgerwatch/turbo-geth/migrations"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"runtime"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/migrations"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -137,9 +138,11 @@ var cmdPrintStages = &cobra.Command{
 
 func init() {
 	withChaindata(cmdPrintStages)
+	withMapSize(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
 	withChaindata(cmdStageSenders)
+	withMapSize(cmdStageSenders)
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	withUnwind(cmdStageSenders)
@@ -148,6 +151,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageSenders)
 
 	withChaindata(cmdStageExec)
+	withMapSize(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
@@ -156,6 +160,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageExec)
 
 	withChaindata(cmdStageIHash)
+	withMapSize(cmdStageIHash)
 	withReset(cmdStageIHash)
 	withBlock(cmdStageIHash)
 	withUnwind(cmdStageIHash)
@@ -164,6 +169,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageIHash)
 
 	withChaindata(cmdStageHashState)
+	withMapSize(cmdStageHashState)
 	withReset(cmdStageHashState)
 	withBlock(cmdStageHashState)
 	withUnwind(cmdStageHashState)
@@ -172,6 +178,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageHashState)
 
 	withChaindata(cmdStageHistory)
+	withMapSize(cmdStageHistory)
 	withReset(cmdStageHistory)
 	withBlock(cmdStageHistory)
 	withUnwind(cmdStageHistory)
@@ -180,6 +187,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageHistory)
 
 	withChaindata(cmdLogIndex)
+	withMapSize(cmdLogIndex)
 	withReset(cmdLogIndex)
 	withBlock(cmdLogIndex)
 	withUnwind(cmdLogIndex)
@@ -188,6 +196,7 @@ func init() {
 	rootCmd.AddCommand(cmdLogIndex)
 
 	withChaindata(cmdCallTraces)
+	withMapSize(cmdCallTraces)
 	withReset(cmdCallTraces)
 	withBlock(cmdCallTraces)
 	withUnwind(cmdCallTraces)
@@ -196,6 +205,7 @@ func init() {
 	rootCmd.AddCommand(cmdCallTraces)
 
 	withChaindata(cmdStageTxLookup)
+	withMapSize(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
 	withBlock(cmdStageTxLookup)
 	withUnwind(cmdStageTxLookup)
@@ -205,7 +215,7 @@ func init() {
 }
 
 func stageSenders(ctx context.Context) error {
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
@@ -250,7 +260,7 @@ func stageSenders(ctx context.Context) error {
 func stageExec(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
@@ -291,7 +301,7 @@ func stageExec(ctx context.Context) error {
 func stageIHash(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
 	if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
@@ -329,7 +339,7 @@ func stageIHash(ctx context.Context) error {
 func stageHashState(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
@@ -363,7 +373,7 @@ func stageHashState(ctx context.Context) error {
 func stageLogIndex(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
@@ -395,7 +405,7 @@ func stageLogIndex(ctx context.Context) error {
 func stageCallTraces(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
 	bc, _, progress := newSync(ctx.Done(), db, db, nil)
@@ -431,7 +441,7 @@ func stageCallTraces(ctx context.Context) error {
 func stageHistory(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
@@ -472,7 +482,7 @@ func stageHistory(ctx context.Context) error {
 func stageTxLookup(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
@@ -503,7 +513,7 @@ func stageTxLookup(ctx context.Context) error {
 }
 
 func printAllStages(_ context.Context) error {
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
 	return printStages(db)
