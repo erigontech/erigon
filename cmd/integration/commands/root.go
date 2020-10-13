@@ -19,7 +19,7 @@ var rootCmd = &cobra.Command{
 		if len(chaindata) > 0 {
 			db := ethdb.MustOpen(chaindata)
 			defer db.Close()
-			if cmd != cmdPrintMigrations && cmd != cmdPrintStages {
+			if cmd != cmdPrintMigrations && cmd != cmdPrintStages && cmd != cmdRemoveMigration {
 				if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
 					panic(err)
 				}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
@@ -151,6 +152,28 @@ var cmdPrintMigrations = &cobra.Command{
 	},
 }
 
+var cmdRemoveMigration = &cobra.Command{
+	Use:   "remove_migration",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		if err := removeMigration(ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
+
+var cmdRunMigrations = &cobra.Command{
+	Use:   "run_migrations",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Nothing to do, migrations will be applied automatically
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
@@ -221,6 +244,13 @@ func init() {
 
 	withChaindata(cmdPrintMigrations)
 	rootCmd.AddCommand(cmdPrintMigrations)
+
+	withChaindata(cmdRemoveMigration)
+	withMigration(cmdRemoveMigration)
+	rootCmd.AddCommand(cmdRemoveMigration)
+
+	withChaindata(cmdRunMigrations)
+	rootCmd.AddCommand(cmdRunMigrations)
 }
 
 func stageSenders(ctx context.Context) error {
@@ -544,6 +574,15 @@ func printAppliedMigrations(_ context.Context) error {
 	}
 	sort.Strings(appliedStrs)
 	log.Info("Applied", "migrations", strings.Join(appliedStrs, " "))
+	return nil
+}
+
+func removeMigration(_ context.Context) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if err := db.Delete(dbutils.Migrations, []byte(migration)); err != nil {
+		return err
+	}
 	return nil
 }
 

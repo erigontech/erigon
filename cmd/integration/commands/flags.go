@@ -18,6 +18,7 @@ var (
 	reset              bool
 	bucket             string
 	datadir            string
+	migration          string
 )
 
 func must(err error) {
@@ -69,4 +70,8 @@ func withDatadir(cmd *cobra.Command) {
 
 func withHDD(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&hdd, "hdd", false, "optimizations valuable for HDD")
+}
+
+func withMigration(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&migration, "migration", "", "action to apply to given migration")
 }
