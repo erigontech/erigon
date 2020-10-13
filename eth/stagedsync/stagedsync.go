@@ -23,6 +23,10 @@ type OptionalParameters struct {
 	// StateReaderBuilder is a function that returns state reader for the block execution stage.
 	// It can be used to add someting like bloom filters to figure out non-existing accounts and similar experiments.
 	StateReaderBuilder StateReaderBuilder
+
+	// StateReaderBuilder is a function that returns state writer for the block execution stage.
+	// It can be used to update bloom or other types of filters between block execution.
+	StateWriterBuilder StateWriterBuilder
 }
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
@@ -58,6 +62,15 @@ func (stagedSync *StagedSync) Prepare(
 		readerBuilder = func(getter ethdb.Getter) state.StateReader { return state.NewPlainStateReader(getter) }
 	}
 
+	var writerBuilder StateWriterBuilder
+	if stagedSync.params.StateWriterBuilder != nil {
+		writerBuilder = stagedSync.params.StateWriterBuilder
+	} else {
+		writerBuilder = func(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) state.WriterWithChangeSets {
+			return state.NewPlainStateWriter(db, changeSetsDB, blockNumber)
+		}
+	}
+
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
 			d:                  d,
@@ -77,6 +90,7 @@ func (stagedSync *StagedSync) Prepare(
 			hdd:                hdd,
 			prefetchedBlocks:   stagedSync.PrefetchedBlocks,
 			stateReaderBuilder: readerBuilder,
+			stateWriterBuilder: writerBuilder,
 		},
 	)
 	state := NewState(stages)

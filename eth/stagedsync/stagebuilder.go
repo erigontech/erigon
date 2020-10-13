@@ -37,6 +37,7 @@ type StageParameters struct {
 	changeSetHook      ChangeSetHook
 	prefetchedBlocks   *PrefetchedBlocks
 	stateReaderBuilder StateReaderBuilder
+	stateWriterBuilder StateWriterBuilder
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -174,6 +175,7 @@ func DefaultStages() StageBuilders {
 								Hdd:           world.hdd,
 								ChangeSetHook: world.changeSetHook,
 								ReaderBuilder: world.stateReaderBuilder,
+								WriterBuilder: world.stateWriterBuilder,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
