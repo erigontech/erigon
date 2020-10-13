@@ -31,13 +31,14 @@ type HeadersRequest struct {
 type HeaderResponse struct {
 	Header *types.Header
 	Number uint64
+	Err    error
 }
 
 type EngineProcess interface {
 	HeaderVerification() chan<- VerifyHeaderRequest
 	VerifyResults() <-chan VerifyHeaderResponse
 
-	HeaderRequest() chan HeadersRequest
+	HeaderRequest() <-chan HeadersRequest
 	HeaderResponse() chan<- HeaderResponse
 }
 
@@ -92,7 +93,7 @@ func (p *Process) GetVerifyHeader() <-chan VerifyHeaderResponse {
 	return p.VerifyHeaderResponses
 }
 
-func (p *Process) HeaderRequest() chan HeadersRequest {
+func (p *Process) HeaderRequest() <-chan HeadersRequest {
 	return p.HeadersRequests
 }
 

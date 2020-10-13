@@ -22,6 +22,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
+var ErrUnknownParent = errors.New("unknown parent")
+
 func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
 	if prof {
 		f, err := os.Create("cpu-headers.prof")
@@ -128,14 +130,14 @@ Error: %v
 	}
 
 	if rawdb.ReadHeader(db, headers[0].ParentHash, headers[0].Number.Uint64()-1) == nil {
-		return false, 0, errors.New("unknown parent")
+		return false, 0, ErrUnknownParent
 	}
 	parentTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
 		if i > 0 {
 			if header.ParentHash != headers[i-1].Hash() {
-				return false, 0, errors.New("unknown parent")
+				return false, 0, ErrUnknownParent
 			}
 		}
 		externTd = externTd.Add(externTd, header.Difficulty)
@@ -318,12 +320,13 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 				return nil
 			}
 		case result := <-engine.HeaderRequest():
+			var err error
 			h := rawdb.ReadHeaderByNumber(db, result.Number)
-			if h != nil {
-				engine.HeaderResponse() <- consensus.HeaderResponse{h, result.Number}
-			} else {
-				engine.HeaderRequest() <- result
+			if h == nil {
+				err = ErrUnknownParent
 			}
+
+			engine.HeaderResponse() <- consensus.HeaderResponse{h, result.Number, err}
 		}
 	}
 }

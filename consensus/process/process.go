@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
@@ -15,6 +16,8 @@ type Consensus struct {
 }
 
 const ttl = time.Minute
+
+var ErrEmptyHeader = errors.New("an empty header")
 
 func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader, exit chan struct{}) *Consensus {
 	c := &Consensus{
@@ -29,6 +32,9 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				if req.Deadline == nil {
 					t := time.Now().Add(ttl)
 					req.Deadline = &t
+				}
+				if req.Header == nil {
+					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, common.Hash{}, ErrEmptyHeader}
 				}
 
 				// Short circuit if the header is known
@@ -55,15 +61,28 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 
 					if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
 						c.RequestsMu.Lock()
-						c.verifyByParentHeader(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64()})
+						c.verifyByParentHeader(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64(), nil})
 						c.RequestsMu.Unlock()
 					}
 				}
 			case parentResp := <-c.HeaderResponses:
-				if parentResp.Header == nil {
+				if parentResp.Err != nil {
+					c.RequestsMu.Lock()
 					c.DeleteRequestedBlocks(parentResp.Number)
+
+					requests := c.RequestsToParents[parentResp.Number]
+					for reqID, req := range requests {
+						c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, req.Header.Hash(), parentResp.Err}
+						delete(c.RequestsToParents[parentResp.Number], reqID)
+
+						for n := req.From; n <= req.To; n++ {
+							c.DeleteRequestedBlocks(n)
+						}
+					}
+					c.RequestsMu.Unlock()
 					continue
 				}
+
 				c.RequestsMu.Lock()
 				c.verifyByParentHeader(parentResp)
 				c.RequestsMu.Unlock()
@@ -78,7 +97,6 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 							for n := req.From; n <= req.To; n++ {
 								c.DeleteRequestedBlocks(n)
 							}
-							continue
 						}
 					}
 				}
@@ -114,9 +132,6 @@ func (c *Consensus) verifyByParentHeader(parentResp consensus.HeaderResponse) {
 			parents, _, err := matchParentsSlice(req.Header, req.Parents, nil, req.ParentsCount)
 			if err != nil && !errors.Is(err, errNotAllParents) {
 				c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), err}
-
-				// remove finished request
-				delete(c.RequestsToParents[blockNum], reqID)
 				continue
 			}
 			if errors.Is(err, errNotAllParents) {
@@ -133,12 +148,12 @@ func (c *Consensus) verifyByParentHeader(parentResp consensus.HeaderResponse) {
 			delete(c.RequestsToParents[blockNum], reqID)
 
 			if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
-				c.verifyByParentHeader(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64()})
+				c.verifyByParentHeader(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64(), nil})
 			}
 		}
 	}
 
-	c.DeleteRequestedBlocks(parentResp.Header.Number.Uint64())
+	c.DeleteRequestedBlocks(parentResp.Number)
 }
 
 func (c *Consensus) addVerifyHeaderRequest(req consensus.VerifyHeaderRequest, parents []*types.Header, requestedParents []uint64, allParents int) {
