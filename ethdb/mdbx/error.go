@@ -45,17 +45,17 @@ const (
 	MapFull         Errno = C.MDBX_MAP_FULL
 	DBsFull         Errno = C.MDBX_DBS_FULL
 	ReadersFull     Errno = C.MDBX_READERS_FULL
-	//TLSFull         Errno = C.MDBX_TLS_FULL
-	TxnFull    Errno = C.MDBX_TXN_FULL
-	CursorFull Errno = C.MDBX_CURSOR_FULL
-	PageFull   Errno = C.MDBX_PAGE_FULL
-	//MapResized      Errno = C.MDBX_MAP_RESIZED
-	Incompatible Errno = C.MDBX_INCOMPATIBLE
-	BadRSlot     Errno = C.MDBX_BAD_RSLOT
-	BadTxn       Errno = C.MDBX_BAD_TXN
-	BadValSize   Errno = C.MDBX_BAD_VALSIZE
-	BadDBI       Errno = C.MDBX_BAD_DBI
-	Perm         Errno = C.MDBX_EPERM
+	TxnFull         Errno = C.MDBX_TXN_FULL
+	CursorFull      Errno = C.MDBX_CURSOR_FULL
+	PageFull        Errno = C.MDBX_PAGE_FULL
+	Incompatible    Errno = C.MDBX_INCOMPATIBLE
+	BadRSlot        Errno = C.MDBX_BAD_RSLOT
+	BadTxn          Errno = C.MDBX_BAD_TXN
+	BadValSize      Errno = C.MDBX_BAD_VALSIZE
+	BadDBI          Errno = C.MDBX_BAD_DBI
+	Perm            Errno = C.MDBX_EPERM
+	//TLSFull       Errno = C.MDBX_TLS_FULL
+	//MapResized    Errno = C.MDBX_MAP_RESIZED
 )
 
 // Errno is an error type that represents the (unique) errno values defined by
