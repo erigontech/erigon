@@ -52,7 +52,7 @@ func nextctx() msgctx {
 	return msgctx(atomic.AddUint32(&msgctxn, 1))
 }
 
-//nolint:deadcode
+//nolint:deadcode,unused
 func newMsgFunc(fn msgfunc) (ctx msgctx, done func()) {
 	ctx = nextctx()
 	ctx.register(fn)
