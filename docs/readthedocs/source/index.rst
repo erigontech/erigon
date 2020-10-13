@@ -12,6 +12,7 @@ Welcome to Turbo Geth's documentation!
    installation
    types
    rpc/index
+   rpc/tutorial
 
 Indices and tables
 ==================
