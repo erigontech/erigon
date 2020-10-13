@@ -193,8 +193,8 @@ func TestEnv_SetMaxReader(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if _maxreaders != maxreaders {
-		t.Errorf("unexpected MaxReaders: %v (!= %v)", _maxreaders, maxreaders)
+	if _maxreaders < maxreaders {
+		t.Errorf("unexpected MaxReaders: %v (< %v)", _maxreaders, maxreaders)
 	}
 
 	err = env.Open(dir, 0, 0644)
@@ -212,7 +212,7 @@ func TestEnv_SetMaxReader(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if _maxreaders != maxreaders {
+	if _maxreaders < maxreaders {
 		t.Errorf("unexpected MaxReaders: %v (!= %v)", _maxreaders, maxreaders)
 	}
 }
