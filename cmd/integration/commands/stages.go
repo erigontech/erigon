@@ -250,6 +250,7 @@ func init() {
 	rootCmd.AddCommand(cmdRemoveMigration)
 
 	withChaindata(cmdRunMigrations)
+	withDatadir(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
 }
 
