@@ -380,7 +380,8 @@ func stageIHash(ctx context.Context) error {
 func stageHashState(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
+	//db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
