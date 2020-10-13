@@ -8,9 +8,9 @@ import (
 )
 
 type StorageMode struct {
-	History   bool
-	Receipts  bool
-	TxIndex   bool
+	History  bool
+	Receipts bool
+	TxIndex  bool
 }
 
 var DefaultStorageMode = StorageMode{History: true, Receipts: true, TxIndex: true}
