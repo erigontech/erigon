@@ -104,11 +104,11 @@ db-tools:
 	$(GOBUILD) -o $(GOBIN)/lmdb_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
 
 	cd ethdb/mdbx/dist/ && make tools
-	cp ethdb/mdbx/dist/mdbx_stat $(GOBUILD)
-	cp ethdb/mdbx/dist/mdbx_copy $(GOBUILD)
-	cp ethdb/mdbx/dist/mdbx_dump $(GOBUILD)
-	cp ethdb/mdbx/dist/mdbx_load $(GOBUILD)
-	cp ethdb/mdbx/dist/mdbx_chk $(GOBUILD)
+	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_copy $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_dump $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_chk $(GOBIN)
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
