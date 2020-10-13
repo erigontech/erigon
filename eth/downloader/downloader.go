@@ -1570,6 +1570,7 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 // keeps processing and scheduling them into the header chain and downloader's
 // queue until the stream ends or a failure occurs.
 func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uint64) error {
+	log.Debug("processHeaders", "origin", origin, "bn", blockNumber)
 	// Keep a count of uncertain headers to roll back
 	var (
 		rollback    uint64 // Zero means no rollback (fine as you can't unroll the genesis)

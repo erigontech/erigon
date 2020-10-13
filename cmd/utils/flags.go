@@ -20,6 +20,7 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -396,6 +397,20 @@ var (
 * r - write receipts to the DB
 * t - write tx lookup index to the DB`,
 		Value: ethdb.DefaultStorageMode.ToString(),
+	}
+	SnapshotModeFlag = cli.StringFlag{
+		Name: "snapshot-mode",
+		Usage: `Configures the storage mode of the app:
+* h - download headers snapshot
+* b - download bodies snapshot
+* s - download state snapshot
+* r - download receipts snapshot
+`,
+		Value: torrent.DefaultSnapshotMode.ToString(),
+	}
+	SeedSnapshotsFlag = cli.BoolTFlag{
+		Name:  "seed-snapshots",
+		Usage: `Seed snapshot seeding`,
 	}
 	ArchiveSyncInterval = cli.IntFlag{
 		Name:  "archive-sync-interval",
@@ -1580,8 +1595,14 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	if err != nil {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-
 	cfg.StorageMode = mode
+	snMode, err := torrent.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
+	if err != nil {
+		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+	cfg.SnapshotMode = snMode
+	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
+
 	cfg.Hdd = ctx.GlobalBool(HddFlag.Name)
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 
