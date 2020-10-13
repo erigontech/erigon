@@ -227,23 +227,23 @@ func toMdbx(ctx context.Context, from, to string) error {
 	}
 	defer dstTx.Rollback()
 
-	logEvery := time.NewTicker(30 * time.Second)
+	logEvery := time.NewTicker(15 * time.Second)
 	defer logEvery.Stop()
 
 	for name, b := range dbutils.BucketsConfigs {
 		c := dstTx.Cursor(name)
+		appendFunc := c.Append
+		if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
+			appendFunc = c.(ethdb.CursorDupSort).AppendDup
+		}
+
 		srcC := srcTx.Cursor(name)
 		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 			if err != nil {
 				return err
 			}
 
-			if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
-				if err := c.(ethdb.CursorDupSort).AppendDup(k, v); err != nil {
-					return err
-				}
-			}
-			if err := c.Append(k, v); err != nil {
+			if err := appendFunc(k, v); err != nil {
 				return err
 			}
 
