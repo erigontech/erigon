@@ -149,15 +149,18 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
 	}
 
-	// will check that startNum is less or equal to endNum
-	return getModifiedAccounts(api.dbReader, startNum, endNum)
+	if startNum > endNum {
+		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
+	}
+
+	return ethdb.GetModifiedAccounts(tx, startNum, endNum)
 }
 
 // GetModifiedAccountsByHash returns a list of accounts found in the change sets
 // startHash - first block to include in results
 // endHash - if present, last block to include in results (inclusive)
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.db.Begin(ctx, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -177,13 +180,10 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 		}
 		endNum = endBlock.NumberU64()
 	}
-	return getModifiedAccounts(tx, startNum, endNum)
-}
 
-func getModifiedAccounts(db ethdb.Getter, startNum, endNum uint64) ([]common.Address, error) {
 	if startNum > endNum {
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
-	return ethdb.GetModifiedAccounts(db, startNum, endNum)
+	return ethdb.GetModifiedAccounts(tx, startNum, endNum)
 }
