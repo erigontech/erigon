@@ -252,8 +252,3 @@ CallMany Implements **trace_call**
     func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error)
 
 Filter Implements **trace_filter**
-
-Tutorial: Build add personalized methods to daemon
-=====================================================
-
-`TODO`

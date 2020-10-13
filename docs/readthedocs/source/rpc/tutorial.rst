@@ -112,6 +112,7 @@ now it should be all set and we can test it with:
 
 .. code-block:: sh
 
+    curl -H "Content-Type: application/json" -X POST --data '{"jsonrpc":"2.0","method":"myNamespace_getBlockNumberByHash","params":["ANYHASH"],"id":1}' localhost:8545
 
 another example of custom daemon can be found at https://github.com/torquem-ch/project-1/blob/master/api.go.
 
