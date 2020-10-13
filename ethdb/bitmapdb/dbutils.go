@@ -157,6 +157,9 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 		return lft.GetSerializedSizeInBytes() > target
 	})
 
+	lft.Clear()
+	lft.AddRange(from, from+uint64(to)+1)
+	lft.And(bm)
 	bm.RemoveRange(from, from+uint64(to)+1)
 	return lft
 }
