@@ -121,13 +121,13 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 // startNum - first block from which to include results
 // endNum - if present, last block from which to include results (inclusive). If not present, startNum.
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.db.Begin(ctx, nil, false)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	latestBlock, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
+	latestBlock, _, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return nil, err
 	}
