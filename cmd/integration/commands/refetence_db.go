@@ -225,10 +225,15 @@ func toMdbx(ctx context.Context, from, to string) error {
 	if err1 != nil {
 		return err1
 	}
-	defer dstTx.Rollback()
+	defer func() {
+		dstTx.Rollback()
+	}()
 
 	logEvery := time.NewTicker(15 * time.Second)
 	defer logEvery.Stop()
+
+	commitEvery := time.NewTicker(5 * time.Minute)
+	defer commitEvery.Stop()
 
 	for name, b := range dbutils.BucketsConfigs {
 		if b.IsDeprecated {
@@ -255,6 +260,14 @@ func toMdbx(ctx context.Context, from, to string) error {
 			default:
 			case <-logEvery.C:
 				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
+			case <-commitEvery.C:
+				if err2 := dstTx.Commit(ctx); err2 != nil {
+					return err2
+				}
+				dstTx, err = dst.Begin(ctx, nil, true)
+				if err != nil {
+					return err
+				}
 			case <-ctx.Done():
 				return ctx.Err()
 			}
