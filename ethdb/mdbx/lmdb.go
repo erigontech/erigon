@@ -154,10 +154,3 @@ import "C"
 //	verstr := C.mdbx_version(&maj, &min, &pat)
 //	return C.GoString(verstr)
 //}
-
-func cbool(b bool) C.int {
-	if b {
-		return 1
-	}
-	return 0
-}

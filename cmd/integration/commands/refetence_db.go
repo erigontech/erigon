@@ -231,6 +231,10 @@ func toMdbx(ctx context.Context, from, to string) error {
 	defer logEvery.Stop()
 
 	for name, b := range dbutils.BucketsConfigs {
+		if b.IsDeprecated {
+			continue
+		}
+
 		c := dstTx.Cursor(name)
 		appendFunc := c.Append
 		if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
