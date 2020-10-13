@@ -19,8 +19,10 @@ var rootCmd = &cobra.Command{
 		if len(chaindata) > 0 {
 			db := ethdb.MustOpen(chaindata)
 			defer db.Close()
-			if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
-				panic(err)
+			if cmd != cmdPrintMigrations && cmd != cmdPrintStages {
+				if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
+					panic(err)
+				}
 			}
 
 			err := SetSnapshotKV(db, snapshotDir, snapshotMode)
