@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
@@ -18,10 +19,12 @@ var rootCmd = &cobra.Command{
 
 		if len(chaindata) > 0 {
 			var db *ethdb.ObjectDatabase
-			if mapSize == 0 {
-				db = ethdb.MustOpen(chaindata)
-			} else {
+			if mapSizeStr != "" {
+				var mapSize datasize.ByteSize
+				must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 				db = ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
+			} else {
+				db = ethdb.MustOpen(chaindata)
 			}
 			defer db.Close()
 			if err := migrations.NewMigrator().Apply(db, datadir); err != nil {

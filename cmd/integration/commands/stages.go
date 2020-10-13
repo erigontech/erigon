@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
@@ -332,10 +333,12 @@ func stageHashState(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
 	var db *ethdb.ObjectDatabase
-	if mapSize == 0 {
-		db = ethdb.MustOpen(chaindata)
-	} else {
+	if mapSizeStr != "" {
+		var mapSize datasize.ByteSize
+		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 		db = ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
+	} else {
+		db = ethdb.MustOpen(chaindata)
 	}
 	defer db.Close()
 
