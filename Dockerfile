@@ -1,6 +1,6 @@
 FROM golang:1.15-alpine3.12 as builder
 
-RUN apk add --no-cache make gcc g++ linux-headers git
+RUN apk add --no-cache make gcc g++ linux-headers git bash
 
 WORKDIR /app
 

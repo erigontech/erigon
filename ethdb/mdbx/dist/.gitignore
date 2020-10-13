@@ -1,8 +1,8 @@
 *.a
 *.dylib
 *.o
-config.h
 *.dSYM
+config.h
 
 mdbx_chk
 mdbx_copy

@@ -1,5 +1,5 @@
 GOBIN = $(CURDIR)/build/bin
-GOBUILD = env GO111MODULE=on go build -trimpath
+GOBUILD = env GO111MODULE=on go build -trimpath --ldflags '-linkmode external -extldflags "-static"'
 GOTEST = go test ./... -p 1
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
@@ -113,6 +113,7 @@ db-tools:
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
 ethdb/mdbx/dist/libmdbx.a:
+	echo "Building mdbx"
 	cd ethdb/mdbx/dist/ && make mdbx
 
 test: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
