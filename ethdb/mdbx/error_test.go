@@ -36,10 +36,12 @@ func TestErrno(t *testing.T) {
 		t.Errorf("errno(0) != nil: %#v", zeroerr)
 	}
 	syserr := _operrno("testop", int(syscall.EINVAL))
+	//nolint:goerr113
 	if syserr.(*OpError).Errno != syscall.EINVAL { // fails if error is Errno(syscall.EINVAL)
 		t.Errorf("errno(syscall.EINVAL) != syscall.EINVAL: %#v", syserr)
 	}
 	mdberr := _operrno("testop", int(KeyExist))
+	//nolint:goerr113
 	if mdberr.(*OpError).Errno != KeyExist {
 		t.Errorf("errno(ErrKeyExist) != ErrKeyExist: %#v", syserr)
 	}

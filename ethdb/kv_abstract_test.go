@@ -67,8 +67,8 @@ func TestManagedTx(t *testing.T) {
 		}
 		require.NoError(t, c.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
 		require.NoError(t, c1.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
-		tx.Commit(context.Background())
-
+		err = tx.Commit(context.Background())
+		require.NoError(t, err)
 	}
 
 	for _, db := range readDBs {

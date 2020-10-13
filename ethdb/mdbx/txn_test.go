@@ -1,3 +1,4 @@
+//nolint:goconst
 package mdbx
 
 import (
@@ -633,6 +634,7 @@ func TestTxn_Sub(t *testing.T) {
 			}
 			return errSubAbort
 		})
+		//nolint:goerr113
 		if err != errSubAbort {
 			return fmt.Errorf("expected abort: %v", err)
 		}

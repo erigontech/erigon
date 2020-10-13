@@ -111,12 +111,12 @@ func IsMapFull(err error) bool {
 
 // IsErrno returns true if err's errno is the given errno.
 func IsErrno(err error, errno Errno) bool {
-	return IsErrnoFn(err, func(err error) bool { return err == errno })
+	return IsErrnoFn(err, func(err error) bool { return err == errno }) //nolint:goerr113
 }
 
 // IsErrnoSys returns true if err's errno is the given errno.
 func IsErrnoSys(err error, errno syscall.Errno) bool {
-	return IsErrnoFn(err, func(err error) bool { return err == errno })
+	return IsErrnoFn(err, func(err error) bool { return err == errno }) //nolint:goerr113
 }
 
 // IsErrnoFn calls fn on the error underlying err and returns the result.  If

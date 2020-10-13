@@ -8,27 +8,27 @@ import (
 )
 
 func TestTest1(t *testing.T) {
-	env, err := NewEnv()
-	if err != nil {
-		t.Fatalf("Cannot create environment: %s", err)
+	env, err1 := NewEnv()
+	if err1 != nil {
+		t.Fatalf("Cannot create environment: %s", err1)
 	}
-	err = env.SetGeometry(-1, -1, 1024*1024, -1, -1, 4096)
-	if err != nil {
-		t.Fatalf("Cannot set mapsize: %s", err)
+	err1 = env.SetGeometry(-1, -1, 1024*1024, -1, -1, 4096)
+	if err1 != nil {
+		t.Fatalf("Cannot set mapsize: %s", err1)
 	}
-	path, err := ioutil.TempDir("", "mdb_test")
-	if err != nil {
+	path, err1 := ioutil.TempDir("", "mdb_test")
+	if err1 != nil {
 		t.Fatalf("Cannot create temporary directory")
 	}
-	err = os.MkdirAll(path, 0770)
+	err1 = os.MkdirAll(path, 0770)
 	defer os.RemoveAll(path)
-	if err != nil {
+	if err1 != nil {
 		t.Fatalf("Cannot create directory: %s", path)
 	}
-	err = env.Open(path, 0, 0664)
+	err1 = env.Open(path, 0, 0664)
 	defer env.Close()
-	if err != nil {
-		t.Fatalf("Cannot open environment: %s", err)
+	if err1 != nil {
+		t.Fatalf("Cannot open environment: %s", err1)
 	}
 
 	var db DBI
@@ -41,7 +41,7 @@ func TestTest1(t *testing.T) {
 		val = fmt.Sprintf("Val-%d", i)
 		data[key] = val
 	}
-	err = env.Update(func(txn *Txn) (err error) {
+	if err := env.Update(func(txn *Txn) (err error) {
 		db, err = txn.OpenRoot(0)
 		if err != nil {
 			return err
@@ -55,20 +55,19 @@ func TestTest1(t *testing.T) {
 		}
 
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
-	stat, err := env.Stat()
-	if err != nil {
-		t.Fatalf("Cannot get stat %s", err)
+	stat, err1 := env.Stat()
+	if err1 != nil {
+		t.Fatalf("Cannot get stat %s", err1)
 	} else if stat.Entries != uint64(numEntries) {
 		t.Errorf("Less entry in the database than expected: %d <> %d", stat.Entries, numEntries)
 	}
 	t.Logf("%#v", stat)
 
-	err = env.View(func(txn *Txn) error {
+	if err := env.View(func(txn *Txn) error {
 		cursor, err := txn.OpenCursor(db)
 		if err != nil {
 			cursor.Close()
@@ -110,8 +109,7 @@ func TestTest1(t *testing.T) {
 			return fmt.Errorf("get: value %q does not match %q", bval, "Val-0")
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 }

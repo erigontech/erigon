@@ -276,12 +276,12 @@ type BucketFlags uint
 
 const (
 	Default    BucketFlags = 0x00
-	ReverseKey             = 0x02
-	DupSort                = 0x04
-	IntegerKey             = 0x08
-	DupFixed               = 0x10
-	IntegerDup             = 0x20
-	ReverseDup             = 0x40
+	ReverseKey BucketFlags = 0x02
+	DupSort    BucketFlags = 0x04
+	IntegerKey BucketFlags = 0x08
+	DupFixed   BucketFlags = 0x10
+	IntegerDup BucketFlags = 0x20
+	ReverseDup BucketFlags = 0x40
 )
 
 type BucketConfigItem struct {

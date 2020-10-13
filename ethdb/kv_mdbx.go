@@ -786,8 +786,8 @@ func (c *MdbxCursor) Last() ([]byte, []byte, error) {
 
 func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return []byte{}, nil, err
+		if err1 := c.initCursor(); err1 != nil {
+			return []byte{}, nil, err1
 		}
 	}
 

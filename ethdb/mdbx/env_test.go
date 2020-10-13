@@ -68,14 +68,13 @@ func TestEnv_Open_notExist(t *testing.T) {
 }
 
 func TestEnv_Open(t *testing.T) {
-	env, err := NewEnv()
-	if err != nil {
-		t.Error(err)
+	env, err1 := NewEnv()
+	if err1 != nil {
+		t.Error(err1)
 		return
 	}
 	defer func() {
-		err := env.Close()
-		if err != nil {
+		if err := env.Close(); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -93,14 +92,13 @@ func TestEnv_Open(t *testing.T) {
 }
 
 func TestEnv_FD(t *testing.T) {
-	env, err := NewEnv()
-	if err != nil {
-		t.Error(err)
+	env, err1 := NewEnv()
+	if err1 != nil {
+		t.Error(err1)
 		return
 	}
 	defer func() {
-		err := env.Close()
-		if err != nil {
+		if err := env.Close(); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -611,6 +609,7 @@ func TestEnv_CloseDBI(t *testing.T) {
 		return
 	}
 
+	//nolint:goerr113
 	if stat.Entries != numdb {
 		t.Errorf("unexpected entries: %d (not %d)", stat.Entries, numdb)
 	}
