@@ -135,7 +135,6 @@ type Downloader struct {
 	synchronising   int32
 	notified        int32
 	committed       int32
-	ancientLimit    uint64 // The maximum block number which can be regarded as ancient data.
 
 	// Channels
 	headerCh      chan dataPack        // [eth/62] Channel receiving inbound block headers
@@ -255,25 +254,25 @@ func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, c
 		lightchain = chain
 	}
 	dl := &Downloader{
-		mode:          uint32(StagedSync),
-		stateDB:       stateDB,
-		mux:           mux,
-		queue:         newQueue(blockCacheMaxItems, blockCacheInitialItems),
-		peers:         newPeerSet(),
-		rttEstimate:   uint64(rttMaxEstimate),
-		rttConfidence: uint64(1000000),
-		chainConfig:   chainConfig,
-		blockchain:    chain,
-		lightchain:    lightchain,
-		dropPeer:      dropPeer,
-		headerCh:      make(chan dataPack, 1),
-		bodyCh:        make(chan dataPack, 1),
-		receiptCh:     make(chan dataPack, 1),
-		bodyWakeCh:    make(chan bool, 1),
-		receiptWakeCh: make(chan bool, 1),
-		headerProcCh:  make(chan []*types.Header, 1),
-		quitCh:        make(chan struct{}),
-		storageMode:   sm,
+		mode:             uint32(StagedSync),
+		stateDB:          stateDB,
+		mux:              mux,
+		queue:            newQueue(blockCacheMaxItems, blockCacheInitialItems),
+		peers:            newPeerSet(),
+		rttEstimate:      uint64(rttMaxEstimate),
+		rttConfidence:    uint64(1000000),
+		chainConfig:      chainConfig,
+		blockchain:       chain,
+		lightchain:       lightchain,
+		dropPeer:         dropPeer,
+		headerCh:         make(chan dataPack, 1),
+		bodyCh:           make(chan dataPack, 1),
+		receiptCh:        make(chan dataPack, 1),
+		bodyWakeCh:       make(chan bool, 1),
+		receiptWakeCh:    make(chan bool, 1),
+		headerProcCh:     make(chan []*types.Header, 1),
+		quitCh:           make(chan struct{}),
+		storageMode:      sm,
 		consensusProcess: eng,
 	}
 	go dl.qosTuner()
@@ -689,7 +688,6 @@ func (d *Downloader) Cancel() {
 	d.cancel()
 	d.cancelWg.Wait()
 
-	d.ancientLimit = 0
 	log.Debug("Reset ancient limit to zero")
 }
 
@@ -1839,7 +1837,7 @@ func (d *Downloader) commitPivotBlock(result *fetchResult) error {
 	log.Debug("Committing fast sync pivot as new head", "number", block.Number(), "hash", block.Hash())
 
 	// Commit the pivot block as the new head, will require full sync from here on
-	if _, err := d.blockchain.InsertReceiptChain([]*types.Block{block}, []types.Receipts{result.Receipts}, d.ancientLimit); err != nil {
+	if _, err := d.blockchain.InsertReceiptChain([]*types.Block{block}, []types.Receipts{result.Receipts}, 0); err != nil {
 		return err
 	}
 	if err := d.blockchain.FastSyncCommitHead(block.Hash()); err != nil {
