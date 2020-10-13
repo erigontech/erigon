@@ -131,16 +131,16 @@ func ChunkIterator(bm *roaring.Bitmap, target uint64) func() *roaring.Bitmap {
 	}
 }
 
-// CutLeft - cut from bitmap `target` bytes from left
+// CutLeft - cut from bitmap `targetSize` bytes from left
 // removing lft part from `bm`
 // returns nil on zero cardinality
-func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
+func CutLeft(bm *roaring.Bitmap, targetSize uint64) *roaring.Bitmap {
 	if bm.GetCardinality() == 0 {
 		return nil
 	}
 
 	sz := bm.GetSerializedSizeInBytes()
-	if sz <= target {
+	if sz <= targetSize {
 		lft := roaring.New()
 		lft.Or(bm)
 		bm.Clear()
@@ -154,7 +154,7 @@ func CutLeft(bm *roaring.Bitmap, target uint64) *roaring.Bitmap {
 		lft.Clear()
 		lft.AddRange(from, from+uint64(i)+1)
 		lft.And(bm)
-		return lft.GetSerializedSizeInBytes() > target
+		return lft.GetSerializedSizeInBytes() > targetSize
 	})
 
 	lft.Clear()
