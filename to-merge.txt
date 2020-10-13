@@ -207,29 +207,3 @@ Date:   Tue Oct 13 19:24:08 2020 +0800
     
     Co-authored-by: Felix Lange <fjl@twurst.com>
 
-commit 348c3bc47d8173ce24c5b92d697a5be289eea9a0
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Tue Oct 13 13:21:25 2020 +0200
-
-    trie: fix flaw in stacktrie pool reuse (#21699)
-
-commit 94d1f5888af495a2ce08d16cbd753cc1cc947d11
-Author: mr_franklin <mr_franklin@126.com>
-Date:   Tue Oct 13 17:00:42 2020 +0800
-
-    consensus/clique: unexport calcDifficulty and improve comment (#21619)
-
-commit c37e68e7c114c4783557eff727b8fb5e657549d2
-Author: mr_franklin <mr_franklin@126.com>
-Date:   Tue Oct 13 16:58:41 2020 +0800
-
-    all: replace RWMutex with Mutex in places where RLock is not used (#21622)
-
-commit 32341f88e30f55e722f9d335938c4d1ab099f892
-Author: Hanjiang Yu <delacroix.yu@gmail.com>
-Date:   Tue Oct 13 16:55:57 2020 +0800
-
-    console: fix admin.sleepBlocks (#21629)
-
-
-
