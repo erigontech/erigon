@@ -2,10 +2,11 @@ package commands
 
 import (
 	"context"
-	"github.com/ledgerwatch/turbo-geth/migrations"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"runtime"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/migrations"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -330,8 +331,12 @@ func stageIHash(ctx context.Context) error {
 func stageHashState(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
-	//db := ethdb.MustOpen(chaindata)
+	var db *ethdb.ObjectDatabase
+	if mapSize == 0 {
+		db = ethdb.MustOpen(chaindata)
+	} else {
+		db = ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
+	}
 	defer db.Close()
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)

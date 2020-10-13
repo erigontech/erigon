@@ -38,8 +38,10 @@ func withChaindata(cmd *cobra.Command) {
 
 func withMapSize(cmd *cobra.Command) {
 	var mapSizeStr string
-	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "2T", "map size for LMDB")
-	must(mapSize.UnmarshalText([]byte(mapSizeStr)))
+	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
+	if mapSizeStr != "" {
+		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
+	}
 }
 
 func withCompact(cmd *cobra.Command) {

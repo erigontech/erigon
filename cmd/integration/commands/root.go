@@ -17,7 +17,12 @@ var rootCmd = &cobra.Command{
 		}
 
 		if len(chaindata) > 0 {
-			db := ethdb.MustOpen(chaindata)
+			var db *ethdb.ObjectDatabase
+			if mapSize == 0 {
+				db = ethdb.MustOpen(chaindata)
+			} else {
+				db = ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
+			}
 			defer db.Close()
 			if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
 				panic(err)
