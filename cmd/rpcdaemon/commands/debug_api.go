@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -118,33 +117,45 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	return res, nil
 }
 
-func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(_ context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error) {
-	if endNum != nil && startNum.Int64() >= endNum.Int64() {
-		return nil, fmt.Errorf("start block height (%d) must be less than end block height (%d)", startNum.Int64(), endNum.Int64())
+// GetModifiedAccountsByNumber returns a list of accounts found in the change sets
+// startNum - first block from which to include results
+// endNum - if present, last block from which to include results (inclusive). If not present, startNum.
+func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
+	tx, err := api.dbReader.Begin(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer tx.Rollback()
 
-	final, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
+	latestBlock, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
 	if err != nil {
 		return nil, err
 	}
 
-	lastBlockNumber := final
-
-	if startNum.Int64() < 1 || uint64(startNum.Int64()) > lastBlockNumber {
-		return nil, fmt.Errorf("start block %x not found", uint64(startNum.Int64()))
+	// forces negative numbers to fail (too large) but allows zero
+	startNum := uint64(startNumber.Int64())
+	if startNum > latestBlock {
+		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
 	}
 
-	if endNum == nil {
-		*endNum = startNum
-	} else {
-		if endNum.Int64() < 1 || uint64(endNum.Int64()) > lastBlockNumber {
-			return nil, fmt.Errorf("end block %x not found", uint64(endNum.Int64()))
-		}
+	endNum := startNum // allows for single param calls
+	if endNumber != nil {
+		// forces negative numbers to fail (too large) but allows zero
+		endNum = uint64(endNumber.Int64())
 	}
 
-	return getModifiedAccounts(api.dbReader, uint64(startNum.Int64()), uint64(endNum.Int64()))
+	// is endNum too big?
+	if endNum > latestBlock {
+		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
+	}
+
+	// will check that startNum is less or equal to endNum
+	return getModifiedAccounts(api.dbReader, startNum, endNum)
 }
 
+// GetModifiedAccountsByHash returns a list of accounts found in the change sets
+// startHash - first block to include in results
+// endHash - if present, last block to include in results (inclusive)
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
 	tx, err := api.dbReader.Begin(ctx)
 	if err != nil {
@@ -156,22 +167,22 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	if startBlock == nil {
 		return nil, fmt.Errorf("start block %x not found", startHash)
 	}
+	startNum := startBlock.NumberU64()
+	endNum := startNum // allows for single parameter calls
 
-	var endBlock *types.Block
-	if endHash == nil {
-		endBlock = startBlock
-	} else {
-		endBlock = rawdb.ReadBlockByHash(tx, *endHash)
+	if endHash != nil {
+		endBlock := rawdb.ReadBlockByHash(tx, *endHash)
 		if endBlock == nil {
 			return nil, fmt.Errorf("end block %x not found", *endHash)
 		}
+		endNum = endBlock.NumberU64()
 	}
-	return getModifiedAccounts(tx, startBlock.NumberU64(), endBlock.NumberU64())
+	return getModifiedAccounts(tx, startNum, endNum)
 }
 
 func getModifiedAccounts(db ethdb.Getter, startNum, endNum uint64) ([]common.Address, error) {
-	if startNum >= endNum {
-		return nil, fmt.Errorf("start block height (%d) must be less than end block height (%d)", startNum, endNum)
+	if startNum > endNum {
+		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
 	return ethdb.GetModifiedAccounts(db, startNum, endNum)
