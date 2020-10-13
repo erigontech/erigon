@@ -90,7 +90,7 @@ var receiptsCborDECODE = Migration{
 		}
 		// Commit clearing of the bucket - freelist should now be written to the database
 		if err := OnLoadCommit(db, nil, false); err != nil {
-			return fmt.Errorf("commiting the ")
+			return fmt.Errorf("committing the ")
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
 		if err := collector.Load(db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {
