@@ -203,6 +203,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageIHash)
 
 	withChaindata(cmdStageHashState)
+	withMapSize(cmdStageHashState)
 	withReset(cmdStageHashState)
 	withBlock(cmdStageHashState)
 	withUnwind(cmdStageHashState)
