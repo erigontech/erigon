@@ -232,14 +232,19 @@ func toMdbx(ctx context.Context, from, to string) error {
 
 	for name, b := range dbutils.BucketsConfigs {
 		c := dstTx.Cursor(name)
-		if err := ethdb.ForEach(srcTx.Cursor(name), func(k, v []byte) (bool, error) {
+		srcC := srcTx.Cursor(name)
+		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
+			if err != nil {
+				return err
+			}
+
 			if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
 				if err := c.(ethdb.CursorDupSort).AppendDup(k, v); err != nil {
-					return false, err
+					return err
 				}
 			}
 			if err := c.Append(k, v); err != nil {
-				return false, err
+				return err
 			}
 
 			select {
@@ -247,11 +252,8 @@ func toMdbx(ctx context.Context, from, to string) error {
 			case <-logEvery.C:
 				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
 			case <-ctx.Done():
-				return false, ctx.Err()
+				return ctx.Err()
 			}
-			return true, nil
-		}); err != nil {
-			return err
 		}
 	}
 
