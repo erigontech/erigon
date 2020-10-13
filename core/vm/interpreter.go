@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"fmt"
 	"hash"
 	"sync/atomic"
 
@@ -98,25 +99,35 @@ type EVMInterpreter struct {
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
+	fmt.Println("NewEVMInterpreter")
 	var jt *JumpTable
 	switch {
 	case evm.chainRules.IsYoloV1:
+		fmt.Println("NewEVMInterpreter-yoloV1InstructionSet")
 		jt = &yoloV1InstructionSet
 	case evm.chainRules.IsIstanbul:
+		fmt.Println("NewEVMInterpreter-IsIstanbul")
 		jt = &istanbulInstructionSet
 	case evm.chainRules.IsConstantinople:
+		fmt.Println("NewEVMInterpreter-IsConstantinople")
 		jt = &constantinopleInstructionSet
 	case evm.chainRules.IsByzantium:
+		fmt.Println("NewEVMInterpreter-IsByzantium")
 		jt = &byzantiumInstructionSet
 	case evm.chainRules.IsEIP158:
+		fmt.Println("NewEVMInterpreter-IsEIP158")
 		jt = &spuriousDragonInstructionSet
 	case evm.chainRules.IsEIP150:
+		fmt.Println("NewEVMInterpreter-IsEIP150")
 		jt = &tangerineWhistleInstructionSet
 	case evm.chainRules.IsHomestead:
+		fmt.Println("NewEVMInterpreter-IsHomestead")
 		jt = &homesteadInstructionSet
 	default:
+		fmt.Println("NewEVMInterpreter-frontierInstructionSet")
 		jt = &frontierInstructionSet
 	}
+	fmt.Println("NewEVMInterpreter-jt[SLOAD].constantGas", jt[SLOAD].constantGas)
 	if len(cfg.ExtraEips) > 0 {
 		jtCopy := *jt
 		for i, eip := range cfg.ExtraEips {
@@ -126,8 +137,12 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 				log.Error("EIP activation failed", "eip", eip, "error", err)
 			}
 		}
+		jtCopy[SLOAD].constantGas++
+		fmt.Println("NewEVMInterpreter-jtCopy[SLOAD].constantGas", jtCopy[SLOAD].constantGas)
 		jt = &jtCopy
 	}
+
+	fmt.Printf("NewEVMInterpreter-DONE %v\n\n\n", jt[SLOAD].constantGas)
 
 	return &EVMInterpreter{
 		evm: evm,

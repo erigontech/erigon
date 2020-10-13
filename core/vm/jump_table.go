@@ -1435,3 +1435,18 @@ func newFrontierInstructionSet() JumpTable {
 		},
 	}
 }
+
+func (jt *JumpTable) Clone() *JumpTable {
+	if jt == nil {
+		return nil
+	}
+	var cpy JumpTable
+	for i, op := range jt {
+		if op == nil {
+			cpy[i] = nil
+		} else {
+			cpy[i] = &(*op)
+		}
+	}
+	return &cpy
+}

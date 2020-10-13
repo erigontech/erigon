@@ -64,10 +64,11 @@ func ActivateableEips() []string {
 // - Define SELFBALANCE, with cost GasFastStep (5)
 func enable1884(jt *JumpTable) {
 	// Gas cost changes
+	fmt.Println("enable1884-jt[SLOAD].constantGas", jt[SLOAD].constantGas)
 	jt[SLOAD].constantGas = params.SloadGasEIP1884
 	jt[BALANCE].constantGas = params.BalanceGasEIP1884
 	jt[EXTCODEHASH].constantGas = params.ExtcodeHashGasEIP1884
-
+	fmt.Println("enable1884-jt[SLOAD].constantGas-AFTER", jt[SLOAD].constantGas)
 	// New opcode
 	jt[SELFBALANCE] = &operation{
 		execute:     opSelfBalance,
@@ -104,8 +105,10 @@ func opChainID(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 
 // enable2200 applies EIP-2200 (Rebalance net-metered SSTORE)
 func enable2200(jt *JumpTable) {
+	fmt.Println("enable2200-jt[SLOAD].constantGas-BEFORE", jt[SLOAD].constantGas)
 	jt[SLOAD].constantGas = params.SloadGasEIP2200
 	jt[SSTORE].dynamicGas = gasSStoreEIP2200
+	fmt.Println("enable2200-jt[SLOAD].constantGas-AFTER", jt[SLOAD].constantGas)
 }
 
 // enable2315 applies EIP-2315 (Simple Subroutines)
