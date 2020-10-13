@@ -45,7 +45,6 @@ func openDatabase() *ethdb.ObjectDatabase {
 		var mapSize datasize.ByteSize
 		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 		return ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
-	} else {
-		return ethdb.MustOpen(chaindata)
 	}
+	return ethdb.MustOpen(chaindata)
 }
