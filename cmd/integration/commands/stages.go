@@ -2,10 +2,13 @@ package commands
 
 import (
 	"context"
+	"runtime"
+	"sort"
+	"strings"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
-	"runtime"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -135,6 +138,19 @@ var cmdPrintStages = &cobra.Command{
 	},
 }
 
+var cmdPrintMigrations = &cobra.Command{
+	Use:   "print_migrations",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		if err := printAppliedMigrations(ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
@@ -202,6 +218,9 @@ func init() {
 	withDatadir(cmdStageTxLookup)
 
 	rootCmd.AddCommand(cmdStageTxLookup)
+
+	withChaindata(cmdPrintMigrations)
+	rootCmd.AddCommand(cmdPrintMigrations)
 }
 
 func stageSenders(ctx context.Context) error {
@@ -507,6 +526,25 @@ func printAllStages(_ context.Context) error {
 	defer db.Close()
 
 	return printStages(db)
+}
+
+func printAppliedMigrations(_ context.Context) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	applied, err := migrations.AppliedMigrations(db, false /* withPayload */)
+	if err != nil {
+		return err
+	}
+	var appliedStrs = make([]string, len(applied))
+	i := 0
+	for k := range applied {
+		appliedStrs[i] = k
+		i++
+	}
+	sort.Strings(appliedStrs)
+	log.Info("Applied", "migrations", strings.Join(appliedStrs, " "))
+	return nil
 }
 
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
