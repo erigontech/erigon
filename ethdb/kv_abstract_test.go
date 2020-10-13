@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -32,7 +31,7 @@ func TestManagedTx(t *testing.T) {
 	writeDBs, readDBs, closeAll := setupDatabases(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return map[string]dbutils.BucketConfigItem{
 			bucket1: {
-				Flags:                     lmdb.DupSort,
+				Flags:                     dbutils.DupSort,
 				AutoDupSortKeysConversion: true,
 				DupToLen:                  4,
 				DupFromLen:                6,
@@ -96,6 +95,7 @@ func TestManagedTx(t *testing.T) {
 func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	writeDBs = []ethdb.KV{
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(),
+		ethdb.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
 	}
 

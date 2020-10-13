@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
