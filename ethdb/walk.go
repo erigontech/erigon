@@ -101,6 +101,8 @@ func GetModifiedAccounts(tx Tx, startNum, endNum uint64) ([]common.Address, erro
 	startCode := dbutils.EncodeTimestamp(startNum)
 
 	c := tx.Cursor(dbutils.PlainAccountChangeSetBucket)
+	defer c.Close()
+
 	for k, v, err := c.Seek(startCode); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return nil, fmt.Errorf("iterating over account changeset for %v: %w", k, err)
@@ -123,7 +125,7 @@ func GetModifiedAccounts(tx Tx, startNum, endNum uint64) ([]common.Address, erro
 		return nil, nil
 	}
 
-	idx := uint64(0)
+	idx := 0
 	result := make([]common.Address, len(changedAddrs))
 	for addr := range changedAddrs {
 		copy(result[idx][:], addr[:])
