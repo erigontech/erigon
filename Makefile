@@ -1,5 +1,5 @@
 GOBIN = $(CURDIR)/build/bin
-GOBUILD = env GO111MODULE=on go build -trimpath --ldflags '-linkmode external -extldflags "-static"'
+GOBUILD = env GO111MODULE=on go build -trimpath
 GOTEST = go test ./... -p 1
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
