@@ -20,7 +20,6 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -32,6 +31,8 @@ import (
 	"text/tabwriter"
 	"text/template"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ethereum/go-ethereum/common/fdlimit"
@@ -1303,7 +1304,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 
 	if cfg.LMDB {
 		cfg.LMDBMaxFreelistReuse = ctx.GlobalUint(LMDBMaxFreelistReuseFlag.Name)
-		if cfg.LMDBMapSize < 16 {
+		if cfg.LMDBMaxFreelistReuse < 16 {
 			log.Error("Invalid LMDB MaxFreelistReuse provided. Will use defaults",
 				"lmdb.maxFreelistReuse", ethdb.LMDBDefaultMaxFreelistReuse,
 				"err", "the value should be at least 16",

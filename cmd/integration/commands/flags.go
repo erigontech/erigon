@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +19,7 @@ var (
 	reset              bool
 	bucket             string
 	datadir            string
+	mapSize            datasize.ByteSize
 )
 
 func must(err error) {
@@ -32,6 +34,12 @@ func withChaindata(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("chaindata"))
 	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
 	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
+}
+
+func withMapSize(cmd *cobra.Command) {
+	var mapSizeStr string
+	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "2T", "map size for LMDB")
+	must(mapSize.UnmarshalText([]byte(mapSizeStr)))
 }
 
 func withCompact(cmd *cobra.Command) {
