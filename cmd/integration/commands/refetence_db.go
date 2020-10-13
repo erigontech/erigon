@@ -268,6 +268,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 				if err != nil {
 					return err
 				}
+				c = dstTx.Cursor(name)
 			case <-ctx.Done():
 				return ctx.Err()
 			}
