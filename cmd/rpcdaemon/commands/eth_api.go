@@ -74,11 +74,11 @@ type EthAPI interface {
 
 	// Mining related (see ./eth_mining.go)
 	Coinbase(_ context.Context) (common.Address, error)
-	//Hashrate(_ context.Context) (uint64, error)
-	//Mining(_ context.Context) (bool, error)
-	//GetWork(_ context.Context) ([]interface{}, error)
-	//SubmitWork(_ context.Context, nonce rpc.BlockNumber, powHash, digest common.Hash) (bool, error)
-	//SubmitHashrate(_ context.Context, hashRate common.Hash, id string) (bool, error)
+	Hashrate(_ context.Context) (uint64, error)
+	Mining(_ context.Context) (bool, error)
+	GetWork(_ context.Context) ([]interface{}, error)
+	SubmitWork(_ context.Context, nonce rpc.BlockNumber, powHash, digest common.Hash) (bool, error)
+	SubmitHashrate(_ context.Context, hashRate common.Hash, id string) (bool, error)
 
 	// These three commands worked anyway, but were not in this interface. Temporarily adding them for discussion
 	GetHeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error)
