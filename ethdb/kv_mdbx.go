@@ -241,7 +241,7 @@ func (db *MdbxKV) Close() {
 		if err := env.Close(); err != nil {
 			db.log.Warn("failed to close DB", "err", err)
 		} else {
-			db.log.Info("database closed (LMDB)")
+			db.log.Info("database closed (MDBX)")
 		}
 	}
 
