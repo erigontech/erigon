@@ -44,24 +44,10 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				}
 
 				parents, parentsRequested, allParents := c.requestParentHeaders(req)
-				matchedParents, err := matchParents(req.Header, parents, allParents)
-				if err != nil && !errors.Is(err, errNotAllParents) {
-					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, req.Header.Hash(), err}
-					continue
-				}
+				err := c.verifyByRequest(toVerifyRequest(req, parents, allParents), req.Header.Number.Uint64())
 				if errors.Is(err, errNotAllParents) {
-					c.addVerifyHeaderRequest(req, matchedParents, parentsRequested, allParents)
+					c.addVerifyHeaderRequest(req, parents, parentsRequested, allParents)
 					continue
-				}
-
-				err = c.Verify(c.Process.Chain, req.Header, matchedParents, false, req.Seal)
-				c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, req.Header.Hash(), err}
-				if err == nil {
-					c.AddVerifiedBlocks(req.Header)
-
-					if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
-						c.VerifyRequestsByParent(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64(), nil})
-					}
 				}
 			case parentResp := <-c.HeaderResponses:
 				if parentResp.Err != nil {
@@ -81,7 +67,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					continue
 				}
 
-				c.VerifyRequestsByParent(parentResp)
+				c.VerifyRequestsCommonAncestor(parentResp.Number, parentResp.Header)
 			case <-c.CleanupTicker.C:
 				c.RequestsMu.Lock()
 				for blockNum, reqMap := range c.RequestsToParents {
@@ -106,78 +92,94 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 	return c
 }
 
-func (c *Consensus) VerifyRequestsByParent(parentResp consensus.HeaderResponse) {
+func (c *Consensus) VerifyRequestsCommonAncestor(blockNumber uint64, header *types.Header) {
 	c.RequestsMu.Lock()
 	defer c.RequestsMu.Unlock()
-	c.verifyRequestsByParent(parentResp)
+	c.verifyRequestsCommonAncestor(blockNumber, header)
 }
 
-func (c *Consensus) verifyRequestsByParent(parentResp consensus.HeaderResponse) {
-	toVerify := make(map[uint64][]uint64) // blockNum->reqIDs
+func (c *Consensus) verifyRequestsCommonAncestor(blockNumber uint64, header *types.Header) {
+	toVerify := make(map[uint64][]uint64) // ancestorBlockNum->reqIDs
 
-	for blockNum, reqMap := range c.RequestsToParents {
+	for ancestorBlockNum, reqMap := range c.RequestsToParents {
 		for reqID, req := range reqMap {
 			if req == nil || req.Header == nil {
 				continue
 			}
 
 			// check if new parent is in the requested range
-			if parentResp.Number >= req.From && parentResp.Number <= req.To {
-				reqMap[reqID].Parents = append(reqMap[reqID].Parents, parentResp.Header)
-				toVerify[blockNum] = append(toVerify[blockNum], reqID)
+			if blockNumber >= req.From && blockNumber <= req.To {
+				reqMap[reqID].Parents = append(reqMap[reqID].Parents, header)
+				toVerify[ancestorBlockNum] = append(toVerify[ancestorBlockNum], reqID)
 			}
 		}
 	}
 
-	for blockNum, reqIDs := range toVerify {
+	for ancestorBlockNum, reqIDs := range toVerify {
 		for _, reqID := range reqIDs {
-			req := c.RequestsToParents[blockNum][reqID]
-
-			// fixme copy-paste
-			parents, err := matchParents(req.Header, req.Parents, req.ParentsCount)
-			if err != nil && !errors.Is(err, errNotAllParents) {
-				c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), err}
-
-				// fixme copy-paste
-				// remove finished request
-				delete(c.RequestsToParents[blockNum], reqID)
-
-				if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
-					c.verifyRequestsByParent(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64(), nil})
-				}
-				continue
-			}
-			if errors.Is(err, errNotAllParents) {
+			req, ok := c.RequestsToParents[ancestorBlockNum][reqID]
+			if !ok {
 				continue
 			}
 
-			err = c.Verify(c.Process.Chain, req.Header, parents, false, req.Seal)
-			c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), err}
-			if err == nil {
-				c.AddVerifiedBlocks(req.Header)
-			}
-
-			// remove finished request
-			delete(c.RequestsToParents[blockNum], reqID)
-
-			if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
-				c.verifyRequestsByParent(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64(), nil})
-			}
+			// recursion
+			_ = c.verifyByRequest(req, ancestorBlockNum)
 		}
 	}
 
-	c.DeleteRequestedBlocks(parentResp.Number)
+	c.DeleteRequestedBlocks(blockNumber)
 }
 
-func (c *Consensus) addVerifyHeaderRequest(req consensus.VerifyHeaderRequest, parents []*types.Header, requestedParents []uint64, allParents int) {
-	request := &consensus.VerifyRequest{
+func (c *Consensus) verifyByRequest(req *consensus.VerifyRequest, ancestorBlockNum uint64) error {
+	reqID := req.ID
+
+	parents, err := matchParents(req.Header, req.Parents, req.ParentsCount)
+	if err != nil && !errors.Is(err, errNotAllParents) {
+		c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), err}
+
+		// remove finished request
+		delete(c.RequestsToParents[ancestorBlockNum], reqID)
+
+		if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
+			// recursion
+			c.verifyRequestsCommonAncestor(req.Header.Number.Uint64(), req.Header)
+		}
+
+		return nil
+	}
+	if errors.Is(err, errNotAllParents) {
+		return err
+	}
+
+	err = c.Verify(c.Process.Chain, req.Header, parents, false, req.Seal)
+	c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), err}
+	if err == nil {
+		c.AddVerifiedBlocks(req.Header)
+	}
+
+	// remove finished request
+	delete(c.RequestsToParents[ancestorBlockNum], reqID)
+
+	if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
+		// recursion
+		c.verifyRequestsCommonAncestor(req.Header.Number.Uint64(), req.Header)
+	}
+
+	return nil
+}
+
+func toVerifyRequest(req consensus.VerifyHeaderRequest, parents []*types.Header, allParents int) *consensus.VerifyRequest {
+	return &consensus.VerifyRequest{
 		req,
 		parents,
 		allParents,
 		req.Header.Number.Uint64() - uint64(allParents),
 		req.Header.Number.Uint64() - 1,
 	}
+}
 
+func (c *Consensus) addVerifyHeaderRequest(req consensus.VerifyHeaderRequest, parents []*types.Header, requestedParents []uint64, allParents int) {
+	request := toVerifyRequest(req, parents, allParents)
 	sort.SliceStable(request.Parents, func(i, j int) bool {
 		return request.Parents[i].Hash().String() < request.Parents[j].Hash().String()
 	})

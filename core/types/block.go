@@ -325,14 +325,14 @@ func SearchHeadersByNumber(headers []*Header, blockNumber uint64) ([]*Header, bo
 	if smallestIDx < len(headers) && headers[smallestIDx].Number.Uint64() == blockNumber {
 		highestIDx := uint64(smallestIDx)
 		for i, h := range headers[smallestIDx:] {
-			if currentBlockNumber := h.Number.Uint64(); currentBlockNumber != blockNumber {
+			if h.Number.Uint64() != blockNumber {
 				break
-			} else {
-				highestIDx = uint64(smallestIDx+i)
 			}
-		}
-		res := append([]*Header{}, headers[smallestIDx:highestIDx+1]...)
 
+			highestIDx = uint64(smallestIDx + i)
+		}
+
+		res := append([]*Header{}, headers[smallestIDx:highestIDx+1]...)
 		return res, true
 	}
 	return nil, false
