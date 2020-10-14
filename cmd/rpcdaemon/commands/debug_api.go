@@ -60,7 +60,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	return StorageRangeAt(stateReader, contractAddress, keyStart, maxResult)
 }
 
-// AccountRange re-implementation of eth/api.go:AccountRange
+// AccountRange enumerates all accounts in the given block and start point in paging request
 func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error) {
 	tx, err := api.db.Begin(ctx, nil, false)
 	if err != nil {
