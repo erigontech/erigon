@@ -546,10 +546,13 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			writeDB = d.stateDB
 		}
 
+		cc := &core.TinyChainContext{}
+		cc.SetDB(tx)
+		cc.SetEngine(d.blockchain.Engine())
 		d.stagedSyncState, err = d.stagedSync.Prepare(
 			d,
 			d.chainConfig,
-			d.blockchain,
+			cc,
 			d.blockchain.GetVMConfig(),
 			d.stateDB,
 			writeDB,
