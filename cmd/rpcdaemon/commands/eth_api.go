@@ -29,54 +29,56 @@ type EthAPI interface {
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
 
-	// Transaction related (proposed file: ./eth_txs.go)
+	// Transaction related (see ./eth_txs.go)
 	GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error)
 	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error)
 	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
-	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
 
-	// Uncle related (proposed file: ./eth_uncles.go)
+	// Receipt related (see ./eth_receipts.go)
+	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
+
+	// Uncle related (see ./eth_uncles.go)
 	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleCountByBlockNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
 
-	// Filter related (proposed file: ./eth_filters.go)
+	// Filter related (see ./eth_filters.go)
 	// newPendingTransactionFilter(ctx context.Context) (string, error)
 	// newBlockFilter(ctx context.Context) (string, error)
 	// newFilter(ctx context.Context) (string, error)
 	// uninstallFilter(ctx context.Context) (string, error)
 	// getFilterChanges(ctx context.Context) (string, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error)
 
-	// Account related (proposed file: ./eth_accounts.go)
+	// Account related (see ./eth_accounts.go)
 	Accounts(_ context.Context) (string, error) /* deprecated */
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
 	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 
-	// System related (proposed file: ./eth_system.go)
+	// System related (see ./eth_system.go)
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	Syncing(ctx context.Context) (interface{}, error)
 	// GasPrice(_ context.Context) (*hexutil.Big, error)
 
-	// Sending related (proposed file: ./eth_call.go)
+	// Sending related (see ./eth_call.go)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	// SendTransaction(ctx context.Context) (string, error)
 	Sign(_ context.Context, _ string, _ string) (string, error) /* deprecated */
 
-	// Mining related (proposed file: ./eth_mining.go)
-	Coinbase(ctx context.Context) (common.Address, error)
-	// HashRate(ctx context.Context) (string, error)
-	// Mining(ctx context.Context) (string, error)
-	// GetWork(ctx context.Context) (string, error)
-	// SubmitWork(ctx context.Context) (string, error)
-	// SubmitHashrate(ctx context.Context) (string, error)
+	// Mining related (see ./eth_mining.go)
+	Coinbase(_ context.Context) (common.Address, error)
+	//Hashrate(_ context.Context) (uint64, error)
+	//Mining(_ context.Context) (bool, error)
+	//GetWork(_ context.Context) ([]interface{}, error)
+	//SubmitWork(_ context.Context, nonce rpc.BlockNumber, powHash, digest common.Hash) (bool, error)
+	//SubmitHashrate(_ context.Context, hashRate common.Hash, id string) (bool, error)
 
 	// These three commands worked anyway, but were not in this interface. Temporarily adding them for discussion
 	GetHeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error)
