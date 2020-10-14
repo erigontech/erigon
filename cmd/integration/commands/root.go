@@ -27,6 +27,7 @@ func RootCommand() *cobra.Command {
 	return rootCmd
 }
 
+//nolint:unparam
 func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
 	opts := ethdb.NewLMDB().Path(chaindata)
 	if mapSizeStr != "" {

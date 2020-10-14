@@ -34,7 +34,7 @@ var stateStags = &cobra.Command{
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
-		if err := syncBySmallSteps(db, ctx, chaindata); err != nil {
+		if err := syncBySmallSteps(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -61,7 +61,7 @@ func init() {
 	rootCmd.AddCommand(stateStags)
 }
 
-func syncBySmallSteps(db ethdb.Database, ctx context.Context, chaindata string) error {
+func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
 	sm, err := ethdb.GetStorageModeFromDB(db)

@@ -252,7 +252,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 				return err
 			}
 
-			if err := appendFunc(k, v); err != nil {
+			if err = appendFunc(k, v); err != nil {
 				return err
 			}
 
