@@ -143,43 +143,6 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 	}, nil
 }
 
-// GetBlockTransactionCountByNumber returns the number of transactions in the block
-func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
-	tx, err := api.dbReader.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	blockNum, err := getBlockNumber(blockNr, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	block := rawdb.ReadBlockByNumber(tx, blockNum)
-	if block == nil {
-		return nil, fmt.Errorf("block not found: %d", blockNum)
-	}
-	n := hexutil.Uint(len(block.Transactions()))
-	return &n, nil
-}
-
-// GetBlockTransactionCountByHash returns the number of transactions in the block
-func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
-	tx, err := api.dbReader.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	block := rawdb.ReadBlockByHash(tx, blockHash)
-	if block == nil {
-		return nil, fmt.Errorf("block not found: %x", blockHash)
-	}
-	n := hexutil.Uint(len(block.Transactions()))
-	return &n, nil
-}
-
 // ChainId returns the chain id from the config
 func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
 	tx, err := api.dbReader.Begin(ctx)
