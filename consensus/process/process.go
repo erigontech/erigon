@@ -169,20 +169,23 @@ func (c *Consensus) verifyByRequest(req *consensus.VerifyRequest, ancestorBlockN
 }
 
 func toVerifyRequest(req consensus.VerifyHeaderRequest, parents []*types.Header, allParents int) *consensus.VerifyRequest {
-	return &consensus.VerifyRequest{
+	request := &consensus.VerifyRequest{
 		req,
 		parents,
 		allParents,
 		req.Header.Number.Uint64() - uint64(allParents),
 		req.Header.Number.Uint64() - 1,
 	}
+
+	sort.SliceStable(request.Parents, func(i, j int) bool {
+		return request.Parents[i].Hash().String() < request.Parents[j].Hash().String()
+	})
+
+	return request
 }
 
 func (c *Consensus) addVerifyHeaderRequest(req consensus.VerifyHeaderRequest, parents []*types.Header, requestedParents []uint64, allParents int) {
 	request := toVerifyRequest(req, parents, allParents)
-	sort.SliceStable(request.Parents, func(i, j int) bool {
-		return request.Parents[i].Hash().String() < request.Parents[j].Hash().String()
-	})
 
 	var toAppend []*types.Header
 	for _, parent := range parents {
@@ -205,6 +208,7 @@ func (c *Consensus) addVerifyHeaderRequest(req consensus.VerifyHeaderRequest, pa
 		}
 		reqMap[request.ID] = request
 	}
+
 	for _, parent := range requestedParents {
 		reqMap, ok := c.RequestsToParents[parent]
 		if !ok {
