@@ -43,14 +43,14 @@ func RootCommand() *cobra.Command {
 }
 
 func openDatabase() *ethdb.ObjectDatabase {
+	opts := ethdb.NewLMDB().Path(chaindata)
 	if mapSizeStr != "" {
 		var mapSize datasize.ByteSize
 		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
-		opts := ethdb.NewLMDB().Path(chaindata).MapSize(mapSize)
-		if freelistReuse > 0 {
-			opts = opts.MaxFreelistReuse(uint(freelistReuse))
-		}
-		return ethdb.NewObjectDatabase(opts.MustOpen())
+		opts = opts.MapSize(mapSize)
 	}
-	return ethdb.MustOpen(chaindata)
+	if freelistReuse > 0 {
+		opts = opts.MaxFreelistReuse(uint(freelistReuse))
+	}
+	return ethdb.NewObjectDatabase(opts.MustOpen())
 }

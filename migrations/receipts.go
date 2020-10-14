@@ -57,33 +57,38 @@ var receiptsCborDECODE = Migration{
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-
-		collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
-			blockNum := binary.BigEndian.Uint64(k[:8])
-			select {
-			default:
-			case <-logEvery.C:
-				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
-				log.Info("Migration progress", "blockNum", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
-			}
-
-			// Convert the receipts from their storage form to their internal representation
-			storageReceipts := []*types.ReceiptForStorage{}
-			if err := cbor.Unmarshal(&storageReceipts, v); err != nil {
-				return false, fmt.Errorf("unmarshalling receipt from CBOR: %w, k=%x", err, k)
-			}
-			buf, err := rlp.EncodeToBytes(storageReceipts)
-			if err != nil {
-				return false, fmt.Errorf("encoding receipt to RLP: %w, k=%x", err, k)
-			}
-			if err = collector.Collect(k, buf); err != nil {
-				return false, fmt.Errorf("collecting key %x: %w", k, err)
-			}
-			return true, nil
-		}); err != nil {
+		collector, err := etl.NewCollectorFromFiles(datadir)
+		if err != nil {
 			return err
+		}
+		if collector == nil {
+			collector = etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+			if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
+				blockNum := binary.BigEndian.Uint64(k[:8])
+				select {
+				default:
+				case <-logEvery.C:
+					var m runtime.MemStats
+					runtime.ReadMemStats(&m)
+					log.Info("Migration progress", "blockNum", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+				}
+
+				// Convert the receipts from their storage form to their internal representation
+				storageReceipts := []*types.ReceiptForStorage{}
+				if err := cbor.Unmarshal(&storageReceipts, v); err != nil {
+					return false, fmt.Errorf("unmarshalling receipt from CBOR: %w, k=%x", err, k)
+				}
+				buf, err := rlp.EncodeToBytes(storageReceipts)
+				if err != nil {
+					return false, fmt.Errorf("encoding receipt to RLP: %w, k=%x", err, k)
+				}
+				if err = collector.Collect(k, buf); err != nil {
+					return false, fmt.Errorf("collecting key %x: %w", k, err)
+				}
+				return true, nil
+			}); err != nil {
+				return err
+			}
 		}
 		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.BlockReceiptsPrefix); err != nil {
 			return fmt.Errorf("clearing the receipt bucket: %w", err)
@@ -96,6 +101,7 @@ var receiptsCborDECODE = Migration{
 		if err := collector.Load(db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
+		//TODO: Remove files if loading is successful
 		return nil
 	},
 }
