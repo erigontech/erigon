@@ -98,9 +98,9 @@ var receiptsCborDECODE = Migration{
 			return fmt.Errorf("committing the ")
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err := collector.Load(db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {
-			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
-		}
+		//if err := collector.Load(db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {
+		//	return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
+		//}
 		//TODO: Remove files if loading is successful
 		return nil
 	},

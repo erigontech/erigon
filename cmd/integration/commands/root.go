@@ -25,11 +25,6 @@ var rootCmd = &cobra.Command{
 					panic(err)
 				}
 			}
-
-			err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-			if err != nil {
-				panic(err)
-			}
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
