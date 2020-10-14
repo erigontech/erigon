@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"os"
 	"path"
 	"sync"
@@ -75,7 +76,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearUnwindStack)
 }
 
-func clearUnwindStack(db ethdb.Database, _ context.Context) error {
+func clearUnwindStack(db rawdb.DatabaseWriter, _ context.Context) error {
 	for _, stage := range stages.AllStages {
 		if err := stages.SaveStageUnwind(db, stage, 0, nil); err != nil {
 			return err
@@ -129,7 +130,7 @@ func resetState(db ethdb.Database, _ context.Context) error {
 	return nil
 }
 
-func resetSenders(db ethdb.Database) error {
+func resetSenders(db rawdb.DatabaseWriter) error {
 	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.Senders,
 	); err != nil {
@@ -144,7 +145,7 @@ func resetSenders(db ethdb.Database) error {
 	return nil
 }
 
-func resetExec(db ethdb.Database) error {
+func resetExec(db rawdb.DatabaseWriter) error {
 	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.CurrentStateBucket,
 		dbutils.AccountChangeSetBucket,
@@ -170,7 +171,7 @@ func resetExec(db ethdb.Database) error {
 	return nil
 }
 
-func resetHistory(db ethdb.Database) error {
+func resetHistory(db rawdb.DatabaseWriter) error {
 	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.AccountsHistoryBucket,
 		dbutils.StorageHistoryBucket,
@@ -193,7 +194,7 @@ func resetHistory(db ethdb.Database) error {
 	return nil
 }
 
-func resetLogIndex(db ethdb.Database) error {
+func resetLogIndex(db rawdb.DatabaseWriter) error {
 	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.LogAddressIndex,
 		dbutils.LogTopicIndex,
@@ -210,7 +211,7 @@ func resetLogIndex(db ethdb.Database) error {
 	return nil
 }
 
-func resetCallTraces(db ethdb.Database) error {
+func resetCallTraces(db rawdb.DatabaseWriter) error {
 	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.CallFromIndex,
 		dbutils.CallToIndex,
@@ -227,7 +228,7 @@ func resetCallTraces(db ethdb.Database) error {
 	return nil
 }
 
-func resetTxLookup(db ethdb.Database) error {
+func resetTxLookup(db rawdb.DatabaseWriter) error {
 	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.TxLookupPrefix,
 	); err != nil {
@@ -265,7 +266,7 @@ func resetFinish(db ethdb.Putter) error {
 	return nil
 }
 
-func printStages(db ethdb.Database) error {
+func printStages(db rawdb.DatabaseReader) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
