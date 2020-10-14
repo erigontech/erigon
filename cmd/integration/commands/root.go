@@ -46,7 +46,11 @@ func openDatabase() *ethdb.ObjectDatabase {
 	if mapSizeStr != "" {
 		var mapSize datasize.ByteSize
 		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
-		return ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
+		opts := ethdb.NewLMDB().Path(chaindata).MapSize(mapSize)
+		if freelistReuse > 0 {
+			opts = opts.MaxFreelistReuse(uint(freelistReuse))
+		}
+		return ethdb.NewObjectDatabase(opts.MustOpen())
 	}
 	return ethdb.MustOpen(chaindata)
 }
