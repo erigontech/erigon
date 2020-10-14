@@ -1,6 +1,6 @@
 {
 	"info": {
-		"_postman_id": "ea2dc050-3a67-4b14-aa43-905994ed0f3a",
+		"_postman_id": "88611276-f5aa-454b-b426-167ddecc83ef",
 		"name": "RPC_Testing",
 		"description": "A collection holding all the Ethereum JSON RPC API calls",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -44,7 +44,10 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"jsonrpc\": \"2.0\",\n    \"method\": \"web3_clientVersion\",\n    \"params\": [],\n    \"id\": 1\n}"
+							"raw": "{\n    \"jsonrpc\": \"2.0\",\n    \"method\": \"web3_clientVersion\",\n    \"params\": [],\n    \"id\": 1\n}",
+							"options": {
+								"raw": {}
+							}
 						},
 						"url": {
 							"raw": "{{HOST}}",
@@ -54,49 +57,7 @@
 						},
 						"description": "Returns the current client version.\r\n\r\n**Parameters**\r\n\r\nnone\r\n\r\n**Returns**\r\n\r\n`String` - The current client version"
 					},
-					"response": [
-						{
-							"name": "clientVersion",
-							"originalRequest": {
-								"method": "POST",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									}
-								],
-								"body": {
-									"mode": "raw",
-									"raw": "{\n    \"jsonrpc\": \"2.0\",\n    \"method\": \"web3_clientVersion\",\n    \"params\": [],\n    \"id\": 1\n}"
-								},
-								"url": {
-									"raw": "{{HOST}}",
-									"host": [
-										"{{HOST}}"
-									]
-								}
-							},
-							"status": "OK",
-							"code": 200,
-							"_postman_previewlanguage": "json",
-							"header": [
-								{
-									"key": "content-type",
-									"value": "application/json; charset=utf-8"
-								},
-								{
-									"key": "content-length",
-									"value": "111"
-								},
-								{
-									"key": "date",
-									"value": "Thu, 08 Oct 2020 21:38:40 GMT"
-								}
-							],
-							"cookie": [],
-							"body": "{\n    \"jsonrpc\": \"2.0\",\n    \"result\": \"TurboGeth/version-git_commit/os/go_version\",\n    \"id\": 1\n}"
-						}
-					]
+					"response": []
 				},
 				{
 					"name": "sha3",
@@ -135,7 +96,10 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"web3_sha3\",\n\t\"params\":[\"0x68656c6c6f20776f726c64\"],\n\t\"id\":64\n}"
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"web3_sha3\",\n\t\"params\":[\"0x68656c6c6f20776f726c64\"],\n\t\"id\":64\n}",
+							"options": {
+								"raw": {}
+							}
 						},
 						"url": {
 							"raw": "{{HOST}}",
@@ -180,7 +144,10 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"net_listening\",\n\t\"params\":[],\n\t\"id\":67\n}"
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"net_listening\",\n\t\"params\":[],\n\t\"id\":67\n}",
+							"options": {
+								"raw": {}
+							}
 						},
 						"url": {
 							"raw": "{{HOST}}",
@@ -219,7 +186,10 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"net_version\",\n\t\"params\":[],\n\t\"id\":67\n}"
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"net_version\",\n\t\"params\":[],\n\t\"id\":67\n}",
+							"options": {
+								"raw": {}
+							}
 						},
 						"url": {
 							"raw": "{{HOST}}",
@@ -255,7 +225,10 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"net_peerCount\",\n\t\"params\":[],\n\t\"id\":74\n}"
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"net_peerCount\",\n\t\"params\":[],\n\t\"id\":74\n}",
+							"options": {
+								"raw": {}
+							}
 						},
 						"url": {
 							"raw": "{{HOST}}",
@@ -284,33 +257,54 @@
 									"script": {
 										"id": "6949a1a7-ea61-4b1f-b028-2eee52f55600",
 										"exec": [
+											"var expected = {",
+											"  \"jsonrpc\": \"2.0\",",
+											"  \"id\": 1,",
+											"  \"result\": {",
+											"    \"difficulty\": \"0xb5708d578a6\",",
+											"    \"extraData\": \"0xd783010400844765746887676f312e352e31856c696e7578\",",
+											"    \"gasLimit\": \"0x2fefd8\",",
+											"    \"gasUsed\": \"0x14820\",",
+											"    \"hash\": \"0x0b4c6fb75ded4b90218cf0346b0885e442878f104e1b60bf75d5b6860eeacd53\",",
+											"    \"logsBloom\": \"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",",
+											"    \"miner\": \"0x0c729be7c39543c3d549282a40395299d987cec2\",",
+											"    \"mixHash\": \"0x1530cda332d86d5d7462e3a0eb585e22c88348dd796d29e6ef18196a78cdce07\",",
+											"    \"nonce\": \"0x938e5630b060b7d3\",",
+											"    \"number\": \"0xf4629\",",
+											"    \"parentHash\": \"0x96810a6076e621e311a232468bfd3dcfac08f4803b255af0f00300f47981c10f\",",
+											"    \"receiptsRoot\": \"0x075608bec75d988c52ea6750f4c2204fd60082eb1df32cf8f4732e8a591eef62\",",
+											"    \"sha3Uncles\": \"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",",
+											"    \"size\": \"0x3e1\",",
+											"    \"stateRoot\": \"0xb3f9408d80048b6f206951c4e387f8da37fb8510eccc18527865fa746c47bbc5\",",
+											"    \"timestamp\": \"0x56bff9bb\",",
+											"    \"totalDifficulty\": \"0x6332227c16fd7c67\",",
+											"    \"transactions\": [",
+											"      \"0x730724cb08a6eb17bf6b3296359d261570d343ea7944a17a9d7287d77900db08\",",
+											"      \"0xef2ea39c20ba09553b2f3cf02380406ac766039ca56612937eed5e7f3503fb3a\",",
+											"      \"0x5352c80aa2073e21ce6c4aa5488c38455f3519955ece7dca5af3e326797bcc63\",",
+											"      \"0x060e4cf9fa8d34a8b423b5b3691b2541255ff7974ff16699e104edcfb63bd521\"",
+											"    ],",
+											"    \"transactionsRoot\": \"0xb779480508401ddd57f1f1e83a54715dcafc6ccec4e4d842c1b68cb418e6560d\",",
+											"    \"uncles\": []",
+											"  }",
+											"}",
+											"",
 											"pm.test('Has correct result', function() {",
 											"    const jsonData = pm.response.json();",
-											"    pm.expect(jsonData.result.difficulty).to.be.equals(\"0xb5708d578a6\");",
-											"    pm.expect(jsonData.result.extraData).to.be.equals(\"0xd783010400844765746887676f312e352e31856c696e7578\");",
-											"    pm.expect(jsonData.result.gasLimit).to.be.equals(\"0x2fefd8\");",
-											"    pm.expect(jsonData.result.gasUsed).to.be.equals(\"0x14820\");",
-											"    pm.expect(jsonData.result.hash).to.be.equals(\"0x0b4c6fb75ded4b90218cf0346b0885e442878f104e1b60bf75d5b6860eeacd53\");",
-											"    pm.expect(jsonData.result.logsBloom).to.be.equals(\"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\");",
-											"    pm.expect(jsonData.result.miner).to.be.equals(\"0x0c729be7c39543c3d549282a40395299d987cec2\");",
-											"    pm.expect(jsonData.result.mixHash).to.be.equals(\"0x1530cda332d86d5d7462e3a0eb585e22c88348dd796d29e6ef18196a78cdce07\");",
-											"    pm.expect(jsonData.result.nonce).to.be.equals(\"0x938e5630b060b7d3\");",
-											"    pm.expect(jsonData.result.number).to.be.equals(\"0xf4629\");",
-											"    pm.expect(jsonData.result.parentHash).to.be.equals(\"0x96810a6076e621e311a232468bfd3dcfac08f4803b255af0f00300f47981c10f\");",
-											"    pm.expect(jsonData.result.receiptsRoot).to.be.equals(\"0x075608bec75d988c52ea6750f4c2204fd60082eb1df32cf8f4732e8a591eef62\");",
-											"    pm.expect(jsonData.result.sha3Uncles).to.be.equals(\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\");",
-											"    pm.expect(jsonData.result.size).to.be.equals(\"0x3e1\");",
-											"    pm.expect(jsonData.result.stateRoot).to.be.equals(\"0xb3f9408d80048b6f206951c4e387f8da37fb8510eccc18527865fa746c47bbc5\");",
-											"    pm.expect(jsonData.result.timestamp).to.be.equals(\"0x56bff9bb\");",
-											"    pm.expect(jsonData.result.totalDifficulty).to.be.equals(\"0x6332227c16fd7c67\");",
-											"    pm.expect(jsonData.result.transactions[0]).to.be.equals(\"0x730724cb08a6eb17bf6b3296359d261570d343ea7944a17a9d7287d77900db08\");",
-											"    pm.expect(jsonData.result.transactions[1]).to.be.equals(\"0xef2ea39c20ba09553b2f3cf02380406ac766039ca56612937eed5e7f3503fb3a\");",
-											"    pm.expect(jsonData.result.transactions[2]).to.be.equals(\"0x5352c80aa2073e21ce6c4aa5488c38455f3519955ece7dca5af3e326797bcc63\");",
-											"    pm.expect(jsonData.result.transactions[3]).to.be.equals(\"0x060e4cf9fa8d34a8b423b5b3691b2541255ff7974ff16699e104edcfb63bd521\");",
-											"    pm.expect(jsonData.result.transactionsRoot).to.be.equals(\"0xb779480508401ddd57f1f1e83a54715dcafc6ccec4e4d842c1b68cb418e6560d\");",
-											"});",
-											"",
-											"//pm.expect(jsonData.result.uncles\": []",
+											"    var keys = Object.keys(jsonData.result);",
+											"    keys.map(function (k) {",
+											"      var value = jsonData.result[k] ? jsonData.result[k] : null;",
+											"      var expect = expected.result[k] ? expected.result[k] : null;",
+											"      if (expect && typeof expect === 'object') {",
+											"        jsonData.result[k].map(function (value, index) {",
+											"           var expect = expected.result[k][index];",
+											"          pm.expect(value).to.be.equal(expect)",
+											"        })",
+											"      } else {",
+											"        pm.expect(value).to.be.equal(expect)",
+											"      }",
+											"    });",
+											"})",
 											""
 										],
 										"type": "text/javascript"
@@ -327,7 +321,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getBlockByHash\",\n\t\"params\":[\n\t\t\"0x0b4c6fb75ded4b90218cf0346b0885e442878f104e1b60bf75d5b6860eeacd53\", \n\t\tfalse\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getBlockByHash\",\n\t\"params\":[\n\t\t\"0x0b4c6fb75ded4b90218cf0346b0885e442878f104e1b60bf75d5b6860eeacd53\", \n\t\tfalse\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -347,33 +344,54 @@
 									"script": {
 										"id": "4b074dad-cb41-4e0a-95cf-e057e0cc4195",
 										"exec": [
+											"var expected = {",
+											"  \"jsonrpc\": \"2.0\",",
+											"  \"id\": 1,",
+											"  \"result\": {",
+											"    \"difficulty\": \"0xb5708d578a6\",",
+											"    \"extraData\": \"0xd783010400844765746887676f312e352e31856c696e7578\",",
+											"    \"gasLimit\": \"0x2fefd8\",",
+											"    \"gasUsed\": \"0x14820\",",
+											"    \"hash\": \"0x0b4c6fb75ded4b90218cf0346b0885e442878f104e1b60bf75d5b6860eeacd53\",",
+											"    \"logsBloom\": \"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",",
+											"    \"miner\": \"0x0c729be7c39543c3d549282a40395299d987cec2\",",
+											"    \"mixHash\": \"0x1530cda332d86d5d7462e3a0eb585e22c88348dd796d29e6ef18196a78cdce07\",",
+											"    \"nonce\": \"0x938e5630b060b7d3\",",
+											"    \"number\": \"0xf4629\",",
+											"    \"parentHash\": \"0x96810a6076e621e311a232468bfd3dcfac08f4803b255af0f00300f47981c10f\",",
+											"    \"receiptsRoot\": \"0x075608bec75d988c52ea6750f4c2204fd60082eb1df32cf8f4732e8a591eef62\",",
+											"    \"sha3Uncles\": \"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",",
+											"    \"size\": \"0x3e1\",",
+											"    \"stateRoot\": \"0xb3f9408d80048b6f206951c4e387f8da37fb8510eccc18527865fa746c47bbc5\",",
+											"    \"timestamp\": \"0x56bff9bb\",",
+											"    \"totalDifficulty\": \"0x6332227c16fd7c67\",",
+											"    \"transactions\": [",
+											"      \"0x730724cb08a6eb17bf6b3296359d261570d343ea7944a17a9d7287d77900db08\",",
+											"      \"0xef2ea39c20ba09553b2f3cf02380406ac766039ca56612937eed5e7f3503fb3a\",",
+											"      \"0x5352c80aa2073e21ce6c4aa5488c38455f3519955ece7dca5af3e326797bcc63\",",
+											"      \"0x060e4cf9fa8d34a8b423b5b3691b2541255ff7974ff16699e104edcfb63bd521\"",
+											"    ],",
+											"    \"transactionsRoot\": \"0xb779480508401ddd57f1f1e83a54715dcafc6ccec4e4d842c1b68cb418e6560d\",",
+											"    \"uncles\": []",
+											"  }",
+											"}",
+											"",
 											"pm.test('Has correct result', function() {",
 											"    const jsonData = pm.response.json();",
-											"    pm.expect(jsonData.result.difficulty).to.be.equals(\"0xb5708d578a6\");",
-											"    pm.expect(jsonData.result.extraData).to.be.equals(\"0xd783010400844765746887676f312e352e31856c696e7578\");",
-											"    pm.expect(jsonData.result.gasLimit).to.be.equals(\"0x2fefd8\");",
-											"    pm.expect(jsonData.result.gasUsed).to.be.equals(\"0x14820\");",
-											"    pm.expect(jsonData.result.hash).to.be.equals(\"0x0b4c6fb75ded4b90218cf0346b0885e442878f104e1b60bf75d5b6860eeacd53\");",
-											"    pm.expect(jsonData.result.logsBloom).to.be.equals(\"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\");",
-											"    pm.expect(jsonData.result.miner).to.be.equals(\"0x0c729be7c39543c3d549282a40395299d987cec2\");",
-											"    pm.expect(jsonData.result.mixHash).to.be.equals(\"0x1530cda332d86d5d7462e3a0eb585e22c88348dd796d29e6ef18196a78cdce07\");",
-											"    pm.expect(jsonData.result.nonce).to.be.equals(\"0x938e5630b060b7d3\");",
-											"    pm.expect(jsonData.result.number).to.be.equals(\"0xf4629\");",
-											"    pm.expect(jsonData.result.parentHash).to.be.equals(\"0x96810a6076e621e311a232468bfd3dcfac08f4803b255af0f00300f47981c10f\");",
-											"    pm.expect(jsonData.result.receiptsRoot).to.be.equals(\"0x075608bec75d988c52ea6750f4c2204fd60082eb1df32cf8f4732e8a591eef62\");",
-											"    pm.expect(jsonData.result.sha3Uncles).to.be.equals(\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\");",
-											"    pm.expect(jsonData.result.size).to.be.equals(\"0x3e1\");",
-											"    pm.expect(jsonData.result.stateRoot).to.be.equals(\"0xb3f9408d80048b6f206951c4e387f8da37fb8510eccc18527865fa746c47bbc5\");",
-											"    pm.expect(jsonData.result.timestamp).to.be.equals(\"0x56bff9bb\");",
-											"    pm.expect(jsonData.result.totalDifficulty).to.be.equals(\"0x6332227c16fd7c67\");",
-											"    pm.expect(jsonData.result.transactions[0]).to.be.equals(\"0x730724cb08a6eb17bf6b3296359d261570d343ea7944a17a9d7287d77900db08\");",
-											"    pm.expect(jsonData.result.transactions[1]).to.be.equals(\"0xef2ea39c20ba09553b2f3cf02380406ac766039ca56612937eed5e7f3503fb3a\");",
-											"    pm.expect(jsonData.result.transactions[2]).to.be.equals(\"0x5352c80aa2073e21ce6c4aa5488c38455f3519955ece7dca5af3e326797bcc63\");",
-											"    pm.expect(jsonData.result.transactions[3]).to.be.equals(\"0x060e4cf9fa8d34a8b423b5b3691b2541255ff7974ff16699e104edcfb63bd521\");",
-											"    pm.expect(jsonData.result.transactionsRoot).to.be.equals(\"0xb779480508401ddd57f1f1e83a54715dcafc6ccec4e4d842c1b68cb418e6560d\");",
-											"});",
-											"",
-											"//pm.expect(jsonData.result.uncles\": []",
+											"    var keys = Object.keys(jsonData.result);",
+											"    keys.map(function (k) {",
+											"      var value = jsonData.result[k] ? jsonData.result[k] : null;",
+											"      var expect = expected.result[k] ? expected.result[k] : null;",
+											"      if (expect && typeof expect === 'object') {",
+											"        jsonData.result[k].map(function (value, index) {",
+											"           var expect = expected.result[k][index];",
+											"          pm.expect(value).to.be.equal(expect)",
+											"        })",
+											"      } else {",
+											"        pm.expect(value).to.be.equal(expect)",
+											"      }",
+											"    });",
+											"})",
 											""
 										],
 										"type": "text/javascript"
@@ -390,7 +408,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getBlockByNumber\",\n\t\"params\":[\n\t\t\"0xf4629\", \n\t\tfalse\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getBlockByNumber\",\n\t\"params\":[\n\t\t\"0xf4629\", \n\t\tfalse\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -430,7 +451,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getBlockTransactionCountByHash\",\n\t\"params\":[\n\t\t\"0x0b4c6fb75ded4b90218cf0346b0885e442878f104e1b60bf75d5b6860eeacd53\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getBlockTransactionCountByHash\",\n\t\"params\":[\n\t\t\"0x0b4c6fb75ded4b90218cf0346b0885e442878f104e1b60bf75d5b6860eeacd53\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -470,7 +494,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getBlockTransactionCountByNumber\",\n\t\"params\":[\n\t\t\"0xf4629\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getBlockTransactionCountByNumber\",\n\t\"params\":[\n\t\t\"0xf4629\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -497,38 +524,42 @@
 									"script": {
 										"id": "4afc6c6b-d8db-46a6-9597-bc4035eb85de",
 										"exec": [
+											"var expected = {",
+											"  \"jsonrpc\": \"2.0\",",
+											"  \"id\": 1,",
+											"  \"result\": {",
+											"    \"blockHash\": \"0x785b221ec95c66579d5ae14eebe16284a769e948359615d580f02e646e93f1d5\",",
+											"    \"blockNumber\": \"0x52a90b\",",
+											"    \"from\": \"0x11b6a5fe2906f3354145613db0d99ceb51f604c9\",",
+											"    \"gas\": \"0x6b6c\",",
+											"    \"gasPrice\": \"0x11e1a300\",",
+											"    \"hash\": \"0xb2fea9c4b24775af6990237aa90228e5e092c56bdaee74496992a53c208da1ee\",",
+											"    \"input\": \"0x80dfa34a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002e516d556558334448416654747442464a42315454384a617a67765744776a727a7342686973693473547532613551000000000000000000000000000000000000\",",
+											"    \"nonce\": \"0x10\",",
+											"    \"r\": \"0xacdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222\",",
+											"    \"s\": \"0x132a0517a4c52916e0c6b0e74b0479326891df2a9afd711482c7f3919b335ff6\",",
+											"    \"to\": \"0xfa28ec7198028438514b49a3cf353bca5541ce1d\",",
+											"    \"transactionIndex\": \"0x25\",",
+											"    \"v\": \"0x26\",",
+											"    \"value\": \"0x0\"",
+											"  }",
+											"}",
+											"",
 											"pm.test('Has correct result', function() {",
-											"    var isNetherMind = pm.environment.get('HOST') === '{{NETHERMIND}}'",
-											"    var isParity = pm.environment.get('HOST') == \"{{PARITY}}\";",
 											"    const jsonData = pm.response.json();",
-											"",
-											"    pm.expect(jsonData.result.blockHash).to.be.equals(\"0x785b221ec95c66579d5ae14eebe16284a769e948359615d580f02e646e93f1d5\");",
-											"    pm.expect(jsonData.result.blockNumber).to.be.equals( \"0x52a90b\");",
-											"    pm.expect(jsonData.result.from).to.be.equals(\"0x11b6a5fe2906f3354145613db0d99ceb51f604c9\");",
-											"    pm.expect(jsonData.result.gas).to.be.equals(\"0x6b6c\");",
-											"    pm.expect(jsonData.result.gasPrice).to.be.equals(\"0x11e1a300\");",
-											"    pm.expect(jsonData.result.hash).to.be.equals(\"0xb2fea9c4b24775af6990237aa90228e5e092c56bdaee74496992a53c208da1ee\");",
-											"    pm.expect(jsonData.result.input).to.be.equals(\"0x80dfa34a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002e516d556558334448416654747442464a42315454384a617a67765744776a727a7342686973693473547532613551000000000000000000000000000000000000\");",
-											"    pm.expect(jsonData.result.nonce).to.be.equals(\"0x10\");",
-											"    if (isNetherMind) {",
-											"      pm.expect(jsonData.result.r).to.be.equals(\"0x0acdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222\");",
-											"    } else {",
-											"      pm.expect(jsonData.result.r).to.be.equals(\"0xacdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222\");",
-											"    }",
-											"    pm.expect(jsonData.result.s).to.be.equals(\"0x132a0517a4c52916e0c6b0e74b0479326891df2a9afd711482c7f3919b335ff6\");",
-											"    pm.expect(jsonData.result.to).to.be.equals(\"0xfa28ec7198028438514b49a3cf353bca5541ce1d\");",
-											"    pm.expect(jsonData.result.transactionIndex).to.be.equals(\"0x25\");",
-											"    pm.expect(jsonData.result.v).to.be.equals(\"0x26\");",
-											"    pm.expect(jsonData.result.value).to.be.equals(\"0x0\");",
-											"",
-											"    if (isParity) {",
-											"      pm.expect(jsonData.result.chainId).to.be.equals(\"0x1\");",
-											"      pm.expect(jsonData.result.condition).to.be.equals(null);",
-											"      pm.expect(jsonData.result.creates).to.be.equals(null);",
-											"      pm.expect(jsonData.result.publicKey).to.be.equals(\"0x84575c0c0091b07f4016991839301c7ca392ea48501c78c23660453556560ae24418536e540c2bd4c92491350e2fa128b092dd3e5a8d03fe7a6c5a54a20684cd\");",
-											"      pm.expect(jsonData.result.raw).to.be.equals(\"0xf8e8108411e1a300826b6c94fa28ec7198028438514b49a3cf353bca5541ce1d80b88480dfa34a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002e516d556558334448416654747442464a42315454384a617a67765744776a727a734268697369347354753261355100000000000000000000000000000000000026a00acdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222a0132a0517a4c52916e0c6b0e74b0479326891df2a9afd711482c7f3919b335ff6\");",
-											"      pm.expect(jsonData.result.standardV).to.be.equals(\"0x1\");",
-											"    }",
+											"    var keys = Object.keys(jsonData.result);",
+											"    keys.map(function (k) {",
+											"      var value = jsonData.result[k] ? jsonData.result[k] : null;",
+											"      var expect = expected.result[k] ? expected.result[k] : null;",
+											"      if (expect && typeof expect === 'object') {",
+											"        jsonData.result[k].map(function (value, index) {",
+											"           var expect = expected.result[k][index];",
+											"          pm.expect(value).to.be.equal(expect)",
+											"        })",
+											"      } else {",
+											"        pm.expect(value).to.be.equal(expect)",
+											"      }",
+											"    });",
 											"})",
 											""
 										],
@@ -571,38 +602,42 @@
 									"script": {
 										"id": "e6ed011b-0a3c-43c2-9239-29bd1713d4ea",
 										"exec": [
+											"var expected = {",
+											"  \"jsonrpc\": \"2.0\",",
+											"  \"id\": 1,",
+											"  \"result\": {",
+											"    \"blockHash\": \"0x785b221ec95c66579d5ae14eebe16284a769e948359615d580f02e646e93f1d5\",",
+											"    \"blockNumber\": \"0x52a90b\",",
+											"    \"from\": \"0x11b6a5fe2906f3354145613db0d99ceb51f604c9\",",
+											"    \"gas\": \"0x6b6c\",",
+											"    \"gasPrice\": \"0x11e1a300\",",
+											"    \"hash\": \"0xb2fea9c4b24775af6990237aa90228e5e092c56bdaee74496992a53c208da1ee\",",
+											"    \"input\": \"0x80dfa34a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002e516d556558334448416654747442464a42315454384a617a67765744776a727a7342686973693473547532613551000000000000000000000000000000000000\",",
+											"    \"nonce\": \"0x10\",",
+											"    \"r\": \"0xacdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222\",",
+											"    \"s\": \"0x132a0517a4c52916e0c6b0e74b0479326891df2a9afd711482c7f3919b335ff6\",",
+											"    \"to\": \"0xfa28ec7198028438514b49a3cf353bca5541ce1d\",",
+											"    \"transactionIndex\": \"0x25\",",
+											"    \"v\": \"0x26\",",
+											"    \"value\": \"0x0\"",
+											"  }",
+											"}",
+											"",
 											"pm.test('Has correct result', function() {",
-											"    var isNetherMind = pm.environment.get('HOST') === '{{NETHERMIND}}'",
-											"    var isParity = pm.environment.get('HOST') == \"{{PARITY}}\";",
 											"    const jsonData = pm.response.json();",
-											"",
-											"    pm.expect(jsonData.result.blockHash).to.be.equals(\"0x785b221ec95c66579d5ae14eebe16284a769e948359615d580f02e646e93f1d5\");",
-											"    pm.expect(jsonData.result.blockNumber).to.be.equals( \"0x52a90b\");",
-											"    pm.expect(jsonData.result.from).to.be.equals(\"0x11b6a5fe2906f3354145613db0d99ceb51f604c9\");",
-											"    pm.expect(jsonData.result.gas).to.be.equals(\"0x6b6c\");",
-											"    pm.expect(jsonData.result.gasPrice).to.be.equals(\"0x11e1a300\");",
-											"    pm.expect(jsonData.result.hash).to.be.equals(\"0xb2fea9c4b24775af6990237aa90228e5e092c56bdaee74496992a53c208da1ee\");",
-											"    pm.expect(jsonData.result.input).to.be.equals(\"0x80dfa34a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002e516d556558334448416654747442464a42315454384a617a67765744776a727a7342686973693473547532613551000000000000000000000000000000000000\");",
-											"    pm.expect(jsonData.result.nonce).to.be.equals(\"0x10\");",
-											"    if (isNetherMind) {",
-											"      pm.expect(jsonData.result.r).to.be.equals(\"0x0acdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222\");",
-											"    } else {",
-											"      pm.expect(jsonData.result.r).to.be.equals(\"0xacdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222\");",
-											"    }",
-											"    pm.expect(jsonData.result.s).to.be.equals(\"0x132a0517a4c52916e0c6b0e74b0479326891df2a9afd711482c7f3919b335ff6\");",
-											"    pm.expect(jsonData.result.to).to.be.equals(\"0xfa28ec7198028438514b49a3cf353bca5541ce1d\");",
-											"    pm.expect(jsonData.result.transactionIndex).to.be.equals(\"0x25\");",
-											"    pm.expect(jsonData.result.v).to.be.equals(\"0x26\");",
-											"    pm.expect(jsonData.result.value).to.be.equals(\"0x0\");",
-											"",
-											"    if (isParity) {",
-											"      pm.expect(jsonData.result.chainId).to.be.equals(\"0x1\");",
-											"      pm.expect(jsonData.result.condition).to.be.equals(null);",
-											"      pm.expect(jsonData.result.creates).to.be.equals(null);",
-											"      pm.expect(jsonData.result.publicKey).to.be.equals(\"0x84575c0c0091b07f4016991839301c7ca392ea48501c78c23660453556560ae24418536e540c2bd4c92491350e2fa128b092dd3e5a8d03fe7a6c5a54a20684cd\");",
-											"      pm.expect(jsonData.result.raw).to.be.equals(\"0xf8e8108411e1a300826b6c94fa28ec7198028438514b49a3cf353bca5541ce1d80b88480dfa34a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002e516d556558334448416654747442464a42315454384a617a67765744776a727a734268697369347354753261355100000000000000000000000000000000000026a00acdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222a0132a0517a4c52916e0c6b0e74b0479326891df2a9afd711482c7f3919b335ff6\");",
-											"      pm.expect(jsonData.result.standardV).to.be.equals(\"0x1\");",
-											"    }",
+											"    var keys = Object.keys(jsonData.result);",
+											"    keys.map(function (k) {",
+											"      var value = jsonData.result[k] ? jsonData.result[k] : null;",
+											"      var expect = expected.result[k] ? expected.result[k] : null;",
+											"      if (expect && typeof expect === 'object') {",
+											"        jsonData.result[k].map(function (value, index) {",
+											"           var expect = expected.result[k][index];",
+											"          pm.expect(value).to.be.equal(expect)",
+											"        })",
+											"      } else {",
+											"        pm.expect(value).to.be.equal(expect)",
+											"      }",
+											"    });",
 											"})",
 											""
 										],
@@ -620,7 +655,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getTransactionByBlockHashAndIndex\",\n\t\"params\":[\n\t\t\"0x785b221ec95c66579d5ae14eebe16284a769e948359615d580f02e646e93f1d5\", \n\t\t\"0x25\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getTransactionByBlockHashAndIndex\",\n\t\"params\":[\n\t\t\"0x785b221ec95c66579d5ae14eebe16284a769e948359615d580f02e646e93f1d5\", \n\t\t\"0x25\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -640,38 +678,42 @@
 									"script": {
 										"id": "44d67b3a-acf4-41c0-a79d-cda569505de6",
 										"exec": [
+											"var expected = {",
+											"  \"jsonrpc\": \"2.0\",",
+											"  \"id\": 1,",
+											"  \"result\": {",
+											"    \"blockHash\": \"0x785b221ec95c66579d5ae14eebe16284a769e948359615d580f02e646e93f1d5\",",
+											"    \"blockNumber\": \"0x52a90b\",",
+											"    \"from\": \"0x11b6a5fe2906f3354145613db0d99ceb51f604c9\",",
+											"    \"gas\": \"0x6b6c\",",
+											"    \"gasPrice\": \"0x11e1a300\",",
+											"    \"hash\": \"0xb2fea9c4b24775af6990237aa90228e5e092c56bdaee74496992a53c208da1ee\",",
+											"    \"input\": \"0x80dfa34a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002e516d556558334448416654747442464a42315454384a617a67765744776a727a7342686973693473547532613551000000000000000000000000000000000000\",",
+											"    \"nonce\": \"0x10\",",
+											"    \"r\": \"0xacdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222\",",
+											"    \"s\": \"0x132a0517a4c52916e0c6b0e74b0479326891df2a9afd711482c7f3919b335ff6\",",
+											"    \"to\": \"0xfa28ec7198028438514b49a3cf353bca5541ce1d\",",
+											"    \"transactionIndex\": \"0x25\",",
+											"    \"v\": \"0x26\",",
+											"    \"value\": \"0x0\"",
+											"  }",
+											"}",
+											"",
 											"pm.test('Has correct result', function() {",
-											"    var isNetherMind = pm.environment.get('HOST') === '{{NETHERMIND}}'",
-											"    var isParity = pm.environment.get('HOST') == \"{{PARITY}}\";",
 											"    const jsonData = pm.response.json();",
-											"",
-											"    pm.expect(jsonData.result.blockHash).to.be.equals(\"0x785b221ec95c66579d5ae14eebe16284a769e948359615d580f02e646e93f1d5\");",
-											"    pm.expect(jsonData.result.blockNumber).to.be.equals( \"0x52a90b\");",
-											"    pm.expect(jsonData.result.from).to.be.equals(\"0x11b6a5fe2906f3354145613db0d99ceb51f604c9\");",
-											"    pm.expect(jsonData.result.gas).to.be.equals(\"0x6b6c\");",
-											"    pm.expect(jsonData.result.gasPrice).to.be.equals(\"0x11e1a300\");",
-											"    pm.expect(jsonData.result.hash).to.be.equals(\"0xb2fea9c4b24775af6990237aa90228e5e092c56bdaee74496992a53c208da1ee\");",
-											"    pm.expect(jsonData.result.input).to.be.equals(\"0x80dfa34a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002e516d556558334448416654747442464a42315454384a617a67765744776a727a7342686973693473547532613551000000000000000000000000000000000000\");",
-											"    pm.expect(jsonData.result.nonce).to.be.equals(\"0x10\");",
-											"    if (isNetherMind) {",
-											"      pm.expect(jsonData.result.r).to.be.equals(\"0x0acdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222\");",
-											"    } else {",
-											"      pm.expect(jsonData.result.r).to.be.equals(\"0xacdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222\");",
-											"    }",
-											"    pm.expect(jsonData.result.s).to.be.equals(\"0x132a0517a4c52916e0c6b0e74b0479326891df2a9afd711482c7f3919b335ff6\");",
-											"    pm.expect(jsonData.result.to).to.be.equals(\"0xfa28ec7198028438514b49a3cf353bca5541ce1d\");",
-											"    pm.expect(jsonData.result.transactionIndex).to.be.equals(\"0x25\");",
-											"    pm.expect(jsonData.result.v).to.be.equals(\"0x26\");",
-											"    pm.expect(jsonData.result.value).to.be.equals(\"0x0\");",
-											"",
-											"    if (isParity) {",
-											"      pm.expect(jsonData.result.chainId).to.be.equals(\"0x1\");",
-											"      pm.expect(jsonData.result.condition).to.be.equals(null);",
-											"      pm.expect(jsonData.result.creates).to.be.equals(null);",
-											"      pm.expect(jsonData.result.publicKey).to.be.equals(\"0x84575c0c0091b07f4016991839301c7ca392ea48501c78c23660453556560ae24418536e540c2bd4c92491350e2fa128b092dd3e5a8d03fe7a6c5a54a20684cd\");",
-											"      pm.expect(jsonData.result.raw).to.be.equals(\"0xf8e8108411e1a300826b6c94fa28ec7198028438514b49a3cf353bca5541ce1d80b88480dfa34a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002e516d556558334448416654747442464a42315454384a617a67765744776a727a734268697369347354753261355100000000000000000000000000000000000026a00acdf839bdcb6653da60900f739076a00ecbe0059fa046933348e9b68a62a222a0132a0517a4c52916e0c6b0e74b0479326891df2a9afd711482c7f3919b335ff6\");",
-											"      pm.expect(jsonData.result.standardV).to.be.equals(\"0x1\");",
-											"    }",
+											"    var keys = Object.keys(jsonData.result);",
+											"    keys.map(function (k) {",
+											"      var value = jsonData.result[k] ? jsonData.result[k] : null;",
+											"      var expect = expected.result[k] ? expected.result[k] : null;",
+											"      if (expect && typeof expect === 'object') {",
+											"        jsonData.result[k].map(function (value, index) {",
+											"           var expect = expected.result[k][index];",
+											"          pm.expect(value).to.be.equal(expect)",
+											"        })",
+											"      } else {",
+											"        pm.expect(value).to.be.equal(expect)",
+											"      }",
+											"    });",
 											"})",
 											""
 										],
@@ -689,7 +731,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getTransactionByBlockNumberAndIndex\",\n\t\"params\":[\n\t\t\"0x52a90b\", \n\t\t\"0x25\"\n\t],\n\t\"id\":1\n}\n"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getTransactionByBlockNumberAndIndex\",\n\t\"params\":[\n\t\t\"0x52a90b\", \n\t\t\"0x25\"\n\t],\n\t\"id\":1\n}\n",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -703,6 +748,85 @@
 						},
 						{
 							"name": "getTransactionReceipt",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "7f176149-7a48-42c3-b5f9-48e7eb84ed67",
+										"exec": [
+											"var expected = {",
+											"  \"jsonrpc\": \"2.0\",",
+											"  \"id\": 1,",
+											"  \"result\": {",
+											"    \"blockHash\": \"0xf6084155ff2022773b22df3217d16e9df53cbc42689b27ca4789e06b6339beb2\",",
+											"    \"blockNumber\": \"0x52a975\",",
+											"    \"contractAddress\": null,",
+											"    \"cumulativeGasUsed\": \"0x797db0\",",
+											"    \"from\": \"0xd907941c8b3b966546fc408b8c942eb10a4f98df\",",
+											"    \"gasUsed\": \"0x1308c\",",
+											"    \"logs\": [",
+											"      {",
+											"        \"address\": \"0xd6df5935cd03a768b7b9e92637a01b25e24cb709\",",
+											"        \"topics\": [",
+											"          \"0x8940c4b8e215f8822c5c8f0056c12652c746cbc57eedbd2a440b175971d47a77\",",
+											"          \"0x000000000000000000000000d907941c8b3b966546fc408b8c942eb10a4f98df\"",
+											"        ],",
+											"        \"data\": \"0x0000000000000000000000000000000000000000000000000000008bb2c97000\",",
+											"        \"blockNumber\": \"0x52a975\",",
+											"        \"transactionHash\": \"0xa3ece39ae137617669c6933b7578b94e705e765683f260fcfe30eaa41932610f\",",
+											"        \"transactionIndex\": \"0x29\",",
+											"        \"blockHash\": \"0xf6084155ff2022773b22df3217d16e9df53cbc42689b27ca4789e06b6339beb2\",",
+											"        \"logIndex\": \"0x119\",",
+											"        \"removed\": false",
+											"      },",
+											"      {",
+											"        \"address\": \"0xd6df5935cd03a768b7b9e92637a01b25e24cb709\",",
+											"        \"topics\": [",
+											"          \"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef\",",
+											"          \"0x0000000000000000000000000000000000000000000000000000000000000000\",",
+											"          \"0x000000000000000000000000d907941c8b3b966546fc408b8c942eb10a4f98df\"",
+											"        ],",
+											"        \"data\": \"0x0000000000000000000000000000000000000000000000000000008bb2c97000\",",
+											"        \"blockNumber\": \"0x52a975\",",
+											"        \"transactionHash\": \"0xa3ece39ae137617669c6933b7578b94e705e765683f260fcfe30eaa41932610f\",",
+											"        \"transactionIndex\": \"0x29\",",
+											"        \"blockHash\": \"0xf6084155ff2022773b22df3217d16e9df53cbc42689b27ca4789e06b6339beb2\",",
+											"        \"logIndex\": \"0x11a\",",
+											"        \"removed\": false",
+											"      }",
+											"    ],",
+											"    \"logsBloom\": \"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000020000000000000000000800000000000000004010000010100000000000000000000000000000000000000000000000000040000080000000000000080000000000000000000000000000000000000000000020000000000000000000000002000000000000000000000000000000000000000000000000000020000000010000000000000000000000000000000000000000000000000000000000\",",
+											"    \"status\": \"0x1\",",
+											"    \"to\": \"0xd6df5935cd03a768b7b9e92637a01b25e24cb709\",",
+											"    \"transactionHash\": \"0xa3ece39ae137617669c6933b7578b94e705e765683f260fcfe30eaa41932610f\",",
+											"    \"transactionIndex\": \"0x29\"",
+											"  }",
+											"}",
+											"",
+											"pm.test('Has correct result', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var keys = Object.keys(jsonData.result);",
+											"    keys.map(function (k) {",
+											"      var value = jsonData.result[k] ? jsonData.result[k] : null;",
+											"      var expect = expected.result[k] ? expected.result[k] : null;",
+											"      if (expect && typeof expect === 'object') {",
+											"        if (k !== 'logs') {",
+											"          jsonData.result[k].map(function (value, index) {",
+											"            var expect = expected.result[k][index];",
+											"            pm.expect(value).to.be.equal(expect)",
+											"          })",
+											"        }",
+											"      } else {",
+											"        pm.expect(value).to.be.equal(expect)",
+											"      }",
+											"    });",
+											"})",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -713,7 +837,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getTransactionReceipt\",\n\t\"params\":[\n\t\t\"0xa3ece39ae137617669c6933b7578b94e705e765683f260fcfe30eaa41932610f\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getTransactionReceipt\",\n\t\"params\":[\n\t\t\"0xa3ece39ae137617669c6933b7578b94e705e765683f260fcfe30eaa41932610f\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -740,42 +867,48 @@
 									"script": {
 										"id": "e43fd15d-866d-4302-8437-130b46e69551",
 										"exec": [
+											"var expected = {",
+											"  \"jsonrpc\": \"2.0\",",
+											"  \"id\": 1,",
+											"  \"result\": {",
+											"    \"difficulty\": \"0x3ff800000\",",
+											"    \"extraData\": \"0x59617465732052616e64616c6c202d2045746865724e696e6a61\",",
+											"    \"gasLimit\": \"0x1388\",",
+											"    \"gasUsed\": \"0x0\",",
+											"    \"hash\": \"0x5cd50096dbb856a6d1befa6de8f9c20decb299f375154427d90761dc0b101109\",",
+											"    \"logsBloom\": \"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",",
+											"    \"miner\": \"0xc8ebccc5f5689fa8659d83713341e5ad19349448\",",
+											"    \"mixHash\": \"0xf8c94dfe61cf26dcdf8cffeda337cf6a903d65c449d7691a022837f6e2d99459\",",
+											"    \"nonce\": \"0x68b769c5451a7aea\",",
+											"    \"number\": \"0x1\",",
+											"    \"parentHash\": \"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\",",
+											"    \"receiptsRoot\": \"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",",
+											"    \"sha3Uncles\": \"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",",
+											"    \"size\": \"0x21a\",",
+											"    \"stateRoot\": \"0x1e6e030581fd1873b4784280859cd3b3c04aa85520f08c304cf5ee63d3935add\",",
+											"    \"timestamp\": \"0x55ba4242\",",
+											"    \"totalDifficulty\": \"0xffd003ffe\",",
+											"    \"transactionsRoot\": \"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",",
+											"    \"uncles\": []",
+											"  }",
+											"}",
+											"",
 											"pm.test('Has correct result', function() {",
-											"    var isNetherMind = pm.environment.get('HOST') === '{{NETHERMIND}}'",
-											"    var isParity = pm.environment.get('HOST') == \"{{PARITY}}\";",
 											"    const jsonData = pm.response.json();",
-											"",
-											"    pm.expect(jsonData.result.difficulty).to.be.equals(\"0x3ff800000\");",
-											"    pm.expect(jsonData.result.extraData).to.be.equals(\"0x59617465732052616e64616c6c202d2045746865724e696e6a61\");",
-											"    pm.expect(jsonData.result.gasLimit).to.be.equals(\"0x1388\");",
-											"    pm.expect(jsonData.result.gasUsed).to.be.equals(\"0x0\");",
-											"    pm.expect(jsonData.result.hash).to.be.equals(\"0x5cd50096dbb856a6d1befa6de8f9c20decb299f375154427d90761dc0b101109\");",
-											"    pm.expect(jsonData.result.logsBloom).to.be.equals(\"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\");",
-											"    pm.expect(jsonData.result.miner).to.be.equals(\"0xc8ebccc5f5689fa8659d83713341e5ad19349448\");",
-											"    pm.expect(jsonData.result.mixHash).to.be.equals(\"0xf8c94dfe61cf26dcdf8cffeda337cf6a903d65c449d7691a022837f6e2d99459\");",
-											"    pm.expect(jsonData.result.nonce).to.be.equals(\"0x68b769c5451a7aea\");",
-											"    pm.expect(jsonData.result.number).to.be.equals(\"0x1\");",
-											"    pm.expect(jsonData.result.parentHash).to.be.equals(\"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\");",
-											"    pm.expect(jsonData.result.receiptsRoot).to.be.equals(\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\");",
-											"    pm.expect(jsonData.result.sha3Uncles).to.be.equals(\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\");",
-											"    if (isParity) {",
-											"      pm.expect(jsonData.result.size).to.be.equals(null);",
-											"    } else {",
-											"      pm.expect(jsonData.result.size).to.be.equals(\"0x21a\");",
-											"    }",
-											"    pm.expect(jsonData.result.stateRoot).to.be.equals(\"0x1e6e030581fd1873b4784280859cd3b3c04aa85520f08c304cf5ee63d3935add\");",
-											"    pm.expect(jsonData.result.timestamp).to.be.equals(\"0x55ba4242\");",
-											"    if (isParity) {",
-											"      pm.expect(jsonData.result.totalDifficulty).to.be.equals(\"0x7ff800000\");",
-											"    } else if (isNetherMind) {",
-											"      pm.expect(jsonData.result.totalDifficulty).to.be.equals(\"0x0\");",
-											"    } else {",
-											"      pm.expect(jsonData.result.totalDifficulty).to.be.equals(\"0xffd003ffe\");",
-											"    }",
-											"    pm.expect(jsonData.result.transactionsRoot).to.be.equals(\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\");",
-											"});",
-											"",
-											"//pm.expect(jsonData.result.uncles.length()).to.be.equals(\"[]",
+											"    var keys = Object.keys(jsonData.result);",
+											"    keys.map(function (k) {",
+											"      var value = jsonData.result[k] ? jsonData.result[k] : null;",
+											"      var expect = expected.result[k] ? expected.result[k] : null;",
+											"      if (expect && typeof expect === 'object') {",
+											"        jsonData.result[k].map(function (value, index) {",
+											"           var expect = expected.result[k][index];",
+											"          pm.expect(value).to.be.equal(expect)",
+											"        })",
+											"      } else {",
+											"        pm.expect(value).to.be.equal(expect)",
+											"      }",
+											"    });",
+											"})",
 											""
 										],
 										"type": "text/javascript"
@@ -792,7 +925,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getUncleByBlockHashAndIndex\",\n\t\"params\":[\n\t\t\"0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741\", \n\t\t\"0x0\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getUncleByBlockHashAndIndex\",\n\t\"params\":[\n\t\t\"0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741\", \n\t\t\"0x0\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -812,42 +948,48 @@
 									"script": {
 										"id": "e6553476-e1ec-4dc1-8fb3-685e459fcdd0",
 										"exec": [
+											"var expected = {",
+											"  \"jsonrpc\": \"2.0\",",
+											"  \"id\": 1,",
+											"  \"result\": {",
+											"    \"difficulty\": \"0x3ff800000\",",
+											"    \"extraData\": \"0x59617465732052616e64616c6c202d2045746865724e696e6a61\",",
+											"    \"gasLimit\": \"0x1388\",",
+											"    \"gasUsed\": \"0x0\",",
+											"    \"hash\": \"0x5cd50096dbb856a6d1befa6de8f9c20decb299f375154427d90761dc0b101109\",",
+											"    \"logsBloom\": \"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",",
+											"    \"miner\": \"0xc8ebccc5f5689fa8659d83713341e5ad19349448\",",
+											"    \"mixHash\": \"0xf8c94dfe61cf26dcdf8cffeda337cf6a903d65c449d7691a022837f6e2d99459\",",
+											"    \"nonce\": \"0x68b769c5451a7aea\",",
+											"    \"number\": \"0x1\",",
+											"    \"parentHash\": \"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\",",
+											"    \"receiptsRoot\": \"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",",
+											"    \"sha3Uncles\": \"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",",
+											"    \"size\": \"0x21a\",",
+											"    \"stateRoot\": \"0x1e6e030581fd1873b4784280859cd3b3c04aa85520f08c304cf5ee63d3935add\",",
+											"    \"timestamp\": \"0x55ba4242\",",
+											"    \"totalDifficulty\": \"0xffd003ffe\",",
+											"    \"transactionsRoot\": \"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",",
+											"    \"uncles\": []",
+											"  }",
+											"}",
+											"",
 											"pm.test('Has correct result', function() {",
-											"    var isNetherMind = pm.environment.get('HOST') === '{{NETHERMIND}}'",
-											"    var isParity = pm.environment.get('HOST') == \"{{PARITY}}\";",
 											"    const jsonData = pm.response.json();",
-											"",
-											"    pm.expect(jsonData.result.difficulty).to.be.equals(\"0x3ff800000\");",
-											"    pm.expect(jsonData.result.extraData).to.be.equals(\"0x59617465732052616e64616c6c202d2045746865724e696e6a61\");",
-											"    pm.expect(jsonData.result.gasLimit).to.be.equals(\"0x1388\");",
-											"    pm.expect(jsonData.result.gasUsed).to.be.equals(\"0x0\");",
-											"    pm.expect(jsonData.result.hash).to.be.equals(\"0x5cd50096dbb856a6d1befa6de8f9c20decb299f375154427d90761dc0b101109\");",
-											"    pm.expect(jsonData.result.logsBloom).to.be.equals(\"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\");",
-											"    pm.expect(jsonData.result.miner).to.be.equals(\"0xc8ebccc5f5689fa8659d83713341e5ad19349448\");",
-											"    pm.expect(jsonData.result.mixHash).to.be.equals(\"0xf8c94dfe61cf26dcdf8cffeda337cf6a903d65c449d7691a022837f6e2d99459\");",
-											"    pm.expect(jsonData.result.nonce).to.be.equals(\"0x68b769c5451a7aea\");",
-											"    pm.expect(jsonData.result.number).to.be.equals(\"0x1\");",
-											"    pm.expect(jsonData.result.parentHash).to.be.equals(\"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\");",
-											"    pm.expect(jsonData.result.receiptsRoot).to.be.equals(\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\");",
-											"    pm.expect(jsonData.result.sha3Uncles).to.be.equals(\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\");",
-											"    if (isParity) {",
-											"      pm.expect(jsonData.result.size).to.be.equals(null);",
-											"    } else {",
-											"      pm.expect(jsonData.result.size).to.be.equals(\"0x21a\");",
-											"    }",
-											"    pm.expect(jsonData.result.stateRoot).to.be.equals(\"0x1e6e030581fd1873b4784280859cd3b3c04aa85520f08c304cf5ee63d3935add\");",
-											"    pm.expect(jsonData.result.timestamp).to.be.equals(\"0x55ba4242\");",
-											"    if (isParity) {",
-											"      pm.expect(jsonData.result.totalDifficulty).to.be.equals(\"0x7ff800000\");",
-											"    } else if (isNetherMind) {",
-											"      pm.expect(jsonData.result.totalDifficulty).to.be.equals(\"0x0\");",
-											"    } else {",
-											"      pm.expect(jsonData.result.totalDifficulty).to.be.equals(\"0xffd003ffe\");",
-											"    }",
-											"    pm.expect(jsonData.result.transactionsRoot).to.be.equals(\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\");",
-											"});",
-											"",
-											"//pm.expect(jsonData.result.uncles.length()).to.be.equals(\"[]",
+											"    var keys = Object.keys(jsonData.result);",
+											"    keys.map(function (k) {",
+											"      var value = jsonData.result[k] ? jsonData.result[k] : null;",
+											"      var expect = expected.result[k] ? expected.result[k] : null;",
+											"      if (expect && typeof expect === 'object') {",
+											"        jsonData.result[k].map(function (value, index) {",
+											"           var expect = expected.result[k][index];",
+											"          pm.expect(value).to.be.equal(expect)",
+											"        })",
+											"      } else {",
+											"        pm.expect(value).to.be.equal(expect)",
+											"      }",
+											"    });",
+											"})",
 											""
 										],
 										"type": "text/javascript"
@@ -864,7 +1006,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getUncleByBlockNumberAndIndex\",\n\t\"params\":[\n\t\t\"0x3\",\n\t\t\"0x0\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getUncleByBlockNumberAndIndex\",\n\t\"params\":[\n\t\t\"0x3\",\n\t\t\"0x0\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -885,6 +1030,24 @@
 					"item": [
 						{
 							"name": "newPendingTransactionFilter",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "c68f4858-5f80-4276-ab0d-a364a8cf53c6",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -895,7 +1058,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newPendingTransactionFilter\",\n\t\"params\":[],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newPendingTransactionFilter\",\n\t\"params\":[],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -909,6 +1075,24 @@
 						},
 						{
 							"name": "newBlockFilter",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "48c6c187-468e-4a49-aeeb-0b2d09ff2da5",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -919,7 +1103,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newBlockFilter\",\n\t\"params\":[],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newBlockFilter\",\n\t\"params\":[],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -933,6 +1120,24 @@
 						},
 						{
 							"name": "newFilter",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "f896a52e-65d3-4f84-a7e9-8142e1f10a10",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -943,7 +1148,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newFilter\",\n\t\"params\":[\n\t\t{\n\t\t\t\"topics\":[\"0x12341234\"]\n\t\t}\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newFilter\",\n\t\"params\":[\n\t\t{\n\t\t\t\"topics\":[\"0x12341234\"]\n\t\t}\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -957,6 +1165,24 @@
 						},
 						{
 							"name": "uninstallFilter",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "1dad5d63-c226-451e-bdb0-1d56bcef3b68",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -967,7 +1193,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_uninstallFilter\",\n\t\"params\":[\n\t\t\"0xb\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_uninstallFilter\",\n\t\"params\":[\n\t\t\"0xb\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -981,6 +1210,24 @@
 						},
 						{
 							"name": "getFilterChanges",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "f3afd933-40e6-4228-9d98-fa76d3fb9a0f",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -991,7 +1238,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getFilterChanges\",\n\t\"params\":[\n\t\t\"0x16\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getFilterChanges\",\n\t\"params\":[\n\t\t\"0x16\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1005,6 +1255,24 @@
 						},
 						{
 							"name": "getLogs",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "efb4a8b0-ef81-4894-85fe-3a8ec6cae8b1",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1015,7 +1283,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getLogs\",\n\t\"params\":[{\n\t\t\"topics\":[\n\t\t\t\"0x000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b\"\n\t\t]\n\t}],\n\t\"id\":74\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getLogs\",\n\t\"params\":[{\n\t\t\"topics\":[\n\t\t\t\"0x000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b\"\n\t\t]\n\t}],\n\t\"id\":74\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1071,7 +1342,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_accounts\",\n\t\"params\":[],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_accounts\",\n\t\"params\":[],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1085,6 +1359,24 @@
 						},
 						{
 							"name": "getBalance",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "2b42ffad-d4a5-4d7c-95bf-ff04bdf69bc6",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1095,7 +1387,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getBalance\",\n\t\"params\":[\n\t\t\"0x407d73d8a49eeb85d32cf465507dd71d507100c1\", \n\t\t\"latest\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getBalance\",\n\t\"params\":[\n\t\t\"0x407d73d8a49eeb85d32cf465507dd71d507100c1\", \n\t\t\"latest\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1109,6 +1404,24 @@
 						},
 						{
 							"name": "getStorageAt",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "69e5e2ec-c8e6-4ada-b31d-8d80d46d6661",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1119,7 +1432,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\", \n\t\"method\": \"eth_getStorageAt\", \n\t\"params\": [\n\t\t\"0x295a70b2de5e3953354a6a8344e616ed314d7251\", \n\t\t\"0x0\",\n\t\t\"latest\"\n\t], \n\t\"id\": 1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\", \n\t\"method\": \"eth_getStorageAt\", \n\t\"params\": [\n\t\t\"0x295a70b2de5e3953354a6a8344e616ed314d7251\", \n\t\t\"0x0\",\n\t\t\"latest\"\n\t], \n\t\"id\": 1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1133,6 +1449,24 @@
 						},
 						{
 							"name": "getTransactionCount",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "62f803e4-e3a0-407f-bc7c-651963f3bbd5",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1143,7 +1477,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getTransactionCount\",\n\t\"params\":[\n\t\t\"0x407d73d8a49eeb85d32cf465507dd71d507100c1\",\n\t\t\"latest\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getTransactionCount\",\n\t\"params\":[\n\t\t\"0x407d73d8a49eeb85d32cf465507dd71d507100c1\",\n\t\t\"latest\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1157,6 +1494,24 @@
 						},
 						{
 							"name": "getCode",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "102f95bd-afe4-401a-93d6-5a60dd3b7ea3",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1167,7 +1522,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getCode\",\n\t\"params\":[\n\t\t\"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b\", \n\t\t\"0x2\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getCode\",\n\t\"params\":[\n\t\t\"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b\", \n\t\t\"0x2\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1176,109 +1534,6 @@
 									]
 								},
 								"description": "Returns code at a given address.\r\n\r\n**Parameters**\r\n\r\n`DATA`, 20 Bytes - address\r\n\r\n`QUANTITY|TAG` - integer block number, or the string `\"latest\"`, `\"earliest\"` or `\"pending\"`, see the default block parameter\r\n\r\n```\r\nparams: [\r\n   ' 0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b',\r\n   '0x2'  // 2\r\n]\r\n```\r\n\r\n**Returns**\r\n\r\n`DATA` - the code from the given address."
-							},
-							"response": []
-						}
-					],
-					"protocolProfileBehavior": {},
-					"_postman_isSubFolder": true
-				},
-				{
-					"name": "sending",
-					"item": [
-						{
-							"name": "call",
-							"request": {
-								"method": "POST",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									}
-								],
-								"body": {
-									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_call\",\n\t\"params\":[{\n\t\t\"from\": \"\",\n\t\t\"to\": \"\",\n\t\t\"gas\": \"\",\n\t\t\"gasPrice\": \"\",\n\t\t\"value\": \"\",\n\t\t\"data\": \"\"\n\t}, \"latest\"],\n\t\"id\":1\n}"
-								},
-								"url": {
-									"raw": "{{HOST}}",
-									"host": [
-										"{{HOST}}"
-									]
-								},
-								"description": "Executes a new message call immediately without creating a transaction on the block chain.\r\n\r\n**Parameters**\r\n\r\n`Object` - The transaction call object\r\n\r\n`from`: `DATA`, 20 Bytes - (optional) The address the transaction is sent from.\r\n\r\n`to`: `DATA`, 20 Bytes - The address the transaction is directed to.\r\n\r\n`gas`: `QUANTITY` - (optional) Integer of the gas provided for the transaction execution. eth_call consumes zero gas, but this parameter may be needed by some executions.\r\n\r\n`gasPrice`: `QUANTITY` - (optional) Integer of the gasPrice used for each paid gas\r\n\r\n`value`: `QUANTITY` - (optional) Integer of the value sent with this transaction\r\n\r\n`data`: `DATA` - (optional) Hash of the method signature and encoded parameters. For details see Ethereum Contract ABI\r\n\r\n`QUANTITY|TAG` - integer block number, or the string `\"latest\"`, `\"earliest\"` or `\"pending\"`, see the default block parameter\r\n\r\n**Returns**\r\n\r\n`DATA` - the return value of executed contract."
-							},
-							"response": []
-						},
-						{
-							"name": "estimateGas",
-							"request": {
-								"method": "POST",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									}
-								],
-								"body": {
-									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_estimateGas\",\n\t\"params\":[\n\t],\n\t\"id\":1\n}"
-								},
-								"url": {
-									"raw": "{{HOST}}",
-									"host": [
-										"{{HOST}}"
-									]
-								},
-								"description": "Generates and returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain. Note that the estimate may be significantly more than the amount of gas actually used by the transaction, for a variety of reasons including EVM mechanics and node performance.\r\n\r\n**Parameters**\r\n\r\nSee `eth_call` parameters, expect that all properties are optional. If no gas limit is specified geth uses the block gas limit from the pending block as an upper bound. As a result the returned estimate might not be enough to executed the call/transaction when the amount of gas is higher than the pending block gas limit.\r\n\r\n**Returns**\r\n\r\n`QUANTITY` - the amount of gas used."
-							},
-							"response": []
-						},
-						{
-							"name": "sendTransaction",
-							"request": {
-								"method": "POST",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									}
-								],
-								"body": {
-									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_sendTransaction\",\n\t\"params\":[{\n\t\t\"from\": \"0xb60e8dd61c5d32be8058bb8eb970870f07233155\",\n\t\t\"to\": \"0xd46e8dd67c5d32be8058bb8eb970870f07244567_hangs_parity\",\n\t\t\"gas\": \"0x76c0\",\n\t\t\"gasPrice\": \"0x9184e72a000\",\n\t\t\"value\": \"0x9184e72a\",\n\t\t\"data\": \"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"\n\t}],\n\t\"id\":1\n}"
-								},
-								"url": {
-									"raw": "{{HOST}}",
-									"host": [
-										"{{HOST}}"
-									]
-								},
-								"description": "Creates new message call transaction or a contract creation, if the data field contains code.\r\n\r\n**Parameters**\r\n\r\n`Object` - The transaction object\r\n\r\n`from`: `DATA`, 20 Bytes - The address the transaction is send from.\r\n\r\n`to`: `DATA`, 20 Bytes - (optional when creating new contract) The address the transaction is directed to.\r\n\r\n`gas`: `QUANTITY` - (optional, default: 90000) Integer of the gas provided for the transaction execution. It will return unused gas.\r\n\r\n`gasPrice`: `QUANTITY` - (optional, default: To-Be-Determined) Integer of the gasPrice used for each paid gas\r\n\r\n`value`: `QUANTITY` - (optional) Integer of the value sent with this transaction\r\n\r\n`data`: `DATA` - The compiled code of a contract OR the hash of the invoked method signature and encoded parameters. For details see Ethereum Contract ABI\r\n\r\n`nonce`: `QUANTITY` - (optional) Integer of a nonce. This allows to overwrite your own pending transactions that use the same nonce.\r\n\r\n```\r\nparams: [{\r\n  \"from\": \" 0xb60e8dd61c5d32be8058bb8eb970870f07233155\",\r\n  \"to\": \" 0xd46e8dd67c5d32be8058bb8eb970870f07244567\",\r\n  \"gas\": \"0x76c0\", // 30400\r\n  \"gasPrice\": \"0x9184e72a000\", // 10000000000000\r\n  \"value\": \"0x9184e72a\", // 2441406250\r\n  \"data\": \"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"\r\n}]\r\n```\r\n\r\n**Returns**\r\n\r\n`DATA`, 32 Bytes - the transaction hash, or the zero hash if the transaction is not yet available.\r\n\r\nUse `eth_getTransactionReceipt` to get the contract address, after the transaction was mined, when you created a contract."
-							},
-							"response": []
-						},
-						{
-							"name": "sendRawTransaction",
-							"request": {
-								"method": "POST",
-								"header": [
-									{
-										"key": "Content-Type",
-										"value": "application/json"
-									}
-								],
-								"body": {
-									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_sendRawTransaction\",\n\t\"params\":[\"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"],\n\t\"id\":1\n}"
-								},
-								"url": {
-									"raw": "{{HOST}}",
-									"host": [
-										"{{HOST}}"
-									]
-								},
-								"description": "Creates new message call transaction or a contract creation for signed transactions.\r\n\r\n**Parameters**\r\n\r\n`DATA`, The signed transaction data.\r\n\r\n```\r\nparams: [\"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"]\r\n```\r\n\r\n**Returns**\r\n\r\n`DATA`, 32 Bytes - the transaction hash, or the zero hash if the transaction is not yet available.\r\n\r\nUse `eth_getTransactionReceipt` to get the contract address, after the transaction was mined, when you created a contract."
 							},
 							"response": []
 						}
@@ -1323,7 +1578,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_protocolVersion\",\n\t\"params\":[],\n\t\"id\":67\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_protocolVersion\",\n\t\"params\":[],\n\t\"id\":67\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1343,7 +1601,11 @@
 									"script": {
 										"id": "e0eecb74-a219-426f-84c2-c10b79bed548",
 										"exec": [
-											"// We can't really test this because it changes all the time"
+											"// We can't really test this because it changes all the time",
+											"// We can't really test this because it changes all the time",
+											"pm.test('Cannot test because the value changes each time', function() {",
+											"  pm.expect(true).to.be.true;",
+											"});"
 										],
 										"type": "text/javascript"
 									}
@@ -1359,7 +1621,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_blockNumber\",\n\t\"params\":[],\n\t\"id\":83\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_blockNumber\",\n\t\"params\":[],\n\t\"id\":83\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1379,7 +1644,10 @@
 									"script": {
 										"id": "20998432-d136-400f-b8e2-ea62d493c0db",
 										"exec": [
-											"// There's nothing really to test here. It's either syncing or it's not depending on the node."
+											"// There's nothing really to test here. The node is always syncing",
+											"pm.test('Endpoint not tested', function() {",
+											"  pm.expect(true).to.be.true;",
+											"});"
 										],
 										"type": "text/javascript"
 									}
@@ -1395,7 +1663,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_syncing\",\n\t\"params\":[],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_syncing\",\n\t\"params\":[],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1415,7 +1686,10 @@
 									"script": {
 										"id": "69b7f56c-2a5c-425b-a6e7-d05d65d96e25",
 										"exec": [
-											"// This can't really be tested as it changes all the time"
+											"// This can't really be tested as it changes all the time",
+											"pm.test('Cannot test because the value changes each time', function() {",
+											"  pm.expect(true).to.be.true;",
+											"});"
 										],
 										"type": "text/javascript"
 									}
@@ -1431,7 +1705,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_gasPrice\",\n\t\"params\":[],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_gasPrice\",\n\t\"params\":[],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1448,10 +1725,28 @@
 					"_postman_isSubFolder": true
 				},
 				{
-					"name": "mining",
+					"name": "call",
 					"item": [
 						{
-							"name": "coinbase",
+							"name": "call",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "d6fc5492-d57f-4a7d-a624-bfa92fb287fc",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1462,7 +1757,219 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_coinbase\",\n\t\"params\":[],\n\t\"id\":64\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_call\",\n\t\"params\":[{\n\t\t\"from\": \"\",\n\t\t\"to\": \"\",\n\t\t\"gas\": \"\",\n\t\t\"gasPrice\": \"\",\n\t\t\"value\": \"\",\n\t\t\"data\": \"\"\n\t}, \"latest\"],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
+								},
+								"url": {
+									"raw": "{{HOST}}",
+									"host": [
+										"{{HOST}}"
+									]
+								},
+								"description": "Executes a new message call immediately without creating a transaction on the block chain.\r\n\r\n**Parameters**\r\n\r\n`Object` - The transaction call object\r\n\r\n`from`: `DATA`, 20 Bytes - (optional) The address the transaction is sent from.\r\n\r\n`to`: `DATA`, 20 Bytes - The address the transaction is directed to.\r\n\r\n`gas`: `QUANTITY` - (optional) Integer of the gas provided for the transaction execution. eth_call consumes zero gas, but this parameter may be needed by some executions.\r\n\r\n`gasPrice`: `QUANTITY` - (optional) Integer of the gasPrice used for each paid gas\r\n\r\n`value`: `QUANTITY` - (optional) Integer of the value sent with this transaction\r\n\r\n`data`: `DATA` - (optional) Hash of the method signature and encoded parameters. For details see Ethereum Contract ABI\r\n\r\n`QUANTITY|TAG` - integer block number, or the string `\"latest\"`, `\"earliest\"` or `\"pending\"`, see the default block parameter\r\n\r\n**Returns**\r\n\r\n`DATA` - the return value of executed contract."
+							},
+							"response": []
+						},
+						{
+							"name": "estimateGas",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "068a33d6-1ca7-4493-949a-ff3ff4eedfe0",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_estimateGas\",\n\t\"params\":[\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
+								},
+								"url": {
+									"raw": "{{HOST}}",
+									"host": [
+										"{{HOST}}"
+									]
+								},
+								"description": "Generates and returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain. Note that the estimate may be significantly more than the amount of gas actually used by the transaction, for a variety of reasons including EVM mechanics and node performance.\r\n\r\n**Parameters**\r\n\r\nSee `eth_call` parameters, expect that all properties are optional. If no gas limit is specified geth uses the block gas limit from the pending block as an upper bound. As a result the returned estimate might not be enough to executed the call/transaction when the amount of gas is higher than the pending block gas limit.\r\n\r\n**Returns**\r\n\r\n`QUANTITY` - the amount of gas used."
+							},
+							"response": []
+						},
+						{
+							"name": "sendTransaction",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "1f043ab2-7fc5-4ad9-b487-a502b5625168",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_sendTransaction\",\n\t\"params\":[{\n\t\t\"from\": \"0xb60e8dd61c5d32be8058bb8eb970870f07233155\",\n\t\t\"to\": \"0xd46e8dd67c5d32be8058bb8eb970870f07244567_hangs_parity\",\n\t\t\"gas\": \"0x76c0\",\n\t\t\"gasPrice\": \"0x9184e72a000\",\n\t\t\"value\": \"0x9184e72a\",\n\t\t\"data\": \"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"\n\t}],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
+								},
+								"url": {
+									"raw": "{{HOST}}",
+									"host": [
+										"{{HOST}}"
+									]
+								},
+								"description": "Creates new message call transaction or a contract creation, if the data field contains code.\r\n\r\n**Parameters**\r\n\r\n`Object` - The transaction object\r\n\r\n`from`: `DATA`, 20 Bytes - The address the transaction is send from.\r\n\r\n`to`: `DATA`, 20 Bytes - (optional when creating new contract) The address the transaction is directed to.\r\n\r\n`gas`: `QUANTITY` - (optional, default: 90000) Integer of the gas provided for the transaction execution. It will return unused gas.\r\n\r\n`gasPrice`: `QUANTITY` - (optional, default: To-Be-Determined) Integer of the gasPrice used for each paid gas\r\n\r\n`value`: `QUANTITY` - (optional) Integer of the value sent with this transaction\r\n\r\n`data`: `DATA` - The compiled code of a contract OR the hash of the invoked method signature and encoded parameters. For details see Ethereum Contract ABI\r\n\r\n`nonce`: `QUANTITY` - (optional) Integer of a nonce. This allows to overwrite your own pending transactions that use the same nonce.\r\n\r\n```\r\nparams: [{\r\n  \"from\": \" 0xb60e8dd61c5d32be8058bb8eb970870f07233155\",\r\n  \"to\": \" 0xd46e8dd67c5d32be8058bb8eb970870f07244567\",\r\n  \"gas\": \"0x76c0\", // 30400\r\n  \"gasPrice\": \"0x9184e72a000\", // 10000000000000\r\n  \"value\": \"0x9184e72a\", // 2441406250\r\n  \"data\": \"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"\r\n}]\r\n```\r\n\r\n**Returns**\r\n\r\n`DATA`, 32 Bytes - the transaction hash, or the zero hash if the transaction is not yet available.\r\n\r\nUse `eth_getTransactionReceipt` to get the contract address, after the transaction was mined, when you created a contract."
+							},
+							"response": []
+						},
+						{
+							"name": "sendRawTransaction",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "5ffa83ef-cab4-4c8a-aac7-1c8bddb50e36",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_sendRawTransaction\",\n\t\"params\":[\"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
+								},
+								"url": {
+									"raw": "{{HOST}}",
+									"host": [
+										"{{HOST}}"
+									]
+								},
+								"description": "Creates new message call transaction or a contract creation for signed transactions.\r\n\r\n**Parameters**\r\n\r\n`DATA`, The signed transaction data.\r\n\r\n```\r\nparams: [\"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"]\r\n```\r\n\r\n**Returns**\r\n\r\n`DATA`, 32 Bytes - the transaction hash, or the zero hash if the transaction is not yet available.\r\n\r\nUse `eth_getTransactionReceipt` to get the contract address, after the transaction was mined, when you created a contract."
+							},
+							"response": []
+						}
+					],
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"id": "b80039ec-9cb7-4c56-a6b3-2ec598a425eb",
+								"type": "text/javascript",
+								"exec": [
+									""
+								]
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"id": "92843fa0-6dd2-45b1-940f-b109218bdf27",
+								"type": "text/javascript",
+								"exec": [
+									""
+								]
+							}
+						}
+					],
+					"protocolProfileBehavior": {},
+					"_postman_isSubFolder": true
+				},
+				{
+					"name": "mining",
+					"item": [
+						{
+							"name": "coinbase",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "e8b39efa-2676-4ce9-83c7-e6c13cba19f0",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_coinbase\",\n\t\"params\":[],\n\t\"id\":64\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1476,6 +1983,24 @@
 						},
 						{
 							"name": "hashrate",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "7bc34f02-8008-4c85-a116-c122da045d00",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1486,7 +2011,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_hashrate\",\n\t\"params\":[],\n\t\"id\":71\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_hashrate\",\n\t\"params\":[],\n\t\"id\":71\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1500,6 +2028,24 @@
 						},
 						{
 							"name": "mining",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "4224388e-90d2-417c-81cf-67d8078ea65c",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1510,7 +2056,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_mining\",\n\t\"params\":[],\n\t\"id\":71\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_mining\",\n\t\"params\":[],\n\t\"id\":71\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1524,6 +2073,24 @@
 						},
 						{
 							"name": "getWork",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "71e00c97-9f2f-4c3d-8109-c0b6c89d41e6",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1534,7 +2101,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getWork\",\n\t\"params\":[],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getWork\",\n\t\"params\":[],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1548,6 +2118,24 @@
 						},
 						{
 							"name": "submitWork",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "52a2bf9c-c4ec-4946-816a-87931a26c944",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1558,7 +2146,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\", \n\t\"method\":\"eth_submitWork\", \n\t\"params\":[\n\t\t\"0x0000000000000001\", \n\t\t\"0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\", \n\t\t\"0xD1GE5700000000000000000000000000D1GE5700000000000000000000000000\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\", \n\t\"method\":\"eth_submitWork\", \n\t\"params\":[\n\t\t\"0x0000000000000001\", \n\t\t\"0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\", \n\t\t\"0xD1GE5700000000000000000000000000D1GE5700000000000000000000000000\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1572,6 +2163,24 @@
 						},
 						{
 							"name": "submitHashrate",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "f71fbc77-b273-41b9-9d48-ed85d69bb9f4",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  pm.test('Not tested', function() {",
+											"    var tested = false;",
+											"    pm.expect(tested).to.be.true",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -1582,7 +2191,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\", \n\t\"method\":\"eth_submitHashrate\", \n\t\"params\":[\n\t\t\"0x0000000000000000000000000000000000000000000000000000000000500000\", \n\t\t\"0x59daa26581d0acd1fce254fb7e85952f4c09d0915afd33d3886cd914bc7d283c\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\", \n\t\"method\":\"eth_submitHashrate\", \n\t\"params\":[\n\t\t\"0x0000000000000000000000000000000000000000000000000000000000500000\", \n\t\t\"0x59daa26581d0acd1fce254fb7e85952f4c09d0915afd33d3886cd914bc7d283c\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1607,6 +2219,588 @@
 			"protocolProfileBehavior": {}
 		},
 		{
+			"name": "debug",
+			"item": [
+				{
+					"name": "deep_tests",
+					"item": [
+						{
+							"name": "debug_getModifiedAccountsByNumber (no parameter)",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "4aa967e2-5f5e-4cc6-a7f5-2be5fc418242",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  console.log(\"I AM HERE\");",
+											"  var expected = {",
+											"    \"jsonrpc\": \"2.0\",",
+											"    \"id\": 1,",
+											"    \"error\": {",
+											"      \"code\": -32602,",
+											"      \"message\": \"missing value for required argument 0\"",
+											"    }",
+											"  }",
+											"",
+											"  pm.test('Has error', function() {",
+											"      const jsonData = pm.response.json();",
+											"      pm.expect(jsonData.error.message).to.be.equal(expected.error.message);",
+											"      pm.expect(jsonData.error.code).to.be.equal(expected.error.code);",
+											"  })",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByNumber\",\n\t\"params\":[],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
+								},
+								"url": {
+									"raw": "{{HOST}}",
+									"host": [
+										"{{HOST}}"
+									]
+								},
+								"description": "Return modified accounts from a block\r\n\r\n**Parameters**\r\n\r\nstartNum - `QUANTITY|TAG` - integer of first block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n\r\nendNum - `QUANTITY|TAG` - optional integer of last block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n\r\n```\r\nTODO\r\n```\r\n\r\n**Returns**\r\n\r\nTODO"
+							},
+							"response": []
+						},
+						{
+							"name": "debug_getModifiedAccountsByNumber (one parameter)",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "61ac2764-12bb-41ab-aff9-d328209907e8",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  var expected = {",
+											"    \"jsonrpc\": \"2.0\",",
+											"    \"id\": 1,",
+											"    \"result\": [",
+											"      \"0xdd2f1e6e498202e86d8f5442af596580a4f03c2c\"",
+											"    ]",
+											"  }",
+											"",
+											"  pm.test('Has correct result', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var result = jsonData.result.sort();",
+											"    expected.result.map(function (expect, index) {",
+											"        var value = result[index];",
+											"        pm.expect(value).to.be.equal(expect)",
+											"    })",
+											"  })",
+											"}",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByNumber\",\n\t\"params\":[\n\t\t\"0x2\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
+								},
+								"url": {
+									"raw": "{{HOST}}",
+									"host": [
+										"{{HOST}}"
+									]
+								},
+								"description": "Return modified accounts from a block\r\n\r\n**Parameters**\r\n\r\nstartNum - `QUANTITY|TAG` - integer of first block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n\r\nendNum - `QUANTITY|TAG` - optional integer of last block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n\r\n```\r\nTODO\r\n```\r\n\r\n**Returns**\r\n\r\nTODO"
+							},
+							"response": []
+						},
+						{
+							"name": "debug_getModifiedAccountsByNumber (two parameters)",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "2c2cc936-0047-4567-a423-fccec47c56cb",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  var expected = {",
+											"    \"jsonrpc\": \"2.0\",",
+											"    \"id\": 1,",
+											"    \"result\": [",
+											"      \"0xdd2f1e6e498202e86d8f5442af596580a4f03c2c\"",
+											"    ]",
+											"  }",
+											"",
+											"  pm.test('Has correct result', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var result = jsonData.result.sort();",
+											"    expected.result.map(function (expect, index) {",
+											"        var value = result[index];",
+											"        pm.expect(value).to.be.equal(expect)",
+											"    })",
+											"  })",
+											"}",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByNumber\",\n\t\"params\":[\n\t\t\"0x2\",\n    \"0x2\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
+								},
+								"url": {
+									"raw": "{{HOST}}",
+									"host": [
+										"{{HOST}}"
+									]
+								},
+								"description": "Return modified accounts from a block\r\n\r\n**Parameters**\r\n\r\nstartNum - `QUANTITY|TAG` - integer of first block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n\r\nendNum - `QUANTITY|TAG` - optional integer of last block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n\r\n```\r\nTODO\r\n```\r\n\r\n**Returns**\r\n\r\nTODO"
+							},
+							"response": []
+						},
+						{
+							"name": "debug_getModifiedAccountsByNumber (two parameter different)",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "a935b586-5002-475b-bde7-407e3a08b092",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  var expected = {",
+											"    \"jsonrpc\": \"2.0\",",
+											"    \"id\": 1,",
+											"    \"result\": [",
+											"      \"0x5088d623ba0fcf0131e0897a91734a4d83596aa0\",",
+											"      \"0xc8ebccc5f5689fa8659d83713341e5ad19349448\",",
+											"      \"0xdd2f1e6e498202e86d8f5442af596580a4f03c2c\"",
+											"    ]",
+											"  }",
+											"",
+											"  pm.test('Has correct result', function() {",
+											"    const jsonData = pm.response.json();",
+											"    var result = jsonData.result.sort();",
+											"    expected.result.map(function (expect, index) {",
+											"        var value = result[index];",
+											"        pm.expect(value).to.be.equal(expect)",
+											"    })",
+											"  })",
+											"}",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByNumber\",\n\t\"params\":[\n\t\t\"0x2\",\n    \"0x3\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
+								},
+								"url": {
+									"raw": "{{HOST}}",
+									"host": [
+										"{{HOST}}"
+									]
+								},
+								"description": "Return modified accounts from a block\r\n\r\n**Parameters**\r\n\r\nstartNum - `QUANTITY|TAG` - integer of first block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n\r\nendNum - `QUANTITY|TAG` - optional integer of last block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n\r\n```\r\nTODO\r\n```\r\n\r\n**Returns**\r\n\r\nTODO"
+							},
+							"response": []
+						},
+						{
+							"name": "debug_getModifiedAccountsByNumber (backwards params)",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"id": "000d0a38-9853-4d2c-97e8-5f4766c0670b",
+										"exec": [
+											"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+											"if (isAllTests) {",
+											"  var expected = {",
+											"    \"jsonrpc\": \"2.0\",",
+											"    \"id\": 1,",
+											"    \"error\": {",
+											"      \"code\": -32000,",
+											"      \"message\": \"start block (3) must be less than or equal to end block (2)\"",
+											"    }",
+											"  }",
+											"",
+											"  pm.test('Has error', function() {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData.error.message).to.be.equal(expected.error.message);",
+											"    pm.expect(jsonData.error.code).to.be.equal(expected.error.code);",
+											"  })",
+											"}",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByNumber\",\n\t\"params\":[\n\t\t\"0x3\",\n    \"0x2\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
+								},
+								"url": {
+									"raw": "{{HOST}}",
+									"host": [
+										"{{HOST}}"
+									]
+								},
+								"description": "Return modified accounts from a block\r\n\r\n**Parameters**\r\n\r\nstartNum - `QUANTITY|TAG` - integer of first block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n\r\nendNum - `QUANTITY|TAG` - optional integer of last block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n\r\n```\r\nTODO\r\n```\r\n\r\n**Returns**\r\n\r\nTODO"
+							},
+							"response": []
+						}
+					],
+					"protocolProfileBehavior": {},
+					"_postman_isSubFolder": true
+				},
+				{
+					"name": "debug_storageRangeAt",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "3b822b5b-3799-434e-8b75-c0d0b505f162",
+								"exec": [
+									"// var expected = {",
+									"//   \"jsonrpc\": \"2.0\",",
+									"//   \"id\": 1,",
+									"//   \"result\": {",
+									"//     \"storage\": {",
+									"//       \"0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563\": {",
+									"//         \"key\": \"0x0000000000000000000000000000000000000000000000000000000000000000\",",
+									"//         \"value\": \"0x000000000000000000000000ed2f1401f8994d3ff2b2a923e743c24c2914ab4f\"",
+									"//       },",
+									"//       \"0xb10e2d527612073b26eecdfd717e6a320cf44b4afac2b0732d9fcbe2b7fa0cf6\": {",
+									"//         \"key\": \"0x0000000000000000000000000000000000000000000000000000000000000001\",",
+									"//         \"value\": \"0x000000000000000000000000739c71235a9669f6b900490ab1c95310c19abc71\"",
+									"//       }",
+									"//     },",
+									"//     \"nextKey\": \"0x0000000000000000000000000000000000000000000000000000000000000002\"",
+									"//   }",
+									"// }",
+									"",
+									"// pm.test('Has correct result', function() {",
+									"//     const jsonData = pm.response.json();",
+									"//     var keys = Object.keys(jsonData.result);",
+									"//     keys.map(function (k1) {",
+									"//       var value = jsonData.result[k1] ? jsonData.result[k1] : null;",
+									"//       var expect = expected.result[k1] ? expected.result[k1] : null;",
+									"//       if (expect && typeof expect === 'object') {",
+									"//         jsonData.result[k1].map(function (value, index) {",
+									"//            var expect = expected.result[k1][index];",
+									"//           pm.expect(value).to.be.equal(expect)",
+									"//         })",
+									"//       } else {",
+									"//         pm.expect(value).to.be.equal(expect)",
+									"//       }",
+									"//     });",
+									"// })",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_storageRangeAt\",\n\t\"params\":[\n\t\t\"0xd3f1853788b02e31067f2c6e65cb0ae56729e23e3c92e2393af9396fa182701d\", \n    1,\n    \"0xb734c74ff4087493373a27834074f80acbd32827\",\n\t\t\"0x00\",\n    2\n\t],\n\t\"id\":1\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						},
+						"description": "Returns information about a range of storage locations for the given contractAddress\r\n\r\n**Parameters**\r\n\r\n`blockHash` - `DATA`, 32 bytes, hash of block at which to retreive data.\r\n\r\n`txIndex` - `QUANTITY`, 8 bytes, transaction index in the give block.\r\n\r\n`contractAddress` - `DATA` 20 bytes, contract address from which to retreive storage data.\r\n\r\n`keyStart` - `DATA` 32 bytes, storage key to retreive.\r\n\r\n`maxResult` - QUANTITY, 8 bytes, the number of values to retreive\r\n\r\n```\r\nTODO\r\n```\r\n\r\n**Returns**\r\n\r\nTODO"
+					},
+					"response": []
+				},
+				{
+					"name": "debug_traceTransaction",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "95f15e62-fca7-4728-a1e9-a1f08a44b9bb",
+								"exec": [
+									"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+									"if (isAllTests) {",
+									"  pm.test('Not tested', function() {",
+									"    var tested = false;",
+									"    pm.expect(tested).to.be.true",
+									"  })",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_traceTransaction\",\n\t\"params\":[\n\t\t\"0x0b4c6fb75ded4b90218cf0346b0885e442878f104e1b60bf75d5b6860eeacd53\", \n\t\tfalse\n\t],\n\t\"id\":1\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						},
+						"description": "Returns geth style transaction tracing.\r\n\r\n**Parameters**\r\n\r\n`txHash` - `DATA`, 32 bytes, hash of transaction to trace.\r\n`config` - TODO\r\n\r\n```\r\nTODO\r\n```\r\n\r\n**Returns**\r\n\r\nTODO"
+					},
+					"response": []
+				},
+				{
+					"name": "debug_accountRange",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "aa8398e6-5d72-4294-99e5-9e88f5a3238f",
+								"exec": [
+									"var isAllTests = pm.environment.get('TEST_ALL') === 'true';",
+									"if (isAllTests) {",
+									"  pm.test('Not tested', function() {",
+									"    var tested = false;",
+									"    pm.expect(tested).to.be.true",
+									"  })",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_accountRange\",\n\t\"params\":[\n\t\t\"0x2\", \n\t\t[10],\n    1,\n    true,\n    true,\n    true\n\t],\n\t\"id\":1\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						},
+						"description": "Returns a renage of accounts? TODO\r\n\r\n**Parameters**\r\n\r\n`block - `QUANTITY|TAG` - integer of a block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n`maxResult` - QUANTITY, 8 bytes, the number of values to retreive\r\n`noCode` - `Boolean`, return code from the accounts\r\n`noStorage` - `Boolean`, return storage from the accounts\r\n`incomplete` - `Boolean` unknown TODO\r\n\r\n```\r\nTODO\r\n```\r\n\r\n**Returns**\r\n\r\nTODO"
+					},
+					"response": []
+				},
+				{
+					"name": "debug_getModifiedAccountsByNumber",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "329bff0e-2420-4e6c-9cd2-42289f97172a",
+								"exec": [
+									"var expected = {",
+									"  \"jsonrpc\": \"2.0\",",
+									"  \"id\": 1,",
+									"  \"result\": [",
+									"    \"0x1194e966965418c7d73a42cceeb254d875860356\",",
+									"    \"0x2a65aca4d5fc5b5c859090a6c34d164135398226\",",
+									"    \"0x42e6723a0c884e922240e56d7b618bec96f35800\",",
+									"    \"0x52bc44d5378309ee2abf1539bf71de1b7d7be3b5\",",
+									"    \"0xdf88d2cf450e1134e0cd794c3b89d648c3269ffc\",",
+									"  ]",
+									"}",
+									"",
+									"pm.test('Has correct result', function() {",
+									"    const jsonData = pm.response.json();",
+									"    var result = jsonData.result.sort();",
+									"    expected.result.map(function (expect, index) {",
+									"        var value = result[index];",
+									"        pm.expect(value).to.be.equal(expect)",
+									"    })",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByNumber\",\n\t\"params\":[\n\t\t\"0xcccce\"\n\t],\n\t\"id\":1\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						},
+						"description": "Return modified accounts from a block\r\n\r\n**Parameters**\r\n\r\nstartNum - `QUANTITY|TAG` - the first block number on which to report results\r\n\r\nendNum - `QUANTITY|TAG` - the last block number on which to report results. Optional, defaults to startNum\r\n\r\n```\r\nTODO\r\n```\r\n\r\n**Returns**\r\n\r\nTODO"
+					},
+					"response": []
+				},
+				{
+					"name": "debug_getModifiedAccountsByHash",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "42bbc430-272f-4854-87e9-21c636988c35",
+								"exec": [
+									"var expected = {",
+									"  \"jsonrpc\": \"2.0\",",
+									"  \"id\": 1,",
+									"  \"result\": [",
+									"    \"0x1194e966965418c7d73a42cceeb254d875860356\",",
+									"    \"0x2a65aca4d5fc5b5c859090a6c34d164135398226\",",
+									"    \"0x42e6723a0c884e922240e56d7b618bec96f35800\",",
+									"    \"0x52bc44d5378309ee2abf1539bf71de1b7d7be3b5\",",
+									"    \"0xdf88d2cf450e1134e0cd794c3b89d648c3269ffc\",",
+									"  ]",
+									"}",
+									"",
+									"pm.test('Has correct result', function() {",
+									"    const jsonData = pm.response.json();",
+									"    var result = jsonData.result.sort();",
+									"    expected.result.map(function (expect, index) {",
+									"        var value = result[index];",
+									"        pm.expect(value).to.be.equal(expect)",
+									"    })",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByHash\",\n\t\"params\":[\n\t\t\"0x4e3d3e7eee350df0ee6e94a44471ee2d22cfb174db89bbf8e6c5f6aef7b360c5\"\n\t],\n\t\"id\":1\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						},
+						"description": "Return modified accounts from a block\r\n\r\n**Parameters**\r\n\r\n`startHash` - `DATA`, 32 bytes, the first hash of block at which to retreive data.\r\n\r\n`endHash` - `DATA`, 32 bytes, the last hash of block at which to retreive data. Optional, defaults to startHash\r\n\r\n```\r\nTODO\r\n```\r\n\r\n**Returns**\r\n\r\nTODO"
+					},
+					"response": []
+				}
+			],
+			"protocolProfileBehavior": {}
+		},
+		{
 			"name": "deprecated",
 			"item": [
 				{
@@ -1621,14 +2815,14 @@
 										"id": "b540a82b-5416-45d0-8c4a-a0588d1af204",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    const jsonData = pm.response.json();",
-											"    var method = 'eth_getCompilers';",
-											"    var errorMsgs = {",
-											"        '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"        '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"        '{{PARITY}}': 'Method deprecated',",
-											"    }",
-											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'eth_getCompilers';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method deprecated',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -1646,7 +2840,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getCompilers\",\n\t\"params\":[],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getCompilers\",\n\t\"params\":[],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1667,14 +2864,14 @@
 										"id": "7d2177cf-a82b-445b-ab8a-bb6c02a90eec",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    const jsonData = pm.response.json();",
-											"    var method = 'eth_compileLLL';",
-											"    var errorMsgs = {",
-											"        '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"        '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"        '{{PARITY}}': 'Method deprecated',",
-											"    }",
-											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'eth_compileLLL';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method deprecated',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -1692,7 +2889,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_compileLLL\",\n\t\"params\":[\n\t\t\"(returnlll (suicide (caller)))\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_compileLLL\",\n\t\"params\":[\n\t\t\"(returnlll (suicide (caller)))\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1713,14 +2913,14 @@
 										"id": "b5557777-9860-40f3-8c5e-6763499971dc",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    const jsonData = pm.response.json();",
-											"    var method = 'eth_compileSolidity';",
-											"    var errorMsgs = {",
-											"        '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"        '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"        '{{PARITY}}': 'Method deprecated',",
-											"    }",
-											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'eth_compileSolidity';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method deprecated',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -1738,7 +2938,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_compileSolidity\",\n\t\"params\":[\n\t\t\"contract test { function multiply(uint a) returns(uint d) {   return a * 7;   } }\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_compileSolidity\",\n\t\"params\":[\n\t\t\"contract test { function multiply(uint a) returns(uint d) {   return a * 7;   } }\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1759,14 +2962,14 @@
 										"id": "ac335edc-659c-47b6-87a5-63a695765fc4",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    const jsonData = pm.response.json();",
-											"    var method = 'eth_compileSerpent';",
-											"    var errorMsgs = {",
-											"        '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"        '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"        '{{PARITY}}': 'Method deprecated',",
-											"    }",
-											"    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'eth_compileSerpent';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method deprecated',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -1784,7 +2987,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_compileSerpent\",\n\t\"params\":[\"/* some serpent */\"],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_compileSerpent\",\n\t\"params\":[\"/* some serpent */\"],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1844,7 +3050,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_sign\",\n\t\"params\":[\n\t\t\"0x9b2055d370f73ec7d8a03e965129118dc8f5bf83_hangs_parity\", \n\t\t\"0xdeadbeaf\"\n\t],\n\t\"id\":1\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_sign\",\n\t\"params\":[\n\t\t\"0x9b2055d370f73ec7d8a03e965129118dc8f5bf83_hangs_parity\", \n\t\t\"0xdeadbeaf\"\n\t],\n\t\"id\":1\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1872,16 +3081,14 @@
 										"id": "441c46e5-77ed-471d-b744-084ae5a55fc7",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'db_putString';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'db_putString';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -1909,7 +3116,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_putString\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\",\n\t\t\"myString\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_putString\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\",\n\t\t\"myString\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1930,16 +3140,14 @@
 										"id": "36730797-b40c-4a98-aff3-7393d2284eca",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'db_getString';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'db_getString';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -1957,7 +3165,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_getString\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_getString\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -1978,16 +3189,14 @@
 										"id": "40139cc9-dcc0-4f07-aaa0-fe7c4e475dba",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'db_putHex';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'db_putHex';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2005,7 +3214,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_putHex\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\",\n\t\t\"0x68656c6c6f20776f726c64\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_putHex\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\",\n\t\t\"0x68656c6c6f20776f726c64\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2026,16 +3238,14 @@
 										"id": "8fb8090f-d18e-432f-b4aa-ace0653305ab",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'db_getHex';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'db_getHex';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2053,7 +3263,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_getHex\"\n\t,\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_getHex\"\n\t,\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2081,16 +3294,14 @@
 										"id": "dbe7bd04-5130-4711-a787-7851d6ec80e6",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'shh_post';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'shh_post';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2108,7 +3319,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_post\",\n\t\"params\":[{\n\t\t\"from\":\"0xc931d93e97ab07fe42d923478ba2465f2..\",\n\t\t\"topics\": [\n\t\t\t\"0x68656c6c6f20776f726c64\"\n\t\t],\n\t\t\"payload\":\"0x68656c6c6f20776f726c64\",\n\t\t\"ttl\":\"0x64\",\n\t\t\"priority\":\"0x64\"\n\t}],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_post\",\n\t\"params\":[{\n\t\t\"from\":\"0xc931d93e97ab07fe42d923478ba2465f2..\",\n\t\t\"topics\": [\n\t\t\t\"0x68656c6c6f20776f726c64\"\n\t\t],\n\t\t\"payload\":\"0x68656c6c6f20776f726c64\",\n\t\t\"ttl\":\"0x64\",\n\t\t\"priority\":\"0x64\"\n\t}],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2129,16 +3343,14 @@
 										"id": "efe70fe8-8468-4f9d-819f-e9abe9f82bc4",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'shh_version';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'shh_version';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2156,7 +3368,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_version\",\n\t\"params\":[],\n\t\"id\":67\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_version\",\n\t\"params\":[],\n\t\"id\":67\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2177,16 +3392,14 @@
 										"id": "8704d6d3-da30-463b-82ad-2324855ef56c",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'shh_newIdentity';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'shh_newIdentity';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2204,7 +3417,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newIdentity\",\n\t\"params\":[],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newIdentity\",\n\t\"params\":[],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2225,16 +3441,14 @@
 										"id": "3a114994-d327-48b6-909a-b6853454f1d9",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'shh_hasIdentity';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'shh_hasIdentity';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2252,7 +3466,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_hasIdentity\",\n\t\"params\":[\n\t\t\"0x04f96a5e25610293e42a73908e93ccc8c4d4dc0edcfa9fa872f50cb214e08ebf61a03e245533f97284d442460f2998cd41858798ddfd4d661997d3940272b717b1\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_hasIdentity\",\n\t\"params\":[\n\t\t\"0x04f96a5e25610293e42a73908e93ccc8c4d4dc0edcfa9fa872f50cb214e08ebf61a03e245533f97284d442460f2998cd41858798ddfd4d661997d3940272b717b1\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2273,16 +3490,14 @@
 										"id": "e6ba3405-b1c5-47a9-b8b1-6c3af985c282",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'shh_newGroup';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'shh_newGroup';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2300,7 +3515,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newGroup\",\n\t\"params\":[],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newGroup\",\n\t\"params\":[],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2321,16 +3539,14 @@
 										"id": "ed3fd3d6-ae93-42e7-be48-7cd78a4f0f17",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'shh_addToGroup';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'shh_addToGroup';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2348,7 +3564,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_addToGroup\",\n\t\"params\":[\n\t\t\"0x04f96a5e25610293e42a73908e93ccc8c4d4dc0edcfa9fa872f50cb214e08ebf61a03e245533f97284d442460f2998cd41858798ddfd4d661997d3940272b717b1\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_addToGroup\",\n\t\"params\":[\n\t\t\"0x04f96a5e25610293e42a73908e93ccc8c4d4dc0edcfa9fa872f50cb214e08ebf61a03e245533f97284d442460f2998cd41858798ddfd4d661997d3940272b717b1\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2369,16 +3588,14 @@
 										"id": "40036e03-82d5-410b-bc75-d98cfa688c4a",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'shh_newFilter';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'shh_newFilter';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2396,7 +3613,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newFilter\",\n\t\"params\":[{\n\t\t\"topics\": [\n\t\t\t\"0x12341234bf4b564f\"\n\t\t],\n\t\t\"to\": \"0x2341234bf4b2341234bf4b564f...\"\n\t}],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newFilter\",\n\t\"params\":[{\n\t\t\"topics\": [\n\t\t\t\"0x12341234bf4b564f\"\n\t\t],\n\t\t\"to\": \"0x2341234bf4b2341234bf4b564f...\"\n\t}],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2417,16 +3637,14 @@
 										"id": "09d632a8-fda5-472c-9fd6-0ed41bd8f5a6",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'shh_uninstallFilter';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'shh_uninstallFilter';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2444,7 +3662,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_uninstallFilter\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_uninstallFilter\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2465,16 +3686,14 @@
 										"id": "be1e3cc0-3d87-4927-b65b-8f012fde2db0",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'shh_getFilterChanges';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'shh_getFilterChanges';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2492,7 +3711,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_getFilterChanges\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_getFilterChanges\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2513,16 +3735,14 @@
 										"id": "5c180f82-0162-474f-8ce3-3c0e0dbfdc62",
 										"exec": [
 											"pm.test('Is deprecated', function() {",
-											"    if (pm.environment.get('TEST_ALL') === \"true\") {",
-											"      const jsonData = pm.response.json();",
-											"      var method = 'shh_getMessages';",
-											"      var errorMsgs = {",
-											"          '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-											"          '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-											"          '{{PARITY}}': 'Method not found',",
-											"      }",
-											"      pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-											"    }",
+											"  const jsonData = pm.response.json();",
+											"  var method = 'shh_getMessages';",
+											"  var errorMsgs = {",
+											"    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
+											"    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
+											"    '{{PARITY}}': 'Method not found',",
+											"  }",
+											"  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
 											"})",
 											""
 										],
@@ -2540,7 +3760,10 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_getMessages\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":73\n}"
+									"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_getMessages\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":73\n}",
+									"options": {
+										"raw": {}
+									}
 								},
 								"url": {
 									"raw": "{{HOST}}",
@@ -2616,18 +3839,6 @@
 					""
 				]
 			}
-		}
-	],
-	"variable": [
-		{
-			"id": "e075b79c-7376-40bf-bdda-750ee7cb3257",
-			"key": "HOST",
-			"value": "http://localhost:23456"
-		},
-		{
-			"id": "4281636f-9ad3-4003-b864-cacbb0507053",
-			"key": "TEST_ALL",
-			"value": "false"
 		}
 	],
 	"protocolProfileBehavior": {}
