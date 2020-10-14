@@ -67,6 +67,11 @@ func (opts MdbxOpts) Open() (KV, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if err = env.SetDebug(mdbx.LogLvlDoNotChange, mdbx.DbgLegacyTxOverlap); err != nil {
+		return nil, err
+	}
+
 	err = env.SetMaxDBs(100)
 	if err != nil {
 		return nil, err

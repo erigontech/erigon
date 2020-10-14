@@ -50,6 +50,32 @@ const (
 	CopyCompact = C.MDBX_CP_COMPACT // Perform compaction while copying
 )
 
+const (
+	AllowTxOverlap = C.MDBX_DBG_LEGACY_OVERLAP
+)
+
+const (
+	LogLvlFatal       = C.MDBX_LOG_FATAL
+	LogLvlError       = C.MDBX_LOG_ERROR
+	LogLvlWarn        = C.MDBX_LOG_WARN
+	LogLvlNotice      = C.MDBX_LOG_NOTICE
+	LogLvlVerbose     = C.MDBX_LOG_VERBOSE
+	LogLvlDebug       = C.MDBX_LOG_DEBUG
+	LogLvlTrace       = C.MDBX_LOG_TRACE
+	LogLvlExtra       = C.MDBX_LOG_EXTRA
+	LogLvlDoNotChange = C.MDBX_LOG_DONTCHANGE
+)
+
+const (
+	DbgAssert          = C.MDBX_DBG_ASSERT
+	DbgAudit           = C.MDBX_DBG_AUDIT
+	DbgJitter          = C.MDBX_DBG_JITTER
+	DbgDump            = C.MDBX_DBG_DUMP
+	DbgLegacyMultiOpen = C.MDBX_DBG_LEGACY_MULTIOPEN
+	DbgLegacyTxOverlap = C.MDBX_DBG_LEGACY_OVERLAP
+	DbgDoNotChange     = C.MDBX_DBG_DONTCHANGE
+)
+
 // DBI is a handle for a database in an Env.
 //
 // See MDBX_dbi
@@ -332,6 +358,11 @@ func (env *Env) Flags() (uint, error) {
 		return 0, operrno("mdbx_env_get_flags", ret)
 	}
 	return uint(_flags), nil
+}
+
+func (env *Env) SetDebug(logLvl int, dbg int) error {
+	ret := C.mdbx_setup_debug(C.MDBX_log_level_t(logLvl), C.MDBX_debug_flags_t(dbg), C.MDBX_LOGGER_DONTCHANGE)
+	return operrno("mdbx_setup_debug", ret)
 }
 
 // Path returns the path argument passed to Open.  Path returns a non-nil error

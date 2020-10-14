@@ -217,6 +217,24 @@ func TestEnv_SetMaxReader(t *testing.T) {
 	}
 }
 
+func TestEnv_SetDebug(t *testing.T) {
+	dir, err := ioutil.TempDir("", "test-env-setmdebug-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	env, err := NewEnv()
+	if err != nil {
+		t.Error(err)
+	}
+
+	err = env.SetDebug(LogLvlDoNotChange, DbgLegacyTxOverlap)
+	if err != nil {
+		t.Error(err)
+	}
+}
+
 //func TestEnv_SetMapSize(t *testing.T) {
 //	env := setup(t)
 //	defer clean(env, t)

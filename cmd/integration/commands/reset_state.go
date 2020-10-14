@@ -28,7 +28,10 @@ var cmdResetState = &cobra.Command{
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		err := resetState(ctx)
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		err := resetState(db, ctx)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -48,7 +51,10 @@ var cmdClearUnwindStack = &cobra.Command{
 	Short: "Clear unwind stack",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		err := clearUnwindStack(ctx)
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		err := clearUnwindStack(db, ctx)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -69,10 +75,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearUnwindStack)
 }
 
-func clearUnwindStack(_ context.Context) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-
+func clearUnwindStack(db ethdb.Database, _ context.Context) error {
 	for _, stage := range stages.AllStages {
 		if err := stages.SaveStageUnwind(db, stage, 0, nil); err != nil {
 			return err
@@ -81,9 +84,7 @@ func clearUnwindStack(_ context.Context) error {
 	return nil
 }
 
-func resetState(_ context.Context) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
+func resetState(db ethdb.Database, _ context.Context) error {
 	fmt.Printf("Before reset: \n")
 	if err := printStages(db); err != nil {
 		return err
@@ -128,8 +129,8 @@ func resetState(_ context.Context) error {
 	return nil
 }
 
-func resetSenders(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
+func resetSenders(db ethdb.Database) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.Senders,
 	); err != nil {
 		return err
@@ -143,8 +144,8 @@ func resetSenders(db *ethdb.ObjectDatabase) error {
 	return nil
 }
 
-func resetExec(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
+func resetExec(db ethdb.Database) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.CurrentStateBucket,
 		dbutils.AccountChangeSetBucket,
 		dbutils.StorageChangeSetBucket,
@@ -169,8 +170,8 @@ func resetExec(db *ethdb.ObjectDatabase) error {
 	return nil
 }
 
-func resetHistory(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
+func resetHistory(db ethdb.Database) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.AccountsHistoryBucket,
 		dbutils.StorageHistoryBucket,
 	); err != nil {
@@ -192,8 +193,8 @@ func resetHistory(db *ethdb.ObjectDatabase) error {
 	return nil
 }
 
-func resetLogIndex(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
+func resetLogIndex(db ethdb.Database) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.LogAddressIndex,
 		dbutils.LogTopicIndex,
 	); err != nil {
@@ -209,8 +210,8 @@ func resetLogIndex(db *ethdb.ObjectDatabase) error {
 	return nil
 }
 
-func resetCallTraces(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
+func resetCallTraces(db ethdb.Database) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.CallFromIndex,
 		dbutils.CallToIndex,
 	); err != nil {
@@ -226,8 +227,8 @@ func resetCallTraces(db *ethdb.ObjectDatabase) error {
 	return nil
 }
 
-func resetTxLookup(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
+func resetTxLookup(db ethdb.Database) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.TxLookupPrefix,
 	); err != nil {
 		return err
@@ -264,7 +265,7 @@ func resetFinish(db ethdb.Putter) error {
 	return nil
 }
 
-func printStages(db *ethdb.ObjectDatabase) error {
+func printStages(db ethdb.Database) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
