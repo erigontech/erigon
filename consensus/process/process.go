@@ -47,7 +47,6 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				err := c.verifyByRequest(toVerifyRequest(req, parents, allParents), req.Header.Number.Uint64())
 				if errors.Is(err, errNotAllParents) {
 					c.addVerifyHeaderRequest(req, parents, parentsRequested, allParents)
-					continue
 				}
 			case parentResp := <-c.HeaderResponses:
 				if parentResp.Err != nil {
