@@ -213,6 +213,7 @@ func getTopicsBitmap(c ethdb.Cursor, topics [][]common.Hash, from, to uint32) (*
 	return result, nil
 }
 
+// GetTransactionReceipt returns an array of receipts from the given transaction
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
 	tx, err := api.db.Begin(ctx, nil, false)
 	if err != nil {

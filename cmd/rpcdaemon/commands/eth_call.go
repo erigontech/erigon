@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
+// Call executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
 	tx, err1 := api.db.Begin(ctx, nil, false)
 	if err1 != nil {
