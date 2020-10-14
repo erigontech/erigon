@@ -101,7 +101,7 @@ func (stagedSync *StagedSync) Prepare(
 		state.unwindOrder[i] = stages[stageIndex]
 	}
 
-	if err := state.LoadUnwindInfo(tx); err != nil {
+	if err := state.LoadUnwindInfo(db); err != nil {
 		return nil, err
 	}
 	return state, nil
