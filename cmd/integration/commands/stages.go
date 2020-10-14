@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
@@ -387,12 +388,7 @@ func stageIHash(ctx context.Context) error {
 func stageHashState(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-<<<<<<< HEAD
-	db := ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
-	//db := ethdb.MustOpen(chaindata)
-=======
 	db := openDatabase()
->>>>>>> origin/master
 	defer db.Close()
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
