@@ -56,7 +56,7 @@ type Process struct {
 	RequestedBlocks   map[uint64]uint
 	RequestedBlocksMu sync.RWMutex
 
-	RequestsToParents map[uint64]map[uint64]*VerifyRequest // BlockNum->reqID->VerifyRequest
+	RequestsToParents map[uint64]map[uint64]*VerifyRequest // ParentBlockNum->reqID->VerifyRequest
 	RequestsMu        sync.RWMutex
 }
 
@@ -116,7 +116,7 @@ func (p *Process) AddVerifiedBlocks(header *types.Header) {
 		return
 	}
 
-	if ok = SearchHeader(blocks, header.Hash()); ok {
+	if ok = types.SearchHeader(blocks, header.Hash()); ok {
 		return
 	}
 
@@ -163,17 +163,7 @@ func (p *Process) GetVerifiedBlock(blockNum uint64, hash common.Hash) bool {
 		return false
 	}
 
-	return SearchHeader(headers, hash)
-}
-
-func SearchHeader(blocks []*types.Header, hash common.Hash) bool { //nolint:interfacer
-	n := sort.Search(len(blocks), func(i int) bool {
-		return blocks[i].Hash().String() >= hash.String()
-	})
-	if n < len(blocks) && blocks[n].Hash() == hash {
-		return true
-	}
-	return false
+	return types.SearchHeader(headers, hash)
 }
 
 func (p *Process) AddRequestedBlocks(num uint64) bool {

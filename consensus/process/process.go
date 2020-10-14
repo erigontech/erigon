@@ -44,13 +44,13 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				}
 
 				parents, parentsRequested, allParents := c.requestParentHeaders(req)
-				matchedParents, reqParents, err := matchParents(req.Header, parents, parentsRequested, allParents)
+				matchedParents, err := matchParents(req.Header, parents, allParents)
 				if err != nil && !errors.Is(err, errNotAllParents) {
 					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, req.Header.Hash(), err}
 					continue
 				}
 				if errors.Is(err, errNotAllParents) {
-					c.addVerifyHeaderRequest(req, matchedParents, reqParents, allParents)
+					c.addVerifyHeaderRequest(req, matchedParents, parentsRequested, allParents)
 					continue
 				}
 
@@ -60,9 +60,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					c.AddVerifiedBlocks(req.Header)
 
 					if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
-						c.RequestsMu.Lock()
-						c.verifyByParentHeader(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64(), nil})
-						c.RequestsMu.Unlock()
+						c.VerifyRequestsByParent(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64(), nil})
 					}
 				}
 			case parentResp := <-c.HeaderResponses:
@@ -83,9 +81,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					continue
 				}
 
-				c.RequestsMu.Lock()
-				c.verifyByParentHeader(parentResp)
-				c.RequestsMu.Unlock()
+				c.VerifyRequestsByParent(parentResp)
 			case <-c.CleanupTicker.C:
 				c.RequestsMu.Lock()
 				for blockNum, reqMap := range c.RequestsToParents {
@@ -110,11 +106,22 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 	return c
 }
 
-func (c *Consensus) verifyByParentHeader(parentResp consensus.HeaderResponse) {
+func (c *Consensus) VerifyRequestsByParent(parentResp consensus.HeaderResponse) {
+	c.RequestsMu.Lock()
+	defer c.RequestsMu.Unlock()
+	c.verifyRequestsByParent(parentResp)
+}
+
+func (c *Consensus) verifyRequestsByParent(parentResp consensus.HeaderResponse) {
 	toVerify := make(map[uint64][]uint64) // blockNum->reqIDs
 
 	for blockNum, reqMap := range c.RequestsToParents {
 		for reqID, req := range reqMap {
+			if req == nil || req.Header == nil {
+				continue
+			}
+
+			// check if new parent is in the requested range
 			if parentResp.Number >= req.From && parentResp.Number <= req.To {
 				reqMap[reqID].Parents = append(reqMap[reqID].Parents, parentResp.Header)
 				toVerify[blockNum] = append(toVerify[blockNum], reqID)
@@ -124,14 +131,20 @@ func (c *Consensus) verifyByParentHeader(parentResp consensus.HeaderResponse) {
 
 	for blockNum, reqIDs := range toVerify {
 		for _, reqID := range reqIDs {
-			req, ok := c.RequestsToParents[blockNum][reqID]
-			if !ok || req == nil || req.Header == nil {
-				continue
-			}
+			req := c.RequestsToParents[blockNum][reqID]
 
-			parents, _, err := matchParentsSlice(req.Header, req.Parents, nil, req.ParentsCount)
+			// fixme copy-paste
+			parents, err := matchParents(req.Header, req.Parents, req.ParentsCount)
 			if err != nil && !errors.Is(err, errNotAllParents) {
 				c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), err}
+
+				// fixme copy-paste
+				// remove finished request
+				delete(c.RequestsToParents[blockNum], reqID)
+
+				if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
+					c.verifyRequestsByParent(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64(), nil})
+				}
 				continue
 			}
 			if errors.Is(err, errNotAllParents) {
@@ -148,7 +161,7 @@ func (c *Consensus) verifyByParentHeader(parentResp consensus.HeaderResponse) {
 			delete(c.RequestsToParents[blockNum], reqID)
 
 			if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
-				c.verifyByParentHeader(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64(), nil})
+				c.verifyRequestsByParent(consensus.HeaderResponse{req.Header, req.Header.Number.Uint64(), nil})
 			}
 		}
 	}
@@ -171,7 +184,7 @@ func (c *Consensus) addVerifyHeaderRequest(req consensus.VerifyHeaderRequest, pa
 
 	var toAppend []*types.Header
 	for _, parent := range parents {
-		has := consensus.SearchHeader(request.Parents, parent.Hash())
+		has := types.SearchHeader(request.Parents, parent.Hash())
 		if !has {
 			toAppend = append(toAppend, parent)
 		}
@@ -204,62 +217,48 @@ func (c *Consensus) HeaderVerification() chan<- consensus.VerifyHeaderRequest {
 	return c.VerifyHeaderRequests
 }
 
-// returns parents, parentsRequested, error
-func (c *Consensus) requestParentHeaders(req consensus.VerifyHeaderRequest) (map[uint64][]*types.Header, map[uint64][]*types.Header, int) {
+// returns parents(asc sorted by block number), parentsRequested, error
+func (c *Consensus) requestParentHeaders(req consensus.VerifyHeaderRequest) ([]*types.Header, []uint64, int) {
 	parentsToGet := c.NeededForVerification(req.Header)
 	if parentsToGet == 0 {
 		return nil, nil, 0
 	}
-	parents := make(map[uint64][]*types.Header, parentsToGet)
-	parentsRequested := make(map[uint64][]*types.Header, parentsToGet)
+	parents := make([]*types.Header, 0, parentsToGet)
+	parentsRequested := make([]uint64, 0, parentsToGet)
 	num := req.Header.Number.Uint64()
 
 	for i := num - uint64(parentsToGet); i <= num-1; i++ {
 		requestedParents := c.requestHeaders(i)
 
 		if len(requestedParents) == 0 {
-			parentsRequested[i] = nil // fixme возможно надо удалить эту строку
+			parentsRequested = append(parentsRequested, i)
 			continue
 		}
-		parents[i] = requestedParents
+		parents = append(parents, requestedParents...)
 	}
+
+	sort.SliceStable(parents, func(i, j int) bool {
+		return parents[i].Number.Cmp(parents[j].Number) == -1
+	})
 
 	return parents, parentsRequested, parentsToGet
 }
 
 var errNotAllParents = errors.New("not all parents are gathered")
 
-func matchParentsSlice(header *types.Header, parents []*types.Header, requestedParents []uint64, parentsCount int) ([]*types.Header, []uint64, error) {
-	parentsMap := make(map[uint64][]*types.Header, len(parents))
-	for _, parent := range parents {
-		parentsMap[parent.Number.Uint64()] = append(parentsMap[parent.Number.Uint64()], parent)
-	}
-
-	requestedParentsMap := make(map[uint64][]*types.Header, len(parents))
-	for _, parent := range requestedParents {
-		requestedParentsMap[parent] = nil
-	}
-	return matchParents(header, parentsMap, requestedParentsMap, parentsCount)
-}
-
 // returns matched parents, requested parents block numbers, error
-func matchParents(header *types.Header, parents map[uint64][]*types.Header, parentsRequested map[uint64][]*types.Header, parentsCount int) ([]*types.Header, []uint64, error) {
-	requestedHeaders := make([]uint64, 0, parentsCount)
-	for parent := range parentsRequested {
-		requestedHeaders = append(requestedHeaders, parent)
-	}
-
+func matchParents(header *types.Header, parents []*types.Header, parentsCount int) ([]*types.Header, error) {
 	if len(parents) < parentsCount {
-		return nil, requestedHeaders, errNotAllParents
+		return nil, errNotAllParents
 	}
 
 	num := header.Number.Uint64()
 	expectedParentHash := header.ParentHash
 	headerParents := make([]*types.Header, 0, parentsCount)
 	for i := num - uint64(parentsCount); i <= num-1; i++ {
-		blockParents, ok := parents[i]
+		blockParents, ok := types.SearchHeadersByNumber(parents, i)
 		if !ok || len(blockParents) == 0 {
-			return nil, requestedHeaders, errNotAllParents
+			return nil, errNotAllParents
 		}
 
 		var correctParent bool
@@ -274,11 +273,11 @@ func matchParents(header *types.Header, parents map[uint64][]*types.Header, pare
 
 		if !correctParent && len(blockParents) != 0 {
 			// old value(reorg) in the cache could cause this value
-			return nil, requestedHeaders, consensus.ErrUnknownAncestor
+			return nil, consensus.ErrUnknownAncestor
 		}
 	}
 
-	return headerParents, requestedHeaders, nil
+	return headerParents, nil
 }
 
 func (c *Consensus) requestHeaders(parentNum uint64) []*types.Header {

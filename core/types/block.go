@@ -23,15 +23,17 @@ import (
 	"io"
 	"math/big"
 	"reflect"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -297,6 +299,43 @@ func CopyHeader(h *Header) *Header {
 		copy(cpy.Extra, h.Extra)
 	}
 	return &cpy
+}
+
+func SearchHeader(headers []*Header, hash common.Hash) bool { //nolint:interfacer
+	if len(headers) == 0 {
+		return false
+	}
+	n := sort.Search(len(headers), func(i int) bool {
+		return headers[i].Hash().String() >= hash.String()
+	})
+	if n < len(headers) && headers[n].Hash() == hash {
+		return true
+	}
+	return false
+}
+
+func SearchHeadersByNumber(headers []*Header, blockNumber uint64) ([]*Header, bool) {
+	if len(headers) == 0 {
+		return nil, false
+	}
+	smallestIDx := sort.Search(len(headers), func(i int) bool {
+		return headers[i].Number.Uint64() >= blockNumber
+	})
+
+	if smallestIDx < len(headers) && headers[smallestIDx].Number.Uint64() == blockNumber {
+		highestIDx := uint64(smallestIDx)
+		for i, h := range headers[smallestIDx:] {
+			if currentBlockNumber := h.Number.Uint64(); currentBlockNumber != blockNumber {
+				break
+			} else {
+				highestIDx = uint64(smallestIDx+i)
+			}
+		}
+		res := append([]*Header{}, headers[smallestIDx:highestIDx+1]...)
+
+		return res, true
+	}
+	return nil, false
 }
 
 // DecodeRLP decodes the Ethereum
