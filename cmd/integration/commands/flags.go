@@ -19,6 +19,7 @@ var (
 	bucket             string
 	datadir            string
 	mapSizeStr         string
+	migration          string
 )
 
 func must(err error) {
