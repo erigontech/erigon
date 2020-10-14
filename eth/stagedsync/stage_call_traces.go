@@ -1,8 +1,13 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"math/big"
 	"runtime"
 	"time"
@@ -25,8 +30,8 @@ import (
 )
 
 const (
-	callIndicesMemLimit       = 512 * datasize.MB
-	callIndicesCheckSizeEvery = 10 * time.Second
+	callIndicesMemLimit       = 256 * datasize.MB
+	callIndicesCheckSizeEvery = 30 * time.Second
 )
 
 func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, datadir string, quit <-chan struct{}) error {
@@ -53,7 +58,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 		return nil
 	}
 
-	if err := promoteCallTraces(tx, s.BlockNumber+1, endBlock, chainConfig, chainContext, quit); err != nil {
+	if err := promoteCallTraces(tx, s.BlockNumber+1, endBlock, chainConfig, chainContext, datadir, quit); err != nil {
 		return err
 	}
 
@@ -69,16 +74,15 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 	return nil
 }
 
-func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quit <-chan struct{}) error {
+func promoteCallTraces(tx ethdb.Database, startBlock, endBlock uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, datadir string, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
 	froms := map[string]*roaring.Bitmap{}
 	tos := map[string]*roaring.Bitmap{}
-	callFromIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CallFromIndex)
-	defer callFromIndexCursor.Close()
-	callToIndexCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.CallToIndex)
-	defer callToIndexCursor.Close()
+	collectorFrom := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorTo := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+
 	accountChangesCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainAccountChangeSetBucket)
 	defer accountChangesCursor.Close()
 	storageChangesCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStorageChangeSetBucket)
@@ -86,7 +90,7 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 	defer checkFlushEvery.Stop()
 	engine := chainContext.Engine()
 
-	var caching bool = endBlock-startBlock > 100
+	var caching = endBlock-startBlock > 100
 	var accountCache *fastcache.Cache
 	var storageCache *fastcache.Cache
 	var codeCache *fastcache.Cache
@@ -143,7 +147,7 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 			storagePreset = 0
 		case <-checkFlushEvery.C:
 			if needFlush(froms, callIndicesMemLimit) {
-				if err := flushBitmaps(callFromIndexCursor, froms); err != nil {
+				if err := flushBitmaps(collectorFrom, froms); err != nil {
 					return err
 				}
 
@@ -151,7 +155,7 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 			}
 
 			if needFlush(tos, callIndicesMemLimit) {
-				if err := flushBitmaps(callToIndexCursor, tos); err != nil {
+				if err := flushBitmaps(collectorTo, tos); err != nil {
 					return err
 				}
 
@@ -250,10 +254,66 @@ func promoteCallTraces(tx rawdb.DatabaseReader, startBlock, endBlock uint64, cha
 		}
 	}
 
-	if err := flushBitmaps(callFromIndexCursor, froms); err != nil {
+	if err := flushBitmaps(collectorFrom, froms); err != nil {
 		return err
 	}
-	if err := flushBitmaps(callToIndexCursor, tos); err != nil {
+	if err := flushBitmaps(collectorTo, tos); err != nil {
+		return err
+	}
+
+	var currentBitmap = roaring.New()
+	var buf = bytes.NewBuffer(nil)
+	var loaderFunc = func(k []byte, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		lastChunkKey := make([]byte, len(k)+4)
+		copy(lastChunkKey, k)
+		binary.BigEndian.PutUint32(lastChunkKey[len(k):], ^uint32(0))
+		lastChunkBytes, err := table.Get(lastChunkKey)
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return fmt.Errorf("find last chunk failed: %w", err)
+		}
+
+		lastChunk := roaring.New()
+		if len(lastChunkBytes) > 0 {
+			_, err = lastChunk.FromBuffer(lastChunkBytes)
+			if err != nil {
+				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
+			}
+		}
+
+		if _, err := currentBitmap.FromBuffer(v); err != nil {
+			return err
+		}
+		currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
+		nextChunk := bitmapdb.ChunkIterator(currentBitmap, bitmapdb.ChunkLimit)
+		for chunk := nextChunk(); chunk != nil; chunk = nextChunk() {
+			buf.Reset()
+			if _, err := chunk.WriteTo(buf); err != nil {
+				return err
+			}
+			chunkKey := make([]byte, len(k)+4)
+			copy(chunkKey, k)
+			if currentBitmap.GetCardinality() == 0 {
+				binary.BigEndian.PutUint32(chunkKey[len(k):], ^uint32(0))
+				if err := next(k, chunkKey, common.CopyBytes(buf.Bytes())); err != nil {
+					return err
+				}
+				break
+			}
+			binary.BigEndian.PutUint32(chunkKey[len(k):], chunk.Maximum())
+			if err := next(k, chunkKey, common.CopyBytes(buf.Bytes())); err != nil {
+				return err
+			}
+		}
+
+		currentBitmap.Clear()
+		return nil
+	}
+
+	if err := collectorFrom.Load(tx, dbutils.CallFromIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+		return err
+	}
+
+	if err := collectorTo.Load(tx, dbutils.CallToIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
@@ -292,8 +352,8 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 }
 
 func unwindCallTraces(db rawdb.DatabaseReader, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}) error {
-	froms := map[string]bool{}
-	tos := map[string]bool{}
+	froms := map[string]struct{}{}
+	tos := map[string]struct{}{}
 	tx := db.(ethdb.HasTx).Tx()
 	engine := chainContext.Engine()
 
@@ -327,17 +387,17 @@ func unwindCallTraces(db rawdb.DatabaseReader, from, to uint64, chainConfig *par
 	}
 	for addr := range tracer.froms {
 		a := addr // To copy addr
-		froms[string(a[:])] = true
+		froms[string(a[:])] = struct{}{}
 	}
 	for addr := range tracer.tos {
 		a := addr // To copy addr
-		tos[string(a[:])] = true
+		tos[string(a[:])] = struct{}{}
 	}
 
-	if err := truncateBitmaps(tx, dbutils.CallFromIndex, froms, to+1, from+1); err != nil {
+	if err := truncateBitmaps(db.(ethdb.HasTx).Tx(), dbutils.CallFromIndex, froms, to+1, from+1); err != nil {
 		return err
 	}
-	if err := truncateBitmaps(tx, dbutils.CallToIndex, tos, to+1, from+1); err != nil {
+	if err := truncateBitmaps(db.(ethdb.HasTx).Tx(), dbutils.CallToIndex, tos, to+1, from+1); err != nil {
 		return err
 	}
 	return nil
