@@ -32,6 +32,8 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/ethereum/go-ethereum/common/fdlimit"
 	pcsclite "github.com/gballet/go-libpcsclite"
@@ -396,6 +398,20 @@ var (
 * r - write receipts to the DB
 * t - write tx lookup index to the DB`,
 		Value: ethdb.DefaultStorageMode.ToString(),
+	}
+	SnapshotModeFlag = cli.StringFlag{
+		Name: "snapshot-mode",
+		Usage: `Configures the storage mode of the app:
+* h - download headers snapshot
+* b - download bodies snapshot
+* s - download state snapshot
+* r - download receipts snapshot
+`,
+		Value: torrent.DefaultSnapshotMode.ToString(),
+	}
+	SeedSnapshotsFlag = cli.BoolTFlag{
+		Name:  "seed-snapshots",
+		Usage: `Seed snapshot seeding`,
 	}
 	ArchiveSyncInterval = cli.IntFlag{
 		Name:  "archive-sync-interval",
@@ -1288,7 +1304,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 
 	if cfg.LMDB {
 		cfg.LMDBMaxFreelistReuse = ctx.GlobalUint(LMDBMaxFreelistReuseFlag.Name)
-		if cfg.LMDBMapSize < 16 {
+		if cfg.LMDBMaxFreelistReuse < 16 {
 			log.Error("Invalid LMDB MaxFreelistReuse provided. Will use defaults",
 				"lmdb.maxFreelistReuse", ethdb.LMDBDefaultMaxFreelistReuse,
 				"err", "the value should be at least 16",
@@ -1580,8 +1596,14 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	if err != nil {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-
 	cfg.StorageMode = mode
+	snMode, err := torrent.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
+	if err != nil {
+		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+	cfg.SnapshotMode = snMode
+	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
+
 	cfg.Hdd = ctx.GlobalBool(HddFlag.Name)
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 

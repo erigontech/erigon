@@ -5,6 +5,9 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/migrations"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
+
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -135,9 +138,11 @@ var cmdPrintStages = &cobra.Command{
 
 func init() {
 	withChaindata(cmdPrintStages)
+	withMapSize(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
 	withChaindata(cmdStageSenders)
+	withMapSize(cmdStageSenders)
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	withUnwind(cmdStageSenders)
@@ -146,6 +151,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageSenders)
 
 	withChaindata(cmdStageExec)
+	withMapSize(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
@@ -154,6 +160,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageExec)
 
 	withChaindata(cmdStageIHash)
+	withMapSize(cmdStageIHash)
 	withReset(cmdStageIHash)
 	withBlock(cmdStageIHash)
 	withUnwind(cmdStageIHash)
@@ -162,6 +169,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageIHash)
 
 	withChaindata(cmdStageHashState)
+	withMapSize(cmdStageHashState)
 	withReset(cmdStageHashState)
 	withBlock(cmdStageHashState)
 	withUnwind(cmdStageHashState)
@@ -170,6 +178,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageHashState)
 
 	withChaindata(cmdStageHistory)
+	withMapSize(cmdStageHistory)
 	withReset(cmdStageHistory)
 	withBlock(cmdStageHistory)
 	withUnwind(cmdStageHistory)
@@ -178,6 +187,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageHistory)
 
 	withChaindata(cmdLogIndex)
+	withMapSize(cmdLogIndex)
 	withReset(cmdLogIndex)
 	withBlock(cmdLogIndex)
 	withUnwind(cmdLogIndex)
@@ -186,6 +196,7 @@ func init() {
 	rootCmd.AddCommand(cmdLogIndex)
 
 	withChaindata(cmdCallTraces)
+	withMapSize(cmdCallTraces)
 	withReset(cmdCallTraces)
 	withBlock(cmdCallTraces)
 	withUnwind(cmdCallTraces)
@@ -194,6 +205,7 @@ func init() {
 	rootCmd.AddCommand(cmdCallTraces)
 
 	withChaindata(cmdStageTxLookup)
+	withMapSize(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
 	withBlock(cmdStageTxLookup)
 	withUnwind(cmdStageTxLookup)
@@ -203,10 +215,15 @@ func init() {
 }
 
 func stageSenders(ctx context.Context) error {
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
+	}
+
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -243,15 +260,20 @@ func stageSenders(ctx context.Context) error {
 func stageExec(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
+
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
+	}
 
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
 	}
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	cc, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset { //nolint:staticcheck
@@ -266,7 +288,7 @@ func stageExec(ctx context.Context) error {
 		return stagedsync.UnwindExecutionStage(u, stage4, db, false)
 	}
 	return stagedsync.SpawnExecuteBlocksStage(stage4, db,
-		bc.Config(), bc, bc.GetVMConfig(),
+		bc.Config(), cc, bc.GetVMConfig(),
 		ch,
 		stagedsync.ExecuteBlockStageParams{
 			ToBlock:       block, // limit execution to the specified block
@@ -279,10 +301,19 @@ func stageExec(ctx context.Context) error {
 func stageIHash(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
+		panic(err)
+	}
+
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
+	}
+
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -308,10 +339,15 @@ func stageIHash(ctx context.Context) error {
 func stageHashState(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
+	}
+
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -337,10 +373,10 @@ func stageHashState(ctx context.Context) error {
 func stageLogIndex(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -369,10 +405,10 @@ func stageLogIndex(ctx context.Context) error {
 func stageCallTraces(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -405,10 +441,15 @@ func stageCallTraces(ctx context.Context) error {
 func stageHistory(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
+	}
+
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -441,10 +482,15 @@ func stageHistory(ctx context.Context) error {
 func stageTxLookup(ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
+	if err != nil {
+		panic(err)
+	}
+
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -467,7 +513,7 @@ func stageTxLookup(ctx context.Context) error {
 }
 
 func printAllStages(_ context.Context) error {
-	db := ethdb.MustOpen(chaindata)
+	db := openDatabase()
 	defer db.Close()
 
 	return printStages(db)
@@ -475,12 +521,15 @@ func printAllStages(_ context.Context) error {
 
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
-func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook stagedsync.ChangeSetHook) (*core.BlockChain, *stagedsync.State, progressFunc) {
-	chainConfig, bc, err := newBlockChain(tx)
+func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook stagedsync.ChangeSetHook) (*core.TinyChainContext, *core.BlockChain, *stagedsync.State, progressFunc) {
+	chainConfig, bc, err := newBlockChain(db)
 	if err != nil {
 		panic(err)
 	}
 
+	cc := &core.TinyChainContext{}
+	cc.SetDB(tx)
+	cc.SetEngine(ethash.NewFaker())
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
@@ -489,7 +538,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{},
-	).Prepare(nil, chainConfig, bc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", false, quitCh, nil, nil, func() error { return nil }, hook)
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", false, quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}
@@ -509,7 +558,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 		return s
 	}
 
-	return bc, st, progress
+	return cc, bc, st, progress
 }
 
 func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, error) {
@@ -518,4 +567,21 @@ func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, er
 		return nil, nil, err1
 	}
 	return params.MainnetChainConfig, blockchain, nil
+}
+
+func SetSnapshotKV(db *ethdb.ObjectDatabase, snapshotDir, snapshotMode string) error {
+	if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
+		mode, err := torrent.SnapshotModeFromString(snapshotMode)
+		if err != nil {
+			panic(err)
+		}
+
+		snapshotKV := db.KV()
+		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, snapshotDir, mode)
+		if err != nil {
+			return err
+		}
+		db.SetKV(snapshotKV)
+	}
+	return nil
 }
