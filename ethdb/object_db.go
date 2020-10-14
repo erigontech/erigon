@@ -73,6 +73,8 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 	switch true {
 	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
 		kv, err = NewLMDB().Path(path).Open()
+	case testDB == "mdbx" || strings.HasSuffix(path, "_mdbx"):
+		kv, err = NewMDBX().Path(path).Open()
 	default:
 		opts := NewLMDB().Path(path)
 		if readOnly {
