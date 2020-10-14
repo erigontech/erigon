@@ -526,7 +526,7 @@ func (tx *mdbxTx) Commit(ctx context.Context) error {
 
 	if !tx.isSubTx && !tx.db.opts.readOnly && !tx.db.opts.inMem { // call fsync only after main transaction commit
 		fsyncTimer := time.Now()
-		if err := tx.db.env.Sync(true, true); err != nil {
+		if err := tx.db.env.Sync(true, false); err != nil {
 			log.Warn("fsync after commit failed", "err", err)
 		}
 		fsyncTook := time.Since(fsyncTimer)
