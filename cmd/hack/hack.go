@@ -2111,7 +2111,7 @@ func receiptSizes(chaindata string) error {
 	}
 	sort.Ints(lens)
 	for _, l := range lens {
-		fmt.Printf("%6d - %d\n", sizes[l])
+		fmt.Printf("%6d - %d\n", l, sizes[l])
 	}
 	return nil
 }
