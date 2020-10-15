@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"runtime"
 	"sort"
 	"time"
@@ -86,6 +88,11 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
 
+	byRLP, err := rawdb.ReceiptSerializedByRLP(db)
+	if err != nil {
+		return err
+	}
+
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(start)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
 			return err
@@ -127,8 +134,21 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 		}
 
 		receipts := types.Receipts{}
-		if err := cbor.Unmarshal(&receipts, v); err != nil {
-			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
+
+		if byRLP {
+			// Convert the receipts from their storage form to their internal representation
+			storageReceipts := []*types.ReceiptForStorage{}
+			if err := rlp.DecodeBytes(v, &storageReceipts); err != nil {
+				return fmt.Errorf("invalid receipt array RLP: %w, blocl=%d", err, blockNum)
+			}
+
+			for _, r := range storageReceipts {
+				receipts = append(receipts, (*types.Receipt)(r))
+			}
+		} else {
+			if err := cbor.Unmarshal(&receipts, v); err != nil {
+				return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
+			}
 		}
 
 		for _, receipt := range receipts {

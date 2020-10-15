@@ -449,6 +449,27 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 	if len(data) == 0 {
 		return nil
 	}
+
+	byRLP, err := ReceiptSerializedByRLP(db)
+	if err != nil {
+		log.Error("ReceiptSerializedByCbor failed", "err", err)
+		return nil
+	}
+
+	if byRLP {
+		// Convert the receipts from their storage form to their internal representation
+		storageReceipts := []*types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(data, &storageReceipts); err != nil {
+			log.Error("Invalid receipt array RLP", "hash", hash, "err", err)
+			return nil
+		}
+		receipts := make(types.Receipts, len(storageReceipts))
+		for i, storageReceipt := range storageReceipts {
+			receipts[i] = (*types.Receipt)(storageReceipt)
+		}
+		return receipts
+	}
+
 	receipts := types.Receipts{}
 	if err := cbor.Unmarshal(&receipts, data); err != nil {
 		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
@@ -485,6 +506,29 @@ func ReadReceipts(db DatabaseReader, hash common.Hash, number uint64) types.Rece
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
 func WriteReceipts(db DatabaseWriter, hash common.Hash, number uint64, receipts types.Receipts) {
+	byRLP, err1 := ReceiptSerializedByRLP(db.(DatabaseReader))
+	if err1 != nil {
+		log.Error("ReceiptSerializedByCbor failed", "err", err1)
+		return
+	}
+
+	if byRLP {
+		// Convert the receipts into their storage form and serialize them
+		storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
+		for i, receipt := range receipts {
+			storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
+		}
+		bytes, err := rlp.EncodeToBytes(storageReceipts)
+		if err != nil {
+			log.Crit("Failed to encode block receipts", "err", err)
+		}
+		// Store the flattened receipt slice
+		if err := db.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash), bytes); err != nil {
+			log.Crit("Failed to store block receipts", "err", err)
+		}
+		return
+	}
+
 	newV := make([]byte, 0, 1024)
 	err := cbor.Marshal(&newV, receipts)
 	if err != nil {
@@ -651,4 +695,23 @@ func ReadHeaderByHash(db DatabaseReader, hash common.Hash) *types.Header {
 // WriteAncientBlock writes entire block data into ancient store and returns the total written size.
 func WriteAncientBlock(db DatabaseWriter, block *types.Block, receipts types.Receipts, td *big.Int) int {
 	panic("not implemented")
+}
+
+func IsAppliedMigration(db DatabaseReader, migrationName string) (bool, error) {
+	_, err := db.Get(dbutils.Migrations, []byte(migrationName))
+	if err != nil && errors.Is(err, ethdb.ErrKeyNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func ReceiptSerializedByRLP(db DatabaseReader) (bool, error) {
+	applied, err := IsAppliedMigration(db, "receipts_cbor_encode")
+	if err != nil {
+		return applied, err
+	}
+	return !applied, nil
 }

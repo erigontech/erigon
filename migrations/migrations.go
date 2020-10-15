@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -63,7 +62,7 @@ var migrations = []Migration{
 	dupSortIH,
 	clearIndices,
 	resetIHBucketToRecoverDB,
-	receiptsCborEncode,
+	//receiptsCborEncode,
 }
 
 type Migration struct {
@@ -84,6 +83,11 @@ func NewMigrator() *Migrator {
 
 type Migrator struct {
 	Migrations []Migration
+}
+
+// DatabaseReader wraps the Get method of a backing data store.
+type DatabaseReader interface {
+	Get(bucket string, key []byte) ([]byte, error)
 }
 
 func AppliedMigrations(db ethdb.Database, withPayload bool) (map[string][]byte, error) {
