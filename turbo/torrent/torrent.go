@@ -193,6 +193,7 @@ func saveTorrentSpec(db ethdb.Database, key []byte, ts torrentSpec) error { //no
 }
 
 func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.KV, error) {
+	log.Info("Wrap db to snapshots", "dir", snapshotDir, "mode", mode.ToString())
 	if mode.Bodies {
 		snapshotKV, err := ethdb.NewLMDB().Path(snapshotDir + "/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 			return dbutils.BucketsCfg{

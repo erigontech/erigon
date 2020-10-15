@@ -3,6 +3,7 @@ package generate
 import (
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"os"
 	"os/signal"
@@ -15,7 +16,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func HeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
+//example: go run cmd/state/main.go headersSnapshot --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode "hb"
+func HeaderSnapshot(dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	if snapshotPath == "" {
 		return errors.New("empty snapshot path")
 	}
@@ -24,6 +26,19 @@ func HeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 		return err
 	}
 	kv := ethdb.NewLMDB().Path(dbPath).MustOpen()
+
+	if snapshotDir != "" {
+		var mode torrent.SnapshotMode
+		mode, err = torrent.SnapshotModeFromString(snapshotMode)
+		if err != nil {
+			return err
+		}
+
+		kv, err = torrent.WrapBySnapshots(kv, snapshotDir, mode)
+		if err != nil {
+			return err
+		}
+	}
 	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
@@ -53,6 +68,9 @@ func HeaderSnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 			return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
 		}
 		header = rawdb.ReadHeaderRLP(db, hash, i)
+		if len(header) == 0 {
+			return fmt.Errorf("empty header: %v", i)
+		}
 		tuples = append(tuples, []byte(dbutils.HeaderPrefix), dbutils.HeaderKey(i, hash), header)
 		if len(tuples) >= chunkFile {
 			log.Info("Committed", "block", i)

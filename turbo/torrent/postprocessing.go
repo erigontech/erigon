@@ -167,7 +167,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 		if err != nil {
 			return err
 		}
-		log.Info("Last processed block","num", number, "hash",hash.String())
+		log.Info("Last processed block", "num", number, "hash", hash.String())
 	}
 
 	return nil
