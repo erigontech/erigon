@@ -316,7 +316,7 @@ func truncateBitmaps(tx ethdb.Tx, bucket string, inMem map[string]struct{}, from
 	sort.Strings(keys)
 	for _, k := range keys {
 		if err := bitmapdb.TruncateRange(tx, bucket, []byte(k), from, to); err != nil {
-			return nil
+			return err
 		}
 	}
 
