@@ -3,11 +3,12 @@ package bitmapdb
 import (
 	"bytes"
 	"encoding/binary"
+	"sort"
+
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"sort"
 )
 
 const ChunkLimit = uint64(1900 * datasize.B) // threshold after which appear LMDB OverflowPages
@@ -36,7 +37,7 @@ func CutLeft(bm *roaring.Bitmap, targetSize uint64) *roaring.Bitmap {
 
 	lft := roaring.New()
 	from := uint64(bm.Minimum())
-	minMax := bm.Maximum() - bm.Minimum()             // +1 because AddRange has semantic [from,to)
+	minMax := bm.Maximum() - bm.Minimum() // +1 because AddRange has semantic [from,to)
 	to := sort.Search(int(minMax), func(i int) bool { // can be optimized to avoid "too small steps", but let's leave it for readability
 		lft.Clear()
 		lft.AddRange(from, from+uint64(i)+1)
@@ -85,6 +86,7 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 			if err != nil {
 				return err
 			}
+			k, v = nil, nil
 			if noReasonToCheckNextChunk {
 				break
 			}
@@ -107,23 +109,22 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 		}
 	}
 
-	// rename last chunk
-	k, v, err := c.Current()
+	// rename last chunk if it has no finality marker
+	binary.BigEndian.PutUint32(chunkKey[len(chunkKey)-4:], ^uint32(0))
+	k, v, err := c.Seek(chunkKey)
 	if err != nil {
 		return err
 	}
-	if k == nil { // if last chunk was deleted, do 1 step back
+	if k == nil || !bytes.HasPrefix(k, key) {
 		k, v, err = c.Prev()
 		if err != nil {
 			return err
 		}
-	}
 
-	if binary.BigEndian.Uint32(k[len(k)-4:]) == ^uint32(0) { // nothing to return
-		return nil
-	}
-	if !bytes.HasPrefix(k, key) {
-		return nil
+		// case when all chunks were delted
+		if k == nil || !bytes.HasPrefix(k, key) {
+			return nil
+		}
 	}
 
 	copyV := common.CopyBytes(v)
@@ -132,7 +133,6 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 		return err
 	}
 
-	binary.BigEndian.PutUint32(chunkKey[len(chunkKey)-4:], ^uint32(0))
 	err = c.Put(chunkKey, copyV)
 	if err != nil {
 		return err
