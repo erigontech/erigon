@@ -452,7 +452,7 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 
 	byRLP, err := ReceiptSerializedByRLP(db)
 	if err != nil {
-		log.Error("ReceiptSerializedByCbor failed", "err", err)
+		log.Error("ReceiptSerializedByRLP failed", "err", err)
 		return nil
 	}
 
