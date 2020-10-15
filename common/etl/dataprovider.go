@@ -70,7 +70,7 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (
 		}
 	}
 
-	return &fileDataProvider{bufferFile, nil, false}, nil
+	return &fileDataProvider{bufferFile, nil, true}, nil
 }
 
 func (p *fileDataProvider) Next(decoder Decoder) ([]byte, []byte, error) {
