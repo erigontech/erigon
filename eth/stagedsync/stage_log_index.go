@@ -223,6 +223,12 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 	receipts := tx.Cursor(dbutils.BlockReceiptsPrefix)
 	defer receipts.Close()
 	start := dbutils.EncodeBlockNumber(to + 1)
+
+	byRLP, err := rawdb.ReceiptSerializedByRLP(tx)
+	if err != nil {
+		return err
+	}
+
 	for k, v, err := receipts.Seek(start); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
 			return err
@@ -231,8 +237,21 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 			return err
 		}
 		receipts := types.Receipts{}
-		if err := cbor.Unmarshal(&receipts, v); err != nil {
-			return fmt.Errorf("receipt unmarshal failed: %w, k=%x", err, k)
+
+		if byRLP {
+			// Convert the receipts from their storage form to their internal representation
+			storageReceipts := []*types.ReceiptForStorage{}
+			if err := rlp.DecodeBytes(v, &storageReceipts); err != nil {
+				return fmt.Errorf("invalid receipt array RLP: %w, blocl=%d", err, blockNum)
+			}
+
+			for _, r := range storageReceipts {
+				receipts = append(receipts, (*types.Receipt)(r))
+			}
+		} else {
+			if err := cbor.Unmarshal(&receipts, v); err != nil {
+				return fmt.Errorf("receipt unmarshal failed: %w, k=%x", err, k)
+			}
 		}
 
 		for _, receipt := range receipts {
