@@ -1,0 +1,575 @@
+commit cc05b050df5f88e80bb26aaf6d2f339c49c2d702
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Nov 12 22:10:15 2020 +0200
+
+    params: release Geth v1.9.24 with Go 1.15.5 (#21842)
+
+commit 920a28711746c8e44ef3e6270a41f038d767d92b
+Author: Felix Lange <fjl@twurst.com>
+Date:   Wed Nov 11 23:52:50 2020 +0100
+
+    .travis.yml: move test builders after install builders (#21833)
+
+commit d49407427d1b2642184166bd36ae43070db13e36
+Author: Felix Lange <fjl@twurst.com>
+Date:   Wed Nov 11 22:08:22 2020 +0100
+
+    build: fix regressions with the -dlgo change (#21831)
+    
+    This fixes cross-build and mobile framework failures.
+    It also disables the mac test builder because it was failing
+    all the time in hard to understand ways and we can't afford
+    it anymore under Travis CI's new pricing.
+
+commit d990df909d7839640143344e79356754384dcdd0
+Author: Slava Karpenko <slavikus@gmail.com>
+Date:   Wed Nov 11 21:13:12 2020 +0100
+
+    consensus/ethash: use 64bit indexes for the DAG generation (#21793)
+    
+    * Bit boundary fix for the DAG generation routine
+    
+    * Fix unnecessary conversion warnings
+    
+    Co-authored-by: Sergey Pavlov <spavlov@gmail.com>
+
+commit 27d93c1848846b75d0e67fcac284a0d417acd47c
+Author: Felix Lange <fjl@twurst.com>
+Date:   Wed Nov 11 14:34:43 2020 +0100
+
+    build: add -dlgo flag in ci.go (#21824)
+    
+    This new flag downloads a known version of Go and builds with it. This
+    is meant for environments where we can't easily upgrade the installed Go
+    version.
+    
+    * .travis.yml: remove install step for PR test builders
+    
+    We added this step originally to avoid re-building everything
+    for every test. go test has become much smarter in recent go
+    releases, so we no longer need to install anything here.
+
+commit 70868b1e4ab099d36d68ca86e1a569f9ebfc12dc
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Tue Nov 10 20:54:59 2020 +0100
+
+    fuzzers: removed fuzzbuzz configuration (#21813)
+    
+    We decided to move our fuzzing efforts to oss-fuzz since fuzzbuzz is still early access.
+
+commit 941d8b5c5c3b797251378c30125630313f041106
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Nov 10 15:21:41 2020 +0100
+
+    scripts: create oss-fuzz script in go-ethereum (#21808)
+
+commit c52dfd55fb375a798ef2e3d2620dbb38d83624c1
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Tue Nov 10 21:19:44 2020 +0800
+
+    p2p/simulations/adapters/exec: fix some issues (#21801)
+    
+    - Remove the ws:// prefix from the status endpoint since
+      the ws:// is already included in the stack.WSEndpoint().
+    - Don't register the services again in the node start.
+      Registration is already done in the initialization stage.
+    - Expose admin namespace via websocket.
+      This namespace is necessary for connecting the peers via websocket.
+    - Offer logging relevant options for exec adapter.
+      It's really painful to mix all log output in the single console. So
+      this PR offers two additional options for exec adapter in this case
+      testers can config the log output(e.g. file output) and log level
+      for each p2p node.
+
+commit 0c34eae172d07d4c7778f80aac0b2e96a04e5154
+Merge: 7c30f4d08 81ff70007
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 9 17:57:23 2020 +0200
+
+    Merge pull request #21803 from holiman/ethash
+    
+    consensus/ethash: fix the percentage progress report
+
+commit 7c30f4d08580aa0de5e88b55f8abe96e50e0f441
+Merge: 040928d8b 7b7b327ff
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 9 17:50:26 2020 +0200
+
+    Merge pull request #21804 from karalabe/snapshot-marker-sync
+    
+    core/state/snapshot: update generator marker in sync with flushes
+
+commit 040928d8bb11cc6e2147c0caa430fab2f2887394
+Merge: 9e688fb64 eb694ea70
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 9 17:49:56 2020 +0200
+
+    Merge pull request #21805 from karalabe/travis-drop-1.13
+    
+    travis: drop Go 1.13 builders as it's not supported any more
+
+commit 9e688fb64c13f5bc14512d3638a561ccb691196c
+Merge: 81678971d 1143dc6e2
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 9 17:49:21 2020 +0200
+
+    Merge pull request #21806 from karalabe/deprecate-eoan
+    
+    build: stop building for Ubuntu Eoan, not supported any more
+
+commit 1143dc6e295e6f312b18542b3454f52ccd46f53d
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 9 17:43:54 2020 +0200
+
+    build: stop building for Ubuntu Eoan, not supported any more
+
+commit eb694ea7067b275058d41061bf175ef2da62491d
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 9 17:39:42 2020 +0200
+
+    travis: drop Go 1.13 builders as it's not supported any more
+
+commit 81678971dbd578751896c71f8724fb61f8f22ad7
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Mon Nov 9 15:08:12 2020 +0100
+
+    trie, tests/fuzzers: implement a stacktrie fuzzer + stacktrie fixes (#21799)
+    
+    * trie: fix error in stacktrie not committing small roots
+    
+    * fuzzers: make trie-fuzzer use correct returnvalues
+    
+    * trie: improved tests
+    
+    * tests/fuzzers: fuzzer for stacktrie vs regular trie
+    
+    * test/fuzzers: make stacktrie fuzzer use 32-byte keys
+    
+    * trie: fix error in stacktrie with small nodes
+    
+    * trie: add (skipped) testcase for stacktrie
+    
+    * tests/fuzzers: address review comments for stacktrie fuzzer
+    
+    * trie: fix docs in stacktrie
+
+commit 7b7b327ff294201fa4f7cf460c4a73a4212c06cf
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 9 16:03:58 2020 +0200
+
+    core/state/snapshot: update generator marker in sync with flushes
+
+commit 81ff7000775b279e9c6ccf2ca3a3ebd6f406a2f0
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Mon Nov 9 11:48:18 2020 +0100
+
+    consensus/ethash: fix the percentage progress report
+
+commit 97fc1c3b1d054a1345934e18fa6c3489e9119666
+Merge: 175506e7f 6cfe49427
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Nov 5 11:55:50 2020 +0200
+
+    Merge pull request #21787 from karalabe/pod-non-verbose
+    
+    build: stop verbose output to keep travis from overflowing
+
+commit 6cfe494276c097c0e6f5ca31092da747b44943e6
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Nov 5 11:52:35 2020 +0200
+
+    build: stop verbose output to keep travis from overflowing
+
+commit 175506e7fd9601b66355b5cd3f7df4256637586f
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Wed Nov 4 19:29:24 2020 +0100
+
+    core/types, rlp: optimize derivesha (#21728)
+    
+    This PR contains a minor optimization in derivesha, by exposing the RLP
+    int-encoding and making use of it to write integers directly to a
+    buffer (an RLP integer is known to never require more than 9 bytes
+    total). rlp.AppendUint64 might be useful in other places too.
+    
+    The code assumes, just as before, that the hasher (a trie) will copy the
+    key internally, which it does when doing keybytesToHex(key).
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit 36bb7ac083c31d57519c6e2877588fee01339c9b
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Wed Nov 4 17:36:56 2020 +0100
+
+    cmd/devp2p/internal/ethtest: add correct chain files and improve test output (#21782)
+    
+    This PR replaces the old test genesis.json and chain.rlp files in the testdata
+    directory for the eth protocol test suite, and also adds documentation for
+    running the eth test suite locally.
+    
+    It also improves the test output text and adds more timeouts.
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit 5d20fbbb6fb90f06bd5592f2c926f21dc8aa6fa2
+Author: Felix Lange <fjl@twurst.com>
+Date:   Wed Nov 4 15:02:58 2020 +0100
+
+    cmd/devp2p, internal/utesting: implement TAP output (#21760)
+    
+    TAP is a text format for test results. Parsers for it are available in many languages,
+    making it easy to consume. I want TAP output from our protocol tests because the
+    Hive wrapper around them needs to know about the test names and their individual
+    results and logs. It would also be possible to just write this info as JSON, but I don't
+    want to invent a new format.
+    
+    This also improves the normal console output for tests (when running without --tap).
+    It now prints -- RUN lines before any output from the test, and indents the log output
+    by one space.
+
+commit e6402677c2bbcc6c26fd1c401f95f9a79bf65ea9
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Nov 4 19:41:46 2020 +0800
+
+    core/state/snapshot: fix journal recovery from generating old journal (#21775)
+    
+    * core/state/snapshot: print warning if failed to resolve journal
+    
+    * core/state/snapshot: fix snapshot recovery
+    
+    When we meet the snapshot journal consisted with:
+    - disk layer generator with new-format
+    - diff layer journal with old-format
+    
+    The base layer should be returned without error.
+    The broken diff layer can be reconstructed later
+    but we definitely don't want to reconstruct the
+    huge diff layer.
+    
+    * core: add tests
+
+commit 3eebf340386dee2f6a008664bf8a1e82842a053e
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Wed Nov 4 11:20:39 2020 +0100
+
+    common: remove ToHex and ToHexArray (#21610)
+    
+    ToHex was deprecated a couple years ago. The last remaining use
+    was in ToHexArray, which itself only had a single call site.
+    
+    This just moves ToHexArray near its only remaining call site and
+    implements it using hexutil.Encode. This changes the default behaviour
+    of ToHexArray and with it the behaviour of eth_getProof. Previously we
+    encoded an empty slice as 0, now the empty slice is encoded as 0x.
+
+commit b63bffe8202d46ea10ac8c4f441c582642193ac8
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Sat Oct 31 01:04:38 2020 +0800
+
+    les, p2p/simulations/adapters: fix issues found while simulating les  (#21761)
+    
+    This adds a few tiny fixes for les and the p2p simulation framework:
+    
+    LES Parts
+    
+    - Keep the LES-SERVER connection even it's non-synced
+    
+      We had this idea to reject the connections in LES protocol if the les-server itself is
+      not synced. However, in LES protocol we will also receive the connection from another
+      les-server. In this case even the local node is not synced yet, we should keep the tcp
+      connection for other protocols(e.g. eth protocol).
+    
+    - Don't count "invalid message" for non-existing GetBlockHeadersMsg request
+    
+      In the eth syncing mechanism (full sync, fast sync, light sync), it will try to fetch
+      some non-existent blocks or headers(to ensure we indeed download all the missing chain).
+      In this case, it's possible that the les-server will receive the request for
+      non-existent headers. So don't count it as the "invalid message" for scheduling
+      dropping.
+    
+    - Copy the announce object in the closure
+    
+      Before the les-server pushes the latest headers to all connected clients, it will create
+      a closure and queue it in the underlying request scheduler. In some scenarios it's
+      problematic. E.g, in private networks, the block can be mined very fast. So before the
+      first closure is executed, we may already update the latest_announce object. So actually
+      the "announce" object we want to send is replaced.
+    
+      The downsize is the client will receive two announces with the same td and then drop the
+      server.
+    
+    P2P Simulation Framework
+    
+    - Don't double register the protocol services in p2p-simulation "Start".
+    
+      The protocols upon the devp2p are registered in the "New node stage". So don't reigster
+      them again when starting a node in the p2p simulation framework
+    
+    - Add one more new config field "ExternalSigner", in order to use clef service in the
+      framework.
+
+commit b63e3c37a62b4ff7dfafb06e05e760d22be94d86
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Fri Oct 30 03:01:58 2020 +0800
+
+    core: improve snapshot journal recovery (#21594)
+    
+    * core/state/snapshot: introduce snapshot journal version
+    
+    * core: update the disk layer in an atomic way
+    
+    * core: persist the disk layer generator periodically
+    
+    * core/state/snapshot: improve logging
+    
+    * core/state/snapshot: forcibly ensure the legacy snapshot is matched
+    
+    * core/state/snapshot: add debug logs
+    
+    * core, tests: fix tests and special recovery case
+    
+    * core: polish
+    
+    * core: add more blockchain tests for snapshot recovery
+    
+    * core/state: fix comment
+    
+    * core: add recovery flag for snapshot
+    
+    * core: add restart after start-after-crash tests
+    
+    * core/rawdb: fix imports
+    
+    * core: fix tests
+    
+    * core: remove log
+    
+    * core/state/snapshot: fix snapshot
+    
+    * core: avoid callbacks in SetHead
+    
+    * core: fix setHead cornercase where the threshold root has state
+    
+    * core: small docs for the test cases
+    
+    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
+
+commit 43c278cdf93d5469702fd1c2f570dbf3c1718ff0
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Oct 28 20:27:37 2020 +0800
+
+    core/state: disable snapshot iteration if it's not fully constructed (#21682)
+    
+    * core/state/snapshot: add diskRoot function
+    
+    * core/state/snapshot: disable iteration if the snapshot is generating
+    
+    * core/state/snapshot: simplify the function
+    
+    * core/state: panic for undefined layer
+
+commit 18145adf084b9659c41343609677e6e94c0640c6
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Oct 28 20:00:22 2020 +0800
+
+    core/state: maintain one more diff layer (#21730)
+    
+    * core/state: maintain one more diff layer
+    
+    * core/state: address comment
+
+commit 296a27d10624fa07b4fcb8c1964eefa6a0ba850d
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Tue Oct 27 17:22:44 2020 +0100
+
+    accounts/abi/bind: restore error functionality (#21743)
+    
+    * accounts/abi/bind: restore error functionality
+    
+    * Update accounts/abi/bind/base.go
+    
+    Co-authored-by: Guillaume Ballet <gballet@gmail.com>
+    
+    Co-authored-by: Guillaume Ballet <gballet@gmail.com>
+
+commit 1a55e20d3562b08a4cf31b5b6b66d39d9acc43df
+Author: James Prestwich <10149425+prestwich@users.noreply.github.com>
+Date:   Mon Oct 26 05:45:08 2020 -0700
+
+    cmd/geth: fix dir path in geth attach for yolov2 network (#21749)
+
+commit 7b748e550a3234c5240427d0164a058829dc83dc
+Merge: 8a94aa91f 68ac4eb79
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Fri Oct 23 17:48:43 2020 +0300
+
+    Merge pull request #21747 from holiman/yolov2update
+    
+    params: update yolov2 bootnode with elastic ip
+
+commit 68ac4eb796a243b9c79405ffdafab2a6125acb7a
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Fri Oct 23 16:47:26 2020 +0200
+
+    params: update yolov2 bootnode with elastic ip
+
+commit 8a94aa91fbe4985e8e48f81f2e89fb447b0dfd37
+Merge: 95f720fff f5182c7b9
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Fri Oct 23 16:42:08 2020 +0300
+
+    Merge pull request #21745 from holiman/yolov2_bootnodes
+    
+    utils, params: add yolov2 bootnode
+
+commit f5182c7b9c874aa77e90cc4c104ca01352fac6d2
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Fri Oct 23 15:40:48 2020 +0200
+
+    utils, params: add yolov2 bootnode
+
+commit 95f720fffc9cb366b69abc52d1a64834e92f00a4
+Author: Felix Lange <fjl@twurst.com>
+Date:   Fri Oct 23 13:34:44 2020 +0200
+
+    cmd/devp2p/internal/ethtest: update test chain (#21742)
+    
+    The old one was wrong in two ways: the first block in chain.rlp was the
+    genesis block, and the genesis difficulty was below minimum difficulty.
+    
+    This also contains some other fixes to the test.
+
+commit 6487c002f6b47e08cb9814f16712c6789b313a97
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Fri Oct 23 08:26:57 2020 +0200
+
+    all: implement EIP-2929 (gas cost increases for state access opcodes) + yolo-v2 (#21509)
+    
+    * core/vm, core/state: implement EIP-2929 + YOLOv2
+    
+    * core/state, core/vm: fix some review concerns
+    
+    * core/state, core/vm: address review concerns
+    
+    * core/vm: address review concerns
+    
+    * core/vm: better documentation
+    
+    * core/vm: unify sload cost as fully dynamic
+    
+    * core/vm: fix typo
+    
+    * core/vm/runtime: fix compilation flaw
+    
+    * core/vm/runtime: fix renaming-err leftovers
+    
+    * core/vm: renaming
+    
+    * params/config: use correct yolov2 chainid for config
+    
+    * core, params: use a proper new genesis for yolov2
+    
+    * core/state/tests: golinter nitpicks
+
+commit fb2c79df1995b4e8dfe79f9c75464d29d23aaaf4
+Author: Kristofer Peterson <svenski123@users.noreply.github.com>
+Date:   Wed Oct 21 15:56:45 2020 +0100
+
+    accounts/usbwallet: fix ledger version check (#21733)
+    
+    The version check logic did not take into account the second digit (i.e. the '4' in v1.4.0) - this one line patch corrects this.
+
+commit 91c460797967da491077cf23f9e25e76e0301d32
+Author: hwanjo <34005989+hwanjo@users.noreply.github.com>
+Date:   Wed Oct 21 23:53:30 2020 +0900
+
+    core: fix blockchain insert report time interval calculation (#21723)
+
+commit 85d81b2cdde6f5377fa3af6e108ca0b84a6266bd
+Author: Zsolt Felföldi <zsfelfoldi@gmail.com>
+Date:   Wed Oct 21 10:56:33 2020 +0200
+
+    les: remove clientPeerSet and serverSet (#21566)
+    
+    * les: move NodeStateMachine from clientPool to LesServer
+    
+    * les: new header broadcaster
+    
+    * les: peerCommons.headInfo always contains last announced head
+    
+    * les: remove clientPeerSet and serverSet
+    
+    * les: fixed panic
+    
+    * les: fixed --nodiscover option
+    
+    * les: disconnect all peers at ns.Stop()
+    
+    * les: added comments and fixed signed broadcasts
+    
+    * les: removed unused parameter, fixed tests
+
+commit 3e82c9ef67b9948bc90ba244b9537054188ebaf8
+Author: aaronbuchwald <aaron.buchwald56@gmail.com>
+Date:   Tue Oct 20 14:19:21 2020 -0400
+
+    eth/api: fix potential nil deref in AccountRange (#21710)
+    
+    * Fix potential nil pointer error when neither block number nor hash is specified to accountRange
+    
+    * Update error description
+
+commit 9d25f34263fa0621bd0b70a53057df7c6a5eaa41
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Tue Oct 20 22:34:50 2020 +0800
+
+    core: track and improve tx indexing/unindexing (#21331)
+    
+    * core: add background indexer to waitgroup
+    
+    * core: make indexer stopable
+    
+    * core/rawdb: add unit tests
+    
+    * core/rawdb: fix lint
+    
+    * core/rawdb: fix tests
+    
+    * core/rawdb: fix linter
+
+commit 6e7137103c63f471bf577d857f179110622d8804
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Tue Oct 20 10:58:26 2020 +0200
+
+    miner: fixed race condition in tests (#21664)
+
+commit cef3e2dc5a563fccb4c54b7bea2fddc071bf9541
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Tue Oct 20 10:56:51 2020 +0200
+
+    console: don't exit on ctrl-c, only on ctrl-d (#21660)
+    
+    * add interrupt counter
+    
+    * remove interrupt counter, allow ctrl-C to clear ONLY, ctrl-D will terminate console, stop node
+    
+    * format
+    
+    * add instructions to exit
+    
+    * fix tests
+
+commit b305591e1491229c35a4551f18bd5e745405700f
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Fri Oct 16 11:28:03 2020 +0200
+
+    core/vm: marshall returnData as hexstring in trace logs (#21715)
+    
+    * core/vm: marshall returnData as hexstring in trace logs
+    
+    * core/vm: marshall returnData as hexstring in trace logs
+
+commit 51d026ca8554a04fccd5c5008aadffbd5c0594c7
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Oct 15 12:30:41 2020 +0200
+
+    params: begin v1.9.24 release cycle
