@@ -84,6 +84,9 @@ type EthAPI interface {
 	CompileLLL(_ context.Context, _ string) (string, error)        /* deprecated */
 	CompileSolidity(ctx context.Context, _ string) (string, error) /* deprecated */
 	CompileSerpent(ctx context.Context, _ string) (string, error)  /* deprecated */
+
+	ForkID(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (ID, error)
+	Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (Forks, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access

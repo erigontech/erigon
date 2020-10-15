@@ -68,7 +68,7 @@ var AllStages = []SyncStage{
 
 // GetStageProgress retrieves saved progress of given sync stage from the database
 func GetStageProgress(db rawdb.DatabaseReader, stage SyncStage) (uint64, []byte, error) {
-	v, err := db.Get(dbutils.SyncStageProgress, []byte(stage))
+	v, err := db.Get(dbutils.SyncStageProgress, stage)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err
 	}

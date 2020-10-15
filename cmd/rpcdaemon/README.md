@@ -137,6 +137,9 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | eth_getWork                             | -       |                                            |
 | eth_submitWork                          | -       |                                            |
 |                                         |         |                                            |
+| eth_forkID                              | Yes     | turbo-geth only                            |
+| eth_forks                               | Yes     | turbo-geth only                            |
+|                                         |         |                                            |
 | debug_accountRange                      | Yes     | Private turbo-geth debug module            |
 | debug_getModifiedAccountsByNumber       | Yes     |                                            |
 | debug_getModifiedAccountsByHash         | Yes     |                                            |
