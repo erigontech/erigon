@@ -1418,7 +1418,7 @@ func (jt *JumpTable) Clone() *JumpTable {
 		if op == nil {
 			cpy[i] = nil
 		} else {
-			cpy[i] = &(*op)
+			cpy[i] = &*op
 		}
 	}
 	return &cpy
