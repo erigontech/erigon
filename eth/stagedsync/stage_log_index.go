@@ -242,7 +242,7 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 			// Convert the receipts from their storage form to their internal representation
 			storageReceipts := []*types.ReceiptForStorage{}
 			if err := rlp.DecodeBytes(v, &storageReceipts); err != nil {
-				return fmt.Errorf("invalid receipt array RLP: %w, blocl=%d", err, blockNum)
+				return fmt.Errorf("invalid receipt array RLP: %w", err)
 			}
 
 			for _, r := range storageReceipts {
