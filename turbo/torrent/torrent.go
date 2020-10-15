@@ -216,7 +216,6 @@ func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.
 			return dbutils.BucketsCfg{
 				dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
 				dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
-				dbutils.HeadHeaderKey:      dbutils.BucketConfigItem{},
 			}
 		}).ReadOnly().Open()
 		if err != nil {
@@ -257,7 +256,6 @@ func BuildInfoBytesForLMDBSnapshot(root string) (metainfo.Info, error) {
 	}
 
 	err = info.GeneratePieces(func(fi metainfo.FileInfo) (io.ReadCloser, error) {
-		fmt.Println("info.GeneratePieces", filepath.Join(root, strings.Join(fi.Path, string(filepath.Separator))))
 		return os.Open(filepath.Join(root, strings.Join(fi.Path, string(filepath.Separator))))
 	})
 	if err != nil {
