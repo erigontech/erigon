@@ -64,11 +64,10 @@ func ActivateableEips() []string {
 // - Define SELFBALANCE, with cost GasFastStep (5)
 func enable1884(jt *JumpTable) {
 	// Gas cost changes
-	fmt.Println("enable1884-jt[SLOAD].constantGas", jt[SLOAD].constantGas)
-	jt[SLOAD].constantGas = params.SloadGasEIP1884
-	jt[BALANCE].constantGas = params.BalanceGasEIP1884
-	jt[EXTCODEHASH].constantGas = params.ExtcodeHashGasEIP1884
-	fmt.Println("enable1884-jt[SLOAD].constantGas-AFTER", jt[SLOAD].constantGas)
+	jt[SLOAD] = jt[SLOAD].SetConstantGas(params.SloadGasEIP1884)
+	jt[BALANCE] = jt[BALANCE].SetConstantGas(params.BalanceGasEIP1884)
+	jt[EXTCODEHASH] = jt[EXTCODEHASH].SetConstantGas(params.ExtcodeHashGasEIP1884)
+
 	// New opcode
 	jt[SELFBALANCE] = &operation{
 		execute:     opSelfBalance,
@@ -78,7 +77,7 @@ func enable1884(jt *JumpTable) {
 	}
 }
 
-func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+func opSelfBalance(_ *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	balance := interpreter.evm.IntraBlockState.GetBalance(callContext.contract.Address())
 	callContext.stack.Push(balance)
 	return nil, nil
@@ -105,10 +104,8 @@ func opChainID(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 
 // enable2200 applies EIP-2200 (Rebalance net-metered SSTORE)
 func enable2200(jt *JumpTable) {
-	fmt.Println("enable2200-jt[SLOAD].constantGas-BEFORE", jt[SLOAD].constantGas)
-	jt[SLOAD].constantGas = params.SloadGasEIP2200
-	jt[SSTORE].dynamicGas = gasSStoreEIP2200
-	fmt.Println("enable2200-jt[SLOAD].constantGas-AFTER", jt[SLOAD].constantGas)
+	jt[SLOAD] = jt[SLOAD].SetConstantGas(params.SloadGasEIP2200)
+	jt[SSTORE] = jt[SSTORE].SetDynamicGas(gasSStoreEIP2200)
 }
 
 // enable2315 applies EIP-2315 (Simple Subroutines)
