@@ -86,7 +86,6 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 			if err != nil {
 				return err
 			}
-			k, v = nil, nil
 			if noReasonToCheckNextChunk {
 				break
 			}
