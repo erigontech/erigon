@@ -1166,11 +1166,13 @@ func validateTxLookups2(db rawdb.DatabaseReader, startBlock uint64, interruptCh 
 }
 
 func getModifiedAccounts(chaindata string) {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	addrs, err := ethdb.GetModifiedAccounts(db, 49300, 49400)
-	check(err)
-	fmt.Printf("Len(addrs)=%d\n", len(addrs))
+	// TODO(tjayrush): The call to GetModifiedAccounts needs a database tx
+	fmt.Println("hack - getModiiedAccounts is temporarily disabled.")
+	// db := ethdb.MustOpen(chaindata)
+	// defer db.Close()
+	// addrs, err := ethdb.GetModifiedAccounts(db, 49300, 49400)
+	// check(err)
+	// fmt.Printf("Len(addrs)=%d\n", len(addrs))
 }
 
 type Receiver struct {

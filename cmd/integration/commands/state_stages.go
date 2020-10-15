@@ -7,10 +7,9 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -94,16 +93,15 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	}
 
-	tx, errBegin := db.Begin(context.Background())
-	if errBegin != nil {
-		return errBegin
-	}
+	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db)
 	defer tx.Rollback()
 
-	bc, st, progress := newSync(ch, db, tx, changeSetHook)
+	cc, bc, st, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
+	cc.SetDB(tx)
 
-	if err := tx.CommitAndBegin(context.Background()); err != nil {
+	tx, err = tx.Begin(context.Background())
+	if err != nil {
 		return err
 	}
 
@@ -139,7 +137,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 			if err := stagedsync.SpawnExecuteBlocksStage(
 				stageState, tx,
-				bc.Config(), bc, bc.GetVMConfig(),
+				bc.Config(), cc, bc.GetVMConfig(),
 				ch,
 				stagedsync.ExecuteBlockStageParams{
 					ToBlock:       execToBlock, // limit execution to the specified block
