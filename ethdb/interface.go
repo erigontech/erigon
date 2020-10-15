@@ -165,8 +165,13 @@ type HasNetInterface interface {
 
 type BucketsMigrator interface {
 	BucketExists(bucket string) (bool, error) // makes them empty
-	ClearBuckets(buckets ...string) error     // makes them empty
-	DropBuckets(buckets ...string) error      // drops them, use of them after drop will panic
+	// freelist-friendly methods
+	DropBucketsAndCommitEvery(deleteKeysPerTx uint64, buckets ...string) error
+	ClearBucketsAndCommitEvery(deleteKeysPerTx uint64, buckets ...string) error
+
+	// _Deprecated: freelist-unfriendly methods
+	ClearBuckets(buckets ...string) error // makes them empty
+	DropBuckets(buckets ...string) error  // drops them, use of them after drop will panic
 }
 
 var errNotSupported = errors.New("not supported")
