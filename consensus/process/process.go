@@ -2,6 +2,7 @@ package process
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -29,6 +30,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 		for {
 			select {
 			case req := <-c.VerifyHeaderRequests:
+				fmt.Println("<-c.VerifyHeaderRequests-1", req.Header.Number)
 				if req.Deadline == nil {
 					t := time.Now().Add(ttl)
 					req.Deadline = &t
@@ -44,11 +46,14 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				}
 
 				parents, parentsRequested, allParents := c.requestParentHeaders(req)
+				fmt.Println("<-c.VerifyHeaderRequests-2", req.Header.Number, len(parents), len(parentsRequested), allParents)
 				err := c.verifyByRequest(toVerifyRequest(req, parents, allParents), req.Header.Number.Uint64())
+				fmt.Println("<-c.VerifyHeaderRequests-3", req.Header.Number, err)
 				if errors.Is(err, errNotAllParents) {
 					c.addVerifyHeaderRequest(req, parents, parentsRequested, allParents)
 				}
 			case parentResp := <-c.HeaderResponses:
+				fmt.Println("<-c.HeaderResponses-1")
 				if parentResp.Err != nil {
 					c.RequestsMu.Lock()
 					c.DeleteRequestedBlocks(parentResp.Number)
@@ -63,11 +68,15 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 						}
 					}
 					c.RequestsMu.Unlock()
+					fmt.Println("<-c.HeaderResponses-1.1")
 					continue
 				}
 
+				fmt.Println("<-c.HeaderResponses-2")
 				c.VerifyRequestsCommonAncestor(parentResp.Number, parentResp.Header)
+				fmt.Println("<-c.HeaderResponses-3")
 			case <-c.CleanupTicker.C:
+				fmt.Println("<-c.CleanupTicker.C-1")
 				c.RequestsMu.Lock()
 				for blockNum, reqMap := range c.RequestsToParents {
 					for reqID, req := range reqMap {
@@ -82,7 +91,9 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					}
 				}
 				c.RequestsMu.Unlock()
+				fmt.Println("<-c.CleanupTicker.C-2")
 			case <-exit:
+				fmt.Println("<-exit")
 				return
 			}
 		}
@@ -225,6 +236,7 @@ func (c *Consensus) HeaderVerification() chan<- consensus.VerifyHeaderRequest {
 // returns parents(asc sorted by block number), parentsRequested, error
 func (c *Consensus) requestParentHeaders(req consensus.VerifyHeaderRequest) ([]*types.Header, []uint64, int) {
 	parentsToGet := c.NeededForVerification(req.Header)
+	fmt.Println("requestParentHeaders", req.Header.Number, parentsToGet)
 	if parentsToGet == 0 {
 		return nil, nil, 0
 	}
