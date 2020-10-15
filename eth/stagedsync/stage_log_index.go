@@ -219,12 +219,11 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 	topics := map[string]bool{}
 	addrs := map[string]bool{}
 
-	tx := db.(ethdb.HasTx).Tx()
-	receipts := tx.Cursor(dbutils.BlockReceiptsPrefix)
+	receipts := db.(ethdb.HasTx).Tx().Cursor(dbutils.BlockReceiptsPrefix)
 	defer receipts.Close()
 	start := dbutils.EncodeBlockNumber(to + 1)
 
-	byRLP, err := rawdb.ReceiptSerializedByRLP(tx)
+	byRLP, err := rawdb.ReceiptSerializedByRLP(db)
 	if err != nil {
 		return err
 	}
@@ -264,10 +263,10 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 		}
 	}
 
-	if err := truncateBitmaps(tx, dbutils.LogTopicIndex, topics, to+1, from+1); err != nil {
+	if err := truncateBitmaps(db.(ethdb.HasTx).Tx(), dbutils.LogTopicIndex, topics, to+1, from+1); err != nil {
 		return err
 	}
-	if err := truncateBitmaps(tx, dbutils.LogAddressIndex, addrs, to+1, from+1); err != nil {
+	if err := truncateBitmaps(db.(ethdb.HasTx).Tx(), dbutils.LogAddressIndex, addrs, to+1, from+1); err != nil {
 		return err
 	}
 	return nil
