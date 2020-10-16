@@ -3,15 +3,16 @@ package commands
 import (
 	"context"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
 type Forks struct {
-	Hash   [4]byte
-	Passed []uint64
-	Next   uint64
+	GenesisHash common.Hash `json:"genesis"`
+	Passed      []uint64    `json:"passed"`
+	Next        *uint64     `json:"next,omitempty"`
 }
 
 // returns forkID hash, sorted list of already passed forks and next fork block
@@ -28,16 +29,21 @@ func (api *APIImpl) Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHa
 	defer tx.Rollback()
 
 	chainConfig, genesisHash := getChainConfigWithGenesis(tx)
-
-	forkID := forkid.NewID(chainConfig, genesisHash, blockNumber)
-
 	forksBlocks := forkid.GatherForks(chainConfig)
 
+	lastAddedIdx := -1
 	passedForks := make([]uint64, 0, len(forksBlocks))
-	for _, num := range forksBlocks {
+	for i, num := range forksBlocks {
 		if num <= blockNumber {
 			passedForks = append(passedForks, num)
+			lastAddedIdx = i
 		}
 	}
-	return Forks{forkID.Hash, passedForks, forkID.Next}, nil
+
+	var nextFork *uint64
+	if len(forksBlocks) > lastAddedIdx+1 {
+		nextFork = new(uint64)
+		*nextFork = forksBlocks[lastAddedIdx+1]
+	}
+	return Forks{genesisHash, passedForks, nextFork}, nil
 }
