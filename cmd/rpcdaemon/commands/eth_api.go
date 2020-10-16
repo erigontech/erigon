@@ -57,6 +57,7 @@ type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	Syncing(ctx context.Context) (interface{}, error)
+	Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (Forks, error)
 	// GasPrice(_ context.Context) (*hexutil.Big, error)
 
 	// Sending related (see ./eth_call.go)
@@ -84,9 +85,6 @@ type EthAPI interface {
 	CompileLLL(_ context.Context, _ string) (string, error)        /* deprecated */
 	CompileSolidity(ctx context.Context, _ string) (string, error) /* deprecated */
 	CompileSerpent(ctx context.Context, _ string) (string, error)  /* deprecated */
-
-	ForkID(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (ID, error)
-	Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (Forks, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
