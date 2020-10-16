@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/metrics"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/metrics"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -470,7 +471,6 @@ func (m *TxDb) removeBucketContentByMultipleTransactions(bucket string, deleteKe
 			return err
 		}
 		if cnt < deleteKeysPerTx {
-			partialDropDone = true
 			return nil
 		}
 		var deleted uint64
