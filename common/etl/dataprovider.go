@@ -19,9 +19,8 @@ type dataProvider interface {
 }
 
 type fileDataProvider struct {
-	file     *os.File
-	reader   io.Reader
-	noRemove bool
+	file   *os.File
+	reader io.Reader
 }
 
 type Encoder interface {
@@ -70,7 +69,7 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (
 		}
 	}
 
-	return &fileDataProvider{bufferFile, nil, true}, nil
+	return &fileDataProvider{bufferFile, nil}, nil
 }
 
 func (p *fileDataProvider) Next(decoder Decoder) ([]byte, []byte, error) {
@@ -88,10 +87,7 @@ func (p *fileDataProvider) Next(decoder Decoder) ([]byte, []byte, error) {
 func (p *fileDataProvider) Dispose() (uint64, error) {
 	info, errStat := os.Stat(p.file.Name())
 	errClose := p.file.Close()
-	var errRemove error
-	if !p.noRemove {
-		errRemove = os.Remove(p.file.Name())
-	}
+	errRemove := os.Remove(p.file.Name())
 	if errClose != nil {
 		return 0, errClose
 	}

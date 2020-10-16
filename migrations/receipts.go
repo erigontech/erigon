@@ -62,7 +62,7 @@ var receiptsCborDECODE = Migration{
 			return err
 		}
 		if collector == nil {
-			collector = etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+			collector = etl.NewCriticalCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 			if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
 				blockNum := binary.BigEndian.Uint64(k[:8])
 				select {
@@ -96,6 +96,10 @@ var receiptsCborDECODE = Migration{
 		// Commit clearing of the bucket - freelist should now be written to the database
 		if err := OnLoadCommit(db, nil, true); err != nil {
 			return fmt.Errorf("committing the removal of receipt table")
+		}
+		// Commit clearing of the bucket - freelist should now be written to the database
+		if err := OnLoadCommit(db, nil, true); err != nil {
+			return fmt.Errorf("committing again to create a stable view the removal of receipt table")
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
 		if err := collector.Load(db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {
