@@ -13,6 +13,7 @@ Welcome to Turbo Geth's documentation!
    types
    rpc/index
    rpc/tutorial
+   stagedsync
 
 Indices and tables
 ==================
