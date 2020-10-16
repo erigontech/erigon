@@ -284,7 +284,7 @@ func stageSenders(ctx context.Context) error {
 		panic(err)
 	}
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -334,7 +334,7 @@ func stageExec(ctx context.Context) error {
 		panic(err)
 	}
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	cc, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset { //nolint:staticcheck
@@ -349,7 +349,7 @@ func stageExec(ctx context.Context) error {
 		return stagedsync.UnwindExecutionStage(u, stage4, db, false)
 	}
 	return stagedsync.SpawnExecuteBlocksStage(stage4, db,
-		bc.Config(), bc, bc.GetVMConfig(),
+		bc.Config(), cc, bc.GetVMConfig(),
 		ch,
 		stagedsync.ExecuteBlockStageParams{
 			ToBlock:       block, // limit execution to the specified block
@@ -374,7 +374,7 @@ func stageIHash(ctx context.Context) error {
 		panic(err)
 	}
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -408,7 +408,7 @@ func stageHashState(ctx context.Context) error {
 		panic(err)
 	}
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -437,7 +437,7 @@ func stageLogIndex(ctx context.Context) error {
 	db := openDatabase()
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -469,7 +469,7 @@ func stageCallTraces(ctx context.Context) error {
 	db := openDatabase()
 	defer db.Close()
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -510,7 +510,7 @@ func stageHistory(ctx context.Context) error {
 		panic(err)
 	}
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -551,7 +551,7 @@ func stageTxLookup(ctx context.Context) error {
 		panic(err)
 	}
 
-	bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
 	if reset {
@@ -610,12 +610,15 @@ func removeMigration(_ context.Context) error {
 
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
-func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook stagedsync.ChangeSetHook) (*core.BlockChain, *stagedsync.State, progressFunc) {
-	chainConfig, bc, err := newBlockChain(tx)
+func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook stagedsync.ChangeSetHook) (*core.TinyChainContext, *core.BlockChain, *stagedsync.State, progressFunc) {
+	chainConfig, bc, err := newBlockChain(db)
 	if err != nil {
 		panic(err)
 	}
 
+	cc := &core.TinyChainContext{}
+	cc.SetDB(tx)
+	cc.SetEngine(ethash.NewFaker())
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
@@ -624,7 +627,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{},
-	).Prepare(nil, chainConfig, bc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", false, quitCh, nil, nil, func() error { return nil }, hook)
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", false, quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}
@@ -644,7 +647,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 		return s
 	}
 
-	return bc, st, progress
+	return cc, bc, st, progress
 }
 
 func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, error) {

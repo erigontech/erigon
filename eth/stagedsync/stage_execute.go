@@ -48,7 +48,7 @@ type ExecuteBlockStageParams struct {
 	WriterBuilder StateWriterBuilder
 }
 
-func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
+func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext *core.TinyChainContext, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
 	prevStageProgress, _, errStart := stages.GetStageProgress(stateDB, stages.Senders)
 	if errStart != nil {
 		return errStart
@@ -93,6 +93,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	defer batch.Rollback()
 
 	engine := chainContext.Engine()
+	chainContext.SetDB(tx)
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -172,6 +173,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				if err = tx.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
+				chainContext.SetDB(tx)
 			}
 			warmup = params.Hdd && (to-blockNum) > 30000
 		}

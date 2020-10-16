@@ -18,7 +18,7 @@ import (
 type StageParameters struct {
 	d            DownloaderGlue
 	chainConfig  *params.ChainConfig
-	chainContext core.ChainContext
+	chainContext *core.TinyChainContext
 	vmConfig     *vm.Config
 	db           ethdb.Database
 	// TX is a current transaction that staged sync runs in. It contains all the latest changes that DB has.

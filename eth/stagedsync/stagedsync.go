@@ -41,7 +41,7 @@ func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameter
 func (stagedSync *StagedSync) Prepare(
 	d DownloaderGlue,
 	chainConfig *params.ChainConfig,
-	chainContext core.ChainContext,
+	chainContext *core.TinyChainContext,
 	vmConfig *vm.Config,
 	db ethdb.Database,
 	tx ethdb.Database,
