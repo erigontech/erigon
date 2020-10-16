@@ -41,6 +41,9 @@ func NewCollectorFromFiles(datadir string) (*Collector, error) {
 		// it actually can make debugging more tricky in case we leak some open files.
 		datadir = path.Join(datadir, "etl-temp")
 	}
+	if _, err := os.Stat(datadir); os.IsNotExist(err) {
+		return nil, nil
+	}
 	fileInfos, err := ioutil.ReadDir(datadir)
 	if err != nil {
 		return nil, fmt.Errorf("collector from files - reading directory %s: %w", datadir, err)
