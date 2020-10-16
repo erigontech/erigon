@@ -450,13 +450,11 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 		return nil
 	}
 
-	byRLP, err := ReceiptSerializedByRLP(db)
-	if err != nil {
-		log.Error("ReceiptSerializedByRLP failed", "err", err)
-		return nil
-	}
+	receipts := types.Receipts{}
+	if err := cbor.Unmarshal(&receipts, data); err != nil {
+		log.Warn("cbor receipt unmarshal failed, will fallback to RLP", "hash", hash, "err", err)
 
-	if byRLP {
+		// Try reading RLP if can't unmarshal CBOR
 		// Convert the receipts from their storage form to their internal representation
 		storageReceipts := []*types.ReceiptForStorage{}
 		if err := rlp.DecodeBytes(data, &storageReceipts); err != nil {
@@ -468,12 +466,6 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 			receipts[i] = (*types.Receipt)(storageReceipt)
 		}
 		return receipts
-	}
-
-	receipts := types.Receipts{}
-	if err := cbor.Unmarshal(&receipts, data); err != nil {
-		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
-		return nil
 	}
 	return receipts
 }
