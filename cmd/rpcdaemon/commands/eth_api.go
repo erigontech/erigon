@@ -57,6 +57,7 @@ type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	Syncing(ctx context.Context) (interface{}, error)
+	Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (Forks, error)
 	// GasPrice(_ context.Context) (*hexutil.Big, error)
 
 	// Sending related (see ./eth_call.go)
