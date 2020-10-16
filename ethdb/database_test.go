@@ -147,8 +147,11 @@ func testNoPanicAfterDbClosed(db Database, t *testing.T) {
 	require.NoError(t, err)
 	writeTx, err := db.(HasKV).KV().Begin(context.Background(), nil, true)
 	require.NoError(t, err)
+
+	closeCh := make(chan struct{}, 1)
 	go func() {
 		require.NotPanics(t, func() {
+			<-closeCh
 			db.Close()
 		})
 	}()
@@ -162,6 +165,7 @@ func testNoPanicAfterDbClosed(db Database, t *testing.T) {
 	tx.Rollback()
 
 	db.Close() // close db from 2nd goroutine
+	close(closeCh)
 
 	// after db closed, methods must not panic but return some error
 	require.NotPanics(t, func() {
