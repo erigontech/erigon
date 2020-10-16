@@ -546,9 +546,9 @@ func (tds *TrieDbState) resolveCodeTouches(
 	return nil
 }
 
-var bytes8 [8]byte
-
 func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Hashes, storageTouches common.StorageKeys, loadFunc trie.LoadFunc) error {
+	var bytes8 [8]byte
+
 	// Build the retain list
 	rl := trie.NewRetainList(0)
 	for _, addrHash := range accountTouches {

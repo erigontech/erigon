@@ -342,7 +342,9 @@ func (pm *ProtocolManager) StartTxPool() error {
 	}
 	pm.txFetcher = fetcher.NewTxFetcher(pm.txpool.Has, pm.txpool.AddRemotes, fetchTx)
 
-	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
+	if pm.txsCh == nil {
+		pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
+	}
 	pm.txsSub = pm.txpool.SubscribeNewTxsEvent(pm.txsCh)
 	if pm.txsSub != nil {
 		pm.wg.Add(1)
@@ -356,6 +358,7 @@ func (pm *ProtocolManager) StartTxPool() error {
 func (pm *ProtocolManager) StopTxPool() {
 	if pm.txsSub != nil {
 		pm.txsSub.Unsubscribe() // quits txBroadcastLoop
+		pm.txFetcher.Stop()
 	}
 }
 
