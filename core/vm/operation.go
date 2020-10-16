@@ -13,12 +13,13 @@ type operation struct {
 
 	numPop  int
 	numPush int
-	isPush  bool
-	isSwap  bool
-	isDup   bool
 	opNum   int // only for push, swap, dup
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
+
+	isPush bool
+	isSwap bool
+	isDup  bool
 
 	halts   bool // indicates whether the operation should halt further execution
 	jumps   bool // indicates whether the program counter should not increment
