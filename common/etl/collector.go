@@ -6,6 +6,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
+	"path"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -25,10 +29,49 @@ type Collector struct {
 	flushBuffer     func([]byte, bool) error
 	dataProviders   []dataProvider
 	allFlushed      bool
+	cleanOnFailure  bool
+}
+
+// NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
+func NewCollectorFromFiles(datadir string) (*Collector, error) {
+	// if we are going to create files in the system temp dir, we don't need any
+	// subfolders.
+	if datadir != "" {
+		// the folder name stays the same and shared between ETL runs, so we don't need to remove it.
+		// it actually can make debugging more tricky in case we leak some open files.
+		datadir = path.Join(datadir, "etl-temp")
+	}
+	if _, err := os.Stat(datadir); os.IsNotExist(err) {
+		return nil, nil
+	}
+	fileInfos, err := ioutil.ReadDir(datadir)
+	if err != nil {
+		return nil, fmt.Errorf("collector from files - reading directory %s: %w", datadir, err)
+	}
+	if len(fileInfos) == 0 {
+		return nil, nil
+	}
+	dataProviders := make([]dataProvider, len(fileInfos))
+	for i, fileInfo := range fileInfos {
+		var dataProvider fileDataProvider
+		dataProvider.file, err = os.Open(filepath.Join(datadir, fileInfo.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("collector from files - opening file %s: %w", fileInfo.Name(), err)
+		}
+		dataProviders[i] = &dataProvider
+	}
+	return &Collector{dataProviders: dataProviders, allFlushed: true, cleanOnFailure: false}, nil
+}
+
+// NewCriticalCollector does not clean up temporary files if loading has failed
+func NewCriticalCollector(datadir string, sortableBuffer Buffer) *Collector {
+	c := NewCollector(datadir, sortableBuffer)
+	c.cleanOnFailure = false
+	return c
 }
 
 func NewCollector(datadir string, sortableBuffer Buffer) *Collector {
-	c := &Collector{}
+	c := &Collector{cleanOnFailure: true}
 	encoder := codec.NewEncoder(nil, &cbor)
 
 	c.flushBuffer = func(currentKey []byte, canStoreInRam bool) error {
@@ -70,15 +113,23 @@ func (c *Collector) Collect(k, v []byte) error {
 }
 
 func (c *Collector) Load(db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
-	defer func() {
-		disposeProviders(c.dataProviders)
-	}()
+	if c.cleanOnFailure {
+		defer func() {
+			disposeProviders(c.dataProviders)
+		}()
+	}
 	if !c.allFlushed {
 		if err := c.flushBuffer(nil, true); err != nil {
 			return err
 		}
 	}
-	return loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, args)
+	if err := loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, args); err != nil {
+		return err
+	}
+	if !c.cleanOnFailure {
+		disposeProviders(c.dataProviders)
+	}
+	return nil
 }
 
 func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {

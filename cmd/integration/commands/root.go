@@ -20,13 +20,10 @@ var rootCmd = &cobra.Command{
 		if len(chaindata) > 0 {
 			db := openDatabase()
 			defer db.Close()
-			if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
-				panic(err)
-			}
-
-			err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-			if err != nil {
-				panic(err)
+			if cmd != cmdPrintMigrations && cmd != cmdPrintStages && cmd != cmdRemoveMigration {
+				if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
+					panic(err)
+				}
 			}
 		}
 	},
@@ -41,10 +38,14 @@ func RootCommand() *cobra.Command {
 }
 
 func openDatabase() *ethdb.ObjectDatabase {
+	opts := ethdb.NewLMDB().Path(chaindata)
 	if mapSizeStr != "" {
 		var mapSize datasize.ByteSize
 		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
-		return ethdb.NewObjectDatabase(ethdb.NewLMDB().Path(chaindata).MapSize(mapSize).MustOpen())
+		opts = opts.MapSize(mapSize)
 	}
-	return ethdb.MustOpen(chaindata)
+	if freelistReuse > 0 {
+		opts = opts.MaxFreelistReuse(uint(freelistReuse))
+	}
+	return ethdb.NewObjectDatabase(opts.MustOpen())
 }
