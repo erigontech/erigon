@@ -13,6 +13,8 @@ var (
 	privateApiAddr  string
 	changeSetBucket string
 	indexBucket     string
+	snapshotMode    string
+	snapshotDir     string
 )
 
 func must(err error) {
@@ -23,6 +25,10 @@ func must(err error) {
 
 func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 1, "specifies a block number for operation")
+}
+func withSnapshotData(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
+	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
 }
 
 func withChaindata(cmd *cobra.Command) {

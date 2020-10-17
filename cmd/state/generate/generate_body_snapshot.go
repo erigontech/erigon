@@ -2,6 +2,7 @@ package generate
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"os"
 	"time"
@@ -13,8 +14,21 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func BodySnapshot(dbPath, snapshotPath string, toBlock uint64) error {
+func BodySnapshot(dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	kv := ethdb.NewLMDB().Path(dbPath).MustOpen()
+	var err error
+	if snapshotDir != "" {
+		var mode torrent.SnapshotMode
+		mode, err = torrent.SnapshotModeFromString(snapshotMode)
+		if err != nil {
+			return err
+		}
+
+		kv, err = torrent.WrapBySnapshots(kv, snapshotDir, mode)
+		if err != nil {
+			return err
+		}
+	}
 	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
@@ -28,7 +42,7 @@ func BodySnapshot(dbPath, snapshotPath string, toBlock uint64) error {
 	chunkFile := 30000
 	tuples := make(ethdb.MultiPutTuples, 0, chunkFile*3+100)
 	var hash common.Hash
-	var err error
+
 	for i := uint64(1); i <= toBlock; i++ {
 		hash, err = rawdb.ReadCanonicalHash(db, i)
 		if err != nil {
