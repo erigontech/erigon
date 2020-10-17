@@ -233,9 +233,8 @@ func (dbs *PlainDBState) ReadAccountStorage(address common.Address, _ uint64, ke
 	if err != nil {
 		if errors.Is(err, ethdb.ErrKeyNotFound) {
 			return nil, nil
-		} else {
-			return nil, err
 		}
+		return nil, err
 	}
 	if acc == nil {
 		return nil, nil
