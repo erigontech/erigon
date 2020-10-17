@@ -21,14 +21,14 @@ var receiptsCborEncode = Migration{
 	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-		collector, err := etl.NewCollectorFromFiles(datadir)
-		if err != nil {
-			return err
+		collector, err1 := etl.NewCollectorFromFiles(datadir)
+		if err1 != nil {
+			return err1
 		}
 		if collector == nil {
 			collector = etl.NewCriticalCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 			buf := make([]byte, 0, 100_000)
-			if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
+			if err1 = db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
 				blockNum := binary.BigEndian.Uint64(k[:8])
 				select {
 				default:
@@ -48,12 +48,12 @@ var receiptsCborEncode = Migration{
 				if err := cbor.Marshal(&buf, storageReceipts); err != nil {
 					return false, err
 				}
-				if err = collector.Collect(k, buf); err != nil {
+				if err := collector.Collect(k, buf); err != nil {
 					return false, fmt.Errorf("collecting key %x: %w", k, err)
 				}
 				return true, nil
-			}); err != nil {
-				return err
+			}); err1 != nil {
+				return err1
 			}
 		}
 		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.BlockReceiptsPrefix); err != nil {
