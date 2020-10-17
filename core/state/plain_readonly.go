@@ -229,7 +229,18 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 }
 
 func (dbs *PlainDBState) ReadAccountStorage(address common.Address, _ uint64, key *common.Hash) ([]byte, error) {
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, 1, *key)
+	acc, err := dbs.ReadAccountData(address)
+	if err != nil {
+		if errors.Is(err, ethdb.ErrKeyNotFound) {
+			return nil, nil
+		} else {
+			return nil, err
+		}
+	}
+	if acc == nil {
+		return nil, nil
+	}
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, acc.Incarnation, *key)
 	if dbs.storageCache != nil {
 		if enc, ok := dbs.storageCache.HasGet(nil, compositeKey); ok {
 			return enc, nil
