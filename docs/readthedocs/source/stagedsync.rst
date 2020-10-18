@@ -5,12 +5,12 @@ We tried to maximally decompose the sync process into stages, and perform them s
 
 All of the stages are declared in https://github.com/ledgerwatch/turbo-geth/blob/master/eth/stagedsync/stagebuilder.go
 
-Stage1 : Download Block Headers
-===============================
+Stage 1 : Download Block Headers
+================================
 
 .. code-block:: go
 
-    		{
+    	{
 			ID: stages.Headers,
 			Build: func(world StageParameters) *Stage {
 				return &Stage{
@@ -26,7 +26,7 @@ Stage1 : Download Block Headers
 			},
 		},
 
-This stage takes advantage of two processes, a fetcher method and a processer method.
+This stage uses two processes, a fetcher method and a processer method.
 
 .. code-block:: go
 
@@ -45,6 +45,40 @@ the process method takes the headers retrieve thanks to the fetcher and does the
 This process repeates until we reach the maximun height. once it is reached the stage finish.
 
 Changes in DB:
+
     * Headers are encoded in database under bucket `dbutils.HeaderPrefix`
 
     * Total Difficulty per block is written in `dbutils.HeaderTDKey`
+
+Stage 2 : Write Block Hashes
+============================
+
+.. code-block:: go
+
+		{
+			ID: stages.BlockHashes,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.BlockHashes,
+					Description: "Write block hashes",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnBlockHashStage(s, world.db, world.datadir, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						return u.Done(world.db)
+					},
+				}
+			},
+		},
+
+This stage takes the data written in stage 1, and by using the ETL framework, it writes (blockHash => blockNumber) in order in the Database. So that with given block hash we can get given block number and thus retrieve a block by knowing only the hash and not the number. We use a different stage because we want to write pre-sorted data in order to minimize write operations in the Database.
+
+.. code-block:: go
+
+    func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error
+
+The function above its used with ETL to extract blockHashes and blockNumber from the key of the headers bucket. In fact, since the key of the headers bucket are a concatenation of blockNumber and blockHash, they can be used in such process.
+
+Changes in DB:
+
+    * BlockHash => BlockNumber are written in bucket `dbutils.HeaderNumberPrefix`
