@@ -22,7 +22,7 @@ func (api *TgImpl) Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHas
 		return Forks{}, err
 	}
 
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.db.Begin(ctx, nil, false)
 	if err != nil {
 		return Forks{}, err
 	}
