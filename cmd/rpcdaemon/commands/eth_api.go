@@ -57,7 +57,6 @@ type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	Syncing(ctx context.Context) (interface{}, error)
-	Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (Forks, error)
 	// GasPrice(_ context.Context) (*hexutil.Big, error)
 
 	// Sending related (see ./eth_call.go)
@@ -74,11 +73,6 @@ type EthAPI interface {
 	GetWork(_ context.Context) ([]interface{}, error)
 	SubmitWork(_ context.Context, nonce rpc.BlockNumber, powHash, digest common.Hash) (bool, error)
 	SubmitHashrate(_ context.Context, hashRate common.Hash, id string) (bool, error)
-
-	// These three commands worked anyway, but were not in this interface. Temporarily adding them for discussion
-	GetHeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error)
-	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
-	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 
 	// Deprecated commands in eth_ (proposed file: ./eth_deprecated.go)
 	GetCompilers(_ context.Context) (string, error)                /* deprecated */

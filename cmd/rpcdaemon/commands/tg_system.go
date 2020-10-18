@@ -16,13 +16,13 @@ type Forks struct {
 }
 
 // returns forkID hash, sorted list of already passed forks and next fork block
-func (api *APIImpl) Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (Forks, error) {
+func (api *TgImpl) Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (Forks, error) {
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
 	if err != nil {
 		return Forks{}, err
 	}
 
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.db.Begin(ctx, nil, false)
 	if err != nil {
 		return Forks{}, err
 	}
