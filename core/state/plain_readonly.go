@@ -228,8 +228,8 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 	return &acc, nil
 }
 
-func (dbs *PlainDBState) ReadAccountStorage(address common.Address, _ uint64, key *common.Hash) ([]byte, error) {
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, 1, *key)
+func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 	if dbs.storageCache != nil {
 		if enc, ok := dbs.storageCache.HasGet(nil, compositeKey); ok {
 			return enc, nil
@@ -291,9 +291,21 @@ func (dbs *PlainDBState) ReadAccountCodeSize(address common.Address, codeHash co
 }
 
 func (dbs *PlainDBState) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	// We do not need to know the accurate incarnation value when DbState is used, because correct incarnation
-	// is stored in the account record
-	return 0, nil
+	enc, err := GetAsOf(dbs.tx, false /* storage */, address[:], dbs.blockNr+2)
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return 0, err
+	}
+	if len(enc) == 0 {
+		return 0, nil
+	}
+	var acc accounts.Account
+	if err = acc.DecodeForStorage(enc); err != nil {
+		return 0, err
+	}
+	if acc.Incarnation == 0 {
+		return 0, nil
+	}
+	return acc.Incarnation - 1, nil
 }
 
 func (dbs *PlainDBState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
