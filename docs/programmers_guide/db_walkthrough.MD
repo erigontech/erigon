@@ -50,7 +50,7 @@ Table "Headers"
 This table stores information about block headers. For each block there are three types of block header records with the following (key, value) formats:
 
 * __FULL HEADER__: contains the complete block header with all its information parameters
-    - _key_ : 8-byte RLP-encoded block number + 32-byte block hash
+    - _key_ : 8-byte big-endian block number + 32-byte block hash
     - _value_ : the RLP-encoded block header structured as defined in the [Ethereum Yellow Paper](https://github.com/ethereum/yellowpaper):
         * parent hash: 32-byte hash of the parent block
         * uncles hash: 32-byte hash of the uncle blocks
@@ -58,20 +58,20 @@ This table stores information about block headers. For each block there are thre
         * state root: 32-byte root hash of the state trie
         * transactions root: 32-byte root hash of the trie structure made up of the block transactions
         * receipts root: 32-byte root hash of the trie structure made up of the transaction receipts
-        * logs bloom: 64-byte Bloom filter composed from indexable information in each log entry from the transaction receipts
+        * logs bloom: 256-byte Bloom filter composed from indexable information in each log entry from the transaction receipts
         * difficulty: 8-byte scalar value corresponding to the diffculty level of this block
         * block number: 8-byte scalar value equal to the number of ancestor blocks in the chain (aka block heigth)
         * gas limit: 8-byte scalar value equal to the current limit of gas expenditure per block
         * gas used: 8-byte scalar value equal to the total gas used in transactions in this block
         * timestamp: 8-byte scalar value equal to the Unix epoch timestamp at the inception of this block
-        * extra data: up to 32-byte array of additional relevant data for this block
+        * extra data: up to 32-byte array of additional relevant data for this block (at least for Eth-hash consensus engine, for Clique could be more)
         * mix_hash: 64-byte hash proving, combined with nonce, the computation amount spent in block mining
         * nonce: 8-byte value proving, combined with mix hash, the computation amount spent in block mining
 * __TOTAL DIFFICULTY HEADER__: contains the total mining difficulty (TD) of the chain ending in such specific block
-    - _key_ : 8-byte RLP-encoded block number + 32-byte block hash + `0x74` suffix (ASCII code for `t` character)
-    - _value_ : RLP-encoded total difficulty value: the cumulative difficulty value from first block to this one
+    - _key_ : 8-byte big-endian block number + 32-byte block hash + `0x74` suffix (ASCII code for `t` character)
+    - _value_ : variable-length RLP-encoded total difficulty value: the cumulative difficulty value from first block to this one
 * __CANONICAL HEADER__: contains the block hash
-    - key: 8-byte RLP-encoded block number + `0x6E` suffix (ASCII code for `n` character)
+    - key: 8-byte big-endian block number + `0x6E` suffix (ASCII code for `n` character)
     - value: 32-byte block hash
 
 as shown in the following picture for the block 0 (from top to bottom the three types of records, key on the left and value on the right):
@@ -80,19 +80,10 @@ as shown in the following picture for the block 0 (from top to bottom the three 
 
 You can check that for the genesis block
 
-* block number 0 is encoded as 0x0000000000000000
+* block number 0 is encoded as 0x0000000000000000 (see 8-byte zeros start of each key)
 * block hash is 0x61eb...aba1
+* logs bloom is 256-byte zeros (see the 8 white rows of all 32-byte 0s)
 * total difficulty is 0x80, which is RLP encoding of value 0
-
-The keys for the first two records start with 8-byte encoding of the block number (0), followed by
-the block hash (or header hash, which is the same thing). The second record also has a suffix `0x74`,
-which is ASCII code for `t`. The records of the first type store the actual headers in their values.
-The records of the second type store total mining difficulty (TD) of  the chain ending in that specific header.
-In our case it is `0x80`, which is RLP encoding of 0.
-The records of the third type have their keys composed of 8-byte encoding of the block number (0 here), and
-suffix `0x6E`, which is ASCII code for `n`. These records allow for the lookup of a header/block hash, given its block
-number. They are also called "canonical header" records, because there might be multiple headers for given
-block number, and only one of them is deemed "canonical" at a time.
 
 Bucket "Block Bodies"
 ---------------------
