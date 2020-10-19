@@ -41,9 +41,8 @@ var receiptsCborEncode = Migration{
 		case loadStep:
 			if collector == nil {
 				return fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
-			} else {
-				goto LoadStep
 			}
+			goto LoadStep
 		}
 
 		collector = etl.NewCriticalCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
