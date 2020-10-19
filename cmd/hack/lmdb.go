@@ -12,6 +12,7 @@ const MdbMagic uint32 = 0xBEEFC0DE
 const MdbDataVersion uint32 = 1
 const BranchPageFlag uint16 = 1
 const BigDataFlag uint16 = 1
+const HeaderSize int = 16
 
 func defrag(chaindata string) error {
 	fmt.Printf("Defrag %s\n", chaindata)
@@ -21,33 +22,33 @@ func defrag(chaindata string) error {
 		return fmt.Errorf("opening data.mdb: %v", err)
 	}
 	defer f.Close()
-	var page [PageSize]byte
+	var meta [PageSize]byte
 	// Read meta page 0
-	if _, err = f.ReadAt(page[:], 0*PageSize); err != nil {
+	if _, err = f.ReadAt(meta[:], 0*PageSize); err != nil {
 		return fmt.Errorf("reading meta page 0: %v", err)
 	}
-	pos, pageID, _, _ := readPageHeader(page[:], 0)
+	pos, pageID, _, _ := readPageHeader(meta[:], 0)
 	if pageID != 0 {
 		return fmt.Errorf("meta page 0 has wrong page ID: %d != %d", pageID, 0)
 	}
 	var freeRoot0, mainRoot0, txnID0 uint64
 	var freeDepth0, mainDepth0 uint16
-	pos, freeRoot0, freeDepth0, mainRoot0, mainDepth0, txnID0, err = readMetaPage(page[:], pos)
+	pos, freeRoot0, freeDepth0, mainRoot0, mainDepth0, txnID0, err = readMetaPage(meta[:], pos)
 	if err != nil {
 		return fmt.Errorf("reading meta page 0: %v", err)
 	}
 
 	// Read meta page 0
-	if _, err = f.ReadAt(page[:], 1*PageSize); err != nil {
+	if _, err = f.ReadAt(meta[:], 1*PageSize); err != nil {
 		return fmt.Errorf("reading meta page 1: %v", err)
 	}
-	pos, pageID, _, _ = readPageHeader(page[:], 0)
+	pos, pageID, _, _ = readPageHeader(meta[:], 0)
 	if pageID != 1 {
 		return fmt.Errorf("meta page 1 has wrong page ID: %d != %d", pageID, 1)
 	}
 	var freeRoot1, mainRoot1, txnID1 uint64
 	var freeDepth1, mainDepth1 uint16
-	pos, freeRoot1, freeDepth1, mainRoot1, mainDepth1, txnID1, err = readMetaPage(page[:], pos)
+	pos, freeRoot1, freeDepth1, mainRoot1, mainDepth1, txnID1, err = readMetaPage(meta[:], pos)
 	if err != nil {
 		return fmt.Errorf("reading meta page 1: %v", err)
 	}
@@ -68,76 +69,91 @@ func defrag(chaindata string) error {
 	fmt.Printf("FREE_DBI root page ID: %d, depth: %d\n", freeRoot, freeDepth)
 	fmt.Printf("MAIN_DBI root page ID: %d, depth: %d\n", mainRoot, mainDepth)
 
-	// Read root page of FREE_DBI
-	if _, err = f.ReadAt(page[:], int64(freeRoot*PageSize)); err != nil {
-		return fmt.Errorf("reading FREE_DBI root page: %v", err)
-	}
-	var flags uint16
-	var lowerFree int
-	pos, _, flags, lowerFree = readPageHeader(page[:], 0)
-	fmt.Printf("FREE_DBI root page is branch page: %t\n", flags&BranchPageFlag > 0)
-	numKeys := (lowerFree - pos) / 2
-	fmt.Printf("FREE_DBI number of keys: %d\n", numKeys)
-	var childPageID uint64
-	for i := 0; i < numKeys; i++ {
-		nodePtr := binary.LittleEndian.Uint16(page[pos+i*2:])
-		fmt.Printf("Nodeptr[%d]=%d\n", i, nodePtr)
-		// Only 6 bytes are used for child page ID
-		childPageID = binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
-		fmt.Printf("Child page ID: %d\n", childPageID)
-	}
-
-	if _, err = f.ReadAt(page[:], int64(childPageID*PageSize)); err != nil {
-		return fmt.Errorf("reading FREE_DBI level2 page: %v", err)
-	}
-	pos, _, flags, lowerFree = readPageHeader(page[:], 0)
-	fmt.Printf("FREE_DBI level2 page is branch page: %t\n", flags&BranchPageFlag > 0)
-	numKeys = (lowerFree - pos) / 2
-	fmt.Printf("FREE_DBI number of keys: %d\n", numKeys)
-	for i := 0; i < numKeys; i++ {
-		nodePtr := binary.LittleEndian.Uint16(page[pos+i*2:])
-		fmt.Printf("Nodeptr[%d]=%d\n", i, nodePtr)
-		// Only 6 bytes are used for child page ID
-		childPageID = binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
-		fmt.Printf("Child page ID: %d\n", childPageID)
-	}
-
-	if _, err = f.ReadAt(page[:], int64(childPageID*PageSize)); err != nil {
-		return fmt.Errorf("reading FREE_DBI level3 page: %v", err)
-	}
-	pos, _, flags, lowerFree = readPageHeader(page[:], 0)
-	fmt.Printf("FREE_DBI level3 page is branch page: %t\n", flags&BranchPageFlag > 0)
-	numKeys = (lowerFree - pos) / 2
-	fmt.Printf("FREE_DBI number of keys: %d\n", numKeys)
-	var overflowPageID uint64
-	for i := 0; i < numKeys; i++ {
-		nodePtr := binary.LittleEndian.Uint16(page[pos+i*2:])
-		fmt.Printf("Nodeptr[%d]=%d\n", i, nodePtr)
-		dataSize := binary.LittleEndian.Uint32(page[nodePtr:])
-		flags := binary.LittleEndian.Uint16(page[nodePtr+4:])
-		keySize := binary.LittleEndian.Uint16(page[nodePtr+6:])
-		// Only 6 bytes are used for child page ID
-		//childPageID := binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
-		fmt.Printf("Key size: %d, flags: %x, data size: %d\n", keySize, flags, dataSize)
-		if flags&BigDataFlag > 0 {
-			overflowPageID = binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
-			fmt.Printf("Overflow pageID: %d\n", overflowPageID)
+	var freelist []uint64
+	var freeEntries int
+	var overflows int
+	var pages [8][PageSize]byte // Stack of pages
+	var pageIDs [8]uint64
+	var numKeys [8]int
+	var indices [8]int
+	var top int
+	pageIDs[0] = freeRoot
+	for top >= 0 {
+		branch := top < int(freeDepth)-1
+		i := indices[top]
+		num := numKeys[top]
+		page := &pages[top]
+		if num == 0 {
+			pageID = pageIDs[top]
+			//fmt.Printf("top %d, num == 0, pageID = %d\n", top, pageID)
+			if _, err = f.ReadAt(page[:], int64(pageID*PageSize)); err != nil {
+				return fmt.Errorf("reading FREE_DBI page: %v", err)
+			}
+			var flags uint16
+			var lowerFree int
+			pos, _, flags, lowerFree = readPageHeader(page[:], 0)
+			branchFlag := flags&BranchPageFlag > 0
+			if branchFlag && !branch {
+				return fmt.Errorf("unexpected branch page on level %d of FREE_DBI", top)
+			}
+			if !branchFlag && branch {
+				return fmt.Errorf("expected branch page on level %d of FREE_DBI", top)
+			}
+			num = (lowerFree - pos) / 2
+			i = 0
+			numKeys[top] = num
+			indices[top] = i
+		} else if i < num {
+			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
+			//fmt.Printf("top %d, i %d, num %d, nodePtr %d\n", top, i, num, nodePtr)
+			i++
+			indices[top] = i
+			if branch {
+				top++
+				indices[top] = 0
+				numKeys[top] = 0
+				pageIDs[top] = binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
+			} else {
+				freeEntries++
+				dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
+				flags := binary.LittleEndian.Uint16(page[nodePtr+4:])
+				keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
+				if flags&BigDataFlag > 0 {
+					overflowPageID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
+					if _, err = f.ReadAt(meta[:], int64(overflowPageID*PageSize)); err != nil {
+						return fmt.Errorf("reading FREE_DBI overflow page: %v", err)
+					}
+					var overflowNum int
+					pos, flags, overflowNum = readOverflowPageHeader(meta[:], 0)
+					overflows += overflowNum
+					left := dataSize - 8
+					// Start with pos + 8 because first 8 bytes is the size of the list
+					for j := pos + 8; j < PageSize && left > 0; j += 8 {
+						freelist = append(freelist, binary.LittleEndian.Uint64(meta[j:]))
+						left -= 8
+					}
+					for i := 1; i < overflowNum; i++ {
+						if _, err = f.ReadAt(meta[:], int64((overflowPageID+uint64(i))*PageSize)); err != nil {
+							return fmt.Errorf("reading FREE_DBI overflow page: %v", err)
+						}
+						for j := 0; j < PageSize && left > 0; j += 8 {
+							freelist = append(freelist, binary.LittleEndian.Uint64(meta[j:]))
+							left -= 8
+						}
+					}
+				} else {
+					// First 8 bytes is the size of the list
+					for j := nodePtr + 8 + keySize + 8; j < nodePtr+8+keySize+dataSize; j += 8 {
+						freelist = append(freelist, binary.LittleEndian.Uint64(meta[j:]))
+					}
+				}
+			}
+		} else {
+			//fmt.Printf("top %d, i %d, num %d\n", top, i, num)
+			top--
 		}
 	}
-
-	if _, err = f.ReadAt(page[:], int64(overflowPageID*PageSize)); err != nil {
-		return fmt.Errorf("reading FREE_DBI overflow page: %v", err)
-	}
-	var overflowNum int
-	pos, flags, overflowNum = readOverflowPageHeader(page[:], 0)
-	fmt.Printf("Number of overflow pages: %d\n", overflowNum)
-	for i := 1; i < overflowNum; i++ {
-		if _, err = f.ReadAt(page[:], int64((overflowPageID+1)*PageSize)); err != nil {
-			return fmt.Errorf("reading FREE_DBI overflow page: %v", err)
-		}
-		pos, flags, overflowNum = readOverflowPageHeader(page[:], 0)
-		fmt.Printf("Number of overflow pages: %d\n", overflowNum)
-	}
+	fmt.Printf("Size of freelist: %d, entries: %d, overflows: %d\n", len(freelist), freeEntries, overflows)
 	return nil
 }
 
