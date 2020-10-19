@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -30,5 +31,5 @@ func TestReceiptCbor(t *testing.T) {
 	err = receiptsCborEncode.Up(db, "tmp-test-dir", []byte("load"), func(db ethdb.Putter, key []byte, isDone bool) error {
 		return nil
 	})
-	require.NoError(err)
+	require.True(errors.Is(err, ErrMigrationETLFilesDeleted))
 }
