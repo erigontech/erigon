@@ -22,6 +22,7 @@ var receiptsCborEncode = Migration{
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 		buf := make([]byte, 0, 100_000)
+		const loadStep = "load"
 
 		collector, err1 := etl.NewCollectorFromFiles(datadir)
 		if err1 != nil {
@@ -31,7 +32,7 @@ var receiptsCborEncode = Migration{
 			goto LoadPart
 		}
 
-		if string(progress) == "load" && collector == nil {
+		if string(progress) == loadStep && collector == nil {
 			return fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
 		}
 
@@ -69,13 +70,13 @@ var receiptsCborEncode = Migration{
 		}
 
 		// Commit clearing of the bucket - freelist should now be written to the database
-		if err := CommitProgress(db, []byte("load"), false); err != nil {
+		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
 			return fmt.Errorf("committing the removal of receipt table")
 		}
 
 	LoadPart:
 		// Commit again
-		if err := CommitProgress(db, []byte("load"), false); err != nil {
+		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
 			return fmt.Errorf("committing again to create a stable view the removal of receipt table")
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
