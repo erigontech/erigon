@@ -74,11 +74,6 @@ type EthAPI interface {
 	SubmitWork(_ context.Context, nonce rpc.BlockNumber, powHash, digest common.Hash) (bool, error)
 	SubmitHashrate(_ context.Context, hashRate common.Hash, id string) (bool, error)
 
-	// These three commands worked anyway, but were not in this interface. Temporarily adding them for discussion
-	GetHeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error)
-	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
-	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
-
 	// Deprecated commands in eth_ (proposed file: ./eth_deprecated.go)
 	GetCompilers(_ context.Context) (string, error)                /* deprecated */
 	CompileLLL(_ context.Context, _ string) (string, error)        /* deprecated */

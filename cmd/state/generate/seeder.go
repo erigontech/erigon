@@ -111,7 +111,7 @@ func Seed(pathes []string) error {
 		ticker := time.NewTicker(10 * time.Second)
 		for range ticker.C {
 			for _, t := range cl.Torrents() {
-				log.Info("Snapshot stats", "snapshot", t.Name(), "active peers", t.Stats().ActivePeers, "seeding", t.Seeding())
+				log.Info("Snapshot stats", "snapshot", t.Name(), "active peers", t.Stats().ActivePeers, "seeding", t.Seeding(), "hash", t.Metainfo().HashInfoBytes().String())
 			}
 
 			if common.IsCanceled(ctx) {

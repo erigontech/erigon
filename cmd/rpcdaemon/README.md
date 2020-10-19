@@ -93,8 +93,6 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | eth_getBlockByNumber                    | Yes     |                                            |
 | eth_getBlockTransactionCountByHash      | Yes     |                                            |
 | eth_getBlockTransactionCountByNumber    | Yes     |                                            |
-| eth_getHeaderByHash                     | Yes     | turbo-geth only                            |
-| eth_getHeaderByNumber                   | Yes     | turbo-geth only                            |
 | eth_getUncleByBlockHashAndIndex         | Yes     |                                            |
 | eth_getUncleByBlockNumberAndIndex       | Yes     |                                            |
 | eth_getUncleCountByBlockHash            | Yes     |                                            |
@@ -104,7 +102,6 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | eth_getTransactionByBlockHashAndIndex   | Yes     |                                            |
 | eth_getTransactionByBlockNumberAndIndex | Yes     |                                            |
 | eth_getTransactionReceipt               | Yes     |                                            |
-| eth_getLogsByHash                       | Yes     | turbo-geth only (all logs in block)        |
 |                                         |         |                                            |
 | eth_estimateGas                         | Yes     |                                            |
 | eth_getBalance                          | Yes     |                                            |
@@ -173,6 +170,14 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | shh_uninstallFilter                     | No      | depreciated                                |
 | shh_getFilterChanges                    | No      | depreciated                                |
 | shh_getMessages                         | No      | depreciated                                |
+|                                         |         |                                            |
+| tg_getHeaderByHash                      | Yes     | turbo-geth only                            |
+| tg_getHeaderByNumber                    | Yes     | turbo-geth only                            |
+|                                         |         |                                            |
+| tg_getLogsByHash                        | Yes     | turbo-geth only                            |
+|                                         |         |                                            |
+| tg_forks                                | Yes     | turbo-geth only                            |
+
 
 This table is constantly updated. Please visit again.
 

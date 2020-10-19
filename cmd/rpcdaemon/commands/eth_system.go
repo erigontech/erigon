@@ -10,7 +10,7 @@ import (
 )
 
 // BlockNumber returns the latest block number of the chain
-func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
+func (api *APIImpl) BlockNumber(_ context.Context) (hexutil.Uint64, error) {
 	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
 	if err != nil {
 		return 0, err
@@ -19,7 +19,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 }
 
 // Syncing - we can return the progress of the very first stage as the highest block, and then the progress of the very last stage as the current block
-func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
+func (api *APIImpl) Syncing(_ context.Context) (interface{}, error) {
 	highestBlock, _, err := stages.GetStageProgress(api.dbReader, stages.Headers)
 	if err != nil {
 		return false, err
@@ -59,7 +59,7 @@ func (api *APIImpl) ProtocolVersion(_ context.Context) (hexutil.Uint, error) {
 }
 
 // GasPrice returns a suggestion for a gas price.
-func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
+func (api *APIImpl) GasPrice(_ context.Context) (*hexutil.Big, error) {
 	return nil, fmt.Errorf(NotImplemented, "eth_getPrice")
 	// price, err := eth.SuggestPrice(ctx)
 	// return (*hexutil.Big)(price), err

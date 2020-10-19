@@ -646,7 +646,6 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 // spawnSync runs d.process and all given fetcher functions to completion in
 // separate goroutines, returning the first error that appears.
 func (d *Downloader) spawnSync(fetchers []func() error) error {
-	fmt.Println("spawn sync", len(fetchers))
 	errc := make(chan error, len(fetchers))
 
 	d.cancelWg.Add(len(fetchers))

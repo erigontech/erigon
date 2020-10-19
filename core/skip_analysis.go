@@ -30,7 +30,7 @@ import (
 // 0x86e55d1818b5355424975de9633a57c40789ca08552297b726333a9433949c92 (block 6426298)
 // 0x3666640316df11865abd1352f4c0b4c5126f8ac1d858ef2a0c6e744a4865bca2 (block 5800596)
 
-const MainnetNotCheckedFrom uint64 = 10968760
+const MainnetNotCheckedFrom uint64 = 11075819
 
 func SkipAnalysis(config *params.ChainConfig, blockNumber uint64) bool {
 	if config != params.MainnetChainConfig {

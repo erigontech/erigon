@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/metrics"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 // TxDb - provides Database interface around ethdb.Tx
@@ -415,6 +415,86 @@ func (m *TxDb) ClearBuckets(buckets ...string) error {
 			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
 		}
 		if err := migrator.ClearBucket(name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *TxDb) ClearBucketsAndCommitEvery(deleteKeysPerTx uint64, buckets ...string) error {
+	for i := range buckets {
+		name := buckets[i]
+		log.Info("Clear bucket", "name", name)
+		if err := m.removeBucketContentByMultipleTransactions(name, deleteKeysPerTx); err != nil {
+			return err
+		}
+		if err := m.tx.(BucketMigrator).ClearBucket(name); err != nil {
+			return err
+		}
+		if err := m.CommitAndBegin(context.Background()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *TxDb) DropBucketsAndCommitEvery(deleteKeysPerTx uint64, buckets ...string) error {
+	for i := range buckets {
+		name := buckets[i]
+		log.Info("Dropping bucket", "name", name)
+		if err := m.removeBucketContentByMultipleTransactions(name, deleteKeysPerTx); err != nil {
+			return err
+		}
+		if err := m.tx.(BucketMigrator).DropBucket(name); err != nil {
+			return err
+		}
+		if err := m.CommitAndBegin(context.Background()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeBucketContentByMultipleTransactions - allows to avoid single large freelist record inside database and
+// avoid "too big transaction" error
+func (m *TxDb) removeBucketContentByMultipleTransactions(bucket string, deleteKeysPerTx uint64) error {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	var partialDropDone bool
+	for !partialDropDone {
+		c := m.tx.Cursor(bucket)
+		cnt, err := c.Count()
+		if err != nil {
+			return err
+		}
+		if cnt < deleteKeysPerTx {
+			return nil
+		}
+		var deleted uint64
+		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
+			if err != nil {
+				return err
+			}
+			deleted++
+			if deleted > deleteKeysPerTx {
+				break
+			}
+
+			err = c.DeleteCurrent()
+			if err != nil {
+				return err
+			}
+
+			select {
+			default:
+			case <-logEvery.C:
+				log.Info("ClearBuckets", "bucket", bucket, "records_left", cnt-deleted)
+			}
+		}
+
+		if err := m.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
 	}

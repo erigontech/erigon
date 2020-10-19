@@ -25,7 +25,7 @@ const (
 
 var (
 	LMDBDefaultMapSize          = 2 * datasize.TB
-	LMDBDefaultMaxFreelistReuse = uint(16) // measured in pages
+	LMDBDefaultMaxFreelistReuse = uint(1000) // measured in pages
 )
 
 type BucketConfigsFunc func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg
