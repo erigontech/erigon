@@ -60,11 +60,11 @@ var receiptsCborEncode = Migration{
 			return fmt.Errorf("clearing the receipt bucket: %w", err)
 		}
 		// Commit clearing of the bucket - freelist should now be written to the database
-		if err := OnLoadCommit(db, nil, true); err != nil {
+		if err := OnLoadCommit(db, nil, false); err != nil {
 			return fmt.Errorf("committing the removal of receipt table")
 		}
 		// Commit again
-		if err := OnLoadCommit(db, nil, true); err != nil {
+		if err := OnLoadCommit(db, nil, false); err != nil {
 			return fmt.Errorf("committing again to create a stable view the removal of receipt table")
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
