@@ -111,7 +111,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 	if opts.inMem {
 		flags |= mdbx.NoMetaSync | mdbx.UtterlyNoSync
 	}
-	flags |= mdbx.SafeNoSync
+	//flags |= mdbx.SafeNoSync
 	//flags |= mdbx.LifoReclaim
 	flags |= mdbx.Coalesce
 	err = env.Open(opts.path, flags, 0664)
