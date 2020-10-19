@@ -31,6 +31,7 @@ const (
 	Prev         = C.MDBX_PREV           // The previous item.
 	PrevDup      = C.MDBX_PREV_DUP       // The previous item of the current key (DupSort).
 	PrevNoDup    = C.MDBX_PREV_NODUP     // The last data item of the previous key (DupSort).
+	PrevMultiple = C.MDBX_PREV_MULTIPLE  //
 	Set          = C.MDBX_SET            // The specified key.
 	SetKey       = C.MDBX_SET_KEY        // Get key and data at the specified key.
 	SetRange     = C.MDBX_SET_RANGE      // The first key no less than the specified key.
@@ -44,12 +45,13 @@ const (
 	// Flags for Txn.Put and Cursor.Put.
 	//
 	// See mdb_put and mdb_cursor_put.
-
+	Upsert      = C.MDBX_UPSERT      // Replace the item at the current key position (Cursor only)
 	Current     = C.MDBX_CURRENT     // Replace the item at the current key position (Cursor only)
 	NoDupData   = C.MDBX_NODUPDATA   // Store the key-value pair only if key is not present (DupSort).
 	NoOverwrite = C.MDBX_NOOVERWRITE // Store a new key-value pair only if key is not present.
 	Append      = C.MDBX_APPEND      // Append an item to the database.
 	AppendDup   = C.MDBX_APPENDDUP   // Append an item to the database (DupSort).
+	AllDups     = C.MDBX_ALLDUPS
 )
 
 // Cursor operates on data inside a transaction and holds a position in the

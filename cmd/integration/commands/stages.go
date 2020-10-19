@@ -158,7 +158,7 @@ var cmdPrintStages = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDatabase(chaindata, false)
 		defer db.Close()
 
 		if err := printAllStages(db, ctx); err != nil {
@@ -174,7 +174,9 @@ var cmdPrintMigrations = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := printAppliedMigrations(ctx); err != nil {
+		db := openDatabase(chaindata, false)
+		defer db.Close()
+		if err := printAppliedMigrations(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -187,7 +189,9 @@ var cmdRemoveMigration = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := removeMigration(ctx); err != nil {
+		db := openDatabase(chaindata, false)
+		defer db.Close()
+		if err := removeMigration(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -199,6 +203,8 @@ var cmdRunMigrations = &cobra.Command{
 	Use:   "run_migrations",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		db := openDatabase(chaindata, false)
+		defer db.Close()
 		// Nothing to do, migrations will be applied automatically
 		return nil
 	},
@@ -580,10 +586,7 @@ func printAllStages(db rawdb.DatabaseReader, _ context.Context) error {
 	return printStages(db)
 }
 
-func printAppliedMigrations(_ context.Context) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-
+func printAppliedMigrations(db ethdb.Database, _ context.Context) error {
 	applied, err := migrations.AppliedMigrations(db, false /* withPayload */)
 	if err != nil {
 		return err
@@ -599,9 +602,7 @@ func printAppliedMigrations(_ context.Context) error {
 	return nil
 }
 
-func removeMigration(_ context.Context) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
+func removeMigration(db ethdb.Database, _ context.Context) error {
 	if err := db.Delete(dbutils.Migrations, []byte(migration)); err != nil {
 		return err
 	}

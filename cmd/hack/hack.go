@@ -364,6 +364,10 @@ func bucketStats(chaindata string) error {
 				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
 					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
 			}
+
+			bs, statErr := tx.(LmdbStat).BucketStat("freelist")
+			check(statErr)
+			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
 			return nil
 		}); err != nil {
 			panic(err)
@@ -380,6 +384,9 @@ func bucketStats(chaindata string) error {
 				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
 					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
 			}
+			bs, statErr := tx.(MdbxStat).BucketStat("freelist")
+			check(statErr)
+			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
 			return nil
 		}); err != nil {
 			panic(err)

@@ -478,7 +478,8 @@ func TestTxn_Commit_managed(t *testing.T) {
 				t.Errorf("expected panic: %v", err)
 			}
 		}()
-		return txn.Commit()
+		_, err2 := txn.Commit()
+		return err2
 	})
 	if err != nil {
 		t.Error(err)
@@ -536,7 +537,7 @@ func TestTxn_Commit(t *testing.T) {
 		return
 	}
 	txn.Abort()
-	err = txn.Commit()
+	_, err = txn.Commit()
 	if !IsErrnoSys(err, syscall.EINVAL) {
 		t.Errorf("mdb_txn_commit: %v", err)
 	}
@@ -890,7 +891,7 @@ func TestTxn_Reset_writeTxn(t *testing.T) {
 		t.Errorf("renew: %v", err)
 	}
 
-	err = txn.Commit()
+	_, err = txn.Commit()
 	if err != nil {
 		t.Errorf("commit: %v", err)
 	}
@@ -1031,7 +1032,7 @@ func TestTxn_Stat(t *testing.T) {
 
 	var stat *Stat
 	err = env.View(func(txn *Txn) (err error) {
-		stat, err = txn.Stat(dbi)
+		stat, err = txn.StatDBI(dbi)
 		return err
 	})
 	if err != nil {

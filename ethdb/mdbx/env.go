@@ -26,7 +26,9 @@ const (
 	EnvDefaults = C.MDBX_ENV_DEFAULTS
 	LifoReclaim = C.MDBX_LIFORECLAIM
 	//FixedMap    = C.MDBX_FIXEDMAP   // Danger zone. Map memory at a fixed address.
-	NoSubdir   = C.MDBX_NOSUBDIR   // Argument to Open is a file, not a directory.
+	NoSubdir   = C.MDBX_NOSUBDIR // Argument to Open is a file, not a directory.
+	Accede     = C.MDBX_ACCEDE
+	Coalesce   = C.MDBX_COALESCE
 	Readonly   = C.MDBX_RDONLY     // Used in several functions to denote an object as readonly.
 	WriteMap   = C.MDBX_WRITEMAP   // Use a writable memory map.
 	NoMetaSync = C.MDBX_NOMETASYNC // Don't fsync metapage after commit.
@@ -38,6 +40,13 @@ const (
 	//NoLock      = C.MDBX_NOLOCK     // Danger zone. LMDB does not use any locks.
 	NoReadahead = C.MDBX_NORDAHEAD // Disable readahead. Requires OS support.
 	NoMemInit   = C.MDBX_NOMEMINIT // Disable LMDB memory initialization.
+	Exclusive   = C.MDBX_EXCLUSIVE // Disable LMDB memory initialization.
+)
+
+const (
+	MinPageSize = C.MDBX_MIN_PAGESIZE
+	MaxPageSize = C.MDBX_MAX_PAGESIZE
+	MaxDbi      = C.MDBX_MAX_DBI
 )
 
 // These flags are exclusively used in the Env.CopyFlags and Env.CopyFDFlags
@@ -261,6 +270,7 @@ type Stat struct {
 	LeafPages     uint64 // Number of leaf pages
 	OverflowPages uint64 // Number of overflow pages
 	Entries       uint64 // Number of data items
+	LastTxId      uint64 // Transaction ID of commited last modification
 }
 
 // Stat returns statistics about the environment.
@@ -283,7 +293,8 @@ func (env *Env) Stat() (*Stat, error) {
 		BranchPages:   uint64(_stat.ms_branch_pages),
 		LeafPages:     uint64(_stat.ms_leaf_pages),
 		OverflowPages: uint64(_stat.ms_overflow_pages),
-		Entries:       uint64(_stat.ms_entries)}
+		Entries:       uint64(_stat.ms_entries),
+		LastTxId:      uint64(_stat.ms_mod_txnid)}
 	return &stat, nil
 }
 
@@ -291,11 +302,18 @@ func (env *Env) Stat() (*Stat, error) {
 //
 // See MDBX_envinfo.
 type EnvInfo struct {
-	MapSize    int64 // Size of the data memory map
-	LastPNO    int64 // ID of the last used page
-	LastTxnID  int64 // ID of the last committed transaction
-	MaxReaders uint  // maximum number of threads for the environment
-	NumReaders uint  // maximum number of threads used in the environment
+	MapSize                        int64 // Size of the data memory map
+	LastPNO                        int64 // ID of the last used page
+	LastTxnID                      int64 // ID of the last committed transaction
+	MaxReaders                     uint  // maximum number of threads for the environment
+	NumReaders                     uint  // maximum number of threads used in the environment
+	PageSize                       uint  //
+	SystemPageSize                 uint  //
+	AutoSyncThreshold              uint  //
+	SinceSyncSeconds16dot16        uint  //
+	AutosyncPeriodSeconds16dot16   uint  //
+	SinceReaderCheckSeconds16dot16 uint  //
+	Flags                          uint  //
 }
 
 // Info returns information about the environment.
@@ -314,11 +332,19 @@ func (env *Env) Info() (*EnvInfo, error) {
 		return nil, operrno("mdbx_env_info", ret)
 	}
 	info := EnvInfo{
-		MapSize: int64(_info.mi_mapsize),
-		LastPNO: int64(_info.mi_last_pgno),
-		//LastTxnID:  int64(_info.mi_last_txnid),
-		MaxReaders: uint(_info.mi_maxreaders),
-		NumReaders: uint(_info.mi_numreaders),
+		MapSize:        int64(_info.mi_mapsize),
+		LastPNO:        int64(_info.mi_last_pgno),
+		LastTxnID:      int64(_info.mi_recent_txnid),
+		MaxReaders:     uint(_info.mi_maxreaders),
+		NumReaders:     uint(_info.mi_numreaders),
+		PageSize:       uint(_info.mi_dxb_pagesize),
+		SystemPageSize: uint(_info.mi_sys_pagesize),
+
+		AutoSyncThreshold:              uint(_info.mi_autosync_threshold),
+		SinceSyncSeconds16dot16:        uint(_info.mi_since_sync_seconds16dot16),
+		AutosyncPeriodSeconds16dot16:   uint(_info.mi_autosync_period_seconds16dot16),
+		SinceReaderCheckSeconds16dot16: uint(_info.mi_since_reader_check_seconds16dot16),
+		Flags:                          uint(_info.mi_mode),
 	}
 	return &info, nil
 }

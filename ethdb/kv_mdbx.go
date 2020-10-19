@@ -1,7 +1,5 @@
 package ethdb
 
-import "C"
-
 import (
 	"bytes"
 	"context"
@@ -11,7 +9,6 @@ import (
 	"path"
 	"runtime"
 	"sync"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -68,7 +65,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	_ = env.SetDebug(mdbx.LogLvlDoNotChange, mdbx.DbgLegacyTxOverlap) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
+	//_ = env.SetDebug(mdbx.LogLvlDoNotChange, mdbx.DbgLegacyTxOverlap) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 
 	err = env.SetMaxDBs(100)
 	if err != nil {
@@ -114,7 +111,8 @@ func (opts MdbxOpts) Open() (KV, error) {
 		flags |= mdbx.NoMetaSync | mdbx.UtterlyNoSync
 	}
 	flags |= mdbx.SafeNoSync
-	flags |= mdbx.LifoReclaim
+	//flags |= mdbx.LifoReclaim
+	flags |= mdbx.Coalesce
 	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
@@ -482,7 +480,7 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 
 func (tx *mdbxTx) ClearBucket(bucket string) error {
 	if err := tx.dropEvenIfBucketIsNotDeprecated(bucket); err != nil {
-		return nil
+		return err
 	}
 	return tx.CreateBucket(bucket)
 }
@@ -517,26 +515,13 @@ func (tx *mdbxTx) Commit(ctx context.Context) error {
 		}
 	}()
 	tx.closeCursors()
-
-	commitTimer := time.Now()
-	if err := tx.tx.Commit(); err != nil {
+	latency, err := tx.tx.Commit()
+	//if commitTook > 20*time.Second {
+	log.Info("Commit", "preparation", latency.Preparation, "gc", latency.GC, "write", latency.Preparation, "fsync", latency.Sync, "whole", latency.Whole)
+	if err != nil {
 		return err
 	}
-	commitTook := time.Since(commitTimer)
-	if commitTook > 20*time.Second {
-		log.Info("Batch", "commit", commitTook)
-	}
 
-	if !tx.isSubTx && !tx.db.opts.readOnly && !tx.db.opts.inMem { // call fsync only after main transaction commit
-		fsyncTimer := time.Now()
-		if err := tx.db.env.Sync(true, false); err != nil {
-			log.Warn("fsync after commit failed", "err", err)
-		}
-		fsyncTook := time.Since(fsyncTimer)
-		if fsyncTook > 20*time.Second {
-			log.Info("Batch", "fsync", fsyncTook)
-		}
-	}
 	return nil
 }
 
@@ -642,7 +627,7 @@ func (tx *mdbxTx) Has(bucket string, key []byte) (bool, error) {
 }
 
 func (tx *mdbxTx) BucketSize(name string) (uint64, error) {
-	st, err := tx.tx.Stat(mdbx.DBI(tx.db.buckets[name].DBI))
+	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
 	if err != nil {
 		return 0, err
 	}
@@ -650,7 +635,10 @@ func (tx *mdbxTx) BucketSize(name string) (uint64, error) {
 }
 
 func (tx *mdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
-	return tx.tx.Stat(mdbx.DBI(tx.db.buckets[name].DBI))
+	if name == "freelist" || name == "gc" || name == "free_list" {
+		return tx.tx.StatDBI(mdbx.DBI(0))
+	}
+	return tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
 }
 
 func (tx *mdbxTx) Cursor(bucket string) Cursor {
@@ -744,7 +732,7 @@ func (c *MdbxCursor) initCursor() error {
 }
 
 func (c *MdbxCursor) Count() (uint64, error) {
-	st, err := c.tx.tx.Stat(c.dbi)
+	st, err := c.tx.tx.StatDBI(c.dbi)
 	if err != nil {
 		return 0, err
 	}

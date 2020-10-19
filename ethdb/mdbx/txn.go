@@ -10,6 +10,7 @@ import "C"
 import (
 	"log"
 	"runtime"
+	"time"
 	"unsafe"
 )
 
@@ -28,6 +29,16 @@ const (
 	DupFixed   = C.MDBX_DUPFIXED   // Duplicate items have a fixed size (DupSort).
 	ReverseDup = C.MDBX_REVERSEDUP // Reverse duplicate values (DupSort).
 	Create     = C.MDBX_CREATE     // Create DB if not already existing.
+)
+
+const (
+	TxRW        = C.MDBX_TXN_READWRITE
+	TxRO        = C.MDBX_TXN_RDONLY
+	TxPrepareRO = C.MDBX_TXN_RDONLY_PREPARE
+
+	TxTry        = C.MDBX_TXN_TRY
+	TxNoMetaSync = C.MDBX_TXN_NOMETASYNC
+	TxNoSync     = C.MDBX_TXN_NOSYNC
 )
 
 // Txn is a database transaction in an environment.
@@ -158,8 +169,8 @@ func (txn *Txn) runOpTerm(fn TxnOp) error {
 	if err != nil {
 		return err
 	}
-
-	return txn.commit()
+	_, err = txn.commit()
+	return err
 }
 
 func (txn *Txn) runOp(fn TxnOp) error {
@@ -179,7 +190,7 @@ func (txn *Txn) runOp(fn TxnOp) error {
 // finalizer on txn.  A Txn cannot be used again after Commit is called.
 //
 // See mdbx_txn_commit.
-func (txn *Txn) Commit() error {
+func (txn *Txn) Commit() (CommitLatency, error) {
 	if txn.managed {
 		panic("managed transaction cannot be committed directly")
 	}
@@ -188,10 +199,35 @@ func (txn *Txn) Commit() error {
 	return txn.commit()
 }
 
-func (txn *Txn) commit() error {
-	ret := C.mdbx_txn_commit(txn._txn)
+const ratio = 1000000000
+
+type CommitLatency struct {
+	Preparation time.Duration
+	GC          time.Duration
+	Write       time.Duration
+	Sync        time.Duration
+	Whole       time.Duration
+}
+
+func toDuration(seconds16dot16 C.uint32_t) time.Duration {
+	return time.Duration((ratio*seconds16dot16 + 32768) >> 16)
+}
+
+func (txn *Txn) commit() (CommitLatency, error) {
+	var _stat C.MDBX_commit_latency
+	ret := C.mdbx_txn_commit_ex(txn._txn, &_stat)
 	txn.clearTxn()
-	return operrno("mdbx_txn_commit", ret)
+	s := CommitLatency{
+		Preparation: toDuration(_stat.preparation_16dot16),
+		GC:          toDuration(_stat.gc_16dot16),
+		Write:       toDuration(_stat.write_16dot16),
+		Sync:        toDuration(_stat.sync_16dot16),
+		Whole:       toDuration(_stat.whole_16dot16),
+	}
+	if ret != success {
+		return s, operrno("mdbx_txn_commit_ex", ret)
+	}
+	return s, nil
 }
 
 // Abort discards pending writes in the transaction and clears the finalizer on
@@ -352,10 +388,65 @@ func (txn *Txn) openDBISimple(cname *C.char, flags uint) (DBI, error) {
 	return DBI(dbi), operrno("mdbx_dbi_open", ret)
 }
 
-// Stat returns a Stat describing the database dbi.
-//
-// See mdbx_stat.
-func (txn *Txn) Stat(dbi DBI) (*Stat, error) {
+type TxInfo struct {
+	Id uint64 // The ID of the transaction. For a READ-ONLY transaction, this corresponds to the snapshot being read
+	/** For READ-ONLY transaction: the lag from a recent MVCC-snapshot, i.e. the
+	  number of committed transaction since read transaction started. For WRITE
+	  transaction (provided if `scan_rlt=true`): the lag of the oldest reader
+	  from current transaction (i.e. at least 1 if any reader running). */
+	ReadLag uint64
+	/** Used space by this transaction, i.e. corresponding to the last used
+	 * database page. */
+	SpaceUsed uint64
+	/** Current size of database file. */
+	SpaceLimitSoft uint64
+	/** Upper bound for size the database file, i.e. the value `size_upper`
+	  argument of the appropriate call of \ref mdbx_env_set_geometry(). */
+	SpaceLimitHard uint64
+	/** For READ-ONLY transaction: The total size of the database pages that were
+	  retired by committed write transactions after the reader's MVCC-snapshot,
+	  i.e. the space which would be freed after the Reader releases the
+	  MVCC-snapshot for reuse by completion read transaction.
+	  For WRITE transaction: The summarized size of the database pages that were
+	  retired for now due Copy-On-Write during this transaction. */
+	SpaceRetired uint64
+	/** For READ-ONLY transaction: the space available for writer(s) and that
+	  must be exhausted for reason to call the Handle-Slow-Readers callback for
+	  this read transaction. For WRITE transaction: the space inside transaction
+	  that left to `MDBX_TXN_FULL` error. */
+	SpaceLeftover uint64
+	/** For READ-ONLY transaction (provided if `scan_rlt=true`): The space that
+	  actually become available for reuse when only this transaction will be
+	  finished.
+	  For WRITE transaction: The summarized size of the dirty database
+	  pages that generated during this transaction. */
+	SpaceDirty uint64
+}
+
+// scan_rlt   The boolean flag controls the scan of the read lock
+//  table to provide complete information. Such scan
+//  is relatively expensive and you can avoid it
+//  if corresponding fields are not needed.
+//  See description of \ref MDBX_txn_info.
+func (txn *Txn) Info(scanRlt bool) (*TxInfo, error) {
+	var _stat C.MDBX_txn_info
+	ret := C.mdbx_txn_info(txn._txn, &_stat, C.bool(scanRlt))
+	if ret != success {
+		return nil, operrno("mdbx_txn_info", ret)
+	}
+	return &TxInfo{
+		Id:             uint64(_stat.txn_id),
+		ReadLag:        uint64(_stat.txn_reader_lag),
+		SpaceUsed:      uint64(_stat.txn_space_used),
+		SpaceLimitSoft: uint64(_stat.txn_space_limit_soft),
+		SpaceLimitHard: uint64(_stat.txn_space_limit_hard),
+		SpaceRetired:   uint64(_stat.txn_space_retired),
+		SpaceLeftover:  uint64(_stat.txn_space_leftover),
+		SpaceDirty:     uint64(_stat.txn_space_dirty),
+	}, nil
+}
+
+func (txn *Txn) StatDBI(dbi DBI) (*Stat, error) {
 	var _stat C.MDBX_stat
 	ret := C.mdbx_dbi_stat(txn._txn, C.MDBX_dbi(dbi), &_stat, C.size_t(unsafe.Sizeof(_stat)))
 	if ret != success {
@@ -407,7 +498,8 @@ func (txn *Txn) subFlag(flags uint, fn TxnOp) error {
 	if err != nil {
 		return err
 	}
-	return sub.commit()
+	_, err = sub.commit()
+	return err
 }
 
 func (txn *Txn) bytes(val *C.MDBX_val) []byte {

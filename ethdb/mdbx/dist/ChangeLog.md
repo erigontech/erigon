@@ -5,101 +5,103 @@ ChangeLog
 
 TODO:
 
-- Rework/speedup the implementation of the dirty page list (lazy compactification, lazy sorting via merge).
-- Finalize C++ API (few typos and trivia bugs are likely for now).
-- Packages for ROSA Linux, ALT Linux, Fedora/RHEL, Debian/Ubuntu.
+ - Rework/speedup the implementation of the dirty page list (lazy compactification, lazy sorting via merge).
+ - Finalize C++ API (few typos and trivia bugs are likely for now).
+ - Packages for ROSA Linux, ALT Linux, Fedora/RHEL, Debian/Ubuntu.
+
+Added features:
+ - Provided package for [buildroot](https://buildroot.org/).
+ - Added `mdbx_env_delete()` for deletion an environment files in a proper and multiprocess-safe way.
 
 Fixes:
 
-- Fixed missing installation of `mdbx.h++`.
-- Fixed use of obsolete `__noreturn`.
-- Fixed use of `yield` instruction on ARM if unsupported.
-- Added pthread workaround for buggy toolchain/cmake/buildroot.
-- Fixed use of `pthread_yield()` for non-GLIBC.
-- Fixed use of `RegGetValueA()` on Windows 2000/XP.
-- Fixed use of `GetTickCount64()` on Windows 2000/XP.
-- Fixed opening DB on a network shares (in the exclusive mode).
-- Fixed copy&paste typos.
-- Fixed minor false-positive GCC warning.
+ - Fixed missing installation of `mdbx.h++`.
+ - Fixed use of obsolete `__noreturn`.
+ - Fixed use of `yield` instruction on ARM if unsupported.
+ - Added pthread workaround for buggy toolchain/cmake/buildroot.
+ - Fixed use of `pthread_yield()` for non-GLIBC.
+ - Fixed use of `RegGetValueA()` on Windows 2000/XP.
+ - Fixed use of `GetTickCount64()` on Windows 2000/XP.
+ - Fixed opening DB on a network shares (in the exclusive mode).
+ - Fixed copy&paste typos.
+ - Fixed minor false-positive GCC warning.
+ - Added workaround for broken `DEFINE_ENUM_FLAG_OPERATORS` from Windows SDK.
 
 ## v0.9.1 2020-09-30
 
 Added features:
 
-- Preliminary C++ API with support for C++17 polymorphic allocators.
-- [Online C++ API reference](https://erthink.github.io/libmdbx/) by Doxygen.
-- Quick reference for Insert/Update/Delete operations.
-- Explicit `MDBX_SYNC_DURABLE` to sync modes for API clarity.
-- Explicit `MDBX_ALLDUPS` and `MDBX_UPSERT` for API clarity.
-- Support for read transactions preparation (`MDBX_TXN_RDONLY_PREPARE` flag).
-- Support for cursor preparation/(pre)allocation and reusing (`mdbx_cursor_create()` and `mdbx_cursor_bind()` functions)
-  .
-- Support for checking database using specified meta-page (see `mdbx_chk -h`).
-- Support for turn to the specific meta-page after checking (see `mdbx_chk -h`).
-- Support for explicit reader threads (de)registration.
-- The `mdbx_txn_break()` function to explicitly mark a transaction as broken.
-- Improved handling of corrupted databases by `mdbx_chk` utility and `mdbx_walk_tree()` function.
-- Improved DB corruption detection by checking parent-page-txnid.
-- Improved opening large DB (> 4Gb) from 32-bit code.
-- Provided `pure-function` and `const-function` attributes to C API.
-- Support for user-settable context for transactions & cursors.
-- Revised API and documentation related to Handle-Slow-Readers callback feature.
+ - Preliminary C++ API with support for C++17 polymorphic allocators.
+ - [Online C++ API reference](https://erthink.github.io/libmdbx/) by Doxygen.
+ - Quick reference for Insert/Update/Delete operations.
+ - Explicit `MDBX_SYNC_DURABLE` to sync modes for API clarity.
+ - Explicit `MDBX_ALLDUPS` and `MDBX_UPSERT` for API clarity.
+ - Support for read transactions preparation (`MDBX_TXN_RDONLY_PREPARE` flag).
+ - Support for cursor preparation/(pre)allocation and reusing (`mdbx_cursor_create()` and `mdbx_cursor_bind()` functions).
+ - Support for checking database using specified meta-page (see `mdbx_chk -h`).
+ - Support for turn to the specific meta-page after checking (see `mdbx_chk -h`).
+ - Support for explicit reader threads (de)registration.
+ - The `mdbx_txn_break()` function to explicitly mark a transaction as broken.
+ - Improved handling of corrupted databases by `mdbx_chk` utility and `mdbx_walk_tree()` function.
+ - Improved DB corruption detection by checking parent-page-txnid.
+ - Improved opening large DB (> 4Gb) from 32-bit code.
+ - Provided `pure-function` and `const-function` attributes to C API.
+ - Support for user-settable context for transactions & cursors.
+ - Revised API and documentation related to Handle-Slow-Readers callback feature.
 
 Deprecated functions and flags:
 
-- For clarity and API simplification the `MDBX_MAPASYNC` flag is deprecated. Just use `MDBX_SAFE_NOSYNC`
-  or `MDBX_UTTERLY_NOSYNC` instead of it.
-- `MDBX_oom_func`, `mdbx_env_set_oomfunc()` and `mdbx_env_get_oomfunc()`
-  replaced with `MDBX_hsr_func`, `mdbx_env_get_hsr` and `mdbx_env_get_hsr()`.
+ - For clarity and API simplification the `MDBX_MAPASYNC` flag is deprecated.
+   Just use `MDBX_SAFE_NOSYNC` or `MDBX_UTTERLY_NOSYNC` instead of it.
+ - `MDBX_oom_func`, `mdbx_env_set_oomfunc()` and `mdbx_env_get_oomfunc()`
+   replaced with `MDBX_hsr_func`, `mdbx_env_get_hsr` and `mdbx_env_get_hsr()`.
 
 Fixes:
 
-- Fix `mdbx_strerror()` for `MDBX_BUSY` error (no error description is returned).
-- Fix update internal meta-geo information in read-only mode (`EACCESS` or `EBADFD` error).
-- Fix `mdbx_page_get()` null-defer when DB corrupted (crash by `SIGSEGV`).
-- Fix `mdbx_env_open()` for re-opening after non-fatal errors (`mdbx_chk` unexpected failures).
-- Workaround for MSVC 19.27 `static_assert()` bug.
-- Doxygen descriptions and refinement.
-- Update Valgrind's suppressions.
-- Workaround to avoid infinite loop of 'nested' testcase on MIPS under QEMU.
-- Fix a lot of typos & spelling (Thanks to Josh Soref for PR).
-- Fix `getopt()` messages for Windows (Thanks to Andrey Sporaw for reporting).
-- Fix MSVC compiler version requirements (Thanks to Andrey Sporaw for reporting).
-- Workarounds for QEMU's bugs to run tests for cross-builded library under QEMU.
-- Now C++ compiler optional for building by CMake.
+ - Fix `mdbx_strerror()` for `MDBX_BUSY` error (no error description is returned).
+ - Fix update internal meta-geo information in read-only mode (`EACCESS` or `EBADFD` error).
+ - Fix `mdbx_page_get()` null-defer when DB corrupted (crash by `SIGSEGV`).
+ - Fix `mdbx_env_open()` for re-opening after non-fatal errors (`mdbx_chk` unexpected failures).
+ - Workaround for MSVC 19.27 `static_assert()` bug.
+ - Doxygen descriptions and refinement.
+ - Update Valgrind's suppressions.
+ - Workaround to avoid infinite loop of 'nested' testcase on MIPS under QEMU.
+ - Fix a lot of typos & spelling (Thanks to Josh Soref for PR).
+ - Fix `getopt()` messages for Windows (Thanks to Andrey Sporaw for reporting).
+ - Fix MSVC compiler version requirements (Thanks to Andrey Sporaw for reporting).
+ - Workarounds for QEMU's bugs to run tests for cross-builded library under QEMU.
+ - Now C++ compiler optional for building by CMake.
+
 
 ## v0.9.0 2020-07-31 (not a release, but API changes)
 
 Added features:
 
-- [Online C API reference](https://erthink.github.io/libmdbx/) by Doxygen.
-- Separated enums for environment, sub-databases, transactions, copying and data-update flags.
+ - [Online C API reference](https://erthink.github.io/libmdbx/) by Doxygen.
+ - Separated enums for environment, sub-databases, transactions, copying and data-update flags.
 
 Deprecated functions and flags:
 
-- Usage of custom comparators and the `mdbx_dbi_open_ex()` are deprecated, since such databases couldn't be checked by
-  the `mdbx_chk` utility. Please use the value-to-key functions to provide keys that are compatible with the built-in
-  libmdbx comparators.
+ - Usage of custom comparators and the `mdbx_dbi_open_ex()` are deprecated, since such databases couldn't be checked by the `mdbx_chk` utility.
+   Please use the value-to-key functions to provide keys that are compatible with the built-in libmdbx comparators.
+
 
 ## v0.8.2 2020-07-06
-
 - Added support multi-opening the same DB in a process with SysV locking (BSD).
 - Fixed warnings & minors for LCC compiler (E2K).
 - Enabled to simultaneously open the same database from processes with and without the `MDBX_WRITEMAP` option.
-- Added key-to-value, `mdbx_get_keycmp()` and `mdbx_get_datacmp()` functions (helpful to avoid using custom comparators)
-  .
+- Added key-to-value, `mdbx_get_keycmp()` and `mdbx_get_datacmp()` functions (helpful to avoid using custom comparators).
 - Added `ENABLE_UBSAN` CMake option to enabling the UndefinedBehaviorSanitizer from GCC/CLANG.
 - Workaround for [CLANG bug](https://bugs.llvm.org/show_bug.cgi?id=43275).
 - Returning `MDBX_CORRUPTED` in case all meta-pages are weak and no other error.
 - Refined mode bits while auto-creating LCK-file.
-- Avoids unnecessary database file re-mapping in case geometry changed by another process(es). From the user's point of
-  view, the `MDBX_UNABLE_EXTEND_MAPSIZE` error will now be returned less frequently and only when using the DB in the
-  current process really requires it to be reopened.
-- Remapping on-the-fly and of the database file was implemented. Now remapping with a change of address is performed
-  automatically if there are no dependent readers in the current process.
+- Avoids unnecessary database file re-mapping in case geometry changed by another process(es).
+  From the user's point of view, the `MDBX_UNABLE_EXTEND_MAPSIZE` error will now be returned less frequently and only when using the DB in the current process really requires it to be reopened.
+- Remapping on-the-fly and of the database file was implemented.
+  Now remapping with a change of address is performed automatically if there are no dependent readers in the current process.
+
 
 ## v0.8.1 2020-06-12
-
 - Minor change versioning. The last number in the version now means the number of commits since last release/tag.
 - Provide ChangeLog file.
 - Fix for using libmdbx as a C-only sub-project with CMake.
@@ -108,8 +110,8 @@ Deprecated functions and flags:
 - Refine LTO (link time optimization) for clang.
 - Force enabling exceptions handling for MSVC (`/EHsc` option).
 
-## v0.8.0 2020-06-05
 
+## v0.8.0 2020-06-05
 - Support for Android/Bionic.
 - Support for iOS.
 - Auto-handling `MDBX_NOSUBDIR` while opening for any existing database.
@@ -134,8 +136,7 @@ Deprecated functions and flags:
 - Add deprecated `MDBX_MAP_RESIZED` for compatibility.
 - Add `MDBX_BUILD_TOOLS` option (default `ON`).
 - Refine `mdbx_dbi_open_ex()` to safe concurrently opening the same handle from different threads.
-- Truncate clk-file during environment closing. So a zero-length lck-file indicates that the environment was closed
-  properly.
+- Truncate clk-file during environment closing. So a zero-length lck-file indicates that the environment was closed properly.
 - Refine `mdbx_update_gc()` for huge transactions with small sizes of database page.
 - Extends dump/load to support all MDBX attributes.
 - Avoid upsertion the same key-value data, fix related assertions.
@@ -154,22 +155,20 @@ Deprecated functions and flags:
 - Minor fix/workaround to avoid UBSAN traps for `memcpy(ptr, NULL, 0)`.
 - Avoid some GCC-analyzer false-positive warnings.
 
-## v0.7.0 2020-03-18
 
+## v0.7.0 2020-03-18
 - Workarounds for Wine (Windows compatibility layer for Linux).
 - `MDBX_MAP_RESIZED` renamed to `MDBX_UNABLE_EXTEND_MAPSIZE`.
 - Clarify API description, fix typos.
 - Speedup runtime checks in debug/checked builds.
-- Added checking for read/write transactions overlapping for the same thread, added `MDBX_TXN_OVERLAPPING` error
-  and `MDBX_DBG_LEGACY_OVERLAP` option.
-- Added `mdbx_key_from_jsonInteger()`, `mdbx_key_from_double()`, `mdbx_key_from_float()`, `mdbx_key_from_int64()`
-  and `mdbx_key_from_int32()` functions. See `mdbx.h` for description.
+- Added checking for read/write transactions overlapping for the same thread, added `MDBX_TXN_OVERLAPPING` error and `MDBX_DBG_LEGACY_OVERLAP` option.
+- Added `mdbx_key_from_jsonInteger()`, `mdbx_key_from_double()`, `mdbx_key_from_float()`, `mdbx_key_from_int64()` and `mdbx_key_from_int32()` functions. See `mdbx.h` for description.
 - Fix compatibility (use zero for invalid DBI).
 - Refine/clarify error messages.
 - Avoids extra error messages "bad txn" from mdbx_chk when DB is corrupted.
 
-## v0.6.0 2020-01-21
 
+## v0.6.0 2020-01-21
 - Fix `mdbx_load` utility for custom comparators.
 - Fix checks related to `MDBX_APPEND` flag inside `mdbx_cursor_put()`.
 - Refine/fix dbi_bind() internals.
@@ -180,8 +179,8 @@ Deprecated functions and flags:
 - Fix env_set_geometry() for large pagesize.
 - Clarify API description & comments, fix typos.
 
-## v0.5.0 2019-12-31
 
+## v0.5.0 2019-12-31
 - Fix returning MDBX_RESULT_TRUE from page_alloc().
 - Fix false-positive ASAN issue.
 - Fix assertion for `MDBX_NOTLS` option.
@@ -195,8 +194,8 @@ Deprecated functions and flags:
 - Avoid using `FILE_FLAG_NO_BUFFERING` for compatibility with small database pages.
 - Added install section for CMake.
 
-## v0.4.0 2019-12-02
 
+## v0.4.0 2019-12-02
 - Support for Mac OSX, FreeBSD, NetBSD, OpenBSD, DragonFly BSD, OpenSolaris, OpenIndiana (AIX and HP-UX pending).
 - Use bootid for decisions of rollback.
 - Counting retired pages and extended transaction info.
