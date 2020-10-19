@@ -57,9 +57,12 @@ func BlockBodyKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }
 
-// blockReceiptsKey = blockReceiptsPrefix + num (uint64 big endian) + hash
-func BlockReceiptsKey(number uint64, hash common.Hash) []byte {
-	return append(EncodeBlockNumber(number), hash.Bytes()...)
+// ReceiptsKey = blockN (uint64 big endian) + txId (uint32 big endian)
+func ReceiptKey(blockNumber uint64, txId uint32) []byte {
+	newK := make([]byte, 8+4)
+	binary.BigEndian.PutUint64(newK, blockNumber)
+	binary.BigEndian.PutUint32(newK[8:], txId)
+	return newK
 }
 
 // bloomBitsKey = bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash

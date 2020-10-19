@@ -156,7 +156,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), true)
+		tx, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
 			return err
 		}

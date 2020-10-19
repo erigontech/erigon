@@ -84,7 +84,7 @@ func TestSnapshotGet(t *testing.T) {
 	kv := NewSnapshotKV().For(dbutils.HeaderPrefix).SnapshotDB(sn1).DB(mainDB).MustOpen()
 	kv = NewSnapshotKV().For(dbutils.BlockBodyPrefix).SnapshotDB(sn2).DB(kv).MustOpen()
 
-	tx, err := kv.Begin(context.Background(), nil, false)
+	tx, err := kv.Begin(context.Background(), nil, RO)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestSnapshotWritableTxAndGet(t *testing.T) {
 	kv := NewSnapshotKV().For(dbutils.HeaderPrefix).SnapshotDB(sn1).DB(mainDB).MustOpen()
 	kv = NewSnapshotKV().For(dbutils.BlockBodyPrefix).SnapshotDB(sn2).DB(kv).MustOpen()
 
-	tx, err := kv.Begin(context.Background(), nil, true)
+	tx, err := kv.Begin(context.Background(), nil, RW)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestSnapshotWritableTxAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, err = kv.Begin(context.Background(), nil, false)
+	tx, err = kv.Begin(context.Background(), nil, RO)
 	if err != nil {
 		t.Fatal(err)
 	}

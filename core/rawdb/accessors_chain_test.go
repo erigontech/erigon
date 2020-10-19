@@ -369,7 +369,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	WriteBody(ctx, db, hash, 0, body)
 
 	// Insert the receipt slice into the database and check presence
-	WriteReceipts(db, hash, 0, receipts)
+	WriteReceipts(db, 0, receipts)
 	if rs := ReadReceipts(db, hash, 0); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
 	} else {

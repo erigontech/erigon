@@ -25,7 +25,8 @@ var (
 // }
 //
 // Common pattern for long-living transactions:
-//	tx, err := db.Begin(true)
+//	tx, err := db.
+//	(true)
 //	if err != nil {
 //		return err
 //	}
@@ -56,9 +57,19 @@ type KV interface {
 	//	as its parent. Transactions may be nested to any level. A parent
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
-	Begin(ctx context.Context, parent Tx, writable bool) (Tx, error)
+	Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, error)
 	AllBuckets() dbutils.BucketsCfg
 }
+
+type TxFlags uint
+
+const (
+	RW         TxFlags = 0x00 // default
+	RO         TxFlags = 0x02
+	Try        TxFlags = 0x04
+	NoMetaSync TxFlags = 0x08
+	NoSync     TxFlags = 0x10
+)
 
 type Tx interface {
 	// Cursor - creates cursor object on top of given bucket. Type of cursor - depends on bucket configuration.

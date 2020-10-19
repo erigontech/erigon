@@ -417,46 +417,29 @@ func DeleteTd(db DatabaseDeleter, hash common.Hash, number uint64) error {
 // HasReceipts verifies the existence of all the transaction receipts belonging
 // to a block.
 func HasReceipts(db DatabaseReader, hash common.Hash, number uint64) bool {
-	if has, err := db.Has(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash)); !has || err != nil {
+	if has, err := db.Has(dbutils.BlockReceiptsPrefix, dbutils.ReceiptKey(number, 0)); !has || err != nil {
 		return false
 	}
 	return true
 }
 
-// ReadReceiptsRLP retrieves all the transaction receipts belonging to a block in RLP encoding.
-func ReadReceiptsRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue {
-	data := []byte{}
-	//data, _ := db.Ancient(freezerReceiptTable, number)
-	if len(data) == 0 {
-		data, _ = db.Get(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash))
-		// In the background freezer is moving data from leveldb to flatten files.
-		// So during the first check for ancient db, the data is not yet in there,
-		// but when we reach into leveldb, the data was already moved. That would
-		// result in a not found error.
-		if len(data) == 0 {
-			//data, _ = db.Ancient(freezerReceiptTable, number)
-		}
-	}
-	return nil // Can't find the data anywhere.
-}
-
 // ReadRawReceipts retrieves all the transaction receipts belonging to a block.
 // The receipt metadata fields are not guaranteed to be populated, so they
 // should not be used. Use ReadReceipts instead if the metadata is needed.
-func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.Receipts {
-	// Retrieve the flattened receipt slice
-	data, err := db.Get(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash))
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		log.Error("ReadRawReceipts failed", "err", err)
-	}
-	if len(data) == 0 {
-		return nil
-	}
+func ReadRawReceipts(db ethdb.Database, hash common.Hash, number uint64) types.Receipts {
 	receipts := types.Receipts{}
-	if err := cbor.Unmarshal(&receipts, data); err != nil {
-		log.Error("receipt unmarshal failed", "hash", hash, "err", err)
+	if err := db.Walk(dbutils.BlockReceiptsPrefix, dbutils.ReceiptKey(number, 0), 8*8, func(k, v []byte) (bool, error) {
+		var r = &types.Receipt{}
+		if err := cbor.Unmarshal(&r, bytes.NewReader(v)); err != nil {
+			return false, fmt.Errorf("receipt unmarshal failed: %x, %w", hash, err)
+		}
+		receipts = append(receipts, r)
+		return true, nil
+	}); err != nil {
+		log.Error("logs fetching failed", "hash", hash, "err", err)
 		return nil
 	}
+
 	return receipts
 }
 
@@ -467,7 +450,7 @@ func ReadRawReceipts(db DatabaseReader, hash common.Hash, number uint64) types.R
 // The current implementation populates these metadata fields by reading the receipts'
 // corresponding block body, so if the block body is not found it will return nil even
 // if the receipt itself is stored.
-func ReadReceipts(db DatabaseReader, hash common.Hash, number uint64) types.Receipts {
+func ReadReceipts(db ethdb.Database, hash common.Hash, number uint64) types.Receipts {
 	// We're deriving many fields from the block body, retrieve beside the receipt
 	receipts := ReadRawReceipts(db, hash, number)
 	if receipts == nil {
@@ -487,24 +470,54 @@ func ReadReceipts(db DatabaseReader, hash common.Hash, number uint64) types.Rece
 }
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
-func WriteReceipts(db DatabaseWriter, hash common.Hash, number uint64, receipts types.Receipts) {
-	newV := make([]byte, 0, 1024)
-	err := cbor.Marshal(&newV, receipts)
-	if err != nil {
-		log.Crit("Failed to encode block receipts", "err", err)
-	}
+func WriteReceipts(tx DatabaseWriter, number uint64, receipts types.Receipts) {
+	buf := bytes.NewBuffer(make([]byte, 0, 1024))
+	for txId, r := range receipts {
+		err := cbor.Marshal(buf, r)
+		if err != nil {
+			err = fmt.Errorf("encode block receipts for block %d: %v", number, err)
+			log.Crit("Failed to store block receipts", "err", err)
+			return
+		}
 
-	// Store the flattened receipt slice
-	if err := db.Put(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash), newV); err != nil {
-		log.Crit("Failed to store block receipts", "err", err)
+		// Store the flattened receipt slice
+		if err = tx.Put(dbutils.BlockReceiptsPrefix, dbutils.ReceiptKey(number, uint32(txId)), buf.Bytes()); err != nil {
+			err = fmt.Errorf("writing receipts for block %d: %v", number, err)
+			log.Crit("Failed to store block receipts", "err", err)
+			return
+		}
 	}
 }
 
-// DeleteReceipts removes all receipt data associated with a block hash.
-func DeleteReceipts(db DatabaseDeleter, hash common.Hash, number uint64) {
-	if err := db.Delete(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash)); err != nil {
-		log.Crit("Failed to delete block receipts", "err", err)
+// WriteReceipts stores all the transaction receipts belonging to a block.
+func AppendReceipts(tx ethdb.DbWithPendingMutations, blockNumber uint64, receipts types.Receipts) error {
+	buf := bytes.NewBuffer(make([]byte, 0, 1024))
+	for txId, r := range receipts {
+		err := cbor.Marshal(buf, r)
+		if err != nil {
+			return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
+		}
+
+		// Store the flattened receipt slice
+		if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.ReceiptKey(blockNumber, uint32(txId)), buf.Bytes()); err != nil {
+			return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
+		}
 	}
+	return nil
+}
+
+// DeleteReceipts removes all receipt data associated with a block hash.
+func DeleteReceipts(db ethdb.Database, hash common.Hash, number uint64) {
+	if err := db.Walk(dbutils.BlockReceiptsPrefix, dbutils.ReceiptKey(number, 0), 8*8, func(k, v []byte) (bool, error) {
+		if err := db.Delete(dbutils.BlockReceiptsPrefix, k); err != nil {
+			return false, err
+		}
+		return true, nil
+	}); err != nil {
+		log.Error("logs fetching failed", "hash", hash, "err", err)
+		return
+	}
+
 }
 
 // ReadBlock retrieves an entire block corresponding to the hash, assembling it
@@ -566,7 +579,7 @@ func WriteAncientBlock(db ethdb.AncientWriter, block *types.Block, receipts type
 */
 
 // DeleteBlock removes all block data associated with a hash.
-func DeleteBlock(db DatabaseDeleter, hash common.Hash, number uint64) error {
+func DeleteBlock(db ethdb.Database, hash common.Hash, number uint64) error {
 	DeleteReceipts(db, hash, number)
 	DeleteHeader(db, hash, number)
 	DeleteBody(db, hash, number)
@@ -578,7 +591,7 @@ func DeleteBlock(db DatabaseDeleter, hash common.Hash, number uint64) error {
 
 // DeleteBlockWithoutNumber removes all block data associated with a hash, except
 // the hash to number mapping.
-func DeleteBlockWithoutNumber(db DatabaseDeleter, hash common.Hash, number uint64) error {
+func DeleteBlockWithoutNumber(db ethdb.Database, hash common.Hash, number uint64) error {
 	DeleteReceipts(db, hash, number)
 	deleteHeaderWithoutNumber(db, hash, number)
 	DeleteBody(db, hash, number)

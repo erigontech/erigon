@@ -224,8 +224,8 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 	return mm
 }
 
-func (m *mutation) Begin(ctx context.Context, writable bool) (DbWithPendingMutations, error) {
-	return m.db.Begin(ctx, writable)
+func (m *mutation) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
+	return m.db.Begin(ctx, flags)
 }
 
 func (m *mutation) panicOnEmptyDB() {

@@ -21,6 +21,11 @@ const (
 	NonExistingDBI = 999_999_999
 )
 
+const (
+	TxRO = 1
+	TxRW
+)
+
 var (
 	LMDBDefaultMapSize          = 2 * datasize.TB
 	LMDBDefaultMaxFreelistReuse = uint(1000) // measured in pages
@@ -144,7 +149,7 @@ func (opts LmdbOpts) Open() (KV, error) {
 
 	// Open or create buckets
 	if opts.readOnly {
-		tx, innerErr := db.Begin(context.Background(), nil, false)
+		tx, innerErr := db.Begin(context.Background(), nil, RO)
 		if innerErr != nil {
 			return nil, innerErr
 		}
@@ -273,7 +278,7 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages), nil
 }
 
-func (db *LmdbKV) Begin(_ context.Context, parent Tx, writable bool) (Tx, error) {
+func (db *LmdbKV) Begin(_ context.Context, parent Tx, flags TxFlags) (Tx, error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -283,15 +288,15 @@ func (db *LmdbKV) Begin(_ context.Context, parent Tx, writable bool) (Tx, error)
 		db.wg.Add(1)
 	}
 
-	flags := uint(0)
-	if !writable {
-		flags |= lmdb.Readonly
+	nativeFlags := uint(0)
+	if flags&RO != 0 {
+		nativeFlags |= lmdb.Readonly
 	}
 	var parentTx *lmdb.Txn
 	if parent != nil {
 		parentTx = parent.(*lmdbTx).tx
 	}
-	tx, err := db.env.BeginTxn(parentTx, flags)
+	tx, err := db.env.BeginTxn(parentTx, nativeFlags)
 	if err != nil {
 		if !isSubTx {
 			runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
@@ -381,7 +386,7 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	defer db.wg.Done()
 
 	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
-	tx, err := db.Begin(ctx, nil, false)
+	tx, err := db.Begin(ctx, nil, RO)
 	if err != nil {
 		return err
 	}
@@ -397,7 +402,7 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	db.wg.Add(1)
 	defer db.wg.Done()
 
-	tx, err := db.Begin(ctx, nil, true)
+	tx, err := db.Begin(ctx, nil, RW)
 	if err != nil {
 		return err
 	}

@@ -92,7 +92,7 @@ func BenchmarkFilters(b *testing.B) {
 			panic(err)
 		}
 		rawdb.WriteHeadBlockHash(db, block.Hash())
-		rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), receipts[i])
+		rawdb.WriteReceipts(db, block.NumberU64(), receipts[i])
 	}
 	b.ResetTimer()
 
@@ -177,7 +177,7 @@ func TestFilters(t *testing.T) {
 			panic(err)
 		}
 		rawdb.WriteHeadBlockHash(db, block.Hash())
-		rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), receipts[i])
+		rawdb.WriteReceipts(db, block.NumberU64(), receipts[i])
 	}
 
 	filter := NewRangeFilter(backend, 0, -1, []common.Address{addr}, [][]common.Hash{{hash1, hash2, hash3, hash4}})

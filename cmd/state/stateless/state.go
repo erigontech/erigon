@@ -435,7 +435,7 @@ func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB ethdb.K
 	var err error
 	var localTx ethdb.Tx
 
-	if localTx, err = localDB.Begin(ctx, nil, true); err != nil {
+	if localTx, err = localDB.Begin(ctx, nil, ethdb.RW); err != nil {
 		panic(err)
 	}
 
@@ -450,7 +450,7 @@ func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB ethdb.K
 		if err = localTx.Commit(ctx); err != nil {
 			panic(err)
 		}
-		if localTx, err = localDB.Begin(ctx, nil, true); err != nil {
+		if localTx, err = localDB.Begin(ctx, nil, ethdb.RW); err != nil {
 			panic(err)
 		}
 
@@ -1113,7 +1113,7 @@ func makeCreators(blockNum uint64) {
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
-	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, false)
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, ethdb.RO)
 	check(err1)
 	defer ethTx.Rollback()
 	f, err := os.OpenFile("/Volumes/tb41/turbo-geth/creators.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)

@@ -396,7 +396,7 @@ func (bc *BlockChain) SetHead(head uint64) error {
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	updateFn := func(db rawdb.DatabaseWriter, header *types.Header) (uint64, bool) {
+	updateFn := func(db ethdb.Database, header *types.Header) (uint64, bool) {
 		// Rewind the block chain, ensuring we don't end up with a stateless head block
 		if currentBlock := bc.CurrentBlock(); currentBlock != nil && header.Number.Uint64() < currentBlock.NumberU64() {
 			newHeadBlock := bc.GetBlock(header.Hash(), header.Number.Uint64())
@@ -436,7 +436,7 @@ func (bc *BlockChain) SetHead(head uint64) error {
 	}
 
 	// Rewind the header chain, deleting all block bodies until then
-	delFn := func(db rawdb.DatabaseDeleter, hash common.Hash, num uint64) {
+	delFn := func(db ethdb.Database, hash common.Hash, num uint64) {
 		// Ignore the error here since light client won't hit this path
 		frozen, _ := bc.db.Ancients()
 		if num+1 <= frozen {
@@ -1026,7 +1026,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			}
 			// Write all the data out into the database
 			rawdb.WriteBody(context.Background(), batch, block.Hash(), block.NumberU64(), block.Body())
-			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receiptChain[i])
+			rawdb.WriteReceipts(batch, block.NumberU64(), receiptChain[i])
 			if bc.enableTxLookupIndex {
 				rawdb.WriteTxLookupEntries(batch, block)
 			}
@@ -1179,7 +1179,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 		}
 	}
 	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
-		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
+		rawdb.WriteReceipts(bc.db, block.NumberU64(), receipts)
 	}
 
 	// If the total difficulty is higher than our known, add it to the canonical chain
@@ -1399,7 +1399,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				// state, but if it's this special case here(skip reexecution) we will lose
 				// the empty receipt entry.
 				if len(block.Transactions()) == 0 {
-					rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), nil)
+					rawdb.WriteReceipts(bc.db, block.NumberU64(), nil)
 				} else {
 					log.Error("Please file an issue, skip known block execution without receipt",
 						"hash", block.Hash(), "number", block.NumberU64())

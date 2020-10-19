@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -22,7 +23,7 @@ import (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
-	tx, err1 := api.db.Begin(ctx, nil, false)
+	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return nil, fmt.Errorf("call cannot open tx: %v", err1)
 	}
@@ -49,7 +50,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexu
 }
 
 func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, gasCap *big.Int) (hexutil.Uint64, error) {
-	tx, err1 := api.db.Begin(ctx, nil, false)
+	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return 0, fmt.Errorf("estimateGas cannot open tx: %v", err1)
 	}
