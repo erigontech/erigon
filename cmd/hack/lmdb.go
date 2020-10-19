@@ -69,7 +69,7 @@ func defrag(chaindata string) error {
 	fmt.Printf("FREE_DBI root page ID: %d, depth: %d\n", freeRoot, freeDepth)
 	fmt.Printf("MAIN_DBI root page ID: %d, depth: %d\n", mainRoot, mainDepth)
 
-	var freelist []uint64
+	var freelist = make(map[uint64]struct{})
 	var freeEntries int
 	var overflows int
 	var pages [8][PageSize]byte // Stack of pages
@@ -85,7 +85,6 @@ func defrag(chaindata string) error {
 		page := &pages[top]
 		if num == 0 {
 			pageID = pageIDs[top]
-			//fmt.Printf("top %d, num == 0, pageID = %d\n", top, pageID)
 			if _, err = f.ReadAt(page[:], int64(pageID*PageSize)); err != nil {
 				return fmt.Errorf("reading FREE_DBI page: %v", err)
 			}
@@ -105,7 +104,6 @@ func defrag(chaindata string) error {
 			indices[top] = i
 		} else if i < num {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
-			//fmt.Printf("top %d, i %d, num %d, nodePtr %d\n", top, i, num, nodePtr)
 			i++
 			indices[top] = i
 			if branch {
@@ -128,8 +126,9 @@ func defrag(chaindata string) error {
 					overflows += overflowNum
 					left := dataSize - 8
 					// Start with pos + 8 because first 8 bytes is the size of the list
-					for j := pos + 8; j < PageSize && left > 0; j += 8 {
-						freelist = append(freelist, binary.LittleEndian.Uint64(meta[j:]))
+					for j := HeaderSize + 8; j < PageSize && left > 0; j += 8 {
+						pn := binary.LittleEndian.Uint64(meta[j:])
+						freelist[pn] = struct{}{}
 						left -= 8
 					}
 					for i := 1; i < overflowNum; i++ {
@@ -137,19 +136,20 @@ func defrag(chaindata string) error {
 							return fmt.Errorf("reading FREE_DBI overflow page: %v", err)
 						}
 						for j := 0; j < PageSize && left > 0; j += 8 {
-							freelist = append(freelist, binary.LittleEndian.Uint64(meta[j:]))
+							pn := binary.LittleEndian.Uint64(meta[j:])
+							freelist[pn] = struct{}{}
 							left -= 8
 						}
 					}
 				} else {
 					// First 8 bytes is the size of the list
 					for j := nodePtr + 8 + keySize + 8; j < nodePtr+8+keySize+dataSize; j += 8 {
-						freelist = append(freelist, binary.LittleEndian.Uint64(meta[j:]))
+						pn := binary.LittleEndian.Uint64(page[j:])
+						freelist[pn] = struct{}{}
 					}
 				}
 			}
 		} else {
-			//fmt.Printf("top %d, i %d, num %d\n", top, i, num)
 			top--
 		}
 	}
