@@ -28,10 +28,9 @@ var receiptsCborEncode = Migration{
 		if err1 != nil {
 			return err1
 		}
-		if collector != nil && progress != nil {
+		if collector != nil && progress != nil && string(progress) == loadStep {
 			goto LoadStep
 		}
-
 		if string(progress) == loadStep && collector == nil {
 			return fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
 		}
