@@ -20,7 +20,7 @@ import (
 )
 
 type LoadNextFunc func(originalK, k, v []byte) error
-type LoadFunc func(k []byte, value []byte, state State, next LoadNextFunc) error
+type LoadFunc func(k []byte, value []byte, table CurrentTableReader, next LoadNextFunc) error
 
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
 // as a Collect Transform Load
@@ -163,7 +163,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		defer tx.Rollback()
 	}
 
-	state := &bucketState{tx, bucket, args.Quit}
+	currentTable := &currentTableReader{tx, bucket}
 	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
 	var lastKey []byte
 	if bucket != "" { // passing empty bucket name is valid case for etl when DB modification is not expected
@@ -229,7 +229,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 
 		element := (heap.Pop(h)).(HeapElem)
 		provider := providers[element.TimeIdx]
-		err := loadFunc(element.Key, element.Value, state, loadNextFunc)
+		err := loadFunc(element.Key, element.Value, currentTable, loadNextFunc)
 		if err != nil {
 			return err
 		}
@@ -272,7 +272,7 @@ func makeCurrentKeyStr(k []byte) string {
 	} else if len(k) < 4 {
 		currentKeyStr = fmt.Sprintf("%x", k)
 	} else if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8 { // if key has leading zeroes, show a bit more info
-		currentKeyStr = fmt.Sprintf("%x...", k[:8])
+		currentKeyStr = fmt.Sprintf("%x", k)
 	} else {
 		currentKeyStr = fmt.Sprintf("%x...", k[:4])
 	}
