@@ -9,6 +9,7 @@ import (
 	"path"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -515,9 +516,9 @@ func (tx *mdbxTx) Commit(ctx context.Context) error {
 		}
 	}()
 	tx.closeCursors()
+	t := time.Now()
 	latency, err := tx.tx.Commit()
-	//if commitTook > 20*time.Second {
-	log.Info("Commit", "preparation", latency.Preparation, "gc", latency.GC, "write", latency.Preparation, "fsync", latency.Sync, "whole", latency.Whole)
+	log.Info("Commit", "preparation", latency.Preparation, "gc", latency.GC, "write", latency.Preparation, "fsync", latency.Sync, "whole", latency.Whole, "outside", time.Since(t))
 	if err != nil {
 		return err
 	}
