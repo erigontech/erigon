@@ -183,7 +183,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Senders recovery", stages.Senders), "block", j.index)
+			log.Info(fmt.Sprintf("[%s] Senders recovery", stages.Senders), "number", j.index)
 		}
 		binary.BigEndian.PutUint32(k, uint32(j.index))
 		if err := collector.Collect(k, j.senders); err != nil {

@@ -220,7 +220,7 @@ func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Executed blocks", stages.Execution),
-		"currentBlock", now,
+		"number", now,
 		"blk/second", speed,
 		"batch", common.StorageSize(batch.BatchSize()),
 		"alloc", common.StorageSize(m.Alloc),

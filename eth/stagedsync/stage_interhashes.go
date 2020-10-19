@@ -78,7 +78,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 }
 
 func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
-	log.Info("Regeneration intermediate hashes started")
+	log.Info(fmt.Sprintf("[%s] Regeneration intermediate hashes started", stages.IntermediateHashes))
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
 	buf.SetComparator(comparator)
@@ -115,7 +115,7 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 	}); err != nil {
 		return fmt.Errorf("gen ih stage: fail load data to bucket: %w", err)
 	}
-	log.Info("Regeneration ended")
+	log.Info(fmt.Sprintf("[%s] Regeneration ended", stages.IntermediateHashes))
 	return nil
 }
 
@@ -142,7 +142,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, loa
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Debug("Incremental state promotion of intermediate hashes", "from", from, "to", to, "csbucket", changeSetBucket)
+	log.Debug(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", stages.IntermediateHashes), "from", from, "to", to, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
 
@@ -186,7 +186,7 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, load 
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info("Unwinding of intermediate hashes", "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
+	log.Info(fmt.Sprintf("[%s] Unwinding of intermediate hashes", stages.IntermediateHashes), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
@@ -273,7 +273,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	if hash != expectedRootHash {
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
 	}
-	log.Info("Collection finished",
+	log.Info(fmt.Sprintf("[%s] Collection finished", stages.IntermediateHashes),
 		"root hash", hash.Hex(),
 		"gen IH", generationIHTook,
 	)
@@ -373,7 +373,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	if hash != expectedRootHash {
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
 	}
-	log.Info("Collection finished",
+	log.Info(fmt.Sprintf("[%s] Collection finished", stages.IntermediateHashes),
 		"root hash", hash.Hex(),
 		"gen IH", generationIHTook,
 	)
