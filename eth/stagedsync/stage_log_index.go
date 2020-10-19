@@ -271,8 +271,7 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 			var err error
 			v, err = gozstd.DecompressDict(nil, v, dbutils.CompressionDicts.DReceipts)
 			if err != nil {
-				log.Error("receipt decompress failed", "blockNum", binary.BigEndian.Uint64(k[:8]), "err", err)
-				return nil
+				return false, fmt.Errorf("receipt decompress failed: %d, %w", binary.BigEndian.Uint64(k[:8]), err)
 			}
 		}
 		receipts := types.Receipts{}
