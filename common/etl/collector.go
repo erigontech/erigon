@@ -112,22 +112,28 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
-func (c *Collector) Load(db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
-	if c.cleanOnFailure {
-		defer func() {
-			disposeProviders(c.dataProviders)
-		}()
-	}
+func (c *Collector) Load(db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) (err error) {
+	defer func() {
+		if !c.cleanOnFailure {
+			// don't clean if error or panic happened
+			if err != nil {
+				return
+			}
+			if rec := recover(); rec != nil {
+				panic(rec)
+			}
+		}
+
+		disposeProviders(c.dataProviders)
+	}()
 	if !c.allFlushed {
 		if err := c.flushBuffer(nil, true); err != nil {
 			return err
 		}
 	}
-	if err := loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, args); err != nil {
+	err = loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, args)
+	if err != nil {
 		return err
-	}
-	if !c.cleanOnFailure {
-		disposeProviders(c.dataProviders)
 	}
 	return nil
 }

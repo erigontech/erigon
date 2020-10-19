@@ -68,12 +68,13 @@ var migrations = []Migration{
 
 type Migration struct {
 	Name string
-	Up   func(db ethdb.Database, dataDir string, OnLoadCommit etl.LoadCommitHandler) error
+	Up   func(db ethdb.Database, dataDir string, progress []byte, OnLoadCommitOnLoadCommit etl.LoadCommitHandler) error
 }
 
 var (
 	ErrMigrationNonUniqueName   = fmt.Errorf("please provide unique migration name")
 	ErrMigrationCommitNotCalled = fmt.Errorf("migraion commit function was not called")
+	ErrMigrationETLFilesDeleted = fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
 )
 
 func NewMigrator() *Migrator {
@@ -89,6 +90,9 @@ type Migrator struct {
 func AppliedMigrations(db ethdb.Database, withPayload bool) (map[string][]byte, error) {
 	applied := map[string][]byte{}
 	err := db.Walk(dbutils.Migrations, nil, 0, func(k []byte, v []byte) (bool, error) {
+		if bytes.HasPrefix(k, []byte("_progress_")) {
+			return true, nil
+		}
 		if withPayload {
 			applied[string(common.CopyBytes(k))] = common.CopyBytes(v)
 		} else {
@@ -104,9 +108,9 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		return nil
 	}
 
-	applied, err := AppliedMigrations(db, false)
-	if err != nil {
-		return err
+	applied, err1 := AppliedMigrations(db, false)
+	if err1 != nil {
+		return err1
 	}
 
 	// migration names must be unique, protection against people's mistake
@@ -119,9 +123,9 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		uniqueNameCheck[m.Migrations[i].Name] = true
 	}
 
-	tx, err := db.Begin(context.Background())
-	if err != nil {
-		return err
+	tx, err1 := db.Begin(context.Background())
+	if err1 != nil {
+		return err1
 	}
 	defer tx.Rollback()
 
@@ -134,8 +138,19 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		commitFuncCalled := false // commit function must be called if no error, protection against people's mistake
 
 		log.Info("Apply migration", "name", v.Name)
-		if err := v.Up(tx, datadir, func(putter ethdb.Putter, key []byte, isDone bool) error {
+		progress, err := tx.Get(dbutils.Migrations, []byte("_progress_"+v.Name))
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return err
+		}
+
+		if err = v.Up(tx, datadir, progress, func(_ ethdb.Putter, key []byte, isDone bool) error {
 			if !isDone {
+				if key != nil {
+					err = tx.Put(dbutils.Migrations, []byte("_progress_"+v.Name), key)
+					if err != nil {
+						return err
+					}
+				}
 				// do commit, but don't save partial progress
 				if err := tx.CommitAndBegin(context.Background()); err != nil {
 					return err
@@ -148,7 +163,12 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 			if err != nil {
 				return err
 			}
-			err = putter.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
+			err = tx.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
+			if err != nil {
+				return err
+			}
+
+			err = tx.Delete(dbutils.Migrations, []byte("_progress_"+v.Name))
 			if err != nil {
 				return err
 			}
