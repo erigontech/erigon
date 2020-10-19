@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/spf13/cobra"
+	"strings"
 )
 
 var rootCmd = &cobra.Command{
@@ -29,18 +30,36 @@ func RootCommand() *cobra.Command {
 
 //nolint:unparam
 func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
-	opts := ethdb.NewLMDB().Path(chaindata)
-	if mapSizeStr != "" {
-		var mapSize datasize.ByteSize
-		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
-		opts = opts.MapSize(mapSize)
+	var kv ethdb.KV
+	switch true {
+	case strings.HasSuffix(path, "_mdbx"):
+		opts := ethdb.NewMDBX().Path(path)
+		if mapSizeStr != "" {
+			var mapSize datasize.ByteSize
+			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
+			opts = opts.MapSize(mapSize)
+		}
+		if freelistReuse > 0 {
+			opts = opts.MaxFreelistReuse(uint(freelistReuse))
+		}
+		kv = opts.MustOpen()
+	default:
+		opts := ethdb.NewLMDB().Path(path)
+		if mapSizeStr != "" {
+			var mapSize datasize.ByteSize
+			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
+			opts = opts.MapSize(mapSize)
+		}
+		if freelistReuse > 0 {
+			opts = opts.MaxFreelistReuse(uint(freelistReuse))
+		}
+		kv = opts.MustOpen()
 	}
-	if freelistReuse > 0 {
-		opts = opts.MaxFreelistReuse(uint(freelistReuse))
-	}
-	db := ethdb.NewObjectDatabase(opts.MustOpen())
-	if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
-		panic(err)
+	db := ethdb.NewObjectDatabase(kv)
+	if applyMigrations {
+		if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
+			panic(err)
+		}
 	}
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
 	if err != nil {
