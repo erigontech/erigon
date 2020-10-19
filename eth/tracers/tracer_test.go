@@ -59,6 +59,7 @@ func runTrace(tracer *Tracer) (json.RawMessage, error) {
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 
 	_, err := env.Interpreter().Run(contract, []byte{}, false)
+	env.Interpreter().Close()
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +176,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 	timeout := errors.New("stahp")
 	tracer.Stop(timeout)
 	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, nil, contract, 0, nil) //nolint:errcheck
+	env.Interpreter().Close()
 
 	if _, err := tracer.GetResult(); err.Error() != timeout.Error() {
 		t.Errorf("Expected timeout error, got %v", err)

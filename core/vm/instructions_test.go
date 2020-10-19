@@ -92,7 +92,6 @@ func init() {
 }
 
 func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFunc, name string) {
-
 	var (
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{})
 		rstack         = stack.NewReturnStack()
@@ -100,6 +99,7 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		pc             = uint64(0)
 		evmInterpreter = env.interpreter.(*EVMInterpreter)
 	)
+	defer env.interpreter.Close()
 
 	for i, test := range tests {
 		x := new(uint256.Int).SetBytes(common.Hex2Bytes(test.X))
@@ -199,6 +199,7 @@ func TestAddMod(t *testing.T) {
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
 		pc             = uint64(0)
 	)
+	defer env.interpreter.Close()
 	tests := []struct {
 		x        string
 		y        string
@@ -239,6 +240,7 @@ func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcas
 		pc          = uint64(0)
 		interpreter = env.interpreter.(*EVMInterpreter)
 	)
+	defer env.interpreter.Close()
 	result := make([]TwoOperandTestcase, len(args))
 	for i, param := range args {
 		x := new(uint256.Int).SetBytes(common.Hex2Bytes(param.x))
@@ -291,6 +293,7 @@ func opBenchmark(bench *testing.B, op executionFunc, args ...string) {
 	)
 
 	env.interpreter = evmInterpreter
+	defer env.interpreter.Close()
 	// convert args
 	byteArgs := make([][]byte, len(args))
 	for i, arg := range args {
@@ -527,6 +530,7 @@ func TestOpMstore(t *testing.T) {
 	)
 
 	env.interpreter = evmInterpreter
+	defer env.interpreter.Close()
 	mem.Resize(64)
 	pc := uint64(0)
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
@@ -552,6 +556,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 	)
 
 	env.interpreter = evmInterpreter
+	defer env.interpreter.Close()
 	mem.Resize(64)
 	pc := uint64(0)
 	memStart := new(uint256.Int)
@@ -573,6 +578,7 @@ func BenchmarkOpSHA3(bench *testing.B) {
 		evmInterpreter = NewEVMInterpreter(env, env.vmConfig)
 	)
 	env.interpreter = evmInterpreter
+	defer env.interpreter.Close()
 	mem.Resize(32)
 	pc := uint64(0)
 	start := uint256.NewInt()

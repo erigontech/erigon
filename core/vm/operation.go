@@ -27,13 +27,3 @@ type operation struct {
 	reverts bool // determines whether the operation reverts state (implicitly halts)
 	returns bool // determines whether the operations sets the return data content
 }
-
-func (o operation) SetConstantGas(constantGas uint64) *operation {
-	o.constantGas = constantGas
-	return &o
-}
-
-func (o operation) SetDynamicGas(dynamicGas gasFunc) *operation {
-	o.dynamicGas = dynamicGas
-	return &o
-}

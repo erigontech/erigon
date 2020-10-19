@@ -130,7 +130,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 		cfg.GasLimit,
 		cfg.Value,
 	)
-
+	vmenv.Interpreter().Close()
 	return ret, cfg.State, err
 }
 
@@ -159,6 +159,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		cfg.GasLimit,
 		cfg.Value,
 	)
+	vmenv.Interpreter().Close()
 	return code, address, leftOverGas, err
 }
 
@@ -181,6 +182,6 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 		cfg.GasLimit,
 		cfg.Value,
 	)
-
+	vmenv.Interpreter().Close()
 	return ret, leftOverGas, err
 }

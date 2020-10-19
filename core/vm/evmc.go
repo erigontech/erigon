@@ -399,3 +399,5 @@ func (evm *EVMC) CanRun(code []byte) bool {
 	}
 	return evm.cap == required
 }
+
+func (evm *EVMC) Close() {}

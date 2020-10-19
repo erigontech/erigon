@@ -229,7 +229,7 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 	vmenv := vm.NewEVM(context, statedb, config, cfg)
 	// Apply the transaction to the current state (included in the env)
-	result, err := ApplyMessage(vmenv, msg, gp)
+	result, err := ApplyOnlyMessage(vmenv, msg, gp)
 	if err != nil {
 		return nil, err
 	}

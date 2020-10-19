@@ -168,6 +168,11 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool) (*ExecutionResult, erro
 	return NewStateTransition(evm, msg, gp).TransitionDb()
 }
 
+func ApplyOnlyMessage(evm *vm.EVM, msg Message, gp *GasPool) (*ExecutionResult, error) {
+	defer evm.Interpreter().Close()
+	return NewStateTransition(evm, msg, gp).TransitionDb()
+}
+
 // to returns the recipient of the message.
 func (st *StateTransition) to() common.Address {
 	if st.msg == nil || st.msg.To() == nil /* contract creation */ {

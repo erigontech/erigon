@@ -184,6 +184,7 @@ func NewEVM(ctx Context, state IntraBlockState, chainConfig *params.ChainConfig,
 // it's safe to be called multiple times.
 func (evm *EVM) Cancel() {
 	atomic.StoreInt32(&evm.abort, 1)
+	evm.Interpreter().Close()
 }
 
 // Cancelled returns true if Cancel has been called
