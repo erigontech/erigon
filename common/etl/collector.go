@@ -212,12 +212,12 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		}
 		if canUseAppend {
 			if err := tx.(*ethdb.TxDb).Append(bucket, k, v); err != nil {
-				return err
+				return fmt.Errorf("append: k=%x, %w", k, err)
 			}
 			return nil
 		}
 		if err := tx.Put(bucket, k, v); err != nil {
-			return err
+			return fmt.Errorf("put: k=%x, %w", k, err)
 		}
 		return nil
 	}
