@@ -21,4 +21,14 @@ func TestReceiptCbor(t *testing.T) {
 	migrator.Migrations = []Migration{receiptsCborEncode}
 	err = migrator.Apply(db, "")
 	require.NoError(err)
+
+	err = receiptsCborEncode.Up(db, "tmp-test-dir", nil, func(db ethdb.Putter, key []byte, isDone bool) error {
+		return nil
+	})
+	require.NoError(err)
+
+	err = receiptsCborEncode.Up(db, "tmp-test-dir", []byte("load"), func(db ethdb.Putter, key []byte, isDone bool) error {
+		return nil
+	})
+	require.NoError(err)
 }

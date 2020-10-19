@@ -3,6 +3,7 @@ package migrations
 import (
 	"encoding/binary"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
@@ -28,11 +29,21 @@ var receiptsCborEncode = Migration{
 		if err1 != nil {
 			return err1
 		}
-		if collector != nil && progress != nil && string(progress) == loadStep {
-			goto LoadStep
-		}
-		if string(progress) == loadStep && collector == nil {
-			return fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
+		switch string(progress) {
+		case "":
+			if collector != nil { //  can't use files if progress field not set
+				_ = os.RemoveAll(datadir)
+				collector, err1 = etl.NewCollectorFromFiles(datadir)
+				if err1 != nil {
+					return err1
+				}
+			}
+		case loadStep:
+			if collector == nil {
+				return fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
+			} else {
+				goto LoadStep
+			}
 		}
 
 		collector = etl.NewCriticalCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
