@@ -142,10 +142,10 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 			return err
 		}
 
-		if err = v.Up(tx, datadir, progress, func(putter ethdb.Putter, key []byte, isDone bool) error {
+		if err = v.Up(tx, datadir, progress, func(_ ethdb.Putter, key []byte, isDone bool) error {
 			if !isDone {
 				if key != nil {
-					err = putter.Put(dbutils.Migrations, []byte("_progress_"+v.Name), key)
+					err = tx.Put(dbutils.Migrations, []byte("_progress_"+v.Name), key)
 					if err != nil {
 						return err
 					}
@@ -162,7 +162,12 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 			if err != nil {
 				return err
 			}
-			err = putter.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
+			err = tx.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
+			if err != nil {
+				return err
+			}
+
+			err = tx.Delete(dbutils.Migrations, []byte("_progress_"+v.Name))
 			if err != nil {
 				return err
 			}
