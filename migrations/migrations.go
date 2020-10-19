@@ -142,7 +142,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 			return err
 		}
 
-		if err := v.Up(tx, datadir, progress, func(putter ethdb.Putter, key []byte, isDone bool) error {
+		if err = v.Up(tx, datadir, progress, func(putter ethdb.Putter, key []byte, isDone bool) error {
 			if !isDone {
 				if key != nil {
 					err = putter.Put(dbutils.Migrations, []byte("_progress_"+v.Name), key)
