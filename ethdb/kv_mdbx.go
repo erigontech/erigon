@@ -4,17 +4,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
 	"sync"
-	"time"
-
-	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 type MdbxOpts struct {
@@ -104,14 +102,14 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 	}
 
-	var flags uint = mdbx.NoReadahead
+	var flags uint = mdbx.NoReadahead | mdbx.Durable
 	if opts.readOnly {
 		flags |= mdbx.Readonly
 	}
 	if opts.inMem {
-		flags |= mdbx.NoMetaSync | mdbx.UtterlyNoSync
+		flags |= mdbx.NoMetaSync | mdbx.SafeNoSync
 	}
-	//flags |= mdbx.SafeNoSync
+
 	//flags |= mdbx.LifoReclaim
 	flags |= mdbx.Coalesce
 	err = env.Open(opts.path, flags, 0664)
@@ -516,9 +514,8 @@ func (tx *mdbxTx) Commit(ctx context.Context) error {
 		}
 	}()
 	tx.closeCursors()
-	t := time.Now()
 	latency, err := tx.tx.Commit()
-	log.Info("Commit", "preparation", latency.Preparation, "gc", latency.GC, "write", latency.Preparation, "fsync", latency.Sync, "whole", latency.Whole, "outside", time.Since(t))
+	log.Info("Commit", "preparation", latency.Preparation, "gc", latency.GC, "write", latency.Preparation, "fsync", latency.Sync, "whole", latency.Whole)
 	if err != nil {
 		return err
 	}
