@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -24,7 +25,7 @@ func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolSt
 		return fmt.Errorf("txPoolUpdate to (%d) < from (%d)", to, s.BlockNumber)
 	}
 	if pool != nil && !pool.IsStarted() {
-		log.Info("Starting tx pool after sync", "from", s.BlockNumber, "to", to)
+		log.Info(fmt.Sprintf("[%s] Starting tx pool after sync", stages.TxPool), "from", s.BlockNumber, "to", to)
 		headHash, err := rawdb.ReadCanonicalHash(db, to)
 		if err != nil {
 			return err
@@ -42,7 +43,7 @@ func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolSt
 			return err
 		}
 		pending, queued := pool.Stats()
-		log.Info("Transaction stats", "pending", pending, "queued", queued)
+		log.Info(fmt.Sprintf("[%s] Transaction stats", stages.TxPool), "pending", pending, "queued", queued)
 	}
 	return s.DoneAndUpdate(db, to)
 }
@@ -78,7 +79,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter
 	}); err != nil {
 		return err
 	}
-	log.Info("TxPoolUpdate: Reading canonical hashes complete", "hashes", len(canonical))
+	log.Info(fmt.Sprintf("[%s] TxPoolUpdate: Reading canonical hashes complete", stages.TxPool), "hashes", len(canonical))
 	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
@@ -109,7 +110,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter
 		}
 		return true, nil
 	}); err != nil {
-		log.Error("TxPoolUpdate: walking over the block bodies", "error", err)
+		log.Error(fmt.Sprintf("[%s] TxPoolUpdate: walking over the block bodies", stages.TxPool), "error", err)
 		return err
 	}
 	return nil
@@ -125,7 +126,7 @@ func unwindTxPool(u *UnwindState, s *StageState, db ethdb.GetterPutter, pool *co
 			return err
 		}
 		pending, queued := pool.Stats()
-		log.Info("Transaction stats", "pending", pending, "queued", queued)
+		log.Info(fmt.Sprintf("[%s] Transaction stats", stages.TxPool), "pending", pending, "queued", queued)
 	}
 	if err := u.Done(db); err != nil {
 		return fmt.Errorf("unwind Backend: reset: %w", err)
@@ -162,7 +163,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, qui
 	}); err != nil {
 		return err
 	}
-	log.Info("unwind TxPoolUpdate: Reading canonical hashes complete", "hashes", len(canonical))
+	log.Info(fmt.Sprintf("[%s] unwind TxPoolUpdate: Reading canonical hashes complete", stages.TxPool), "hashes", len(canonical))
 	senders := make([][]common.Address, to-from+1)
 	if err := db.Walk(dbutils.Senders, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
@@ -186,7 +187,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, qui
 		senders[blockNumber-from-1] = sendersArray
 		return true, nil
 	}); err != nil {
-		log.Error("TxPoolUpdate: walking over sender", "error", err)
+		log.Error(fmt.Sprintf("[%s] TxPoolUpdate: walking over sender", stages.TxPool), "error", err)
 		return err
 	}
 	var txsToInject []*types.Transaction
@@ -219,12 +220,12 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, qui
 		txsToInject = append(txsToInject, body.Transactions...)
 		return true, nil
 	}); err != nil {
-		log.Error("unwind TxPoolUpdate: walking over the block bodies", "error", err)
+		log.Error(fmt.Sprintf("[%s] unwind TxPoolUpdate: walking over the block bodies", stages.TxPool), "error", err)
 		return err
 	}
 	//nolint:errcheck
-	log.Info("unwind TxPoolUpdate: injecting txs into the pool", "number", len(txsToInject))
+	log.Info(fmt.Sprintf("[%s] unwind TxPoolUpdate: injecting txs into the pool", stages.TxPool), "number", len(txsToInject))
 	pool.AddRemotesSync(txsToInject)
-	log.Info("Injection complete")
+	log.Info(fmt.Sprintf("[%s] Injection complete", stages.TxPool))
 	return nil
 }

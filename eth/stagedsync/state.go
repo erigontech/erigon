@@ -165,7 +165,6 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 				return err
 			}
 		}
-
 		index, stage := s.CurrentStage()
 
 		if hook, ok := s.beforeStageRun[string(stage.ID)]; ok {
@@ -195,6 +194,7 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 		}
 		timings[string(stage.ID)] = time.Since(t)
 	}
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Memory", "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
