@@ -33,10 +33,7 @@ var receiptsCborEncode = Migration{
 		case "":
 			if collector != nil { //  can't use files if progress field not set
 				_ = os.RemoveAll(datadir)
-				collector, err1 = etl.NewCollectorFromFiles(datadir)
-				if err1 != nil {
-					return err1
-				}
+				collector = nil
 			}
 		case loadStep:
 			if collector == nil {
