@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -274,6 +275,7 @@ Error: %v
 	if reorg {
 		ctx = append(ctx, []interface{}{"reorg", reorg, "forkBlockNumber", forkBlockNumber}...)
 	}
-	log.Info("Imported new block headers", ctx...)
+
+	log.Info(fmt.Sprintf("[%s] Imported new block headers", stages.Headers), ctx...)
 	return reorg, forkBlockNumber, nil
 }

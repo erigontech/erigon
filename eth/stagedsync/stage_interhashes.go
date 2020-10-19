@@ -53,7 +53,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 	syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
 	expectedRootHash := syncHeadHeader.Root
 
-	log.Info("Generating intermediate hashes", "from", s.BlockNumber, "to", to)
+	log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", stages.IntermediateHashes), "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 {
 		if err := regenerateIntermediateHashes(tx, datadir, expectedRootHash, quit); err != nil {
 			return err

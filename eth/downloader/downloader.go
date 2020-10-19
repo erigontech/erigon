@@ -604,7 +604,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
 				return nil
 			}
-			log.Info("Commit blocks")
+			log.Info(fmt.Sprintf("[%s] Commit blocks", stages.Bodies))
 			_, errCommit := tx.Commit()
 			return errCommit
 		})
@@ -621,7 +621,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			commitStart := time.Now()
 			_, errTx := tx.Commit()
 			if errTx == nil {
-				log.Info("Commit blocks", "in", time.Since(commitStart))
+				log.Info(fmt.Sprintf("[%s] Commit blocks", stages.Bodies), "in", time.Since(commitStart))
 			}
 			return errTx
 		}

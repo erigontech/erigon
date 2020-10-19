@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -1710,7 +1711,7 @@ func (st *InsertStats) Report(chain []*types.Block, index int, toCommit bool) {
 		if st.ignored > 0 {
 			context = append(context, []interface{}{"ignored", st.ignored}...)
 		}
-		log.Info("Imported new chain segment", context...)
+		log.Info(fmt.Sprintf("[%s] Imported new chain segment", stages.Bodies), context...)
 		*st = InsertStats{StartTime: now, lastIndex: index + 1}
 	}
 }
