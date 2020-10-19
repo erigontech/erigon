@@ -199,8 +199,6 @@ func (txn *Txn) Commit() (CommitLatency, error) {
 	return txn.commit()
 }
 
-const ratio = 1000000000
-
 type CommitLatency struct {
 	Preparation time.Duration
 	GC          time.Duration
@@ -210,7 +208,7 @@ type CommitLatency struct {
 }
 
 func toDuration(seconds16dot16 C.uint32_t) time.Duration {
-	return time.Duration((ratio*seconds16dot16 + 32768) >> 16)
+	return time.Duration((uint64(1000000000)*uint64(seconds16dot16) + 32768) >> 16)
 }
 
 func (txn *Txn) commit() (CommitLatency, error) {

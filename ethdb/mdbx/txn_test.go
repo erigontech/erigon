@@ -1387,3 +1387,13 @@ func openDBI(env *Env, key string, flags uint) (DBI, error) {
 	}
 	return db, nil
 }
+
+func TestNameToNano(t *testing.T) {
+	if toDuration(65536).Milliseconds() != 1_000 {
+		t.Error("unexpected result")
+	}
+
+	if toDuration(65536*1_000).Milliseconds() != 1_000*1_000 {
+		t.Error("unexpected result")
+	}
+}
