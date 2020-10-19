@@ -3,6 +3,7 @@ package bitmapdb
 import (
 	"bytes"
 	"encoding/binary"
+	"sort"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
@@ -10,134 +11,60 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-const ShardLimit = 3 * datasize.KB
+const ChunkLimit = uint64(1900 * datasize.B) // threshold after which appear LMDB OverflowPages
 
-// AppendMergeByOr - appending delta to existing data in db, merge by Or
-// Method maintains sharding - because some bitmaps are >1Mb and when new incoming blocks process it
-//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (LMDB does copy-on-write).
-//
-// if last existing shard size merge it with delta
-// if serialized size of delta > ShardLimit - break down to multiple shards
-// shard number - it's biggest value in bitmap
-func AppendMergeByOr(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
-	lastShardKey := make([]byte, len(key)+4)
-	copy(lastShardKey, key)
-	binary.BigEndian.PutUint32(lastShardKey[len(lastShardKey)-4:], ^uint32(0))
-
-	currentLastV, seekErr := c.SeekExact(lastShardKey)
-	if seekErr != nil {
-		return seekErr
+func ChunkIterator(bm *roaring.Bitmap, target uint64) func() *roaring.Bitmap {
+	return func() *roaring.Bitmap {
+		return CutLeft(bm, target)
 	}
-
-	if currentLastV == nil { // no existing shards, then just create one
-		err := writeBitmapSharded(c, key, delta)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	last := roaring.New()
-	_, err := last.FromBuffer(currentLastV)
-	if err != nil {
-		return err
-	}
-
-	delta = roaring.Or(delta, last)
-
-	err = writeBitmapSharded(c, key, delta)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
-// writeBitmapSharded - write bitmap to db, perform sharding if delta > ShardLimit
-func writeBitmapSharded(c ethdb.Cursor, key []byte, delta *roaring.Bitmap) error {
-	shardKey := make([]byte, len(key)+4)
-	copy(shardKey, key)
-	sz := int(delta.GetSerializedSizeInBytes())
-	if sz <= int(ShardLimit) {
-		newV := bytes.NewBuffer(make([]byte, 0, delta.GetSerializedSizeInBytes()))
-		_, err := delta.WriteTo(newV)
-		if err != nil {
-			return err
-		}
-		binary.BigEndian.PutUint32(shardKey[len(shardKey)-4:], ^uint32(0))
-		err = c.Put(common.CopyBytes(shardKey), newV.Bytes())
-		if err != nil {
-			return err
-		}
+// CutLeft - cut from bitmap `targetSize` bytes from left
+// removing lft part from `bm`
+// returns nil on zero cardinality
+func CutLeft(bm *roaring.Bitmap, targetSize uint64) *roaring.Bitmap {
+	if bm.GetCardinality() == 0 {
 		return nil
 	}
 
-	shardsAmount := uint32(sz / int(ShardLimit))
-	if shardsAmount == 0 {
-		shardsAmount = 1
-	}
-	step := (delta.Maximum() - delta.Minimum()) / shardsAmount
-	step = step / 16
-	if step == 0 {
-		step = 1
-	}
-	shard, tmp := roaring.New(), roaring.New() // shard will write to db, tmp will use to add data to shard
-	for delta.GetCardinality() > 0 {
-		from := uint64(delta.Minimum())
-		to := from + uint64(step)
-		tmp.Clear()
-		tmp.AddRange(from, to)
-		tmp.And(delta)
-		shard.Or(tmp)
-		shard.RunOptimize()
-		delta.RemoveRange(from, to)
-		if delta.GetCardinality() == 0 {
-			break
-		}
-		if shard.GetSerializedSizeInBytes() >= uint64(ShardLimit) {
-			newV := bytes.NewBuffer(make([]byte, 0, shard.GetSerializedSizeInBytes()))
-			_, err := shard.WriteTo(newV)
-			if err != nil {
-				return err
-			}
-			binary.BigEndian.PutUint32(shardKey[len(shardKey)-4:], shard.Maximum())
-
-			err = c.Put(common.CopyBytes(shardKey), newV.Bytes())
-			if err != nil {
-				return err
-			}
-			shard.Clear()
-		}
+	sz := bm.GetSerializedSizeInBytes()
+	if sz <= targetSize {
+		lft := roaring.New()
+		lft.Or(bm)
+		bm.Clear()
+		return lft
 	}
 
-	if shard.GetSerializedSizeInBytes() > 0 {
-		newV := bytes.NewBuffer(make([]byte, 0, shard.GetSerializedSizeInBytes()))
-		_, err := shard.WriteTo(newV)
-		if err != nil {
-			return err
-		}
-		binary.BigEndian.PutUint32(shardKey[len(shardKey)-4:], ^uint32(0))
-		err = c.Put(common.CopyBytes(shardKey), newV.Bytes())
-		if err != nil {
-			return err
-		}
-		return nil
-	}
+	lft := roaring.New()
+	from := uint64(bm.Minimum())
+	minMax := bm.Maximum() - bm.Minimum()             // +1 because AddRange has semantic [from,to)
+	to := sort.Search(int(minMax), func(i int) bool { // can be optimized to avoid "too small steps", but let's leave it for readability
+		lft.Clear()
+		lft.AddRange(from, from+uint64(i)+1)
+		lft.And(bm)
+		return lft.GetSerializedSizeInBytes() > targetSize
+	})
 
-	return nil
+	lft.Clear()
+	lft.AddRange(from, from+uint64(to)+1)
+	lft.And(bm)
+	bm.RemoveRange(from, from+uint64(to)+1)
+	return lft
 }
 
 // TruncateRange - gets existing bitmap in db and call RemoveRange operator on it.
 // starts from hot shard, stops when shard not overlap with [from-to)
 // !Important: [from, to)
 func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) error {
-	shardKey := make([]byte, len(key)+4)
-	copy(shardKey, key)
-	binary.BigEndian.PutUint32(shardKey[len(shardKey)-4:], uint32(from))
+	chunkKey := make([]byte, len(key)+4)
+	copy(chunkKey, key)
+	binary.BigEndian.PutUint32(chunkKey[len(chunkKey)-4:], uint32(from))
 	c := tx.Cursor(bucket)
 	defer c.Close()
 	cForDelete := tx.Cursor(bucket) // use dedicated cursor for delete operation, but in near future will change to ETL
 	defer cForDelete.Close()
 
-	for k, v, err := c.Seek(shardKey); k != nil; k, v, err = c.Next() {
+	for k, v, err := c.Seek(chunkKey); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -151,7 +78,7 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 		if err != nil {
 			return err
 		}
-		noReasonToCheckNextShard := (uint64(bm.Minimum()) <= from && uint64(bm.Maximum()) >= to) || binary.BigEndian.Uint32(k[len(k)-4:]) == ^uint32(0)
+		noReasonToCheckNextChunk := (uint64(bm.Minimum()) <= from && uint64(bm.Maximum()) >= to) || binary.BigEndian.Uint32(k[len(k)-4:]) == ^uint32(0)
 
 		bm.RemoveRange(from, to)
 		if bm.GetCardinality() == 0 { // don't store empty bitmaps
@@ -159,7 +86,7 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 			if err != nil {
 				return err
 			}
-			if noReasonToCheckNextShard {
+			if noReasonToCheckNextChunk {
 				break
 			}
 			continue
@@ -176,28 +103,27 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 			return err
 		}
 
-		if noReasonToCheckNextShard {
+		if noReasonToCheckNextChunk {
 			break
 		}
 	}
 
-	// rename last shard
-	k, v, err := c.Current()
+	// rename last chunk if it has no finality marker
+	binary.BigEndian.PutUint32(chunkKey[len(chunkKey)-4:], ^uint32(0))
+	k, v, err := c.Seek(chunkKey)
 	if err != nil {
 		return err
 	}
-	if k == nil { // if last shard was deleted, do 1 step back
+	if k == nil || !bytes.HasPrefix(k, key) {
 		k, v, err = c.Prev()
 		if err != nil {
 			return err
 		}
-	}
 
-	if binary.BigEndian.Uint32(k[len(k)-4:]) == ^uint32(0) { // nothing to return
-		return nil
-	}
-	if !bytes.HasPrefix(k, key) {
-		return nil
+		// case when all chunks were delted
+		if k == nil || !bytes.HasPrefix(k, key) {
+			return nil
+		}
 	}
 
 	copyV := common.CopyBytes(v)
@@ -206,8 +132,7 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 		return err
 	}
 
-	binary.BigEndian.PutUint32(shardKey[len(shardKey)-4:], ^uint32(0))
-	err = c.Put(shardKey, copyV)
+	err = c.Put(chunkKey, copyV)
 	if err != nil {
 		return err
 	}
@@ -215,10 +140,10 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 	return nil
 }
 
-// Get - reading as much shards as needed to satisfy [from, to] condition
-// join all shards to 1 bitmap by Or operator
+// Get - reading as much chunks as needed to satisfy [from, to] condition
+// join all chunks to 1 bitmap by Or operator
 func Get(c ethdb.Cursor, key []byte, from, to uint32) (*roaring.Bitmap, error) {
-	var shards []*roaring.Bitmap
+	var chunks []*roaring.Bitmap
 
 	fromKey := make([]byte, len(key)+4)
 	copy(fromKey, key)
@@ -237,15 +162,15 @@ func Get(c ethdb.Cursor, key []byte, from, to uint32) (*roaring.Bitmap, error) {
 		if err != nil {
 			return nil, err
 		}
-		shards = append(shards, bm)
+		chunks = append(chunks, bm)
 
 		if binary.BigEndian.Uint32(k[len(k)-4:]) >= to {
 			break
 		}
 	}
 
-	if len(shards) == 0 {
+	if len(chunks) == 0 {
 		return roaring.New(), nil
 	}
-	return roaring.FastOr(shards...), nil
+	return roaring.FastOr(chunks...), nil
 }

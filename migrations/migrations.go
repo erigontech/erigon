@@ -136,7 +136,11 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		log.Info("Apply migration", "name", v.Name)
 		if err := v.Up(tx, datadir, func(putter ethdb.Putter, key []byte, isDone bool) error {
 			if !isDone {
-				return nil // don't save partial progress
+				// do commit, but don't save partial progress
+				if err := tx.CommitAndBegin(context.Background()); err != nil {
+					return err
+				}
+				return nil
 			}
 			commitFuncCalled = true
 

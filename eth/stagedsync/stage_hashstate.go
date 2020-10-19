@@ -157,14 +157,14 @@ type OldestAppearedLoad struct {
 	lastKey       bytes.Buffer
 }
 
-func (l *OldestAppearedLoad) LoadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
+func (l *OldestAppearedLoad) LoadFunc(k []byte, value []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 	if bytes.Equal(k, l.lastKey.Bytes()) {
 		return nil
 	}
 	l.lastKey.Reset()
 	//nolint:errcheck
 	l.lastKey.Write(k)
-	return l.innerLoadFunc(k, value, state, next)
+	return l.innerLoadFunc(k, value, table, next)
 }
 
 func NewPromoter(db ethdb.Database, quitCh <-chan struct{}) *Promoter {

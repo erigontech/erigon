@@ -190,7 +190,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			return err
 		}
 	}
-	loadFunc := func(k []byte, value []byte, _ etl.State, next etl.LoadNextFunc) error {
+	loadFunc := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		index := int(binary.BigEndian.Uint32(k))
 		return next(k, dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), value)
 	}

@@ -159,7 +159,7 @@ func (ig *IndexGenerator) DropIndex(bucket string) error {
 	return casted.ClearBuckets(bucket)
 }
 
-func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
+func loadFunc(k []byte, value []byte, state etl.CurrentTableReader, next etl.LoadNextFunc) error {
 	if len(value)%9 != 0 {
 		log.Error("Value must be a multiple of 9", "ln", len(value), "k", common.Bytes2Hex(k))
 		return errors.New("incorrect value")

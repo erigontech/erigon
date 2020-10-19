@@ -227,7 +227,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	p.TempDir = datadir
 	var exclude [][]byte
 	//ihFilter := trie.NewPrefixFilter()
-	collect := func(k []byte, _ []byte, _ etl.State, _ etl.LoadNextFunc) error {
+	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		exclude = append(exclude, k)
 		//ihFilter.Add(k)
 		return nil
@@ -330,7 +330,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	p := NewHashPromoter(db, quit)
 	p.TempDir = datadir
 	var exclude [][]byte
-	collect := func(k []byte, _ []byte, _ etl.State, _ etl.LoadNextFunc) error {
+	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		exclude = append(exclude, k)
 		return nil
 	}
