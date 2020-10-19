@@ -21,7 +21,7 @@ endif
 
 all: tg hack tester rpctest state pics rpcdaemon integration db-tools
 
-docker:
+docker: clean
 	docker build -t turbo-geth:latest .
 
 docker-alltools:
@@ -36,46 +36,46 @@ geth:
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 tg: ethdb/mdbx/dist/libmdbx.a
-	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
+	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 hack:
-	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack 
+	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/hack\" to launch hack."
 
 tester:
-	$(GOBUILD) -o $(GOBIN)/tester ./cmd/tester 
+	$(GOBUILD) -o $(GOBIN)/tester ./cmd/tester
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tester\" to launch tester."
 
 rpctest:
-	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest 
+	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
 
 state:
-	$(GOBUILD) -o $(GOBIN)/state ./cmd/state 
+	$(GOBUILD) -o $(GOBIN)/state ./cmd/state
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/state\" to launch state."
 
 restapi:
-	$(GOBUILD) -o $(GOBIN)/restapi ./cmd/restapi 
+	$(GOBUILD) -o $(GOBIN)/restapi ./cmd/restapi
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/restapi\" to launch restapi."
 
 run-web-ui:
 	@echo 'Web: Turbo-Geth Debug Utility is launching...'
 	@cd debug-web-ui && yarn start
-	
+
 pics:
-	$(GOBUILD) -o $(GOBIN)/pics ./cmd/pics 
+	$(GOBUILD) -o $(GOBIN)/pics ./cmd/pics
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
 rpcdaemon:
-	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/rpcdaemon 
+	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/rpcdaemon
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
@@ -87,15 +87,15 @@ semantics: semantics/z3/build/libz3.a
 semantics/z3/build/libz3.a:
 	cd semantics/z3 && python scripts/mk_make.py --staticlib
 	cd semantics/z3/build && ${MAKE} -j8
-	cp semantics/z3/build/libz3.a .	
+	cp semantics/z3/build/libz3.a .
 
 integration:
-	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration 
+	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
 headers:
-	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers 
+	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
 
@@ -114,7 +114,7 @@ db-tools:
 
 ethdb/mdbx/dist/libmdbx.a:
 	echo "Building mdbx"
-	cd ethdb/mdbx/dist/ && make clean && make libmdbx.a
+	cd ethdb/mdbx/dist/ && make libmdbx.a && cat config.h
 
 test: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
 	$(GOTEST)
@@ -153,8 +153,8 @@ lintci-deps:
 clean:
 	env GO111MODULE=on go clean -cache
 	rm -fr build/*
-	rm semantics/z3/build/libz3.a
-	rm ethdb/mdbx/dist/libmdbx.a
+	rm -f semantics/z3/build/libz3.a
+	cd ethdb/mdbx/dist/ && make clean
 
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
