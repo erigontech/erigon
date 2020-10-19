@@ -29,7 +29,7 @@ var receiptsCborEncode = Migration{
 			return err1
 		}
 		if collector != nil && progress != nil {
-			goto LoadPart
+			goto LoadStep
 		}
 
 		if string(progress) == loadStep && collector == nil {
@@ -74,7 +74,7 @@ var receiptsCborEncode = Migration{
 			return fmt.Errorf("committing the removal of receipt table")
 		}
 
-	LoadPart:
+	LoadStep:
 		// Commit again
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
 			return fmt.Errorf("committing again to create a stable view the removal of receipt table")
