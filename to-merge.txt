@@ -567,9 +567,3 @@ Date:   Fri Oct 16 11:28:03 2020 +0200
     * core/vm: marshall returnData as hexstring in trace logs
     
     * core/vm: marshall returnData as hexstring in trace logs
-
-commit 51d026ca8554a04fccd5c5008aadffbd5c0594c7
-Author: Felix Lange <fjl@twurst.com>
-Date:   Thu Oct 15 12:30:41 2020 +0200
-
-    params: begin v1.9.24 release cycle
