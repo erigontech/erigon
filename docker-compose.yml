@@ -30,23 +30,9 @@ services:
       - ./cmd/prometheus/dashboards:/etc/grafana/provisioning/dashboards
       - ${XDG_DATA_HOME:-~/.local/share}/tg-grafana:/var/lib/grafana
 
-  restapi:
-    image: turbo-geth:latest
-    command: restapi --http.addr="0.0.0.0:8080" --private.api.addr="turbo-geth:9090"
-    ports:
-      - 8080:8080
-
   rpcdaemon:
     image: turbo-geth:latest
     command: rpcdaemon --private.api.addr="turbo-geth:9090" --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug,net"
     ports:
       - 8545:8545
-
-  debugui:
-    image: turbo-geth:debugui
-    build: ./debug-web-ui/
-    stdin_open: true
-    ports:
-      - 3001:3000
-
 
