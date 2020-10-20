@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -31,7 +32,7 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
 	}
 
-	log.Info("Promoting plain state", "from", s.BlockNumber, "to", to)
+	log.Info(fmt.Sprintf("[%s] Promoting plain state", stages.HashState), "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
 		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
 			return err
@@ -156,14 +157,14 @@ type OldestAppearedLoad struct {
 	lastKey       bytes.Buffer
 }
 
-func (l *OldestAppearedLoad) LoadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
+func (l *OldestAppearedLoad) LoadFunc(k []byte, value []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 	if bytes.Equal(k, l.lastKey.Bytes()) {
 		return nil
 	}
 	l.lastKey.Reset()
 	//nolint:errcheck
 	l.lastKey.Write(k)
-	return l.innerLoadFunc(k, value, state, next)
+	return l.innerLoadFunc(k, value, table, next)
 }
 
 func NewPromoter(db ethdb.Database, quitCh <-chan struct{}) *Promoter {
@@ -319,7 +320,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info("Incremental promotion started", "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
+	log.Info(fmt.Sprintf("[%s] Incremental promotion started", stages.HashState), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
 

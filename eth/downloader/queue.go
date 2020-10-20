@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
@@ -410,7 +411,7 @@ func (q *queue) Results(block bool) []*fetchResult {
 		q.lastStatLog = time.Now()
 		info := q.Stats()
 		info = append(info, "throttle", throttleThreshold)
-		log.Info("Downloader queue stats", info...)
+		log.Info(fmt.Sprintf("[%s] Downloader queue stats", stages.Bodies), info...)
 	}
 	return results
 }

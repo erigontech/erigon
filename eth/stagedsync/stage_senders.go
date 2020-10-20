@@ -51,7 +51,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		s.Done()
 		return nil
 	}
-	log.Info("Senders recovery", "from", s.BlockNumber, "to", to)
+	log.Info(fmt.Sprintf("[%s] Senders recovery", stages.Senders), "from", s.BlockNumber, "to", to)
 
 	if cfg.StartTrace {
 		filePath := fmt.Sprintf("trace_%d_%d_%d.out", cfg.Now.Day(), cfg.Now.Hour(), cfg.Now.Minute())
@@ -104,7 +104,8 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	}); err != nil {
 		return err
 	}
-	log.Info("Sync (Senders): Reading canonical hashes complete", "hashes", len(canonical))
+
+	log.Info(fmt.Sprintf("[%s] Reading canonical hashes complete", stages.Senders), "hashes", len(canonical))
 
 	jobs := make(chan *senderRecoveryJob, cfg.BatchSize)
 	go func() {
@@ -161,7 +162,8 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			recoverSenders(secp256k1.ContextForThread(threadNo), config, jobs, out, quitCh)
 		}(i)
 	}
-	log.Info("Sync (Senders): Started recoverer goroutines", "numOfGoroutines", cfg.NumOfGoroutines)
+
+	log.Info(fmt.Sprintf("[%s] Started recoverer goroutines", stages.Senders), "numOfGoroutines", cfg.NumOfGoroutines)
 	go func() {
 		wg.Wait()
 		close(out)
@@ -181,14 +183,14 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("Senders recovery", "block", j.index)
+			log.Info(fmt.Sprintf("[%s] Senders recovery", stages.Senders), "number", j.index)
 		}
 		binary.BigEndian.PutUint32(k, uint32(j.index))
 		if err := collector.Collect(k, j.senders); err != nil {
 			return err
 		}
 	}
-	loadFunc := func(k []byte, value []byte, _ etl.State, next etl.LoadNextFunc) error {
+	loadFunc := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		index := int(binary.BigEndian.Uint32(k))
 		return next(k, dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), value)
 	}

@@ -1,19 +1,23 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"runtime"
 	"sort"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
@@ -21,8 +25,8 @@ import (
 )
 
 const (
-	logIndicesMemLimit       = 512 * datasize.MB
-	logIndicesCheckSizeEvery = 10 * time.Second
+	logIndicesMemLimit       = 256 * datasize.MB
+	logIndicesCheckSizeEvery = 30 * time.Second
 )
 
 func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
@@ -54,7 +58,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 		start++
 	}
 
-	if err := promoteLogIndex(tx, start, quit); err != nil {
+	if err := promoteLogIndex(tx, start, datadir, quit); err != nil {
 		return err
 	}
 
@@ -70,21 +74,20 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 	return nil
 }
 
-func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan struct{}) error {
+func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	tx := db.(ethdb.HasTx).Tx()
 	topics := map[string]*roaring.Bitmap{}
 	addresses := map[string]*roaring.Bitmap{}
-	logTopicIndexCursor := tx.Cursor(dbutils.LogTopicIndex)
-	defer logTopicIndexCursor.Close()
-	logAddrIndexCursor := tx.Cursor(dbutils.LogAddressIndex)
-	defer logAddrIndexCursor.Close()
 	receipts := tx.Cursor(dbutils.BlockReceiptsPrefix)
 	defer receipts.Close()
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
+
+	collectorTopics := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorAddrs := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(start)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {
@@ -99,27 +102,19 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 		select {
 		default:
 		case <-logEvery.C:
-			sz, err := tx.BucketSize(dbutils.LogTopicIndex)
-			if err != nil {
-				return err
-			}
-			sz2, err := tx.BucketSize(dbutils.LogAddressIndex)
-			if err != nil {
-				return err
-			}
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info("Progress", "blockNum", blockNum, dbutils.LogTopicIndex, common.StorageSize(sz), dbutils.LogAddressIndex, common.StorageSize(sz2), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info(fmt.Sprintf("[%s] Progress", stages.LogIndex), "blockNum", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush(topics, logIndicesMemLimit) {
-				if err := flushBitmaps(logTopicIndexCursor, topics); err != nil {
+				if err := flushBitmaps(collectorTopics, topics); err != nil {
 					return err
 				}
 				topics = map[string]*roaring.Bitmap{}
 			}
 
 			if needFlush(addresses, logIndicesMemLimit) {
-				if err := flushBitmaps(logAddrIndexCursor, addresses); err != nil {
+				if err := flushBitmaps(collectorAddrs, addresses); err != nil {
 					return err
 				}
 				addresses = map[string]*roaring.Bitmap{}
@@ -154,12 +149,70 @@ func promoteLogIndex(db ethdb.DbWithPendingMutations, start uint64, quit <-chan 
 		}
 	}
 
-	if err := flushBitmaps(logTopicIndexCursor, topics); err != nil {
+	if err := flushBitmaps(collectorTopics, topics); err != nil {
 		return err
 	}
-	if err := flushBitmaps(logAddrIndexCursor, addresses); err != nil {
+	if err := flushBitmaps(collectorAddrs, addresses); err != nil {
 		return err
 	}
+
+	var currentBitmap = roaring.New()
+	var buf = bytes.NewBuffer(nil)
+
+	var loaderFunc = func(k []byte, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		lastChunkKey := make([]byte, len(k)+4)
+		copy(lastChunkKey, k)
+		binary.BigEndian.PutUint32(lastChunkKey[len(k):], ^uint32(0))
+		lastChunkBytes, err := table.Get(lastChunkKey)
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return fmt.Errorf("find last chunk failed: %w", err)
+		}
+
+		lastChunk := roaring.New()
+		if len(lastChunkBytes) > 0 {
+			_, err = lastChunk.FromBuffer(lastChunkBytes)
+			if err != nil {
+				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
+			}
+		}
+
+		if _, err := currentBitmap.FromBuffer(v); err != nil {
+			return err
+		}
+		currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
+		nextChunk := bitmapdb.ChunkIterator(currentBitmap, bitmapdb.ChunkLimit)
+		for chunk := nextChunk(); chunk != nil; chunk = nextChunk() {
+			buf.Reset()
+			if _, err := chunk.WriteTo(buf); err != nil {
+				return err
+			}
+			chunkKey := make([]byte, len(k)+4)
+			copy(chunkKey, k)
+			if currentBitmap.GetCardinality() == 0 {
+				binary.BigEndian.PutUint32(chunkKey[len(k):], ^uint32(0))
+				if err := next(k, chunkKey, common.CopyBytes(buf.Bytes())); err != nil {
+					return err
+				}
+				break
+			}
+			binary.BigEndian.PutUint32(chunkKey[len(k):], chunk.Maximum())
+			if err := next(k, chunkKey, common.CopyBytes(buf.Bytes())); err != nil {
+				return err
+			}
+		}
+
+		currentBitmap.Clear()
+		return nil
+	}
+
+	if err := collectorTopics.Load(db, dbutils.LogTopicIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+		return err
+	}
+
+	if err := collectorAddrs.Load(db, dbutils.LogAddressIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -196,39 +249,36 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 }
 
 func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-chan struct{}) error {
-	topics := map[string]bool{}
-	addrs := map[string]bool{}
+	topics := map[string]struct{}{}
+	addrs := map[string]struct{}{}
 
-	tx := db.(ethdb.HasTx).Tx()
-	receipts := tx.Cursor(dbutils.BlockReceiptsPrefix)
-	defer receipts.Close()
 	start := dbutils.EncodeBlockNumber(to + 1)
-	for k, v, err := receipts.Seek(start); k != nil; k, v, err = receipts.Next() {
-		if err != nil {
-			return err
-		}
+	if err := db.Walk(dbutils.BlockReceiptsPrefix, start, 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
-			return err
+			return false, err
 		}
 		receipts := types.Receipts{}
 		if err := cbor.Unmarshal(&receipts, v); err != nil {
-			return fmt.Errorf("receipt unmarshal failed: %w, k=%x", err, k)
+			return false, fmt.Errorf("receipt unmarshal failed: %w, k=%x", err, k)
 		}
 
 		for _, receipt := range receipts {
 			for _, log := range receipt.Logs {
 				for _, topic := range log.Topics {
-					topics[string(topic.Bytes())] = true
+					topics[string(topic.Bytes())] = struct{}{}
 				}
-				addrs[string(log.Address.Bytes())] = true
+				addrs[string(log.Address.Bytes())] = struct{}{}
 			}
 		}
-	}
-
-	if err := truncateBitmaps(tx, dbutils.LogTopicIndex, topics, to+1, from+1); err != nil {
+		return true, nil
+	}); err != nil {
 		return err
 	}
-	if err := truncateBitmaps(tx, dbutils.LogAddressIndex, addrs, to+1, from+1); err != nil {
+
+	if err := truncateBitmaps(db.(ethdb.HasTx).Tx(), dbutils.LogTopicIndex, topics, to+1, from+1); err != nil {
+		return err
+	}
+	if err := truncateBitmaps(db.(ethdb.HasTx).Tx(), dbutils.LogAddressIndex, addrs, to+1, from+1); err != nil {
 		return err
 	}
 	return nil
@@ -237,30 +287,30 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) bool {
 	sz := uint64(0)
 	for _, m := range bitmaps {
-		sz += m.GetSerializedSizeInBytes()
+		sz += m.GetSizeInBytes()
 	}
 	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 
-func flushBitmaps(c ethdb.Cursor, inMem map[string]*roaring.Bitmap) error {
-	keys := make([]string, 0, len(inMem))
-	for k := range inMem {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		b := inMem[k]
-		if err := bitmapdb.AppendMergeByOr(c, []byte(k), b); err != nil {
+func flushBitmaps(c *etl.Collector, inMem map[string]*roaring.Bitmap) error {
+	for k, v := range inMem {
+		v.RunOptimize()
+		if v.GetCardinality() == 0 {
+			continue
+		}
+		newV := bytes.NewBuffer(make([]byte, 0, v.GetSerializedSizeInBytes()))
+		if _, err := v.WriteTo(newV); err != nil {
+			return err
+		}
+		if err := c.Collect([]byte(k), newV.Bytes()); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
-func truncateBitmaps(tx ethdb.Tx, bucket string, inMem map[string]bool, from, to uint64) error {
+func truncateBitmaps(tx ethdb.Tx, bucket string, inMem map[string]struct{}, from, to uint64) error {
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
@@ -268,7 +318,7 @@ func truncateBitmaps(tx ethdb.Tx, bucket string, inMem map[string]bool, from, to
 	sort.Strings(keys)
 	for _, k := range keys {
 		if err := bitmapdb.TruncateRange(tx, bucket, []byte(k), from, to); err != nil {
-			return nil
+			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", bucket, err)
 		}
 	}
 

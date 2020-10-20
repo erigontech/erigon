@@ -61,7 +61,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		s.Done()
 		return nil
 	}
-	log.Info("Blocks execution", "from", s.BlockNumber, "to", to)
+	log.Info(fmt.Sprintf("[%s] Blocks execution", stages.Execution), "from", s.BlockNumber, "to", to)
 
 	if prof {
 		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", s.BlockNumber))
@@ -115,14 +115,14 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 		block := rawdb.ReadBlock(tx, blockHash, blockNum)
 		if block == nil {
-			log.Error("Empty block", "hash", blockHash.String(), "blocknum", blockNum)
+			log.Error(fmt.Sprintf("[%s] Empty block", stages.Execution), "hash", blockHash.String(), "blocknum", blockNum)
 			break
 		}
 		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
 		if warmup {
-			log.Info("Running a warmup...")
+			log.Info(fmt.Sprintf("[%s] Running a warmup...", stages.Execution))
 			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.PlainStateBucket, logEvery, quit); err != nil {
 				return err
 			}
@@ -132,7 +132,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			}
 
 			warmup = false
-			log.Info("Warm up done.")
+			log.Info(fmt.Sprintf("[%s] Warm up done.", stages.Execution))
 		}
 
 		var stateReader state.StateReader
@@ -209,7 +209,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			return err
 		}
 	}
-	log.Info("Completed on", "block", stageProgress)
+
+	log.Info(fmt.Sprintf("[%s] Completed on", stages.Execution), "block", stageProgress)
 	s.Done()
 	return nil
 }
@@ -218,8 +219,8 @@ func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Info("Executed blocks:",
-		"currentBlock", now,
+	log.Info(fmt.Sprintf("[%s] Executed blocks", stages.Execution),
+		"number", now,
 		"blk/second", speed,
 		"batch", common.StorageSize(batch.BatchSize()),
 		"alloc", common.StorageSize(m.Alloc),

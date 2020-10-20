@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -110,8 +111,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		log.Debug("Used prefetched bodies", "count", prefetchedHashes, "to", origin+uint64(prefetchedHashes))
 		return true, nil
 	}
-
-	log.Info("Downloading block bodies", "count", hashCount)
+	log.Info(fmt.Sprintf("[%s] Downloading block bodies", stages.Bodies), "count", hashCount)
 	from := origin + 1
 	d.queue.Prepare(from, d.getMode())
 	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)
