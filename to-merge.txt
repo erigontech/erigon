@@ -535,35 +535,3 @@ Date:   Tue Oct 20 22:34:50 2020 +0800
     * core/rawdb: fix tests
     
     * core/rawdb: fix linter
-
-commit 6e7137103c63f471bf577d857f179110622d8804
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Tue Oct 20 10:58:26 2020 +0200
-
-    miner: fixed race condition in tests (#21664)
-
-commit cef3e2dc5a563fccb4c54b7bea2fddc071bf9541
-Author: rene <41963722+renaynay@users.noreply.github.com>
-Date:   Tue Oct 20 10:56:51 2020 +0200
-
-    console: don't exit on ctrl-c, only on ctrl-d (#21660)
-    
-    * add interrupt counter
-    
-    * remove interrupt counter, allow ctrl-C to clear ONLY, ctrl-D will terminate console, stop node
-    
-    * format
-    
-    * add instructions to exit
-    
-    * fix tests
-
-commit b305591e1491229c35a4551f18bd5e745405700f
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Fri Oct 16 11:28:03 2020 +0200
-
-    core/vm: marshall returnData as hexstring in trace logs (#21715)
-    
-    * core/vm: marshall returnData as hexstring in trace logs
-    
-    * core/vm: marshall returnData as hexstring in trace logs
