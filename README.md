@@ -196,7 +196,7 @@ Core contributors:
 
 * Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
 
-* Alex Sharov ([AskAlexSharov](https://github.com/AskAlexSharov))
+* Alex Sharov ([AskAlexSharov](https://twitter.com/AskAlexSharov))
 
 * Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
 
