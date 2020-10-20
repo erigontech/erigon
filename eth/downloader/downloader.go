@@ -688,7 +688,7 @@ func (d *Downloader) Cancel() {
 	d.cancel()
 	d.cancelWg.Wait()
 
-	d.ancientLimit = 0
+	atomic.StoreUint64(&d.ancientLimit, 0)
 	log.Debug("Reset ancient limit to zero")
 }
 
@@ -1839,7 +1839,7 @@ func (d *Downloader) commitPivotBlock(result *fetchResult) error {
 	log.Debug("Committing fast sync pivot as new head", "number", block.Number(), "hash", block.Hash())
 
 	// Commit the pivot block as the new head, will require full sync from here on
-	if _, err := d.blockchain.InsertReceiptChain([]*types.Block{block}, []types.Receipts{result.Receipts}, d.ancientLimit); err != nil {
+	if _, err := d.blockchain.InsertReceiptChain([]*types.Block{block}, []types.Receipts{result.Receipts}, atomic.LoadUint64(&d.ancientLimit)); err != nil {
 		return err
 	}
 	if err := d.blockchain.FastSyncCommitHead(block.Hash()); err != nil {
