@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
 	"sync"
+
+	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 type MdbxOpts struct {
@@ -635,6 +636,9 @@ func (tx *mdbxTx) BucketSize(name string) (uint64, error) {
 func (tx *mdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 	if name == "freelist" || name == "gc" || name == "free_list" {
 		return tx.tx.StatDBI(mdbx.DBI(0))
+	}
+	if name == "root" {
+		return tx.tx.StatDBI(mdbx.DBI(1))
 	}
 	return tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
 }
