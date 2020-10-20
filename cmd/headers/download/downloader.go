@@ -6,15 +6,30 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"os"
+	"runtime"
+	"syscall"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/golang/protobuf/ptypes/empty"
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/ledgerwatch/turbo-geth/cmd/headers/proto"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/keepalive"
 )
 
 type chainReader struct {
@@ -109,6 +124,7 @@ func Downloader(
 	headersCh chan BlockHeadersFromSentry,
 	penaltyCh chan PenaltyMsg,
 	reqHeadersCh chan headerdownload.HeaderRequest,
+	sentryClient proto.SentryClient,
 ) {
 	//config := eth.DefaultConfig.Ethash
 	engine := ethash.New(ethash.Config{
@@ -186,10 +202,27 @@ func Downloader(
 			for _, announce := range newBlockHashReq.NewBlockHashesData {
 				if !hd.HasTip(announce.Hash) {
 					log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
-					reqHeadersCh <- headerdownload.HeaderRequest{
-						Hash:   announce.Hash,
-						Number: announce.Number,
-						Length: 1,
+					bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
+						Amount:  1,
+						Reverse: false,
+						Skip:    0,
+						Origin:  eth.HashOrNumber{Hash: announce.Hash},
+					})
+					if err != nil {
+						log.Error("Could not encode header request", "err", err)
+						continue
+					}
+					outreq := proto.SendMessageByMinBlockRequest{
+						MinBlock: announce.Number,
+						Data: &proto.OutboundMessageData{
+							Id:   proto.OutboundMessageId_GetBlockHeaders,
+							Data: bytes,
+						},
+					}
+					_, err = sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+					if err != nil {
+						log.Error("Could not send header request", "err", err)
+						continue
 					}
 				}
 			}
@@ -218,3 +251,102 @@ func Downloader(
 		}
 	}
 }
+
+func Download(filesDir string, bufferSize int, sentryAddr string, coreAddr string) error {
+	ctx := rootContext()
+	log.Info("Starting Core P2P server", "on", coreAddr, "connecting to sentry", coreAddr)
+
+	listenConfig := net.ListenConfig{
+		Control: func(network, address string, _ syscall.RawConn) error {
+			log.Info("Core P2P received connection", "via", network, "from", address)
+			return nil
+		},
+	}
+	lis, err := listenConfig.Listen(ctx, "tcp", coreAddr)
+	if err != nil {
+		return fmt.Errorf("could not create Core P2P listener: %w, addr=%s", err, coreAddr)
+	}
+	var (
+		streamInterceptors []grpc.StreamServerInterceptor
+		unaryInterceptors  []grpc.UnaryServerInterceptor
+	)
+	if metrics.Enabled {
+		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
+		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
+	}
+	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+	var grpcServer *grpc.Server
+	cpus := uint32(runtime.GOMAXPROCS(-1))
+	opts := []grpc.ServerOption{
+		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
+		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
+		grpc.ReadBufferSize(1024),
+		grpc.MaxConcurrentStreams(100), // to force clients reduce concurrency level
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time: 10 * time.Minute,
+		}),
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+	}
+	grpcServer = grpc.NewServer(opts...)
+	controlServer := &ControlServerImpl{}
+	proto.RegisterControlServer(grpcServer, controlServer)
+	if metrics.Enabled {
+		grpc_prometheus.Register(grpcServer)
+	}
+
+	go func() {
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Error("Core P2P server fail", "err", err)
+		}
+	}()
+	// CREATING GRPC CLIENT CONNECTION
+	var dialOpts []grpc.DialOption
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Timeout: 10 * time.Minute,
+		}),
+	}
+
+	dialOpts = append(dialOpts, grpc.WithInsecure())
+
+	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
+	if err != nil {
+		return fmt.Errorf("creating client connection to sentry P2P: %w", err)
+	}
+	sentryClient := proto.NewSentryClient(conn)
+
+	newBlockCh := make(chan NewBlockFromSentry)
+	newBlockHashCh := make(chan NewBlockHashFromSentry)
+	penaltyCh := make(chan PenaltyMsg)
+	reqHeadersCh := make(chan headerdownload.HeaderRequest)
+	headersCh := make(chan BlockHeadersFromSentry)
+
+	go Downloader(ctx, filesDir, bufferSize*1024*1024, newBlockCh, newBlockHashCh, headersCh, penaltyCh, reqHeadersCh, sentryClient)
+
+	<-ctx.Done()
+	return nil
+}
+
+type ControlServerImpl struct {
+	proto.UnimplementedControlServer
+}
+
+func (cs *ControlServerImpl) ForwardInboundMessage(context.Context, *proto.InboundMessage) (*empty.Empty, error) {
+	return nil, nil
+}
+
+func (cs *ControlServerImpl) GetStatus(context.Context, *empty.Empty) (*proto.StatusData, error) {
+	return nil, nil
+}
+
+/*
+type ControlServer interface {
+	ForwardInboundMessage(context.Context, *InboundMessage) (*empty.Empty, error)
+	GetStatus(context.Context, *empty.Empty) (*StatusData, error)
+	mustEmbedUnimplementedControlServer()
+}
+*/
