@@ -19,7 +19,7 @@ ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
-all: tg hack tester rpctest state restapi pics rpcdaemon integration lmdb-tools
+all: tg hack tester rpctest state pics rpcdaemon integration lmdb-tools
 
 docker:
 	docker build -t turbo-geth:latest .

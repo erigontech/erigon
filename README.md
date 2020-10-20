@@ -167,35 +167,9 @@ trace_filter
 
 \* net_peerCount currently always returns a count of 25 as work continues on Sentry.
 
-#### REST API Daemon
-
-Apart from JSON-RPC daemon, Turbo-Geth also contains REST API daemon. It uses
-turbo-geth remote DB functionality. 
-
-<code>🔬 See [REST API docs](./cmd/restapi/README.md)</code>
-
-Run turbo-geth in one terminal window
-
-```
-> ./build/bin/tg --private.api.addr=localhost:9090
-```
-
-Run REST daemon
-```
-> make restapi
-> ./build/bin/restapi --private.api.addr=localhost:9090
-```
-
-This API is very limited at the moment too:
-
-```
-GET /api/v1/accounts/<accountAddress>
-GET /api/v1/storage/?prefix=PREFIX
-```
-
 #### Or run all components by docker-compose
 
-Next command starts: turbo-geth on port 30303, rpcdaemon 8545, restapi 8080, debug-web-ui 3001, prometheus 9090, grafana 3000
+Next command starts: turbo-geth on port 30303, rpcdaemon 8545, prometheus 9090, grafana 3000
 
 ```
 docker-compose build
