@@ -247,7 +247,28 @@ func Downloader(
 		reqs := hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
 		for _, req := range reqs {
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
-			reqHeadersCh <- *req
+			bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
+				Amount:  uint64(req.Length),
+				Reverse: true,
+				Skip:    0,
+				Origin:  eth.HashOrNumber{Hash: req.Hash},
+			})
+			if err != nil {
+				log.Error("Could not encode header request", "err", err)
+				continue
+			}
+			outreq := proto.SendMessageByMinBlockRequest{
+				MinBlock: req.Number,
+				Data: &proto.OutboundMessageData{
+					Id:   proto.OutboundMessageId_GetBlockHeaders,
+					Data: bytes,
+				},
+			}
+			_, err = sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+			if err != nil {
+				log.Error("Could not send header request", "err", err)
+				continue
+			}
 		}
 	}
 }
