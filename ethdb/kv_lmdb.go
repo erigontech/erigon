@@ -662,6 +662,9 @@ func (tx *lmdbTx) BucketStat(name string) (*lmdb.Stat, error) {
 	if name == "freelist" || name == "gc" || name == "free_list" { //nolint:goconst
 		return tx.tx.Stat(lmdb.DBI(0))
 	}
+	if name == "root" { //nolint:goconst
+		return tx.tx.Stat(lmdb.DBI(1))
+	}
 	return tx.tx.Stat(lmdb.DBI(tx.db.buckets[name].DBI))
 }
 
