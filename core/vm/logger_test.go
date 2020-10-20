@@ -60,7 +60,6 @@ func TestStoreCapture(t *testing.T) {
 		stack    = stack.New()
 		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, false /* skipAnalysis */)
 	)
-	defer env.interpreter.Close()
 	stack.Push(uint256.NewInt().SetUint64(1))
 	stack.Push(uint256.NewInt())
 	var index common.Hash

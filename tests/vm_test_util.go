@@ -134,7 +134,6 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 
 func (t *VMTest) exec(state vm.IntraBlockState, vmconfig vm.Config) ([]byte, uint64, error) {
 	evm := t.newEVM(state, vmconfig)
-	defer evm.Interpreter().Close()
 	e := t.json.Exec
 	value, _ := uint256.FromBig(e.Value)
 	return evm.Call(vm.AccountRef(e.Caller), e.Address, e.Data, e.GasLimit, value)

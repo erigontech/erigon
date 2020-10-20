@@ -63,8 +63,6 @@ type Interpreter interface {
 	// }
 	// ```
 	CanRun([]byte) bool
-
-	Close()
 }
 
 // callCtx contains the things that are per-call, such as stack and memory,
@@ -89,8 +87,7 @@ type EVMInterpreter struct {
 	evm *EVM
 	cfg Config
 
-	jt         *JumpTable // EVM instruction table
-	revertEIPs func()
+	jt *JumpTable // EVM instruction table
 
 	hasher    keccakState // Keccak256 hasher instance shared across opcodes
 	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
@@ -120,37 +117,20 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	default:
 		jt = &frontierInstructionSet
 	}
-
-	var revertEIPsSlice []func()
 	if len(cfg.ExtraEips) > 0 {
 		for i, eip := range cfg.ExtraEips {
-			if revertEIPFn, err := EnableEIP(eip, jt); err != nil {
+			if err := EnableEIP(eip, jt); err != nil {
 				// Disable it, so caller can check if it's activated or not
 				cfg.ExtraEips = append(cfg.ExtraEips[:i], cfg.ExtraEips[i+1:]...)
-				if revertEIPFn != nil {
-					revertEIPFn()
-				}
 				log.Error("EIP activation failed", "eip", eip, "error", err)
-			} else {
-				revertEIPsSlice = append(revertEIPsSlice, revertEIPFn)
-			}
-		}
-	}
-
-	var revertEIPs func()
-	if len(revertEIPsSlice) > 0 {
-		revertEIPs = func() {
-			for i := len(revertEIPsSlice) - 1; i >= 0; i-- {
-				revertEIPsSlice[i]()
 			}
 		}
 	}
 
 	return &EVMInterpreter{
-		evm:        evm,
-		cfg:        cfg,
-		jt:         jt,
-		revertEIPs: revertEIPs,
+		evm: evm,
+		cfg: cfg,
+		jt:  jt,
 	}
 }
 
@@ -329,13 +309,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 // CanRun tells if the contract, passed as an argument, can be
 // run by the current interpreter.
-func (in *EVMInterpreter) CanRun(_ []byte) bool {
+func (in *EVMInterpreter) CanRun(code []byte) bool {
 	return true
-}
-
-func (in *EVMInterpreter) Close() {
-	if in.revertEIPs != nil {
-		in.revertEIPs()
-		in.revertEIPs = nil
-	}
 }

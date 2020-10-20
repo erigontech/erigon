@@ -224,7 +224,7 @@ func transactionStats(blockNum uint64) {
 			tt.measureDepth = 0
 			tt.measureCurrentGas = tx.Gas()
 			tt.trace = (blockNum == 1279578) && (txIdx == 3)
-			if result, err := core.ApplyOnlyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+			if result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			} else {
 				usedGas := result.UsedGas

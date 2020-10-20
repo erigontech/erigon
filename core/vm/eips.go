@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-var activators = map[int]func(*JumpTable) func(){
+var activators = map[int]func(*JumpTable){
 	2200: enable2200,
 	1884: enable1884,
 	1344: enable1344,
@@ -35,12 +35,13 @@ var activators = map[int]func(*JumpTable) func(){
 // EnableEIP enables the given EIP on the config.
 // This operation writes in-place, and callers need to ensure that the globally
 // defined jump tables are not polluted.
-func EnableEIP(eipNum int, jt *JumpTable) (func(), error) {
+func EnableEIP(eipNum int, jt *JumpTable) error {
 	enablerFn, ok := activators[eipNum]
 	if !ok {
-		return nil, fmt.Errorf("undefined eip %d", eipNum)
+		return fmt.Errorf("undefined eip %d", eipNum)
 	}
-	return enablerFn(jt), nil
+	enablerFn(jt)
+	return nil
 }
 
 func ValidEip(eipNum int) bool {
@@ -61,34 +62,22 @@ func ActivateableEips() []string {
 // - Increase cost of EXTCODEHASH to 700
 // - Increase cost of SLOAD to 800
 // - Define SELFBALANCE, with cost GasFastStep (5)
-func enable1884(jt *JumpTable) func() {
+func enable1884(jt *JumpTable) {
 	// Gas cost changes
-	oldConstantGasSload := jt[SLOAD].constantGas
 	jt[SLOAD].constantGas = params.SloadGasEIP1884
-
-	oldConstantGasBalance := jt[BALANCE].constantGas
 	jt[BALANCE].constantGas = params.BalanceGasEIP1884
-
-	oldConstantGasExtCodehash := jt[EXTCODEHASH].constantGas
 	jt[EXTCODEHASH].constantGas = params.ExtcodeHashGasEIP1884
 
 	// New opcode
-	oldSelfBalance := jt[SELFBALANCE]
 	jt[SELFBALANCE] = &operation{
 		execute:     opSelfBalance,
 		constantGas: GasFastStep,
 		minStack:    minStack(0, 1),
 		maxStack:    maxStack(0, 1),
 	}
-	return func() {
-		jt[SELFBALANCE] = oldSelfBalance
-		jt[EXTCODEHASH].constantGas = oldConstantGasExtCodehash
-		jt[BALANCE].constantGas = oldConstantGasBalance
-		jt[SLOAD].constantGas = oldConstantGasSload
-	}
 }
 
-func opSelfBalance(_ *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	balance := interpreter.evm.IntraBlockState.GetBalance(callContext.contract.Address())
 	callContext.stack.Push(balance)
 	return nil, nil
@@ -96,17 +85,13 @@ func opSelfBalance(_ *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 
 // enable1344 applies EIP-1344 (ChainID Opcode)
 // - Adds an opcode that returns the current chain’s EIP-155 unique identifier
-func enable1344(jt *JumpTable) func() {
+func enable1344(jt *JumpTable) {
 	// New opcode
-	oldOp := jt[CHAINID]
 	jt[CHAINID] = &operation{
 		execute:     opChainID,
 		constantGas: GasQuickStep,
 		minStack:    minStack(0, 1),
 		maxStack:    maxStack(0, 1),
-	}
-	return func() {
-		jt[CHAINID] = oldOp
 	}
 }
 
@@ -118,32 +103,22 @@ func opChainID(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 }
 
 // enable2200 applies EIP-2200 (Rebalance net-metered SSTORE)
-func enable2200(jt *JumpTable) func() {
-	oldConstantGasSLoad := jt[SLOAD].constantGas
+func enable2200(jt *JumpTable) {
 	jt[SLOAD].constantGas = params.SloadGasEIP2200
-
-	oldDynamicGasSStore := jt[SSTORE].dynamicGas
 	jt[SSTORE].dynamicGas = gasSStoreEIP2200
-	return func() {
-		jt[SSTORE].dynamicGas = oldDynamicGasSStore
-		jt[SLOAD].constantGas = oldConstantGasSLoad
-	}
 }
 
 // enable2315 applies EIP-2315 (Simple Subroutines)
 // - Adds opcodes that jump to and return from subroutines
-func enable2315(jt *JumpTable) func() {
+func enable2315(jt *JumpTable) {
 	// New opcode
-	oldBeginSubOp := jt[BEGINSUB]
 	jt[BEGINSUB] = &operation{
 		execute:     opBeginSub,
 		constantGas: GasQuickStep,
 		minStack:    minStack(0, 0),
 		maxStack:    maxStack(0, 0),
 	}
-
 	// New opcode
-	oldJumpSub := jt[JUMPSUB]
 	jt[JUMPSUB] = &operation{
 		execute:     opJumpSub,
 		constantGas: GasSlowStep,
@@ -151,19 +126,12 @@ func enable2315(jt *JumpTable) func() {
 		maxStack:    maxStack(1, 0),
 		jumps:       true,
 	}
-
 	// New opcode
-	oldReturnSub := jt[RETURNSUB]
 	jt[RETURNSUB] = &operation{
 		execute:     opReturnSub,
 		constantGas: GasFastStep,
 		minStack:    minStack(0, 0),
 		maxStack:    maxStack(0, 0),
 		jumps:       true,
-	}
-	return func() {
-		jt[RETURNSUB] = oldReturnSub
-		jt[JUMPSUB] = oldJumpSub
-		jt[BEGINSUB] = oldBeginSubOp
 	}
 }
