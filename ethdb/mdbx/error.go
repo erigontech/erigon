@@ -25,6 +25,20 @@ func (err *OpError) Error() string {
 	return err.Op + ": " + err.Errno.Error()
 }
 
+// Errno is an error type that represents the (unique) errno values defined by
+// LMDB.  Other errno values (such as EINVAL) are represented with type
+// syscall.Errno.  On Windows, LMDB return codes are translated into portable
+// syscall.Errno constants (e.g. syscall.EINVAL, syscall.EACCES, etc.).
+//
+// Most often helper functions such as IsNotFound may be used instead of
+// dealing with Errno values directly.
+//
+//		lmdb.IsNotFound(err)
+//		lmdb.IsErrno(err, lmdb.TxnFull)
+//		lmdb.IsErrnoSys(err, syscall.EINVAL)
+//		lmdb.IsErrnoFn(err, os.IsPermission)
+type Errno C.int
+
 // The most common error codes do not need to be handled explicity.  Errors can
 // be checked through helper functions IsNotFound, IsMapFull, etc, Otherwise
 // they should be checked using the IsErrno function instead of direct
@@ -57,20 +71,6 @@ const (
 	//TLSFull       Errno = C.MDBX_TLS_FULL
 	//MapResized    Errno = C.MDBX_MAP_RESIZED
 )
-
-// Errno is an error type that represents the (unique) errno values defined by
-// LMDB.  Other errno values (such as EINVAL) are represented with type
-// syscall.Errno.  On Windows, LMDB return codes are translated into portable
-// syscall.Errno constants (e.g. syscall.EINVAL, syscall.EACCES, etc.).
-//
-// Most often helper functions such as IsNotFound may be used instead of
-// dealing with Errno values directly.
-//
-//		lmdb.IsNotFound(err)
-//		lmdb.IsErrno(err, lmdb.TxnFull)
-//		lmdb.IsErrnoSys(err, syscall.EINVAL)
-//		lmdb.IsErrnoFn(err, os.IsPermission)
-type Errno C.int
 
 // minimum and maximum values produced for the Errno type. syscall.Errnos of
 // other values may still be produced.
