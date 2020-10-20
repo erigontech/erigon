@@ -25,8 +25,7 @@ var (
 // }
 //
 // Common pattern for long-living transactions:
-//	tx, err := db.
-//	(true)
+//	tx, err := db.Begin(ethdb.RW)
 //	if err != nil {
 //		return err
 //	}
