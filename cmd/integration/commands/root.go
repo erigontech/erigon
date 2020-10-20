@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/spf13/cobra"
-	"strings"
 )
 
 var rootCmd = &cobra.Command{
@@ -31,8 +30,7 @@ func RootCommand() *cobra.Command {
 //nolint:unparam
 func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
 	var kv ethdb.KV
-	switch true {
-	case strings.HasSuffix(path, "_mdbx"):
+	if database == "mdbx" {
 		opts := ethdb.NewMDBX().Path(path)
 		if mapSizeStr != "" {
 			var mapSize datasize.ByteSize
@@ -43,7 +41,7 @@ func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
 			opts = opts.MaxFreelistReuse(uint(freelistReuse))
 		}
 		kv = opts.MustOpen()
-	default:
+	} else {
 		opts := ethdb.NewLMDB().Path(path)
 		if mapSizeStr != "" {
 			var mapSize datasize.ByteSize
@@ -55,6 +53,7 @@ func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
 		}
 		kv = opts.MustOpen()
 	}
+
 	db := ethdb.NewObjectDatabase(kv)
 	if applyMigrations {
 		if err := migrations.NewMigrator().Apply(db, datadir); err != nil {

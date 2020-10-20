@@ -7,6 +7,7 @@ import (
 
 var (
 	chaindata          string
+	database           string
 	snapshotMode       string
 	snapshotDir        string
 	compact            bool
@@ -30,19 +31,26 @@ func must(err error) {
 	}
 }
 
+//func chaindataFlag() *pflag.FlagSet {
+//	set := pflag.NewFlagSet("chaindata", pflag.ContinueOnError)
+//	set.StringVar(&chaindata, "chaindata", "", "path to the db")
+//	must(set.SetAnnotation("chaindata", cobra.BashCompSubdirsInDir, []string{}))
+//	return set
+//
+// 	cmd.Flags().AddFlagSet(chaindataFlag())
+//}
+
 func withChaindata(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
 	must(cmd.MarkFlagRequired("chaindata"))
 	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
 	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
+	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
 }
 
-func withMapSize(cmd *cobra.Command) {
+func withLmdbFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
-}
-
-func withFreelistReuse(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&freelistReuse, "maxFreelistReuse", 0, "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.")
 }
 

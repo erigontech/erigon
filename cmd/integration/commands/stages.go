@@ -212,12 +212,11 @@ var cmdRunMigrations = &cobra.Command{
 
 func init() {
 	withChaindata(cmdPrintStages)
-	withMapSize(cmdPrintStages)
+	withLmdbFlags(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
 	withChaindata(cmdStageSenders)
-	withMapSize(cmdStageSenders)
-	withFreelistReuse(cmdStageSenders)
+	withLmdbFlags(cmdStageSenders)
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	withUnwind(cmdStageSenders)
@@ -226,8 +225,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageSenders)
 
 	withChaindata(cmdStageExec)
-	withMapSize(cmdStageExec)
-	withFreelistReuse(cmdStageExec)
+	withLmdbFlags(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
@@ -236,8 +234,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageExec)
 
 	withChaindata(cmdStageIHash)
-	withMapSize(cmdStageIHash)
-	withFreelistReuse(cmdStageIHash)
+	withLmdbFlags(cmdStageIHash)
 	withReset(cmdStageIHash)
 	withBlock(cmdStageIHash)
 	withUnwind(cmdStageIHash)
@@ -246,8 +243,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageIHash)
 
 	withChaindata(cmdStageHashState)
-	withMapSize(cmdStageHashState)
-	withFreelistReuse(cmdStageHashState)
+	withLmdbFlags(cmdStageHashState)
 	withReset(cmdStageHashState)
 	withBlock(cmdStageHashState)
 	withUnwind(cmdStageHashState)
@@ -256,8 +252,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageHashState)
 
 	withChaindata(cmdStageHistory)
-	withMapSize(cmdStageHistory)
-	withFreelistReuse(cmdStageHistory)
+	withLmdbFlags(cmdStageHistory)
 	withReset(cmdStageHistory)
 	withBlock(cmdStageHistory)
 	withUnwind(cmdStageHistory)
@@ -266,8 +261,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageHistory)
 
 	withChaindata(cmdLogIndex)
-	withMapSize(cmdLogIndex)
-	withFreelistReuse(cmdLogIndex)
+	withLmdbFlags(cmdLogIndex)
 	withReset(cmdLogIndex)
 	withBlock(cmdLogIndex)
 	withUnwind(cmdLogIndex)
@@ -276,8 +270,7 @@ func init() {
 	rootCmd.AddCommand(cmdLogIndex)
 
 	withChaindata(cmdCallTraces)
-	withMapSize(cmdCallTraces)
-	withFreelistReuse(cmdCallTraces)
+	withLmdbFlags(cmdCallTraces)
 	withReset(cmdCallTraces)
 	withBlock(cmdCallTraces)
 	withUnwind(cmdCallTraces)
@@ -286,8 +279,7 @@ func init() {
 	rootCmd.AddCommand(cmdCallTraces)
 
 	withChaindata(cmdStageTxLookup)
-	withMapSize(cmdStageTxLookup)
-	withFreelistReuse(cmdStageTxLookup)
+	withLmdbFlags(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
 	withBlock(cmdStageTxLookup)
 	withUnwind(cmdStageTxLookup)
@@ -299,14 +291,12 @@ func init() {
 	rootCmd.AddCommand(cmdPrintMigrations)
 
 	withChaindata(cmdRemoveMigration)
-	withMapSize(cmdRemoveMigration)
-	withFreelistReuse(cmdRemoveMigration)
+	withLmdbFlags(cmdRemoveMigration)
 	withMigration(cmdRemoveMigration)
 	rootCmd.AddCommand(cmdRemoveMigration)
 
 	withChaindata(cmdRunMigrations)
-	withMapSize(cmdRunMigrations)
-	withFreelistReuse(cmdRunMigrations)
+	withLmdbFlags(cmdRunMigrations)
 	withDatadir(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
 }
