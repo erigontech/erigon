@@ -665,7 +665,7 @@ func (tx *lmdbTx) BucketStat(name string) (*lmdb.Stat, error) {
 	if name == "root" { //nolint:goconst
 		return tx.tx.Stat(lmdb.DBI(1))
 	}
-	return tx.tx.Stat(lmdb.DBI(tx.db.buckets[name].DBI))
+	return tx.tx.Stat(tx.db.buckets[name].DBI)
 }
 
 func (tx *lmdbTx) Cursor(bucket string) Cursor {
