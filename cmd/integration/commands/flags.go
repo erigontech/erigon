@@ -19,6 +19,8 @@ var (
 	bucket             string
 	datadir            string
 	mapSizeStr         string
+	freelistReuse      int
+	migration          string
 )
 
 func must(err error) {
@@ -37,6 +39,10 @@ func withChaindata(cmd *cobra.Command) {
 
 func withMapSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
+}
+
+func withFreelistReuse(cmd *cobra.Command) {
+	cmd.Flags().IntVar(&freelistReuse, "maxFreelistReuse", 0, "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.")
 }
 
 func withCompact(cmd *cobra.Command) {
@@ -74,4 +80,8 @@ func withDatadir(cmd *cobra.Command) {
 
 func withHDD(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&hdd, "hdd", false, "optimizations valuable for HDD")
+}
+
+func withMigration(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&migration, "migration", "", "action to apply to given migration")
 }

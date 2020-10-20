@@ -3,8 +3,11 @@ package commands
 import (
 	"context"
 	"runtime"
+	"sort"
+	"strings"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
@@ -136,6 +139,41 @@ var cmdPrintStages = &cobra.Command{
 	},
 }
 
+var cmdPrintMigrations = &cobra.Command{
+	Use:   "print_migrations",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		if err := printAppliedMigrations(ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
+
+var cmdRemoveMigration = &cobra.Command{
+	Use:   "remove_migration",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		if err := removeMigration(ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
+
+var cmdRunMigrations = &cobra.Command{
+	Use:   "run_migrations",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Nothing to do, migrations will be applied automatically
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(cmdPrintStages)
 	withMapSize(cmdPrintStages)
@@ -143,6 +181,7 @@ func init() {
 
 	withChaindata(cmdStageSenders)
 	withMapSize(cmdStageSenders)
+	withFreelistReuse(cmdStageSenders)
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	withUnwind(cmdStageSenders)
@@ -152,6 +191,7 @@ func init() {
 
 	withChaindata(cmdStageExec)
 	withMapSize(cmdStageExec)
+	withFreelistReuse(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
@@ -161,6 +201,7 @@ func init() {
 
 	withChaindata(cmdStageIHash)
 	withMapSize(cmdStageIHash)
+	withFreelistReuse(cmdStageIHash)
 	withReset(cmdStageIHash)
 	withBlock(cmdStageIHash)
 	withUnwind(cmdStageIHash)
@@ -170,6 +211,7 @@ func init() {
 
 	withChaindata(cmdStageHashState)
 	withMapSize(cmdStageHashState)
+	withFreelistReuse(cmdStageHashState)
 	withReset(cmdStageHashState)
 	withBlock(cmdStageHashState)
 	withUnwind(cmdStageHashState)
@@ -179,6 +221,7 @@ func init() {
 
 	withChaindata(cmdStageHistory)
 	withMapSize(cmdStageHistory)
+	withFreelistReuse(cmdStageHistory)
 	withReset(cmdStageHistory)
 	withBlock(cmdStageHistory)
 	withUnwind(cmdStageHistory)
@@ -188,6 +231,7 @@ func init() {
 
 	withChaindata(cmdLogIndex)
 	withMapSize(cmdLogIndex)
+	withFreelistReuse(cmdLogIndex)
 	withReset(cmdLogIndex)
 	withBlock(cmdLogIndex)
 	withUnwind(cmdLogIndex)
@@ -197,6 +241,7 @@ func init() {
 
 	withChaindata(cmdCallTraces)
 	withMapSize(cmdCallTraces)
+	withFreelistReuse(cmdCallTraces)
 	withReset(cmdCallTraces)
 	withBlock(cmdCallTraces)
 	withUnwind(cmdCallTraces)
@@ -206,12 +251,28 @@ func init() {
 
 	withChaindata(cmdStageTxLookup)
 	withMapSize(cmdStageTxLookup)
+	withFreelistReuse(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
 	withBlock(cmdStageTxLookup)
 	withUnwind(cmdStageTxLookup)
 	withDatadir(cmdStageTxLookup)
 
 	rootCmd.AddCommand(cmdStageTxLookup)
+
+	withChaindata(cmdPrintMigrations)
+	rootCmd.AddCommand(cmdPrintMigrations)
+
+	withChaindata(cmdRemoveMigration)
+	withMapSize(cmdRemoveMigration)
+	withFreelistReuse(cmdRemoveMigration)
+	withMigration(cmdRemoveMigration)
+	rootCmd.AddCommand(cmdRemoveMigration)
+
+	withChaindata(cmdRunMigrations)
+	withMapSize(cmdRunMigrations)
+	withFreelistReuse(cmdRunMigrations)
+	withDatadir(cmdRunMigrations)
+	rootCmd.AddCommand(cmdRunMigrations)
 }
 
 func stageSenders(ctx context.Context) error {
@@ -517,6 +578,34 @@ func printAllStages(_ context.Context) error {
 	defer db.Close()
 
 	return printStages(db)
+}
+
+func printAppliedMigrations(_ context.Context) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	applied, err := migrations.AppliedMigrations(db, false /* withPayload */)
+	if err != nil {
+		return err
+	}
+	var appliedStrs = make([]string, len(applied))
+	i := 0
+	for k := range applied {
+		appliedStrs[i] = k
+		i++
+	}
+	sort.Strings(appliedStrs)
+	log.Info("Applied", "migrations", strings.Join(appliedStrs, " "))
+	return nil
+}
+
+func removeMigration(_ context.Context) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	if err := db.Delete(dbutils.Migrations, []byte(migration)); err != nil {
+		return err
+	}
+	return nil
 }
 
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState

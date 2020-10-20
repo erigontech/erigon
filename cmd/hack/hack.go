@@ -2086,6 +2086,36 @@ func extracHeaders(chaindata string, block uint64) error {
 	return nil
 }
 
+func receiptSizes(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.KV().Begin(context.Background(), nil, false)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	c := tx.Cursor(dbutils.BlockReceiptsPrefix)
+	defer c.Close()
+	sizes := make(map[int]int)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		sizes[len(v)]++
+	}
+	var lens = make([]int, len(sizes))
+	i := 0
+	for l := range sizes {
+		lens[i] = l
+		i++
+	}
+	sort.Ints(lens)
+	for _, l := range lens {
+		fmt.Printf("%6d - %d\n", l, sizes[l])
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -2241,6 +2271,11 @@ func main() {
 	}
 	if *action == "extractHeaders" {
 		if err := extracHeaders(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "receiptSizes" {
+		if err := receiptSizes(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

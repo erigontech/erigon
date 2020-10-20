@@ -25,9 +25,8 @@ type Decoder interface {
 	Decode(interface{}) error
 }
 
-type State interface {
+type CurrentTableReader interface {
 	Get([]byte) ([]byte, error)
-	Stopped() error
 }
 
 type ExtractNextFunc func(originalK, k []byte, v []byte) error
@@ -163,22 +162,17 @@ func disposeProviders(providers []dataProvider) {
 	}
 }
 
-type bucketState struct {
+type currentTableReader struct {
 	getter ethdb.Getter
 	bucket string
-	quit   <-chan struct{}
 }
 
-func (s *bucketState) Get(key []byte) ([]byte, error) {
+func (s *currentTableReader) Get(key []byte) ([]byte, error) {
 	return s.getter.Get(s.bucket, key)
 }
 
-func (s *bucketState) Stopped() error {
-	return common.Stopped(s.quit)
-}
-
 // IdentityLoadFunc loads entries as they are, without transformation
-var IdentityLoadFunc LoadFunc = func(k []byte, value []byte, _ State, next LoadNextFunc) error {
+var IdentityLoadFunc LoadFunc = func(k []byte, value []byte, _ CurrentTableReader, next LoadNextFunc) error {
 	return next(k, k, value)
 }
 
