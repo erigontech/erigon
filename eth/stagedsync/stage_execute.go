@@ -42,7 +42,7 @@ type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.Database, blo
 type ExecuteBlockStageParams struct {
 	ToBlock       uint64 // not setting this params means no limit
 	WriteReceipts bool
-	Hdd           bool
+	BatchSize     int
 	ChangeSetHook ChangeSetHook
 	ReaderBuilder StateReaderBuilder
 	WriterBuilder StateWriterBuilder
@@ -99,8 +99,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	defer logEvery.Stop()
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
-	// Warmup only works for HDD sync, and for long ranges
-	var warmup = params.Hdd && (to-s.BlockNumber) > 30000
 
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
@@ -120,20 +118,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
-
-		if warmup {
-			log.Info(fmt.Sprintf("[%s] Running a warmup...", stages.Execution))
-			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.PlainStateBucket, logEvery, quit); err != nil {
-				return err
-			}
-
-			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.CodeBucket, logEvery, quit); err != nil {
-				return err
-			}
-
-			warmup = false
-			log.Info(fmt.Sprintf("[%s] Warm up done.", stages.Execution))
-		}
 
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
@@ -162,7 +146,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			}
 		}
 
-		if batch.BatchSize() >= batch.IdealBatchSize() {
+		if batch.BatchSize() >= params.BatchSize {
 			if err = s.Update(batch, blockNum); err != nil {
 				return err
 			}
@@ -175,7 +159,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				}
 				chainContext.SetDB(tx)
 			}
-			warmup = params.Hdd && (to-blockNum) > 30000
 		}
 
 		if prof {
