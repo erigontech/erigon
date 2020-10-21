@@ -1,9 +1,15 @@
-Build: `docker-compose build --parallel`
+Run Grafana and Prometheus: `docker-compose up prometheus grafana`
 
-Run only Prometheus: `docker-compose up prometheus grafana`
+List of hosts and ports to collecting metrics is in: `./cmd/prometheus/prometheus.yml`
 
-Run with TurboGeth, RestApi and DebugUI: `XDG_DATA_HOME=/path/to/geth/data/dir docker-compose up`
+Env variables:
+- `XDG_DATA_HOME` re-defines default prometheus and grafana databases folder. 
+- `TG_PROMETHEUS_CONFIG` path to custom `prometheus.yml` file. Default is: `./cmd/prometheus/prometheus.yml`
+- `TG_GRAFANA_CONFIG` path to custom `grafana.ini file`. Default is: `./cmd/prometheus/grafana.ini`
+
+To add custom tg host: copy `./cmd/prometheus/prometheus.yml`, modify, pass new location by:
+`TG_PROMETHEUS_CONFIG=/new/location/prometheus.yml docker-compose up prometheus grafana`
+
 
 Grafana: [localhost:3000](localhost:3000), admin/admin
-DebugUI: [localhost:3001](localhost:3001)
 
