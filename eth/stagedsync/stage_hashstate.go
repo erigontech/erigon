@@ -34,7 +34,7 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
-		if err := promoteHashedStateCleanly(logPrefix, s, db, datadir, quit); err != nil {
+		if err := promoteHashedStateCleanly(logPrefix, db, datadir, quit); err != nil {
 			return err
 		}
 	} else {
@@ -74,7 +74,7 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, s
 	return nil
 }
 
-func promoteHashedStateCleanly(logPrefix string, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+func promoteHashedStateCleanly(logPrefix string, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	err := etl.Transform(
 		logPrefix,
 		db,

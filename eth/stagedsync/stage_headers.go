@@ -1,12 +1,9 @@
 package stagedsync
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 	mrand "math/rand"
-	"os"
-	"runtime/pprof"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -15,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -23,21 +19,8 @@ import (
 )
 
 func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
-	if prof {
-		f, err := os.Create("cpu-headers.prof")
-		if err != nil {
-			log.Error("could not create CPU profile", "error", err)
-			return err
-		}
-		defer f.Close()
-		if err = pprof.StartCPUProfile(f); err != nil {
-			log.Error("could not start CPU profile", "error", err)
-			return err
-		}
-		defer pprof.StopCPUProfile()
-	}
-
-	err := d.SpawnHeaderDownloadStage(headersFetchers, s, u)
+	logPrefix := s.state.LogPrefix()
+	err := d.SpawnHeaderDownloadStage(logPrefix, headersFetchers, s, u)
 	if err == nil {
 		s.Done()
 	}
@@ -88,7 +71,7 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlock(cr.db, hash, number)
 }
 
-func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) (bool, uint64, error) {
+func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) (bool, uint64, error) {
 	start := time.Now()
 
 	// ignore headers that we already have
@@ -106,7 +89,7 @@ func InsertHeaderChain(db ethdb.Database, headers []*types.Header, config *param
 		}
 		// If the header is a banned one, straight out abort
 		if core.BadHashes[h.Hash()] {
-			log.Error(fmt.Sprintf(`
+			log.Error(fmt.Sprintf(`[%s]
 ########## BAD BLOCK #########
 
 Number: %v
@@ -114,7 +97,7 @@ Hash: 0x%x
 
 Error: %v
 ##############################
-`, h.Number, h.Hash(), core.ErrBlacklistedHash))
+`, logPrefix, h.Number, h.Hash(), core.ErrBlacklistedHash))
 			return false, 0, core.ErrBlacklistedHash
 		}
 	}
@@ -124,14 +107,14 @@ Error: %v
 	}
 
 	if rawdb.ReadHeader(db, headers[0].ParentHash, headers[0].Number.Uint64()-1) == nil {
-		return false, 0, errors.New("unknown parent")
+		return false, 0, fmt.Errorf("%s: unknown parent %x", logPrefix, headers[0].ParentHash)
 	}
 	parentTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
 		if i > 0 {
 			if header.ParentHash != headers[i-1].Hash() {
-				return false, 0, errors.New("unknown parent")
+				return false, 0, fmt.Errorf("%s: broken chain", logPrefix)
 			}
 		}
 		externTd = externTd.Add(externTd, header.Difficulty)
@@ -216,11 +199,11 @@ Error: %v
 		}
 		data, err := rlp.EncodeToBytes(header)
 		if err != nil {
-			log.Crit("Failed to RLP encode header", "err", err)
+			log.Crit(fmt.Sprintf("[%s] Failed to RLP encode header", logPrefix), "err", err)
 		}
 		rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td)
 		if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
-			log.Crit("Failed to store header", "err", err)
+			log.Crit(fmt.Sprintf("[%s] Failed to store header", logPrefix), "err", err)
 		}
 	}
 	if deepFork {
@@ -254,12 +237,12 @@ Error: %v
 		encoded := dbutils.EncodeBlockNumber(lastHeader.Number.Uint64())
 
 		if err := batch.Put(dbutils.HeaderNumberPrefix, lastHeader.Hash().Bytes(), encoded); err != nil {
-			log.Crit("Failed to store hash to number mapping", "err", err)
+			log.Crit(fmt.Sprintf("[%s] Failed to store hash to number mapping", logPrefix), "err", err)
 		}
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
 	}
 	if _, err := batch.Commit(); err != nil {
-		return false, 0, fmt.Errorf("write header markers into disk: %w", err)
+		return false, 0, fmt.Errorf("%s: write header markers into disk: %w", logPrefix, err)
 	}
 	// Report some public statistics so the user has a clue what's going on
 	ctx := []interface{}{
@@ -276,6 +259,6 @@ Error: %v
 		ctx = append(ctx, []interface{}{"reorg", reorg, "forkBlockNumber", forkBlockNumber}...)
 	}
 
-	log.Info(fmt.Sprintf("[%s] Imported new block headers", stages.Headers), ctx...)
+	log.Info(fmt.Sprintf("[%s] Imported new block headers", logPrefix), ctx...)
 	return reorg, forkBlockNumber, nil
 }

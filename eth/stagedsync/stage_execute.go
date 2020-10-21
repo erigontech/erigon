@@ -297,24 +297,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	return nil
 }
 
-func writeAccountHashed(logPrefix string, db ethdb.Database, key string, acc accounts.Account) error {
-	var addrHash common.Hash
-	copy(addrHash[:], []byte(key))
-	if err := cleanupContractCodeBucket(
-		logPrefix,
-		db,
-		dbutils.ContractCodeBucket,
-		acc,
-		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
-			return rawdb.ReadAccount(db, addrHash, out)
-		},
-		func(inc uint64) []byte { return dbutils.GenerateStoragePrefix(addrHash[:], inc) },
-	); err != nil {
-		return fmt.Errorf("%s: writeAccountHashed for %x: %w", logPrefix, []byte(key), err)
-	}
-	return rawdb.WriteAccount(db, addrHash, acc)
-}
-
 func writeAccountPlain(logPrefix string, db ethdb.Database, key string, acc accounts.Account) error {
 	var address common.Address
 	copy(address[:], []byte(key))

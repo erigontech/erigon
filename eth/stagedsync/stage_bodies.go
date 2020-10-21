@@ -7,7 +7,8 @@ import (
 )
 
 func spawnBodyDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, pid string, pb *PrefetchedBlocks) error {
-	cont, err := d.SpawnBodyDownloadStage(pid, s, u, pb)
+	logPrefix := s.state.LogPrefix()
+	cont, err := d.SpawnBodyDownloadStage(logPrefix, pid, s, u, pb)
 	if err != nil {
 		return err
 	}
@@ -20,7 +21,7 @@ func spawnBodyDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, pid str
 
 func unwindBodyDownloadStage(u *UnwindState, db ethdb.Database) error {
 	if err := u.Done(db); err != nil {
-		return fmt.Errorf("unwind Bodies: reset: %v", err)
+		return fmt.Errorf("unwind Bodies: reset: %w", err)
 	}
 	return nil
 }
