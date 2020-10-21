@@ -42,7 +42,7 @@ func (st *InsertStats) report(chain []*types.Block, index int, cache common.Stor
 	// Fetch the timings for the batch
 	var (
 		now     = mclock.Now()
-		elapsed = time.Duration(now) - time.Duration(st.startTime)
+		elapsed = now.Sub(st.startTime)
 	)
 	// If we're at the last block of the batch or report period reached, log
 	if index == len(chain)-1 || elapsed >= statsReportLimit {
