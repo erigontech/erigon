@@ -202,8 +202,10 @@ func (txn *Txn) Commit() (CommitLatency, error) {
 type CommitLatency struct {
 	Preparation time.Duration
 	GC          time.Duration
+	Audit       time.Duration
 	Write       time.Duration
 	Sync        time.Duration
+	Ending      time.Duration
 	Whole       time.Duration
 }
 
@@ -216,11 +218,13 @@ func (txn *Txn) commit() (CommitLatency, error) {
 	ret := C.mdbx_txn_commit_ex(txn._txn, &_stat)
 	txn.clearTxn()
 	s := CommitLatency{
-		Preparation: toDuration(_stat.preparation_16dot16),
-		GC:          toDuration(_stat.gc_16dot16),
-		Write:       toDuration(_stat.write_16dot16),
-		Sync:        toDuration(_stat.sync_16dot16),
-		Whole:       toDuration(_stat.whole_16dot16),
+		Preparation: toDuration(_stat.preparation),
+		GC:          toDuration(_stat.gc),
+		Audit:       toDuration(_stat.audit),
+		Write:       toDuration(_stat.write),
+		Sync:        toDuration(_stat.sync),
+		Ending:      toDuration(_stat.ending),
+		Whole:       toDuration(_stat.whole),
 	}
 	if ret != success {
 		return s, operrno("mdbx_txn_commit_ex", ret)

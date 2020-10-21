@@ -117,13 +117,13 @@ ethdb/mdbx/dist/libmdbx.a:
 	cd ethdb/mdbx/dist/ && make libmdbx.a && cat config.h
 
 test: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
-	$(GOTEST)
+	TEST_DB=mdbx $(GOTEST)
 
-test-lmdb: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
+test-lmdb: semantics/z3/build/libz3.a
 	TEST_DB=lmdb $(GOTEST)
 
-test-bolt: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
-	TEST_DB=bolt $(GOTEST)
+test-mdbx: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
+	TEST_DB=mdbx $(GOTEST)
 
 lint: lintci
 

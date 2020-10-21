@@ -11,7 +11,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_ALLOY 1n#define MDBX_BUILD_SOURCERY 872f709cda814dc206e03d5e9e684a50af85a6f5cb0544676cdffccee5d6bc09_v0_9_1_35_g2e31b2c
+#define MDBX_ALLOY 1n#define MDBX_BUILD_SOURCERY 6d7c21bd0366dcdc7be982d973cd4ffea76e6fc94896fe23df8cdbf576e09353_v0_9_1_43_gb092821
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -816,7 +816,7 @@ typedef pthread_mutex_t mdbx_fastmutex_t;
     defined(__amd64__) || defined(__amd64) || defined(_M_X64) ||               \
     defined(_M_AMD64) || defined(__IA32__) || defined(__INTEL__)
 #ifndef __ia32__
-/* LY: define neutral __ia32__ for x86 and x86-64 archs */
+/* LY: define neutral __ia32__ for x86 and x86-64 */
 #define __ia32__ 1
 #endif /* __ia32__ */
 #if !defined(__amd64__) && (defined(__x86_64) || defined(__x86_64__) ||        \
@@ -1895,7 +1895,7 @@ typedef struct MDBX_db {
   pgno_t md_overflow_pages; /* number of overflow pages */
   uint64_t md_seq;          /* table sequence counter */
   uint64_t md_entries;      /* number of data items */
-  uint64_t md_mod_txnid;    /* txnid of last commited modification */
+  uint64_t md_mod_txnid;    /* txnid of last committed modification */
 } MDBX_db;
 
 /* database size-related parameters */
@@ -2551,7 +2551,7 @@ struct MDBX_env {
 #define me_lfd me_lck_mmap.fd
 #define me_lck me_lck_mmap.lck
 
-  unsigned me_psize;    /* DB page size, inited from me_os_psize */
+  unsigned me_psize;    /* DB page size, initialized from me_os_psize */
   uint8_t me_psize2log; /* log2 of DB page size */
   int8_t me_stuck_meta; /* recovery-only: target meta page or less that zero */
   unsigned me_os_psize; /* OS page size, from mdbx_syspagesize() */

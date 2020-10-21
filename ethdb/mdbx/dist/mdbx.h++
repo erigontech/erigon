@@ -2081,7 +2081,7 @@ public:
   /// \ref MDBX_BAD_DBI (since the DB name is gone).
   inline void close_map(const map_handle &);
 
-  /// \brief Readed information
+  /// \brief Reader information
   struct reader_info {
     int slot;                 ///< The reader lock table slot number.
     mdbx_pid_t pid;           ///< The reader process ID.

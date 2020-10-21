@@ -84,7 +84,7 @@ libmdbx.$(SO_SUFFIX): mdbx-dylib.o mdbx++-dylib.o
 
 
 ################################################################################
-# Amalgamated source code, i.e. distributed after `make dists`
+# Amalgamated source code, i.e. distributed after `make dist`
 MAN_SRCDIR := man1/
 
 config.h: mdbx.c $(lastword $(MAKEFILE_LIST))

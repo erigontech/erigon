@@ -1245,7 +1245,7 @@ enum MDBX_env_flags_t {
    *  - a system crash immediately after commit the write transaction
    *    high likely lead to database corruption.
    *  - successful completion of mdbx_env_sync(force = true) after one or
-   *    more commited transactions guarantees consistency and durability.
+   *    more committed transactions guarantees consistency and durability.
    *  - BUT by committing two or more transactions you back database into
    *    a weak state, in which a system crash may lead to database corruption!
    *    In case single transaction after mdbx_env_sync, you may lose transaction
@@ -1954,7 +1954,7 @@ struct MDBX_stat {
   uint64_t ms_leaf_pages;     /**< Number of leaf pages */
   uint64_t ms_overflow_pages; /**< Number of overflow pages */
   uint64_t ms_entries;        /**< Number of data items */
-  uint64_t ms_mod_txnid; /**< Transaction ID of commited last modification */
+  uint64_t ms_mod_txnid; /**< Transaction ID of committed last modification */
 };
 #ifndef __cplusplus
 /** \ingroup c_statinfo */
@@ -2921,19 +2921,36 @@ MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API int mdbx_txn_flags(const MDBX_txn *txn);
 MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API uint64_t
 mdbx_txn_id(const MDBX_txn *txn);
 
-/** \brief Latence of commit stages in 1/65536 of seconds units. */
+/** \brief Latency of commit stages in 1/65536 of seconds units.
+ * \warning This structure may be changed in future releases.
+ * \see mdbx_txn_commit_ex() */
 struct MDBX_commit_latency {
-  uint32_t preparation_16dot16;
-  uint32_t gc_16dot16;
-  uint32_t write_16dot16;
-  uint32_t sync_16dot16;
-  uint32_t whole_16dot16;
+  /** \brief Duration of preparation (commit child transactions, update
+   * sub-databases records and cursors destroying). */
+  uint32_t preparation;
+  /** \brief Duration of GC/freeDB handling & updation. */
+  uint32_t gc;
+  /** \brief Duration of internal audit if enabled. */
+  uint32_t audit;
+  /** \brief Duration of writing dirty/modified data pages. */
+  uint32_t write;
+  /** \brief Duration of syncing written data to the dist/storage. */
+  uint32_t sync;
+  /** \brief Duration of transaction ending (releasing resources). */
+  uint32_t ending;
+  /** \brief The total duration of a commit. */
+  uint32_t whole;
 };
 #ifndef __cplusplus
 /** \ingroup c_statinfo */
 typedef struct MDBX_commit_latency MDBX_commit_latency;
 #endif
 
+/** \brief Commit all the operations of a transaction into the database and
+ * collect latency information.
+ * \see mdbx_txn_commit()
+ * \ingroup c_statinfo
+ * \warning This function may be changed in future releases. */
 LIBMDBX_API int mdbx_txn_commit_ex(MDBX_txn *txn, MDBX_commit_latency *latency);
 
 /** \brief Commit all the operations of a transaction into the database.
@@ -3247,8 +3264,8 @@ LIBMDBX_API int mdbx_dbi_open(MDBX_txn *txn, const char *name,
  * \param [in] datacmp Optional custom data comparison function for a database.
  * \param [out] dbi    Address where the new MDBX_dbi handle will be stored.
  * \returns A non-zero error value on failure and 0 on success. */
-//MDBX_DEPRECATED
-LIBMDBX_API int mdbx_dbi_open_ex(MDBX_txn *txn, const char *name, MDBX_db_flags_t flags,
+MDBX_DEPRECATED LIBMDBX_API int
+mdbx_dbi_open_ex(MDBX_txn *txn, const char *name, MDBX_db_flags_t flags,
                  MDBX_dbi *dbi, MDBX_cmp_func *keycmp, MDBX_cmp_func *datacmp);
 
 /** \defgroup value2key Value-to-Key functions to avoid custom comparators
@@ -4381,7 +4398,7 @@ LIBMDBX_API int mdbx_thread_unregister(const MDBX_env *env);
  * \param [in] pid     A pid of the reader process.
  * \param [in] tid     A thread_id of the reader thread.
  * \param [in] laggard An oldest read transaction number on which stalled.
- * \param [in] gap     A lag from the last commited txn.
+ * \param [in] gap     A lag from the last committed txn.
  * \param [in] space   A space that actually become available for reuse after
  *                     this reader finished. The callback function can take
  *                     this value into account to evaluate the impact that

@@ -17,8 +17,8 @@ cmake_minimum_required(VERSION 3.8.2)
 cmake_policy(PUSH)
 cmake_policy(VERSION 3.8.2)
 
-macro(add_compile_flags langs)
-  foreach(_lang ${langs})
+macro(add_compile_flags languages)
+  foreach(_lang ${languages})
     string(REPLACE ";" " " _flags "${ARGN}")
     if(CMAKE_CXX_COMPILER_LOADED AND _lang STREQUAL "CXX")
       set("${_lang}_FLAGS" "${${_lang}_FLAGS} ${_flags}")
@@ -113,23 +113,34 @@ macro(fetch_version name source_root_directory parent_scope)
       message(FATAL_ERROR "Please install latest version of git ('show --no-patch --format=%H HEAD' failed)")
     endif()
 
-    execute_process(COMMAND ${GIT} tag --sort=-version:refname
-      OUTPUT_VARIABLE tag_list
+    execute_process(COMMAND ${GIT} describe --tags --abbrev=0 "--match=v[0-9]*"
+      OUTPUT_VARIABLE last_release_tag
       OUTPUT_STRIP_TRAILING_WHITESPACE
       WORKING_DIRECTORY ${source_root_directory}
       RESULT_VARIABLE rc)
     if(rc)
-      message(FATAL_ERROR "Please install latest version of git ('tag --sort=-version:refname' failed)")
+      message(FATAL_ERROR "Please install latest version of git ('describe --tags --abbrev=0 --match=v[0-9]*' failed)")
     endif()
-    string(REGEX REPLACE "\n" ";" tag_list "${tag_list}")
-    set(last_release_tag "")
-    set(git_revlist_arg "HEAD")
-    foreach(tag IN LISTS tag_list)
-      if(NOT last_release_tag)
-        string(REGEX MATCH "^v[0-9]+(\.[0-9]+)+" last_release_tag "${tag}")
-        set(git_revlist_arg "${tag}..HEAD")
+    if (last_release_tag)
+      set(git_revlist_arg "${last_release_tag}..HEAD")
+    else()
+      execute_process(COMMAND ${GIT} tag --sort=-version:refname
+        OUTPUT_VARIABLE tag_list
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        WORKING_DIRECTORY ${source_root_directory}
+        RESULT_VARIABLE rc)
+      if(rc)
+        message(FATAL_ERROR "Please install latest version of git ('tag --sort=-version:refname' failed)")
       endif()
-    endforeach(tag)
+      string(REGEX REPLACE "\n" ";" tag_list "${tag_list}")
+      set(git_revlist_arg "HEAD")
+      foreach(tag IN LISTS tag_list)
+        if(NOT last_release_tag)
+          string(REGEX MATCH "^v[0-9]+(\.[0-9]+)+" last_release_tag "${tag}")
+          set(git_revlist_arg "${tag}..HEAD")
+        endif()
+      endforeach(tag)
+    endif()
     execute_process(COMMAND ${GIT} rev-list --count "${git_revlist_arg}"
       OUTPUT_VARIABLE ${name}_GIT_REVISION
       OUTPUT_STRIP_TRAILING_WHITESPACE
