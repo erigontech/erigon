@@ -64,7 +64,7 @@ func (x *Receipt) CodecEncodeSelf(e *codec1978.Encoder) {
 			_, _ = yysep2, yy2arr2
 			const yyr2 bool = false // struct tag has 'toArray'
 			if yyr2 || yy2arr2 {
-				z.EncWriteArrayStart(4)
+				z.EncWriteArrayStart(3)
 				z.EncWriteArrayElem()
 				if x.PostState == nil {
 					r.EncodeNil()
@@ -75,15 +75,9 @@ func (x *Receipt) CodecEncodeSelf(e *codec1978.Encoder) {
 				r.EncodeUint(uint64(x.Status))
 				z.EncWriteArrayElem()
 				r.EncodeUint(uint64(x.CumulativeGasUsed))
-				z.EncWriteArrayElem()
-				if x.Logs == nil {
-					r.EncodeNil()
-				} else {
-					h.encSlicePtrtoLog(([]*Log)(x.Logs), e)
-				} // end block: if x.Logs slice == nil
 				z.EncWriteArrayEnd()
 			} else {
-				z.EncWriteMapStart(4)
+				z.EncWriteMapStart(3)
 				z.EncWriteMapElemKey()
 				if z.IsJSONHandle() {
 					z.WriteStr("\"1\"")
@@ -112,18 +106,6 @@ func (x *Receipt) CodecEncodeSelf(e *codec1978.Encoder) {
 				}
 				z.EncWriteMapElemValue()
 				r.EncodeUint(uint64(x.CumulativeGasUsed))
-				z.EncWriteMapElemKey()
-				if z.IsJSONHandle() {
-					z.WriteStr("\"4\"")
-				} else {
-					r.EncodeString(`4`)
-				}
-				z.EncWriteMapElemValue()
-				if x.Logs == nil {
-					r.EncodeNil()
-				} else {
-					h.encSlicePtrtoLog(([]*Log)(x.Logs), e)
-				} // end block: if x.Logs slice == nil
 				z.EncWriteMapEnd()
 			}
 		}
@@ -184,8 +166,6 @@ func (x *Receipt) codecDecodeSelfFromMap(l int, d *codec1978.Decoder) {
 			x.Status = (uint64)(r.DecodeUint64())
 		case "3":
 			x.CumulativeGasUsed = (uint64)(r.DecodeUint64())
-		case "4":
-			h.decSlicePtrtoLog((*[]*Log)(&x.Logs), d)
 		default:
 			z.DecStructFieldNotFound(-1, yys3)
 		} // end switch yys3
@@ -196,69 +176,57 @@ func (x *Receipt) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
-	var yyj10 int
-	var yyb10 bool
-	var yyhl10 bool = l >= 0
-	yyj10++
-	if yyhl10 {
-		yyb10 = yyj10 > l
+	var yyj8 int
+	var yyb8 bool
+	var yyhl8 bool = l >= 0
+	yyj8++
+	if yyhl8 {
+		yyb8 = yyj8 > l
 	} else {
-		yyb10 = z.DecCheckBreak()
+		yyb8 = z.DecCheckBreak()
 	}
-	if yyb10 {
+	if yyb8 {
 		z.DecReadArrayEnd()
 		return
 	}
 	z.DecReadArrayElem()
 	x.PostState = r.DecodeBytes(([]byte)(x.PostState), false)
-	yyj10++
-	if yyhl10 {
-		yyb10 = yyj10 > l
+	yyj8++
+	if yyhl8 {
+		yyb8 = yyj8 > l
 	} else {
-		yyb10 = z.DecCheckBreak()
+		yyb8 = z.DecCheckBreak()
 	}
-	if yyb10 {
+	if yyb8 {
 		z.DecReadArrayEnd()
 		return
 	}
 	z.DecReadArrayElem()
 	x.Status = (uint64)(r.DecodeUint64())
-	yyj10++
-	if yyhl10 {
-		yyb10 = yyj10 > l
+	yyj8++
+	if yyhl8 {
+		yyb8 = yyj8 > l
 	} else {
-		yyb10 = z.DecCheckBreak()
+		yyb8 = z.DecCheckBreak()
 	}
-	if yyb10 {
+	if yyb8 {
 		z.DecReadArrayEnd()
 		return
 	}
 	z.DecReadArrayElem()
 	x.CumulativeGasUsed = (uint64)(r.DecodeUint64())
-	yyj10++
-	if yyhl10 {
-		yyb10 = yyj10 > l
-	} else {
-		yyb10 = z.DecCheckBreak()
-	}
-	if yyb10 {
-		z.DecReadArrayEnd()
-		return
-	}
-	z.DecReadArrayElem()
-	h.decSlicePtrtoLog((*[]*Log)(&x.Logs), d)
 	for {
-		yyj10++
-		if yyhl10 {
-			yyb10 = yyj10 > l
+		yyj8++
+		if yyhl8 {
+			yyb8 = yyj8 > l
 		} else {
-			yyb10 = z.DecCheckBreak()
+			yyb8 = z.DecCheckBreak()
 		}
-		if yyb10 {
+		if yyb8 {
 			break
 		}
 		z.DecReadArrayElem()
-		z.DecStructFieldNotFound(yyj10-1, "")
+		z.DecStructFieldNotFound(yyj8-1, "")
 	}
 }
 
@@ -1009,7 +977,7 @@ func (x *ReceiptForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 		_, _ = yysep2, yy2arr2
 		const yyr2 bool = false // struct tag has 'toArray'
 		if yyr2 || yy2arr2 {
-			z.EncWriteArrayStart(4)
+			z.EncWriteArrayStart(3)
 			z.EncWriteArrayElem()
 			if x.PostState == nil {
 				r.EncodeNil()
@@ -1020,15 +988,9 @@ func (x *ReceiptForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 			r.EncodeUint(uint64(x.Status))
 			z.EncWriteArrayElem()
 			r.EncodeUint(uint64(x.CumulativeGasUsed))
-			z.EncWriteArrayElem()
-			if x.Logs == nil {
-				r.EncodeNil()
-			} else {
-				h.encSlicePtrtoLog(([]*Log)(x.Logs), e)
-			} // end block: if x.Logs slice == nil
 			z.EncWriteArrayEnd()
 		} else {
-			z.EncWriteMapStart(4)
+			z.EncWriteMapStart(3)
 			z.EncWriteMapElemKey()
 			if z.IsJSONHandle() {
 				z.WriteStr("\"1\"")
@@ -1057,18 +1019,6 @@ func (x *ReceiptForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 			}
 			z.EncWriteMapElemValue()
 			r.EncodeUint(uint64(x.CumulativeGasUsed))
-			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"4\"")
-			} else {
-				r.EncodeString(`4`)
-			}
-			z.EncWriteMapElemValue()
-			if x.Logs == nil {
-				r.EncodeNil()
-			} else {
-				h.encSlicePtrtoLog(([]*Log)(x.Logs), e)
-			} // end block: if x.Logs slice == nil
 			z.EncWriteMapEnd()
 		}
 	}
@@ -1124,8 +1074,6 @@ func (x *ReceiptForStorage) codecDecodeSelfFromMap(l int, d *codec1978.Decoder) 
 			x.Status = (uint64)(r.DecodeUint64())
 		case "3":
 			x.CumulativeGasUsed = (uint64)(r.DecodeUint64())
-		case "4":
-			h.decSlicePtrtoLog((*[]*Log)(&x.Logs), d)
 		default:
 			z.DecStructFieldNotFound(-1, yys3)
 		} // end switch yys3
@@ -1136,69 +1084,57 @@ func (x *ReceiptForStorage) codecDecodeSelfFromArray(l int, d *codec1978.Decoder
 	var h codecSelfer2
 	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
-	var yyj10 int
-	var yyb10 bool
-	var yyhl10 bool = l >= 0
-	yyj10++
-	if yyhl10 {
-		yyb10 = yyj10 > l
+	var yyj8 int
+	var yyb8 bool
+	var yyhl8 bool = l >= 0
+	yyj8++
+	if yyhl8 {
+		yyb8 = yyj8 > l
 	} else {
-		yyb10 = z.DecCheckBreak()
+		yyb8 = z.DecCheckBreak()
 	}
-	if yyb10 {
+	if yyb8 {
 		z.DecReadArrayEnd()
 		return
 	}
 	z.DecReadArrayElem()
 	x.PostState = r.DecodeBytes(([]byte)(x.PostState), false)
-	yyj10++
-	if yyhl10 {
-		yyb10 = yyj10 > l
+	yyj8++
+	if yyhl8 {
+		yyb8 = yyj8 > l
 	} else {
-		yyb10 = z.DecCheckBreak()
+		yyb8 = z.DecCheckBreak()
 	}
-	if yyb10 {
+	if yyb8 {
 		z.DecReadArrayEnd()
 		return
 	}
 	z.DecReadArrayElem()
 	x.Status = (uint64)(r.DecodeUint64())
-	yyj10++
-	if yyhl10 {
-		yyb10 = yyj10 > l
+	yyj8++
+	if yyhl8 {
+		yyb8 = yyj8 > l
 	} else {
-		yyb10 = z.DecCheckBreak()
+		yyb8 = z.DecCheckBreak()
 	}
-	if yyb10 {
+	if yyb8 {
 		z.DecReadArrayEnd()
 		return
 	}
 	z.DecReadArrayElem()
 	x.CumulativeGasUsed = (uint64)(r.DecodeUint64())
-	yyj10++
-	if yyhl10 {
-		yyb10 = yyj10 > l
-	} else {
-		yyb10 = z.DecCheckBreak()
-	}
-	if yyb10 {
-		z.DecReadArrayEnd()
-		return
-	}
-	z.DecReadArrayElem()
-	h.decSlicePtrtoLog((*[]*Log)(&x.Logs), d)
 	for {
-		yyj10++
-		if yyhl10 {
-			yyb10 = yyj10 > l
+		yyj8++
+		if yyhl8 {
+			yyb8 = yyj8 > l
 		} else {
-			yyb10 = z.DecCheckBreak()
+			yyb8 = z.DecCheckBreak()
 		}
-		if yyb10 {
+		if yyb8 {
 			break
 		}
 		z.DecReadArrayElem()
-		z.DecStructFieldNotFound(yyj10-1, "")
+		z.DecStructFieldNotFound(yyj8-1, "")
 	}
 }
 
@@ -2220,110 +2156,6 @@ func (x *LogForStorage) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 		}
 		z.DecReadArrayElem()
 		z.DecStructFieldNotFound(yyj10-1, "")
-	}
-}
-
-func (x codecSelfer2) encSlicePtrtoLog(v []*Log, e *codec1978.Encoder) {
-	var h codecSelfer2
-	z, r := codec1978.GenHelperEncoder(e)
-	_, _, _ = h, z, r
-	if v == nil {
-		r.EncodeNil()
-		return
-	}
-	z.EncWriteArrayStart(len(v))
-	for _, yyv1 := range v {
-		z.EncWriteArrayElem()
-		if yyv1 == nil {
-			r.EncodeNil()
-		} else {
-			yyv1.CodecEncodeSelf(e)
-		}
-	}
-	z.EncWriteArrayEnd()
-}
-
-func (x codecSelfer2) decSlicePtrtoLog(v *[]*Log, d *codec1978.Decoder) {
-	var h codecSelfer2
-	z, r := codec1978.GenHelperDecoder(d)
-	_, _, _ = h, z, r
-
-	yyv1 := *v
-	yyh1, yyl1 := z.DecSliceHelperStart()
-	var yyc1 bool
-	_ = yyc1
-	if yyh1.IsNil {
-		if yyv1 != nil {
-			yyv1 = nil
-			yyc1 = true
-		}
-	} else if yyl1 == 0 {
-		if yyv1 == nil {
-			yyv1 = []*Log{}
-			yyc1 = true
-		} else if len(yyv1) != 0 {
-			yyv1 = yyv1[:0]
-			yyc1 = true
-		}
-	} else {
-		yyhl1 := yyl1 > 0
-		var yyrl1 int
-		_ = yyrl1
-		if yyhl1 {
-			if yyl1 > cap(yyv1) {
-				yyrl1 = z.DecInferLen(yyl1, z.DecBasicHandle().MaxInitLen, 8)
-				if yyrl1 <= cap(yyv1) {
-					yyv1 = yyv1[:yyrl1]
-				} else {
-					yyv1 = make([]*Log, yyrl1)
-				}
-				yyc1 = true
-			} else if yyl1 != len(yyv1) {
-				yyv1 = yyv1[:yyl1]
-				yyc1 = true
-			}
-		}
-		var yyj1 int
-		for yyj1 = 0; (yyhl1 && yyj1 < yyl1) || !(yyhl1 || z.DecCheckBreak()); yyj1++ { // bounds-check-elimination
-			if yyj1 == 0 && yyv1 == nil {
-				if yyhl1 {
-					yyrl1 = z.DecInferLen(yyl1, z.DecBasicHandle().MaxInitLen, 8)
-				} else {
-					yyrl1 = 8
-				}
-				yyv1 = make([]*Log, yyrl1)
-				yyc1 = true
-			}
-			yyh1.ElemContainerState(yyj1)
-			var yydb1 bool
-			if yyj1 >= len(yyv1) {
-				yyv1 = append(yyv1, nil)
-				yyc1 = true
-			}
-			if yydb1 {
-				z.DecSwallow()
-			} else {
-				if r.TryNil() {
-					yyv1[yyj1] = nil
-				} else {
-					if yyv1[yyj1] == nil {
-						yyv1[yyj1] = new(Log)
-					}
-					yyv1[yyj1].CodecDecodeSelf(d)
-				}
-			}
-		}
-		if yyj1 < len(yyv1) {
-			yyv1 = yyv1[:yyj1]
-			yyc1 = true
-		} else if yyj1 == 0 && yyv1 == nil {
-			yyv1 = make([]*Log, 0)
-			yyc1 = true
-		}
-	}
-	yyh1.End()
-	if yyc1 {
-		*v = yyv1
 	}
 }
 

@@ -54,7 +54,7 @@ type Receipt struct {
 	Status            uint64 `json:"status" codec:"2"`
 	CumulativeGasUsed uint64 `json:"cumulativeGasUsed" gencodec:"required" codec:"3"`
 	Bloom             Bloom  `json:"logsBloom"         gencodec:"required" codec:"-"`
-	Logs              []*Log `json:"logs"              gencodec:"required" codec:"4"`
+	Logs              []*Log `json:"logs"              gencodec:"required" codec:"-"`
 
 	// Implementation fields: These fields are added by geth when processing a transaction.
 	// They are stored in the chain database.

@@ -181,8 +181,6 @@ var receiptsOnePerTx = Migration{
 				if err := collectorL.Collect(newK, buf.Bytes()); err != nil {
 					return false, fmt.Errorf("collecting key %x: %w", k, err)
 				}
-
-				r.Logs = nil
 			}
 
 			buf.Reset()
