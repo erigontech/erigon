@@ -117,7 +117,7 @@ ethdb/mdbx/dist/libmdbx.a:
 	cd ethdb/mdbx/dist/ && make libmdbx.a && cat config.h
 
 test: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
-	TEST_DB=mdbx $(GOTEST)
+	$(GOTEST)
 
 test-lmdb: semantics/z3/build/libz3.a
 	TEST_DB=lmdb $(GOTEST)
