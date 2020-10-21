@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"os"
@@ -84,6 +85,7 @@ type PenaltyMsg struct {
 }
 
 func makeP2PServer(
+	ctx context.Context,
 	natSetting string,
 	port int,
 	peerHeightMap *sync.Map,
@@ -129,11 +131,13 @@ func makeP2PServer(
 				log.Info(fmt.Sprintf("[%s] Start with peer", peerID))
 				peerRwMap.Store(peerID, rw)
 				if err := runPeer(
+					ctx,
 					peerHeightMap,
 					peerTimeMap,
 					peer,
 					rw,
-					eth.ProtocolVersions[0],
+					eth.ProtocolVersions[0], // version == eth65
+					eth.ProtocolVersions[1], // minVersion == eth64
 					eth.DefaultConfig.NetworkID,
 					genesis.Difficulty,
 					params.MainnetGenesisHash,
@@ -142,6 +146,7 @@ func makeP2PServer(
 					newBlockCh,
 					newBlockHashCh,
 					headersCh,
+					coreClient,
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 				}
@@ -164,11 +169,13 @@ func errResp(code int, format string, v ...interface{}) error {
 }
 
 func runPeer(
+	ctx context.Context,
 	peerHeightMap *sync.Map,
 	peerTimeMap *sync.Map,
 	peer *p2p.Peer,
 	rw p2p.MsgReadWriter,
 	version uint,
+	minVersion uint,
 	networkID uint64,
 	td *big.Int,
 	genesisHash common.Hash,
@@ -177,6 +184,7 @@ func runPeer(
 	newBlockCh chan NewBlockFromSentry,
 	newBlockHashCh chan NewBlockHashFromSentry,
 	headersCh chan BlockHeadersFromSentry,
+	coreClient proto.ControlClient,
 ) error {
 	peerID := peer.ID().String()
 	forkId := forkid.NewID(chainConfig, genesisHash, head)
@@ -215,8 +223,8 @@ func runPeer(
 	if status.NetworkID != networkID {
 		return errResp(eth.ErrNetworkIDMismatch, "network id does not match: theirs %d, ours %d", status.NetworkID, networkID)
 	}
-	if uint(status.ProtocolVersion) != version {
-		return errResp(eth.ErrProtocolVersionMismatch, "version does not match: theirs %d, ours %d", status.ProtocolVersion, version)
+	if uint(status.ProtocolVersion) < minVersion {
+		return errResp(eth.ErrProtocolVersionMismatch, "version is less than allowed minimum: theirs %d, min %d", status.ProtocolVersion, minVersion)
 	}
 	if status.Genesis != genesisHash {
 		return errResp(eth.ErrGenesisMismatch, "genesis hash does not match: theirs %x, ours %x", status.Genesis, genesisHash)
@@ -254,8 +262,13 @@ func runPeer(
 				return fmt.Errorf("send empty headers reply: %v", err)
 			}
 		case eth.BlockHeadersMsg:
+			bytes := make([]byte, msg.Size)
+			_, err = io.ReadFull(msg.Payload, bytes)
+			if err != nil {
+				return fmt.Errorf("%s: reading msg into bytes: %v", err)
+			}
 			var headers []*types.Header
-			if err = msg.Decode(&headers); err != nil {
+			if err = rlp.DecodeBytes(bytes, &headers); err != nil {
 				return errResp(eth.ErrDecode, "decoding BlockHeadersMsg %v: %v", msg, err)
 			}
 			var hashesStr strings.Builder
@@ -267,7 +280,15 @@ func runPeer(
 				hashesStr.WriteString(fmt.Sprintf("%x-%x(%d)", hash[:4], hash[28:], header.Number.Uint64()))
 			}
 			log.Info(fmt.Sprintf("[%s] BlockHeadersMsg{%s}", peerID, hashesStr.String()))
-			headersCh <- BlockHeadersFromSentry{SentryMsg: SentryMsg{sentryId: 0, requestId: 0}, headers: headers}
+			outreq := proto.InboundMessage{
+				PeerId: []byte(peerID),
+				Id:     proto.InboundMessageId_BlockHeaders,
+				Data:   bytes,
+			}
+			_, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{})
+			if err != nil {
+				return fmt.Errorf("send block headers to core P2P: %v", err)
+			}
 		case eth.GetBlockBodiesMsg:
 			// Decode the retrieval message
 			msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
@@ -461,6 +482,7 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string) err
 	headersCh := make(chan BlockHeadersFromSentry)
 	var peerHeightMap, peerRwMap, peerTimeMap sync.Map
 	server, err := makeP2PServer(
+		ctx,
 		natSetting,
 		port,
 		&sentryServer.peerHeightMap,
