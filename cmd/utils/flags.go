@@ -423,9 +423,10 @@ var (
 		Usage: "Which database software to use? Currently supported values: lmdb",
 		Value: "lmdb",
 	}
-	HddFlag = cli.BoolFlag{
-		Name:  "hdd",
-		Usage: "Perform warm up loop during transaction replay stage to reduce the impact of high latency of HDD",
+	BatchSizeFlag = cli.StringFlag{
+		Name:  "batchSize",
+		Usage: "Batch size for the execution stage",
+		Value: "512M",
 	}
 	PrivateApiAddr = cli.StringFlag{
 		Name:  "private.api.addr",
@@ -1604,7 +1605,12 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	cfg.SnapshotMode = snMode
 	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
 
-	cfg.Hdd = ctx.GlobalBool(HddFlag.Name)
+	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
+		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))
+		if err != nil {
+			Fatalf("Invalid batchSize provided: %v", err)
+		}
+	}
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 
 	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheTrieFlag.Name) {

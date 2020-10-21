@@ -49,6 +49,7 @@ var stagesToUseNamedKeys = Migration{
 		}
 
 		if err := etl.Transform(
+			"stages_to_use_named_keys",
 			db,
 			dbutils.SyncStageProgressOld1,
 			dbutils.SyncStageProgress,
@@ -93,6 +94,7 @@ var unwindStagesToUseNamedKeys = Migration{
 		}
 
 		if err := etl.Transform(
+			"unwind_stages_to_use_named_keys",
 			db,
 			dbutils.SyncStageUnwindOld1,
 			dbutils.SyncStageUnwind,

@@ -165,7 +165,7 @@ type Downloader struct {
 
 	storageMode ethdb.StorageMode
 	datadir     string
-	hdd         bool
+	batchSize   int
 
 	headersState    *stagedsync.StageState
 	headersUnwinder stagedsync.Unwinder
@@ -224,7 +224,7 @@ type BlockChain interface {
 	InsertChain(context.Context, types.Blocks) (int, error)
 
 	// InsertBodyChain inserts a batch of blocks into the local chain, without executing them.
-	InsertBodyChain(context.Context, types.Blocks) (bool, error)
+	InsertBodyChain(string, context.Context, types.Blocks) (bool, error)
 
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []types.Receipts, uint64) (int, error)
@@ -287,8 +287,8 @@ func (d *Downloader) SetDataDir(datadir string) {
 	d.datadir = datadir
 }
 
-func (d *Downloader) SetHdd(hdd bool) {
-	d.hdd = hdd
+func (d *Downloader) SetBatchSize(batchSize int) {
+	d.batchSize = batchSize
 }
 
 func (d *Downloader) SetChainConfig(chainConfig *params.ChainConfig) {
@@ -559,7 +559,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			p.id,
 			d.storageMode,
 			d.datadir,
-			d.hdd,
+			d.batchSize,
 			d.quitCh,
 			fetchers,
 			txPool,
@@ -604,7 +604,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
 				return nil
 			}
-			log.Info(fmt.Sprintf("[%s] Commit blocks", stages.Bodies))
+			log.Info("Commit cycle")
 			_, errCommit := tx.Commit()
 			return errCommit
 		})
@@ -621,7 +621,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			commitStart := time.Now()
 			_, errTx := tx.Commit()
 			if errTx == nil {
-				log.Info(fmt.Sprintf("[%s] Commit blocks", stages.Bodies), "in", time.Since(commitStart))
+				log.Info("Commit cycle", "in", time.Since(commitStart))
 			}
 			return errTx
 		}
@@ -688,7 +688,7 @@ func (d *Downloader) Cancel() {
 	d.cancel()
 	d.cancelWg.Wait()
 
-	d.ancientLimit = 0
+	atomic.StoreUint64(&d.ancientLimit, 0)
 	log.Debug("Reset ancient limit to zero")
 }
 
@@ -1695,11 +1695,12 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					if mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
+						logPrefix := d.stagedSyncState.LogPrefix()
+						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
-								return fmt.Errorf("unwinding all stages to %d: %v", forkBlockNumber, err1)
+								return fmt.Errorf("%s: unwinding all stages to %d: %v", logPrefix, forkBlockNumber, err1)
 							}
 						}
 					} else {
@@ -1769,20 +1770,20 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 // processFullSyncContent takes fetch results from the queue and imports them into the chain.
 func (d *Downloader) processFullSyncContent() error {
 	for {
-		results := d.queue.Results(true)
+		results := d.queue.Results("logPrefix", true)
 		if len(results) == 0 {
 			return nil
 		}
 		if d.chainInsertHook != nil {
 			d.chainInsertHook(results)
 		}
-		if _, err := d.importBlockResults(results, true /* execute */); err != nil {
+		if _, err := d.importBlockResults("logPrefix", results, true /* execute */); err != nil {
 			return err
 		}
 	}
 }
 
-func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (uint64, error) {
+func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult, execute bool) (uint64, error) {
 	// Check for any early termination requests
 	if len(results) == 0 {
 		return 0, nil
@@ -1806,7 +1807,7 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 	if execute {
 		index, err = d.blockchain.InsertChain(context.Background(), blocks)
 	} else {
-		stopped, err = d.blockchain.InsertBodyChain(context.Background(), blocks)
+		stopped, err = d.blockchain.InsertBodyChain(logPrefix, context.Background(), blocks)
 		if stopped {
 			index = 0
 		} else {
@@ -1839,7 +1840,7 @@ func (d *Downloader) commitPivotBlock(result *fetchResult) error {
 	log.Debug("Committing fast sync pivot as new head", "number", block.Number(), "hash", block.Hash())
 
 	// Commit the pivot block as the new head, will require full sync from here on
-	if _, err := d.blockchain.InsertReceiptChain([]*types.Block{block}, []types.Receipts{result.Receipts}, d.ancientLimit); err != nil {
+	if _, err := d.blockchain.InsertReceiptChain([]*types.Block{block}, []types.Receipts{result.Receipts}, atomic.LoadUint64(&d.ancientLimit)); err != nil {
 		return err
 	}
 	if err := d.blockchain.FastSyncCommitHead(block.Hash()); err != nil {

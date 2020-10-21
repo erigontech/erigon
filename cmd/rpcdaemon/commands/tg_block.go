@@ -11,16 +11,16 @@ import (
 )
 
 // GetHeaderByNumber returns a block's header by number
-func (api *TgImpl) GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
+func (api *TgImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockNumber) (*types.Header, error) {
 	tx, err := api.db.Begin(ctx, nil, false)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	header := rawdb.ReadHeaderByNumber(tx, uint64(number.Int64()))
+	header := rawdb.ReadHeaderByNumber(tx, uint64(blockNumber.Int64()))
 	if header == nil {
-		return nil, fmt.Errorf("block header not found: %d", number.Int64())
+		return nil, fmt.Errorf("block header not found: %d", blockNumber.Int64())
 	}
 
 	return header, nil

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -52,7 +53,7 @@ func init() {
 	withUnwind(stateStags)
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
-	withHDD(stateStags)
+	withBatchSize(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 }
@@ -114,6 +115,8 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		stopAt = block
 	}
 
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 	for progress(stages.Execution).BlockNumber < stopAt || (unwind <= unwindEvery) {
 		select {
 		case <-ctx.Done():
@@ -142,7 +145,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 				stagedsync.ExecuteBlockStageParams{
 					ToBlock:       execToBlock, // limit execution to the specified block
 					WriteReceipts: sm.Receipts,
-					Hdd:           hdd,
+					BatchSize:     int(batchSize),
 					ChangeSetHook: changeSetHook,
 				}); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)

@@ -10,7 +10,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 
 	"github.com/RoaringBitmap/roaring"
@@ -45,8 +44,9 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 	}
 
 	endBlock, err := s.ExecutionAt(tx)
+	logPrefix := s.state.LogPrefix()
 	if err != nil {
-		return fmt.Errorf("logs index: getting last executed block: %w", err)
+		return fmt.Errorf("%s: logs index: getting last executed block: %w", logPrefix, err)
 	}
 	if endBlock == s.BlockNumber {
 		s.Done()
@@ -58,7 +58,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 		start++
 	}
 
-	if err := promoteLogIndex(tx, start, datadir, quit); err != nil {
+	if err := promoteLogIndex(logPrefix, tx, start, datadir, quit); err != nil {
 		return err
 	}
 
@@ -74,7 +74,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 	return nil
 }
 
-func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-chan struct{}) error {
+func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, datadir string, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -104,7 +104,7 @@ func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-cha
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Progress", stages.LogIndex), "blockNum", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush(topics, logIndicesMemLimit) {
 				if err := flushBitmaps(collectorTopics, topics); err != nil {
@@ -123,7 +123,7 @@ func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-cha
 
 		receipts := types.Receipts{}
 		if err := cbor.Unmarshal(&receipts, v); err != nil {
-			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
+			return fmt.Errorf("%s: receipt unmarshal failed: %w, blocl=%d", logPrefix, err, blockNum)
 		}
 
 		for _, receipt := range receipts {
@@ -165,14 +165,14 @@ func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-cha
 		binary.BigEndian.PutUint32(lastChunkKey[len(k):], ^uint32(0))
 		lastChunkBytes, err := table.Get(lastChunkKey)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return fmt.Errorf("find last chunk failed: %w", err)
+			return fmt.Errorf("%s: find last chunk failed: %w", logPrefix, err)
 		}
 
 		lastChunk := roaring.New()
 		if len(lastChunkBytes) > 0 {
 			_, err = lastChunk.FromBuffer(lastChunkBytes)
 			if err != nil {
-				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
+				return fmt.Errorf("%s: couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", logPrefix, err, len(lastChunkBytes))
 			}
 		}
 
@@ -205,11 +205,11 @@ func promoteLogIndex(db ethdb.Database, start uint64, datadir string, quit <-cha
 		return nil
 	}
 
-	if err := collectorTopics.Load(db, dbutils.LogTopicIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorTopics.Load(logPrefix, db, dbutils.LogTopicIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 
-	if err := collectorAddrs.Load(db, dbutils.LogAddressIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorAddrs.Load(logPrefix, db, dbutils.LogAddressIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 
@@ -231,12 +231,13 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 		defer tx.Rollback()
 	}
 
-	if err := unwindLogIndex(tx, s.BlockNumber, u.UnwindPoint, quitCh); err != nil {
+	logPrefix := s.state.LogPrefix()
+	if err := unwindLogIndex(logPrefix, tx, s.BlockNumber, u.UnwindPoint, quitCh); err != nil {
 		return err
 	}
 
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("unwind LogIndex: %w", err)
+		return fmt.Errorf("%s: %w", logPrefix, err)
 	}
 
 	if !useExternalTx {
@@ -248,7 +249,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-c
 	return nil
 }
 
-func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-chan struct{}) error {
+func unwindLogIndex(logPrefix string, db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-chan struct{}) error {
 	topics := map[string]struct{}{}
 	addrs := map[string]struct{}{}
 
@@ -259,7 +260,7 @@ func unwindLogIndex(db ethdb.DbWithPendingMutations, from, to uint64, quitCh <-c
 		}
 		receipts := types.Receipts{}
 		if err := cbor.Unmarshal(&receipts, v); err != nil {
-			return false, fmt.Errorf("receipt unmarshal failed: %w, k=%x", err, k)
+			return false, fmt.Errorf("%s: receipt unmarshal failed: %w, k=%x", logPrefix, err, k)
 		}
 
 		for _, receipt := range receipts {

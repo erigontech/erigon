@@ -9,13 +9,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // externsions for downloader needed for staged sync
 func (d *Downloader) SpawnBodyDownloadStage(
+	logPrefix string,
 	id string,
 	s *stagedsync.StageState,
 	u stagedsync.Unwinder,
@@ -54,7 +54,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 			// This is how we learn about canonical chain
 			blockNumber := binary.BigEndian.Uint64(k[:8])
 			if blockNumber != currentNumber {
-				log.Warn("Canonical hash is missing", "number", currentNumber, "got", blockNumber)
+				log.Warn(fmt.Sprintf("[%s] Canonical hash is missing", logPrefix), "number", currentNumber, "got", blockNumber)
 				missingHeader = currentNumber
 				return false, nil
 			}
@@ -70,18 +70,18 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		}
 		header := new(types.Header)
 		if err1 := rlp.Decode(bytes.NewReader(v), header); err1 != nil {
-			log.Error("Invalid block header RLP", "hash", k[8:], "err", err1)
+			log.Error(fmt.Sprintf("[%s] Invalid block header RLP", logPrefix), "hash", k[8:], "err", err1)
 			return false, err1
 		}
 		headers[common.BytesToHash(k[8:])] = header
 		return hashCount < len(hashes), nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("walking over canonical hashes: %w", err)
+		return false, fmt.Errorf("%s: walking over canonical hashes: %w", logPrefix, err)
 	}
 	if missingHeader != 0 {
 		if err1 := u.UnwindTo(missingHeader, d.stateDB); err1 != nil {
-			return false, fmt.Errorf("resetting SyncStage Headers to missing header: %w", err1)
+			return false, fmt.Errorf("%s: resetting SyncStage Headers to missing header: %w", logPrefix, err1)
 		}
 		// This will cause the sync return to the header stage
 		return false, nil
@@ -98,7 +98,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		if block := prefetchedBlocks.Pop(h); block != nil {
 			fr := fetchResultFromBlock(block)
 			execute := false
-			_, err := d.importBlockResults([]*fetchResult{fr}, execute)
+			_, err := d.importBlockResults(logPrefix, []*fetchResult{fr}, execute)
 			if err != nil {
 				return false, err
 			}
@@ -108,10 +108,10 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		}
 	}
 	if prefetchedHashes > 0 {
-		log.Debug("Used prefetched bodies", "count", prefetchedHashes, "to", origin+uint64(prefetchedHashes))
+		log.Debug(fmt.Sprintf("[%s] Used prefetched bodies", logPrefix), "count", prefetchedHashes, "to", origin+uint64(prefetchedHashes))
 		return true, nil
 	}
-	log.Info(fmt.Sprintf("[%s] Downloading block bodies", stages.Bodies), "count", hashCount)
+	log.Info(fmt.Sprintf("[%s] Downloading block bodies", logPrefix), "count", hashCount)
 	from := origin + 1
 	d.queue.Prepare(from, d.getMode())
 	d.queue.ScheduleBodies(from, hashes[:hashCount], headers)
@@ -127,7 +127,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 	// Now fetch all the bodies
 	fetchers := []func() error{
 		func() error { return d.fetchBodies(from) },
-		func() error { return d.processBodiesStage(to) },
+		func() error { return d.processBodiesStage(logPrefix, to) },
 	}
 
 	if err := d.spawnSync(fetchers); err != nil {
@@ -147,17 +147,17 @@ func fetchResultFromBlock(b *types.Block) *fetchResult {
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.
 // it doesn't execute blocks
-func (d *Downloader) processBodiesStage(to uint64) error {
+func (d *Downloader) processBodiesStage(logPrefix string, to uint64) error {
 	for {
 		if err := common.Stopped(d.quitCh); err != nil {
 			return err
 		}
 
-		results := d.queue.Results(true)
+		results := d.queue.Results(logPrefix, true)
 		if len(results) == 0 {
 			return nil
 		}
-		lastNumber, err := d.importBlockResults(results, false /* execute */)
+		lastNumber, err := d.importBlockResults(logPrefix, results, false /* execute */)
 		if err != nil {
 			return err
 		}

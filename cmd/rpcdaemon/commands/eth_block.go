@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter/ethapi"
 )
@@ -71,38 +70,6 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, hash common.Hash, fullTx
 		}
 	}
 	return response, err
-}
-
-// GetHeaderByNumber returns a block's header by number
-func (api *APIImpl) GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	tx, err := api.dbReader.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	header := rawdb.ReadHeaderByNumber(tx, uint64(number.Int64()))
-	if header == nil {
-		return nil, fmt.Errorf("block header not found: %d", number.Int64())
-	}
-
-	return header, nil
-}
-
-// GetHeaderByHash returns a block's header by hash
-func (api *APIImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
-	tx, err := api.dbReader.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	header := rawdb.ReadHeaderByHash(tx, hash)
-	if header == nil {
-		return nil, fmt.Errorf("block header not found: %s", hash.String())
-	}
-
-	return header, nil
 }
 
 // GetBlockTransactionCountByNumber returns the number of transactions in the block

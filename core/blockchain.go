@@ -40,7 +40,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -1239,7 +1238,7 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 
 // InsertBodyChain attempts to insert the given batch of block into the
 // canonical chain, without executing those blocks
-func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (bool, error) {
+func (bc *BlockChain) InsertBodyChain(logPrefix string, ctx context.Context, chain types.Blocks) (bool, error) {
 	// Sanity check that we have something meaningful to import
 	if len(chain) == 0 {
 		return true, nil
@@ -1274,6 +1273,7 @@ func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (
 	}()
 
 	return InsertBodies(
+		logPrefix,
 		ctx,
 		&bc.procInterrupt,
 		chain,
@@ -1653,7 +1653,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		stats.Processed++
 		stats.UsedGas += usedGas
 		toCommit := stats.NeedToCommit(chain, i)
-		stats.Report(chain, i, toCommit)
+		stats.Report("logPrefix", chain, i, toCommit)
 		if toCommit {
 			bc.committedBlock.Store(bc.currentBlock.Load())
 			committedK = k
@@ -1683,7 +1683,7 @@ func (st *InsertStats) NeedToCommit(chain []*types.Block, index int) bool {
 
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
-func (st *InsertStats) Report(chain []*types.Block, index int, toCommit bool) {
+func (st *InsertStats) Report(logPrefix string, chain []*types.Block, index int, toCommit bool) {
 	// Fetch the timings for the batch
 	var (
 		now     = mclock.Now()
@@ -1711,7 +1711,7 @@ func (st *InsertStats) Report(chain []*types.Block, index int, toCommit bool) {
 		if st.ignored > 0 {
 			context = append(context, []interface{}{"ignored", st.ignored}...)
 		}
-		log.Info(fmt.Sprintf("[%s] Imported new chain segment", stages.Bodies), context...)
+		log.Info(fmt.Sprintf("[%s] Imported new chain segment", logPrefix), context...)
 		*st = InsertStats{StartTime: now, lastIndex: index + 1}
 	}
 }
@@ -2209,6 +2209,7 @@ func ExecuteBlockEphemerally(
 
 // InsertBodies is insertChain with execute=false and ommission of blockchain object
 func InsertBodies(
+	logPrefix string,
 	ctx context.Context,
 	procInterrupt *int32,
 	chain types.Blocks,
@@ -2269,7 +2270,7 @@ func InsertBodies(
 			"root", block.Root())
 	}
 	stats.Processed = len(chain)
-	stats.Report(chain, len(chain)-1, true)
+	stats.Report(logPrefix, chain, len(chain)-1, true)
 	rawdb.WriteHeadBlockHash(db, chain[len(chain)-1].Hash())
 	if _, err := batch.Commit(); err != nil {
 		return true, fmt.Errorf("commit inserting bodies: %w", err)

@@ -76,6 +76,7 @@ type TransformArgs struct {
 }
 
 func Transform(
+	logPrefix string,
 	db ethdb.Database,
 	fromBucket string,
 	toBucket string,
@@ -92,17 +93,20 @@ func Transform(
 	collector := NewCollector(datadir, buffer)
 
 	t := time.Now()
-	if err := extractBucketIntoFiles(db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit, args.LogDetailsExtract); err != nil {
-		disposeProviders(collector.dataProviders)
+	if err := extractBucketIntoFiles(logPrefix, db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit, args.LogDetailsExtract); err != nil {
+		disposeProviders(logPrefix, collector.dataProviders)
 		return err
 	}
-	log.Debug("Extraction finished", "it took", time.Since(t))
+	log.Debug(fmt.Sprintf("[%s] Extraction finished", logPrefix), "it took", time.Since(t))
 
-	defer func(t time.Time) { log.Debug("Collection finished", "it took", time.Since(t)) }(time.Now())
-	return collector.Load(db, toBucket, loadFunc, args)
+	defer func(t time.Time) {
+		log.Debug(fmt.Sprintf("[%s] Collection finished", logPrefix), "it took", time.Since(t))
+	}(time.Now())
+	return collector.Load(logPrefix, db, toBucket, loadFunc, args)
 }
 
 func extractBucketIntoFiles(
+	logPrefix string,
 	db ethdb.Database,
 	bucket string,
 	startkey []byte,
@@ -134,7 +138,7 @@ func extractBucketIntoFiles(
 
 			runtime.ReadMemStats(&m)
 			logArs = append(logArs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-			log.Info("ETL [1/2] Extracting", logArs...)
+			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
 		}
 		if endkey != nil && bytes.Compare(k, endkey) > 0 {
 			return false, nil
@@ -148,17 +152,17 @@ func extractBucketIntoFiles(
 	}
 	return collector.flushBuffer(nil, true)
 }
-func disposeProviders(providers []dataProvider) {
+func disposeProviders(logPrefix string, providers []dataProvider) {
 	totalSize := uint64(0)
 	for _, p := range providers {
 		providerSize, err := p.Dispose()
 		if err != nil {
-			log.Warn("promoting hashed state, error while disposing provider", "provier", p, "err", err)
+			log.Warn(fmt.Sprintf("[%s] promoting hashed state, error while disposing provider", logPrefix), "provider", p, "err", err)
 		}
 		totalSize += providerSize
 	}
 	if totalSize > 0 {
-		log.Info("etl: temp files removed successfully", "total size", datasize.ByteSize(totalSize).HumanReadable())
+		log.Info(fmt.Sprintf("[%s] etl: temp files removed successfully", logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
 	}
 }
 

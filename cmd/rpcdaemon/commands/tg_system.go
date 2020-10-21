@@ -15,7 +15,7 @@ type Forks struct {
 	Next        *uint64     `json:"next,omitempty"`
 }
 
-// returns forkID hash, sorted list of already passed forks and next fork block
+// Forks returns forkID hash, sorted list of already passed forks and next fork block
 func (api *TgImpl) Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (Forks, error) {
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
 	if err != nil {

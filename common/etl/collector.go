@@ -112,7 +112,7 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
-func (c *Collector) Load(db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) (err error) {
+func (c *Collector) Load(logPrefix string, db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) (err error) {
 	defer func() {
 		if !c.cleanOnFailure {
 			// don't clean if error or panic happened
@@ -124,21 +124,21 @@ func (c *Collector) Load(db ethdb.Database, toBucket string, loadFunc LoadFunc, 
 			}
 		}
 
-		disposeProviders(c.dataProviders)
+		disposeProviders(logPrefix, c.dataProviders)
 	}()
 	if !c.allFlushed {
 		if err := c.flushBuffer(nil, true); err != nil {
 			return err
 		}
 	}
-	err = loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, args)
+	err = loadFilesIntoBucket(logPrefix, db, toBucket, c.dataProviders, loadFunc, args)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
+func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
 
@@ -149,8 +149,8 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 			he := HeapElem{key, i, value}
 			heap.Push(h, he)
 		} else /* we must have at least one entry per file */ {
-			eee := fmt.Errorf("error reading first readers: n=%d current=%d provider=%s err=%v",
-				len(providers), i, provider, err)
+			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%v",
+				logPrefix, len(providers), i, provider, err)
 			panic(eee)
 		}
 	}
@@ -204,7 +204,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 
 			runtime.ReadMemStats(&m)
 			logArs = append(logArs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-			log.Info("ETL [2/2] Loading", logArs...)
+			log.Info(fmt.Sprintf("[%s] ETL [2/2] Loading", logPrefix), logArs...)
 		}
 
 		if canUseAppend && len(v) == 0 {
@@ -218,12 +218,12 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		}
 		if canUseAppend {
 			if err := tx.(*ethdb.TxDb).Append(bucket, k, v); err != nil {
-				return fmt.Errorf("append: k=%x, %w", k, err)
+				return fmt.Errorf("%s: append: k=%x, %w", logPrefix, k, err)
 			}
 			return nil
 		}
 		if err := tx.Put(bucket, k, v); err != nil {
-			return fmt.Errorf("put: k=%x, %w", k, err)
+			return fmt.Errorf("%s: put: k=%x, %w", logPrefix, k, err)
 		}
 		return nil
 	}
@@ -242,7 +242,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		if element.Key, element.Value, err = provider.Next(decoder); err == nil {
 			heap.Push(h, element)
 		} else if err != io.EOF {
-			return fmt.Errorf("error while reading next element from disk: %v", err)
+			return fmt.Errorf("%s: error while reading next element from disk: %v", logPrefix, err)
 		}
 	}
 	// Final commit
@@ -261,7 +261,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 
 	runtime.ReadMemStats(&m)
 	log.Debug(
-		"Committed batch",
+		fmt.Sprintf("[%s] Committed batch", logPrefix),
 		"bucket", bucket,
 		"commit", commitTook,
 		"records", i,

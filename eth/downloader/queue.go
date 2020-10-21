@@ -29,7 +29,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
@@ -360,7 +359,7 @@ func (q *queue) Schedule(headers []*types.Header, from uint64) []*types.Header {
 // the cache. the result slice will be empty if the queue has been closed.
 // Results can be called concurrently with Deliver and Schedule,
 // but assumes that there are not two simultaneous callers to Results
-func (q *queue) Results(block bool) []*fetchResult {
+func (q *queue) Results(logPrefix string, block bool) []*fetchResult {
 	// Abort early if there are no items and non-blocking requested
 	if !block && !q.resultCache.HasCompletedItems() {
 		return nil
@@ -411,7 +410,7 @@ func (q *queue) Results(block bool) []*fetchResult {
 		q.lastStatLog = time.Now()
 		info := q.Stats()
 		info = append(info, "throttle", throttleThreshold)
-		log.Info(fmt.Sprintf("[%s] Downloader queue stats", stages.Bodies), info...)
+		log.Info(fmt.Sprintf("[%s] Downloader queue stats", logPrefix), info...)
 	}
 	return results
 }
