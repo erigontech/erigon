@@ -208,7 +208,7 @@ func (st *stagedSyncTester) sync(id string, td *big.Int) error {
 	st.lock.RUnlock()
 
 	// Synchronise with the chosen peer and ensure proper cleanup afterwards
-	err := st.downloader.synchronise("logPrefix", id, hash, number, StagedSync, nil, func() error { return nil })
+	err := st.downloader.synchronise(id, hash, number, StagedSync, nil, func() error { return nil })
 	select {
 	case <-st.downloader.cancelCh:
 		// Ok, downloader fully cancelled after sync cycle

@@ -19,8 +19,7 @@ import (
 )
 
 func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
-	logPrefix := s.state.LogPrefix()
-	err := d.SpawnHeaderDownloadStage(logPrefix, headersFetchers, s, u)
+	err := d.SpawnHeaderDownloadStage(headersFetchers, s, u)
 	if err == nil {
 		s.Done()
 	}

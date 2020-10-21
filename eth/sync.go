@@ -312,7 +312,7 @@ func (pm *ProtocolManager) doSync(op *chainSyncOp) error {
 	*/
 	// Run the sync cycle, and disable fast sync if we're past the pivot block
 	txPool, _ := pm.txpool.(*core.TxPool)
-	err := pm.downloader.Synchronise("doSync", op.peer.id, op.head, op.number, op.mode, txPool, func() error { return pm.StartTxPool() })
+	err := pm.downloader.Synchronise(op.peer.id, op.head, op.number, op.mode, txPool, func() error { return pm.StartTxPool() })
 	if err != nil {
 		return err
 	}

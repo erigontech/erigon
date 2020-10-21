@@ -368,8 +368,8 @@ func (d *Downloader) UnregisterPeer(id string) error {
 
 // Synchronise tries to sync up our local block chain with a remote peer, both
 // adding various sanity checks as well as wrapping it with various log entries.
-func (d *Downloader) Synchronise(logPrefix string, id string, head common.Hash, blockNumber uint64, mode SyncMode, txPool *core.TxPool, poolStart func() error) error {
-	err := d.synchronise(logPrefix, id, head, blockNumber, mode, txPool, poolStart)
+func (d *Downloader) Synchronise(id string, head common.Hash, blockNumber uint64, mode SyncMode, txPool *core.TxPool, poolStart func() error) error {
+	err := d.synchronise(id, head, blockNumber, mode, txPool, poolStart)
 
 	switch err {
 	case nil, errBusy, errCanceled:
@@ -396,7 +396,7 @@ func (d *Downloader) Synchronise(logPrefix string, id string, head common.Hash, 
 // synchronise will select the peer and use it for synchronising. If an empty string is given
 // it will use the best peer possible and synchronize if its TD is higher than our own. If any of the
 // checks fail an error will be returned. This method is synchronous
-func (d *Downloader) synchronise(logPrefix string, id string, hash common.Hash, blockNumber uint64, mode SyncMode, txPool *core.TxPool, poolStart func() error) error {
+func (d *Downloader) synchronise(id string, hash common.Hash, blockNumber uint64, mode SyncMode, txPool *core.TxPool, poolStart func() error) error {
 	// Mock out the synchronisation if testing
 	if d.synchroniseMock != nil {
 		return d.synchroniseMock(id, hash)
@@ -459,7 +459,7 @@ func (d *Downloader) synchronise(logPrefix string, id string, hash common.Hash, 
 	if p == nil {
 		return errUnknownPeer
 	}
-	return d.syncWithPeer(logPrefix, p, hash, blockNumber, txPool, poolStart)
+	return d.syncWithPeer(p, hash, blockNumber, txPool, poolStart)
 }
 
 func (d *Downloader) getMode() SyncMode {
@@ -468,7 +468,7 @@ func (d *Downloader) getMode() SyncMode {
 
 // syncWithPeer starts a block synchronization based on the hash chain from the
 // specified peer and head hash.s
-func (d *Downloader) syncWithPeer(logPrefix string, p *peerConnection, hash common.Hash, blockNumber uint64, txPool *core.TxPool, poolStart func() error) (err error) {
+func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumber uint64, txPool *core.TxPool, poolStart func() error) (err error) {
 	d.mux.Post(StartEvent{})
 	defer func() {
 		// reset on error
@@ -520,7 +520,7 @@ func (d *Downloader) syncWithPeer(logPrefix string, p *peerConnection, hash comm
 
 	fetchers := []func() error{
 		func() error { return d.fetchHeaders(p, origin+1) }, // Headers are always retrieved
-		func() error { return d.processHeaders(logPrefix, origin+1, pivot, blockNumber) },
+		func() error { return d.processHeaders(origin+1, pivot, blockNumber) },
 	}
 
 	// Turbo-Geth's staged sync goes here
@@ -638,12 +638,12 @@ func (d *Downloader) syncWithPeer(logPrefix string, p *peerConnection, hash comm
 	} else if mode == FullSync {
 		fetchers = append(fetchers, d.processFullSyncContent)
 	}
-	return d.spawnSync(logPrefix, fetchers)
+	return d.spawnSync(fetchers)
 }
 
 // spawnSync runs d.process and all given fetcher functions to completion in
 // separate goroutines, returning the first error that appears.
-func (d *Downloader) spawnSync(logPrefix string, fetchers []func() error) error {
+func (d *Downloader) spawnSync(fetchers []func() error) error {
 	errc := make(chan error, len(fetchers))
 
 	d.cancelWg.Add(len(fetchers))
@@ -1571,7 +1571,7 @@ func (d *Downloader) fetchParts(deliveryCh chan dataPack, deliver func(dataPack)
 // processHeaders takes batches of retrieved headers from an input channel and
 // keeps processing and scheduling them into the header chain and downloader's
 // queue until the stream ends or a failure occurs.
-func (d *Downloader) processHeaders(logPrefix string, origin uint64, pivot uint64, blockNumber uint64) error {
+func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uint64) error {
 	log.Debug("processHeaders", "origin", origin, "bn", blockNumber)
 	// Keep a count of uncertain headers to roll back
 	var (
@@ -1695,11 +1695,12 @@ func (d *Downloader) processHeaders(logPrefix string, origin uint64, pivot uint6
 					if mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
+						logPrefix := d.stagedSyncState.LogPrefix()
 						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
-								return fmt.Errorf("unwinding all stages to %d: %v", forkBlockNumber, err1)
+								return fmt.Errorf("%s: unwinding all stages to %d: %v", logPrefix, forkBlockNumber, err1)
 							}
 						}
 					} else {

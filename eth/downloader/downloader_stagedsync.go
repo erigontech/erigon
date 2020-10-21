@@ -130,7 +130,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		func() error { return d.processBodiesStage(to) },
 	}
 
-	if err := d.spawnSync(logPrefix, fetchers); err != nil {
+	if err := d.spawnSync(fetchers); err != nil {
 		return false, err
 	}
 
@@ -173,7 +173,6 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 }
 
 func (d *Downloader) SpawnHeaderDownloadStage(
-	logPrefix string,
 	fetchers []func() error,
 	s *stagedsync.StageState,
 	u stagedsync.Unwinder,
@@ -192,5 +191,5 @@ func (d *Downloader) SpawnHeaderDownloadStage(
 	d.cancelCh = make(chan struct{})
 	d.cancelLock.Unlock()
 	defer d.Cancel() // No matter what, we can't leave the cancel channel open
-	return d.spawnSync(logPrefix, fetchers)
+	return d.spawnSync(fetchers)
 }
