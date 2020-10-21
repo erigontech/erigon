@@ -239,6 +239,7 @@ var Buckets = []string{
 	SnapshotInfoBucket,
 	CallFromIndex,
 	CallToIndex,
+	Log,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

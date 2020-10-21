@@ -204,10 +204,6 @@ var receiptsOnePerTx = Migration{
 		if err := OnLoadCommit(db, nil, false); err != nil {
 			return fmt.Errorf("committing the removal of receipt table")
 		}
-		// Commit again
-		if err := OnLoadCommit(db, nil, false); err != nil {
-			return fmt.Errorf("committing again to create a stable view the removal of receipt table")
-		}
 		// Now transaction would have been re-opened, and we should be re-using the space
 		if err := collectorR.Load("receipts_one_per_tx", db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
