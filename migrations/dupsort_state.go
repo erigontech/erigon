@@ -27,6 +27,7 @@ var dupSortHashState = Migration{
 		}
 
 		if err := etl.Transform(
+			"dupsort_hash_state",
 			db,
 			dbutils.CurrentStateBucketOld1,
 			dbutils.CurrentStateBucket,
@@ -62,6 +63,7 @@ var dupSortPlainState = Migration{
 		}
 
 		if err := etl.Transform(
+			"dupsort_plain_state",
 			db,
 			dbutils.PlainStateBucketOld1,
 			dbutils.PlainStateBucket,
@@ -99,14 +101,14 @@ var dupSortIH = Migration{
 			}
 			return collector.Collect(keyHex, hash)
 		}
-		loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+		loader := trie.NewFlatDBTrieLoader("dupsort_intermediate_trie_hashes", dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 		if err := loader.Reset(trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
 			return err
 		}
 		if _, err := loader.CalcTrieRoot(db, nil); err != nil {
 			return err
 		}
-		if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+		if err := collector.Load("dupsort_intermediate_trie_hashes", db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 			Comparator: comparator,
 		}); err != nil {
 			return fmt.Errorf("gen ih stage: fail load data to bucket: %w", err)

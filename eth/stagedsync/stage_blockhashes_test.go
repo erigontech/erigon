@@ -24,7 +24,7 @@ func TestBlockHashStage(t *testing.T) {
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
 	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
 
-	_, _, err := InsertHeaderChain(db, headers, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	_, _, err := InsertHeaderChain("logPrefix", db, headers, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
 	assert.NoError(t, err)
 	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, db, "", nil)
 	assert.NoError(t, err)

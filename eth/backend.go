@@ -303,7 +303,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
 	eth.protocolManager.SetDataDir(stack.Config().DataDir)
-	eth.protocolManager.SetHdd(config.Hdd)
+	eth.protocolManager.SetBatchSize(int(config.BatchSize))
 
 	if config.SyncMode != downloader.StagedSync {
 		if err = eth.StartTxPool(); err != nil {

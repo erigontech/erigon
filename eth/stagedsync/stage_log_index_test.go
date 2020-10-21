@@ -2,11 +2,12 @@ package stagedsync
 
 import (
 	"context"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
-	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/require"
@@ -49,7 +50,7 @@ func TestLogIndex(t *testing.T) {
 	err = appendReceipts(tx, receipts2, 2, common.Hash{})
 	require.NoError(err)
 
-	err = promoteLogIndex(tx, 0, "", nil)
+	err = promoteLogIndex("logPrefix", tx, 0, "", nil)
 	require.NoError(err)
 
 	// Check indices GetCardinality (in how many blocks they meet)
@@ -73,7 +74,7 @@ func TestLogIndex(t *testing.T) {
 	require.Equal(2, int(m.GetCardinality()))
 
 	// Unwind test
-	err = unwindLogIndex(tx, 2, 1, nil)
+	err = unwindLogIndex("logPrefix", tx, 2, 1, nil)
 	require.NoError(err)
 
 	m, err = bitmapdb.Get(logAddrIndex, addr1[:], 0, 10_000_000)
@@ -93,7 +94,7 @@ func TestLogIndex(t *testing.T) {
 	require.Equal(1, int(m.GetCardinality()))
 
 	// Unwind test
-	err = unwindLogIndex(tx, 1, 0, nil)
+	err = unwindLogIndex("logPrefix", tx, 1, 0, nil)
 	require.NoError(err)
 
 	m, err = bitmapdb.Get(logAddrIndex, addr1[:], 0, 10_000_000)

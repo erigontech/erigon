@@ -28,16 +28,17 @@ func SpawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh <-ch
 		return err
 	}
 
+	logPrefix := s.state.LogPrefix()
 	startKey = dbutils.HeaderHashKey(blockNum)
-	if err = TxLookupTransform(db, startKey, dbutils.HeaderHashKey(syncHeadNumber), quitCh, dataDir); err != nil {
+	if err = TxLookupTransform(logPrefix, db, startKey, dbutils.HeaderHashKey(syncHeadNumber), quitCh, dataDir); err != nil {
 		return err
 	}
 
 	return s.DoneAndUpdate(db, syncHeadNumber)
 }
 
-func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh <-chan struct{}, datadir string) error {
-	return etl.Transform(db, dbutils.HeaderPrefix, dbutils.TxLookupPrefix, datadir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+func TxLookupTransform(logPrefix string, db ethdb.Database, startKey, endKey []byte, quitCh <-chan struct{}, datadir string) error {
+	return etl.Transform(logPrefix, db, dbutils.HeaderPrefix, dbutils.TxLookupPrefix, datadir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		if !dbutils.CheckCanonicalKey(k) {
 			return nil
 		}
@@ -45,7 +46,7 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh <-chan
 		blockHash := common.BytesToHash(v)
 		body := rawdb.ReadBody(db, blockHash, blocknum)
 		if body == nil {
-			return fmt.Errorf("tx lookup generation, empty block body %d, hash %x", blocknum, v)
+			return fmt.Errorf("%s: tx lookup generation, empty block body %d, hash %x", logPrefix, blocknum, v)
 		}
 
 		blockNumBytes := new(big.Int).SetUint64(blocknum).Bytes()
@@ -68,6 +69,7 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh <-chan
 func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quitCh <-chan struct{}) error {
 	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
+	logPrefix := s.state.LogPrefix()
 	// Remove lookup entries for blocks between unwindPoint+1 and stage.BlockNumber
 	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (b bool, e error) {
 		if err := common.Stopped(quitCh); err != nil {
@@ -90,7 +92,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, datadir st
 
 		body := new(types.Body)
 		if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
-			return false, fmt.Errorf("unwindTxLookup, rlp decode err: %w", err)
+			return false, fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
 		}
 		for _, tx := range body.Transactions {
 			if err := collector.Collect(tx.Hash().Bytes(), nil); err != nil {
@@ -102,7 +104,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, datadir st
 	}); err != nil {
 		return err
 	}
-	if err := collector.Load(db, dbutils.TxLookupPrefix, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
+	if err := collector.Load(logPrefix, db, dbutils.TxLookupPrefix, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
 		return err
 	}
 	return u.Done(db)

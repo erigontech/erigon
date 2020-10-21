@@ -14,7 +14,7 @@ var (
 	block              uint64
 	unwind             uint64
 	unwindEvery        uint64
-	hdd                bool
+	batchSizeStr       string
 	reset              bool
 	bucket             string
 	datadir            string
@@ -78,8 +78,8 @@ func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", node.DefaultDataDir(), "data directory for temporary ELT files")
 }
 
-func withHDD(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&hdd, "hdd", false, "optimizations valuable for HDD")
+func withBatchSize(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&batchSizeStr, "batchSize", "512M", "batch size for execution stage")
 }
 
 func withMigration(cmd *cobra.Command) {

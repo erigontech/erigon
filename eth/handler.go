@@ -104,7 +104,7 @@ type ProtocolManager struct {
 
 	mode          downloader.SyncMode // Sync mode passed from the command line
 	datadir       string
-	hdd           bool
+	batchSize     int
 	currentHeight uint64 // Atomic variable to contain chain height
 }
 
@@ -173,10 +173,10 @@ func (pm *ProtocolManager) SetDataDir(datadir string) {
 	}
 }
 
-func (pm *ProtocolManager) SetHdd(hdd bool) {
-	pm.hdd = hdd
+func (pm *ProtocolManager) SetBatchSize(batchSize int) {
+	pm.batchSize = batchSize
 	if pm.downloader != nil {
-		pm.downloader.SetHdd(hdd)
+		pm.downloader.SetBatchSize(batchSize)
 	}
 }
 
@@ -191,7 +191,7 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 	}
 	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
 	manager.downloader.SetDataDir(manager.datadir)
-	manager.downloader.SetHdd(manager.hdd)
+	manager.downloader.SetBatchSize(manager.batchSize)
 	manager.downloader.SetStagedSync(manager.stagedSync)
 
 	// Construct the fetcher (short sync)

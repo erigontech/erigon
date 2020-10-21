@@ -30,7 +30,7 @@ func RegenerateIndex(chaindata string, csBucket string) error {
 		log.Error("Cant get last executed block", "err", err)
 	}
 
-	ig := core.NewIndexGenerator(db, quitCh)
+	ig := core.NewIndexGenerator("regenerate", db, quitCh)
 	cs, ok := changeset.Mapper[csBucket]
 	if !ok {
 		return errors.New("unknown changeset")

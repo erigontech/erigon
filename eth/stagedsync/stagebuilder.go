@@ -25,7 +25,7 @@ type StageParameters struct {
 	// It can be used for both reading and writing.
 	TX          ethdb.Database
 	pid         string
-	hdd         bool
+	batchSize   int // Batch size for the execution stage
 	storageMode ethdb.StorageMode
 	datadir     string
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
@@ -146,8 +146,6 @@ func DefaultStages() StageBuilders {
 							BatchSize:       batchSize,
 							BlockSize:       blockSize,
 							BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
-							StartTrace:      false,
-							Prof:            false,
 							NumOfGoroutines: n,
 							ReadChLen:       4,
 							Now:             time.Now(),
@@ -155,7 +153,7 @@ func DefaultStages() StageBuilders {
 						return SpawnRecoverSendersStage(cfg, s, world.TX, world.chainConfig, 0, world.datadir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindSendersStage(u, world.TX)
+						return UnwindSendersStage(u, s, world.TX)
 					},
 				}
 			},
@@ -172,7 +170,7 @@ func DefaultStages() StageBuilders {
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts: world.storageMode.Receipts,
-								Hdd:           world.hdd,
+								BatchSize:     world.batchSize,
 								ChangeSetHook: world.changeSetHook,
 								ReaderBuilder: world.stateReaderBuilder,
 								WriterBuilder: world.stateWriterBuilder,
@@ -226,7 +224,7 @@ func DefaultStages() StageBuilders {
 						return SpawnAccountHistoryIndex(s, world.TX, world.datadir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindAccountHistoryIndex(u, world.TX, world.QuitCh)
+						return UnwindAccountHistoryIndex(u, s, world.TX, world.QuitCh)
 					},
 				}
 			},
@@ -243,7 +241,7 @@ func DefaultStages() StageBuilders {
 						return SpawnStorageHistoryIndex(s, world.TX, world.datadir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindStorageHistoryIndex(u, world.TX, world.QuitCh)
+						return UnwindStorageHistoryIndex(u, s, world.TX, world.QuitCh)
 					},
 				}
 			},
