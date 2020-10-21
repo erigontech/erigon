@@ -172,7 +172,7 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 				return err
 			}
 		}
-		index, stage := s.CurrentStage()
+		_, stage := s.CurrentStage()
 
 		if hook, ok := s.beforeStageRun[string(stage.ID)]; ok {
 			if err := hook(); err != nil {
@@ -181,12 +181,10 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 		}
 
 		if stage.Disabled {
+			logPrefix := s.LogPrefix()
 			message := fmt.Sprintf(
-				"Sync stage %d/%d. %v disabled. %s",
-				index+1,
-				s.Len(),
-				stage.Description,
-				stage.DisabledDescription,
+				"[%s] disabled. %s",
+				logPrefix, stage.DisabledDescription,
 			)
 
 			log.Info(message)
@@ -226,7 +224,7 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
 	}
 
 	if time.Since(start) > 30*time.Second {
-		log.Info(fmt.Sprintf("[%s] DONE", logPrefix))
+		log.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", time.Since(start))
 	}
 	return nil
 }
