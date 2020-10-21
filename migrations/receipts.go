@@ -95,7 +95,7 @@ var receiptsCborEncode = Migration{
 }
 
 var receiptsOnePerTx = Migration{
-	Name: "receipts_one_per_tx",
+	Name: "receipts_one_per_tx2",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -112,24 +112,31 @@ var receiptsOnePerTx = Migration{
 
 		const loadStep = "load"
 
-		collector, err1 := etl.NewCollectorFromFiles(tmpdir)
+		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir + "1")
+		if err1 != nil {
+			return err1
+		}
+		collectorL, err1 := etl.NewCollectorFromFiles(tmpdir + "2")
 		if err1 != nil {
 			return err1
 		}
 		switch string(progress) {
 		case "":
-			if collector != nil { //  can't use files if progress field not set
-				_ = os.RemoveAll(tmpdir)
-				collector = nil
+			if collectorR != nil || collectorL == nil { //  can't use files if progress field not set
+				_ = os.RemoveAll(tmpdir + "1")
+				_ = os.RemoveAll(tmpdir + "2")
+				collectorR = nil
+				collectorL = nil
 			}
 		case loadStep:
-			if collector == nil {
+			if collectorR == nil || collectorL == nil {
 				return ErrMigrationETLFilesDeleted
 			}
 			goto LoadStep
 		}
 
-		collector = etl.NewCriticalCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collectorR = etl.NewCriticalCollector(tmpdir+"1", etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collectorL = etl.NewCriticalCollector(tmpdir+"2", etl.NewSortableBuffer(etl.BufferOptimalSize))
 		if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
 			blockNum := binary.BigEndian.Uint64(k[:8])
 			select {
@@ -157,19 +164,35 @@ var receiptsOnePerTx = Migration{
 				receipts[i].CumulativeGasUsed = legacyReceipts[i].CumulativeGasUsed
 				receipts[i].Logs = legacyReceipts[i].Logs
 			}
+
 			for txId, r := range receipts {
+				if len(r.Logs) == 0 {
+					continue
+				}
+
 				newK := make([]byte, 8+4)
 				copy(newK, k[:8])
 				binary.BigEndian.PutUint32(newK[8:], uint32(txId))
 
 				buf.Reset()
-				if err := cbor.Marshal(buf, r); err != nil {
+				if err := cbor.Marshal(buf, r.Logs); err != nil {
 					return false, err
 				}
-				if err := collector.Collect(newK, buf.Bytes()); err != nil {
+				if err := collectorL.Collect(newK, buf.Bytes()); err != nil {
 					return false, fmt.Errorf("collecting key %x: %w", k, err)
 				}
+
+				r.Logs = nil
 			}
+
+			buf.Reset()
+			if err := cbor.Marshal(buf, receipts); err != nil {
+				return false, err
+			}
+			if err := collectorL.Collect(common.CopyBytes(k[8:]), buf.Bytes()); err != nil {
+				return false, fmt.Errorf("collecting key %x: %w", k, err)
+			}
+
 			return true, nil
 		}); err != nil {
 			return err
@@ -188,7 +211,10 @@ var receiptsOnePerTx = Migration{
 			return fmt.Errorf("committing again to create a stable view the removal of receipt table")
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err := collector.Load("receipts_one_per_tx", db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {
+		if err := collectorR.Load("receipts_one_per_tx", db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
+		}
+		if err := collectorL.Load("receipts_one_per_tx", db, dbutils.Log, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
 		return nil
