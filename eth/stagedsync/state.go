@@ -219,14 +219,13 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
 	}
 
 	start := time.Now()
-
+	logPrefix := s.LogPrefix()
 	err = stage.ExecFunc(stageState, s)
 	if err != nil {
 		return err
 	}
 
 	if time.Since(start) > 30*time.Second {
-		logPrefix := s.LogPrefix()
 		log.Info(fmt.Sprintf("[%s] DONE", logPrefix))
 	}
 	return nil

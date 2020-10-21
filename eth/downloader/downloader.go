@@ -1770,7 +1770,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 // processFullSyncContent takes fetch results from the queue and imports them into the chain.
 func (d *Downloader) processFullSyncContent() error {
 	for {
-		results := d.queue.Results(true)
+		results := d.queue.Results("logPrefix", true)
 		if len(results) == 0 {
 			return nil
 		}

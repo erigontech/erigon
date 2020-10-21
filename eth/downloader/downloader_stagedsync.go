@@ -153,7 +153,7 @@ func (d *Downloader) processBodiesStage(logPrefix string, to uint64) error {
 			return err
 		}
 
-		results := d.queue.Results(true)
+		results := d.queue.Results(logPrefix, true)
 		if len(results) == 0 {
 			return nil
 		}
