@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
-	"runtime/pprof"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
@@ -61,19 +59,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		s.Done()
 		return nil
 	}
-	log.Info(fmt.Sprintf("[%s] Blocks execution", stages.Execution), "from", s.BlockNumber, "to", to)
-
-	if prof {
-		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", s.BlockNumber))
-		if err != nil {
-			log.Error("could not create CPU profile", "error", err)
-			return err
-		}
-		if err = pprof.StartCPUProfile(f); err != nil {
-			log.Error("could not start CPU profile", "error", err)
-			return err
-		}
-	}
+	log.Info(fmt.Sprintf("[%s] Blocks execution", s.state.LogPrefix()), "from", s.BlockNumber, "to", to)
 
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
@@ -158,13 +144,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					return err
 				}
 				chainContext.SetDB(tx)
-			}
-		}
-
-		if prof {
-			if blockNum-s.BlockNumber == 100000 {
-				// Flush the CPU profiler
-				pprof.StopCPUProfile()
 			}
 		}
 

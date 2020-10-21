@@ -94,6 +94,10 @@ func (s *State) CurrentStage() (uint, *Stage) {
 	return s.currentStage, s.stages[s.currentStage]
 }
 
+func (s *State) LogPrefix() string {
+	return fmt.Sprintf("%d/%d %s", s.currentStage+1, s.Len(), s.stages[s.currentStage].ID)
+}
+
 func (s *State) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
 		if bytes.Equal(stage.ID, id) {
