@@ -93,7 +93,7 @@ func regenerateIntermediateHashes(logPrefix string, db ethdb.Database, datadir s
 		}
 		return collector.Collect(keyHex, hash)
 	}
-	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+	loader := trie.NewFlatDBTrieLoader(logPrefix, dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	if err := loader.Reset(trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
 		return err
 	}
@@ -262,7 +262,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 
 		return collector.Collect(keyHex, hash)
 	}
-	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+	loader := trie.NewFlatDBTrieLoader(logPrefix, dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
 	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 		return err
@@ -363,7 +363,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		}
 		return collector.Collect(keyHex, hash)
 	}
-	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+	loader := trie.NewFlatDBTrieLoader(logPrefix, dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
 	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 		return err

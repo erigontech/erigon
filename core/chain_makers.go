@@ -293,7 +293,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 					unfurl.AddKey(storageChange.Key)
 				}
 			}
-			loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+			loader := trie.NewFlatDBTrieLoader("GenerateChain", dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 			if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}

@@ -224,7 +224,7 @@ type BlockChain interface {
 	InsertChain(context.Context, types.Blocks) (int, error)
 
 	// InsertBodyChain inserts a batch of blocks into the local chain, without executing them.
-	InsertBodyChain(context.Context, types.Blocks) (bool, error)
+	InsertBodyChain(string, context.Context, types.Blocks) (bool, error)
 
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []types.Receipts, uint64) (int, error)
@@ -1777,13 +1777,13 @@ func (d *Downloader) processFullSyncContent() error {
 		if d.chainInsertHook != nil {
 			d.chainInsertHook(results)
 		}
-		if _, err := d.importBlockResults(results, true /* execute */); err != nil {
+		if _, err := d.importBlockResults("logPrefix", results, true /* execute */); err != nil {
 			return err
 		}
 	}
 }
 
-func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (uint64, error) {
+func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult, execute bool) (uint64, error) {
 	// Check for any early termination requests
 	if len(results) == 0 {
 		return 0, nil
@@ -1807,7 +1807,7 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 	if execute {
 		index, err = d.blockchain.InsertChain(context.Background(), blocks)
 	} else {
-		stopped, err = d.blockchain.InsertBodyChain(context.Background(), blocks)
+		stopped, err = d.blockchain.InsertBodyChain(logPrefix, context.Background(), blocks)
 		if stopped {
 			index = 0
 		} else {

@@ -217,11 +217,8 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
 	if err != nil {
 		return err
 	}
-	index, stage := s.CurrentStage()
 
 	start := time.Now()
-	message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, s.Len(), stage.Description)
-	log.Info(message)
 
 	err = stage.ExecFunc(stageState, s)
 	if err != nil {
@@ -229,7 +226,8 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
 	}
 
 	if time.Since(start) > 30*time.Second {
-		log.Info(fmt.Sprintf("%s DONE!", message))
+		logPrefix := s.LogPrefix()
+		log.Info(fmt.Sprintf("[%s] DONE", logPrefix))
 	}
 	return nil
 }
@@ -266,7 +264,7 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb
 	}
 
 	if time.Since(start) > 30*time.Second {
-		log.Info("Unwinding... DONE!")
+		log.Info("Unwinding... DONE!", "stage", string(unwind.Stage))
 	}
 	return nil
 }

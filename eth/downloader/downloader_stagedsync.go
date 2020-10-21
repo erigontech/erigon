@@ -98,7 +98,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		if block := prefetchedBlocks.Pop(h); block != nil {
 			fr := fetchResultFromBlock(block)
 			execute := false
-			_, err := d.importBlockResults([]*fetchResult{fr}, execute)
+			_, err := d.importBlockResults(logPrefix, []*fetchResult{fr}, execute)
 			if err != nil {
 				return false, err
 			}
@@ -127,7 +127,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 	// Now fetch all the bodies
 	fetchers := []func() error{
 		func() error { return d.fetchBodies(from) },
-		func() error { return d.processBodiesStage(to) },
+		func() error { return d.processBodiesStage(logPrefix, to) },
 	}
 
 	if err := d.spawnSync(fetchers); err != nil {
@@ -147,7 +147,7 @@ func fetchResultFromBlock(b *types.Block) *fetchResult {
 
 // processBodiesStage takes fetch results from the queue and imports them into the chain.
 // it doesn't execute blocks
-func (d *Downloader) processBodiesStage(to uint64) error {
+func (d *Downloader) processBodiesStage(logPrefix string, to uint64) error {
 	for {
 		if err := common.Stopped(d.quitCh); err != nil {
 			return err
@@ -157,7 +157,7 @@ func (d *Downloader) processBodiesStage(to uint64) error {
 		if len(results) == 0 {
 			return nil
 		}
-		lastNumber, err := d.importBlockResults(results, false /* execute */)
+		lastNumber, err := d.importBlockResults(logPrefix, results, false /* execute */)
 		if err != nil {
 			return err
 		}
