@@ -25,7 +25,7 @@ services:
     ports:
       - 3000:3000
     volumes:
-      - ${TG_GRAFANA_CONFIG:./cmd/prometheus/grafana.ini}:/etc/grafana/grafana.ini
+      - ${TG_GRAFANA_CONFIG:-./cmd/prometheus/grafana.ini}:/etc/grafana/grafana.ini
       - ./cmd/prometheus/datasources:/etc/grafana/provisioning/datasources
       - ./cmd/prometheus/dashboards:/etc/grafana/provisioning/dashboards
       - ${XDG_DATA_HOME:-~/.local/share}/tg-grafana:/var/lib/grafana
