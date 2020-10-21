@@ -30,7 +30,9 @@ func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, datadir string, 
 	binary.BigEndian.PutUint64(startKey, s.BlockNumber)
 	endKey := dbutils.HeaderKey(*headNumber, headHash) // Make sure we stop at head
 
+	logPrefix := s.state.LogPrefix()
 	if err := etl.Transform(
+		logPrefix,
 		stateDB,
 		dbutils.HeaderPrefix,
 		dbutils.HeaderNumberPrefix,

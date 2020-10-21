@@ -33,7 +33,7 @@ func RegenerateTxLookup(chaindata string) error {
 		log.Error("Cant get last executed block", "err", err)
 	}
 	log.Info("TxLookup generation started", "start time", startTime)
-	err = stagedsync.TxLookupTransform(db, dbutils.HeaderHashKey(0), dbutils.HeaderHashKey(lastExecutedBlock), quitCh, os.TempDir())
+	err = stagedsync.TxLookupTransform("txlookup", db, dbutils.HeaderHashKey(0), dbutils.HeaderHashKey(lastExecutedBlock), quitCh, os.TempDir())
 	if err != nil {
 		return err
 	}

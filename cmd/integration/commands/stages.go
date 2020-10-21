@@ -309,8 +309,6 @@ func stageSenders(ctx context.Context) error {
 		BatchSize:       batchSize,
 		BlockSize:       blockSize,
 		BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
-		StartTrace:      false,
-		Prof:            false,
 		NumOfGoroutines: n,
 		ReadChLen:       4,
 		Now:             time.Now(),

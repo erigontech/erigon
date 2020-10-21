@@ -86,7 +86,7 @@ var receiptsCborEncode = Migration{
 			return fmt.Errorf("committing again to create a stable view the removal of receipt table")
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err := collector.Load(db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: CommitProgress}); err != nil {
+		if err := collector.Load("receipts_cbor_encode", db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: CommitProgress}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
 		return nil

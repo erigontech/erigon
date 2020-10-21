@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -32,13 +31,14 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
 	}
 
-	log.Info(fmt.Sprintf("[%s] Promoting plain state", stages.HashState), "from", s.BlockNumber, "to", to)
+	logPrefix := s.state.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
-		if err := promoteHashedStateCleanly(s, db, datadir, quit); err != nil {
+		if err := promoteHashedStateCleanly(logPrefix, s, db, datadir, quit); err != nil {
 			return err
 		}
 	} else {
-		if err := promoteHashedStateIncrementally(s, s.BlockNumber, to, db, datadir, quit); err != nil {
+		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, db, datadir, quit); err != nil {
 			return err
 		}
 	}
@@ -47,34 +47,36 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
-	if err := unwindHashStateStageImpl(u, s, db, datadir, quit); err != nil {
+	logPrefix := s.state.LogPrefix()
+	if err := unwindHashStateStageImpl(logPrefix, u, s, db, datadir, quit); err != nil {
 		return err
 	}
 	if err := u.Done(db); err != nil {
-		return fmt.Errorf("unwind HashState: reset: %v", err)
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
 	return nil
 }
 
-func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit <-chan struct{}) error {
+func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit <-chan struct{}) error {
 	// Currently it does not require unwinding because it does not create any Intemediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(stateDB, quit)
 	prom.TempDir = datadir
-	if err := prom.Unwind(s, u, false /* storage */, true /* codes */); err != nil {
+	if err := prom.Unwind(logPrefix, s, u, false /* storage */, true /* codes */); err != nil {
 		return err
 	}
-	if err := prom.Unwind(s, u, false /* storage */, false /* codes */); err != nil {
+	if err := prom.Unwind(logPrefix, s, u, false /* storage */, false /* codes */); err != nil {
 		return err
 	}
-	if err := prom.Unwind(s, u, true /* storage */, false /* codes */); err != nil {
+	if err := prom.Unwind(logPrefix, s, u, true /* storage */, false /* codes */); err != nil {
 		return err
 	}
 	return nil
 }
 
-func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+func promoteHashedStateCleanly(logPrefix string, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	err := etl.Transform(
+		logPrefix,
 		db,
 		dbutils.PlainStateBucket,
 		dbutils.CurrentStateBucket,
@@ -90,6 +92,7 @@ func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string,
 	}
 
 	return etl.Transform(
+		logPrefix,
 		db,
 		dbutils.PlainContractCodeBucket,
 		dbutils.ContractCodeBucket,
@@ -313,14 +316,14 @@ func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 	}
 }
 
-func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes bool) error {
+func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, codes bool) error {
 	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info(fmt.Sprintf("[%s] Incremental promotion started", stages.HashState), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
+	log.Info(fmt.Sprintf("[%s] Incremental promotion started", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
 
@@ -338,6 +341,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	}
 
 	return etl.Transform(
+		logPrefix,
 		p.db,
 		changeSetBucket,
 		loadBucket,
@@ -352,7 +356,7 @@ func (p *Promoter) Promote(s *StageState, from, to uint64, storage bool, codes b
 	)
 }
 
-func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes bool) error {
+func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, codes bool) error {
 	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
@@ -362,7 +366,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	from := s.BlockNumber
 	to := u.UnwindPoint
 
-	log.Info("Unwinding started", "from", from, "to", to, "storage", storage, "codes", codes)
+	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", from, "to", to, "storage", storage, "codes", codes)
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
@@ -384,6 +388,7 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	}
 
 	return etl.Transform(
+		logPrefix,
 		p.db,
 		changeSetBucket,
 		loadBucket,
@@ -404,16 +409,16 @@ func (p *Promoter) Unwind(s *StageState, u *UnwindState, storage bool, codes boo
 	)
 }
 
-func promoteHashedStateIncrementally(s *StageState, from, to uint64, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+func promoteHashedStateIncrementally(logPrefix string, s *StageState, from, to uint64, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	prom := NewPromoter(db, quit)
 	prom.TempDir = datadir
-	if err := prom.Promote(s, from, to, false /* storage */, true /* codes */); err != nil {
+	if err := prom.Promote(logPrefix, s, from, to, false /* storage */, true /* codes */); err != nil {
 		return err
 	}
-	if err := prom.Promote(s, from, to, false /* storage */, false /* codes */); err != nil {
+	if err := prom.Promote(logPrefix, s, from, to, false /* storage */, false /* codes */); err != nil {
 		return err
 	}
-	if err := prom.Promote(s, from, to, true /* storage */, false /* codes */); err != nil {
+	if err := prom.Promote(logPrefix, s, from, to, true /* storage */, false /* codes */); err != nil {
 		return err
 	}
 	return nil

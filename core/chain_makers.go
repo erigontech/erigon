@@ -303,7 +303,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
 			if intermediateHashes {
-				if err := collector.Load(dbCopy, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+				if err := collector.Load("GenerateChain", dbCopy, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 					return nil, nil, fmt.Errorf("loading intermediate hashes: %w", err)
 				}
 			}
