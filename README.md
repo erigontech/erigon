@@ -167,6 +167,10 @@ trace_filter
 
 \* net_peerCount currently always returns a count of 25 as work continues on Sentry.
 
+#### Grafana dashboard:
+
+`docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
+
 #### Or run all components by docker-compose
 
 Next command starts: turbo-geth on port 30303, rpcdaemon 8545, prometheus 9090, grafana 3000
