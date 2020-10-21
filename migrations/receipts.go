@@ -187,7 +187,7 @@ var receiptsOnePerTx = Migration{
 			if err := cbor.Marshal(buf, receipts); err != nil {
 				return false, err
 			}
-			if err := collectorL.Collect(common.CopyBytes(k[8:]), buf.Bytes()); err != nil {
+			if err := collectorR.Collect(common.CopyBytes(k[8:]), buf.Bytes()); err != nil {
 				return false, fmt.Errorf("collecting key %x: %w", k, err)
 			}
 
