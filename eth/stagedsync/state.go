@@ -95,6 +95,9 @@ func (s *State) CurrentStage() (uint, *Stage) {
 }
 
 func (s *State) LogPrefix() string {
+	if s == nil {
+		return ""
+	}
 	return fmt.Sprintf("%d/%d %s", s.currentStage+1, s.Len(), s.stages[s.currentStage].ID)
 }
 
