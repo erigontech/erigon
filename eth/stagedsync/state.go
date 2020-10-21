@@ -141,7 +141,7 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.Getter) (*StageState
 }
 
 func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
-	timings := map[string]time.Duration{}
+	var timings []interface{}
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
 			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
@@ -159,7 +159,7 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 				if err := s.UnwindStage(unwind, db, tx); err != nil {
 					return err
 				}
-				timings["Unwind "+string(unwind.Stage)] = time.Since(t)
+				timings = append(timings, "Unwind "+string(unwind.Stage), time.Since(t))
 			}
 			if err := s.SetCurrentStage(stages.Headers); err != nil {
 				return err
@@ -192,17 +192,13 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 		if err := s.runStage(stage, db, tx); err != nil {
 			return err
 		}
-		timings[string(stage.ID)] = time.Since(t)
+		timings = append(timings, string(stage.ID), time.Since(t))
 	}
 
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Memory", "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
-	logArs := make([]interface{}, 0, len(timings)*2)
-	for name, val := range timings {
-		logArs = append(logArs, name, val)
-	}
-	log.Info("Timings", logArs...)
+	log.Info("Timings", timings...)
 	return nil
 }
 
