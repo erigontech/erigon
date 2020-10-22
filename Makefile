@@ -21,7 +21,7 @@ endif
 
 all: tg hack tester rpctest state pics rpcdaemon integration db-tools
 
-docker: clean
+docker:
 	docker build -t turbo-geth:latest .
 
 docker-alltools:
@@ -35,7 +35,9 @@ geth:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
-tg: ethdb/mdbx/dist/libmdbx.a
+tg:
+	@echo "Building mdbx"
+	cd ethdb/mdbx/dist/ && make clean && make libmdbx.a && cat config.h
 	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
