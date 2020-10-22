@@ -63,70 +63,18 @@ func (x *Receipt) CodecEncodeSelf(e *codec1978.Encoder) {
 			yy2arr2 := z.EncBasicHandle().StructToArray
 			_ = yy2arr2
 			const yyr2 bool = false // struct tag has 'toArray'
-			var yyq2 = [3]bool{     // should field at this index be written?
-				len(x.PostState) != 0,    // PostState
-				x.Status != 0,            // Status
-				x.CumulativeGasUsed != 0, // CumulativeGasUsed
-			}
-			_ = yyq2
-			if yyr2 || yy2arr2 {
-				z.EncWriteArrayStart(3)
-				z.EncWriteArrayElem()
-				if yyq2[0] {
-					if x.PostState == nil {
-						r.EncodeNil()
-					} else {
-						r.EncodeStringBytesRaw([]byte(x.PostState))
-					} // end block: if x.PostState slice == nil
-				} else {
-					r.EncodeNil()
-				}
-				z.EncWriteArrayElem()
-				if yyq2[1] {
-					r.EncodeUint(uint64(x.Status))
-				} else {
-					r.EncodeUint(0)
-				}
-				z.EncWriteArrayElem()
-				if yyq2[2] {
-					r.EncodeUint(uint64(x.CumulativeGasUsed))
-				} else {
-					r.EncodeUint(0)
-				}
-				z.EncWriteArrayEnd()
+			z.EncWriteArrayStart(3)
+			z.EncWriteArrayElem()
+			if x.PostState == nil {
+				r.EncodeNil()
 			} else {
-				var yynn2 int
-				for _, b := range yyq2 {
-					if b {
-						yynn2++
-					}
-				}
-				z.EncWriteMapStart(yynn2)
-				yynn2 = 0
-				if yyq2[0] {
-					z.EncWriteMapElemKey()
-					r.EncodeString(`1`)
-					z.EncWriteMapElemValue()
-					if x.PostState == nil {
-						r.EncodeNil()
-					} else {
-						r.EncodeStringBytesRaw([]byte(x.PostState))
-					} // end block: if x.PostState slice == nil
-				}
-				if yyq2[1] {
-					z.EncWriteMapElemKey()
-					r.EncodeString(`2`)
-					z.EncWriteMapElemValue()
-					r.EncodeUint(uint64(x.Status))
-				}
-				if yyq2[2] {
-					z.EncWriteMapElemKey()
-					r.EncodeString(`3`)
-					z.EncWriteMapElemValue()
-					r.EncodeUint(uint64(x.CumulativeGasUsed))
-				}
-				z.EncWriteMapEnd()
-			}
+				r.EncodeStringBytesRaw([]byte(x.PostState))
+			} // end block: if x.PostState slice == nil
+			z.EncWriteArrayElem()
+			r.EncodeUint(uint64(x.Status))
+			z.EncWriteArrayElem()
+			r.EncodeUint(uint64(x.CumulativeGasUsed))
+			z.EncWriteArrayEnd()
 		}
 	}
 }
@@ -284,88 +232,27 @@ func (x *Log) CodecEncodeSelf(e *codec1978.Encoder) {
 			yy2arr2 := z.EncBasicHandle().StructToArray
 			_ = yy2arr2
 			const yyr2 bool = false // struct tag has 'toArray'
-			var yyq2 = [3]bool{     // should field at this index be written?
-				len(x.Address) != 0, // Address
-				len(x.Topics) != 0,  // Topics
-				len(x.Data) != 0,    // Data
-			}
-			_ = yyq2
-			if yyr2 || yy2arr2 {
-				z.EncWriteArrayStart(3)
-				z.EncWriteArrayElem()
-				if yyq2[0] {
-					yy6 := &x.Address
-					if !z.EncBinary() {
-						z.EncTextMarshal(*yy6)
-					} else {
-						h.enccommon_Address((*pkg1_common.Address)(yy6), e)
-					}
-				} else {
-					r.EncodeNil()
-				}
-				z.EncWriteArrayElem()
-				if yyq2[1] {
-					if x.Topics == nil {
-						r.EncodeNil()
-					} else {
-						h.encSlicecommon_Hash(([]pkg1_common.Hash)(x.Topics), e)
-					} // end block: if x.Topics slice == nil
-				} else {
-					r.EncodeNil()
-				}
-				z.EncWriteArrayElem()
-				if yyq2[2] {
-					if x.Data == nil {
-						r.EncodeNil()
-					} else {
-						r.EncodeStringBytesRaw([]byte(x.Data))
-					} // end block: if x.Data slice == nil
-				} else {
-					r.EncodeNil()
-				}
-				z.EncWriteArrayEnd()
+			z.EncWriteArrayStart(3)
+			z.EncWriteArrayElem()
+			yy6 := &x.Address
+			if !z.EncBinary() {
+				z.EncTextMarshal(*yy6)
 			} else {
-				var yynn2 int
-				for _, b := range yyq2 {
-					if b {
-						yynn2++
-					}
-				}
-				z.EncWriteMapStart(yynn2)
-				yynn2 = 0
-				if yyq2[0] {
-					z.EncWriteMapElemKey()
-					r.EncodeString(`1`)
-					z.EncWriteMapElemValue()
-					yy10 := &x.Address
-					if !z.EncBinary() {
-						z.EncTextMarshal(*yy10)
-					} else {
-						h.enccommon_Address((*pkg1_common.Address)(yy10), e)
-					}
-				}
-				if yyq2[1] {
-					z.EncWriteMapElemKey()
-					r.EncodeString(`2`)
-					z.EncWriteMapElemValue()
-					if x.Topics == nil {
-						r.EncodeNil()
-					} else {
-						h.encSlicecommon_Hash(([]pkg1_common.Hash)(x.Topics), e)
-					} // end block: if x.Topics slice == nil
-				}
-				if yyq2[2] {
-					z.EncWriteMapElemKey()
-					r.EncodeString(`3`)
-					z.EncWriteMapElemValue()
-					if x.Data == nil {
-						r.EncodeNil()
-					} else {
-						r.EncodeStringBytesRaw([]byte(x.Data))
-					} // end block: if x.Data slice == nil
-				}
-				z.EncWriteMapEnd()
+				h.enccommon_Address((*pkg1_common.Address)(yy6), e)
 			}
+			z.EncWriteArrayElem()
+			if x.Topics == nil {
+				r.EncodeNil()
+			} else {
+				h.encSlicecommon_Hash(([]pkg1_common.Hash)(x.Topics), e)
+			} // end block: if x.Topics slice == nil
+			z.EncWriteArrayElem()
+			if x.Data == nil {
+				r.EncodeNil()
+			} else {
+				r.EncodeStringBytesRaw([]byte(x.Data))
+			} // end block: if x.Data slice == nil
+			z.EncWriteArrayEnd()
 		}
 	}
 }

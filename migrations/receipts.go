@@ -95,7 +95,7 @@ var receiptsCborEncode = Migration{
 }
 
 var receiptsOnePerTx = Migration{
-	Name: "receipts_one_per_transaction3",
+	Name: "receipts_one_per_transaction4",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -121,24 +121,37 @@ var receiptsOnePerTx = Migration{
 		if err1 != nil {
 			return err1
 		}
-		defer collectorR.Close(logPrefix)
 		collectorL, err1 := etl.NewCollectorFromFiles(tmpdir + "2")
 		if err1 != nil {
 			return err1
 		}
-		defer collectorL.Close(logPrefix)
 		switch string(progress) {
 		case "":
-			if collectorR != nil || collectorL == nil { //  can't use files if progress field not set
+			// can't use files if progress field not set, clear them
+			if collectorR != nil {
 				collectorR.Close(logPrefix)
-				collectorL.Close(logPrefix)
 				collectorR = nil
+			}
+
+			if collectorL != nil {
+				collectorL.Close(logPrefix)
 				collectorL = nil
 			}
 		case loadStep:
 			if collectorR == nil || collectorL == nil {
 				return ErrMigrationETLFilesDeleted
 			}
+			defer func() {
+				// don't clean if error or panic happened
+				if err != nil {
+					return
+				}
+				if rec := recover(); rec != nil {
+					panic(rec)
+				}
+				collectorR.Close(logPrefix)
+				collectorL.Close(logPrefix)
+			}()
 			goto LoadStep
 		}
 
