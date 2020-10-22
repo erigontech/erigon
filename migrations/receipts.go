@@ -148,7 +148,7 @@ var receiptsOnePerTx = Migration{
 			}
 
 			// Convert the receipts from their storage form to their internal representation
-			legacyReceipts := []*LegacyReceipt{}
+			var legacyReceipts []*LegacyReceipt
 
 			reader.Reset(v)
 			if err := cbor.Unmarshal(&legacyReceipts, reader); err != nil {
