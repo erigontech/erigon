@@ -2098,8 +2098,9 @@ func receiptSizes(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
-	tx.(ethdb.BucketsMigrator).ClearBuckets(dbutils.BlockReceiptsPrefix2, dbutils.Log)
-	tx.Commit(context.Background())
+	_ = tx.(ethdb.BucketMigrator).ClearBucket(dbutils.BlockReceiptsPrefix2)
+	_ = tx.(ethdb.BucketMigrator).ClearBucket(dbutils.Log)
+	_ = tx.Commit(context.Background())
 
 	tx, err = db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err != nil {
