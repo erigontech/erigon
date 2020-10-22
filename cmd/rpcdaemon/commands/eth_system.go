@@ -43,7 +43,7 @@ func (api *APIImpl) Syncing(_ context.Context) (interface{}, error) {
 
 // ChainId returns the chain id from the config
 func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.db.Begin(ctx, nil, false)
 	if err != nil {
 		return 0, err
 	}
