@@ -92,9 +92,6 @@ func makeP2PServer(
 	peerTimeMap *sync.Map,
 	peerRwMap *sync.Map,
 	protocols []string,
-	newBlockCh chan NewBlockFromSentry,
-	newBlockHashCh chan NewBlockHashFromSentry,
-	headersCh chan BlockHeadersFromSentry,
 	coreClient proto.ControlClient,
 ) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
@@ -143,9 +140,6 @@ func makeP2PServer(
 					params.MainnetGenesisHash,
 					params.MainnetChainConfig,
 					0, /* head */
-					newBlockCh,
-					newBlockHashCh,
-					headersCh,
 					coreClient,
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
@@ -181,9 +175,6 @@ func runPeer(
 	genesisHash common.Hash,
 	chainConfig *params.ChainConfig,
 	head uint64,
-	newBlockCh chan NewBlockFromSentry,
-	newBlockHashCh chan NewBlockHashFromSentry,
-	headersCh chan BlockHeadersFromSentry,
 	coreClient proto.ControlClient,
 ) error {
 	peerID := peer.ID().String()
@@ -320,8 +311,13 @@ func runPeer(
 		case eth.ReceiptsMsg:
 			log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
+			bytes := make([]byte, msg.Size)
+			_, err = io.ReadFull(msg.Payload, bytes)
+			if err != nil {
+				return fmt.Errorf("%s: reading msg into bytes: %v", err)
+			}
 			var announces eth.NewBlockHashesData
-			if err = msg.Decode(&announces); err != nil {
+			if err = rlp.DecodeBytes(bytes, &announces); err != nil {
 				return errResp(eth.ErrDecode, "decode NewBlockHashesData %v: %v", msg, err)
 			}
 			x, _ := peerHeightMap.Load(peerID)
@@ -338,10 +334,23 @@ func runPeer(
 			}
 			peerHeightMap.Store(peerID, highestBlock)
 			log.Info(fmt.Sprintf("[%s] NewBlockHashesMsg {%s}", peerID, numStr.String()))
-			newBlockHashCh <- NewBlockHashFromSentry{SentryMsg: SentryMsg{sentryId: 0, requestId: 0}, NewBlockHashesData: announces}
+			outreq := proto.InboundMessage{
+				PeerId: []byte(peerID),
+				Id:     proto.InboundMessageId_NewBlockHashes,
+				Data:   bytes,
+			}
+			_, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{})
+			if err != nil {
+				return fmt.Errorf("send block header announcement to core P2P: %v", err)
+			}
 		case eth.NewBlockMsg:
+			bytes := make([]byte, msg.Size)
+			_, err = io.ReadFull(msg.Payload, bytes)
+			if err != nil {
+				return fmt.Errorf("%s: reading msg into bytes: %v", err)
+			}
 			var request eth.NewBlockData
-			if err = msg.Decode(&request); err != nil {
+			if err = rlp.DecodeBytes(bytes, &request); err != nil {
 				return errResp(eth.ErrDecode, "decode NewBlockMsg %v: %v", msg, err)
 			}
 			blockNum := request.Block.NumberU64()
@@ -352,7 +361,15 @@ func runPeer(
 				peerHeightMap.Store(peerID, highestBlock)
 			}
 			log.Info(fmt.Sprintf("[%s] NewBlockMsg{blockNumber: %d}", peerID, blockNum))
-			newBlockCh <- NewBlockFromSentry{SentryMsg: SentryMsg{sentryId: 0, requestId: 0}, NewBlockData: request}
+			outreq := proto.InboundMessage{
+				PeerId: []byte(peerID),
+				Id:     proto.InboundMessageId_NewBlock,
+				Data:   bytes,
+			}
+			_, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{})
+			if err != nil {
+				return fmt.Errorf("send new block to core P2P: %v", err)
+			}
 		case eth.NewPooledTransactionHashesMsg:
 			var hashes []common.Hash
 			if err := msg.Decode(&hashes); err != nil {
@@ -476,11 +493,6 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string) err
 	}
 	coreClient := proto.NewControlClient(conn)
 
-	newBlockCh := make(chan NewBlockFromSentry)
-	newBlockHashCh := make(chan NewBlockHashFromSentry)
-	reqHeadersCh := make(chan headerdownload.HeaderRequest)
-	headersCh := make(chan BlockHeadersFromSentry)
-	var peerHeightMap, peerRwMap, peerTimeMap sync.Map
 	server, err := makeP2PServer(
 		ctx,
 		natSetting,
@@ -489,9 +501,6 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string) err
 		&sentryServer.peerTimeMap,
 		&sentryServer.peerRwMap,
 		[]string{eth.ProtocolName},
-		newBlockCh,
-		newBlockHashCh,
-		headersCh,
 		coreClient,
 	)
 	if err != nil {
@@ -501,52 +510,6 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string) err
 	if err = server.Start(); err != nil {
 		return fmt.Errorf("could not start server: %w", err)
 	}
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case req := <-reqHeadersCh:
-				// Choose a peer that we can send this request to
-				var peerID string
-				var found bool
-				peerHeightMap.Range(func(key, value interface{}) bool {
-					valUint, _ := value.(uint64)
-					if valUint >= req.Number {
-						peerID = key.(string)
-						timeRaw, _ := peerTimeMap.Load(peerID)
-						t, _ := timeRaw.(int64)
-						// If request is large, we give 5 second pause to the peer before sending another request, unless it responded
-						if req.Length == 1 || t <= time.Now().Unix() {
-							found = true
-							return false
-						}
-					}
-					return true
-				})
-				if !found {
-					//log.Warn(fmt.Sprintf("Could not find suitable peer to send GetBlockHeadersData request for block %d", req.Number))
-				} else {
-					log.Info(fmt.Sprintf("Sending req for hash %x, blocknumber %d, length %d to peer %s\n", req.Hash, req.Number, req.Length, peerID))
-					rwRaw, _ := peerRwMap.Load(peerID)
-					rw, _ := rwRaw.(p2p.MsgReadWriter)
-					if rw == nil {
-						log.Error(fmt.Sprintf("Could not find rw for peer %s", peerID))
-					} else {
-						if err := p2p.Send(rw, eth.GetBlockHeadersMsg, &eth.GetBlockHeadersData{
-							Amount:  uint64(req.Length),
-							Reverse: true,
-							Skip:    0,
-							Origin:  eth.HashOrNumber{Hash: req.Hash},
-						}); err != nil {
-							log.Error(fmt.Sprintf("Failed to send to peer %s: %v", peerID, err))
-						}
-						peerTimeMap.Store(peerID, time.Now().Unix()+5)
-					}
-				}
-			}
-		}
-	}()
 	<-ctx.Done()
 	return nil
 }
@@ -563,8 +526,56 @@ func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto.PenalizeP
 	return nil, nil
 }
 
-func (ss *SentryServerImpl) SendMessageByMinBlock(context.Context, *proto.SendMessageByMinBlockRequest) (*proto.SentPeers, error) {
-	return nil, nil
+func (ss *SentryServerImpl) findPeer(minBlock uint64, amount uint64) (string, bool) {
+	// Choose a peer that we can send this request to
+	var peerID string
+	var found bool
+	ss.peerHeightMap.Range(func(key, value interface{}) bool {
+		valUint, _ := value.(uint64)
+		if valUint >= minBlock {
+			peerID = key.(string)
+			timeRaw, _ := ss.peerTimeMap.Load(peerID)
+			t, _ := timeRaw.(int64)
+			// If request is large, we give 5 second pause to the peer before sending another request, unless it responded
+			if amount == 1 || t <= time.Now().Unix() {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return peerID, found
+}
+
+func (ss *SentryServerImpl) getBlockHeaders(inreq *proto.SendMessageByMinBlockRequest) (*proto.SentPeers, error) {
+	var req eth.GetBlockHeadersData
+	if err := rlp.DecodeBytes(inreq.Data.Data, &req); err != nil {
+		return &proto.SentPeers{}, fmt.Errorf("parse request: %v", err)
+	}
+	peerID, found := ss.findPeer(inreq.MinBlock, req.Amount)
+	if !found {
+		return &proto.SentPeers{}, nil
+	}
+	log.Info(fmt.Sprintf("Sending req for hash %x, blocknumber %d, length %d to peer %s\n", req.Origin.Hash, req.Origin.Number, req.Amount, peerID))
+	rwRaw, _ := ss.peerRwMap.Load(peerID)
+	rw, _ := rwRaw.(p2p.MsgReadWriter)
+	if rw == nil {
+		return &proto.SentPeers{}, fmt.Errorf("find rw for peer %s", peerID)
+	}
+	if err := p2p.Send(rw, eth.GetBlockHeadersMsg, &req); err != nil {
+		return &proto.SentPeers{}, fmt.Errorf("send to peer %s: %v", peerID, err)
+	}
+	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)
+	return &proto.SentPeers{Peers: [][]byte{[]byte(peerID)}}, nil
+}
+
+func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *proto.SendMessageByMinBlockRequest) (*proto.SentPeers, error) {
+	switch inreq.Data.Id {
+	case proto.OutboundMessageId_GetBlockHeaders:
+		return ss.getBlockHeaders(inreq)
+	default:
+		return &proto.SentPeers{}, fmt.Errorf("not implemented for message Id: %s", inreq.Data.Id)
+	}
 }
 
 func (ss *SentryServerImpl) SendMessageById(context.Context, *proto.SendMessageByIdRequest) (*proto.SentPeers, error) {

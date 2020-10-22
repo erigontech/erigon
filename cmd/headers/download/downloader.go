@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -114,18 +115,92 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 	}
 }
 
-// Downloader needs to be run from a go-routine, and it is in the sole control of the HeaderDownloader object
-func Downloader(
-	ctx context.Context,
-	filesDir string,
-	bufferLimit int,
-	newBlockCh chan NewBlockFromSentry,
-	newBlockHashCh chan NewBlockHashFromSentry,
-	headersCh chan BlockHeadersFromSentry,
-	penaltyCh chan PenaltyMsg,
-	reqHeadersCh chan headerdownload.HeaderRequest,
-	sentryClient proto.SentryClient,
-) {
+func Download(filesDir string, bufferSize int, sentryAddr string, coreAddr string) error {
+	ctx := rootContext()
+	log.Info("Starting Core P2P server", "on", coreAddr, "connecting to sentry", coreAddr)
+
+	listenConfig := net.ListenConfig{
+		Control: func(network, address string, _ syscall.RawConn) error {
+			log.Info("Core P2P received connection", "via", network, "from", address)
+			return nil
+		},
+	}
+	lis, err := listenConfig.Listen(ctx, "tcp", coreAddr)
+	if err != nil {
+		return fmt.Errorf("could not create Core P2P listener: %w, addr=%s", err, coreAddr)
+	}
+	var (
+		streamInterceptors []grpc.StreamServerInterceptor
+		unaryInterceptors  []grpc.UnaryServerInterceptor
+	)
+	if metrics.Enabled {
+		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
+		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
+	}
+	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+	var grpcServer *grpc.Server
+	cpus := uint32(runtime.GOMAXPROCS(-1))
+	opts := []grpc.ServerOption{
+		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
+		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
+		grpc.ReadBufferSize(1024),
+		grpc.MaxConcurrentStreams(100), // to force clients reduce concurrency level
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time: 10 * time.Minute,
+		}),
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+	}
+	grpcServer = grpc.NewServer(opts...)
+
+	// CREATING GRPC CLIENT CONNECTION
+	var dialOpts []grpc.DialOption
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Timeout: 10 * time.Minute,
+		}),
+	}
+
+	dialOpts = append(dialOpts, grpc.WithInsecure())
+
+	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
+	if err != nil {
+		return fmt.Errorf("creating client connection to sentry P2P: %w", err)
+	}
+	sentryClient := proto.NewSentryClient(conn)
+
+	var controlServer *ControlServerImpl
+	if controlServer, err = NewControlServer(filesDir, bufferSize, sentryClient); err != nil {
+		return fmt.Errorf("create core P2P server: %w", err)
+	}
+	proto.RegisterControlServer(grpcServer, controlServer)
+	if metrics.Enabled {
+		grpc_prometheus.Register(grpcServer)
+	}
+
+	go func() {
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Error("Core P2P server fail", "err", err)
+		}
+	}()
+
+	go controlServer.loop(ctx)
+
+	<-ctx.Done()
+	return nil
+}
+
+type ControlServerImpl struct {
+	proto.UnimplementedControlServer
+	hdLock       sync.Mutex
+	hd           *headerdownload.HeaderDownload
+	sentryClient proto.SentryClient
+}
+
+func NewControlServer(filesDir string, bufferLimit int, sentryClient proto.SentryClient) (*ControlServerImpl, error) {
 	//config := eth.DefaultConfig.Ethash
 	engine := ethash.New(ethash.Config{
 		CachesInMem:      1,
@@ -183,68 +258,120 @@ func Downloader(
 		}
 	}
 	log.Info(hd.AnchorState())
+	return &ControlServerImpl{hd: hd, sentryClient: sentryClient}, nil
+}
+
+func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
+	cs.hdLock.Lock()
+	defer cs.hdLock.Unlock()
+	var request eth.NewBlockHashesData
+	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
+		return nil, fmt.Errorf("decode NewBlockHashes: %v", err)
+	}
+	for _, announce := range request {
+		if !cs.hd.HasTip(announce.Hash) {
+			log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
+			bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
+				Amount:  1,
+				Reverse: false,
+				Skip:    0,
+				Origin:  eth.HashOrNumber{Hash: announce.Hash},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("encode header request: %v", err)
+			}
+			outreq := proto.SendMessageByMinBlockRequest{
+				MinBlock: announce.Number,
+				Data: &proto.OutboundMessageData{
+					Id:   proto.OutboundMessageId_GetBlockHeaders,
+					Data: bytes,
+				},
+			}
+			_, err = cs.sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+			if err != nil {
+				return nil, fmt.Errorf("send header request: %v", err)
+			}
+		}
+	}
+	return &empty.Empty{}, nil
+}
+
+func (cs *ControlServerImpl) blockHeaders(inreq *proto.InboundMessage) (*empty.Empty, error) {
+	cs.hdLock.Lock()
+	defer cs.hdLock.Unlock()
+	var request []*types.Header
+	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
+		return nil, fmt.Errorf("decode BlockHeaders: %v", err)
+	}
+	if segments, penalty, err := cs.hd.SplitIntoSegments(request); err == nil {
+		if penalty == headerdownload.NoPenalty {
+			for _, segment := range segments {
+				processSegment(cs.hd, segment)
+			}
+		} else {
+			//penaltyCh <- PenaltyMsg{SentryMsg: headersReq.SentryMsg, penalty: penalty}
+		}
+	} else {
+		return nil, fmt.Errorf("SingleHeaderAsSegment failed: %v", err)
+	}
+	log.Info("HeadersMsg processed")
+	return &empty.Empty{}, nil
+}
+
+func (cs *ControlServerImpl) newBlock(inreq *proto.InboundMessage) (*empty.Empty, error) {
+	cs.hdLock.Lock()
+	defer cs.hdLock.Unlock()
+	var request eth.NewBlockData
+	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
+		return nil, fmt.Errorf("decode NewBlockMsg: %v", err)
+	}
+	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(request.Block.Header()); err == nil {
+		if penalty == headerdownload.NoPenalty {
+			processSegment(cs.hd, segments[0]) // There is only one segment in this case
+		} else {
+			// Send penalty back to the sentry
+			//penaltyCh <- PenaltyMsg{SentryMsg: newBlockReq.SentryMsg, penalty: penalty}
+		}
+	} else {
+		return nil, fmt.Errorf("singleHeaderAsSegment failed: %v", err)
+	}
+	log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d}", request.Block.NumberU64()))
+	return &empty.Empty{}, nil
+}
+
+func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
+	switch inreq.Id {
+	case proto.InboundMessageId_NewBlockHashes:
+		return cs.newBlockHashes(ctx, inreq)
+	case proto.InboundMessageId_BlockHeaders:
+		return cs.blockHeaders(inreq)
+	case proto.InboundMessageId_NewBlock:
+		return cs.newBlock(inreq)
+	default:
+		return nil, fmt.Errorf("not implemented for message Id: %s", inreq.Id)
+	}
+}
+
+func (cs *ControlServerImpl) GetStatus(context.Context, *empty.Empty) (*proto.StatusData, error) {
+	return nil, nil
+}
+
+func (cs *ControlServerImpl) loop(ctx context.Context) {
+	var timer *time.Timer
+	cs.hdLock.Lock()
+	timer = cs.hd.RequestQueueTimer
+	cs.hdLock.Unlock()
 	for {
 		select {
-		case newBlockReq := <-newBlockCh:
-			if segments, penalty, err := hd.SingleHeaderAsSegment(newBlockReq.Block.Header()); err == nil {
-				if penalty == headerdownload.NoPenalty {
-					processSegment(hd, segments[0]) // There is only one segment in this case
-				} else {
-					// Send penalty back to the sentry
-					penaltyCh <- PenaltyMsg{SentryMsg: newBlockReq.SentryMsg, penalty: penalty}
-				}
-			} else {
-				log.Error("SingleHeaderAsSegment failed", "error", err)
-				continue
-			}
-			log.Info(fmt.Sprintf("NewBlockMsg{blockNumber: %d}", newBlockReq.Block.NumberU64()))
-		case newBlockHashReq := <-newBlockHashCh:
-			for _, announce := range newBlockHashReq.NewBlockHashesData {
-				if !hd.HasTip(announce.Hash) {
-					log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
-					bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
-						Amount:  1,
-						Reverse: false,
-						Skip:    0,
-						Origin:  eth.HashOrNumber{Hash: announce.Hash},
-					})
-					if err != nil {
-						log.Error("Could not encode header request", "err", err)
-						continue
-					}
-					outreq := proto.SendMessageByMinBlockRequest{
-						MinBlock: announce.Number,
-						Data: &proto.OutboundMessageData{
-							Id:   proto.OutboundMessageId_GetBlockHeaders,
-							Data: bytes,
-						},
-					}
-					_, err = sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
-					if err != nil {
-						log.Error("Could not send header request", "err", err)
-						continue
-					}
-				}
-			}
-		case headersReq := <-headersCh:
-			if segments, penalty, err := hd.SplitIntoSegments(headersReq.headers); err == nil {
-				if penalty == headerdownload.NoPenalty {
-					for _, segment := range segments {
-						processSegment(hd, segment)
-					}
-				} else {
-					penaltyCh <- PenaltyMsg{SentryMsg: headersReq.SentryMsg, penalty: penalty}
-				}
-			} else {
-				log.Error("SingleHeaderAsSegment failed", "error", err)
-			}
-			log.Info("HeadersMsg processed")
-		case <-hd.RequestQueueTimer.C:
+		case <-timer.C:
 			fmt.Printf("RequestQueueTimer ticked\n")
 		case <-ctx.Done():
 			return
 		}
-		reqs := hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
+		cs.hdLock.Lock()
+		reqs := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
+		timer = cs.hd.RequestQueueTimer
+		cs.hdLock.Unlock()
 		for _, req := range reqs {
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
 			bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
@@ -264,7 +391,7 @@ func Downloader(
 					Data: bytes,
 				},
 			}
-			_, err = sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+			_, err = cs.sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
 			if err != nil {
 				log.Error("Could not send header request", "err", err)
 				continue
@@ -272,102 +399,3 @@ func Downloader(
 		}
 	}
 }
-
-func Download(filesDir string, bufferSize int, sentryAddr string, coreAddr string) error {
-	ctx := rootContext()
-	log.Info("Starting Core P2P server", "on", coreAddr, "connecting to sentry", coreAddr)
-
-	listenConfig := net.ListenConfig{
-		Control: func(network, address string, _ syscall.RawConn) error {
-			log.Info("Core P2P received connection", "via", network, "from", address)
-			return nil
-		},
-	}
-	lis, err := listenConfig.Listen(ctx, "tcp", coreAddr)
-	if err != nil {
-		return fmt.Errorf("could not create Core P2P listener: %w, addr=%s", err, coreAddr)
-	}
-	var (
-		streamInterceptors []grpc.StreamServerInterceptor
-		unaryInterceptors  []grpc.UnaryServerInterceptor
-	)
-	if metrics.Enabled {
-		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	}
-	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
-	var grpcServer *grpc.Server
-	cpus := uint32(runtime.GOMAXPROCS(-1))
-	opts := []grpc.ServerOption{
-		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
-		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
-		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(100), // to force clients reduce concurrency level
-		grpc.KeepaliveParams(keepalive.ServerParameters{
-			Time: 10 * time.Minute,
-		}),
-		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
-	}
-	grpcServer = grpc.NewServer(opts...)
-	controlServer := &ControlServerImpl{}
-	proto.RegisterControlServer(grpcServer, controlServer)
-	if metrics.Enabled {
-		grpc_prometheus.Register(grpcServer)
-	}
-
-	go func() {
-		if err := grpcServer.Serve(lis); err != nil {
-			log.Error("Core P2P server fail", "err", err)
-		}
-	}()
-	// CREATING GRPC CLIENT CONNECTION
-	var dialOpts []grpc.DialOption
-	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Timeout: 10 * time.Minute,
-		}),
-	}
-
-	dialOpts = append(dialOpts, grpc.WithInsecure())
-
-	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
-	if err != nil {
-		return fmt.Errorf("creating client connection to sentry P2P: %w", err)
-	}
-	sentryClient := proto.NewSentryClient(conn)
-
-	newBlockCh := make(chan NewBlockFromSentry)
-	newBlockHashCh := make(chan NewBlockHashFromSentry)
-	penaltyCh := make(chan PenaltyMsg)
-	reqHeadersCh := make(chan headerdownload.HeaderRequest)
-	headersCh := make(chan BlockHeadersFromSentry)
-
-	go Downloader(ctx, filesDir, bufferSize*1024*1024, newBlockCh, newBlockHashCh, headersCh, penaltyCh, reqHeadersCh, sentryClient)
-
-	<-ctx.Done()
-	return nil
-}
-
-type ControlServerImpl struct {
-	proto.UnimplementedControlServer
-}
-
-func (cs *ControlServerImpl) ForwardInboundMessage(context.Context, *proto.InboundMessage) (*empty.Empty, error) {
-	return nil, nil
-}
-
-func (cs *ControlServerImpl) GetStatus(context.Context, *empty.Empty) (*proto.StatusData, error) {
-	return nil, nil
-}
-
-/*
-type ControlServer interface {
-	ForwardInboundMessage(context.Context, *InboundMessage) (*empty.Empty, error)
-	GetStatus(context.Context, *empty.Empty) (*StatusData, error)
-	mustEmbedUnimplementedControlServer()
-}
-*/
