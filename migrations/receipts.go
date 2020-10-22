@@ -95,7 +95,7 @@ var receiptsCborEncode = Migration{
 }
 
 var receiptsOnePerTx = Migration{
-	Name: "receipts_one_per_transaction",
+	Name: "receipts_one_per_transaction2",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -187,6 +187,13 @@ var receiptsOnePerTx = Migration{
 			if err := cbor.Marshal(buf, receipts); err != nil {
 				return false, err
 			}
+			if buf.Len() == 1 {
+				fmt.Printf("1: %d, len(legacyReceipts)=%d\n", len(v), len(legacyReceipts))
+			}
+			if buf.Len() == 7 {
+				fmt.Printf("7: %d, len(legacyReceipts)=%d\n", len(v), len(legacyReceipts))
+			}
+
 			if err := collectorR.Collect(common.CopyBytes(k[:8]), buf.Bytes()); err != nil {
 				return false, fmt.Errorf("collecting key %x: %w", k, err)
 			}
@@ -197,15 +204,15 @@ var receiptsOnePerTx = Migration{
 		}
 
 	LoadStep:
-		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.BlockReceiptsPrefix); err != nil {
-			return fmt.Errorf("clearing the receipt bucket: %w", err)
-		}
+		//if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.BlockReceiptsPrefix); err != nil {
+		//	return fmt.Errorf("clearing the receipt bucket: %w", err)
+		//}
 		// Commit clearing of the bucket - freelist should now be written to the database
 		if err := OnLoadCommit(db, nil, false); err != nil {
 			return fmt.Errorf("committing the removal of receipt table")
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err := collectorR.Load("receipts_one_per_transaction", db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err := collectorR.Load("receipts_one_per_transaction", db, dbutils.BlockReceiptsPrefix2, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
 		if err := collectorL.Load("receipts_one_per_transaction", db, dbutils.Log, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {

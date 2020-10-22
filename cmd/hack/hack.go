@@ -2115,6 +2115,9 @@ func receiptSizes(chaindata string) error {
 	}
 	sort.Ints(lens)
 	for _, l := range lens {
+		//if sizes[l] < 100000 {
+		//	continue
+		//}
 		fmt.Printf("%6d - %d\n", l, sizes[l])
 	}
 	return nil
