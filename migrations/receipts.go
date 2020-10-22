@@ -99,6 +99,7 @@ var receiptsOnePerTx = Migration{
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
+		logPrefix := "receipts_one_per_transaction"
 
 		// Recently was introduced receipts serialization problem
 		// Code was not generated well for types.Log type
@@ -120,10 +121,12 @@ var receiptsOnePerTx = Migration{
 		if err1 != nil {
 			return err1
 		}
+		defer collectorR.Close(logPrefix)
 		collectorL, err1 := etl.NewCollectorFromFiles(tmpdir + "2")
 		if err1 != nil {
 			return err1
 		}
+		defer collectorL.Close(logPrefix)
 		switch string(progress) {
 		case "":
 			if collectorR != nil || collectorL == nil { //  can't use files if progress field not set
@@ -140,7 +143,9 @@ var receiptsOnePerTx = Migration{
 		}
 
 		collectorR = etl.NewCriticalCollector(tmpdir+"1", etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+		defer collectorR.Close(logPrefix)
 		collectorL = etl.NewCriticalCollector(tmpdir+"2", etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+		defer collectorL.Close(logPrefix)
 		if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
 			blockNum := binary.BigEndian.Uint64(k[:8])
 			select {
@@ -210,10 +215,10 @@ var receiptsOnePerTx = Migration{
 			return fmt.Errorf("committing the removal of receipt table")
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err := collectorR.Load("receipts_one_per_transaction", db, dbutils.BlockReceiptsPrefix2, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err := collectorR.Load(logPrefix, db, dbutils.BlockReceiptsPrefix2, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
-		if err := collectorL.Load("receipts_one_per_transaction", db, dbutils.Log, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {
+		if err := collectorL.Load(logPrefix, db, dbutils.Log, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
 		return nil

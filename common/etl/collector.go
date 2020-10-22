@@ -30,7 +30,7 @@ type Collector struct {
 	flushBuffer     func([]byte, bool) error
 	dataProviders   []dataProvider
 	allFlushed      bool
-	cleanOnFailure  bool
+	autoClean       bool
 }
 
 // NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
@@ -54,18 +54,18 @@ func NewCollectorFromFiles(tmpdir string) (*Collector, error) {
 		}
 		dataProviders[i] = &dataProvider
 	}
-	return &Collector{dataProviders: dataProviders, allFlushed: true, cleanOnFailure: false}, nil
+	return &Collector{dataProviders: dataProviders, allFlushed: true, autoClean: false}, nil
 }
 
 // NewCriticalCollector does not clean up temporary files if loading has failed
 func NewCriticalCollector(tmpdir string, sortableBuffer Buffer) *Collector {
 	c := NewCollector(tmpdir, sortableBuffer)
-	c.cleanOnFailure = false
+	c.autoClean = false
 	return c
 }
 
 func NewCollector(tmpdir string, sortableBuffer Buffer) *Collector {
-	c := &Collector{cleanOnFailure: true}
+	c := &Collector{autoClean: true}
 	encoder := codec.NewEncoder(nil, &cbor)
 
 	c.flushBuffer = func(currentKey []byte, canStoreInRam bool) error {
@@ -108,17 +108,9 @@ func (c *Collector) Collect(k, v []byte) error {
 
 func (c *Collector) Load(logPrefix string, db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) (err error) {
 	defer func() {
-		if !c.cleanOnFailure {
-			// don't clean if error or panic happened
-			if err != nil {
-				return
-			}
-			if rec := recover(); rec != nil {
-				panic(rec)
-			}
+		if c.autoClean {
+			c.Close(logPrefix)
 		}
-
-		disposeProviders(logPrefix, c.dataProviders)
 	}()
 	if !c.allFlushed {
 		if err := c.flushBuffer(nil, true); err != nil {
@@ -130,6 +122,10 @@ func (c *Collector) Load(logPrefix string, db ethdb.Database, toBucket string, l
 		return err
 	}
 	return nil
+}
+
+func (c *Collector) Close(logPrefix string) {
+	disposeProviders(logPrefix, c.dataProviders)
 }
 
 func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
