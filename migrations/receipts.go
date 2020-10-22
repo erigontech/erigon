@@ -178,16 +178,6 @@ var receiptsOnePerTx = Migration{
 				if err := cbor.Marshal(buf, r.Logs); err != nil {
 					return false, err
 				}
-				//if buf.Len() == 1 {
-				//	if len(r.Logs) > 1 {
-				//		fmt.Printf("0: %d, len(legacyReceipts)=%d, %+v\n", len(v), len(legacyReceipts), legacyReceipts[0])
-				//	}
-				//}
-				//if buf.Len() < 10 {
-				//	if len(r.Logs) > 10 {
-				//		fmt.Printf("01: %d, len(legacyReceipts)=%d, %+v\n", len(v), len(legacyReceipts), legacyReceipts[0])
-				//	}
-				//}
 				if err := collectorL.Collect(newK, buf.Bytes()); err != nil {
 					return false, fmt.Errorf("collecting key %x: %w", k, err)
 				}
@@ -197,16 +187,6 @@ var receiptsOnePerTx = Migration{
 			if err := cbor.Marshal(buf, receipts); err != nil {
 				return false, err
 			}
-			//if buf.Len() == 1 {
-			//	if len(v) != 1 {
-			//		fmt.Printf("1: %d, len(legacyReceipts)=%d\n", len(v), len(legacyReceipts))
-			//	}
-			//}
-			//if buf.Len() == 7 {
-			//	if len(v) > 800 {
-			//		fmt.Printf("7: %d, len(legacyReceipts)=%d, %+v\n", len(v), len(legacyReceipts), legacyReceipts[0].Logs[0])
-			//	}
-			//}
 
 			if err := collectorR.Collect(common.CopyBytes(k[:8]), buf.Bytes()); err != nil {
 				return false, fmt.Errorf("collecting key %x: %w", k, err)
