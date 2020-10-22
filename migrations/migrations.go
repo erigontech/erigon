@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -143,7 +144,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 			return err
 		}
 
-		if err = v.Up(tx, datadir, progress, func(_ ethdb.Putter, key []byte, isDone bool) error {
+		if err = v.Up(tx, path.Join(datadir, "migrations", v.Name), progress, func(_ ethdb.Putter, key []byte, isDone bool) error {
 			if !isDone {
 				if key != nil {
 					err = tx.Put(dbutils.Migrations, []byte("_progress_"+v.Name), key)
