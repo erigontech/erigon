@@ -36,12 +36,13 @@ var (
 type codecSelfer2 struct{}
 
 func codecSelfer2False() bool { return false }
+func codecSelfer2True() bool  { return true }
 
 func init() {
-	if codec1978.GenVersion != 17 {
+	if codec1978.GenVersion != 19 {
 		_, file, _, _ := runtime.Caller(0)
 		ver := strconv.FormatInt(int64(codec1978.GenVersion), 10)
-		panic(errors.New("codecgen version mismatch: current: 17, need " + ver + ". Re-generate file: " + file))
+		panic(errors.New("codecgen version mismatch: current: 19, need " + ver + ". Re-generate file: " + file))
 	}
 	if false { // reference the types, but skip this branch at build/run time
 		var _ pkg1_common.Address
@@ -57,11 +58,10 @@ func (x *Receipt) CodecEncodeSelf(e *codec1978.Encoder) {
 		r.EncodeNil()
 	} else {
 		if !z.EncBinary() && z.IsJSONHandle() {
-			z.EncJSONMarshal(x)
+			z.EncJSONMarshal(*x)
 		} else {
-			yysep2 := !z.EncBinary()
 			yy2arr2 := z.EncBasicHandle().StructToArray
-			_, _ = yysep2, yy2arr2
+			_ = yy2arr2
 			const yyr2 bool = false // struct tag has 'toArray'
 			if yyr2 || yy2arr2 {
 				z.EncWriteArrayStart(3)
@@ -230,6 +230,10 @@ func (x *Receipt) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 	}
 }
 
+func (x *Receipt) IsCodecEmpty() bool {
+	return !(len(x.PostState) != 0 && x.Status != 0 && x.CumulativeGasUsed != 0 && true)
+}
+
 func (x *storedReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
@@ -237,9 +241,8 @@ func (x *storedReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 	if x == nil {
 		r.EncodeNil()
 	} else {
-		yysep2 := !z.EncBinary()
 		yy2arr2 := z.EncBasicHandle().StructToArray
-		_, _ = yysep2, yy2arr2
+		_ = yy2arr2
 		const yyr2 bool = false // struct tag has 'toArray'
 		if yyr2 || yy2arr2 {
 			z.EncWriteArrayStart(3)
@@ -411,6 +414,10 @@ func (x *storedReceiptRLP) codecDecodeSelfFromArray(l int, d *codec1978.Decoder)
 	}
 }
 
+func (x *storedReceiptRLP) IsCodecEmpty() bool {
+	return !(len(x.PostStateOrStatus) != 0 && x.CumulativeGasUsed != 0 && len(x.Logs) != 0 && true)
+}
+
 func (x *v4StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
@@ -418,9 +425,8 @@ func (x *v4StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 	if x == nil {
 		r.EncodeNil()
 	} else {
-		yysep2 := !z.EncBinary()
 		yy2arr2 := z.EncBasicHandle().StructToArray
-		_, _ = yysep2, yy2arr2
+		_ = yy2arr2
 		const yyr2 bool = false // struct tag has 'toArray'
 		if yyr2 || yy2arr2 {
 			z.EncWriteArrayStart(6)
@@ -435,14 +441,14 @@ func (x *v4StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 			z.EncWriteArrayElem()
 			yy11 := &x.TxHash
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy11)
+				z.EncTextMarshal(*yy11)
 			} else {
 				h.enccommon_Hash((*pkg1_common.Hash)(yy11), e)
 			}
 			z.EncWriteArrayElem()
 			yy13 := &x.ContractAddress
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy13)
+				z.EncTextMarshal(*yy13)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy13), e)
 			}
@@ -486,7 +492,7 @@ func (x *v4StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 			z.EncWriteMapElemValue()
 			yy19 := &x.TxHash
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy19)
+				z.EncTextMarshal(*yy19)
 			} else {
 				h.enccommon_Hash((*pkg1_common.Hash)(yy19), e)
 			}
@@ -499,7 +505,7 @@ func (x *v4StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 			z.EncWriteMapElemValue()
 			yy21 := &x.ContractAddress
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy21)
+				z.EncTextMarshal(*yy21)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy21), e)
 			}
@@ -700,6 +706,10 @@ func (x *v4StoredReceiptRLP) codecDecodeSelfFromArray(l int, d *codec1978.Decode
 	}
 }
 
+func (x *v4StoredReceiptRLP) IsCodecEmpty() bool {
+	return !(len(x.PostStateOrStatus) != 0 && x.CumulativeGasUsed != 0 && len(x.TxHash) != 0 && len(x.ContractAddress) != 0 && len(x.Logs) != 0 && x.GasUsed != 0 && true)
+}
+
 func (x *v3StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
@@ -707,9 +717,8 @@ func (x *v3StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 	if x == nil {
 		r.EncodeNil()
 	} else {
-		yysep2 := !z.EncBinary()
 		yy2arr2 := z.EncBasicHandle().StructToArray
-		_, _ = yysep2, yy2arr2
+		_ = yy2arr2
 		const yyr2 bool = false // struct tag has 'toArray'
 		if yyr2 || yy2arr2 {
 			z.EncWriteArrayStart(5)
@@ -724,7 +733,7 @@ func (x *v3StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 			z.EncWriteArrayElem()
 			yy10 := &x.ContractAddress
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy10)
+				z.EncTextMarshal(*yy10)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy10), e)
 			}
@@ -768,7 +777,7 @@ func (x *v3StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 			z.EncWriteMapElemValue()
 			yy16 := &x.ContractAddress
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy16)
+				z.EncTextMarshal(*yy16)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy16), e)
 			}
@@ -947,6 +956,10 @@ func (x *v3StoredReceiptRLP) codecDecodeSelfFromArray(l int, d *codec1978.Decode
 	}
 }
 
+func (x *v3StoredReceiptRLP) IsCodecEmpty() bool {
+	return !(len(x.PostStateOrStatus) != 0 && x.CumulativeGasUsed != 0 && len(x.ContractAddress) != 0 && len(x.Logs) != 0 && x.GasUsed != 0 && true)
+}
+
 func (x ReceiptsForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
@@ -972,9 +985,8 @@ func (x *ReceiptForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 	if x == nil {
 		r.EncodeNil()
 	} else {
-		yysep2 := !z.EncBinary()
 		yy2arr2 := z.EncBasicHandle().StructToArray
-		_, _ = yysep2, yy2arr2
+		_ = yy2arr2
 		const yyr2 bool = false // struct tag has 'toArray'
 		if yyr2 || yy2arr2 {
 			z.EncWriteArrayStart(3)
@@ -1138,6 +1150,10 @@ func (x *ReceiptForStorage) codecDecodeSelfFromArray(l int, d *codec1978.Decoder
 	}
 }
 
+func (x *ReceiptForStorage) IsCodecEmpty() bool {
+	return !(len(x.PostState) != 0 && x.Status != 0 && x.CumulativeGasUsed != 0 && true)
+}
+
 func (x Receipts) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
@@ -1164,18 +1180,17 @@ func (x *Log) CodecEncodeSelf(e *codec1978.Encoder) {
 		r.EncodeNil()
 	} else {
 		if !z.EncBinary() && z.IsJSONHandle() {
-			z.EncJSONMarshal(x)
+			z.EncJSONMarshal(*x)
 		} else {
-			yysep2 := !z.EncBinary()
 			yy2arr2 := z.EncBasicHandle().StructToArray
-			_, _ = yysep2, yy2arr2
+			_ = yy2arr2
 			const yyr2 bool = false // struct tag has 'toArray'
 			if yyr2 || yy2arr2 {
 				z.EncWriteArrayStart(3)
 				z.EncWriteArrayElem()
 				yy6 := &x.Address
 				if !z.EncBinary() {
-					z.EncTextMarshal(yy6)
+					z.EncTextMarshal(*yy6)
 				} else {
 					h.enccommon_Address((*pkg1_common.Address)(yy6), e)
 				}
@@ -1203,7 +1218,7 @@ func (x *Log) CodecEncodeSelf(e *codec1978.Encoder) {
 				z.EncWriteMapElemValue()
 				yy10 := &x.Address
 				if !z.EncBinary() {
-					z.EncTextMarshal(yy10)
+					z.EncTextMarshal(*yy10)
 				} else {
 					h.enccommon_Address((*pkg1_common.Address)(yy10), e)
 				}
@@ -1363,6 +1378,28 @@ func (x *Log) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 	}
 }
 
+func (x *Log) IsCodecEmpty() bool {
+	return !(len(x.Address) != 0 && len(x.Topics) != 0 && len(x.Data) != 0 && true)
+}
+
+func (x Logs) CodecEncodeSelf(e *codec1978.Encoder) {
+	var h codecSelfer2
+	z, r := codec1978.GenHelperEncoder(e)
+	_, _, _ = h, z, r
+	if x == nil {
+		r.EncodeNil()
+	} else {
+		h.encLogs((Logs)(x), e)
+	} // end block: if x slice == nil
+}
+
+func (x *Logs) CodecDecodeSelf(d *codec1978.Decoder) {
+	var h codecSelfer2
+	z, r := codec1978.GenHelperDecoder(d)
+	_, _, _ = h, z, r
+	h.decLogs((*Logs)(x), d)
+}
+
 func (x *rlpLog) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
@@ -1370,16 +1407,15 @@ func (x *rlpLog) CodecEncodeSelf(e *codec1978.Encoder) {
 	if x == nil {
 		r.EncodeNil()
 	} else {
-		yysep2 := !z.EncBinary()
 		yy2arr2 := z.EncBasicHandle().StructToArray
-		_, _ = yysep2, yy2arr2
+		_ = yy2arr2
 		const yyr2 bool = false // struct tag has 'toArray'
 		if yyr2 || yy2arr2 {
 			z.EncWriteArrayStart(3)
 			z.EncWriteArrayElem()
 			yy6 := &x.Address
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy6)
+				z.EncTextMarshal(*yy6)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy6), e)
 			}
@@ -1407,7 +1443,7 @@ func (x *rlpLog) CodecEncodeSelf(e *codec1978.Encoder) {
 			z.EncWriteMapElemValue()
 			yy10 := &x.Address
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy10)
+				z.EncTextMarshal(*yy10)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy10), e)
 			}
@@ -1562,6 +1598,10 @@ func (x *rlpLog) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 	}
 }
 
+func (x *rlpLog) IsCodecEmpty() bool {
+	return !(len(x.Address) != 0 && len(x.Topics) != 0 && len(x.Data) != 0 && true)
+}
+
 func (x *rlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
@@ -1569,16 +1609,15 @@ func (x *rlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 	if x == nil {
 		r.EncodeNil()
 	} else {
-		yysep2 := !z.EncBinary()
 		yy2arr2 := z.EncBasicHandle().StructToArray
-		_, _ = yysep2, yy2arr2
+		_ = yy2arr2
 		const yyr2 bool = false // struct tag has 'toArray'
 		if yyr2 || yy2arr2 {
 			z.EncWriteArrayStart(3)
 			z.EncWriteArrayElem()
 			yy6 := &x.Address
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy6)
+				z.EncTextMarshal(*yy6)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy6), e)
 			}
@@ -1606,7 +1645,7 @@ func (x *rlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 			z.EncWriteMapElemValue()
 			yy10 := &x.Address
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy10)
+				z.EncTextMarshal(*yy10)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy10), e)
 			}
@@ -1761,6 +1800,10 @@ func (x *rlpStorageLog) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 	}
 }
 
+func (x *rlpStorageLog) IsCodecEmpty() bool {
+	return !(len(x.Address) != 0 && len(x.Topics) != 0 && len(x.Data) != 0 && true)
+}
+
 func (x *legacyRlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
@@ -1768,16 +1811,15 @@ func (x *legacyRlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 	if x == nil {
 		r.EncodeNil()
 	} else {
-		yysep2 := !z.EncBinary()
 		yy2arr2 := z.EncBasicHandle().StructToArray
-		_, _ = yysep2, yy2arr2
+		_ = yy2arr2
 		const yyr2 bool = false // struct tag has 'toArray'
 		if yyr2 || yy2arr2 {
 			z.EncWriteArrayStart(3)
 			z.EncWriteArrayElem()
 			yy6 := &x.Address
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy6)
+				z.EncTextMarshal(*yy6)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy6), e)
 			}
@@ -1805,7 +1847,7 @@ func (x *legacyRlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 			z.EncWriteMapElemValue()
 			yy10 := &x.Address
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy10)
+				z.EncTextMarshal(*yy10)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy10), e)
 			}
@@ -1960,6 +2002,10 @@ func (x *legacyRlpStorageLog) codecDecodeSelfFromArray(l int, d *codec1978.Decod
 	}
 }
 
+func (x *legacyRlpStorageLog) IsCodecEmpty() bool {
+	return !(len(x.Address) != 0 && len(x.Topics) != 0 && len(x.Data) != 0 && true)
+}
+
 func (x *LogForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
@@ -1967,16 +2013,15 @@ func (x *LogForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 	if x == nil {
 		r.EncodeNil()
 	} else {
-		yysep2 := !z.EncBinary()
 		yy2arr2 := z.EncBasicHandle().StructToArray
-		_, _ = yysep2, yy2arr2
+		_ = yy2arr2
 		const yyr2 bool = false // struct tag has 'toArray'
 		if yyr2 || yy2arr2 {
 			z.EncWriteArrayStart(3)
 			z.EncWriteArrayElem()
 			yy6 := &x.Address
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy6)
+				z.EncTextMarshal(*yy6)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy6), e)
 			}
@@ -2004,7 +2049,7 @@ func (x *LogForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 			z.EncWriteMapElemValue()
 			yy10 := &x.Address
 			if !z.EncBinary() {
-				z.EncTextMarshal(yy10)
+				z.EncTextMarshal(*yy10)
 			} else {
 				h.enccommon_Address((*pkg1_common.Address)(yy10), e)
 			}
@@ -2157,6 +2202,10 @@ func (x *LogForStorage) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 		z.DecReadArrayElem()
 		z.DecStructFieldNotFound(yyj10-1, "")
 	}
+}
+
+func (x *LogForStorage) IsCodecEmpty() bool {
+	return !(len(x.Address) != 0 && len(x.Topics) != 0 && len(x.Data) != 0 && true)
 }
 
 func (x codecSelfer2) encSlicePtrtoLogForStorage(v []*LogForStorage, e *codec1978.Encoder) {
@@ -2520,7 +2569,7 @@ func (x codecSelfer2) encSlicecommon_Hash(v []pkg1_common.Hash, e *codec1978.Enc
 		z.EncWriteArrayElem()
 		yy2 := &yyv1
 		if !z.EncBinary() {
-			z.EncTextMarshal(yy2)
+			z.EncTextMarshal(*yy2)
 		} else {
 			h.enccommon_Hash((*pkg1_common.Hash)(yy2), e)
 		}
@@ -2600,6 +2649,110 @@ func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.De
 			yyc1 = true
 		} else if yyj1 == 0 && yyv1 == nil {
 			yyv1 = make([]pkg1_common.Hash, 0)
+			yyc1 = true
+		}
+	}
+	yyh1.End()
+	if yyc1 {
+		*v = yyv1
+	}
+}
+
+func (x codecSelfer2) encLogs(v Logs, e *codec1978.Encoder) {
+	var h codecSelfer2
+	z, r := codec1978.GenHelperEncoder(e)
+	_, _, _ = h, z, r
+	if v == nil {
+		r.EncodeNil()
+		return
+	}
+	z.EncWriteArrayStart(len(v))
+	for _, yyv1 := range v {
+		z.EncWriteArrayElem()
+		if yyv1 == nil {
+			r.EncodeNil()
+		} else {
+			yyv1.CodecEncodeSelf(e)
+		}
+	}
+	z.EncWriteArrayEnd()
+}
+
+func (x codecSelfer2) decLogs(v *Logs, d *codec1978.Decoder) {
+	var h codecSelfer2
+	z, r := codec1978.GenHelperDecoder(d)
+	_, _, _ = h, z, r
+
+	yyv1 := *v
+	yyh1, yyl1 := z.DecSliceHelperStart()
+	var yyc1 bool
+	_ = yyc1
+	if yyh1.IsNil {
+		if yyv1 != nil {
+			yyv1 = nil
+			yyc1 = true
+		}
+	} else if yyl1 == 0 {
+		if yyv1 == nil {
+			yyv1 = []*Log{}
+			yyc1 = true
+		} else if len(yyv1) != 0 {
+			yyv1 = yyv1[:0]
+			yyc1 = true
+		}
+	} else {
+		yyhl1 := yyl1 > 0
+		var yyrl1 int
+		_ = yyrl1
+		if yyhl1 {
+			if yyl1 > cap(yyv1) {
+				yyrl1 = z.DecInferLen(yyl1, z.DecBasicHandle().MaxInitLen, 8)
+				if yyrl1 <= cap(yyv1) {
+					yyv1 = yyv1[:yyrl1]
+				} else {
+					yyv1 = make([]*Log, yyrl1)
+				}
+				yyc1 = true
+			} else if yyl1 != len(yyv1) {
+				yyv1 = yyv1[:yyl1]
+				yyc1 = true
+			}
+		}
+		var yyj1 int
+		for yyj1 = 0; (yyhl1 && yyj1 < yyl1) || !(yyhl1 || z.DecCheckBreak()); yyj1++ { // bounds-check-elimination
+			if yyj1 == 0 && yyv1 == nil {
+				if yyhl1 {
+					yyrl1 = z.DecInferLen(yyl1, z.DecBasicHandle().MaxInitLen, 8)
+				} else {
+					yyrl1 = 8
+				}
+				yyv1 = make([]*Log, yyrl1)
+				yyc1 = true
+			}
+			yyh1.ElemContainerState(yyj1)
+			var yydb1 bool
+			if yyj1 >= len(yyv1) {
+				yyv1 = append(yyv1, nil)
+				yyc1 = true
+			}
+			if yydb1 {
+				z.DecSwallow()
+			} else {
+				if r.TryNil() {
+					yyv1[yyj1] = nil
+				} else {
+					if yyv1[yyj1] == nil {
+						yyv1[yyj1] = new(Log)
+					}
+					yyv1[yyj1].CodecDecodeSelf(d)
+				}
+			}
+		}
+		if yyj1 < len(yyv1) {
+			yyv1 = yyv1[:yyj1]
+			yyc1 = true
+		} else if yyj1 == 0 && yyv1 == nil {
+			yyv1 = make([]*Log, 0)
 			yyc1 = true
 		}
 	}
