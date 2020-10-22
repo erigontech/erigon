@@ -96,7 +96,7 @@ var receiptsCborEncode = Migration{
 
 var receiptsOnePerTx = Migration{
 	Name: "receipts_one_per_transaction3",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 		logPrefix := "receipts_one_per_transaction"
@@ -130,8 +130,8 @@ var receiptsOnePerTx = Migration{
 		switch string(progress) {
 		case "":
 			if collectorR != nil || collectorL == nil { //  can't use files if progress field not set
-				_ = os.RemoveAll(tmpdir + "1")
-				_ = os.RemoveAll(tmpdir + "2")
+				collectorR.Close(logPrefix)
+				collectorL.Close(logPrefix)
 				collectorR = nil
 				collectorL = nil
 			}
@@ -143,9 +143,18 @@ var receiptsOnePerTx = Migration{
 		}
 
 		collectorR = etl.NewCriticalCollector(tmpdir+"1", etl.NewSortableBuffer(etl.BufferOptimalSize*2))
-		defer collectorR.Close(logPrefix)
 		collectorL = etl.NewCriticalCollector(tmpdir+"2", etl.NewSortableBuffer(etl.BufferOptimalSize*2))
-		defer collectorL.Close(logPrefix)
+		defer func() {
+			// don't clean if error or panic happened
+			if err != nil {
+				return
+			}
+			if rec := recover(); rec != nil {
+				panic(rec)
+			}
+			collectorR.Close(logPrefix)
+			collectorL.Close(logPrefix)
+		}()
 		if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
 			blockNum := binary.BigEndian.Uint64(k[:8])
 			select {

@@ -108,9 +108,17 @@ func (c *Collector) Collect(k, v []byte) error {
 
 func (c *Collector) Load(logPrefix string, db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) (err error) {
 	defer func() {
-		if c.autoClean {
-			c.Close(logPrefix)
+		if !c.autoClean {
+			// don't clean if error or panic happened
+			if err != nil {
+				return
+			}
+			if rec := recover(); rec != nil {
+				panic(rec)
+			}
 		}
+
+		c.Close(logPrefix)
 	}()
 	if !c.allFlushed {
 		if err := c.flushBuffer(nil, true); err != nil {
