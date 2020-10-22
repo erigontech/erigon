@@ -112,10 +112,9 @@ var (
 	HeaderHashSuffix   = []byte("n") // headerPrefix + num (uint64 big endian) + headerHashSuffix -> hash
 	HeaderNumberPrefix = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
 
-	BlockBodyPrefix      = "b"   // blockBodyPrefix + num (uint64 big endian) + hash -> block body
-	BlockReceiptsPrefix  = "r"   // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
-	BlockReceiptsPrefix2 = "r2"  // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
-	Log                  = "log" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+	BlockBodyPrefix     = "b"   // blockBodyPrefix + num (uint64 big endian) + hash -> block body
+	BlockReceiptsPrefix = "r"   // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+	Log                 = "log" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -241,7 +240,6 @@ var Buckets = []string{
 	CallFromIndex,
 	CallToIndex,
 	Log,
-	BlockReceiptsPrefix2,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

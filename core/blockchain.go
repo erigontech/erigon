@@ -1405,8 +1405,8 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				// state, but if it's this special case here(skip reexecution) we will lose
 				// the empty receipt entry.
 				if len(block.Transactions()) == 0 {
-					if err := rawdb.WriteReceipts(bc.db, block.NumberU64(), nil); err != nil {
-						return i, err
+					if err1 := rawdb.WriteReceipts(bc.db, block.NumberU64(), nil); err1 != nil {
+						return i, err1
 					}
 				} else {
 					log.Error("Please file an issue, skip known block execution without receipt",
