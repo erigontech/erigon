@@ -187,7 +187,7 @@ var receiptsOnePerTx = Migration{
 			if err := cbor.Marshal(buf, receipts); err != nil {
 				return false, err
 			}
-			if err := collectorR.Collect(common.CopyBytes(k[8:]), buf.Bytes()); err != nil {
+			if err := collectorR.Collect(common.CopyBytes(k[:8]), buf.Bytes()); err != nil {
 				return false, fmt.Errorf("collecting key %x: %w", k, err)
 			}
 
@@ -205,10 +205,10 @@ var receiptsOnePerTx = Migration{
 			return fmt.Errorf("committing the removal of receipt table")
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err := collectorR.Load("receipts_one_per_tx", db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err := collectorR.Load("receipts_one_per_transaction", db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
-		if err := collectorL.Load("receipts_one_per_tx", db, dbutils.Log, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {
+		if err := collectorL.Load("receipts_one_per_transaction", db, dbutils.Log, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: OnLoadCommit}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
 		return nil

@@ -60,12 +60,14 @@ func TestReceiptOnePerTx(t *testing.T) {
 	binary.BigEndian.PutUint64(k, 1)
 	block1 := []*LegacyReceipt{
 		{
+			CumulativeGasUsed: 1_000_000_000,
 			Logs: []*types.Log{
 				{Address: common.HexToAddress("01"), Data: common.FromHex("02")},
 				{Address: common.HexToAddress("03"), Data: common.FromHex("04")},
 			},
 		},
 		{
+			CumulativeGasUsed: 2_000_000_000,
 			Logs: []*types.Log{
 				{Address: common.HexToAddress("05"), Data: common.FromHex("06")},
 				{Address: common.HexToAddress("07"), Data: common.FromHex("08")},
@@ -81,6 +83,7 @@ func TestReceiptOnePerTx(t *testing.T) {
 	binary.BigEndian.PutUint64(k, 2)
 	block2 := []*LegacyReceipt{
 		{
+			CumulativeGasUsed: 3_000_000_000,
 			Logs: []*types.Log{
 				{Address: common.HexToAddress("09"), Data: common.FromHex("10")},
 				{Address: common.HexToAddress("11"), Data: common.FromHex("12")},
@@ -105,47 +108,84 @@ func TestReceiptOnePerTx(t *testing.T) {
 		return true, nil
 	})
 	require.NoError(err)
+	require.Equal(2, i)
+
+	i = 0
+	err = db.Walk(dbutils.Log, nil, 0, func(k, v []byte) (bool, error) {
+		i++
+		return true, nil
+	})
+	require.NoError(err)
 	require.Equal(3, i)
 
-	newK := make([]byte, 8+4)
 	{
+		newK := make([]byte, 8)
 		binary.BigEndian.PutUint64(newK, 1)
-		binary.BigEndian.PutUint32(newK[8:], 0)
 		v, err := db.Get(dbutils.BlockReceiptsPrefix, newK)
 		require.NoError(err)
 
-		r := &types.Receipt{}
-		err = cbor.Unmarshal(r, bytes.NewReader(v))
+		var r types.Receipts
+		err = cbor.Unmarshal(&r, bytes.NewReader(v))
 		require.NoError(err)
-		require.Equal(len(block1[0].Logs), len(r.Logs))
-		require.Equal(block1[0].Logs[0], r.Logs[0])
-		require.Equal(block1[0].Logs[1], r.Logs[1])
+
+		require.Equal(len(r), len(block1))
+		require.Equal(r[0].CumulativeGasUsed, block1[0].CumulativeGasUsed)
+		require.Equal(r[1].CumulativeGasUsed, block1[1].CumulativeGasUsed)
+		require.Nil(r[0].Logs)
+		require.Nil(r[1].Logs)
 	}
 	{
+		newK := make([]byte, 8)
+		binary.BigEndian.PutUint64(newK, 2)
+		v, err := db.Get(dbutils.BlockReceiptsPrefix, newK)
+		require.NoError(err)
+
+		var r types.Receipts
+		err = cbor.Unmarshal(&r, bytes.NewReader(v))
+		require.NoError(err)
+		require.Equal(len(r), len(block2))
+		require.Equal(r[0].CumulativeGasUsed, block2[0].CumulativeGasUsed)
+		require.Nil(r[0].Logs)
+	}
+	{
+		newK := make([]byte, 8+4)
+		binary.BigEndian.PutUint64(newK, 1)
+		binary.BigEndian.PutUint32(newK[8:], 0)
+		v, err := db.Get(dbutils.Log, newK)
+		require.NoError(err)
+
+		var l types.Logs
+		err = cbor.Unmarshal(&l, bytes.NewReader(v))
+		require.NoError(err)
+		require.Equal(len(l), len(block1[0].Logs))
+		require.Equal(l[0], block1[0].Logs[0])
+		require.Equal(l[1], block1[0].Logs[1])
+	}
+	{
+		newK := make([]byte, 8+4)
 		binary.BigEndian.PutUint64(newK, 1)
 		binary.BigEndian.PutUint32(newK[8:], 1)
-		v, err := db.Get(dbutils.BlockReceiptsPrefix, newK)
+		v, err := db.Get(dbutils.Log, newK)
 		require.NoError(err)
 
-		r := &types.Receipt{}
-		err = cbor.Unmarshal(r, bytes.NewReader(v))
+		var l types.Logs
+		err = cbor.Unmarshal(&l, bytes.NewReader(v))
 		require.NoError(err)
-		require.Equal(len(block1[1].Logs), len(r.Logs))
-		require.Equal(block1[1].Logs[0], r.Logs[0])
-		require.Equal(block1[1].Logs[1], r.Logs[1])
+		require.Equal(len(l), len(block1[1].Logs))
+		require.Equal(l[0], block1[1].Logs[0])
+		require.Equal(l[1], block1[1].Logs[1])
 	}
 	{
+		newK := make([]byte, 8+4)
 		binary.BigEndian.PutUint64(newK, 2)
 		binary.BigEndian.PutUint32(newK[8:], 0)
-		v, err := db.Get(dbutils.BlockReceiptsPrefix, newK)
+		v, err := db.Get(dbutils.Log, newK)
 		require.NoError(err)
 
-		r := &types.Receipt{}
-		err = cbor.Unmarshal(r, bytes.NewReader(v))
+		var l types.Logs
+		err = cbor.Unmarshal(&l, bytes.NewReader(v))
 		require.NoError(err)
-		require.Equal(len(block2[0].Logs), len(r.Logs))
-		require.Equal(block2[0].Logs[0], r.Logs[0])
-		require.Equal(block2[0].Logs[1], r.Logs[1])
+		require.Equal(len(l), len(block2[0].Logs))
+		require.Equal(l[0], block2[0].Logs[0])
 	}
-
 }
