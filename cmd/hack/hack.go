@@ -2093,11 +2093,20 @@ func extracHeaders(chaindata string, block uint64) error {
 func receiptSizes(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	tx.(ethdb.BucketsMigrator).ClearBuckets(dbutils.BlockReceiptsPrefix2, dbutils.Log)
+	tx.Commit(context.Background())
+
+	tx, err = db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	c := tx.Cursor(dbutils.BlockReceiptsPrefix)
 	defer c.Close()
 	sizes := make(map[int]int)

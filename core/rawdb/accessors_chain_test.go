@@ -369,7 +369,9 @@ func TestBlockReceiptStorage(t *testing.T) {
 	WriteBody(ctx, db, hash, 0, body)
 
 	// Insert the receipt slice into the database and check presence
-	WriteReceipts(db, 0, receipts)
+	if err := WriteReceipts(db, 0, receipts); err != nil {
+		panic(err)
+	}
 	if rs := ReadReceipts(db, hash, 0); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
 	} else {
@@ -389,7 +391,9 @@ func TestBlockReceiptStorage(t *testing.T) {
 	// Sanity check that body alone without the receipt is a full purge
 	WriteBody(ctx, db, hash, 0, body)
 
-	DeleteReceipts(db, hash, 0)
+	if err := DeleteReceipts(db, 0); err != nil {
+		panic(err)
+	}
 	if rs := ReadReceipts(db, hash, 0); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}

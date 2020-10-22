@@ -484,7 +484,7 @@ func ReadReceipts(db ethdb.Database, hash common.Hash, number uint64) types.Rece
 }
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
-func WriteReceipts(tx DatabaseWriter, number uint64, receipts types.Receipts) {
+func WriteReceipts(tx DatabaseWriter, number uint64, receipts types.Receipts) error {
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 	for txId, r := range receipts {
 		if len(r.Logs) == 0 {
@@ -494,31 +494,24 @@ func WriteReceipts(tx DatabaseWriter, number uint64, receipts types.Receipts) {
 		buf.Reset()
 		err := cbor.Marshal(buf, r.Logs)
 		if err != nil {
-			err = fmt.Errorf("encode block receipts for block %d: %v", number, err)
-			log.Crit("Failed to store block receipts", "err", err)
-			return
+			return fmt.Errorf("encode block logs for block %d: %v", number, err)
 		}
 
 		if err = tx.Put(dbutils.Log, dbutils.LogKey(number, uint32(txId)), buf.Bytes()); err != nil {
-			err = fmt.Errorf("writing receipts for block %d: %v", number, err)
-			log.Crit("Failed to store block receipts", "err", err)
-			return
+			return fmt.Errorf("writing logs for block %d: %v", number, err)
 		}
 	}
 
 	buf.Reset()
 	err := cbor.Marshal(buf, receipts)
 	if err != nil {
-		err = fmt.Errorf("encode block receipts for block %d: %v", number, err)
-		log.Crit("Failed to store block receipts", "err", err)
-		return
+		return fmt.Errorf("encode block receipts for block %d: %v", number, err)
 	}
 
 	if err = tx.Put(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number), buf.Bytes()); err != nil {
-		err = fmt.Errorf("writing receipts for block %d: %v", number, err)
-		log.Crit("Failed to store block receipts", "err", err)
-		return
+		return fmt.Errorf("writing receipts for block %d: %v", number, err)
 	}
+	return nil
 }
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
@@ -553,10 +546,9 @@ func AppendReceipts(tx ethdb.DbWithPendingMutations, blockNumber uint64, receipt
 }
 
 // DeleteReceipts removes all receipt data associated with a block hash.
-func DeleteReceipts(db ethdb.Database, number uint64) {
+func DeleteReceipts(db ethdb.Database, number uint64) error {
 	if err := db.Delete(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number)); err != nil {
-		log.Error("logs fetching failed", "number", number, "err", err)
-		return
+		return fmt.Errorf("receipts delete failed: %d, %w", number, err)
 	}
 
 	if err := db.Walk(dbutils.Log, dbutils.LogKey(number, 0), 8*8, func(k, v []byte) (bool, error) {
@@ -565,9 +557,9 @@ func DeleteReceipts(db ethdb.Database, number uint64) {
 		}
 		return true, nil
 	}); err != nil {
-		log.Error("logs fetching failed", "number", number, "err", err)
-		return
+		return fmt.Errorf("logs delete failed: %d, %w", number, err)
 	}
+	return nil
 }
 
 // DeleteNewerReceipts removes all receipt for given block number or newer
@@ -652,7 +644,9 @@ func WriteAncientBlock(db ethdb.AncientWriter, block *types.Block, receipts type
 
 // DeleteBlock removes all block data associated with a hash.
 func DeleteBlock(db ethdb.Database, hash common.Hash, number uint64) error {
-	DeleteReceipts(db, number)
+	if err := DeleteReceipts(db, number); err != nil {
+		panic(err)
+	}
 	DeleteHeader(db, hash, number)
 	DeleteBody(db, hash, number)
 	if err := DeleteTd(db, hash, number); err != nil {
@@ -664,7 +658,9 @@ func DeleteBlock(db ethdb.Database, hash common.Hash, number uint64) error {
 // DeleteBlockWithoutNumber removes all block data associated with a hash, except
 // the hash to number mapping.
 func DeleteBlockWithoutNumber(db ethdb.Database, hash common.Hash, number uint64) error {
-	DeleteReceipts(db, number)
+	if err := DeleteReceipts(db, number); err != nil {
+		panic(err)
+	}
 	deleteHeaderWithoutNumber(db, hash, number)
 	DeleteBody(db, hash, number)
 	if err := DeleteTd(db, hash, number); err != nil {

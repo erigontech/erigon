@@ -100,6 +100,10 @@ var receiptsOnePerTx = Migration{
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
+		// Recently was introduced receipts serialization problem
+		// Code was not generated well for types.Log type
+		// So, to fix this problem - need deserialize by reflection (LegacyReceipt doesn't have generated code)
+		// then serialize by generated code - types.Receipts and types.Log have generated code now
 		type LegacyReceipt struct {
 			PostState         []byte       `codec:"1"`
 			Status            uint64       `codec:"2"`

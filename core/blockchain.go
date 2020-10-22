@@ -453,7 +453,9 @@ func (bc *BlockChain) SetHead(head uint64) error {
 			// The header, total difficulty and canonical hash will be
 			// removed in the hc.SetHead function.
 			rawdb.DeleteBody(db, hash, num)
-			rawdb.DeleteReceipts(db, num)
+			if err := rawdb.DeleteReceipts(db, num); err != nil {
+				panic(err)
+			}
 		}
 		// Todo(rjl493456442) txlookup, bloombits, etc
 	}
@@ -1026,7 +1028,9 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			}
 			// Write all the data out into the database
 			rawdb.WriteBody(context.Background(), batch, block.Hash(), block.NumberU64(), block.Body())
-			rawdb.WriteReceipts(batch, block.NumberU64(), receiptChain[i])
+			if err := rawdb.WriteReceipts(batch, block.NumberU64(), receiptChain[i]); err != nil {
+				return 0, err
+			}
 			if bc.enableTxLookupIndex {
 				rawdb.WriteTxLookupEntries(batch, block)
 			}
@@ -1179,7 +1183,9 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 		}
 	}
 	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
-		rawdb.WriteReceipts(bc.db, block.NumberU64(), receipts)
+		if err := rawdb.WriteReceipts(bc.db, block.NumberU64(), receipts); err != nil {
+			return NonStatTy, err
+		}
 	}
 
 	// If the total difficulty is higher than our known, add it to the canonical chain
@@ -1399,7 +1405,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				// state, but if it's this special case here(skip reexecution) we will lose
 				// the empty receipt entry.
 				if len(block.Transactions()) == 0 {
-					rawdb.WriteReceipts(bc.db, block.NumberU64(), nil)
+					if err := rawdb.WriteReceipts(bc.db, block.NumberU64(), nil); err != nil {
+						return i, err
+					}
 				} else {
 					log.Error("Please file an issue, skip known block execution without receipt",
 						"hash", block.Hash(), "number", block.NumberU64())
