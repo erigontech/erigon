@@ -2108,7 +2108,7 @@ func receiptSizes(chaindata string) error {
 	//}
 	//defer tx.Rollback()
 
-	c := tx.Cursor(dbutils.BlockReceiptsPrefix)
+	c := tx.Cursor(dbutils.Log)
 	defer c.Close()
 	sizes := make(map[int]int)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
@@ -2125,9 +2125,9 @@ func receiptSizes(chaindata string) error {
 	}
 	sort.Ints(lens)
 	for _, l := range lens {
-		//if sizes[l] < 100000 {
-		//	continue
-		//}
+		if sizes[l] < 100000 {
+			continue
+		}
 		fmt.Printf("%6d - %d\n", l, sizes[l])
 	}
 	return nil
