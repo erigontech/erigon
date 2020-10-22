@@ -95,7 +95,7 @@ var receiptsCborEncode = Migration{
 }
 
 var receiptsOnePerTx = Migration{
-	Name: "receipts_one_per_transaction4",
+	Name: "receipts_one_per_transaction3",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
