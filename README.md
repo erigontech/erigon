@@ -212,7 +212,7 @@ Core contributors:
 
 * Giulio Rebuffo
 
-* Thomas Jay Rush ([tjayrush](https://github.com/tjayrush))
+* Thomas Jay Rush ([@tjayrush](https://twitter.com/tjayrush))
 
 Thanks to:
 
