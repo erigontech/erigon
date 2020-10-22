@@ -79,11 +79,7 @@ func (x *Receipt) CodecEncodeSelf(e *codec1978.Encoder) {
 			} else {
 				z.EncWriteMapStart(3)
 				z.EncWriteMapElemKey()
-				if z.IsJSONHandle() {
-					z.WriteStr("\"1\"")
-				} else {
-					r.EncodeString(`1`)
-				}
+				r.EncodeString(`1`)
 				z.EncWriteMapElemValue()
 				if x.PostState == nil {
 					r.EncodeNil()
@@ -91,19 +87,11 @@ func (x *Receipt) CodecEncodeSelf(e *codec1978.Encoder) {
 					r.EncodeStringBytesRaw([]byte(x.PostState))
 				} // end block: if x.PostState slice == nil
 				z.EncWriteMapElemKey()
-				if z.IsJSONHandle() {
-					z.WriteStr("\"2\"")
-				} else {
-					r.EncodeString(`2`)
-				}
+				r.EncodeString(`2`)
 				z.EncWriteMapElemValue()
 				r.EncodeUint(uint64(x.Status))
 				z.EncWriteMapElemKey()
-				if z.IsJSONHandle() {
-					z.WriteStr("\"3\"")
-				} else {
-					r.EncodeString(`3`)
-				}
+				r.EncodeString(`3`)
 				z.EncWriteMapElemValue()
 				r.EncodeUint(uint64(x.CumulativeGasUsed))
 				z.EncWriteMapEnd()
@@ -264,11 +252,7 @@ func (x *storedReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 		} else {
 			z.EncWriteMapStart(3)
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"PostStateOrStatus\"")
-			} else {
-				r.EncodeString(`PostStateOrStatus`)
-			}
+			r.EncodeString(`PostStateOrStatus`)
 			z.EncWriteMapElemValue()
 			if x.PostStateOrStatus == nil {
 				r.EncodeNil()
@@ -276,19 +260,11 @@ func (x *storedReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 				r.EncodeStringBytesRaw([]byte(x.PostStateOrStatus))
 			} // end block: if x.PostStateOrStatus slice == nil
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"CumulativeGasUsed\"")
-			} else {
-				r.EncodeString(`CumulativeGasUsed`)
-			}
+			r.EncodeString(`CumulativeGasUsed`)
 			z.EncWriteMapElemValue()
 			r.EncodeUint(uint64(x.CumulativeGasUsed))
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Logs\"")
-			} else {
-				r.EncodeString(`Logs`)
-			}
+			r.EncodeString(`Logs`)
 			z.EncWriteMapElemValue()
 			if x.Logs == nil {
 				r.EncodeNil()
@@ -464,11 +440,7 @@ func (x *v4StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 		} else {
 			z.EncWriteMapStart(6)
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"PostStateOrStatus\"")
-			} else {
-				r.EncodeString(`PostStateOrStatus`)
-			}
+			r.EncodeString(`PostStateOrStatus`)
 			z.EncWriteMapElemValue()
 			if x.PostStateOrStatus == nil {
 				r.EncodeNil()
@@ -476,19 +448,11 @@ func (x *v4StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 				r.EncodeStringBytesRaw([]byte(x.PostStateOrStatus))
 			} // end block: if x.PostStateOrStatus slice == nil
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"CumulativeGasUsed\"")
-			} else {
-				r.EncodeString(`CumulativeGasUsed`)
-			}
+			r.EncodeString(`CumulativeGasUsed`)
 			z.EncWriteMapElemValue()
 			r.EncodeUint(uint64(x.CumulativeGasUsed))
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"TxHash\"")
-			} else {
-				r.EncodeString(`TxHash`)
-			}
+			r.EncodeString(`TxHash`)
 			z.EncWriteMapElemValue()
 			yy19 := &x.TxHash
 			if !z.EncBinary() {
@@ -497,11 +461,7 @@ func (x *v4StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.enccommon_Hash((*pkg1_common.Hash)(yy19), e)
 			}
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"ContractAddress\"")
-			} else {
-				r.EncodeString(`ContractAddress`)
-			}
+			r.EncodeString(`ContractAddress`)
 			z.EncWriteMapElemValue()
 			yy21 := &x.ContractAddress
 			if !z.EncBinary() {
@@ -510,11 +470,7 @@ func (x *v4StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.enccommon_Address((*pkg1_common.Address)(yy21), e)
 			}
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Logs\"")
-			} else {
-				r.EncodeString(`Logs`)
-			}
+			r.EncodeString(`Logs`)
 			z.EncWriteMapElemValue()
 			if x.Logs == nil {
 				r.EncodeNil()
@@ -522,11 +478,7 @@ func (x *v4StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.encSlicePtrtoLogForStorage(([]*LogForStorage)(x.Logs), e)
 			} // end block: if x.Logs slice == nil
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"GasUsed\"")
-			} else {
-				r.EncodeString(`GasUsed`)
-			}
+			r.EncodeString(`GasUsed`)
 			z.EncWriteMapElemValue()
 			r.EncodeUint(uint64(x.GasUsed))
 			z.EncWriteMapEnd()
@@ -749,11 +701,7 @@ func (x *v3StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 		} else {
 			z.EncWriteMapStart(5)
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"PostStateOrStatus\"")
-			} else {
-				r.EncodeString(`PostStateOrStatus`)
-			}
+			r.EncodeString(`PostStateOrStatus`)
 			z.EncWriteMapElemValue()
 			if x.PostStateOrStatus == nil {
 				r.EncodeNil()
@@ -761,19 +709,11 @@ func (x *v3StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 				r.EncodeStringBytesRaw([]byte(x.PostStateOrStatus))
 			} // end block: if x.PostStateOrStatus slice == nil
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"CumulativeGasUsed\"")
-			} else {
-				r.EncodeString(`CumulativeGasUsed`)
-			}
+			r.EncodeString(`CumulativeGasUsed`)
 			z.EncWriteMapElemValue()
 			r.EncodeUint(uint64(x.CumulativeGasUsed))
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"ContractAddress\"")
-			} else {
-				r.EncodeString(`ContractAddress`)
-			}
+			r.EncodeString(`ContractAddress`)
 			z.EncWriteMapElemValue()
 			yy16 := &x.ContractAddress
 			if !z.EncBinary() {
@@ -782,11 +722,7 @@ func (x *v3StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.enccommon_Address((*pkg1_common.Address)(yy16), e)
 			}
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Logs\"")
-			} else {
-				r.EncodeString(`Logs`)
-			}
+			r.EncodeString(`Logs`)
 			z.EncWriteMapElemValue()
 			if x.Logs == nil {
 				r.EncodeNil()
@@ -794,11 +730,7 @@ func (x *v3StoredReceiptRLP) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.encSlicePtrtoLogForStorage(([]*LogForStorage)(x.Logs), e)
 			} // end block: if x.Logs slice == nil
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"GasUsed\"")
-			} else {
-				r.EncodeString(`GasUsed`)
-			}
+			r.EncodeString(`GasUsed`)
 			z.EncWriteMapElemValue()
 			r.EncodeUint(uint64(x.GasUsed))
 			z.EncWriteMapEnd()
@@ -1004,11 +936,7 @@ func (x *ReceiptForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 		} else {
 			z.EncWriteMapStart(3)
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"1\"")
-			} else {
-				r.EncodeString(`1`)
-			}
+			r.EncodeString(`1`)
 			z.EncWriteMapElemValue()
 			if x.PostState == nil {
 				r.EncodeNil()
@@ -1016,19 +944,11 @@ func (x *ReceiptForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 				r.EncodeStringBytesRaw([]byte(x.PostState))
 			} // end block: if x.PostState slice == nil
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"2\"")
-			} else {
-				r.EncodeString(`2`)
-			}
+			r.EncodeString(`2`)
 			z.EncWriteMapElemValue()
 			r.EncodeUint(uint64(x.Status))
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"3\"")
-			} else {
-				r.EncodeString(`3`)
-			}
+			r.EncodeString(`3`)
 			z.EncWriteMapElemValue()
 			r.EncodeUint(uint64(x.CumulativeGasUsed))
 			z.EncWriteMapEnd()
@@ -1210,11 +1130,7 @@ func (x *Log) CodecEncodeSelf(e *codec1978.Encoder) {
 			} else {
 				z.EncWriteMapStart(3)
 				z.EncWriteMapElemKey()
-				if z.IsJSONHandle() {
-					z.WriteStr("\"1\"")
-				} else {
-					r.EncodeString(`1`)
-				}
+				r.EncodeString(`1`)
 				z.EncWriteMapElemValue()
 				yy10 := &x.Address
 				if !z.EncBinary() {
@@ -1223,11 +1139,7 @@ func (x *Log) CodecEncodeSelf(e *codec1978.Encoder) {
 					h.enccommon_Address((*pkg1_common.Address)(yy10), e)
 				}
 				z.EncWriteMapElemKey()
-				if z.IsJSONHandle() {
-					z.WriteStr("\"2\"")
-				} else {
-					r.EncodeString(`2`)
-				}
+				r.EncodeString(`2`)
 				z.EncWriteMapElemValue()
 				if x.Topics == nil {
 					r.EncodeNil()
@@ -1235,11 +1147,7 @@ func (x *Log) CodecEncodeSelf(e *codec1978.Encoder) {
 					h.encSlicecommon_Hash(([]pkg1_common.Hash)(x.Topics), e)
 				} // end block: if x.Topics slice == nil
 				z.EncWriteMapElemKey()
-				if z.IsJSONHandle() {
-					z.WriteStr("\"3\"")
-				} else {
-					r.EncodeString(`3`)
-				}
+				r.EncodeString(`3`)
 				z.EncWriteMapElemValue()
 				if x.Data == nil {
 					r.EncodeNil()
@@ -1435,11 +1343,7 @@ func (x *rlpLog) CodecEncodeSelf(e *codec1978.Encoder) {
 		} else {
 			z.EncWriteMapStart(3)
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Address\"")
-			} else {
-				r.EncodeString(`Address`)
-			}
+			r.EncodeString(`Address`)
 			z.EncWriteMapElemValue()
 			yy10 := &x.Address
 			if !z.EncBinary() {
@@ -1448,11 +1352,7 @@ func (x *rlpLog) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.enccommon_Address((*pkg1_common.Address)(yy10), e)
 			}
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Topics\"")
-			} else {
-				r.EncodeString(`Topics`)
-			}
+			r.EncodeString(`Topics`)
 			z.EncWriteMapElemValue()
 			if x.Topics == nil {
 				r.EncodeNil()
@@ -1460,11 +1360,7 @@ func (x *rlpLog) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.encSlicecommon_Hash(([]pkg1_common.Hash)(x.Topics), e)
 			} // end block: if x.Topics slice == nil
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Data\"")
-			} else {
-				r.EncodeString(`Data`)
-			}
+			r.EncodeString(`Data`)
 			z.EncWriteMapElemValue()
 			if x.Data == nil {
 				r.EncodeNil()
@@ -1637,11 +1533,7 @@ func (x *rlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 		} else {
 			z.EncWriteMapStart(3)
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Address\"")
-			} else {
-				r.EncodeString(`Address`)
-			}
+			r.EncodeString(`Address`)
 			z.EncWriteMapElemValue()
 			yy10 := &x.Address
 			if !z.EncBinary() {
@@ -1650,11 +1542,7 @@ func (x *rlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.enccommon_Address((*pkg1_common.Address)(yy10), e)
 			}
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Topics\"")
-			} else {
-				r.EncodeString(`Topics`)
-			}
+			r.EncodeString(`Topics`)
 			z.EncWriteMapElemValue()
 			if x.Topics == nil {
 				r.EncodeNil()
@@ -1662,11 +1550,7 @@ func (x *rlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.encSlicecommon_Hash(([]pkg1_common.Hash)(x.Topics), e)
 			} // end block: if x.Topics slice == nil
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Data\"")
-			} else {
-				r.EncodeString(`Data`)
-			}
+			r.EncodeString(`Data`)
 			z.EncWriteMapElemValue()
 			if x.Data == nil {
 				r.EncodeNil()
@@ -1839,11 +1723,7 @@ func (x *legacyRlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 		} else {
 			z.EncWriteMapStart(3)
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Address\"")
-			} else {
-				r.EncodeString(`Address`)
-			}
+			r.EncodeString(`Address`)
 			z.EncWriteMapElemValue()
 			yy10 := &x.Address
 			if !z.EncBinary() {
@@ -1852,11 +1732,7 @@ func (x *legacyRlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.enccommon_Address((*pkg1_common.Address)(yy10), e)
 			}
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Topics\"")
-			} else {
-				r.EncodeString(`Topics`)
-			}
+			r.EncodeString(`Topics`)
 			z.EncWriteMapElemValue()
 			if x.Topics == nil {
 				r.EncodeNil()
@@ -1864,11 +1740,7 @@ func (x *legacyRlpStorageLog) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.encSlicecommon_Hash(([]pkg1_common.Hash)(x.Topics), e)
 			} // end block: if x.Topics slice == nil
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"Data\"")
-			} else {
-				r.EncodeString(`Data`)
-			}
+			r.EncodeString(`Data`)
 			z.EncWriteMapElemValue()
 			if x.Data == nil {
 				r.EncodeNil()
@@ -2041,11 +1913,7 @@ func (x *LogForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 		} else {
 			z.EncWriteMapStart(3)
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"1\"")
-			} else {
-				r.EncodeString(`1`)
-			}
+			r.EncodeString(`1`)
 			z.EncWriteMapElemValue()
 			yy10 := &x.Address
 			if !z.EncBinary() {
@@ -2054,11 +1922,7 @@ func (x *LogForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.enccommon_Address((*pkg1_common.Address)(yy10), e)
 			}
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"2\"")
-			} else {
-				r.EncodeString(`2`)
-			}
+			r.EncodeString(`2`)
 			z.EncWriteMapElemValue()
 			if x.Topics == nil {
 				r.EncodeNil()
@@ -2066,11 +1930,7 @@ func (x *LogForStorage) CodecEncodeSelf(e *codec1978.Encoder) {
 				h.encSlicecommon_Hash(([]pkg1_common.Hash)(x.Topics), e)
 			} // end block: if x.Topics slice == nil
 			z.EncWriteMapElemKey()
-			if z.IsJSONHandle() {
-				z.WriteStr("\"3\"")
-			} else {
-				r.EncodeString(`3`)
-			}
+			r.EncodeString(`3`)
 			z.EncWriteMapElemValue()
 			if x.Data == nil {
 				r.EncodeNil()
