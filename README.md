@@ -212,6 +212,8 @@ Core contributors:
 
 * Giulio Rebuffo
 
+* Thomas Jay Rush ([tjayrush](https://github.com/tjayrush))
+
 Thanks to:
 
 * All contributors of Turbo-Geth
