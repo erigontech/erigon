@@ -73,7 +73,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		return err
 	}
 
-	log.Info(fmt.Sprintf("[%s] Reading canonical hashes complete", logPrefix), "hashes", len(canonical))
+	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "amount", len(canonical))
 
 	jobs := make(chan *senderRecoveryJob, cfg.BatchSize)
 	out := make(chan *senderRecoveryJob, cfg.BatchSize)
