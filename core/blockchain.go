@@ -453,7 +453,7 @@ func (bc *BlockChain) SetHead(head uint64) error {
 			// The header, total difficulty and canonical hash will be
 			// removed in the hc.SetHead function.
 			rawdb.DeleteBody(db, hash, num)
-			rawdb.DeleteReceipts(db, hash, num)
+			rawdb.DeleteReceipts(db, num)
 		}
 		// Todo(rjl493456442) txlookup, bloombits, etc
 	}

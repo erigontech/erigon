@@ -81,8 +81,8 @@ func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, tmpdir s
 	tx := db.(ethdb.HasTx).Tx()
 	topics := map[string]*roaring.Bitmap{}
 	addresses := map[string]*roaring.Bitmap{}
-	receipts := tx.Cursor(dbutils.BlockReceiptsPrefix)
-	defer receipts.Close()
+	logs := tx.Cursor(dbutils.Log)
+	defer logs.Close()
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
 
@@ -91,7 +91,7 @@ func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, tmpdir s
 
 	reader := bytes.NewReader(nil)
 
-	for k, v, err := receipts.Seek(dbutils.ReceiptKey(start, 0)); k != nil; k, v, err = receipts.Next() {
+	for k, v, err := logs.Seek(dbutils.LogKey(start, 0)); k != nil; k, v, err = logs.Next() {
 		if err != nil {
 			return err
 		}
@@ -123,13 +123,13 @@ func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, tmpdir s
 			}
 		}
 
-		var receipt = &types.Receipt{}
+		var ll types.Logs
 		reader.Reset(v)
-		if err := cbor.Unmarshal(receipt, reader); err != nil {
+		if err := cbor.Unmarshal(&ll, reader); err != nil {
 			return fmt.Errorf("%s: receipt unmarshal failed: %w, blocl=%d", logPrefix, err, blockNum)
 		}
 
-		for _, l := range receipt.Logs {
+		for _, l := range ll {
 			for _, topic := range l.Topics {
 				topicStr := string(topic.Bytes())
 				m, ok := topics[topicStr]
@@ -255,16 +255,16 @@ func unwindLogIndex(logPrefix string, db ethdb.DbWithPendingMutations, from, to 
 	addrs := map[string]struct{}{}
 
 	start := dbutils.EncodeBlockNumber(to + 1)
-	if err := db.Walk(dbutils.BlockReceiptsPrefix, start, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.Log, start, 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
 		}
-		var receipt = &types.Receipt{}
-		if err := cbor.Unmarshal(receipt, bytes.NewReader(v)); err != nil {
+		var logs types.Logs
+		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
 			return false, fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
 		}
 
-		for _, l := range receipt.Logs {
+		for _, l := range logs {
 			for _, topic := range l.Topics {
 				topics[string(topic.Bytes())] = struct{}{}
 			}

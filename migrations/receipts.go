@@ -95,7 +95,7 @@ var receiptsCborEncode = Migration{
 }
 
 var receiptsOnePerTx = Migration{
-	Name: "receipts_one_per_transaction2",
+	Name: "receipts_one_per_transaction3",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -135,8 +135,8 @@ var receiptsOnePerTx = Migration{
 			goto LoadStep
 		}
 
-		collectorR = etl.NewCriticalCollector(tmpdir+"1", etl.NewSortableBuffer(etl.BufferOptimalSize))
-		collectorL = etl.NewCriticalCollector(tmpdir+"2", etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collectorR = etl.NewCriticalCollector(tmpdir+"1", etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+		collectorL = etl.NewCriticalCollector(tmpdir+"2", etl.NewSortableBuffer(etl.BufferOptimalSize*2))
 		if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
 			blockNum := binary.BigEndian.Uint64(k[:8])
 			select {
@@ -178,6 +178,16 @@ var receiptsOnePerTx = Migration{
 				if err := cbor.Marshal(buf, r.Logs); err != nil {
 					return false, err
 				}
+				//if buf.Len() == 1 {
+				//	if len(r.Logs) > 1 {
+				//		fmt.Printf("0: %d, len(legacyReceipts)=%d, %+v\n", len(v), len(legacyReceipts), legacyReceipts[0])
+				//	}
+				//}
+				//if buf.Len() < 10 {
+				//	if len(r.Logs) > 10 {
+				//		fmt.Printf("01: %d, len(legacyReceipts)=%d, %+v\n", len(v), len(legacyReceipts), legacyReceipts[0])
+				//	}
+				//}
 				if err := collectorL.Collect(newK, buf.Bytes()); err != nil {
 					return false, fmt.Errorf("collecting key %x: %w", k, err)
 				}
@@ -187,12 +197,16 @@ var receiptsOnePerTx = Migration{
 			if err := cbor.Marshal(buf, receipts); err != nil {
 				return false, err
 			}
-			if buf.Len() == 1 {
-				fmt.Printf("1: %d, len(legacyReceipts)=%d\n", len(v), len(legacyReceipts))
-			}
-			if buf.Len() == 7 {
-				fmt.Printf("7: %d, len(legacyReceipts)=%d\n", len(v), len(legacyReceipts))
-			}
+			//if buf.Len() == 1 {
+			//	if len(v) != 1 {
+			//		fmt.Printf("1: %d, len(legacyReceipts)=%d\n", len(v), len(legacyReceipts))
+			//	}
+			//}
+			//if buf.Len() == 7 {
+			//	if len(v) > 800 {
+			//		fmt.Printf("7: %d, len(legacyReceipts)=%d, %+v\n", len(v), len(legacyReceipts), legacyReceipts[0].Logs[0])
+			//	}
+			//}
 
 			if err := collectorR.Collect(common.CopyBytes(k[:8]), buf.Bytes()); err != nil {
 				return false, fmt.Errorf("collecting key %x: %w", k, err)

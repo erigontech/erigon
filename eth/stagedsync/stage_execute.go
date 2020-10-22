@@ -260,12 +260,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		return fmt.Errorf("%s: walking storage changesets: %v", logPrefix, err)
 	}
 	if writeReceipts {
-		if err := stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.ReceiptKey(u.UnwindPoint+1, 0), 0, func(k, v []byte) (bool, error) {
-			if err := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err != nil {
-				return false, fmt.Errorf("%s: delete receipts: %v", logPrefix, err)
-			}
-			return true, nil
-		}); err != nil {
+		if err := rawdb.DeleteNewerReceipts(stateDB, u.UnwindPoint+1); err != nil {
 			return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
 		}
 	}
