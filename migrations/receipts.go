@@ -75,12 +75,12 @@ var receiptsCborEncode = Migration{
 			return fmt.Errorf("clearing the receipt bucket: %w", err)
 		}
 
+	LoadStep:
 		// Commit clearing of the bucket - freelist should now be written to the database
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
 			return fmt.Errorf("committing the removal of receipt table")
 		}
 
-	LoadStep:
 		// Commit again
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
 			return fmt.Errorf("committing again to create a stable view the removal of receipt table")
