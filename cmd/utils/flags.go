@@ -827,7 +827,7 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 	case ctx.GlobalBool(GoerliFlag.Name):
 		urls = params.GoerliBootnodes
 	case ctx.GlobalBool(YoloV2Flag.Name):
-		urls = params.YoloV1Bootnodes
+		urls = params.YoloV2Bootnodes
 	case cfg.BootstrapNodes != nil:
 		return // already set, don't apply defaults.
 	}
@@ -863,7 +863,7 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	case ctx.GlobalBool(GoerliFlag.Name):
 		urls = params.GoerliBootnodes
 	case ctx.GlobalBool(YoloV2Flag.Name):
-		urls = params.YoloV1Bootnodes
+		urls = params.YoloV2Bootnodes
 	case cfg.BootstrapNodesV5 != nil:
 		return // already set, don't apply defaults.
 	}
