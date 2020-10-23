@@ -29,13 +29,13 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
                 |                                          |                                      |
                 |                                          |                                      |
                 v                                          v                                      v
-            +-------------------------------------------------------------------------------------------------+
-            |                                       ethdb/kv_abstract.go                                      |  
-            |         (Common KV interface. DB-friendly, disk-friendly, cpu-cache-friendly.                   |
-            |           Same app code can work with local or remote database.                                 |
-            |           Allows experiment with another database implementations.                              |
-            |          Supports context.Context for cancelation. Any operation can return error)              |
-            +-------------------------------------------------------------------------------------------------+
+            +----------------------------------------------------------------------------------------------+
+            |                                       ethdb/kv_abstract.go                                   |  
+            |         (Common KV interface. DB-friendly, disk-friendly, cpu-cache-friendly.                |
+            |           Same app code can work with local or remote database.                              |
+            |           Allows experiment with another database implementations.                           |
+            |          Supports context.Context for cancelation. Any operation can return error)           |
+            +----------------------------------------------------------------------------------------------+
                 |                                          |                                      |
                 |                                          |                                      |
                 v                                          v                                      v
