@@ -330,12 +330,56 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 	return nil
 }
 
+func commonPrefixLen(k1, k2 []byte) int {
+	l2 := len(k2)
+	for i, c := range k1 {
+		if i == l2 {
+			return l2
+		}
+		if k2[i] != c {
+			return i
+		}
+	}
+	return len(k1)
+}
+
 func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *StageState, db ethdb.Database, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = tmpdir
 	var exclude [][]byte
+
+	c := db.(ethdb.HasTx).Tx().Cursor(dbutils.IntermediateTrieHashBucket)
+	c2 := db.(ethdb.HasTx).Tx().Cursor(dbutils.IntermediateTrieHashBucket)
+	defer c.Close()
+	defer c2.Close()
+
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		exclude = append(exclude, k)
+		//fmt.Printf("1: %x\n", k)
+
+		nibs := make([]byte, len(k)*2)
+		trie.DecompressNibbles(k, &nibs)
+
+		for ihK, _, err := c.Seek(nibs[:1]); ihK != nil; ihK, _, err = c.Seek(nibs[:commonPrefixLen(ihK, nibs)]) {
+			if err != nil {
+				return err
+			}
+
+			cmp := bytes.Compare(nibs, ihK)
+			if cmp == -1 {
+				break
+			}
+
+			if cmp == 0 {
+				c2.Delete(ihK)
+				break
+			}
+
+			if bytes.HasPrefix(nibs, ihK) {
+				c2.Delete(ihK)
+			}
+		}
+
+		//exclude = append(exclude, k)
 		return nil
 	}
 	if err := p.Unwind(logPrefix, s, u, false /* storage */, collect); err != nil {
