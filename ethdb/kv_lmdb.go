@@ -102,7 +102,7 @@ func (opts LmdbOpts) Open() (KV, error) {
 
 	if opts.mapSize == 0 {
 		if opts.inMem {
-			opts.mapSize = 64 * datasize.MB
+			opts.mapSize = 128 * datasize.MB
 		} else {
 			opts.mapSize = LMDBDefaultMapSize
 		}

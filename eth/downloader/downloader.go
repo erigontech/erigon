@@ -579,7 +579,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 			var errTx error
 			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background(), ethdb.RO)
+			tx, errTx = tx.Begin(context.Background(), ethdb.RW)
 			return errTx
 		})
 		d.stagedSyncState.OnBeforeUnwind(func(id stages.SyncStage) error {
@@ -594,7 +594,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			}
 			var errTx error
 			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background(), ethdb.RO)
+			tx, errTx = tx.Begin(context.Background(), ethdb.RW)
 			return errTx
 		})
 		d.stagedSyncState.BeforeStageUnwind(stages.Bodies, func() error {
