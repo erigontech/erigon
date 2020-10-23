@@ -1,13 +1,16 @@
 package commands
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -207,6 +210,62 @@ func compareBuckets(ctx context.Context, tx ethdb.Tx, b string, refTx ethdb.Tx, 
 				fmt.Printf("Unexpected result of bytes.Compare: %d\n", bytes.Compare(k, refK))
 			}
 		}
+	}
+	return nil
+}
+
+func fToMdbx(ctx context.Context, to string) error {
+	file, err := os.Open("/media/alex/evo/alex.log")
+	if err != nil {
+		fmt.Printf("Failed to open file: %s", err)
+		os.Exit(1)
+	}
+	defer file.Close()
+
+	dst := ethdb.NewMDBX().Path(to).MustOpen()
+	dstTx, err1 := dst.Begin(ctx, nil, true)
+	if err1 != nil {
+		return err1
+	}
+	defer func() {
+		dstTx.Rollback()
+	}()
+
+	logEvery := time.NewTicker(15 * time.Second)
+	defer logEvery.Stop()
+
+	commitEvery := time.NewTicker(5 * time.Minute)
+	defer commitEvery.Stop()
+
+	err = dstTx.Commit(context.Background())
+	if err != nil {
+		return err
+	}
+
+	fileScanner := bufio.NewScanner(file)
+	c := dstTx.CursorDupSort(dbutils.CurrentStateBucket)
+	appendFunc := c.AppendDup
+	for fileScanner.Scan() {
+		kv := strings.Split(fileScanner.Text(), ",")
+		k, _ := hex.DecodeString(kv[0])
+		v, _ := hex.DecodeString(kv[1])
+		if err = appendFunc(k, v); err != nil {
+			return err
+		}
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Progress", "key", fmt.Sprintf("%x", k))
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+
+		fmt.Printf("%x, %x\n", kv[0], kv[1])
+	}
+
+	if err := fileScanner.Err(); err != nil {
+		fmt.Println(err)
 	}
 	return nil
 }

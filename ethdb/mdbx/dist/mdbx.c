@@ -11,7 +11,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_ALLOY 1n#define MDBX_BUILD_SOURCERY 57b4c5a2e9aeb6aa87297d2c69e42ed279a5995cea1b5fe60dd66d7945f2b77e_v0_9_1_48_g2e3a552_dirty
+#define MDBX_ALLOY 1n#define MDBX_BUILD_SOURCERY 6d7c21bd0366dcdc7be982d973cd4ffea76e6fc94896fe23df8cdbf576e09353_v0_9_1_43_gb092821
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -3606,14 +3606,6 @@ number_of_ovpages(const MDBX_env *env, size_t bytes) {
   return bytes2pgno(env, PAGEHDRSZ - 1 + bytes) + 1;
 }
 
-static inline int corrupted() {
-  fflush(NULL);
-  abort();
-  return MDBX_CORRUPTED;
-}
-
-#define MDBX_CORRUPTED corrupted()
-
 __cold static int MDBX_PRINTF_ARGS(2, 3)
     bad_page(const MDBX_page *mp, const char *fmt, ...) {
   if (mdbx_log_enabled(MDBX_LOG_ERROR)) {
@@ -7205,7 +7197,7 @@ static int mdbx_pages_xkeep(MDBX_cursor *mc, unsigned pflags, bool all) {
   MDBX_txn *txn = mc->mc_txn;
   MDBX_cursor *m3, *m0 = mc;
   MDBX_xcursor *mx;
-  MDBX_page *mp;
+  MDBX_page *dp, *mp;
   unsigned i, j;
   int rc = MDBX_SUCCESS;
 
@@ -7243,8 +7235,11 @@ mark_done:
         pgno_t pgno = txn->mt_dbs[i].md_root;
         if (pgno == P_INVALID)
           continue;
-        MDBX_page *dp = mdbx_dpl_find(txn->tw.dirtylist, pgno);
-        if (dp && (dp->mp_flags & Mask) == pflags)
+        int level;
+        if (unlikely((rc = mdbx_page_get(m0, pgno, &dp, &level,
+                                         txn->mt_txnid)) != MDBX_SUCCESS))
+          break;
+        if ((dp->mp_flags & Mask) == pflags && level <= 1)
           dp->mp_flags ^= P_KEEP;
       }
     }
@@ -8144,6 +8139,12 @@ skip_cache:
   const unsigned wanna_range = num - 1;
 
   while (true) { /* hsr-kick retry loop */
+    /* If our dirty list is already full, we can't do anything */
+    if (unlikely(txn->tw.dirtyroom == 0)) {
+      rc = MDBX_TXN_FULL;
+      goto fail;
+    }
+
     MDBX_cursor_couple recur;
     for (MDBX_cursor_op op = MDBX_FIRST;;
          op = (flags & MDBX_LIFORECLAIM) ? MDBX_PREV : MDBX_NEXT) {
@@ -8184,11 +8185,6 @@ skip_cache:
       }
 
       if (op == MDBX_FIRST) { /* 1st iteration, setup cursor, etc */
-        if (unlikely(txn->tw.dirtyroom < txn->mt_dbs[FREE_DBI].md_depth) &&
-            !(txn->mt_dbistate[FREE_DBI] & DBI_DIRTY)) {
-          /* If our dirty list is already full, we can't touch GC */
-          flags &= ~MDBX_ALLOC_GC;
-        }
         if (unlikely(!(flags & MDBX_ALLOC_GC)))
           break /* reclaiming is prohibited for now */;
 
@@ -8299,21 +8295,6 @@ skip_cache:
         goto fail;
       }
       const unsigned gc_len = MDBX_PNL_SIZE(gc_pnl);
-      /* TODO: provide a user-configurable threshold */
-      const unsigned threshold_2_stop_gc_reclaiming = MDBX_PNL_MAX / 2;
-      if (unlikely(gc_len + MDBX_PNL_SIZE(txn->tw.reclaimed_pglist) >
-                   threshold_2_stop_gc_reclaiming)) {
-        /* Stop reclaiming to avoid overflow the page list.
-         * This is a rare case while search for a continuously multi-page region
-         * in a large database. https://github.com/erthink/libmdbx/issues/123 */
-        flags -= MDBX_ALLOC_GC;
-        if (unlikely(flags == 0)) {
-          /* Oh, we can't do anything */
-          rc = MDBX_TXN_FULL;
-          goto fail;
-        }
-        break;
-      }
       rc = mdbx_pnl_need(&txn->tw.reclaimed_pglist, gc_len);
       if (unlikely(rc != MDBX_SUCCESS))
         goto fail;
@@ -11591,7 +11572,7 @@ mdbx_validate_meta(MDBX_env *env, MDBX_meta *const meta, uint64_t *filesize,
   if (meta->mm_geo.next < MIN_PAGENO || meta->mm_geo.next - 1 > MAX_PAGENO) {
     mdbx_warning("meta[%u] has invalid next-pageno (%" PRIaPGNO "), skip it",
                  meta_number, meta->mm_geo.next);
-    return -30796;
+    return MDBX_CORRUPTED;
   }
 
   /* LY: check filesize & used_bytes */
@@ -11605,7 +11586,7 @@ mdbx_validate_meta(MDBX_env *env, MDBX_meta *const meta, uint64_t *filesize,
       mdbx_warning("meta[%u] used-bytes (%" PRIu64 ") beyond filesize (%" PRIu64
                    "), skip it",
                    meta_number, used_bytes, *filesize);
-      return -30796;
+      return MDBX_CORRUPTED;
     }
   }
   if (meta->mm_geo.next - 1 > MAX_PAGENO || used_bytes > MAX_MAPSIZE) {
@@ -11665,7 +11646,7 @@ mdbx_validate_meta(MDBX_env *env, MDBX_meta *const meta, uint64_t *filesize,
     mdbx_warning("meta[%u] next-pageno (%" PRIaPGNO
                  ") is beyond end-pgno (%" PRIaPGNO "), skip it",
                  meta_number, meta->mm_geo.next, meta->mm_geo.now);
-    return -30796;
+    return MDBX_CORRUPTED;
   }
 
   /* LY: GC root */
@@ -11675,12 +11656,12 @@ mdbx_validate_meta(MDBX_env *env, MDBX_meta *const meta, uint64_t *filesize,
         meta->mm_dbs[FREE_DBI].md_leaf_pages ||
         meta->mm_dbs[FREE_DBI].md_overflow_pages) {
       mdbx_warning("meta[%u] has false-empty GC, skip it", meta_number);
-      return -30796;
+      return MDBX_CORRUPTED;
     }
   } else if (meta->mm_dbs[FREE_DBI].md_root >= meta->mm_geo.next) {
     mdbx_warning("meta[%u] has invalid GC-root %" PRIaPGNO ", skip it",
                  meta_number, meta->mm_dbs[FREE_DBI].md_root);
-    return -30796;
+    return MDBX_CORRUPTED;
   }
 
   /* LY: MainDB root */
@@ -11690,12 +11671,12 @@ mdbx_validate_meta(MDBX_env *env, MDBX_meta *const meta, uint64_t *filesize,
         meta->mm_dbs[MAIN_DBI].md_leaf_pages ||
         meta->mm_dbs[MAIN_DBI].md_overflow_pages) {
       mdbx_warning("meta[%u] has false-empty maindb", meta_number);
-      return -30796;
+      return MDBX_CORRUPTED;
     }
   } else if (meta->mm_dbs[MAIN_DBI].md_root >= meta->mm_geo.next) {
     mdbx_warning("meta[%u] has invalid maindb-root %" PRIaPGNO ", skip it",
                  meta_number, meta->mm_dbs[MAIN_DBI].md_root);
-    return -30796;
+    return MDBX_CORRUPTED;
   }
 
   if (safe64_read(&meta->mm_txnid_a) == 0) {
@@ -11717,7 +11698,7 @@ static __cold int mdbx_read_header(MDBX_env *env, MDBX_meta *dest,
 
   memset(dest, 0, sizeof(MDBX_meta));
   dest->mm_datasync_sign = MDBX_DATASIGN_WEAK;
-  rc = -30796;
+  rc = MDBX_CORRUPTED;
 
   /* Read twice all meta pages so we can find the latest one. */
   unsigned loop_limit = NUM_METAS * 2;
@@ -11794,7 +11775,7 @@ static __cold int mdbx_read_header(MDBX_env *env, MDBX_meta *dest,
     if (rc == MDBX_SUCCESS) {
       /* TODO: try to restore the database by fully checking b-tree structure
        * for the each meta page, if the corresponding option was given */
-      return -30796;
+      return MDBX_CORRUPTED;
     }
     return rc;
   }
@@ -12809,7 +12790,7 @@ static __cold int mdbx_setup_dxb(MDBX_env *env, const int lck_rc) {
         mdbx_error("last-page beyond end-of-file (last %" PRIaPGNO
                    ", have %" PRIaPGNO ")",
                    meta.mm_geo.next, bytes2pgno(env, (size_t)filesize_before));
-        return -30796;
+        return MDBX_CORRUPTED;
       }
 
       if (env->me_flags & MDBX_RDONLY) {
@@ -12875,7 +12856,7 @@ static __cold int mdbx_setup_dxb(MDBX_env *env, const int lck_rc) {
   if (unlikely(meta_clash_mask)) {
     if (/* not recovery mode */ env->me_stuck_meta < 0) {
       mdbx_error("meta-pages are clashed: mask 0x%d", meta_clash_mask);
-      return -30796;
+      return MDBX_CORRUPTED;
     } else {
       mdbx_warning("ignore meta-pages clashing (mask 0x%d) in recovery mode",
                    meta_clash_mask);
@@ -18501,6 +18482,7 @@ static int mdbx_cursor_del0(MDBX_cursor *mc) {
   MDBX_page *mp;
   indx_t ki;
   unsigned nkeys;
+  MDBX_cursor *m2, *m3;
   MDBX_dbi dbi = mc->mc_dbi;
 
   mdbx_cassert(mc, IS_LEAF(mc->mc_pg[mc->mc_top]));
@@ -18510,8 +18492,8 @@ static int mdbx_cursor_del0(MDBX_cursor *mc) {
   mc->mc_db->md_entries--;
 
   /* Adjust other cursors pointing to mp */
-  for (MDBX_cursor *m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2 = m2->mc_next) {
-    MDBX_cursor *m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2;
+  for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2 = m2->mc_next) {
+    m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2;
     if (m3 == mc || !(m2->mc_flags & m3->mc_flags & C_INITIALIZED))
       continue;
     if (m3->mc_snum < mc->mc_snum)
@@ -18554,10 +18536,10 @@ static int mdbx_cursor_del0(MDBX_cursor *mc) {
                        ((mc->mc_flags & C_SUB) && mc->mc_db->md_entries == 0 &&
                         nkeys == 0));
 
-  /* Adjust this and other cursors pointing to mp */
-  for (MDBX_cursor *m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2 = m2->mc_next) {
-    MDBX_cursor *m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2;
-    if (!(m2->mc_flags & m3->mc_flags & C_INITIALIZED))
+  /* Adjust other cursors pointing to mp */
+  for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2 = m2->mc_next) {
+    m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2;
+    if (m3 == mc || !(m2->mc_flags & m3->mc_flags & C_INITIALIZED))
       continue;
     if (m3->mc_snum < mc->mc_snum)
       continue;
@@ -18575,8 +18557,7 @@ static int mdbx_cursor_del0(MDBX_cursor *mc) {
       }
       if (m3->mc_ki[mc->mc_top] >= ki ||
           /* moved to right sibling */ m3->mc_pg[mc->mc_top] != mp) {
-        mdbx_cassert(m3, (m3->mc_flags & C_EOF) == 0);
-        if (m3->mc_xcursor) {
+        if (m3->mc_xcursor && (m3->mc_flags & C_EOF) == 0) {
           MDBX_node *node =
               page_node(m3->mc_pg[m3->mc_top], m3->mc_ki[m3->mc_top]);
           /* If this node has dupdata, it may need to be reinited
@@ -18602,6 +18583,39 @@ static int mdbx_cursor_del0(MDBX_cursor *mc) {
       }
     }
   }
+
+  /* Adjust THIS cursor */
+  if (unlikely(mc->mc_ki[mc->mc_top] >= nkeys)) {
+    rc = mdbx_cursor_sibling(mc, SIBLING_RIGHT);
+    if (unlikely(rc == MDBX_NOTFOUND)) {
+      mc->mc_flags |= C_EOF;
+      return MDBX_SUCCESS;
+    }
+    if (unlikely(rc != MDBX_SUCCESS))
+      goto bailout;
+  }
+  if (mc->mc_xcursor) {
+    MDBX_node *node = page_node(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+    /* If this node has dupdata, it may need to be reinited
+     * because its data has moved.
+     * If the xcursor was not inited it must be reinited.
+     * Else if node points to a subDB, nothing is needed. */
+    if (node_flags(node) & F_DUPDATA) {
+      if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
+        if (!(node_flags(node) & F_SUBDATA))
+          mc->mc_xcursor->mx_cursor.mc_pg[0] = node_data(node);
+      } else {
+        rc = mdbx_xcursor_init1(mc, node, mc->mc_pg[mc->mc_top]);
+        if (unlikely(rc != MDBX_SUCCESS))
+          goto bailout;
+        rc = mdbx_cursor_first(&mc->mc_xcursor->mx_cursor, NULL, NULL);
+        if (unlikely(rc != MDBX_SUCCESS))
+          goto bailout;
+      }
+    }
+    mc->mc_xcursor->mx_cursor.mc_flags |= C_DEL;
+  }
+  mc->mc_flags |= C_DEL;
 
   mdbx_cassert(mc, rc == MDBX_SUCCESS);
   if (mdbx_audit_enabled())
@@ -19237,13 +19251,6 @@ static THREAD_RESULT __cold THREAD_CALL mdbx_env_copythr(void *arg) {
   uint8_t *ptr;
   int toggle = 0;
 
-#if defined(EPIPE) && !(defined(_WIN32) || defined(_WIN64))
-  sigset_t sigset;
-  sigemptyset(&sigset);
-  sigaddset(&sigset, SIGPIPE);
-  my->mc_error = pthread_sigmask(SIG_BLOCK, &sigset, NULL);
-#endif /* EPIPE */
-
   mdbx_condpair_lock(&my->mc_condpair);
   while (!my->mc_error) {
     while (!my->mc_new && !my->mc_error) {
@@ -19261,14 +19268,6 @@ static THREAD_RESULT __cold THREAD_CALL mdbx_env_copythr(void *arg) {
     if (wsize > 0 && !my->mc_error) {
       int err = mdbx_write(my->mc_fd, ptr, wsize);
       if (err != MDBX_SUCCESS) {
-#if defined(EPIPE) && !(defined(_WIN32) || defined(_WIN64))
-        if (err == EPIPE) {
-          /* Collect the pending SIGPIPE,
-           * otherwise at least OS X gives it to the process on thread-exit. */
-          int unused;
-          sigwait(&sigset, &unused);
-        }
-#endif /* EPIPE */
         my->mc_error = err;
         goto bailout;
       }
@@ -25255,9 +25254,9 @@ __dll_export
         0,
         9,
         1,
-        48,
-        {"2020-10-23T03:33:08+03:00", "c998eb4c8e3c388427d5cbb9832ee665350c4a65", "2e3a552c3c7e1c286c0aed78fb7e1049be86369f",
-         "v0.9.1-48-g2e3a552-dirty"},
+        43,
+        {"2020-10-21T02:24:39+03:00", "b38491fbcede61bc86e9fd9a1e83913b9de5a1ab", "b0928219c326e3be5dc9557f3123aedf3d345c3c",
+         "v0.9.1-43-gb092821"},
         sourcery};
 
 __dll_export
