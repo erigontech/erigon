@@ -350,10 +350,13 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	p.TempDir = tmpdir
 	var exclude [][]byte
 
-	c := db.(ethdb.HasTx).Tx().Cursor(dbutils.IntermediateTrieHashBucket)
-	c2 := db.(ethdb.HasTx).Tx().Cursor(dbutils.IntermediateTrieHashBucket)
+	tx := db.(ethdb.HasTx).Tx()
+
+	c := tx.CursorDupSort(dbutils.IntermediateTrieHashBucket)
+	c2 := tx.CursorDupSort(dbutils.IntermediateTrieHashBucket)
 	defer c.Close()
 	defer c2.Close()
+	comparator := tx.Comparator(dbutils.IntermediateTrieHashBucket)
 
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		fmt.Printf("1: %x\n", k)
@@ -361,25 +364,66 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		nibs := make([]byte, len(k)*2)
 		trie.DecompressNibbles(k, &nibs)
 
-		for ihK, _, err := c.Seek(nibs[:1]); ihK != nil; ihK, _, err = c.Seek(nibs[:commonPrefixLen(ihK, nibs)]) {
+		next := nibs[:1]
+	Loop:
+		for ihK, _, err := c.Seek(next); ihK != nil; ihK, _, err = c.Seek(next) {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("2: %x\n", ihK)
 
-			cmp := bytes.Compare(nibs, ihK)
-			if cmp == -1 {
-				break
+			if len(ihK) < 80 {
+				cmp := bytes.Compare(nibs, ihK)
+				if cmp == -1 {
+					break Loop
+				}
+
+				if cmp == 0 {
+					c2.Delete(ihK)
+					break Loop
+				}
+
+				if bytes.HasPrefix(nibs, ihK) {
+					c2.Delete(ihK)
+				}
+				l := commonPrefixLen(ihK, nibs)
+				next = nibs[:l+1]
+				continue
 			}
 
-			if cmp == 0 {
-				c2.Delete(ihK)
-				break
+			if len(nibs) < 80 {
+				break Loop
 			}
 
-			if bytes.HasPrefix(nibs, ihK) {
-				c2.Delete(ihK)
+			nibs2 := nibs[80:]
+
+			next = nibs2[:1]
+			for ihK, ihV, err := c.SeekBothRange(nibs[:80], next); ihK != nil; ihK, ihV, err = c.SeekBothRange(nibs[:80], next) {
+				if err != nil {
+					return err
+				}
+
+				vv := ihV[:len(ihV)-32]
+
+				cmp := bytes.Compare(nibs2, vv)
+				if cmp == -1 {
+					break Loop
+				}
+
+				if cmp == 0 {
+					c2.SeekBothExact(ihK, ihV)
+					c2.DeleteCurrent()
+					break Loop
+				}
+
+				if bytes.HasPrefix(nibs[80:], vv) {
+					c2.SeekBothExact(ihK, ihV)
+					c2.DeleteCurrent()
+				}
+				l := commonPrefixLen(vv, nibs2)
+				next = nibs2[:l+1]
 			}
+
+			break Loop
 		}
 
 		//exclude = append(exclude, k)
@@ -398,7 +442,6 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	}
 
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
 	buf.SetComparator(comparator)
 	collector := etl.NewCollector(tmpdir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
