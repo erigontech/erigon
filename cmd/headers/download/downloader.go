@@ -356,11 +356,41 @@ func (cs *ControlServerImpl) GetStatus(context.Context, *empty.Empty) (*proto.St
 	return nil, nil
 }
 
+func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdownload.HeaderRequest) {
+	for _, req := range reqs {
+		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
+		bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
+			Amount:  uint64(req.Length),
+			Reverse: true,
+			Skip:    0,
+			Origin:  eth.HashOrNumber{Hash: req.Hash},
+		})
+		if err != nil {
+			log.Error("Could not encode header request", "err", err)
+			continue
+		}
+		outreq := proto.SendMessageByMinBlockRequest{
+			MinBlock: req.Number,
+			Data: &proto.OutboundMessageData{
+				Id:   proto.OutboundMessageId_GetBlockHeaders,
+				Data: bytes,
+			},
+		}
+		_, err = cs.sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		if err != nil {
+			log.Error("Could not send header request", "err", err)
+			continue
+		}
+	}
+}
+
 func (cs *ControlServerImpl) loop(ctx context.Context) {
 	var timer *time.Timer
 	cs.hdLock.Lock()
+	reqs := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
 	timer = cs.hd.RequestQueueTimer
 	cs.hdLock.Unlock()
+	cs.sendRequests(ctx, reqs)
 	for {
 		select {
 		case <-timer.C:
@@ -372,30 +402,6 @@ func (cs *ControlServerImpl) loop(ctx context.Context) {
 		reqs := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
 		timer = cs.hd.RequestQueueTimer
 		cs.hdLock.Unlock()
-		for _, req := range reqs {
-			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
-			bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
-				Amount:  uint64(req.Length),
-				Reverse: true,
-				Skip:    0,
-				Origin:  eth.HashOrNumber{Hash: req.Hash},
-			})
-			if err != nil {
-				log.Error("Could not encode header request", "err", err)
-				continue
-			}
-			outreq := proto.SendMessageByMinBlockRequest{
-				MinBlock: req.Number,
-				Data: &proto.OutboundMessageData{
-					Id:   proto.OutboundMessageId_GetBlockHeaders,
-					Data: bytes,
-				},
-			}
-			_, err = cs.sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
-			if err != nil {
-				log.Error("Could not send header request", "err", err)
-				continue
-			}
-		}
+		cs.sendRequests(ctx, reqs)
 	}
 }
