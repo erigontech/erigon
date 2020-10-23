@@ -243,6 +243,8 @@ func toMdbx(ctx context.Context, from, to string) error {
 			continue
 		}
 
+		fmt.Printf("do?\n")
+
 		c := dstTx.Cursor(name)
 		appendFunc := c.Append
 		if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
