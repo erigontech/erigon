@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -62,10 +63,10 @@ type Process struct {
 
 type VerifyRequest struct {
 	VerifyHeaderRequest
-	Parents      []*types.Header
-	ParentsCount int
-	From         uint64
-	To           uint64
+	KnownParents    []*types.Header
+	ParentsExpected int
+	From            uint64
+	To              uint64
 }
 
 const (
@@ -113,10 +114,12 @@ func (p *Process) AddVerifiedBlocks(header *types.Header) {
 	} else {
 		blocks = append(blocks, header)
 		p.VerifiedBlocks.Add(blockNum, blocks)
+		fmt.Println("AddVerifiedBlocks-1-ok", blockNum)
 		return
 	}
 
 	if ok = types.SearchHeader(blocks, header.Hash()); ok {
+		fmt.Println("AddVerifiedBlocks-2-!ok", blockNum)
 		return
 	}
 
@@ -127,6 +130,7 @@ func (p *Process) AddVerifiedBlocks(header *types.Header) {
 	})
 
 	p.VerifiedBlocks.Add(blockNum, blocks)
+	fmt.Println("AddVerifiedBlocks-3-ok", blockNum)
 }
 
 func (p *Process) GetVerifiedBlocks(blockNum uint64) ([]*types.Header, bool) {
@@ -135,17 +139,20 @@ func (p *Process) GetVerifiedBlocks(blockNum uint64) ([]*types.Header, bool) {
 
 	h, ok := p.VerifiedBlocks.Get(blockNum)
 	if !ok {
+		fmt.Println("GetVerifiedBlocks-1", blockNum, false)
 		return nil, false
 	}
 
 	headers, ok := h.([]*types.Header)
 	if !ok {
+		fmt.Println("GetVerifiedBlocks-2", blockNum, false)
 		return nil, false
 	}
 
 	res := make([]*types.Header, len(headers))
 	copy(res, headers)
 
+	fmt.Println("GetVerifiedBlocks-3", blockNum, false)
 	return res, true
 }
 

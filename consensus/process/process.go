@@ -6,6 +6,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -53,7 +55,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					c.addVerifyHeaderRequest(req, parents, parentsRequested, allParents)
 				}
 			case parentResp := <-c.HeaderResponses:
-				fmt.Println("<-c.HeaderResponses-1")
+				fmt.Println("<-c.HeaderResponses-1", parentResp.Number, parentResp.Header == nil, parentResp.Err)
 				if parentResp.Err != nil {
 					c.RequestsMu.Lock()
 					c.DeleteRequestedBlocks(parentResp.Number)
@@ -73,7 +75,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				}
 
 				fmt.Println("<-c.HeaderResponses-2")
-				c.VerifyRequestsCommonAncestor(parentResp.Number, parentResp.Header)
+				c.VerifyRequestsCommonAncestor(parentResp.Header)
 				fmt.Println("<-c.HeaderResponses-3")
 			case <-c.CleanupTicker.C:
 				fmt.Println("<-c.CleanupTicker.C-1")
@@ -102,48 +104,98 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 	return c
 }
 
-func (c *Consensus) VerifyRequestsCommonAncestor(blockNumber uint64, header *types.Header) {
+func (c *Consensus) VerifyRequestsCommonAncestor(header *types.Header) {
 	c.RequestsMu.Lock()
 	defer c.RequestsMu.Unlock()
-	c.verifyRequestsCommonAncestor(blockNumber, header)
+	c.verifyRequestsCommonAncestor(header)
 }
 
-func (c *Consensus) verifyRequestsCommonAncestor(blockNumber uint64, header *types.Header) {
-	toVerify := make(map[uint64][]uint64) // ancestorBlockNum->reqIDs
+type blockByAncestor struct {
+	parents          []uint64
+	blockNum         uint64
+	reqID            uint64
+	ancestorBlockNum uint64
+}
 
-	for ancestorBlockNum, reqMap := range c.RequestsToParents {
-		for reqID, req := range reqMap {
-			if req == nil || req.Header == nil {
+func (c *Consensus) verifyRequestsCommonAncestor(header *types.Header) {
+	if header == nil {
+		return
+	}
+	blockNumber := header.Number.Uint64()
+	fmt.Printf("\n\n+++++++++++++++++++++++++++++++++++++++++++++++++_verifyRequestsCommonAncestor-START %d %d\n", blockNumber, header.Number.Uint64())
+	toVerify := make(map[uint64]blockByAncestor) // ancestorBlockNum->reqIDs
+	toVerifySet := make(map[uint64]map[uint64]struct{})
+
+	for ancestorBlockNum, reqIDsToRequests := range c.RequestsToParents {
+		for reqID, request := range reqIDsToRequests {
+			if request == nil || request.Header == nil {
 				continue
 			}
 
+			ancMap, ok := toVerifySet[ancestorBlockNum]
+			if !ok {
+				ancMap = make(map[uint64]struct{})
+				toVerifySet[ancestorBlockNum] = ancMap
+			}
+			_, ok = ancMap[reqID]
+
 			// check if new parent is in the requested range
-			if blockNumber >= req.From && blockNumber <= req.To {
-				reqMap[reqID].Parents = append(reqMap[reqID].Parents, header)
-				toVerify[ancestorBlockNum] = append(toVerify[ancestorBlockNum], reqID)
+			if !ok && blockNumber >= request.From && blockNumber <= request.To {
+				appendParents(reqIDsToRequests[reqID], header)
+
+				req, ok := toVerify[ancestorBlockNum]
+				if !ok {
+					req.blockNum = reqIDsToRequests[reqID].Header.Number.Uint64()
+					req.reqID = reqID
+					req.ancestorBlockNum = ancestorBlockNum
+				}
+				req.parents = append(req.parents, reqID)
+				toVerify[ancestorBlockNum] = req
+
+				fmt.Printf("TO_VERIFY for %d\n", req.blockNum, req.ancestorBlockNum, request.)
+
+				ancMap[reqID] = struct{}{}
 			}
 		}
 	}
 
-	for ancestorBlockNum, reqIDs := range toVerify {
-		for _, reqID := range reqIDs {
-			req, ok := c.RequestsToParents[ancestorBlockNum][reqID]
-			if !ok {
-				continue
-			}
+	toVerifySlice := make([]blockByAncestor, 0, len(toVerify))
+	for _, reqIDs := range toVerify {
+		toVerifySlice = append(toVerifySlice, reqIDs)
+	}
+	sort.SliceStable(toVerifySlice, func(i, j int) bool {
+		return toVerifySlice[i].blockNum < toVerifySlice[j].blockNum
+	})
 
-			// recursion
-			_ = c.verifyByRequest(req, ancestorBlockNum)
+	fmt.Println("XXXXXXXXXXXXXXXXXXXXXX-1", blockNumber)
+	spew.Dump(toVerifySlice)
+
+	for _, block := range toVerifySlice {
+		req, ok := c.RequestsToParents[block.ancestorBlockNum][block.reqID]
+		if !ok || len(req.KnownParents) < req.ParentsExpected {
+			continue
 		}
+
+		// recursion
+		fmt.Println("%%%%% rec", block.ancestorBlockNum, req.ID, req.ParentsExpected, len(req.KnownParents), req.VerifyHeaderRequest.ID, req.Header.Number.Uint64(), req.VerifyHeaderRequest.Header.Number.Uint64())
+		_ = c.verifyByRequest(req, block.ancestorBlockNum)
 	}
 
 	c.DeleteRequestedBlocks(blockNumber)
+
+	fmt.Printf("+++++++++++++++++++++++++++++++++++++++++++++++++_verifyRequestsCommonAncestor-END %d %d\n\n\n", blockNumber, header.Number.Uint64())
 }
 
 func (c *Consensus) verifyByRequest(req *consensus.VerifyRequest, ancestorBlockNum uint64) error {
+	fmt.Println("IN verifyByRequest", ancestorBlockNum, req.ID, req.Header.Number.Uint64(), req.ParentsExpected, len(req.KnownParents))
+	if uint64(len(req.KnownParents)) > req.Header.Number.Uint64() {
+		for _, b := range req.KnownParents {
+			fmt.Println("verifyByRequest-2", req.Header.Number.Uint64(), b.Number.Uint64(), b.Hash().String())
+		}
+	}
 	reqID := req.ID
 
-	parents, err := matchParents(req.Header, req.Parents, req.ParentsCount)
+	parents, err := matchParents(req.Header, req.KnownParents, req.ParentsExpected)
 	if err != nil && !errors.Is(err, errNotAllParents) {
 		c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), err}
 
@@ -152,7 +204,8 @@ func (c *Consensus) verifyByRequest(req *consensus.VerifyRequest, ancestorBlockN
 
 		if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
 			// recursion
-			c.verifyRequestsCommonAncestor(req.Header.Number.Uint64(), req.Header)
+			fmt.Println("c.verifyRequestsCommonAncestor-1")
+			c.verifyRequestsCommonAncestor(req.Header)
 		}
 
 		return nil
@@ -162,8 +215,10 @@ func (c *Consensus) verifyByRequest(req *consensus.VerifyRequest, ancestorBlockN
 	}
 
 	err = c.Verify(c.Process.Chain, req.Header, parents, false, req.Seal)
+	fmt.Println("Verify-1", reqID, req.Header.Number.Uint64(), err)
 	c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), err}
 	if err == nil {
+		fmt.Println("Verify-2", reqID, req.Header.Number.Uint64(), err)
 		c.AddVerifiedBlocks(req.Header)
 	}
 
@@ -172,7 +227,8 @@ func (c *Consensus) verifyByRequest(req *consensus.VerifyRequest, ancestorBlockN
 
 	if c.IsRequestedBlocks(req.Header.Number.Uint64()) {
 		// recursion
-		c.verifyRequestsCommonAncestor(req.Header.Number.Uint64(), req.Header)
+		fmt.Println("Verify-3", reqID, req.Header.Number.Uint64(), err)
+		c.verifyRequestsCommonAncestor(req.Header)
 	}
 
 	return nil
@@ -187,36 +243,27 @@ func toVerifyRequest(req consensus.VerifyHeaderRequest, parents []*types.Header,
 		req.Header.Number.Uint64() - 1,
 	}
 
-	sort.SliceStable(request.Parents, func(i, j int) bool {
-		return request.Parents[i].Hash().String() < request.Parents[j].Hash().String()
+	sort.SliceStable(request.KnownParents, func(i, j int) bool {
+		return request.KnownParents[i].Hash().String() < request.KnownParents[j].Hash().String()
 	})
 
 	return request
 }
 
 func (c *Consensus) addVerifyHeaderRequest(req consensus.VerifyHeaderRequest, parents []*types.Header, requestedParents []uint64, allParents int) {
+	fmt.Println("\n\n================================================ STARTED", req.ID, req.Header.Number.Uint64())
 	request := toVerifyRequest(req, parents, allParents)
 
-	var toAppend []*types.Header
-	for _, parent := range parents {
-		has := types.SearchHeader(request.Parents, parent.Hash())
-		if !has {
-			toAppend = append(toAppend, parent)
-		}
-	}
+	appendParents(request, parents...)
 
-	request.Parents = append(request.Parents, toAppend...)
-	sort.SliceStable(request.Parents, func(i, j int) bool {
-		return request.Parents[i].Hash().String() < request.Parents[j].Hash().String()
-	})
-
-	for _, parent := range request.Parents {
+	for _, parent := range request.KnownParents {
 		reqMap, ok := c.RequestsToParents[parent.Number.Uint64()]
 		if !ok {
 			reqMap = make(map[uint64]*consensus.VerifyRequest)
 			c.RequestsToParents[parent.Number.Uint64()] = reqMap
 		}
 		reqMap[request.ID] = request
+		fmt.Println("addVerifyHeaderRequest-ADD-1.1", parent.Number.Uint64(), request.ID, request.Header.Number.Uint64(), request.ParentsExpected, len(request.KnownParents))
 	}
 
 	for _, parent := range requestedParents {
@@ -226,7 +273,25 @@ func (c *Consensus) addVerifyHeaderRequest(req consensus.VerifyHeaderRequest, pa
 			c.RequestsToParents[parent] = reqMap
 		}
 		reqMap[request.ID] = request
+		fmt.Println("addVerifyHeaderRequest-ADD-1.2", parent, request.ID, request.Header.Number.Uint64(), request.ParentsExpected, len(request.KnownParents))
 	}
+	fmt.Println("================================================ DONE\n\n", req.ID, req.Header.Number.Uint64())
+}
+
+func appendParents(request *consensus.VerifyRequest, parents ...*types.Header) {
+	for _, parent := range parents {
+		has := types.SearchHeader(request.KnownParents, parent.Hash())
+		if !has {
+			request.KnownParents = append(request.KnownParents, parent)
+		}
+	}
+
+	sort.SliceStable(request.KnownParents, func(i, j int) bool {
+		if request.KnownParents[i].Number.Uint64() == request.KnownParents[j].Number.Uint64() {
+			return request.KnownParents[i].Hash().String() < request.KnownParents[j].Hash().String()
+		}
+		return request.KnownParents[i].Number.Uint64() < request.KnownParents[j].Number.Uint64()
+	})
 }
 
 func (c *Consensus) HeaderVerification() chan<- consensus.VerifyHeaderRequest {
@@ -290,6 +355,7 @@ func matchParents(header *types.Header, parents []*types.Header, parentsCount in
 
 		if !correctParent && len(blockParents) != 0 {
 			// old value(reorg) in the cache could cause this value
+			fmt.Println("+++++++++++++++++++++++++++++++++++++", header.Number.Uint64(), correctParent, len(blockParents), spew.Sdump(blockParents))
 			return nil, consensus.ErrUnknownAncestor
 		}
 	}

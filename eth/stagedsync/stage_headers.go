@@ -310,6 +310,7 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 		case req := <-requests:
 			engine.HeaderVerification() <- req
 		case result := <-engine.VerifyResults():
+			fmt.Println("!!!!! <-engine.VerifyResults()", result.ID, result.Err)
 			if result.Err != nil {
 				return result.Err
 			}
