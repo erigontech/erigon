@@ -13,7 +13,8 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
 ## Class diagram: 
 
 ```asciiflow.com
-// This is not call graph, just show classes from low-level to high-level. And show which classes satisfy which interfaces.
+// This is not call graph, just show classes from low-level to high-level. 
+// And show which classes satisfy which interfaces.
 
 +-----------------------------------+   +-----------------------------------+   +-----------------------------------+ 
 |  github.com/ledgerwatch/lmdb-go   |   |  github.com/torquem-ch/mdbx-go    |   | google.golang.org/grpc.ClientConn |                    
