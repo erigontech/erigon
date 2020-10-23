@@ -371,7 +371,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 				return err
 			}
 
-			if len(ihK) < 80 {
+			if len(ihK) < trie.IHDupKeyLen {
 				cmp := bytes.Compare(nibs, ihK)
 				if cmp == -1 {
 					break Loop
@@ -390,14 +390,15 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 				continue
 			}
 
-			if len(nibs) < 80 {
+			if len(nibs) < trie.IHDupKeyLen {
 				break Loop
 			}
 
-			nibs2 := nibs[80:]
+			nibs1 := nibs[:trie.IHDupKeyLen]
+			nibs2 := nibs[trie.IHDupKeyLen:]
 
 			next = nibs2[:1]
-			for ihK, ihV, err := c.SeekBothRange(nibs[:80], next); ihK != nil; ihK, ihV, err = c.SeekBothRange(nibs[:80], next) {
+			for ihK, ihV, err := c.SeekBothRange(nibs1, next); ihK != nil; ihK, ihV, err = c.SeekBothRange(nibs1, next) {
 				if err != nil {
 					return err
 				}
@@ -405,6 +406,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 				vv := ihV[:len(ihV)-32]
 
 				cmp := bytes.Compare(nibs2, vv)
+				fmt.Printf("3: %x, %x, %d\n", next, ihV, cmp)
 				if cmp == -1 {
 					break Loop
 				}
@@ -415,7 +417,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 					break Loop
 				}
 
-				if bytes.HasPrefix(nibs[80:], vv) {
+				if bytes.HasPrefix(nibs2, vv) {
 					c2.SeekBothExact(ihK, ihV)
 					c2.DeleteCurrent()
 				}
