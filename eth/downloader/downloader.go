@@ -164,7 +164,7 @@ type Downloader struct {
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
 
 	storageMode ethdb.StorageMode
-	datadir     string
+	tmpdir      string
 	batchSize   int
 
 	headersState    *stagedsync.StageState
@@ -283,8 +283,8 @@ func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 }
 
 // DataDir sets the directory where download is allowed to create temporary files
-func (d *Downloader) SetDataDir(datadir string) {
-	d.datadir = datadir
+func (d *Downloader) SetTmpDir(tmpdir string) {
+	d.tmpdir = tmpdir
 }
 
 func (d *Downloader) SetBatchSize(batchSize int) {
@@ -558,7 +558,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			writeDB,
 			p.id,
 			d.storageMode,
-			d.datadir,
+			d.tmpdir,
 			d.batchSize,
 			d.quitCh,
 			fetchers,

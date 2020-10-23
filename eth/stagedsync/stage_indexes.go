@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, quitCh <-chan struct{}) error {
+func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
 	endBlock, err := s.ExecutionAt(db)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {
@@ -25,16 +25,16 @@ func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 	}
 
 	ig := core.NewIndexGenerator(logPrefix, db, quitCh)
-	ig.TempDir = datadir
+	ig.TempDir = tmpdir
 
-	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket, datadir); err != nil {
+	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket, tmpdir); err != nil {
 		return fmt.Errorf("%s: fail to generate index: %w", logPrefix, err)
 	}
 
 	return s.DoneAndUpdate(db, endBlock)
 }
 
-func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, quitCh <-chan struct{}) error {
+func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
 	endBlock, err := s.ExecutionAt(db)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {
@@ -50,8 +50,8 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, datadir string, 
 		blockNum = lastProcessedBlockNumber + 1
 	}
 	ig := core.NewIndexGenerator(logPrefix, db, quitCh)
-	ig.TempDir = datadir
-	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainStorageChangeSetBucket, datadir); err != nil {
+	ig.TempDir = tmpdir
+	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainStorageChangeSetBucket, tmpdir); err != nil {
 		return fmt.Errorf("%s: fail to generate index: %w", logPrefix, err)
 	}
 

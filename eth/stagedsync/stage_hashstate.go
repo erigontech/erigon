@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+func SpawnHashStateStage(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -34,11 +34,11 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
-		if err := promoteHashedStateCleanly(logPrefix, db, datadir, quit); err != nil {
+		if err := promoteHashedStateCleanly(logPrefix, db, tmpdir, quit); err != nil {
 			return err
 		}
 	} else {
-		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, db, datadir, quit); err != nil {
+		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, db, tmpdir, quit); err != nil {
 			return err
 		}
 	}
@@ -46,9 +46,9 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, datadir string, quit 
 	return s.DoneAndUpdate(db, to)
 }
 
-func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
 	logPrefix := s.state.LogPrefix()
-	if err := unwindHashStateStageImpl(logPrefix, u, s, db, datadir, quit); err != nil {
+	if err := unwindHashStateStageImpl(logPrefix, u, s, db, tmpdir, quit); err != nil {
 		return err
 	}
 	if err := u.Done(db); err != nil {
@@ -57,11 +57,11 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, data
 	return nil
 }
 
-func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, stateDB ethdb.Database, datadir string, quit <-chan struct{}) error {
+func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, stateDB ethdb.Database, tmpdir string, quit <-chan struct{}) error {
 	// Currently it does not require unwinding because it does not create any Intemediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(stateDB, quit)
-	prom.TempDir = datadir
+	prom.TempDir = tmpdir
 	if err := prom.Unwind(logPrefix, s, u, false /* storage */, true /* codes */); err != nil {
 		return err
 	}
@@ -74,13 +74,13 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, s
 	return nil
 }
 
-func promoteHashedStateCleanly(logPrefix string, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+func promoteHashedStateCleanly(logPrefix string, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
 	err := etl.Transform(
 		logPrefix,
 		db,
 		dbutils.PlainStateBucket,
 		dbutils.CurrentStateBucket,
-		datadir,
+		tmpdir,
 		keyTransformExtractFunc(transformPlainStateKey),
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
@@ -96,7 +96,7 @@ func promoteHashedStateCleanly(logPrefix string, db ethdb.Database, datadir stri
 		db,
 		dbutils.PlainContractCodeBucket,
 		dbutils.ContractCodeBucket,
-		datadir,
+		tmpdir,
 		keyTransformExtractFunc(transformContractCodeKey),
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
@@ -409,9 +409,9 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	)
 }
 
-func promoteHashedStateIncrementally(logPrefix string, s *StageState, from, to uint64, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+func promoteHashedStateIncrementally(logPrefix string, s *StageState, from, to uint64, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
 	prom := NewPromoter(db, quit)
-	prom.TempDir = datadir
+	prom.TempDir = tmpdir
 	if err := prom.Promote(logPrefix, s, from, to, false /* storage */, true /* codes */); err != nil {
 		return err
 	}

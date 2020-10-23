@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -18,6 +17,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
 )
+
+const TmpDirName = "etl-temp"
 
 type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k []byte, value []byte, table CurrentTableReader, next LoadNextFunc) error
@@ -33,20 +34,13 @@ type Collector struct {
 }
 
 // NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
-func NewCollectorFromFiles(datadir string) (*Collector, error) {
-	// if we are going to create files in the system temp dir, we don't need any
-	// subfolders.
-	if datadir != "" {
-		// the folder name stays the same and shared between ETL runs, so we don't need to remove it.
-		// it actually can make debugging more tricky in case we leak some open files.
-		datadir = path.Join(datadir, "etl-temp")
-	}
-	if _, err := os.Stat(datadir); os.IsNotExist(err) {
+func NewCollectorFromFiles(tmpdir string) (*Collector, error) {
+	if _, err := os.Stat(tmpdir); os.IsNotExist(err) {
 		return nil, nil
 	}
-	fileInfos, err := ioutil.ReadDir(datadir)
+	fileInfos, err := ioutil.ReadDir(tmpdir)
 	if err != nil {
-		return nil, fmt.Errorf("collector from files - reading directory %s: %w", datadir, err)
+		return nil, fmt.Errorf("collector from files - reading directory %s: %w", tmpdir, err)
 	}
 	if len(fileInfos) == 0 {
 		return nil, nil
@@ -54,7 +48,7 @@ func NewCollectorFromFiles(datadir string) (*Collector, error) {
 	dataProviders := make([]dataProvider, len(fileInfos))
 	for i, fileInfo := range fileInfos {
 		var dataProvider fileDataProvider
-		dataProvider.file, err = os.Open(filepath.Join(datadir, fileInfo.Name()))
+		dataProvider.file, err = os.Open(filepath.Join(tmpdir, fileInfo.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("collector from files - opening file %s: %w", fileInfo.Name(), err)
 		}
@@ -64,13 +58,13 @@ func NewCollectorFromFiles(datadir string) (*Collector, error) {
 }
 
 // NewCriticalCollector does not clean up temporary files if loading has failed
-func NewCriticalCollector(datadir string, sortableBuffer Buffer) *Collector {
-	c := NewCollector(datadir, sortableBuffer)
+func NewCriticalCollector(tmpdir string, sortableBuffer Buffer) *Collector {
+	c := NewCollector(tmpdir, sortableBuffer)
 	c.cleanOnFailure = false
 	return c
 }
 
-func NewCollector(datadir string, sortableBuffer Buffer) *Collector {
+func NewCollector(tmpdir string, sortableBuffer Buffer) *Collector {
 	c := &Collector{cleanOnFailure: true}
 	encoder := codec.NewEncoder(nil, &cbor)
 
@@ -85,7 +79,7 @@ func NewCollector(datadir string, sortableBuffer Buffer) *Collector {
 			provider = KeepInRAM(sortableBuffer)
 			c.allFlushed = true
 		} else {
-			provider, err = FlushToDisk(encoder, currentKey, sortableBuffer, datadir)
+			provider, err = FlushToDisk(encoder, currentKey, sortableBuffer, tmpdir)
 		}
 		if err != nil {
 			return err
