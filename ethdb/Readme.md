@@ -15,20 +15,20 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
 ```asciiflow.com
 // This is not call graph, just show classes from low-level to high-level. And show which classes satisfy which interfaces.
 
-+------------------------------------+      +------------------------------------+      +------------------------------------+ 
-|   github.com/ledgerwatch/lmdb-go   |      |   github.com/torquem-ch/mdbx-go    |      | google.golang.org/grpc.ClientConn  |                    
-|   (app-agnostic LMDB go bindings)  |      |   (app-agnostic MDBX go bindings)  |      | (app-agnostic RPC and streaming)   |
-+------------------------------------+      +------------------------------------+      +------------------------------------+
-                |                                             |                                             |
-                |                                             |                                             |
-                v                                             v                                             v
-+------------------------------------+      +------------------------------------+      +------------------------------------+
-|       ethdb/kv_lmdb.go             |      |       ethdb/kv_mdbx.go             |      |       ethdb/kv_remote.go           |                
-|  (tg-specific LMDB implementaion)  |      |  (tg-specific MDBX implementaion)  |      |   (tg-specific remote DB access)   |              
-+------------------------------------+      +------------------------------------+      +------------------------------------+
-                |                                             |                                             |
-                |                                             |                                             |
-                v                                             v                                             v
++-----------------------------------+     +-----------------------------------+     +-----------------------------------+ 
+|  github.com/ledgerwatch/lmdb-go   |     |  github.com/torquem-ch/mdbx-go    |     | google.golang.org/grpc.ClientConn |                    
+|  (app-agnostic LMDB go bindings)  |     |  (app-agnostic MDBX go bindings)  |     | (app-agnostic RPC and streaming)  |
++-----------------------------------+     +-----------------------------------+     +-----------------------------------+
+                |                                            |                                            |
+                |                                            |                                            |
+                v                                            v                                            v
++-----------------------------------+     +-----------------------------------+     +-----------------------------------+
+|      ethdb/kv_lmdb.go             |     |       ethdb/kv_mdbx.go            |     |       ethdb/kv_remote.go          |                
+| (tg-specific LMDB implementaion)  |     |  (tg-specific MDBX implementaion) |     |   (tg-specific remote DB access)  |              
++-----------------------------------+     +-----------------------------------+     +-----------------------------------+
+                |                                            |                                            |
+                |                                            |                                            |
+                v                                            v                                            v
             +-------------------------------------------------------------------------------------------------------+
             |                                       ethdb/kv_abstract.go                                            |  
             |         (Common KV interface. DB-friendly, disk-friendly, cpu-cache-friendly.                         |
@@ -36,18 +36,18 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
             |           Allows experiment with another database implementations.                                    |
             |          Supports context.Context for cancelation. Any operation can return error)                    |
             +-------------------------------------------------------------------------------------------------------+
-                |                                             |                                             |
-                |                                             |                                             |
-                v                                             v                                             v
-+------------------------------------+      +------------------------------------+      +------------------------------------+
-|       ethdb/object_db.go           |      |          ethdb/tx_db.go            |      |    ethdb/remote/remotedbserver     |                
-|     (thread-safe, stateless,       |      | (non-thread-safe, more performant  |      | (grpc server, use any kv_abstract, |  
-|   opens/close short transactions   |      |   than object_db, method Begin     |      |   kv_remote call this server, 1    |
-|      internally when need)         |      |  DOESN'T create new TxDb object)   |      | transaction maps on 1 grpc stream  |
-+------------------------------------+      +------------------------------------+      +------------------------------------+
-                |                                             |                                     
-                |                                             |                                     
-                v                                             v                                     
+                |                                            |                                            |
+                |                                            |                                            |
+                v                                            v                                            v
++-----------------------------------+     +-----------------------------------+     +-----------------------------------+
+|       ethdb/object_db.go          |     |          ethdb/tx_db.go           |     |    ethdb/remote/remotedbserver    |                
+|     (thread-safe, stateless,      |     | (non-thread-safe, more performant |     | (grpc server, using kv_abstract,  |  
+|   opens/close short transactions  |     |   than object_db, method Begin    |     |   kv_remote call this server, 1   |
+|      internally when need)        |     |  DOESN'T create new TxDb object)  |     | transaction maps on 1 grpc stream |
++-----------------------------------+     +-----------------------------------+     +-----------------------------------+
+                |                                            |                                     
+                |                                            |                                     
+                v                                            v                                     
             +-------------------------------------------------------------------------------------------------------+
             |                                       ethdb/interface.go                                              |  
             |         (Common DB interfaces. ethdb.Database and ethdb.DbWithPendingMutations are widely used)       |
