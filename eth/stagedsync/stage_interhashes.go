@@ -195,6 +195,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+			fmt.Printf("1??\n")
 			newK, err := transformPlainStateKey(k)
 			if err != nil {
 				return err
@@ -222,6 +223,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	); err != nil {
 		return err
 	}
+	fmt.Printf("2??\n")
 	return nil
 }
 
@@ -354,7 +356,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	defer c2.Close()
 
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		//fmt.Printf("1: %x\n", k)
+		fmt.Printf("1: %x\n", k)
 
 		nibs := make([]byte, len(k)*2)
 		trie.DecompressNibbles(k, &nibs)
@@ -363,6 +365,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 			if err != nil {
 				return err
 			}
+			fmt.Printf("2: %x\n", ihK)
 
 			cmp := bytes.Compare(nibs, ihK)
 			if cmp == -1 {
