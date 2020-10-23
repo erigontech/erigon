@@ -55,6 +55,8 @@ type LogConfig struct {
 	DisableReturnData bool // disable return data capture
 	Debug             bool // print output during capture end
 	Limit             int  // maximum length of output, but zero means unlimited
+	// Chain overrides, can be used to execute a trace using future fork rules
+	Overrides *params.ChainConfig `json:"overrides,omitempty"`
 }
 
 //go:generate gencodec -type StructLog -field-override structLogMarshaling -out gen_structlog.go
@@ -286,6 +288,10 @@ func WriteTrace(writer io.Writer, logs []StructLog) {
 				fmt.Fprintf(writer, "%x: %x\n", h, item)
 			}
 		}
+		if len(log.ReturnData) > 0 {
+			fmt.Fprintln(writer, "ReturnData:")
+			fmt.Fprint(writer, hex.Dump(log.ReturnData))
+		}
 		fmt.Fprintln(writer)
 	}
 }
@@ -331,8 +337,8 @@ func (t *mdLogger) CaptureStart(from common.Address, to common.Address, create b
 	}
 
 	fmt.Fprintf(t.out, `
-|  Pc   |      Op     | Cost |   Stack   |   RStack  |
-|-------|-------------|------|-----------|-----------|
+|  Pc   |      Op     | Cost |   Stack   |   RStack  |  Refund |
+|-------|-------------|------|-----------|-----------|---------|
 `)
 	return nil
 }
@@ -343,8 +349,8 @@ func (t *mdLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64
 	if !t.cfg.DisableStack {
 		// format stack
 		var a []string
-		for _, elem := range stack.Data {
-			a = append(a, fmt.Sprintf("%d", elem))
+		for _, elem := range stack.data {
+			a = append(a, fmt.Sprintf("%v", elem.String()))
 		}
 		b := fmt.Sprintf("[%v]", strings.Join(a, ","))
 		fmt.Fprintf(t.out, "%10v |", b)
@@ -357,6 +363,7 @@ func (t *mdLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64
 		b = fmt.Sprintf("[%v]", strings.Join(a, ","))
 		fmt.Fprintf(t.out, "%10v |", b)
 	}
+	fmt.Fprintf(t.out, "%10v |", env.StateDB.GetRefund())
 	fmt.Fprintln(t.out, "")
 	if err != nil {
 		fmt.Fprintf(t.out, "Error: %v\n", err)
@@ -372,11 +379,7 @@ func (t *mdLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64
 }
 
 func (t *mdLogger) CaptureEnd(output []byte, gasUsed uint64, tm time.Duration, err error) error {
-	fmt.Fprintf(t.out, `
-Output: 0x%x
-Consumed gas: %d
-Error: %v
-`,
+	fmt.Fprintf(t.out, "\nOutput: `0x%x`\nConsumed gas: `%d`\nError: `%v`\n",
 		output, gasUsed, err)
 	return nil
 }

@@ -68,7 +68,7 @@ func setDefaults(cfg *Config) {
 			PetersburgBlock:     new(big.Int),
 			IstanbulBlock:       new(big.Int),
 			MuirGlacierBlock:    new(big.Int),
-			YoloV1Block:         nil,
+			YoloV2Block:         nil,
 		}
 	}
 
@@ -119,6 +119,14 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 		vmenv   = NewEnv(cfg)
 		sender  = vm.AccountRef(cfg.Origin)
 	)
+	if cfg.ChainConfig.IsYoloV2(vmenv.BlockNumber) {
+		cfg.State.AddAddressToAccessList(cfg.Origin)
+		cfg.State.AddAddressToAccessList(address)
+		for _, addr := range vmenv.ActivePrecompiles() {
+			cfg.State.AddAddressToAccessList(addr)
+			cfg.State.AddAddressToAccessList(addr)
+		}
+	}
 	cfg.State.CreateAccount(address, true)
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(address, code)
@@ -151,6 +159,12 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		vmenv  = NewEnv(cfg)
 		sender = vm.AccountRef(cfg.Origin)
 	)
+	if cfg.ChainConfig.IsYoloV2(vmenv.BlockNumber) {
+		cfg.State.AddAddressToAccessList(cfg.Origin)
+		for _, addr := range vmenv.ActivePrecompiles() {
+			cfg.State.AddAddressToAccessList(addr)
+		}
+	}
 
 	// Call the code with the given configuration.
 	code, address, leftOverGas, err := vmenv.Create(
@@ -173,6 +187,14 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 	vmenv := NewEnv(cfg)
 
 	sender := cfg.State.GetOrNewStateObject(cfg.Origin)
+	if cfg.ChainConfig.IsYoloV2(vmenv.BlockNumber) {
+		cfg.State.AddAddressToAccessList(cfg.Origin)
+		cfg.State.AddAddressToAccessList(address)
+		for _, addr := range vmenv.ActivePrecompiles() {
+			cfg.State.AddAddressToAccessList(addr)
+		}
+	}
+
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(
 		sender,
