@@ -704,7 +704,10 @@ func (c *MdbxCursor) putNoOverwrite(k, v []byte) error     { return c.c.Put(k, v
 func (c *MdbxCursor) putNoDupData(k, v []byte) error       { return c.c.Put(k, v, mdbx.NoDupData) }
 func (c *MdbxCursor) append(k, v []byte) error             { return c.c.Put(k, v, mdbx.Append) }
 func (c *MdbxCursor) appendDup(k, v []byte) error {
-	fmt.Fprintf(debugF, "%x,%x\n", k, v)
+	//_, err := fmt.Fprintf(debugF, "%x,%x\n", k, v)
+	//if err != nil {
+	//	panic(err)
+	//}
 	return c.c.Put(k, v, mdbx.AppendDup)
 }
 func (c *MdbxCursor) reserve(k []byte, n int) ([]byte, error) { return c.c.PutReserve(k, n, 0) }

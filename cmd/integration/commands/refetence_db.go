@@ -239,6 +239,9 @@ func toMdbx(ctx context.Context, from, to string) error {
 		if b.IsDeprecated {
 			continue
 		}
+		if name != dbutils.CurrentStateBucket {
+			continue
+		}
 
 		c := dstTx.Cursor(name)
 		appendFunc := c.Append
