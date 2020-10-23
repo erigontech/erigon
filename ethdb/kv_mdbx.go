@@ -20,7 +20,7 @@ var debugF *os.File
 
 func init() {
 	var err error
-	debugF, err = os.OpenFile("/tmp/alex.log", os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0755)
+	debugF, err = os.OpenFile("/media/alex/evo/alex.log", os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0755)
 	if err != nil {
 		panic(err)
 	}
@@ -704,10 +704,10 @@ func (c *MdbxCursor) putNoOverwrite(k, v []byte) error     { return c.c.Put(k, v
 func (c *MdbxCursor) putNoDupData(k, v []byte) error       { return c.c.Put(k, v, mdbx.NoDupData) }
 func (c *MdbxCursor) append(k, v []byte) error             { return c.c.Put(k, v, mdbx.Append) }
 func (c *MdbxCursor) appendDup(k, v []byte) error {
-	//_, err := fmt.Fprintf(debugF, "%x,%x\n", k, v)
-	//if err != nil {
-	//	panic(err)
-	//}
+	_, err := fmt.Fprintf(debugF, "%x,%x\n", k, v)
+	if err != nil {
+		panic(err)
+	}
 	return c.c.Put(k, v, mdbx.AppendDup)
 }
 func (c *MdbxCursor) reserve(k []byte, n int) ([]byte, error) { return c.c.PutReserve(k, n, 0) }
