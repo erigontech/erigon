@@ -25,11 +25,13 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"path"
 	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
@@ -143,7 +145,8 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		}
 	}
 
-	err = migrations.NewMigrator().Apply(chainDb, stack.Config().DataDir)
+	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
+	err = migrations.NewMigrator().Apply(chainDb, tmpdir)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +305,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-	eth.protocolManager.SetDataDir(stack.Config().DataDir)
+	eth.protocolManager.SetTmpDir(tmpdir)
 	eth.protocolManager.SetBatchSize(int(config.BatchSize))
 
 	if config.SyncMode != downloader.StagedSync {

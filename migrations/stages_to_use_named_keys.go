@@ -24,7 +24,7 @@ var dbKeys = []stages.SyncStage{
 
 var stagesToUseNamedKeys = Migration{
 	Name: "stages_to_use_named_keys",
-	Up: func(db ethdb.Database, datadir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 
 		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
 			return err
@@ -53,7 +53,7 @@ var stagesToUseNamedKeys = Migration{
 			db,
 			dbutils.SyncStageProgressOld1,
 			dbutils.SyncStageProgress,
-			datadir,
+			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
 			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
@@ -70,7 +70,7 @@ var stagesToUseNamedKeys = Migration{
 
 var unwindStagesToUseNamedKeys = Migration{
 	Name: "unwind_stages_to_use_named_keys",
-	Up: func(db ethdb.Database, datadir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.SyncStageUnwindOld1); err != nil {
 			return err
 		} else if !exists {
@@ -98,7 +98,7 @@ var unwindStagesToUseNamedKeys = Migration{
 			db,
 			dbutils.SyncStageUnwindOld1,
 			dbutils.SyncStageUnwind,
-			datadir,
+			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
 			etl.TransformArgs{OnLoadCommit: OnLoadCommit},

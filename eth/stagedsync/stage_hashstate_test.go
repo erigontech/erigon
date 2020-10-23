@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func getDataDir() string {
+func getTmpDir() string {
 	name, err := ioutil.TempDir("", "geth-tests-staged-sync")
 	if err != nil {
 		panic(err)
@@ -35,7 +35,7 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = promoteHashedStateCleanly("logPrefix", tx2, getDataDir(), nil)
+	err = promoteHashedStateCleanly("logPrefix", tx2, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	err = tx2.CommitAndBegin(context.Background())
 	require.NoError(t, err)
 
-	err = promoteHashedStateCleanly("logPrefix", tx2, getDataDir(), nil)
+	err = promoteHashedStateCleanly("logPrefix", tx2, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	err = tx2.CommitAndBegin(context.Background())
 	require.NoError(t, err)
 
-	err = promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 50}, 50, 101, tx2, getDataDir(), nil)
+	err = promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 50}, 50, 101, tx2, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx2), changeCodeWithIncarnations)
 	generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = promoteHashedStateIncrementally("logPrefix", &StageState{}, 50, 101, tx2, getDataDir(), nil)
+	err = promoteHashedStateIncrementally("logPrefix", &StageState{}, 50, 101, tx2, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -150,13 +150,13 @@ func TestUnwindHashed(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = promoteHashedStateCleanly("logPrefix", tx2, getDataDir(), nil)
+	err = promoteHashedStateCleanly("logPrefix", tx2, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindHashStateStageImpl("logPrefix", u, s, tx2, getDataDir(), nil)
+	err = unwindHashStateStageImpl("logPrefix", u, s, tx2, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while unwind state: %v", err)
 	}

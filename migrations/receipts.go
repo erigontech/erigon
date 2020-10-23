@@ -19,20 +19,20 @@ import (
 
 var receiptsCborEncode = Migration{
 	Name: "receipts_cbor_encode",
-	Up: func(db ethdb.Database, datadir string, progress []byte, CommitProgress etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 		buf := make([]byte, 0, 100_000)
 		const loadStep = "load"
 
-		collector, err1 := etl.NewCollectorFromFiles(datadir)
+		collector, err1 := etl.NewCollectorFromFiles(tmpdir)
 		if err1 != nil {
 			return err1
 		}
 		switch string(progress) {
 		case "":
 			if collector != nil { //  can't use files if progress field not set
-				_ = os.RemoveAll(datadir)
+				_ = os.RemoveAll(tmpdir)
 				collector = nil
 			}
 		case loadStep:
@@ -42,7 +42,7 @@ var receiptsCborEncode = Migration{
 			goto LoadStep
 		}
 
-		collector = etl.NewCriticalCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collector = etl.NewCriticalCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		if err1 = db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
 			blockNum := binary.BigEndian.Uint64(k[:8])
 			select {

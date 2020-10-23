@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func SpawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh <-chan struct{}) error {
+func SpawnTxLookup(s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
 	var blockNum uint64
 	var startKey []byte
 
@@ -30,15 +30,15 @@ func SpawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh <-ch
 
 	logPrefix := s.state.LogPrefix()
 	startKey = dbutils.HeaderHashKey(blockNum)
-	if err = TxLookupTransform(logPrefix, db, startKey, dbutils.HeaderHashKey(syncHeadNumber), quitCh, dataDir); err != nil {
+	if err = TxLookupTransform(logPrefix, db, startKey, dbutils.HeaderHashKey(syncHeadNumber), quitCh, tmpdir); err != nil {
 		return err
 	}
 
 	return s.DoneAndUpdate(db, syncHeadNumber)
 }
 
-func TxLookupTransform(logPrefix string, db ethdb.Database, startKey, endKey []byte, quitCh <-chan struct{}, datadir string) error {
-	return etl.Transform(logPrefix, db, dbutils.HeaderPrefix, dbutils.TxLookupPrefix, datadir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+func TxLookupTransform(logPrefix string, db ethdb.Database, startKey, endKey []byte, quitCh <-chan struct{}, tmpdir string) error {
+	return etl.Transform(logPrefix, db, dbutils.HeaderPrefix, dbutils.TxLookupPrefix, tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		if !dbutils.CheckCanonicalKey(k) {
 			return nil
 		}
@@ -66,8 +66,8 @@ func TxLookupTransform(logPrefix string, db ethdb.Database, startKey, endKey []b
 	})
 }
 
-func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quitCh <-chan struct{}) error {
-	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
+	collector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	logPrefix := s.state.LogPrefix()
 	// Remove lookup entries for blocks between unwindPoint+1 and stage.BlockNumber

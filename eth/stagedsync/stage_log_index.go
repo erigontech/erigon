@@ -28,7 +28,7 @@ const (
 	logIndicesCheckSizeEvery = 30 * time.Second
 )
 
-func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -58,7 +58,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 		start++
 	}
 
-	if err := promoteLogIndex(logPrefix, tx, start, datadir, quit); err != nil {
+	if err := promoteLogIndex(logPrefix, tx, start, tmpdir, quit); err != nil {
 		return err
 	}
 
@@ -74,7 +74,7 @@ func SpawnLogIndex(s *StageState, db ethdb.Database, datadir string, quit <-chan
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, datadir string, quit <-chan struct{}) error {
+func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, tmpdir string, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -86,8 +86,8 @@ func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, datadir 
 	checkFlushEvery := time.NewTicker(logIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
 
-	collectorTopics := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	collectorAddrs := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorTopics := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorAddrs := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	for k, v, err := receipts.Seek(dbutils.EncodeBlockNumber(start)); k != nil; k, v, err = receipts.Next() {
 		if err != nil {

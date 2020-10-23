@@ -27,7 +27,7 @@ type StageParameters struct {
 	pid         string
 	batchSize   int // Batch size for the execution stage
 	storageMode ethdb.StorageMode
-	datadir     string
+	tmpdir      string
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
 	// the stage can take significant time and gracefully shutdown at Ctrl+C.
 	QuitCh             <-chan struct{}
@@ -108,7 +108,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.db, world.datadir, world.QuitCh)
+						return SpawnBlockHashStage(s, world.db, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return u.Done(world.db)
@@ -150,7 +150,7 @@ func DefaultStages() StageBuilders {
 							ReadChLen:       4,
 							Now:             time.Now(),
 						}
-						return SpawnRecoverSendersStage(cfg, s, world.TX, world.chainConfig, 0, world.datadir, world.QuitCh)
+						return SpawnRecoverSendersStage(cfg, s, world.TX, world.chainConfig, 0, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindSendersStage(u, s, world.TX)
@@ -189,10 +189,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnHashStateStage(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, world.datadir, world.QuitCh)
+						return UnwindHashStateStage(u, s, world.TX, world.tmpdir, world.QuitCh)
 					},
 				}
 			},
@@ -204,10 +204,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnIntermediateHashesStage(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnIntermediateHashesStage(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, world.datadir, world.QuitCh)
+						return UnwindIntermediateHashesStage(u, s, world.TX, world.tmpdir, world.QuitCh)
 					},
 				}
 			},
@@ -221,7 +221,7 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnAccountHistoryIndex(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnAccountHistoryIndex(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindAccountHistoryIndex(u, s, world.TX, world.QuitCh)
@@ -238,7 +238,7 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnStorageHistoryIndex(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnStorageHistoryIndex(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindStorageHistoryIndex(u, s, world.TX, world.QuitCh)
@@ -255,7 +255,7 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.Receipts,
 					DisabledDescription: "Enable by adding `r` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnLogIndex(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnLogIndex(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindLogIndex(u, s, world.TX, world.QuitCh)
@@ -272,7 +272,7 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.datadir, world.QuitCh)
+						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh)
@@ -289,10 +289,10 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.TxIndex,
 					DisabledDescription: "Enable by adding `t` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnTxLookup(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnTxLookup(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxLookup(u, s, world.TX, world.datadir, world.QuitCh)
+						return UnwindTxLookup(u, s, world.TX, world.tmpdir, world.QuitCh)
 					},
 				}
 			},
