@@ -256,6 +256,10 @@ func fToMdbx(ctx context.Context, to string) error {
 	commitEvery := time.NewTicker(5 * time.Minute)
 	defer commitEvery.Stop()
 
+	//r := csv.NewReader(bufio.NewReaderSize(file, 1024*1024))
+	//r.Read()
+	_ = dstTx.(ethdb.BucketMigrator).ClearBucket(dbutils.CurrentStateBucket3)
+
 	fileScanner := bufio.NewScanner(file)
 	c := dstTx.CursorDupSort(dbutils.CurrentStateBucket3)
 	i := 0
@@ -272,7 +276,7 @@ func fToMdbx(ctx context.Context, to string) error {
 			return ctx.Err()
 		}
 
-		if k[0] < uint8(151) {
+		if k[0] < uint8(100) {
 			continue
 		}
 		if err = c.AppendDup(k, v); err != nil {
