@@ -27,6 +27,6 @@ func NewMemDatabase() *ObjectDatabase {
 	case "mdbx": //nolint:goconst
 		return NewObjectDatabase(NewMDBX().InMem().MustOpen())
 	default:
-		return NewObjectDatabase(NewMDBX().InMem().MustOpen())
+		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	}
 }
