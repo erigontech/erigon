@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
 // Coinbase implements eth_coinbase. Returns the current client coinbase address.

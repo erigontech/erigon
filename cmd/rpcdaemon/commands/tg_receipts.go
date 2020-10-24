@@ -58,4 +58,3 @@ func (api *TgImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*ty
 // 	}
 // 	return logs, nil
 // }
-
