@@ -565,7 +565,7 @@ func (c *MdbxCursor) Prefetch(v uint) Cursor {
 	return c
 }
 
-func (tx *mdbxTx) Get(bucket string, key []byte) ([]byte, error) {
+func (tx *mdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
@@ -597,7 +597,7 @@ func (tx *mdbxTx) Get(bucket string, key []byte) ([]byte, error) {
 	return val, nil
 }
 
-func (tx *mdbxTx) Has(bucket string, key []byte) (bool, error) {
+func (tx *mdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
