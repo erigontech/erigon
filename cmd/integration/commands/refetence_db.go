@@ -264,19 +264,19 @@ func fToMdbx(ctx context.Context, to string) error {
 		kv := strings.Split(fileScanner.Text(), ",")
 		k, _ := hex.DecodeString(kv[0])
 		v, _ := hex.DecodeString(kv[1])
-		if k[0] < uint8(151) {
-			continue
-		}
-		if err = c.AppendDup(k, v); err != nil {
-			return err
-		}
-
 		select {
 		default:
 		case <-logEvery.C:
 			log.Info("Progress", "key", fmt.Sprintf("%x", k))
 		case <-ctx.Done():
 			return ctx.Err()
+		}
+
+		if k[0] < uint8(151) {
+			continue
+		}
+		if err = c.AppendDup(k, v); err != nil {
+			return err
 		}
 	}
 
