@@ -61,7 +61,6 @@ var (
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
 	CurrentStateBucket     = "CST2"
-	CurrentStateBucket3    = "CST3"
 	CurrentStateBucketOld1 = "CST"
 
 	//key - address hash
@@ -202,7 +201,6 @@ var (
 // BucketsConfigs - can be used to find index in sorted version of Buckets list by name
 var Buckets = []string{
 	CurrentStateBucket,
-	CurrentStateBucket3,
 	AccountsHistoryBucket,
 	StorageHistoryBucket,
 	CodeBucket,
@@ -317,9 +315,6 @@ type BucketConfigItem struct {
 }
 
 var BucketsConfigs = BucketsCfg{
-	CurrentStateBucket3: {
-		Flags: DupSort,
-	},
 	CurrentStateBucket: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
