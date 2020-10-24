@@ -82,6 +82,20 @@ var cmdToMdbx = &cobra.Command{
 	},
 }
 
+var cmdFToMdbx = &cobra.Command{
+	Use:   "f_to_mdbx",
+	Short: "copy data from '--chaindata' to '--reference_chaindata'",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		err := fToMdbx(ctx, toChaindata)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(cmdCompareBucket)
 	withReferenceChaindata(cmdCompareBucket)
@@ -215,7 +229,7 @@ func compareBuckets(ctx context.Context, tx ethdb.Tx, b string, refTx ethdb.Tx, 
 }
 
 func fToMdbx(ctx context.Context, to string) error {
-	file, err := os.Open("/media/alex/evo/alex.log")
+	file, err := os.Open("/media/alex/evo/alex_full.log")
 	if err != nil {
 		fmt.Printf("Failed to open file: %s", err)
 		os.Exit(1)
