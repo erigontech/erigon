@@ -69,7 +69,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 
 // AccountRange enumerates all accounts in the given block and start point in paging request
 func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -107,7 +107,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		maxResults = eth.AccountRangeMaxResults
 	}
 
-	dumper := state.NewDumper(tx, blockNumber)
+	dumper := state.NewDumper(tx.(ethdb.HasTx).Tx(), blockNumber)
 	res, err := dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
@@ -131,7 +131,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 // startNum - first block from which to include results
 // endNum - if present, last block from which to include results (inclusive). If not present, startNum.
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -163,14 +163,14 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
-	return ethdb.GetModifiedAccounts(tx, startNum, endNum)
+	return ethdb.GetModifiedAccounts(tx.(ethdb.HasTx).Tx(), startNum, endNum)
 }
 
 // GetModifiedAccountsByHash returns a list of accounts found in the change sets
 // startHash - first block to include in results
 // endHash - if present, last block to include in results (inclusive)
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -201,5 +201,5 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
-	return ethdb.GetModifiedAccounts(tx, startNum, endNum)
+	return ethdb.GetModifiedAccounts(tx.(ethdb.HasTx).Tx(), startNum, endNum)
 }

@@ -24,17 +24,15 @@ import (
 	"math/big"
 
 	"github.com/VictoriaMetrics/fastcache"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-
 	"github.com/holiman/uint256"
-	"github.com/petar/GoLLRB/llrb"
-
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/petar/GoLLRB/llrb"
 )
 
 type storageItem struct {
@@ -217,7 +215,7 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 	}
 	//restore codehash
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		codeHash, err := dbs.tx.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation))
+		codeHash, err := dbs.tx.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation))
 		if err != nil {
 			return nil, err
 		}

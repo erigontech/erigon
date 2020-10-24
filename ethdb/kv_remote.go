@@ -281,13 +281,13 @@ func (tx *remoteTx) BucketSize(name string) (uint64, error) {
 	return sizeReply.Size, nil
 }
 
-func (tx *remoteTx) Get(bucket string, key []byte) (val []byte, err error) {
+func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {
 	c := tx.Cursor(bucket)
 	defer c.Close()
 	return c.SeekExact(key)
 }
 
-func (tx *remoteTx) Has(bucket string, key []byte) (bool, error) {
+func (tx *remoteTx) HasOne(bucket string, key []byte) (bool, error) {
 	c := tx.Cursor(bucket)
 	defer c.Close()
 	k, _, err := c.Seek(key)

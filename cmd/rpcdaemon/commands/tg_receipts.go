@@ -11,7 +11,7 @@ import (
 
 // GetLogsByHash returns all logs in a block
 func (api *TgImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return nil, err
 	}

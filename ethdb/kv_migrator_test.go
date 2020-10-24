@@ -54,7 +54,7 @@ func TestBucketCRUD(t *testing.T) {
 
 	err = tx.Cursor(deprecatedBucket).Put([]byte{1}, []byte{1})
 	require.NoError(err)
-	v, err := tx.Get(deprecatedBucket, []byte{1})
+	v, err := tx.GetOne(deprecatedBucket, []byte{1})
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
