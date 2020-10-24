@@ -101,7 +101,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 	defer bc.Stop()
 	cc.SetDB(tx)
 
-	tx, err = tx.Begin(context.Background())
+	tx, err = tx.Begin(context.Background(), true)
 	if err != nil {
 		return err
 	}

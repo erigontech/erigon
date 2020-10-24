@@ -19,6 +19,7 @@ import (
 // Walk and MultiWalk methods - work outside of Tx object yet, will implement it later
 type TxDb struct {
 	db       Database
+	writable bool
 	tx       Tx
 	ParentTx Tx
 	cursors  map[string]Cursor
@@ -36,13 +37,13 @@ func NewTxDbWithoutTransaction(db Database) *TxDb {
 	return &TxDb{db: db}
 }
 
-func (m *TxDb) Begin(ctx context.Context) (DbWithPendingMutations, error) {
+func (m *TxDb) Begin(ctx context.Context, writable bool) (DbWithPendingMutations, error) {
 	batch := m
 	if m.tx != nil {
 		batch = &TxDb{db: m.db}
 	}
 
-	if err := batch.begin(ctx, m.tx); err != nil {
+	if err := batch.begin(ctx, m.tx, writable); err != nil {
 		return nil, err
 	}
 	return batch, nil
@@ -85,8 +86,8 @@ func (m *TxDb) NewBatch() DbWithPendingMutations {
 	}
 }
 
-func (m *TxDb) begin(ctx context.Context, parent Tx) error {
-	tx, err := m.db.(HasKV).KV().Begin(ctx, parent, true)
+func (m *TxDb) begin(ctx context.Context, parent Tx, writable bool) error {
+	tx, err := m.db.(HasKV).KV().Begin(ctx, parent, writable)
 	if err != nil {
 		return err
 	}
@@ -334,12 +335,12 @@ func (m *TxDb) CommitAndBegin(ctx context.Context) error {
 		return err
 	}
 
-	return m.begin(ctx, m.ParentTx)
+	return m.begin(ctx, m.ParentTx, m.writable)
 }
 
 func (m *TxDb) RollbackAndBegin(ctx context.Context) error {
 	m.Rollback()
-	return m.begin(ctx, m.ParentTx)
+	return m.begin(ctx, m.ParentTx, m.writable)
 }
 
 func (m *TxDb) Commit() (uint64, error) {

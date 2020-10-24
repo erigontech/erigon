@@ -16,7 +16,7 @@ import (
 // GetUncleByBlockNumberAndIndex returns the uncle block for the given block hash and index. When fullTx is true
 // all transactions in the block are returned in full detail, otherwise only the transaction hash is returned.
 func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 // GetUncleByBlockHashAndIndex returns the uncle block for the given block hash and index. When fullTx is true
 // all transactions in the block are returned in full detail, otherwise only the transaction hash is returned.
 func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.BlockNumber) (*hexutil.Uint, error) {
 	n := hexutil.Uint(0)
 
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return &n, err
 	}
@@ -94,7 +94,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 // GetUncleCountByBlockHash returns number of uncles in the block for the given block hash
 func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error) {
 	n := hexutil.Uint(0)
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return &n, err
 	}
