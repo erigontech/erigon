@@ -18,31 +18,31 @@ type CallParam struct {
 // CallParams array of callMany structs
 type CallParams []CallParam
 
-// Call Implements trace_call
+// Call implements trace_call.
 func (api *TraceAPIImpl) Call(ctx context.Context, call CallParam, blockNr rpc.BlockNumber) ([]interface{}, error) {
 	var stub []interface{}
 	return stub, fmt.Errorf(NotImplemented, "trace_call")
 }
 
-// CallMany Implements trace_call
+// CallMany implements trace_callMany.
 func (api *TraceAPIImpl) CallMany(ctx context.Context, calls CallParams) ([]interface{}, error) {
 	var stub []interface{}
 	return stub, fmt.Errorf(NotImplemented, "trace_callMany")
 }
 
-// RawTransaction Implements trace_rawtransaction
+// RawTransaction implements trace_rawTransaction.
 func (api *TraceAPIImpl) RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error) {
 	var stub []interface{}
 	return stub, fmt.Errorf(NotImplemented, "trace_rawTransaction")
 }
 
-// ReplayBlockTransactions Implements trace_replayBlockTransactions
+// ReplayBlockTransactions implements trace_replayBlockTransactions.
 func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNr rpc.BlockNumber, traceTypes []string) ([]interface{}, error) {
 	var stub []interface{}
 	return stub, fmt.Errorf(NotImplemented, "trace_replayBlockTransactions")
 }
 
-// ReplayTransaction Implements trace_replaytransactions
+// ReplayTransaction implements trace_replayTransaction.
 func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error) {
 	var stub []interface{}
 	return stub, fmt.Errorf(NotImplemented, "trace_replayTransaction")

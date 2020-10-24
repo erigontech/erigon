@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-// Transaction Implements trace_transaction
+// Transaction implements trace_transaction
 // TODO(tjayrush): I think this should return an []interface{}, so we can return both Parity and Geth traces
 func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error) {
 	tx, err := api.dbReader.Begin(ctx, false)
@@ -36,7 +36,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	return traces, err
 }
 
-// Get Implements trace_get
+// Get implements trace_get
 // TODO(tjayrush): This command should take an rpc.BlockNumber .This would allow blockNumbers and 'latest',
 // TODO(tjayrush): 'pending', etc. Parity only accepts block hash.
 // TODO(tjayrush): Also, for some reason, Parity definesthe second parameter as an array of indexes, but
@@ -69,7 +69,7 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 	return nil, err
 }
 
-// Block Implements trace_block
+// Block implements trace_block
 func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error) {
 	blockNum, err := getBlockNumber(blockNr, api.dbReader)
 	if err != nil {
@@ -91,7 +91,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	return traces, err
 }
 
-// Filter Implements trace_filter
+// Filter implements trace_filter
 // TODO(tjayrush): Eventually, we will need to protect ourselves from 'large' queries. Parity crashes when a range query of a very large size
 // is sent. We need to protect ourselves with maxTraces. It may already be done
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error) {

@@ -35,7 +35,7 @@ type EthAPI interface {
 	// Uncle related (see ./eth_uncles.go)
 	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error)
-	GetUncleCountByBlockNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
+	GetUncleCountByBlockNumber(ctx context.Context, number rpc.BlockNumber) (*hexutil.Uint, error)
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
 
 	// Filter related (see ./eth_filters.go)
@@ -46,17 +46,17 @@ type EthAPI interface {
 	// getFilterChanges(ctx context.Context) (string, error)
 
 	// Account related (see ./eth_accounts.go)
-	Accounts(_ context.Context) (string, error) /* deprecated */
+	Accounts(ctx context.Context) ([]common.Address, error)
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
 	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 
 	// System related (see ./eth_system.go)
-	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
-	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	Syncing(ctx context.Context) (interface{}, error)
+	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
+	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.Big, error)
 
 	// Sending related (see ./eth_call.go)
@@ -64,7 +64,7 @@ type EthAPI interface {
 	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	// SendTransaction(ctx context.Context) (string, error)
-	Sign(_ context.Context, _ string, _ string) (string, error) /* deprecated */
+	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 
 	// Mining related (see ./eth_mining.go)
 	Coinbase(_ context.Context) (common.Address, error)
@@ -75,10 +75,10 @@ type EthAPI interface {
 	SubmitHashrate(_ context.Context, hashRate common.Hash, id string) (bool, error)
 
 	// Deprecated commands in eth_ (proposed file: ./eth_deprecated.go)
-	GetCompilers(_ context.Context) (string, error)                /* deprecated */
-	CompileLLL(_ context.Context, _ string) (string, error)        /* deprecated */
-	CompileSolidity(ctx context.Context, _ string) (string, error) /* deprecated */
-	CompileSerpent(ctx context.Context, _ string) (string, error)  /* deprecated */
+	GetCompilers(_ context.Context) ([]string, error)
+	CompileLLL(_ context.Context, _ string) (hexutil.Bytes, error)
+	CompileSolidity(ctx context.Context, _ string) (hexutil.Bytes, error)
+	CompileSerpent(ctx context.Context, _ string) (hexutil.Bytes, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access

@@ -29,13 +29,13 @@ func NewNetAPIImpl(eth ethdb.Backend) *NetAPIImpl {
 	}
 }
 
-// Listening implements RPC call for net_listening
-// TODO(tjayrush) remove hard coded value
+// Listening implements net_listening. Returns true if client is actively listening for network connections.
+// TODO: Remove hard coded value
 func (api *NetAPIImpl) Listening(_ context.Context) (bool, error) {
 	return true, nil
 }
 
-// Version implements RPC call for net_version
+// Version implements net_version. Returns the current network id.
 func (api *NetAPIImpl) Version(_ context.Context) (string, error) {
 	if api.ethBackend == nil {
 		// We're running in --chaindata mode or otherwise cannot get the backend
@@ -50,8 +50,8 @@ func (api *NetAPIImpl) Version(_ context.Context) (string, error) {
 	return strconv.FormatUint(res, 10), nil
 }
 
-// PeerCount implements RPC call for net_peerCount
-// TODO(tjayrush) remove hard coded value
+// PeerCount implements net_peerCount. Returns number of peers currently connected to the client.
+// TODO: This routine currently returns a hard coded value of '25'
 func (api *NetAPIImpl) PeerCount(_ context.Context) (hexutil.Uint, error) {
 	return hexutil.Uint(25), nil
 }
