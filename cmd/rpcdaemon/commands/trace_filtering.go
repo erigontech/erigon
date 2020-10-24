@@ -23,7 +23,7 @@ import (
 // Transaction Implements trace_transaction
 // TODO(tjayrush): I think this should return an []interface{}, so we can return both Parity and Geth traces
 func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 // TODO(tjayrush): only accepts a single one
 // TODO(tjayrush): I think this should return an interface{}, so we can return both Parity and Geth traces
 func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64) (*ParityTrace, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +376,7 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 // -- For convienience, we return both Parity and Geth traces for now. In the future we will either separate
 //    these functions or eliminate Geth traces
 // -- The function convertToParityTraces takes a hierarchical Geth trace and returns a flattened Parity trace
-func (api *TraceAPIImpl) getTransactionTraces(dbtx ethdb.Tx, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
+func (api *TraceAPIImpl) getTransactionTraces(dbtx rawdb.DatabaseReader, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
 	getter := adapter.NewBlockGetter(dbtx)
 	chainContext := adapter.NewChainContext(dbtx)
 	genesis, err := rawdb.ReadBlockByNumber(dbtx, 0)
@@ -391,7 +391,7 @@ func (api *TraceAPIImpl) getTransactionTraces(dbtx ethdb.Tx, ctx context.Context
 	traceType := "callTracer" // nolint: goconst
 
 	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(dbtx, txHash)
-	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, dbtx, blockHash, txIndex)
+	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, dbtx.(ethdb.HasTx).Tx(), blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

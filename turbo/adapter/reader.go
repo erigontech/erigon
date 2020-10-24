@@ -98,7 +98,7 @@ func (r *StateReader) ReadAccountCode(address common.Address, codeHash common.Ha
 		return nil, nil
 	}
 	var val []byte
-	v, err := r.tx.Get(dbutils.CodeBucket, codeHash[:])
+	v, err := r.tx.GetOne(dbutils.CodeBucket, codeHash[:])
 	if err != nil {
 		return nil, err
 	}

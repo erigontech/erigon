@@ -112,7 +112,7 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
 	var has bool
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(bucket, key)
+		v, err := tx.GetOne(bucket, key)
 		if err != nil {
 			return err
 		}
@@ -134,7 +134,7 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
 	var dat []byte
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(bucket, key)
+		v, err := tx.GetOne(bucket, key)
 		if err != nil {
 			return err
 		}
@@ -504,7 +504,7 @@ func (t MultiPutTuples) Swap(i, j int) {
 func Get(tx Tx, bucket string, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
-	v, err := tx.Get(bucket, key)
+	v, err := tx.GetOne(bucket, key)
 	if err != nil {
 		return nil, err
 	}

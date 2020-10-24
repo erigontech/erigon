@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-func getReceipts(ctx context.Context, tx ethdb.Tx, number uint64, hash common.Hash) (types.Receipts, error) {
+func getReceipts(ctx context.Context, tx rawdb.DatabaseReader, number uint64, hash common.Hash) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, hash, number); cached != nil {
 		return cached, nil
 	}
@@ -33,7 +33,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, number uint64, hash common.Ha
 	if err != nil {
 		return nil, err
 	}
-	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx, hash, 0)
+	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), hash, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, number uint64, hash common.Ha
 // GetLogsByHash non-standard RPC that returns all logs in a block
 // TODO(tjayrush): Since this is non-standard we could rename it to GetLogsByBlockHash to be more consistent and avoid confusion
 func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	var begin, end uint64
 	var logs []*types.Log //nolint:prealloc
 
-	tx, beginErr := api.db.Begin(ctx, nil, false)
+	tx, beginErr := api.dbReader.Begin(ctx, false)
 	if beginErr != nil {
 		return returnLogs(logs), beginErr
 	}
@@ -117,7 +117,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	blockNumbers := roaring.New()
 	blockNumbers.AddRange(begin, end+1) // [min,max)
 
-	topicsBitmap, err := getTopicsBitmap(tx.Cursor(dbutils.LogTopicIndex), crit.Topics, uint32(begin), uint32(end))
+	topicsBitmap, err := getTopicsBitmap(tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex), crit.Topics, uint32(begin), uint32(end))
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 	}
 
-	logAddrIndex := tx.Cursor(dbutils.LogAddressIndex)
+	logAddrIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
 	var addrBitmap *roaring.Bitmap
 	for _, addr := range crit.Addresses {
 		m, err := bitmapdb.Get(logAddrIndex, addr[:], uint32(begin), uint32(end))
@@ -218,7 +218,7 @@ func getTopicsBitmap(c ethdb.Cursor, topics [][]common.Hash, from, to uint32) (*
 
 // GetTransactionReceipt returns an array of receipts from the given transaction
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return nil, err
 	}

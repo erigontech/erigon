@@ -429,7 +429,7 @@ func TestReadAfterPut(t *testing.T) {
 					require.NoError(t, c3.Put([]byte{i}, []byte{i}))
 				}
 				for i := uint8(0); i < 10; i++ {
-					v, err := tx.Get(dbutils.Buckets[2], []byte{i})
+					v, err := tx.GetOne(dbutils.Buckets[2], []byte{i})
 					require.NoError(t, err)
 					require.Equal(t, []byte{i}, v)
 				}
@@ -443,7 +443,7 @@ func TestReadAfterPut(t *testing.T) {
 			if err := db.Update(ctx, func(tx ethdb.Tx) error {
 				c3 := tx.Cursor(dbutils.Buckets[2])
 				require.NoError(t, c3.Delete([]byte{5}))
-				v, err := tx.Get(dbutils.Buckets[2], []byte{5})
+				v, err := tx.GetOne(dbutils.Buckets[2], []byte{5})
 				require.NoError(t, err)
 				require.Nil(t, v)
 				return nil

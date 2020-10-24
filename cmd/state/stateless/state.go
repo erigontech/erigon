@@ -1205,7 +1205,7 @@ func storageUsage() {
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
-				vv, err := tx.Get(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
+				vv, err := tx.GetOne(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
 				if err != nil {
 					return err
 				}

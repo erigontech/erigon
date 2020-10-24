@@ -12,7 +12,7 @@ import (
 
 // GetHeaderByNumber returns a block's header by number
 func (api *TgImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockNumber) (*types.Header, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +28,7 @@ func (api *TgImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockN
 
 // GetHeaderByHash returns a block's header by hash
 func (api *TgImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return nil, err
 	}

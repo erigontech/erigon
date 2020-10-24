@@ -89,7 +89,7 @@ func TestSnapshotGet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	v, err := tx.Get(dbutils.HeaderPrefix, dbutils.HeaderKey(1, common.Hash{1}))
+	v, err := tx.GetOne(dbutils.HeaderPrefix, dbutils.HeaderKey(1, common.Hash{1}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestSnapshotGet(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	v, err = tx.Get(dbutils.HeaderPrefix, dbutils.HeaderKey(2, common.Hash{2}))
+	v, err = tx.GetOne(dbutils.HeaderPrefix, dbutils.HeaderKey(2, common.Hash{2}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestSnapshotGet(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	v, err = tx.Get(dbutils.HeaderPrefix, dbutils.HeaderKey(3, common.Hash{3}))
+	v, err = tx.GetOne(dbutils.HeaderPrefix, dbutils.HeaderKey(3, common.Hash{3}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestSnapshotGet(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	v, err = tx.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(1, common.Hash{1}))
+	v, err = tx.GetOne(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(1, common.Hash{1}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestSnapshotGet(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	v, err = tx.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(2, common.Hash{2}))
+	v, err = tx.GetOne(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(2, common.Hash{2}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestSnapshotGet(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	v, err = tx.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(3, common.Hash{3}))
+	v, err = tx.GetOne(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(3, common.Hash{3}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestSnapshotWritableTxAndGet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	v, err := tx.Get(dbutils.HeaderPrefix, dbutils.HeaderKey(1, common.Hash{1}))
+	v, err := tx.GetOne(dbutils.HeaderPrefix, dbutils.HeaderKey(1, common.Hash{1}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestSnapshotWritableTxAndGet(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	v, err = tx.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(1, common.Hash{1}))
+	v, err = tx.GetOne(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(1, common.Hash{1}))
 	if err != nil {
 		t.Fatal(err)
 	}
