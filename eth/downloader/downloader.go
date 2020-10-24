@@ -539,7 +539,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		// but call .Begin() after hearer/body download stages
 		var tx ethdb.DbWithPendingMutations
 		if canRunCycleInOneTransaction {
-			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB)
+			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB, true)
 			defer tx.Rollback()
 			writeDB = tx
 		} else {

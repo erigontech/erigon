@@ -33,8 +33,8 @@ func (m *TxDb) Close() {
 // NewTxDbWithoutTransaction creates TxDb object without opening transaction,
 // such TxDb not usable before .Begin() call on it
 // It allows inject TxDb object into class hierarchy, but open write transaction later
-func NewTxDbWithoutTransaction(db Database) *TxDb {
-	return &TxDb{db: db}
+func NewTxDbWithoutTransaction(db Database, writable bool) *TxDb {
+	return &TxDb{db: db, writable: writable}
 }
 
 func (m *TxDb) Begin(ctx context.Context, writable bool) (DbWithPendingMutations, error) {
