@@ -75,7 +75,7 @@ func TestManagedTx(t *testing.T) {
 		db := db
 		msg := fmt.Sprintf("%T", db)
 		switch db.(type) {
-		case *ethdb.Remote2KV:
+		case *ethdb.RemoteKV:
 		default:
 			continue
 		}
@@ -101,7 +101,7 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []e
 
 	conn := bufconn.Listen(1024 * 1024)
 
-	rdb, _ := ethdb.NewRemote2().InMem(conn).MustOpen()
+	rdb, _ := ethdb.NewRemote().InMem(conn).MustOpen()
 	readDBs = []ethdb.KV{
 		writeDBs[0],
 		writeDBs[1],
@@ -110,8 +110,7 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []e
 
 	grpcServer := grpc.NewServer()
 	go func() {
-		//remote.RegisterKVService(grpcServer, remote.NewKVService(remotedbserver.NewKvServer(writeDBs[1])))
-		remote.RegisterKV2Service(grpcServer, remote.NewKV2Service(remotedbserver.NewKv2Server(writeDBs[1])))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[1]))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}

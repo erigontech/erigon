@@ -24,77 +24,87 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-type remote2Opts struct {
+// generate the messages
+//go:generate protoc --go_out=. "./remote/kv.proto" -I=. -I=./../build/include/google
+//go:generate protoc --go_out=. "./remote/db.proto" -I=. -I=./../build/include/google
+//go:generate protoc --go_out=. "./remote/ethbackend.proto" -I=. -I=./../build/include/google
+
+// generate the services
+//go:generate protoc --go-grpc_out=. "./remote/kv.proto" -I=. -I=./../build/include/google
+//go:generate protoc --go-grpc_out=. "./remote/db.proto" -I=. -I=./../build/include/google
+//go:generate protoc --go-grpc_out=. "./remote/ethbackend.proto" -I=. -I=./../build/include/google
+
+type remoteOpts struct {
 	DialAddress string
 	inMemConn   *bufconn.Listener // for tests
 	bucketsCfg  BucketConfigsFunc
 }
 
-type Remote2KV struct {
-	opts     remote2Opts
-	remoteKV remote.KV2Client
+type RemoteKV struct {
+	opts     remoteOpts
+	remoteKV remote.KVClient
 	remoteDB remote.DBClient
 	conn     *grpc.ClientConn
 	log      log.Logger
 	buckets  dbutils.BucketsCfg
 }
 
-type remote2Tx struct {
+type remoteTx struct {
 	ctx                context.Context
-	db                 *Remote2KV
-	cursors            []*remote2Cursor
-	stream             remote.KV2_TxClient
+	db                 *RemoteKV
+	cursors            []*remoteCursor
+	stream             remote.KV_TxClient
 	streamCancelFn     context.CancelFunc
 	streamingRequested bool
 }
 
-type remote2Cursor struct {
+type remoteCursor struct {
 	initialized bool
 	id          uint32
 	prefetch    uint32
 	ctx         context.Context
 	prefix      []byte
-	stream      remote.KV2_TxClient
-	tx          *remote2Tx
+	stream      remote.KV_TxClient
+	tx          *remoteTx
 	bucketName  string
 	bucketCfg   dbutils.BucketConfigItem
 }
 
-type remote2CursorDupSort struct {
-	*remote2Cursor
+type remoteCursorDupSort struct {
+	*remoteCursor
 }
 
-type remote2CursorDupFixed struct {
-	*remote2CursorDupSort
+type remoteCursorDupFixed struct {
+	*remoteCursorDupSort
 }
 
-func (opts remote2Opts) ReadOnly() remote2Opts {
+func (opts remoteOpts) ReadOnly() remoteOpts {
 	return opts
 }
 
-func (opts remote2Opts) Path(path string) remote2Opts {
+func (opts remoteOpts) Path(path string) remoteOpts {
 	opts.DialAddress = path
 	return opts
 }
 
-func (opts remote2Opts) WithBucketsConfig(f BucketConfigsFunc) remote2Opts {
+func (opts remoteOpts) WithBucketsConfig(f BucketConfigsFunc) remoteOpts {
 	opts.bucketsCfg = f
 	return opts
 }
 
-func (opts remote2Opts) InMem(listener *bufconn.Listener) remote2Opts {
+func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	opts.inMemConn = listener
 	return opts
 }
 
-type Remote2Backend struct {
-	opts             remote2Opts
+type RemoteBackend struct {
+	opts             remoteOpts
 	remoteEthBackend remote.ETHBACKENDClient
 	conn             *grpc.ClientConn
 	log              log.Logger
 }
 
-func (opts remote2Opts) Open(certFile, keyFile, caCert string) (KV, Backend, error) {
+func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, error) {
 	var dialOpts []grpc.DialOption
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
@@ -154,10 +164,10 @@ func (opts remote2Opts) Open(certFile, keyFile, caCert string) (KV, Backend, err
 		return nil, nil, err
 	}
 
-	db := &Remote2KV{
+	db := &RemoteKV{
 		opts:     opts,
 		conn:     conn,
-		remoteKV: remote.NewKV2Client(conn),
+		remoteKV: remote.NewKVClient(conn),
 		remoteDB: remote.NewDBClient(conn),
 		log:      log.New("remote_db", opts.DialAddress),
 		buckets:  dbutils.BucketsCfg{},
@@ -167,7 +177,7 @@ func (opts remote2Opts) Open(certFile, keyFile, caCert string) (KV, Backend, err
 		db.buckets[name] = cfg
 	}
 
-	eth := &Remote2Backend{
+	eth := &RemoteBackend{
 		opts:             opts,
 		remoteEthBackend: remote.NewETHBACKENDClient(conn),
 		conn:             conn,
@@ -177,7 +187,7 @@ func (opts remote2Opts) Open(certFile, keyFile, caCert string) (KV, Backend, err
 	return db, eth, nil
 }
 
-func (opts remote2Opts) MustOpen() (KV, Backend) {
+func (opts remoteOpts) MustOpen() (KV, Backend) {
 	db, txPool, err := opts.Open("", "", "")
 	if err != nil {
 		panic(err)
@@ -185,17 +195,17 @@ func (opts remote2Opts) MustOpen() (KV, Backend) {
 	return db, txPool
 }
 
-func NewRemote2() remote2Opts {
-	return remote2Opts{bucketsCfg: DefaultBucketConfigs}
+func NewRemote() remoteOpts {
+	return remoteOpts{bucketsCfg: DefaultBucketConfigs}
 }
 
-func (db *Remote2KV) AllBuckets() dbutils.BucketsCfg {
+func (db *RemoteKV) AllBuckets() dbutils.BucketsCfg {
 	return db.buckets
 }
 
 // Close
 // All transactions must be closed before closing the database.
-func (db *Remote2KV) Close() {
+func (db *RemoteKV) Close() {
 	if db.conn != nil {
 		if err := db.conn.Close(); err != nil {
 			db.log.Warn("failed to close remote DB", "err", err)
@@ -206,7 +216,7 @@ func (db *Remote2KV) Close() {
 	}
 }
 
-func (db *Remote2KV) DiskSize(ctx context.Context) (uint64, error) {
+func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
 	sizeReply, err := db.remoteDB.Size(ctx, &remote.SizeRequest{})
 	if err != nil {
 		return 0, err
@@ -214,17 +224,17 @@ func (db *Remote2KV) DiskSize(ctx context.Context) (uint64, error) {
 	return sizeReply.Size, nil
 }
 
-func (db *Remote2KV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
+func (db *RemoteKV) Begin(ctx context.Context, parent Tx, writable bool) (Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
 		streamCancelFn()
 		return nil, err
 	}
-	return &remote2Tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn}, nil
+	return &remoteTx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn}, nil
 }
 
-func (db *Remote2KV) View(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	tx, err := db.Begin(ctx, nil, false)
 	if err != nil {
 		return err
@@ -234,36 +244,36 @@ func (db *Remote2KV) View(ctx context.Context, f func(tx Tx) error) (err error) 
 	return f(tx)
 }
 
-func (db *Remote2KV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *RemoteKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
-func (tx *remote2Tx) Comparator(bucket string) dbutils.CmpFunc { panic("not implemented yet") }
-func (tx *remote2Tx) Cmp(bucket string, a, b []byte) int       { panic("not implemented yet") }
-func (tx *remote2Tx) DCmp(bucket string, a, b []byte) int      { panic("not implemented yet") }
+func (tx *remoteTx) Comparator(bucket string) dbutils.CmpFunc { panic("not implemented yet") }
+func (tx *remoteTx) Cmp(bucket string, a, b []byte) int       { panic("not implemented yet") }
+func (tx *remoteTx) DCmp(bucket string, a, b []byte) int      { panic("not implemented yet") }
 
-func (tx *remote2Tx) Commit(ctx context.Context) error {
+func (tx *remoteTx) Commit(ctx context.Context) error {
 	panic("remote db is read-only")
 }
 
-func (tx *remote2Tx) Rollback() {
+func (tx *remoteTx) Rollback() {
 	for _, c := range tx.cursors {
 		c.Close()
 	}
 	tx.closeGrpcStream()
 }
 
-func (c *remote2Cursor) Prefix(v []byte) Cursor {
+func (c *remoteCursor) Prefix(v []byte) Cursor {
 	c.prefix = v
 	return c
 }
 
-func (c *remote2Cursor) Prefetch(v uint) Cursor {
+func (c *remoteCursor) Prefetch(v uint) Cursor {
 	c.prefetch = uint32(v)
 	return c
 }
 
-func (tx *remote2Tx) BucketSize(name string) (uint64, error) {
+func (tx *remoteTx) BucketSize(name string) (uint64, error) {
 	sizeReply, err := tx.db.remoteDB.BucketSize(tx.ctx, &remote.BucketSizeRequest{BucketName: name})
 	if err != nil {
 		return 0, err
@@ -271,13 +281,13 @@ func (tx *remote2Tx) BucketSize(name string) (uint64, error) {
 	return sizeReply.Size, nil
 }
 
-func (tx *remote2Tx) Get(bucket string, key []byte) (val []byte, err error) {
+func (tx *remoteTx) Get(bucket string, key []byte) (val []byte, err error) {
 	c := tx.Cursor(bucket)
 	defer c.Close()
 	return c.SeekExact(key)
 }
 
-func (tx *remote2Tx) Has(bucket string, key []byte) (bool, error) {
+func (tx *remoteTx) Has(bucket string, key []byte) (bool, error) {
 	c := tx.Cursor(bucket)
 	defer c.Close()
 	k, _, err := c.Seek(key)
@@ -287,28 +297,28 @@ func (tx *remote2Tx) Has(bucket string, key []byte) (bool, error) {
 	return bytes.Equal(key, k), nil
 }
 
-func (c *remote2Cursor) SeekExact(key []byte) (val []byte, err error) {
+func (c *remoteCursor) SeekExact(key []byte) (val []byte, err error) {
 	if err := c.initCursor(); err != nil {
 		return nil, err
 	}
 	return c.seekExact(key)
 }
 
-func (c *remote2Cursor) Prev() ([]byte, []byte, error) {
+func (c *remoteCursor) Prev() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
 	return c.prev()
 }
 
-func (tx *remote2Tx) Cursor(bucket string) Cursor {
+func (tx *remoteTx) Cursor(bucket string) Cursor {
 	b := tx.db.buckets[bucket]
-	c := &remote2Cursor{tx: tx, ctx: tx.ctx, bucketName: bucket, bucketCfg: b, stream: tx.stream}
+	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket, bucketCfg: b, stream: tx.stream}
 	tx.cursors = append(tx.cursors, c)
 	return c
 }
 
-func (c *remote2Cursor) initCursor() error {
+func (c *remoteCursor) initCursor() error {
 	if c.initialized {
 		return nil
 	}
@@ -324,16 +334,16 @@ func (c *remote2Cursor) initCursor() error {
 	return nil
 }
 
-func (c *remote2Cursor) Put(key []byte, value []byte) error            { panic("not supported") }
-func (c *remote2Cursor) PutNoOverwrite(key []byte, value []byte) error { panic("not supported") }
-func (c *remote2Cursor) PutCurrent(key, value []byte) error            { panic("not supported") }
-func (c *remote2Cursor) Append(key []byte, value []byte) error         { panic("not supported") }
-func (c *remote2Cursor) Delete(key []byte) error                       { panic("not supported") }
-func (c *remote2Cursor) DeleteCurrent() error                          { panic("not supported") }
-func (c *remote2Cursor) Count() (uint64, error)                        { panic("not supported") }
-func (c *remote2Cursor) Reserve(k []byte, n int) ([]byte, error)       { panic("not supported") }
+func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
+func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not supported") }
+func (c *remoteCursor) PutCurrent(key, value []byte) error            { panic("not supported") }
+func (c *remoteCursor) Append(key []byte, value []byte) error         { panic("not supported") }
+func (c *remoteCursor) Delete(key []byte) error                       { panic("not supported") }
+func (c *remoteCursor) DeleteCurrent() error                          { panic("not supported") }
+func (c *remoteCursor) Count() (uint64, error)                        { panic("not supported") }
+func (c *remoteCursor) Reserve(k []byte, n int) ([]byte, error)       { panic("not supported") }
 
-func (c *remote2Cursor) first() ([]byte, []byte, error) {
+func (c *remoteCursor) first() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_FIRST}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -344,7 +354,7 @@ func (c *remote2Cursor) first() ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 
-func (c *remote2Cursor) next() ([]byte, []byte, error) {
+func (c *remoteCursor) next() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_NEXT}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -354,7 +364,7 @@ func (c *remote2Cursor) next() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remote2Cursor) nextDup() ([]byte, []byte, error) {
+func (c *remoteCursor) nextDup() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_NEXT_DUP}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -364,7 +374,7 @@ func (c *remote2Cursor) nextDup() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remote2Cursor) nextNoDup() ([]byte, []byte, error) {
+func (c *remoteCursor) nextNoDup() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_NEXT_NO_DUP}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -374,7 +384,7 @@ func (c *remote2Cursor) nextNoDup() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remote2Cursor) prev() ([]byte, []byte, error) {
+func (c *remoteCursor) prev() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_PREV}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -384,7 +394,7 @@ func (c *remote2Cursor) prev() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remote2Cursor) prevDup() ([]byte, []byte, error) {
+func (c *remoteCursor) prevDup() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_PREV_DUP}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -394,7 +404,7 @@ func (c *remote2Cursor) prevDup() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remote2Cursor) prevNoDup() ([]byte, []byte, error) {
+func (c *remoteCursor) prevNoDup() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_PREV_NO_DUP}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -404,7 +414,7 @@ func (c *remote2Cursor) prevNoDup() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remote2Cursor) last() ([]byte, []byte, error) {
+func (c *remoteCursor) last() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_LAST}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -414,7 +424,7 @@ func (c *remote2Cursor) last() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remote2Cursor) setRange(k []byte) ([]byte, []byte, error) {
+func (c *remoteCursor) setRange(k []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK, K: k}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -424,7 +434,7 @@ func (c *remote2Cursor) setRange(k []byte) ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remote2Cursor) seekExact(k []byte) ([]byte, error) {
+func (c *remoteCursor) seekExact(k []byte) ([]byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_EXACT, K: k}); err != nil {
 		return nil, err
 	}
@@ -434,7 +444,7 @@ func (c *remote2Cursor) seekExact(k []byte) ([]byte, error) {
 	}
 	return pair.V, nil
 }
-func (c *remote2Cursor) getBothRange(k, v []byte) ([]byte, []byte, error) {
+func (c *remoteCursor) getBothRange(k, v []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH, K: k, V: v}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -444,7 +454,7 @@ func (c *remote2Cursor) getBothRange(k, v []byte) ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remote2Cursor) seekBothExact(k, v []byte) ([]byte, []byte, error) {
+func (c *remoteCursor) seekBothExact(k, v []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH_EXACT, K: k, V: v}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -454,7 +464,7 @@ func (c *remote2Cursor) seekBothExact(k, v []byte) ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remote2Cursor) firstDup() ([]byte, error) {
+func (c *remoteCursor) firstDup() ([]byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_FIRST_DUP}); err != nil {
 		return nil, err
 	}
@@ -464,7 +474,7 @@ func (c *remote2Cursor) firstDup() ([]byte, error) {
 	}
 	return pair.V, nil
 }
-func (c *remote2Cursor) lastDup(k []byte) ([]byte, error) {
+func (c *remoteCursor) lastDup(k []byte) ([]byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_LAST_DUP, K: k}); err != nil {
 		return nil, err
 	}
@@ -474,7 +484,7 @@ func (c *remote2Cursor) lastDup(k []byte) ([]byte, error) {
 	}
 	return pair.V, nil
 }
-func (c *remote2Cursor) getCurrent() ([]byte, []byte, error) {
+func (c *remoteCursor) getCurrent() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_CURRENT}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -484,7 +494,7 @@ func (c *remote2Cursor) getCurrent() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remote2Cursor) multiple() ([]byte, error) {
+func (c *remoteCursor) multiple() ([]byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_GET_MULTIPLE}); err != nil {
 		return nil, err
 	}
@@ -494,7 +504,7 @@ func (c *remote2Cursor) multiple() ([]byte, error) {
 	}
 	return pair.V, nil
 }
-func (c *remote2Cursor) nextMultiple() ([]byte, []byte, error) {
+func (c *remoteCursor) nextMultiple() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_NEXT_MULTIPLE}); err != nil {
 		return []byte{}, nil, err
 	}
@@ -505,7 +515,7 @@ func (c *remote2Cursor) nextMultiple() ([]byte, []byte, error) {
 	return pair.K, pair.V, nil
 }
 
-func (c *remote2Cursor) Current() ([]byte, []byte, error) {
+func (c *remoteCursor) Current() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
@@ -514,14 +524,14 @@ func (c *remote2Cursor) Current() ([]byte, []byte, error) {
 
 // Seek - doesn't start streaming (because much of code does only several .Seek calls without reading sequence of data)
 // .Next() - does request streaming (if configured by user)
-func (c *remote2Cursor) Seek(seek []byte) ([]byte, []byte, error) {
+func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
 	return c.setRange(seek)
 }
 
-func (c *remote2Cursor) First() ([]byte, []byte, error) {
+func (c *remoteCursor) First() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
@@ -529,21 +539,21 @@ func (c *remote2Cursor) First() ([]byte, []byte, error) {
 }
 
 // Next - returns next data element from server, request streaming (if configured by user)
-func (c *remote2Cursor) Next() ([]byte, []byte, error) {
+func (c *remoteCursor) Next() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
 	return c.next()
 }
 
-func (c *remote2Cursor) Last() ([]byte, []byte, error) {
+func (c *remoteCursor) Last() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
 	return c.last()
 }
 
-func (tx *remote2Tx) closeGrpcStream() {
+func (tx *remoteTx) closeGrpcStream() {
 	if tx.stream == nil {
 		return
 	}
@@ -572,7 +582,7 @@ func (tx *remote2Tx) closeGrpcStream() {
 	tx.streamingRequested = false
 }
 
-func (c *remote2Cursor) Close() {
+func (c *remoteCursor) Close() {
 	if c.initialized {
 		if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_CLOSE}); err == nil {
 			_, _ = c.stream.Recv()
@@ -581,11 +591,11 @@ func (c *remote2Cursor) Close() {
 	}
 }
 
-func (tx *remote2Tx) CursorDupSort(bucket string) CursorDupSort {
+func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
 	return &remoteCursorDupSort{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
 }
 
-func (c *remote2CursorDupSort) Prefetch(v uint) Cursor {
+func (c *remoteCursorDupSort) Prefetch(v uint) Cursor {
 	c.prefetch = uint32(v)
 	return c
 }
@@ -606,86 +616,86 @@ func (c *remote2CursorDupSort) Prefetch(v uint) Cursor {
 //	return c.remoteCursor.initCursor()
 //}
 
-func (c *remote2CursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
+func (c *remoteCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
 	return c.seekBothExact(key, value)
 }
 
-func (c *remote2CursorDupSort) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
+func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
 	return c.getBothRange(key, value)
 }
 
-func (c *remote2CursorDupSort) DeleteExact(k1, k2 []byte) error      { panic("not supported") }
-func (c *remote2CursorDupSort) AppendDup(k []byte, v []byte) error   { panic("not supported") }
-func (c *remote2CursorDupSort) PutNoDupData(key, value []byte) error { panic("not supported") }
-func (c *remote2CursorDupSort) DeleteCurrentDuplicates() error       { panic("not supported") }
-func (c *remote2CursorDupSort) CountDuplicates() (uint64, error)     { panic("not supported") }
+func (c *remoteCursorDupSort) DeleteExact(k1, k2 []byte) error      { panic("not supported") }
+func (c *remoteCursorDupSort) AppendDup(k []byte, v []byte) error   { panic("not supported") }
+func (c *remoteCursorDupSort) PutNoDupData(key, value []byte) error { panic("not supported") }
+func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error       { panic("not supported") }
+func (c *remoteCursorDupSort) CountDuplicates() (uint64, error)     { panic("not supported") }
 
-func (c *remote2CursorDupSort) FirstDup() ([]byte, error) {
+func (c *remoteCursorDupSort) FirstDup() ([]byte, error) {
 	if err := c.initCursor(); err != nil {
 		return nil, err
 	}
 	return c.firstDup()
 }
-func (c *remote2CursorDupSort) NextDup() ([]byte, []byte, error) {
+func (c *remoteCursorDupSort) NextDup() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
 	return c.nextDup()
 }
-func (c *remote2CursorDupSort) NextNoDup() ([]byte, []byte, error) {
+func (c *remoteCursorDupSort) NextNoDup() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
 	return c.nextNoDup()
 }
-func (c *remote2CursorDupSort) PrevDup() ([]byte, []byte, error) {
+func (c *remoteCursorDupSort) PrevDup() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
 	return c.prevDup()
 }
-func (c *remote2CursorDupSort) PrevNoDup() ([]byte, []byte, error) {
+func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
 	return c.prevNoDup()
 }
-func (c *remote2CursorDupSort) LastDup(k []byte) ([]byte, error) {
+func (c *remoteCursorDupSort) LastDup(k []byte) ([]byte, error) {
 	if err := c.initCursor(); err != nil {
 		return nil, err
 	}
 	return c.lastDup(k)
 }
 
-func (tx *remote2Tx) CursorDupFixed(bucket string) CursorDupFixed {
-	return &remote2CursorDupFixed{remote2CursorDupSort: tx.CursorDupSort(bucket).(*remote2CursorDupSort)}
+func (tx *remoteTx) CursorDupFixed(bucket string) CursorDupFixed {
+	return &remoteCursorDupFixed{remoteCursorDupSort: tx.CursorDupSort(bucket).(*remoteCursorDupSort)}
 }
 
-func (c *remote2CursorDupFixed) GetMulti() ([]byte, error) {
+func (c *remoteCursorDupFixed) GetMulti() ([]byte, error) {
 	if err := c.initCursor(); err != nil {
 		return nil, err
 	}
 	return c.multiple()
 }
 
-func (c *remote2CursorDupFixed) NextMulti() ([]byte, []byte, error) {
+func (c *remoteCursorDupFixed) NextMulti() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
 		return []byte{}, nil, err
 	}
 	return c.nextMultiple()
 }
 
-func (c *remote2CursorDupFixed) PutMulti(key []byte, page []byte, stride int) error {
+func (c *remoteCursorDupFixed) PutMulti(key []byte, page []byte, stride int) error {
 	panic("not supported")
 }
 
-func (back *Remote2Backend) AddLocal(signedTx []byte) ([]byte, error) {
+func (back *RemoteBackend) AddLocal(signedTx []byte) ([]byte, error) {
 	res, err := back.remoteEthBackend.Add(context.Background(), &remote.TxRequest{Signedtx: signedTx})
 	if err != nil {
 		return common.Hash{}.Bytes(), err
@@ -693,7 +703,7 @@ func (back *Remote2Backend) AddLocal(signedTx []byte) ([]byte, error) {
 	return res.Hash, nil
 }
 
-func (back *Remote2Backend) Etherbase() (common.Address, error) {
+func (back *RemoteBackend) Etherbase() (common.Address, error) {
 	res, err := back.remoteEthBackend.Etherbase(context.Background(), &remote.EtherbaseRequest{})
 	if err != nil {
 		return common.Address{}, err
@@ -702,7 +712,7 @@ func (back *Remote2Backend) Etherbase() (common.Address, error) {
 	return common.BytesToAddress(res.Hash), nil
 }
 
-func (back *Remote2Backend) NetVersion() (uint64, error) {
+func (back *RemoteBackend) NetVersion() (uint64, error) {
 	res, err := back.remoteEthBackend.NetVersion(context.Background(), &remote.NetVersionRequest{})
 	if err != nil {
 		return 0, err
