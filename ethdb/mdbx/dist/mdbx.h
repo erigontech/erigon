@@ -2456,9 +2456,11 @@ LIBMDBX_API int mdbx_env_get_fd(const MDBX_env *env, mdbx_filehandle_t *fd);
  *                          means "keep current or use default".
  *
  * \param [in] shrink_threshold  The shrink threshold in bytes, must be greater
- *                               than zero to allow the database to shrink.
+ *                               than zero to allow the database to shrink and
+ *                               greater than growth_step to avoid shrinking
+ *                               right after grow.
  *                               Negative value means "keep current
- *                               or use default".
+ *                               or use default". Default is 2*growth_step.
  *
  * \param [in] pagesize          The database page size for new database
  *                               creation or -1 otherwise. Must be power of 2
@@ -2831,9 +2833,9 @@ struct MDBX_txn_info {
   uint64_t txn_id;
 
   /** For READ-ONLY transaction: the lag from a recent MVCC-snapshot, i.e. the
-     number of committed transaction since read transaction started.
-     For WRITE transaction (provided if `scan_rlt=true`): the lag of the oldest
-     reader from current transaction (i.e. at least 1 if any reader running). */
+     number of committed transaction since read transaction started. For WRITE
+     transaction (provided if `scan_rlt=true`): the lag of the oldest reader
+     from current transaction (i.e. at least 1 if any reader running). */
   uint64_t txn_reader_lag;
 
   /** Used space by this transaction, i.e. corresponding to the last used
@@ -2857,8 +2859,7 @@ struct MDBX_txn_info {
 
   /** For READ-ONLY transaction: the space available for writer(s) and that
      must be exhausted for reason to call the Handle-Slow-Readers callback for
-     this read transaction.
-     For WRITE transaction: the space inside transaction
+     this read transaction. For WRITE transaction: the space inside transaction
      that left to `MDBX_TXN_FULL` error. */
   uint64_t txn_space_leftover;
 

@@ -27,8 +27,6 @@ Fixes:
  - Fixed copy&paste typos.
  - Fixed minor false-positive GCC warning.
  - Added workaround for broken `DEFINE_ENUM_FLAG_OPERATORS` from Windows SDK.
- - Fixed cursor state after multimap/dupsort repeated deletes (https://github.com/erthink/libmdbx/issues/121).
- - Added `SIGPIPE` suppression for internal thread during `mdbx_env_copy()`.
 
 ## v0.9.1 2020-09-30
 
