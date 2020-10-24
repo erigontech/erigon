@@ -3173,68 +3173,6 @@
           "name": "deep_tests",
           "item": [
             {
-              "name": "accountRange (previous crash)",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "id": "54adf1ec-e7b2-4f63-a062-edf3c24f1478",
-                    "exec": [
-                      "var allTests = false; //pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "",
-                      "var expected = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 1,",
-                      "  \"result\": {",
-                      "    \"root\": \"0x4943d941637411107494da9ec8bc04359d731bfd08b72b4d0edcbd4cd2ecb341\",",
-                      "    \"accounts\": {",
-                      "      \"0x0a0650861f785ed8e4bf1005c450bbd06eb48fb6\": {",
-                      "        \"balance\": \"3066860000000000000000\",",
-                      "        \"nonce\": 0,",
-                      "        \"root\": \"0000000000000000000000000000000000000000000000000000000000000000\",",
-                      "        \"codeHash\": \"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\"",
-                      "      }",
-                      "    },",
-                      "    \"next\": \"Cgb619zXpJLLwFPuq95pNLOdhjc=\"",
-                      "  }",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-                      "})",
-                      ""
-                    ],
-                    "type": "text/javascript"
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"debug_accountRange\",\n  \"params\": [\n    10000000,\n    \"\",\n    0,\n    false,\n    false,\n    false\n  ], \"id\":1}",
-                  "options": {
-                    "raw": {}
-                  }
-                },
-                "url": {
-                  "raw": "{{HOST}}",
-                  "host": ["{{HOST}}"]
-                },
-                "description": "Returns a range of accounts involved in the given block range\r\n\r\n**Parameters**\r\n\r\n`block: `QUANTITY|TAG` - Integer of a block number, or the string `\"earliest\"`, `\"latest\"` or `\"pending\"`, as in the default block parameter.\r\n\r\n`prefix`: DATA, N bytes, a prefix against which to match account addresses (report only on accounts addresses that begin with this prefix, default matches all accounts)\r\n\r\n`maxResult`: QUANTITY, 8 bytes, the maximum number of accounts to retreive\r\n\r\n`excludeCode`: `Boolean`, if `true`, do not return byte code from the address, if `false` return the byte code (if any)\r\n\r\n`excludeStorage`: `Boolean`, if `true`, do not return storage from the address, if `false` return storage (if any)\r\n\r\n`excludeMissingPreimages`: `Boolean`, if `true`, do not return missing preimages, if `false` do return them\r\n\r\n**Returns**\r\n\r\nReturns `IteratorDump` which is defined as:\r\n\r\n```\r\ntype IteratorDump struct {\r\n\troot     string\r\n\taccounts map[common.Address]DumpAccount\r\n\tnext     []byte // nil if no more accounts\r\n}\r\n```\r\n\r\n`DumpAccount` is a type defined as:\r\n\r\n```\r\ntype DumpAccount struct {\r\n\tbalance   string\r\n\tnonce     uint64\r\n\troot      string\r\n\tcodeHash  string\r\n\tcode      string\r\n\tstorage   map[string]string\r\n\taddress   *common.Address\r\n\tsecureKey hexutil.Bytes // If we don't have address, we can output the key\r\n}\r\n```"
-              },
-              "response": []
-            },
-            {
               "name": "getModifiedAccountsByNumber (no parameter)",
               "event": [
                 {
