@@ -118,7 +118,7 @@ type UnsafeSentryServer interface {
 	mustEmbedUnimplementedSentryServer()
 }
 
-func RegisterSentryServer(s *grpc.Server, srv SentryServer) {
+func RegisterSentryServer(s grpc.ServiceRegistrar, srv SentryServer) {
 	s.RegisterService(&_Sentry_serviceDesc, srv)
 }
 
