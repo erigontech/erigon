@@ -80,8 +80,14 @@ func TestHeadersGenerateIndex(t *testing.T) {
 		}
 		if td == nil {
 			t.Error(i, "empty td")
-		} else if td.Cmp(rawdb.ReadTd(snDB, header.Hash(), header.Number.Uint64())) != 0 {
-			t.Error(i, header.Hash(), header.Number.Uint64(), "td incorrect")
+		} else {
+			td, err := rawdb.ReadTd(snDB, header.Hash(), header.Number.Uint64())
+			if err != nil {
+				panic(err)
+			}
+			if td.Cmp(td) != 0 {
+				t.Error(i, header.Hash(), header.Number.Uint64(), "td incorrect")
+			}
 		}
 	}
 }

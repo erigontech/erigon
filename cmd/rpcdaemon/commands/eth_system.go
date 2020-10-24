@@ -49,7 +49,10 @@ func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
 	}
 	defer tx.Rollback()
 
-	chainConfig := getChainConfig(tx)
+	chainConfig, err := getChainConfig(tx)
+	if err != nil {
+		return 0, err
+	}
 	return hexutil.Uint64(chainConfig.ChainID.Uint64()), nil
 }
 

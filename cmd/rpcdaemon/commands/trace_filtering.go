@@ -164,7 +164,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 
 				for _, num := range blockNumbers {
 
-					block := rawdb.ReadBlockByNumber(api.dbReader, num)
+					block, err := rawdb.ReadBlockByNumber(api.dbReader, num)
+					if err != nil {
+						return err
+					}
 					senders := rawdb.ReadSenders(api.dbReader, block.Hash(), num)
 					txs := block.Transactions()
 					for i, tx := range txs {
@@ -205,7 +208,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		} else if req.FromBlock != nil || req.ToBlock != nil { // iterate over blocks
 
 			for blockNum := fromBlock; blockNum < toBlock+1; blockNum++ {
-				block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+				block, err := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+				if err != nil {
+					return err
+				}
 				blockTransactions := block.Transactions()
 				for _, tx := range blockTransactions {
 					if uint64(len(filteredHashes)) == maxTracesCount {
@@ -239,8 +245,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	}
 	getter := adapter.NewBlockGetter(api.dbReader)
 	chainContext := adapter.NewChainContext(api.dbReader)
-	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+	genesis, err := rawdb.ReadBlockByNumber(api.dbReader, 0)
+	if err != nil {
+		return nil, err
+	}
+	genesisHash := genesis.Hash()
+	chainConfig, err := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+	if err != nil {
+		return nil, err
+	}
 	traceType := "callTracer" // nolint: goconst
 	traces := ParityTraces{}
 	dbtx, err1 := api.db.Begin(ctx, nil, false)
@@ -252,7 +265,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		if traceTypes[i] {
 			// In this case, we're processing a block (or uncle) reward trace. The hash is a block hash
 			// Because Geth does not return blockReward or uncleReward traces, we must create them here
-			block := rawdb.ReadBlockByHash(api.dbReader, txOrBlockHash)
+			block, err := rawdb.ReadBlockByHash(api.dbReader, txOrBlockHash)
+			if err != nil {
+				return nil, err
+			}
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
 			var tr ParityTrace
 			tr.Action.Author = strings.ToLower(block.Coinbase().String())
@@ -363,8 +379,15 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 func (api *TraceAPIImpl) getTransactionTraces(dbtx ethdb.Tx, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
 	getter := adapter.NewBlockGetter(dbtx)
 	chainContext := adapter.NewChainContext(dbtx)
-	genesisHash := rawdb.ReadBlockByNumber(dbtx, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(dbtx, genesisHash)
+	genesis, err := rawdb.ReadBlockByNumber(dbtx, 0)
+	if err != nil {
+		return nil, err
+	}
+	genesisHash := genesis.Hash()
+	chainConfig, err := rawdb.ReadChainConfig(dbtx, genesisHash)
+	if err != nil {
+		return nil, err
+	}
 	traceType := "callTracer" // nolint: goconst
 
 	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(dbtx, txHash)

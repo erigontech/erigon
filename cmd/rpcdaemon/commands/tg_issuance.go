@@ -45,8 +45,15 @@ func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issua
 }
 
 func (api *TgImpl) rewardCalc(db rawdb.DatabaseReader, blockNr rpc.BlockNumber, which string) (Issuance, error) {
-	genesisHash := rawdb.ReadBlockByNumber(db, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(db, genesisHash)
+	genesis, err := rawdb.ReadBlockByNumber(db, 0)
+	if err != nil {
+		return Issuance{}, err
+	}
+	genesisHash := genesis.Hash()
+	chainConfig, err := rawdb.ReadChainConfig(db, genesisHash)
+	if err != nil {
+		return Issuance{}, err
+	}
 	if chainConfig.Ethash == nil {
 		// Clique for example has no issuance
 		return Issuance{}, nil
@@ -87,7 +94,7 @@ func (api *TgImpl) getBlockByRPCNumber(db rawdb.DatabaseReader, blockNr rpc.Bloc
 	if err != nil {
 		return nil, err
 	}
-	return rawdb.ReadBlockByNumber(db, blockNum), nil
+	return rawdb.ReadBlockByNumber(db, blockNum)
 }
 
 // Issuance structure to return information about issuance

@@ -207,7 +207,9 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			return nil, fmt.Errorf("database version is v%d, Geth %s only supports v%d", *bcVersion, params.VersionWithMeta, core.BlockChainVersion)
 		} else if bcVersion == nil || *bcVersion < core.BlockChainVersion {
 			log.Warn("Upgrade blockchain database version", "from", dbVer, "to", core.BlockChainVersion)
-			rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion)
+			if err2 := rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion); err2 != nil {
+				return nil, err2
+			}
 		}
 	}
 
@@ -244,7 +246,10 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
 		eth.blockchain.SetHead(compat.RewindTo)
-		rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
+		err = rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if config.TxPool.Journal != "" {

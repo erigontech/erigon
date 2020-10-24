@@ -26,12 +26,19 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	additionalFields := make(map[string]interface{})
 
-	block := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
 
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(rawdb.ReadTd(tx, block.Hash(), blockNum))
+	td, err := rawdb.ReadTd(tx, block.Hash(), blockNum)
+	if err != nil {
+		return nil, err
+	}
+	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
@@ -54,13 +61,20 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, hash common.Hash, fullTx
 
 	additionalFields := make(map[string]interface{})
 
-	block := rawdb.ReadBlockByHash(tx, hash)
+	block, err := rawdb.ReadBlockByHash(tx, hash)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %x", hash)
 	}
 	number := block.NumberU64()
 
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(rawdb.ReadTd(tx, hash, number))
+	td, err := rawdb.ReadTd(tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
 
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
@@ -85,7 +99,10 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	block := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
@@ -101,7 +118,10 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 	defer tx.Rollback()
 
-	block := rawdb.ReadBlockByHash(tx, blockHash)
+	block, err := rawdb.ReadBlockByHash(tx, blockHash)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %x", blockHash)
 	}

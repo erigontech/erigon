@@ -34,7 +34,10 @@ func (api *TgImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*type
 	}
 	defer tx.Rollback()
 
-	header := rawdb.ReadHeaderByHash(tx, hash)
+	header, err := rawdb.ReadHeaderByHash(tx, hash)
+	if err != nil {
+		return nil, err
+	}
 	if header == nil {
 		return nil, fmt.Errorf("block header not found: %s", hash.String())
 	}
