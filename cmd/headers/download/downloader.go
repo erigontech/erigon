@@ -115,7 +115,7 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 	}
 }
 
-func Download(filesDir string, bufferSize int, sentryAddr string, coreAddr string) error {
+func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string) error {
 	ctx := rootContext()
 	log.Info("Starting Core P2P server", "on", coreAddr, "connecting to sentry", coreAddr)
 
@@ -172,8 +172,13 @@ func Download(filesDir string, bufferSize int, sentryAddr string, coreAddr strin
 	}
 	sentryClient := proto.NewSentryClient(conn)
 
+	var bufferSize datasize.ByteSize
+	if err := bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
+		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
+	}
 	var controlServer *ControlServerImpl
-	if controlServer, err = NewControlServer(filesDir, bufferSize, sentryClient); err != nil {
+
+	if controlServer, err = NewControlServer(filesDir, int(bufferSize), sentryClient); err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
 	proto.RegisterControlServer(grpcServer, controlServer)
@@ -200,7 +205,7 @@ type ControlServerImpl struct {
 	sentryClient proto.SentryClient
 }
 
-func NewControlServer(filesDir string, bufferLimit int, sentryClient proto.SentryClient) (*ControlServerImpl, error) {
+func NewControlServer(filesDir string, bufferSize int, sentryClient proto.SentryClient) (*ControlServerImpl, error) {
 	//config := eth.DefaultConfig.Ethash
 	engine := ethash.New(ethash.Config{
 		CachesInMem:      1,
@@ -219,9 +224,9 @@ func NewControlServer(filesDir string, bufferLimit int, sentryClient proto.Sentr
 	}
 	hd := headerdownload.NewHeaderDownload(
 		filesDir,
-		bufferLimit, /* bufferLimit */
-		16*1024,     /* tipLimit */
-		1024,        /* initPowDepth */
+		bufferSize, /* bufferLimit */
+		16*1024,    /* tipLimit */
+		1024,       /* initPowDepth */
 		calcDiffFunc,
 		verifySealFunc,
 		3600, /* newAnchor future limit */
@@ -394,7 +399,7 @@ func (cs *ControlServerImpl) loop(ctx context.Context) {
 	for {
 		select {
 		case <-timer.C:
-			fmt.Printf("RequestQueueTimer ticked\n")
+			log.Info("RequestQueueTimer ticked")
 		case <-ctx.Done():
 			return
 		}
