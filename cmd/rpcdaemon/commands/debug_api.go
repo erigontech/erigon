@@ -53,7 +53,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	cc := adapter.NewChainContext(tx)
 	genesisHash := rawdb.ReadBlockByNumber(tx, 0).Hash()
 	chainConfig := rawdb.ReadChainConfig(tx, genesisHash)
-	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
+	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx, blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
