@@ -115,10 +115,10 @@ func init() {
 
 	rootCmd.AddCommand(cmdToMdbx)
 
-	withToChaindata(cmdToMdbx)
-	withBucket(cmdToMdbx)
+	withToChaindata(cmdFToMdbx)
+	withBucket(cmdFToMdbx)
 
-	rootCmd.AddCommand(cmdToMdbx)
+	rootCmd.AddCommand(cmdFToMdbx)
 }
 
 func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {
