@@ -318,8 +318,8 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto.Inbo
 				PeerId:  inreq.PeerId,
 				Penalty: proto.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
-			if _, err := cs.sentryClient.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-				log.Error("Could not send penalty", "err", err)
+			if _, err1 := cs.sentryClient.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+				log.Error("Could not send penalty", "err", err1)
 			}
 		}
 	} else {
@@ -344,8 +344,8 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto.InboundM
 				PeerId:  inreq.PeerId,
 				Penalty: proto.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
-			if _, err := cs.sentryClient.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-				log.Error("Could not send penalty", "err", err)
+			if _, err1 := cs.sentryClient.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+				log.Error("Could not send penalty", "err", err1)
 			}
 		}
 	} else {
