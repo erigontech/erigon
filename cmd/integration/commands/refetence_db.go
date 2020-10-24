@@ -256,11 +256,6 @@ func fToMdbx(ctx context.Context, to string) error {
 	commitEvery := time.NewTicker(5 * time.Minute)
 	defer commitEvery.Stop()
 
-	err = dstTx.Commit(context.Background())
-	if err != nil {
-		return err
-	}
-
 	fileScanner := bufio.NewScanner(file)
 	c := dstTx.CursorDupSort(dbutils.CurrentStateBucket3)
 	for fileScanner.Scan() {
