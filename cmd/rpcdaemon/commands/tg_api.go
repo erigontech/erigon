@@ -23,6 +23,8 @@ type TgAPI interface {
 	//GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error)
 
 	// Issuance / reward related (see ./tg_issuance.go)
+	// BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
+	// UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
 	Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
 }
 

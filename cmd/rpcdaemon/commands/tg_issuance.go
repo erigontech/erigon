@@ -10,6 +10,28 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
+// BlockReward returns the block reward for this block
+// func (api *TgImpl) BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
+//	tx, err := api.dbReader.Begin(ctx, false)
+//	if err != nil {
+//		return Issuance{}, err
+//	}
+//	defer tx.Rollback()
+//
+//	return api.rewardCalc(tx, blockNr, "block") // nolint goconst
+//}
+
+// UncleReward returns the uncle reward for this block
+// func (api *TgImpl) UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
+//	tx, err := api.dbReader.Begin(ctx, false)
+//	if err != nil {
+//		return Issuance{}, err
+//	}
+//	defer tx.Rollback()
+//
+//	return api.rewardCalc(tx, blockNr, "uncle") // nolint goconst
+//}
+
 // Issuance implements tg_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
 func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
 	tx, err := api.dbReader.Begin(ctx, false)

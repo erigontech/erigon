@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-func getReceipts(ctx context.Context, tx ethdb.Tx, number uint64, hash common.Hash) (types.Receipts, error) {
+func getReceipts(ctx context.Context, tx rawdb.DatabaseReader, number uint64, hash common.Hash) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, hash, number); cached != nil {
 		return cached, nil
 	}
