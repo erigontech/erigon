@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
-// GetBalance returns the balance of the address at the given block
+// GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
 	if err != nil {
@@ -37,7 +37,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	return (*hexutil.Big)(acc.Balance.ToBig()), nil
 }
 
-// GetTransactionCount returns the number of transactions the given address has sent for the given block number
+// GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
 	if err != nil {
@@ -57,7 +57,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 	return (*hexutil.Uint64)(&acc.Nonce), err
 }
 
-// GetCode returns the code stored at the given address in the state for the given block number.
+// GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
 func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
 	if err != nil {
@@ -81,7 +81,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 	return res, nil
 }
 
-// GetStorageAt returns a 32-byte long, zero-left-padded value at storage location 'index' of address 'address'. Returns '0x' if no value
+// GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
 func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
 

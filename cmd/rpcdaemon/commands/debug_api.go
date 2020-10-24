@@ -41,7 +41,7 @@ func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Database) *PrivateDebugAPIIm
 	}
 }
 
-// StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
+// StorageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
 	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
@@ -67,8 +67,8 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	return StorageRangeAt(stateReader, contractAddress, keyStart, maxResult)
 }
 
-// AccountRange enumerates all accounts in the given block and start point in paging request
-func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error) {
+// AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block range
+func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, startKey []byte, maxResults int, excludeCode, excludeStorage, excludeMissingPreimages bool) (state.IteratorDump, error) {
 	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return state.IteratorDump{}, err
@@ -108,7 +108,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	}
 
 	dumper := state.NewDumper(tx.(ethdb.HasTx).Tx(), blockNumber)
-	res, err := dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
+	res, err := dumper.IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages, startKey, maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -127,9 +127,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	return res, nil
 }
 
-// GetModifiedAccountsByNumber returns a list of accounts found in the change sets
-// startNum - first block from which to include results
-// endNum - if present, last block from which to include results (inclusive). If not present, startNum.
+// GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
 	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
@@ -166,9 +164,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	return ethdb.GetModifiedAccounts(tx.(ethdb.HasTx).Tx(), startNum, endNum)
 }
 
-// GetModifiedAccountsByHash returns a list of accounts found in the change sets
-// startHash - first block to include in results
-// endHash - if present, last block to include in results (inclusive)
+// GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash. Returns a list of accounts modified in the given block.
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
 	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {

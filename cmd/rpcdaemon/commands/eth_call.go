@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-// Call executes a new message call immediately without creating a transaction on the block chain.
+// Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
 	tx, err1 := api.db.Begin(ctx, nil, false)
 	if err1 != nil {
@@ -40,10 +40,9 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	return result.Return(), result.Err
 }
 
-// EstimateGas returns an estimate of the amount of gas needed to execute the
-// given transaction against the current pending block.
+// EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
 func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error) {
-	//fixme: blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	// TODO: fixme: blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 	hash := rawdb.ReadHeadBlockHash(api.dbReader)
 
 	return api.DoEstimateGas(ctx, args, rpc.BlockNumberOrHash{BlockHash: &hash}, big.NewInt(0).SetUint64(api.GasCap))

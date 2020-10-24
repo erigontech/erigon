@@ -14,8 +14,10 @@ type StorageRangeResult struct {
 	NextKey *common.Hash `json:"nextKey"` // nil if Storage includes the last key in the trie.
 }
 
+// StorageMap a map from storage locations to StorageEntry items
 type StorageMap map[common.Hash]StorageEntry
 
+// StorageEntry an entry in storage of the account
 type StorageEntry struct {
 	Key   *common.Hash `json:"key"`
 	Value common.Hash  `json:"value"`
