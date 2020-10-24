@@ -114,6 +114,11 @@ func init() {
 	withBucket(cmdToMdbx)
 
 	rootCmd.AddCommand(cmdToMdbx)
+
+	withToChaindata(cmdToMdbx)
+	withBucket(cmdToMdbx)
+
+	rootCmd.AddCommand(cmdToMdbx)
 }
 
 func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {
