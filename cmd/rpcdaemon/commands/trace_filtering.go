@@ -265,7 +265,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		if traceTypes[i] {
 			// In this case, we're processing a block (or uncle) reward trace. The hash is a block hash
 			// Because Geth does not return blockReward or uncleReward traces, we must create them here
-			block := rawdb.ReadBlockByHash(api.dbReader, txOrBlockHash)
+			block, err := rawdb.ReadBlockByHash(api.dbReader, txOrBlockHash)
+			if err != nil {
+				return nil, err
+			}
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
 			var tr ParityTrace
 			tr.Action.Author = strings.ToLower(block.Coinbase().String())

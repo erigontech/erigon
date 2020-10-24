@@ -85,7 +85,9 @@ func BenchmarkFilters(b *testing.B) {
 		b.Fatalf("generate chain: %v", err)
 	}
 	for i, block := range chain {
-		rawdb.WriteBlock(context.Background(), db, block)
+		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
+			panic(err)
+		}
 		rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
 		rawdb.WriteHeadBlockHash(db, block.Hash())
 		rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), receipts[i])
@@ -166,7 +168,9 @@ func TestFilters(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 	for i, block := range chain {
-		rawdb.WriteBlock(context.Background(), db, block)
+		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
+			panic(err)
+		}
 		rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
 		rawdb.WriteHeadBlockHash(db, block.Hash())
 		rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), receipts[i])

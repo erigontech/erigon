@@ -540,8 +540,12 @@ func (bc *BlockChain) ResetWithGenesisBlock(genesis *types.Block) error {
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	rawdb.WriteTd(bc.db, genesis.Hash(), genesis.NumberU64(), genesis.Difficulty())
-	rawdb.WriteBlock(context.Background(), bc.db, genesis)
+	if err := rawdb.WriteTd(bc.db, genesis.Hash(), genesis.NumberU64(), genesis.Difficulty()); err != nil {
+		return err
+	}
+	if err := rawdb.WriteBlock(context.Background(), bc.db, genesis); err != nil {
+		return err
+	}
 	bc.writeHeadBlock(genesis)
 
 	// Last update all in-memory chain markers
@@ -1130,7 +1134,9 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	if common.IsCanceled(ctx) {
 		return NonStatTy, ctx.Err()
 	}
-	rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd)
+	if err := rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd); err != nil {
+		return NonStatTy, err
+	}
 	rawdb.WriteBody(ctx, bc.db, block.Hash(), block.NumberU64(), block.Body())
 	sendersData := make([]byte, len(block.Transactions())*common.AddressLength)
 	senders := block.Body().SendersFromTxs()
@@ -1436,7 +1442,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	for verifyFrom = 0; verifyFrom < len(chain) && localTd.Cmp(externTd) >= 0; verifyFrom++ {
 		header := chain[verifyFrom].Header()
 		externTd = externTd.Add(externTd, header.Difficulty)
-		rawdb.WriteTd(bc.db, header.Hash(), header.Number.Uint64(), externTd)
+		_ = rawdb.WriteTd(bc.db, header.Hash(), header.Number.Uint64(), externTd)
 	}
 
 	if localTd.Cmp(externTd) >= 0 {
@@ -1452,8 +1458,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		for _, block := range chain {
 			log.Warn("Saving", "block", block.NumberU64(), "hash", block.Hash())
 			td = new(big.Int).Add(block.Difficulty(), td)
-			rawdb.WriteBlock(ctx, bc.db, block)
-			rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), td)
+			if err := rawdb.WriteBlock(ctx, bc.db, block); err != nil {
+				return 0, err
+			}
+			_ = rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), td)
 		}
 		return 0, nil
 	}
@@ -2248,7 +2256,10 @@ func InsertBodies(
 		}
 
 		// Calculate the total difficulty of the block
-		ptd := rawdb.ReadTd(batch, block.ParentHash(), block.NumberU64()-1)
+		ptd, err := rawdb.ReadTd(batch, block.ParentHash(), block.NumberU64()-1)
+		if err != nil {
+			return true, err
+		}
 
 		if ptd == nil {
 			return true, consensus.ErrUnknownAncestor

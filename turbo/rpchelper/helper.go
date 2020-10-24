@@ -38,7 +38,10 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader rawdb.Database
 			return 0, common.Hash{}, err
 		}
 	} else {
-		block := rawdb.ReadBlockByHash(dbReader, hash)
+		block, err := rawdb.ReadBlockByHash(dbReader, hash)
+		if err != nil {
+			return 0, common.Hash{}, err
+		}
 		if block == nil {
 			return 0, common.Hash{}, fmt.Errorf("block %x not found", hash)
 		}

@@ -35,7 +35,11 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	}
 	hash := block.Hash()
 	additionalFields := make(map[string]interface{})
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(rawdb.ReadTd(tx, block.Hash(), blockNum))
+	td, err := rawdb.ReadTd(tx, block.Hash(), blockNum)
+	if err != nil {
+		return nil, err
+	}
+	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 
 	uncles := block.Uncles()
 	if index >= hexutil.Uint(len(uncles)) {
@@ -55,13 +59,20 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 	}
 	defer tx.Rollback()
 
-	block := rawdb.ReadBlockByHash(tx, hash)
+	block, err := rawdb.ReadBlockByHash(tx, hash)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %x", hash)
 	}
 	number := block.NumberU64()
 	additionalFields := make(map[string]interface{})
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(rawdb.ReadTd(tx, hash, number))
+	td, err := rawdb.ReadTd(tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 
 	uncles := block.Uncles()
 	if index >= hexutil.Uint(len(uncles)) {
@@ -106,7 +117,10 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 	}
 	defer tx.Rollback()
 
-	block := rawdb.ReadBlockByHash(tx, hash)
+	block, err := rawdb.ReadBlockByHash(tx, hash)
+	if err != nil {
+		return &n, err
+	}
 	if block != nil {
 		n = hexutil.Uint(len(block.Uncles()))
 	}

@@ -93,7 +93,10 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 
 	} else if hash, ok := blockNrOrHash.Hash(); ok {
-		block := rawdb.ReadBlockByHash(tx, hash)
+		block, err1 := rawdb.ReadBlockByHash(tx, hash)
+		if err1 != nil {
+			return state.IteratorDump{}, err1
+		}
 		if block == nil {
 			return state.IteratorDump{}, fmt.Errorf("block %s not found", hash.Hex())
 		}
@@ -173,7 +176,10 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	}
 	defer tx.Rollback()
 
-	startBlock := rawdb.ReadBlockByHash(tx, startHash)
+	startBlock, err := rawdb.ReadBlockByHash(tx, startHash)
+	if err != nil {
+		return nil, err
+	}
 	if startBlock == nil {
 		return nil, fmt.Errorf("start block %x not found", startHash)
 	}
@@ -181,7 +187,10 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	endNum := startNum // allows for single parameter calls
 
 	if endHash != nil {
-		endBlock := rawdb.ReadBlockByHash(tx, *endHash)
+		endBlock, err := rawdb.ReadBlockByHash(tx, *endHash)
+		if err != nil {
+			return nil, err
+		}
 		if endBlock == nil {
 			return nil, fmt.Errorf("end block %x not found", *endHash)
 		}

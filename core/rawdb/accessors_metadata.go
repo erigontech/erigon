@@ -46,14 +46,15 @@ func ReadDatabaseVersion(db DatabaseReader) *uint64 {
 }
 
 // WriteDatabaseVersion stores the version number of the database
-func WriteDatabaseVersion(db DatabaseWriter, version uint64) {
+func WriteDatabaseVersion(db DatabaseWriter, version uint64) error {
 	enc, err := rlp.EncodeToBytes(version)
 	if err != nil {
-		log.Crit("Failed to encode database version", "err", err)
+		return fmt.Errorf("failed to encode database version: %w", err)
 	}
 	if err = db.Put(dbutils.DatabaseVerisionKey, []byte(dbutils.DatabaseVerisionKey), enc); err != nil {
-		log.Crit("Failed to store the database version", "err", err)
+		return fmt.Errorf("failed to store the database version: %w", err)
 	}
+	return nil
 }
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
@@ -73,17 +74,18 @@ func ReadChainConfig(db DatabaseReader, hash common.Hash) (*params.ChainConfig, 
 }
 
 // WriteChainConfig writes the chain config settings to the database.
-func WriteChainConfig(db DatabaseWriter, hash common.Hash, cfg *params.ChainConfig) {
+func WriteChainConfig(db DatabaseWriter, hash common.Hash, cfg *params.ChainConfig) error {
 	if cfg == nil {
-		return
+		return nil
 	}
 	data, err := json.Marshal(cfg)
 	if err != nil {
-		log.Crit("Failed to JSON encode chain config", "err", err)
+		return fmt.Errorf("failed to JSON encode chain config: %w", err)
 	}
 	if err := db.Put(dbutils.ConfigPrefix, hash[:], data); err != nil {
-		log.Crit("Failed to store chain config", "err", err)
+		return fmt.Errorf("failed to store chain config: %w", err)
 	}
+	return nil
 }
 
 // ReadPreimage retrieves a single preimage of the provided hash.
