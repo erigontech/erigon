@@ -14,6 +14,8 @@ import (
 // GetBlockByNumber see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber
 // see internal/ethapi.PublicBlockChainAPI.GetBlockByNumber
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
+	// TODO the next line used to be "tx, err := api.dbReader.Begin(ctx)" When it changed, there was concern that it would have
+	// negative impact on performance. Revisit performance of using this type of database transaction
 	tx, err := api.db.Begin(ctx, nil, false)
 	if err != nil {
 		return nil, err
