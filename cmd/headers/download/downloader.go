@@ -317,7 +317,7 @@ func (cs *ControlServerImpl) blockHeaders(inreq *proto.InboundMessage) (*empty.E
 			//penaltyCh <- PenaltyMsg{SentryMsg: headersReq.SentryMsg, penalty: penalty}
 		}
 	} else {
-		return nil, fmt.Errorf("SingleHeaderAsSegment failed: %v", err)
+		return nil, fmt.Errorf("singleHeaderAsSegment failed: %v", err)
 	}
 	log.Info("HeadersMsg processed")
 	return &empty.Empty{}, nil
