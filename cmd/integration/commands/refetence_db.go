@@ -263,12 +263,11 @@ func fToMdbx(ctx context.Context, to string) error {
 
 	fileScanner := bufio.NewScanner(file)
 	c := dstTx.CursorDupSort(dbutils.CurrentStateBucket)
-	appendFunc := c.AppendDup
 	for fileScanner.Scan() {
 		kv := strings.Split(fileScanner.Text(), ",")
 		k, _ := hex.DecodeString(kv[0])
 		v, _ := hex.DecodeString(kv[1])
-		if err = appendFunc(k, v); err != nil {
+		if err = c.AppendDup(k, v); err != nil {
 			return err
 		}
 
@@ -286,6 +285,11 @@ func fToMdbx(ctx context.Context, to string) error {
 	if err := fileScanner.Err(); err != nil {
 		fmt.Println(err)
 	}
+	err = dstTx.Commit(context.Background())
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
