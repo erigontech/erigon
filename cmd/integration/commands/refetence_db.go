@@ -262,7 +262,7 @@ func fToMdbx(ctx context.Context, to string) error {
 	}
 
 	fileScanner := bufio.NewScanner(file)
-	c := dstTx.CursorDupSort(dbutils.CurrentStateBucket)
+	c := dstTx.CursorDupSort(dbutils.CurrentStateBucket3)
 	for fileScanner.Scan() {
 		kv := strings.Split(fileScanner.Text(), ",")
 		k, _ := hex.DecodeString(kv[0])
