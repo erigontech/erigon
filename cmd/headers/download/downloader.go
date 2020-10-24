@@ -173,7 +173,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	sentryClient := proto.NewSentryClient(conn)
 
 	var bufferSize datasize.ByteSize
-	if err := bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
+	if err = bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
 		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
 	}
 	var controlServer *ControlServerImpl
@@ -187,8 +187,8 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	}
 
 	go func() {
-		if err := grpcServer.Serve(lis); err != nil {
-			log.Error("Core P2P server fail", "err", err)
+		if err1 := grpcServer.Serve(lis); err1 != nil {
+			log.Error("Core P2P server fail", "err", err1)
 		}
 	}()
 
@@ -301,7 +301,7 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto.In
 	return &empty.Empty{}, nil
 }
 
-func (cs *ControlServerImpl) blockHeaders(inreq *proto.InboundMessage) (*empty.Empty, error) {
+func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
 	cs.hdLock.Lock()
 	defer cs.hdLock.Unlock()
 	var request []*types.Header
@@ -314,7 +314,13 @@ func (cs *ControlServerImpl) blockHeaders(inreq *proto.InboundMessage) (*empty.E
 				processSegment(cs.hd, segment)
 			}
 		} else {
-			//penaltyCh <- PenaltyMsg{SentryMsg: headersReq.SentryMsg, penalty: penalty}
+			outreq := proto.PenalizePeerRequest{
+				PeerId:  inreq.PeerId,
+				Penalty: proto.PenaltyKind_Kick, // TODO: Extend penalty kinds
+			}
+			if _, err := cs.sentryClient.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				log.Error("Could not send penalty", "err", err)
+			}
 		}
 	} else {
 		return nil, fmt.Errorf("singleHeaderAsSegment failed: %v", err)
@@ -323,7 +329,7 @@ func (cs *ControlServerImpl) blockHeaders(inreq *proto.InboundMessage) (*empty.E
 	return &empty.Empty{}, nil
 }
 
-func (cs *ControlServerImpl) newBlock(inreq *proto.InboundMessage) (*empty.Empty, error) {
+func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
 	cs.hdLock.Lock()
 	defer cs.hdLock.Unlock()
 	var request eth.NewBlockData
@@ -334,8 +340,13 @@ func (cs *ControlServerImpl) newBlock(inreq *proto.InboundMessage) (*empty.Empty
 		if penalty == headerdownload.NoPenalty {
 			processSegment(cs.hd, segments[0]) // There is only one segment in this case
 		} else {
-			// Send penalty back to the sentry
-			//penaltyCh <- PenaltyMsg{SentryMsg: newBlockReq.SentryMsg, penalty: penalty}
+			outreq := proto.PenalizePeerRequest{
+				PeerId:  inreq.PeerId,
+				Penalty: proto.PenaltyKind_Kick, // TODO: Extend penalty kinds
+			}
+			if _, err := cs.sentryClient.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				log.Error("Could not send penalty", "err", err)
+			}
 		}
 	} else {
 		return nil, fmt.Errorf("singleHeaderAsSegment failed: %v", err)
@@ -349,9 +360,9 @@ func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *p
 	case proto.InboundMessageId_NewBlockHashes:
 		return cs.newBlockHashes(ctx, inreq)
 	case proto.InboundMessageId_BlockHeaders:
-		return cs.blockHeaders(inreq)
+		return cs.blockHeaders(ctx, inreq)
 	case proto.InboundMessageId_NewBlock:
-		return cs.newBlock(inreq)
+		return cs.newBlock(ctx, inreq)
 	default:
 		return nil, fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}

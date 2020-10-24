@@ -256,7 +256,7 @@ func runPeer(
 			bytes := make([]byte, msg.Size)
 			_, err = io.ReadFull(msg.Payload, bytes)
 			if err != nil {
-				return fmt.Errorf("%s: reading msg into bytes: %v", err)
+				return fmt.Errorf("%s: reading msg into bytes: %v", peerID, err)
 			}
 			var headers []*types.Header
 			if err = rlp.DecodeBytes(bytes, &headers); err != nil {
@@ -314,7 +314,7 @@ func runPeer(
 			bytes := make([]byte, msg.Size)
 			_, err = io.ReadFull(msg.Payload, bytes)
 			if err != nil {
-				return fmt.Errorf("%s: reading msg into bytes: %v", err)
+				return fmt.Errorf("%s: reading msg into bytes: %v", peerID, err)
 			}
 			var announces eth.NewBlockHashesData
 			if err = rlp.DecodeBytes(bytes, &announces); err != nil {
@@ -347,7 +347,7 @@ func runPeer(
 			bytes := make([]byte, msg.Size)
 			_, err = io.ReadFull(msg.Payload, bytes)
 			if err != nil {
-				return fmt.Errorf("%s: reading msg into bytes: %v", err)
+				return fmt.Errorf("%s: reading msg into bytes: %v", peerID, err)
 			}
 			var request eth.NewBlockData
 			if err = rlp.DecodeBytes(bytes, &request); err != nil {
@@ -471,8 +471,8 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string) err
 	}
 
 	go func() {
-		if err := grpcServer.Serve(lis); err != nil {
-			log.Error("Sentry P2P server fail", "err", err)
+		if err1 := grpcServer.Serve(lis); err != nil {
+			log.Error("Sentry P2P server fail", "err", err1)
 		}
 	}()
 	// CREATING GRPC CLIENT CONNECTION
