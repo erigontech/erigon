@@ -85,7 +85,8 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	}
 	rawdb.WriteHeader(context.TODO(), db, origin)
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
-	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
+	err := rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
+	assert.NoError(t, err)
 
 	reorg, _, err := InsertHeaderChain("logPrefix", db, headers1, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
 	assert.NoError(t, err)

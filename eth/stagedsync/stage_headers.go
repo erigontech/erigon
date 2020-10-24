@@ -200,17 +200,20 @@ Error: %v
 			forkBlockNumber = number
 		}
 		if newCanonical {
-			rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
+			err = rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
+			if err != nil {
+				return false, 0, err
+			}
 		}
 		data, err := rlp.EncodeToBytes(header)
 		if err != nil {
-			log.Crit(fmt.Sprintf("[%s] Failed to RLP encode header", logPrefix), "err", err)
+			return false, 0, fmt.Errorf("[%s] Failed to RLP encode header: %w", logPrefix, err)
 		}
 		if err := rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td); err != nil {
-			log.Crit(fmt.Sprintf("[%s] Failed to WriteTd", logPrefix), "err", err)
+			return false, 0, fmt.Errorf("[%s] Failed to WriteTd: %w", logPrefix, err)
 		}
 		if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
-			log.Crit(fmt.Sprintf("[%s] Failed to store header", logPrefix), "err", err)
+			return false, 0, fmt.Errorf("[%s] Failed to store header: %w", logPrefix, err)
 		}
 	}
 	if deepFork {
@@ -226,25 +229,34 @@ Error: %v
 				break
 			}
 
-			rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber)
+			err = rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber)
+			if err != nil {
+				return false, 0, err
+			}
 			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)
 			forkBlockNumber = forkHeader.Number.Uint64() - 1
 			forkHash = forkHeader.ParentHash
 		}
-		rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
+		err = rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
+		if err != nil {
+			return false, 0, err
+		}
 	}
 	reorg := newCanonical && forkBlockNumber < *headNumber
 	if reorg {
 		// Delete any canonical number assignments above the new head
 		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
-			rawdb.DeleteCanonicalHash(batch, i)
+			err = rawdb.DeleteCanonicalHash(batch, i)
+			if err != nil {
+				return false, 0, err
+			}
 		}
 	}
 	if newCanonical {
 		encoded := dbutils.EncodeBlockNumber(lastHeader.Number.Uint64())
 
 		if err := batch.Put(dbutils.HeaderNumberPrefix, lastHeader.Hash().Bytes(), encoded); err != nil {
-			log.Crit(fmt.Sprintf("[%s] Failed to store hash to number mapping", logPrefix), "err", err)
+			return false, 0, fmt.Errorf("[%s] Failed to store hash to number mapping: %w", logPrefix, err)
 		}
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
 	}

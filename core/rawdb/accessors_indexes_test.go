@@ -63,7 +63,9 @@ func TestLookupStorage(t *testing.T) {
 				}
 			}
 			// Insert all the transactions into the database, and verify contents
-			WriteCanonicalHash(db, block.Hash(), block.NumberU64())
+			if err := WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
+				t.Fatal(err)
+			}
 			if err := WriteBlock(ctx, db, block); err != nil {
 				t.Fatal(err)
 			}
