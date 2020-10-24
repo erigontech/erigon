@@ -22,7 +22,7 @@ var (
 type mutation struct {
 	puts       *btree.BTree
 	mu         sync.RWMutex
-	searchItem MutationItem
+	searchItem *MutationItem
 	size       int
 	db         Database
 }
@@ -33,8 +33,8 @@ type MutationItem struct {
 	value []byte
 }
 
-func (mi MutationItem) Less(than btree.Item) bool {
-	i := than.(MutationItem)
+func (mi *MutationItem) Less(than btree.Item) bool {
+	i := than.(*MutationItem)
 	c := strings.Compare(mi.table, i.table)
 	if c != 0 {
 		return c < 0
@@ -58,7 +58,7 @@ func (m *mutation) getMem(table string, key []byte) ([]byte, bool) {
 	if i == nil {
 		return nil, false
 	}
-	return i.(MutationItem).value, true
+	return i.(*MutationItem).value, true
 }
 
 // Can only be called from the worker thread
@@ -123,11 +123,11 @@ func (m *mutation) Put(table string, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	newMi := MutationItem{table: table, key: key, value: value}
+	newMi := &MutationItem{table: table, key: key, value: value}
 	i := m.puts.ReplaceOrInsert(newMi)
 	m.size += int(unsafe.Sizeof(newMi)) + len(key) + len(value)
 	if i != nil {
-		oldMi := i.(MutationItem)
+		oldMi := i.(*MutationItem)
 		m.size -= (int(unsafe.Sizeof(oldMi)) + len(oldMi.key) + len(oldMi.value))
 	}
 	return nil
@@ -142,11 +142,11 @@ func (m *mutation) MultiPut(tuples ...[]byte) (uint64, error) {
 	defer m.mu.Unlock()
 	l := len(tuples)
 	for i := 0; i < l; i += 3 {
-		newMi := MutationItem{table: string(tuples[i]), key: tuples[i+1], value: tuples[i+2]}
+		newMi := &MutationItem{table: string(tuples[i]), key: tuples[i+1], value: tuples[i+2]}
 		i := m.puts.ReplaceOrInsert(newMi)
 		m.size += int(unsafe.Sizeof(newMi)) + len(newMi.key) + len(newMi.value)
 		if i != nil {
-			oldMi := i.(MutationItem)
+			oldMi := i.(*MutationItem)
 			m.size -= (int(unsafe.Sizeof(oldMi)) + len(oldMi.key) + len(oldMi.value))
 		}
 	}
@@ -196,7 +196,7 @@ func (m *mutation) doCommit(tx Tx) error {
 	var innerErr error
 	var isEndOfBucket bool
 	m.puts.Ascend(func(i btree.Item) bool {
-		mi := i.(MutationItem)
+		mi := i.(*MutationItem)
 		if mi.table != prevTable {
 			if c != nil {
 				c.Close()
@@ -269,7 +269,7 @@ func (m *mutation) Keys() ([][]byte, error) {
 	tuples := common.NewTuples(m.puts.Len(), 2, 1)
 	var innerErr error
 	m.puts.Ascend(func(i btree.Item) bool {
-		mi := i.(MutationItem)
+		mi := i.(*MutationItem)
 		if err := tuples.Append([]byte(mi.table), mi.key); err != nil {
 			innerErr = err
 			return false
