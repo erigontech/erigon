@@ -11,7 +11,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_ALLOY 1n#define MDBX_BUILD_SOURCERY 6d7c21bd0366dcdc7be982d973cd4ffea76e6fc94896fe23df8cdbf576e09353_v0_9_1_43_gb092821
+#define MDBX_ALLOY 1n#define MDBX_BUILD_SOURCERY 47735b016e5744a277eccd69807e42a70c00d95fd598fbc793dae4dad4de32cd_v0_9_1_54_gca2ecf2
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -7197,7 +7197,7 @@ static int mdbx_pages_xkeep(MDBX_cursor *mc, unsigned pflags, bool all) {
   MDBX_txn *txn = mc->mc_txn;
   MDBX_cursor *m3, *m0 = mc;
   MDBX_xcursor *mx;
-  MDBX_page *dp, *mp;
+  MDBX_page *mp;
   unsigned i, j;
   int rc = MDBX_SUCCESS;
 
@@ -7235,11 +7235,8 @@ mark_done:
         pgno_t pgno = txn->mt_dbs[i].md_root;
         if (pgno == P_INVALID)
           continue;
-        int level;
-        if (unlikely((rc = mdbx_page_get(m0, pgno, &dp, &level,
-                                         txn->mt_txnid)) != MDBX_SUCCESS))
-          break;
-        if ((dp->mp_flags & Mask) == pflags && level <= 1)
+        MDBX_page *dp = mdbx_dpl_find(txn->tw.dirtylist, pgno);
+        if (dp && (dp->mp_flags & Mask) == pflags)
           dp->mp_flags ^= P_KEEP;
       }
     }
@@ -8139,12 +8136,6 @@ skip_cache:
   const unsigned wanna_range = num - 1;
 
   while (true) { /* hsr-kick retry loop */
-    /* If our dirty list is already full, we can't do anything */
-    if (unlikely(txn->tw.dirtyroom == 0)) {
-      rc = MDBX_TXN_FULL;
-      goto fail;
-    }
-
     MDBX_cursor_couple recur;
     for (MDBX_cursor_op op = MDBX_FIRST;;
          op = (flags & MDBX_LIFORECLAIM) ? MDBX_PREV : MDBX_NEXT) {
@@ -8185,6 +8176,11 @@ skip_cache:
       }
 
       if (op == MDBX_FIRST) { /* 1st iteration, setup cursor, etc */
+        if (unlikely(txn->tw.dirtyroom < txn->mt_dbs[FREE_DBI].md_depth) &&
+            !(txn->mt_dbistate[FREE_DBI] & DBI_DIRTY)) {
+          /* If our dirty list is already full, we can't touch GC */
+          flags &= ~MDBX_ALLOC_GC;
+        }
         if (unlikely(!(flags & MDBX_ALLOC_GC)))
           break /* reclaiming is prohibited for now */;
 
@@ -8295,6 +8291,21 @@ skip_cache:
         goto fail;
       }
       const unsigned gc_len = MDBX_PNL_SIZE(gc_pnl);
+      /* TODO: provide a user-configurable threshold */
+      const unsigned threshold_2_stop_gc_reclaiming = MDBX_PNL_MAX / 2;
+      if (unlikely(gc_len + MDBX_PNL_SIZE(txn->tw.reclaimed_pglist) >
+                   threshold_2_stop_gc_reclaiming)) {
+        /* Stop reclaiming to avoid overflow the page list.
+         * This is a rare case while search for a continuously multi-page region
+         * in a large database. https://github.com/erthink/libmdbx/issues/123 */
+        flags -= MDBX_ALLOC_GC;
+        if (unlikely(flags == 0)) {
+          /* Oh, we can't do anything */
+          rc = MDBX_TXN_FULL;
+          goto fail;
+        }
+        break;
+      }
       rc = mdbx_pnl_need(&txn->tw.reclaimed_pglist, gc_len);
       if (unlikely(rc != MDBX_SUCCESS))
         goto fail;
@@ -15152,7 +15163,7 @@ static int mdbx_cursor_set(MDBX_cursor *mc, MDBX_val *key, MDBX_val *data,
     if (!mc->mc_top) {
       /* There are no other pages */
       mc->mc_ki[mc->mc_top] = 0;
-      if (op == MDBX_SET_RANGE && exactp == &stub_exactp) {
+      if (op == MDBX_SET_RANGE) {
         rc = 0;
         goto set1;
       } else
@@ -15171,7 +15182,7 @@ static int mdbx_cursor_set(MDBX_cursor *mc, MDBX_val *key, MDBX_val *data,
 
 set2:
   node = mdbx_node_search(mc, &aligned_key, exactp);
-  if (exactp != &stub_exactp && !*exactp) {
+  if (!*exactp && !(op == MDBX_SET_RANGE || op == MDBX_GET_BOTH_RANGE)) {
     /* MDBX_SET specified and not an exact match. */
     return MDBX_NOTFOUND;
   }
@@ -18482,7 +18493,6 @@ static int mdbx_cursor_del0(MDBX_cursor *mc) {
   MDBX_page *mp;
   indx_t ki;
   unsigned nkeys;
-  MDBX_cursor *m2, *m3;
   MDBX_dbi dbi = mc->mc_dbi;
 
   mdbx_cassert(mc, IS_LEAF(mc->mc_pg[mc->mc_top]));
@@ -18492,8 +18502,8 @@ static int mdbx_cursor_del0(MDBX_cursor *mc) {
   mc->mc_db->md_entries--;
 
   /* Adjust other cursors pointing to mp */
-  for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2 = m2->mc_next) {
-    m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2;
+  for (MDBX_cursor *m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2 = m2->mc_next) {
+    MDBX_cursor *m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2;
     if (m3 == mc || !(m2->mc_flags & m3->mc_flags & C_INITIALIZED))
       continue;
     if (m3->mc_snum < mc->mc_snum)
@@ -18536,10 +18546,10 @@ static int mdbx_cursor_del0(MDBX_cursor *mc) {
                        ((mc->mc_flags & C_SUB) && mc->mc_db->md_entries == 0 &&
                         nkeys == 0));
 
-  /* Adjust other cursors pointing to mp */
-  for (m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2 = m2->mc_next) {
-    m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2;
-    if (m3 == mc || !(m2->mc_flags & m3->mc_flags & C_INITIALIZED))
+  /* Adjust this and other cursors pointing to mp */
+  for (MDBX_cursor *m2 = mc->mc_txn->mt_cursors[dbi]; m2; m2 = m2->mc_next) {
+    MDBX_cursor *m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2;
+    if (!(m2->mc_flags & m3->mc_flags & C_INITIALIZED))
       continue;
     if (m3->mc_snum < mc->mc_snum)
       continue;
@@ -18557,7 +18567,8 @@ static int mdbx_cursor_del0(MDBX_cursor *mc) {
       }
       if (m3->mc_ki[mc->mc_top] >= ki ||
           /* moved to right sibling */ m3->mc_pg[mc->mc_top] != mp) {
-        if (m3->mc_xcursor && (m3->mc_flags & C_EOF) == 0) {
+        mdbx_cassert(m3, (m3->mc_flags & C_EOF) == 0);
+        if (m3->mc_xcursor) {
           MDBX_node *node =
               page_node(m3->mc_pg[m3->mc_top], m3->mc_ki[m3->mc_top]);
           /* If this node has dupdata, it may need to be reinited
@@ -18583,39 +18594,6 @@ static int mdbx_cursor_del0(MDBX_cursor *mc) {
       }
     }
   }
-
-  /* Adjust THIS cursor */
-  if (unlikely(mc->mc_ki[mc->mc_top] >= nkeys)) {
-    rc = mdbx_cursor_sibling(mc, SIBLING_RIGHT);
-    if (unlikely(rc == MDBX_NOTFOUND)) {
-      mc->mc_flags |= C_EOF;
-      return MDBX_SUCCESS;
-    }
-    if (unlikely(rc != MDBX_SUCCESS))
-      goto bailout;
-  }
-  if (mc->mc_xcursor) {
-    MDBX_node *node = page_node(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
-    /* If this node has dupdata, it may need to be reinited
-     * because its data has moved.
-     * If the xcursor was not inited it must be reinited.
-     * Else if node points to a subDB, nothing is needed. */
-    if (node_flags(node) & F_DUPDATA) {
-      if (mc->mc_xcursor->mx_cursor.mc_flags & C_INITIALIZED) {
-        if (!(node_flags(node) & F_SUBDATA))
-          mc->mc_xcursor->mx_cursor.mc_pg[0] = node_data(node);
-      } else {
-        rc = mdbx_xcursor_init1(mc, node, mc->mc_pg[mc->mc_top]);
-        if (unlikely(rc != MDBX_SUCCESS))
-          goto bailout;
-        rc = mdbx_cursor_first(&mc->mc_xcursor->mx_cursor, NULL, NULL);
-        if (unlikely(rc != MDBX_SUCCESS))
-          goto bailout;
-      }
-    }
-    mc->mc_xcursor->mx_cursor.mc_flags |= C_DEL;
-  }
-  mc->mc_flags |= C_DEL;
 
   mdbx_cassert(mc, rc == MDBX_SUCCESS);
   if (mdbx_audit_enabled())
@@ -19251,6 +19229,13 @@ static THREAD_RESULT __cold THREAD_CALL mdbx_env_copythr(void *arg) {
   uint8_t *ptr;
   int toggle = 0;
 
+#if defined(EPIPE) && !(defined(_WIN32) || defined(_WIN64))
+  sigset_t sigset;
+  sigemptyset(&sigset);
+  sigaddset(&sigset, SIGPIPE);
+  my->mc_error = pthread_sigmask(SIG_BLOCK, &sigset, NULL);
+#endif /* EPIPE */
+
   mdbx_condpair_lock(&my->mc_condpair);
   while (!my->mc_error) {
     while (!my->mc_new && !my->mc_error) {
@@ -19268,6 +19253,14 @@ static THREAD_RESULT __cold THREAD_CALL mdbx_env_copythr(void *arg) {
     if (wsize > 0 && !my->mc_error) {
       int err = mdbx_write(my->mc_fd, ptr, wsize);
       if (err != MDBX_SUCCESS) {
+#if defined(EPIPE) && !(defined(_WIN32) || defined(_WIN64))
+        if (err == EPIPE) {
+          /* Collect the pending SIGPIPE,
+           * otherwise at least OS X gives it to the process on thread-exit. */
+          int unused;
+          sigwait(&sigset, &unused);
+        }
+#endif /* EPIPE */
         my->mc_error = err;
         goto bailout;
       }
@@ -25254,9 +25247,9 @@ __dll_export
         0,
         9,
         1,
-        43,
-        {"2020-10-21T02:24:39+03:00", "b38491fbcede61bc86e9fd9a1e83913b9de5a1ab", "b0928219c326e3be5dc9557f3123aedf3d345c3c",
-         "v0.9.1-43-gb092821"},
+        54,
+        {"2020-10-24T01:18:46+03:00", "5d62ae342dc68ce4976aa9006fe0ab6a31a8136c", "ca2ecf2289d8d2e60016b1d349f62eff537e76b6",
+         "v0.9.1-54-gca2ecf2"},
         sourcery};
 
 __dll_export

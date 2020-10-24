@@ -283,9 +283,9 @@ func fToMdbx(ctx context.Context, to string) error {
 			return err
 		}
 	}
-
-	if err := fileScanner.Err(); err != nil {
-		fmt.Println(err)
+	err = fileScanner.Err()
+	if err != nil {
+		panic(err)
 	}
 	err = dstTx.Commit(context.Background())
 	if err != nil {
@@ -321,9 +321,6 @@ func toMdbx(ctx context.Context, from, to string) error {
 
 	for name, b := range dbutils.BucketsConfigs {
 		if b.IsDeprecated {
-			continue
-		}
-		if name != dbutils.CurrentStateBucket {
 			continue
 		}
 
