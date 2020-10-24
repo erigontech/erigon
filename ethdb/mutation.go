@@ -22,7 +22,7 @@ var (
 type mutation struct {
 	puts       *btree.BTree
 	mu         sync.RWMutex
-	searchItem *MutationItem
+	searchItem MutationItem
 	size       int
 	db         Database
 }
@@ -54,7 +54,7 @@ func (m *mutation) getMem(table string, key []byte) ([]byte, bool) {
 	defer m.mu.RUnlock()
 	m.searchItem.table = table
 	m.searchItem.key = key
-	i := m.puts.Get(m.searchItem)
+	i := m.puts.Get(&m.searchItem)
 	if i == nil {
 		return nil, false
 	}
@@ -95,7 +95,7 @@ func (m *mutation) hasMem(table string, key []byte) bool {
 	defer m.mu.RUnlock()
 	m.searchItem.table = table
 	m.searchItem.key = key
-	return m.puts.Has(m.searchItem)
+	return m.puts.Has(&m.searchItem)
 }
 
 func (m *mutation) Has(table string, key []byte) (bool, error) {
