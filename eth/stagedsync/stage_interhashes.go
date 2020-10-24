@@ -39,7 +39,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, tmpdir strin
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background())
+		tx, err = db.Begin(context.Background(), true)
 		if err != nil {
 			return err
 		}
@@ -308,7 +308,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background())
+		tx, err = db.Begin(context.Background(), true)
 		if err != nil {
 			return err
 		}

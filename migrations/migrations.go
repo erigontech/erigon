@@ -124,7 +124,7 @@ func (m *Migrator) Apply(db ethdb.Database, tmpdir string) error {
 		uniqueNameCheck[m.Migrations[i].Name] = true
 	}
 
-	tx, err1 := db.Begin(context.Background())
+	tx, err1 := db.Begin(context.Background(), true)
 	if err1 != nil {
 		return err1
 	}

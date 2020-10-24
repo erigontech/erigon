@@ -13,7 +13,7 @@ import (
 
 // BlockReward returns the block reward for this block
 func (api *TgImpl) BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return Issuance{}, err
 	}
@@ -24,7 +24,7 @@ func (api *TgImpl) BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Is
 
 // UncleReward returns the uncle reward for this block
 func (api *TgImpl) UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return Issuance{}, err
 	}
@@ -35,7 +35,7 @@ func (api *TgImpl) UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Is
 
 // Issuance returns the issuance for this block
 func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return Issuance{}, err
 	}

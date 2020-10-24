@@ -539,7 +539,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		// but call .Begin() after hearer/body download stages
 		var tx ethdb.DbWithPendingMutations
 		if canRunCycleInOneTransaction {
-			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB)
+			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB, true)
 			defer tx.Rollback()
 			writeDB = tx
 		} else {
@@ -579,7 +579,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 			var errTx error
 			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background())
+			tx, errTx = tx.Begin(context.Background(), true)
 			return errTx
 		})
 		d.stagedSyncState.OnBeforeUnwind(func(id stages.SyncStage) error {
@@ -594,7 +594,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			}
 			var errTx error
 			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background())
+			tx, errTx = tx.Begin(context.Background(), true)
 			return errTx
 		})
 		d.stagedSyncState.BeforeStageUnwind(stages.Bodies, func() error {
