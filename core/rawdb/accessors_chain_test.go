@@ -256,7 +256,10 @@ func TestCanonicalMappingStorage(t *testing.T) {
 		t.Fatalf("Non existent canonical mapping returned: %v", entry)
 	}
 	// Write and verify the TD in the database
-	WriteCanonicalHash(db, hash, number)
+	err = WriteCanonicalHash(db, hash, number)
+	if err != nil {
+		panic(err)
+	}
 	entry, err = ReadCanonicalHash(db, number)
 	if err != nil {
 		panic(err)
@@ -267,7 +270,10 @@ func TestCanonicalMappingStorage(t *testing.T) {
 		t.Fatalf("Retrieved canonical mapping mismatch: have %v, want %v", entry, hash)
 	}
 	// Delete the TD and verify the execution
-	DeleteCanonicalHash(db, number)
+	err = DeleteCanonicalHash(db, number)
+	if err != nil {
+		panic(err)
+	}
 	entry, err = ReadCanonicalHash(db, number)
 	if err != nil {
 		panic(err)

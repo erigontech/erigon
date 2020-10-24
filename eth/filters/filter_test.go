@@ -88,7 +88,9 @@ func BenchmarkFilters(b *testing.B) {
 		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
 			panic(err)
 		}
-		rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
+		if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
+			panic(err)
+		}
 		rawdb.WriteHeadBlockHash(db, block.Hash())
 		rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), receipts[i])
 	}
@@ -171,7 +173,9 @@ func TestFilters(t *testing.T) {
 		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
 			panic(err)
 		}
-		rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
+		if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
+			panic(err)
+		}
 		rawdb.WriteHeadBlockHash(db, block.Hash())
 		rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), receipts[i])
 	}

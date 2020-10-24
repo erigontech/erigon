@@ -50,17 +50,19 @@ func ReadCanonicalHash(db DatabaseReader, number uint64) (common.Hash, error) {
 }
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
-func WriteCanonicalHash(db DatabaseWriter, hash common.Hash, number uint64) {
+func WriteCanonicalHash(db DatabaseWriter, hash common.Hash, number uint64) error {
 	if err := db.Put(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number), hash.Bytes()); err != nil {
-		log.Crit("Failed to store number to hash mapping", "err", err)
+		return fmt.Errorf("failed to store number to hash mapping: %w", err)
 	}
+	return nil
 }
 
 // DeleteCanonicalHash removes the number to hash canonical mapping.
-func DeleteCanonicalHash(db DatabaseDeleter, number uint64) {
+func DeleteCanonicalHash(db DatabaseDeleter, number uint64) error {
 	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number)); err != nil {
-		log.Crit("Failed to delete number to hash mapping", "err", err)
+		return fmt.Errorf("failed to delete number to hash mapping: %w", err)
 	}
+	return nil
 }
 
 // ReadAllHashes retrieves all the hashes assigned to blocks at a certain heights,

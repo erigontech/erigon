@@ -247,7 +247,9 @@ func makeChainForBench(db ethdb.Database, full bool, count uint64) {
 		ctx := context.Background()
 
 		rawdb.WriteHeader(ctx, db, header)
-		rawdb.WriteCanonicalHash(db, hash, n)
+		if err := rawdb.WriteCanonicalHash(db, hash, n); err != nil {
+			panic(err)
+		}
 		if err := rawdb.WriteTd(db, hash, n, big.NewInt(int64(n+1))); err != nil {
 			panic(err)
 		}

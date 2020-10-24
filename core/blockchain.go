@@ -546,7 +546,9 @@ func (bc *BlockChain) ResetWithGenesisBlock(genesis *types.Block) error {
 	if err := rawdb.WriteBlock(context.Background(), bc.db, genesis); err != nil {
 		return err
 	}
-	bc.writeHeadBlock(genesis)
+	if err := bc.writeHeadBlock(genesis); err != nil {
+		return err
+	}
 
 	// Last update all in-memory chain markers
 	bc.genesisBlock = genesis
@@ -597,17 +599,19 @@ func (bc *BlockChain) ExportN(w io.Writer, first uint64, last uint64) error {
 // or if they are on a different side chain.
 //
 // Note, this function assumes that the `mu` mutex is held!
-func (bc *BlockChain) writeHeadBlock(block *types.Block) {
+func (bc *BlockChain) writeHeadBlock(block *types.Block) error {
 	// If the block is on a side chain or an unknown one, force other heads onto it too
 	h, err := rawdb.ReadCanonicalHash(bc.db, block.NumberU64())
 	if err != nil {
-		log.Warn("ReadCanonicalHash failed", "err", err)
+		return err
 	}
 
 	updateHeads := h != block.Hash()
 
 	// Add the block to the canonical chain number scheme and mark as the head
-	rawdb.WriteCanonicalHash(bc.db, block.Hash(), block.NumberU64())
+	if err := rawdb.WriteCanonicalHash(bc.db, block.Hash(), block.NumberU64()); err != nil {
+		log.Error("failed WriteCanonicalHash", "err", err)
+	}
 	if bc.enableTxLookupIndex && !bc.cacheConfig.DownloadOnly {
 		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
@@ -625,6 +629,7 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	}
 	bc.currentBlock.Store(block)
 	headBlockGauge.Update(int64(block.NumberU64()))
+	return nil
 }
 
 // Genesis retrieves the chain's genesis block.
@@ -1212,7 +1217,9 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	status = CanonStatTy
 
 	// Set new head.
-	bc.writeHeadBlock(block)
+	if err := bc.writeHeadBlock(block); err != nil {
+		return NonStatTy, err
+	}
 	bc.futureBlocks.Remove(block.Hash())
 
 	bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
@@ -1849,13 +1856,13 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	}
 	// Delete the old chain
 	for _, oldBlock := range oldChain {
-		rawdb.DeleteCanonicalHash(bc.db, oldBlock.NumberU64())
+		_ = rawdb.DeleteCanonicalHash(bc.db, oldBlock.NumberU64())
 	}
-	bc.writeHeadBlock(commonBlock)
+	_ = bc.writeHeadBlock(commonBlock)
 	// Insert the new chain, taking care of the proper incremental order
 	for i := len(newChain) - 1; i >= 0; i-- {
 		// insert the block in the canonical way, re-writing history
-		bc.writeHeadBlock(newChain[i])
+		_ = bc.writeHeadBlock(newChain[i])
 
 		// Collect reborn logs due to chain reorg
 		collectLogs(newChain[i].Hash(), false)
@@ -1869,7 +1876,7 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	// When transactions get deleted from the database, the receipts that were
 	// created in the fork must also be deleted
 	for _, tx := range types.TxDifference(deletedTxs, addedTxs) {
-		rawdb.DeleteTxLookupEntry(bc.db, tx.Hash())
+		_ = rawdb.DeleteTxLookupEntry(bc.db, tx.Hash())
 	}
 	// Delete any canonical number assignments above the new head
 	number := bc.CurrentBlock().NumberU64()
@@ -1881,7 +1888,7 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		if hash == (common.Hash{}) {
 			break
 		}
-		rawdb.DeleteCanonicalHash(bc.db, i)
+		_ = rawdb.DeleteCanonicalHash(bc.db, i)
 	}
 
 	// If any logs need to be fired, do it now. In theory we could avoid creating

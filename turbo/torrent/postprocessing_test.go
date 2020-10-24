@@ -48,7 +48,10 @@ func TestHeadersGenerateIndex(t *testing.T) {
 
 	db := ethdb.NewLMDB().InMem().WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
 	//we need genesis
-	rawdb.WriteCanonicalHash(ethdb.NewObjectDatabase(db), headers[0].Hash(), headers[0].Number.Uint64())
+	err = rawdb.WriteCanonicalHash(ethdb.NewObjectDatabase(db), headers[0].Hash(), headers[0].Number.Uint64())
+	if err != nil {
+		t.Fatal(err)
+	}
 	snKV := ethdb.NewLMDB().Path(snPath).ReadOnly().WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
 
 	snKV = ethdb.NewSnapshotKV().For(dbutils.HeaderPrefix).For(dbutils.SnapshotInfoBucket).SnapshotDB(snKV).DB(db).MustOpen()
