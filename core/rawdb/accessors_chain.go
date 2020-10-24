@@ -605,17 +605,16 @@ func FindCommonAncestor(db DatabaseReader, a, b *types.Header) *types.Header {
 	return a
 }
 
-func ReadBlockByNumber(db DatabaseReader, number uint64) *types.Block {
+func ReadBlockByNumber(db DatabaseReader, number uint64) (*types.Block, error) {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
-		log.Error("ReadCanonicalHash failed", "err", err)
-		return nil
+		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
 	if hash == (common.Hash{}) {
-		return nil
+		return nil, nil
 	}
 
-	return ReadBlock(db, hash, number)
+	return ReadBlock(db, hash, number), nil
 }
 
 func ReadBlockByHash(db DatabaseReader, hash common.Hash) *types.Block {

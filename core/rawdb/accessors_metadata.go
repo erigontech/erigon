@@ -18,8 +18,11 @@ package rawdb
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -54,17 +57,19 @@ func WriteDatabaseVersion(db DatabaseWriter, version uint64) {
 }
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
-func ReadChainConfig(db DatabaseReader, hash common.Hash) *params.ChainConfig {
-	data, _ := db.Get(dbutils.ConfigPrefix, hash[:])
+func ReadChainConfig(db DatabaseReader, hash common.Hash) (*params.ChainConfig, error) {
+	data, err := db.Get(dbutils.ConfigPrefix, hash[:])
+	if err != nil && errors.Is(err, ethdb.ErrKeyNotFound) {
+		return nil, err
+	}
 	if len(data) == 0 {
-		return nil
+		return nil, nil
 	}
 	var config params.ChainConfig
 	if err := json.Unmarshal(data, &config); err != nil {
-		log.Error("Invalid chain config JSON", "hash", hash, "err", err)
-		return nil
+		return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
 	}
-	return &config
+	return &config, nil
 }
 
 // WriteChainConfig writes the chain config settings to the database.

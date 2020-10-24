@@ -28,7 +28,10 @@ func (api *TgImpl) Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHas
 	}
 	defer tx.Rollback()
 
-	chainConfig, genesisHash := getChainConfigWithGenesis(tx)
+	chainConfig, genesisHash, err := getChainConfigWithGenesis(tx)
+	if err != nil {
+		return Forks{}, err
+	}
 	forksBlocks := forkid.GatherForks(chainConfig)
 
 	lastAddedIdx := -1

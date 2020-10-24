@@ -199,7 +199,10 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
 		return newcfg, common.Hash{}, nil, err
 	}
-	storedcfg := rawdb.ReadChainConfig(db, stored)
+	storedcfg, err := rawdb.ReadChainConfig(db, stored)
+	if err != nil {
+		return newcfg, common.Hash{}, nil, err
+	}
 	if overwrite || storedcfg == nil {
 		log.Warn("Found genesis block without chain config")
 		rawdb.WriteChainConfig(db, stored, newcfg)
