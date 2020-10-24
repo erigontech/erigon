@@ -30,10 +30,6 @@ func NewETHBACKENDClient(cc grpc.ClientConnInterface) ETHBACKENDClient {
 	return &eTHBACKENDClient{cc}
 }
 
-var eTHBACKENDAddStreamDesc = &grpc.StreamDesc{
-	StreamName: "Add",
-}
-
 func (c *eTHBACKENDClient) Add(ctx context.Context, in *TxRequest, opts ...grpc.CallOption) (*AddReply, error) {
 	out := new(AddReply)
 	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/Add", in, out, opts...)
@@ -41,10 +37,6 @@ func (c *eTHBACKENDClient) Add(ctx context.Context, in *TxRequest, opts ...grpc.
 		return nil, err
 	}
 	return out, nil
-}
-
-var eTHBACKENDEtherbaseStreamDesc = &grpc.StreamDesc{
-	StreamName: "Etherbase",
 }
 
 func (c *eTHBACKENDClient) Etherbase(ctx context.Context, in *EtherbaseRequest, opts ...grpc.CallOption) (*EtherbaseReply, error) {
@@ -56,10 +48,6 @@ func (c *eTHBACKENDClient) Etherbase(ctx context.Context, in *EtherbaseRequest, 
 	return out, nil
 }
 
-var eTHBACKENDNetVersionStreamDesc = &grpc.StreamDesc{
-	StreamName: "NetVersion",
-}
-
 func (c *eTHBACKENDClient) NetVersion(ctx context.Context, in *NetVersionRequest, opts ...grpc.CallOption) (*NetVersionReply, error) {
 	out := new(NetVersionReply)
 	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/NetVersion", in, out, opts...)
@@ -69,134 +57,113 @@ func (c *eTHBACKENDClient) NetVersion(ctx context.Context, in *NetVersionRequest
 	return out, nil
 }
 
-// ETHBACKENDService is the service API for ETHBACKEND service.
-// Fields should be assigned to their respective handler implementations only before
-// RegisterETHBACKENDService is called.  Any unassigned fields will result in the
-// handler for that method returning an Unimplemented error.
-type ETHBACKENDService struct {
-	Add        func(context.Context, *TxRequest) (*AddReply, error)
-	Etherbase  func(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
-	NetVersion func(context.Context, *NetVersionRequest) (*NetVersionReply, error)
+// ETHBACKENDServer is the server API for ETHBACKEND service.
+// All implementations must embed UnimplementedETHBACKENDServer
+// for forward compatibility
+type ETHBACKENDServer interface {
+	Add(context.Context, *TxRequest) (*AddReply, error)
+	Etherbase(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
+	NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error)
+	mustEmbedUnimplementedETHBACKENDServer()
 }
 
-func (s *ETHBACKENDService) add(_ interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	if s.Add == nil {
-		return nil, status.Errorf(codes.Unimplemented, "method Add not implemented")
-	}
+// UnimplementedETHBACKENDServer must be embedded to have forward compatible implementations.
+type UnimplementedETHBACKENDServer struct {
+}
+
+func (UnimplementedETHBACKENDServer) Add(context.Context, *TxRequest) (*AddReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Add not implemented")
+}
+func (UnimplementedETHBACKENDServer) Etherbase(context.Context, *EtherbaseRequest) (*EtherbaseReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Etherbase not implemented")
+}
+func (UnimplementedETHBACKENDServer) NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NetVersion not implemented")
+}
+func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
+
+// UnsafeETHBACKENDServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ETHBACKENDServer will
+// result in compilation errors.
+type UnsafeETHBACKENDServer interface {
+	mustEmbedUnimplementedETHBACKENDServer()
+}
+
+func RegisterETHBACKENDServer(s grpc.ServiceRegistrar, srv ETHBACKENDServer) {
+	s.RegisterService(&_ETHBACKEND_serviceDesc, srv)
+}
+
+func _ETHBACKEND_Add_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TxRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return s.Add(ctx, in)
+		return srv.(ETHBACKENDServer).Add(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
-		Server:     s,
+		Server:     srv,
 		FullMethod: "/remote.ETHBACKEND/Add",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return s.Add(ctx, req.(*TxRequest))
+		return srv.(ETHBACKENDServer).Add(ctx, req.(*TxRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
-func (s *ETHBACKENDService) etherbase(_ interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	if s.Etherbase == nil {
-		return nil, status.Errorf(codes.Unimplemented, "method Etherbase not implemented")
-	}
+
+func _ETHBACKEND_Etherbase_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(EtherbaseRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return s.Etherbase(ctx, in)
+		return srv.(ETHBACKENDServer).Etherbase(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
-		Server:     s,
+		Server:     srv,
 		FullMethod: "/remote.ETHBACKEND/Etherbase",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return s.Etherbase(ctx, req.(*EtherbaseRequest))
+		return srv.(ETHBACKENDServer).Etherbase(ctx, req.(*EtherbaseRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
-func (s *ETHBACKENDService) netVersion(_ interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	if s.NetVersion == nil {
-		return nil, status.Errorf(codes.Unimplemented, "method NetVersion not implemented")
-	}
+
+func _ETHBACKEND_NetVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(NetVersionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return s.NetVersion(ctx, in)
+		return srv.(ETHBACKENDServer).NetVersion(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
-		Server:     s,
+		Server:     srv,
 		FullMethod: "/remote.ETHBACKEND/NetVersion",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return s.NetVersion(ctx, req.(*NetVersionRequest))
+		return srv.(ETHBACKENDServer).NetVersion(ctx, req.(*NetVersionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// RegisterETHBACKENDService registers a service implementation with a gRPC server.
-func RegisterETHBACKENDService(s grpc.ServiceRegistrar, srv *ETHBACKENDService) {
-	sd := grpc.ServiceDesc{
-		ServiceName: "remote.ETHBACKEND",
-		Methods: []grpc.MethodDesc{
-			{
-				MethodName: "Add",
-				Handler:    srv.add,
-			},
-			{
-				MethodName: "Etherbase",
-				Handler:    srv.etherbase,
-			},
-			{
-				MethodName: "NetVersion",
-				Handler:    srv.netVersion,
-			},
+var _ETHBACKEND_serviceDesc = grpc.ServiceDesc{
+	ServiceName: "remote.ETHBACKEND",
+	HandlerType: (*ETHBACKENDServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Add",
+			Handler:    _ETHBACKEND_Add_Handler,
 		},
-		Streams:  []grpc.StreamDesc{},
-		Metadata: "remote/ethbackend.proto",
-	}
-
-	s.RegisterService(&sd, nil)
-}
-
-// NewETHBACKENDService creates a new ETHBACKENDService containing the
-// implemented methods of the ETHBACKEND service in s.  Any unimplemented
-// methods will result in the gRPC server returning an UNIMPLEMENTED status to the client.
-// This includes situations where the method handler is misspelled or has the wrong
-// signature.  For this reason, this function should be used with great care and
-// is not recommended to be used by most users.
-func NewETHBACKENDService(s interface{}) *ETHBACKENDService {
-	ns := &ETHBACKENDService{}
-	if h, ok := s.(interface {
-		Add(context.Context, *TxRequest) (*AddReply, error)
-	}); ok {
-		ns.Add = h.Add
-	}
-	if h, ok := s.(interface {
-		Etherbase(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
-	}); ok {
-		ns.Etherbase = h.Etherbase
-	}
-	if h, ok := s.(interface {
-		NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error)
-	}); ok {
-		ns.NetVersion = h.NetVersion
-	}
-	return ns
-}
-
-// UnstableETHBACKENDService is the service API for ETHBACKEND service.
-// New methods may be added to this interface if they are added to the service
-// definition, which is not a backward-compatible change.  For this reason,
-// use of this type is not recommended.
-type UnstableETHBACKENDService interface {
-	Add(context.Context, *TxRequest) (*AddReply, error)
-	Etherbase(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
-	NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error)
+		{
+			MethodName: "Etherbase",
+			Handler:    _ETHBACKEND_Etherbase_Handler,
+		},
+		{
+			MethodName: "NetVersion",
+			Handler:    _ETHBACKEND_NetVersion_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "remote/ethbackend.proto",
 }

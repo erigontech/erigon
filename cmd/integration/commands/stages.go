@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"path"
 	"runtime"
 	"sort"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
@@ -277,6 +279,8 @@ func init() {
 }
 
 func stageSenders(ctx context.Context) error {
+	tmpdir := path.Join(datadir, etl.TmpDirName)
+
 	db := openDatabase()
 	defer db.Close()
 
@@ -314,7 +318,7 @@ func stageSenders(ctx context.Context) error {
 		Now:             time.Now(),
 	}
 
-	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, datadir, ch)
+	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, tmpdir, ch)
 }
 
 func stageExec(ctx context.Context) error {
@@ -362,11 +366,12 @@ func stageExec(ctx context.Context) error {
 
 func stageIHash(ctx context.Context) error {
 	core.UsePlainStateExecution = true
+	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	db := openDatabase()
 	defer db.Close()
 
-	if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
+	if err := migrations.NewMigrator().Apply(db, tmpdir); err != nil {
 		panic(err)
 	}
 
@@ -393,13 +398,14 @@ func stageIHash(ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
-		return stagedsync.UnwindIntermediateHashesStage(u, stage5, db, datadir, ch)
+		return stagedsync.UnwindIntermediateHashesStage(u, stage5, db, tmpdir, ch)
 	}
-	return stagedsync.SpawnIntermediateHashesStage(stage5, db, datadir, ch)
+	return stagedsync.SpawnIntermediateHashesStage(stage5, db, tmpdir, ch)
 }
 
 func stageHashState(ctx context.Context) error {
 	core.UsePlainStateExecution = true
+	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	db := openDatabase()
 	defer db.Close()
@@ -427,13 +433,14 @@ func stageHashState(ctx context.Context) error {
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6.BlockNumber - unwind}
-		return stagedsync.UnwindHashStateStage(u, stage6, db, datadir, ch)
+		return stagedsync.UnwindHashStateStage(u, stage6, db, tmpdir, ch)
 	}
-	return stagedsync.SpawnHashStateStage(stage6, db, datadir, ch)
+	return stagedsync.SpawnHashStateStage(stage6, db, tmpdir, ch)
 }
 
 func stageLogIndex(ctx context.Context) error {
 	core.UsePlainStateExecution = true
+	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	db := openDatabase()
 	defer db.Close()
@@ -458,7 +465,7 @@ func stageLogIndex(ctx context.Context) error {
 		return stagedsync.UnwindLogIndex(u, s, db, ch)
 	}
 
-	if err := stagedsync.SpawnLogIndex(s, db, datadir, ch); err != nil {
+	if err := stagedsync.SpawnLogIndex(s, db, tmpdir, ch); err != nil {
 		return err
 	}
 	return nil
@@ -466,6 +473,7 @@ func stageLogIndex(ctx context.Context) error {
 
 func stageCallTraces(ctx context.Context) error {
 	core.UsePlainStateExecution = true
+	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	db := openDatabase()
 	defer db.Close()
@@ -494,7 +502,7 @@ func stageCallTraces(ctx context.Context) error {
 		return stagedsync.UnwindCallTraces(u, s, db, bc.Config(), bc, ch)
 	}
 
-	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, datadir, ch); err != nil {
+	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, tmpdir, ch); err != nil {
 		return err
 	}
 	return nil
@@ -502,6 +510,7 @@ func stageCallTraces(ctx context.Context) error {
 
 func stageHistory(ctx context.Context) error {
 	core.UsePlainStateExecution = true
+	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	db := openDatabase()
 	defer db.Close()
@@ -532,10 +541,10 @@ func stageHistory(ctx context.Context) error {
 		// TODO
 	}
 
-	if err := stagedsync.SpawnAccountHistoryIndex(stage7, db, datadir, ch); err != nil {
+	if err := stagedsync.SpawnAccountHistoryIndex(stage7, db, tmpdir, ch); err != nil {
 		return err
 	}
-	if err := stagedsync.SpawnStorageHistoryIndex(stage8, db, datadir, ch); err != nil {
+	if err := stagedsync.SpawnStorageHistoryIndex(stage8, db, tmpdir, ch); err != nil {
 		return err
 	}
 	return nil
@@ -543,6 +552,7 @@ func stageHistory(ctx context.Context) error {
 
 func stageTxLookup(ctx context.Context) error {
 	core.UsePlainStateExecution = true
+	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	db := openDatabase()
 	defer db.Close()
@@ -568,10 +578,10 @@ func stageTxLookup(ctx context.Context) error {
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.TxLookup, UnwindPoint: stage9.BlockNumber - unwind}
 		s := progress(stages.TxLookup)
-		return stagedsync.UnwindTxLookup(u, s, db, datadir, ch)
+		return stagedsync.UnwindTxLookup(u, s, db, tmpdir, ch)
 	}
 
-	return stagedsync.SpawnTxLookup(stage9, db, datadir, ch)
+	return stagedsync.SpawnTxLookup(stage9, db, tmpdir, ch)
 }
 
 func printAllStages(_ context.Context) error {
@@ -630,7 +640,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{},
-	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, "", int(batchSize), quitCh, nil, nil, func() error { return nil }, hook)
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), int(batchSize), quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}

@@ -164,7 +164,7 @@ type Downloader struct {
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
 
 	storageMode ethdb.StorageMode
-	datadir     string
+	tmpdir      string
 	batchSize   int
 
 	headersState    *stagedsync.StageState
@@ -283,8 +283,8 @@ func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 }
 
 // DataDir sets the directory where download is allowed to create temporary files
-func (d *Downloader) SetDataDir(datadir string) {
-	d.datadir = datadir
+func (d *Downloader) SetTmpDir(tmpdir string) {
+	d.tmpdir = tmpdir
 }
 
 func (d *Downloader) SetBatchSize(batchSize int) {
@@ -539,7 +539,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		// but call .Begin() after hearer/body download stages
 		var tx ethdb.DbWithPendingMutations
 		if canRunCycleInOneTransaction {
-			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB)
+			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB, true)
 			defer tx.Rollback()
 			writeDB = tx
 		} else {
@@ -558,7 +558,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			writeDB,
 			p.id,
 			d.storageMode,
-			d.datadir,
+			d.tmpdir,
 			d.batchSize,
 			d.quitCh,
 			fetchers,
@@ -579,7 +579,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 			var errTx error
 			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background())
+			tx, errTx = tx.Begin(context.Background(), true)
 			return errTx
 		})
 		d.stagedSyncState.OnBeforeUnwind(func(id stages.SyncStage) error {
@@ -594,7 +594,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			}
 			var errTx error
 			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background())
+			tx, errTx = tx.Begin(context.Background(), true)
 			return errTx
 		})
 		d.stagedSyncState.BeforeStageUnwind(stages.Bodies, func() error {

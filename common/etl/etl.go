@@ -80,7 +80,7 @@ func Transform(
 	db ethdb.Database,
 	fromBucket string,
 	toBucket string,
-	datadir string,
+	tmpdir string,
 	extractFunc ExtractFunc,
 	loadFunc LoadFunc,
 	args TransformArgs,
@@ -90,7 +90,7 @@ func Transform(
 		bufferSize = args.BufferSize
 	}
 	buffer := getBufferByType(args.BufferType, bufferSize)
-	collector := NewCollector(datadir, buffer)
+	collector := NewCollector(tmpdir, buffer)
 
 	t := time.Now()
 	if err := extractBucketIntoFiles(logPrefix, db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit, args.LogDetailsExtract); err != nil {

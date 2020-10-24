@@ -108,7 +108,10 @@ Error: %v
 	if rawdb.ReadHeader(db, headers[0].ParentHash, headers[0].Number.Uint64()-1) == nil {
 		return false, 0, fmt.Errorf("%s: unknown parent %x", logPrefix, headers[0].ParentHash)
 	}
-	parentTd := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
+	parentTd, err := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
+	if err != nil {
+		return false, 0, err
+	}
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
 		if i > 0 {
@@ -145,7 +148,10 @@ Error: %v
 	}
 	headHash := rawdb.ReadHeadHeaderHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
-	localTd := rawdb.ReadTd(db, headHash, *headNumber)
+	localTd, err := rawdb.ReadTd(db, headHash, *headNumber)
+	if err != nil {
+		return false, 0, err
+	}
 	lastHeader := headers[len(headers)-1]
 	// If the total difficulty is higher than our known, add it to the canonical chain
 	// Second clause in the if statement reduces the vulnerability to selfish mining.
@@ -200,7 +206,9 @@ Error: %v
 		if err != nil {
 			log.Crit(fmt.Sprintf("[%s] Failed to RLP encode header", logPrefix), "err", err)
 		}
-		rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td)
+		if err := rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td); err != nil {
+			log.Crit(fmt.Sprintf("[%s] Failed to WriteTd", logPrefix), "err", err)
+		}
 		if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
 			log.Crit(fmt.Sprintf("[%s] Failed to store header", logPrefix), "err", err)
 		}

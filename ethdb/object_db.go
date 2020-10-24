@@ -112,7 +112,7 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
 	var has bool
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(bucket, key)
+		v, err := tx.GetOne(bucket, key)
 		if err != nil {
 			return err
 		}
@@ -134,7 +134,7 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
 	var dat []byte
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(bucket, key)
+		v, err := tx.GetOne(bucket, key)
 		if err != nil {
 			return err
 		}
@@ -448,9 +448,9 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 	return m
 }
 
-func (db *ObjectDatabase) Begin(ctx context.Context) (DbWithPendingMutations, error) {
-	batch := &TxDb{db: db}
-	if err := batch.begin(ctx, nil); err != nil {
+func (db *ObjectDatabase) Begin(ctx context.Context, writable bool) (DbWithPendingMutations, error) {
+	batch := &TxDb{db: db, writable: writable}
+	if err := batch.begin(ctx, nil, writable); err != nil {
 		panic(err)
 	}
 	return batch, nil
@@ -504,7 +504,7 @@ func (t MultiPutTuples) Swap(i, j int) {
 func Get(tx Tx, bucket string, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
-	v, err := tx.Get(bucket, key)
+	v, err := tx.GetOne(bucket, key)
 	if err != nil {
 		return nil, err
 	}

@@ -22,13 +22,16 @@ func (api *TgImpl) Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHas
 		return Forks{}, err
 	}
 
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, false)
 	if err != nil {
 		return Forks{}, err
 	}
 	defer tx.Rollback()
 
-	chainConfig, genesisHash := getChainConfigWithGenesis(tx)
+	chainConfig, genesisHash, err := getChainConfigWithGenesis(tx)
+	if err != nil {
+		return Forks{}, err
+	}
 	forksBlocks := forkid.GatherForks(chainConfig)
 
 	lastAddedIdx := -1

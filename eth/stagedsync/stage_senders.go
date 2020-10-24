@@ -33,7 +33,7 @@ type Stage3Config struct {
 	Now             time.Time
 }
 
-func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, datadir string, quitCh <-chan struct{}) error {
+func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, tmpdir string, quitCh <-chan struct{}) error {
 	prevStageProgress, _, errStart := stages.GetStageProgress(db, stages.Bodies)
 	if errStart != nil {
 		return errStart
@@ -128,7 +128,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		close(out)
 	}()
 
-	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	for j := range out {

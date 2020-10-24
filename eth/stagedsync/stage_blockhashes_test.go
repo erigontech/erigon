@@ -19,7 +19,9 @@ func TestBlockHashStage(t *testing.T) {
 
 	// prepare db so it works with our test
 	rawdb.WriteHeaderNumber(db, origin.Hash(), 0)
-	rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty)
+	if err := rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty); err != nil {
+		panic(err)
+	}
 	rawdb.WriteHeader(context.TODO(), db, origin)
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
 	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)

@@ -71,8 +71,8 @@ type Tx interface {
 	Cursor(bucket string) Cursor
 	CursorDupSort(bucket string) CursorDupSort   // CursorDupSort - can be used if bucket has lmdb.DupSort flag
 	CursorDupFixed(bucket string) CursorDupFixed // CursorDupSort - can be used if bucket has lmdb.DupFixed flag
-	Get(bucket string, key []byte) (val []byte, err error)
-	Has(bucket string, key []byte) (bool, error)
+	GetOne(bucket string, key []byte) (val []byte, err error)
+	HasOne(bucket string, key []byte) (bool, error)
 
 	Commit(ctx context.Context) error // Commit all the operations of a transaction into the database.
 	Rollback()                        // Rollback - abandon all the operations of the transaction instead of saving them.

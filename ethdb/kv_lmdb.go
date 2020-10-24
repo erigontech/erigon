@@ -590,7 +590,7 @@ func (c *LmdbCursor) Prefetch(v uint) Cursor {
 	return c
 }
 
-func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
+func (tx *lmdbTx) GetOne(bucket string, key []byte) ([]byte, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
@@ -622,7 +622,7 @@ func (tx *lmdbTx) Get(bucket string, key []byte) ([]byte, error) {
 	return val, nil
 }
 
-func (tx *lmdbTx) Has(bucket string, key []byte) (bool, error) {
+func (tx *lmdbTx) HasOne(bucket string, key []byte) (bool, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen

@@ -27,7 +27,7 @@ const (
 
 type BlockGetter interface {
 	// GetBlockByHash retrieves a block from the database by hash, caching it if found.
-	GetBlockByHash(hash common.Hash) *types.Block
+	GetBlockByHash(hash common.Hash) (*types.Block, error)
 	// GetBlock retrieves a block from the database by hash and number,
 	// caching it if found.
 	GetBlock(hash common.Hash, number uint64) *types.Block
@@ -36,7 +36,10 @@ type BlockGetter interface {
 // computeTxEnv returns the execution environment of a certain transaction.
 func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, tx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.Context, *state.IntraBlockState, *state2.StateReader, error) {
 	// Create the parent state database
-	block := blockGetter.GetBlockByHash(blockHash)
+	block, err := blockGetter.GetBlockByHash(blockHash)
+	if err != nil {
+		return nil, vm.Context{}, nil, nil, err
+	}
 	if block == nil {
 		return nil, vm.Context{}, nil, nil, fmt.Errorf("block %x not found", blockHash)
 	}

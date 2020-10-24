@@ -152,6 +152,9 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
 			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
+				if err := s.SetCurrentStage(unwind.Stage); err != nil {
+					return err
+				}
 				if s.onBeforeUnwind != nil {
 					if err := s.onBeforeUnwind(unwind.Stage); err != nil {
 						return err

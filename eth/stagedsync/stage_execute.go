@@ -69,7 +69,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = stateDB.Begin(context.Background())
+		tx, err = stateDB.Begin(context.Background(), true)
 		if err != nil {
 			return err
 		}

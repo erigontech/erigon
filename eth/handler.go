@@ -103,7 +103,7 @@ type ProtocolManager struct {
 	broadcastTxAnnouncesOnly bool // Testing field, disable transaction propagation
 
 	mode          downloader.SyncMode // Sync mode passed from the command line
-	datadir       string
+	tmpdir        string
 	batchSize     int
 	currentHeight uint64 // Atomic variable to contain chain height
 }
@@ -166,10 +166,10 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 	return manager, nil
 }
 
-func (pm *ProtocolManager) SetDataDir(datadir string) {
-	pm.datadir = datadir
+func (pm *ProtocolManager) SetTmpDir(tmpdir string) {
+	pm.tmpdir = tmpdir
 	if pm.downloader != nil {
-		pm.downloader.SetDataDir(datadir)
+		pm.downloader.SetTmpDir(tmpdir)
 	}
 }
 
@@ -190,7 +190,7 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		manager.downloader.Cancel()
 	}
 	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
-	manager.downloader.SetDataDir(manager.datadir)
+	manager.downloader.SetTmpDir(manager.tmpdir)
 	manager.downloader.SetBatchSize(manager.batchSize)
 	manager.downloader.SetStagedSync(manager.stagedSync)
 
