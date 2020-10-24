@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -443,7 +444,7 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:   db,
-		puts: newPuts(),
+		puts: btree.New(32),
 	}
 	return m
 }
