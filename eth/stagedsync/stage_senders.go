@@ -90,7 +90,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	collector := etl.NewCollector(datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	errCh := make(chan error)
 	go func() {
 		defer close(errCh)
