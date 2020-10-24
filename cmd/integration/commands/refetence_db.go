@@ -273,8 +273,6 @@ func fToMdbx(ctx context.Context, to string) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-
-		fmt.Printf("%x, %x\n", kv[0], kv[1])
 	}
 
 	if err := fileScanner.Err(); err != nil {
