@@ -276,7 +276,7 @@ func fToMdbx(ctx context.Context, to string) error {
 			return ctx.Err()
 		}
 
-		if k[0] < uint8(100) {
+		if k[0] < uint8(50) {
 			continue
 		}
 		if err = c.AppendDup(k, v); err != nil {
