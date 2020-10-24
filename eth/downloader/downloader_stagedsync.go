@@ -65,15 +65,15 @@ func (d *Downloader) SpawnBodyDownloadStage(
 			}
 			return true, nil
 		}
-		if len(k) != 8+common.HashLength {
+		if len(k) != 8+common.HashLength && len(k) != 8 {
 			return true, nil
 		}
 		header := new(types.Header)
 		if err1 := rlp.Decode(bytes.NewReader(v), header); err1 != nil {
-			log.Error("Invalid block header RLP", "hash", k[8:], "err", err1)
+			log.Error("Invalid block header RLP", "err", err1)
 			return false, err1
 		}
-		headers[common.BytesToHash(k[8:])] = header
+		headers[header.Hash()] = header
 		return hashCount < len(hashes), nil
 	})
 	if err != nil {

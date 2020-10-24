@@ -1,10 +1,13 @@
 package torrent
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -14,8 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"math/big"
-	"os"
 )
 
 var (
@@ -77,24 +78,21 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 
 	if v == 0 {
 		log.Info("Generate headers hash to number index")
-		headHashBytes, innerErr := db.Get(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash))
-		if innerErr != nil {
-			return innerErr
-		}
 
-		headNumberBytes, innerErr := db.Get(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber))
-		if innerErr != nil {
-			return innerErr
-		}
-
-		headNumber := big.NewInt(0).SetBytes(headNumberBytes).Uint64()
-		headHash := common.BytesToHash(headHashBytes)
-
-		innerErr = etl.Transform(db, dbutils.HeaderPrefix, dbutils.HeaderNumberPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-			if len(k) != 8+common.HashLength {
+		innerErr := etl.Transform(db, dbutils.HeaderPrefix, dbutils.HeaderNumberPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+			switch {
+			case len(k) == 40:
+				return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
+			case len(k) == 8:
+				header := new(types.Header)
+				if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
+					log.Error("Invalid block header RLP", "err", err)
+					return nil
+				}
+				return next(k, header.Hash().Bytes(), k)
+			default:
 				return nil
 			}
-			return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
 		}, etl.IdentityLoadFunc, etl.TransformArgs{
 			Quit: ctx.Done(),
 			OnLoadCommit: func(db ethdb.Putter, key []byte, isDone bool) error {
@@ -103,7 +101,6 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 				}
 				return stages.SaveStageProgress(db, HeaderNumber, 1, nil)
 			},
-			ExtractEndKey: dbutils.HeaderKey(headNumber, headHash),
 		})
 		if innerErr != nil {
 			return innerErr
@@ -120,7 +117,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 
 		log.Info("Generate TD index & canonical")
 		err = etl.Transform(db, dbutils.HeaderPrefix, dbutils.HeaderPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-			if len(k) != 8+common.HashLength {
+			if len(k) != 8+common.HashLength && len(k) != 8 {
 				return nil
 			}
 			header := &types.Header{}

@@ -211,16 +211,18 @@ Error: %v
 		} else if newCanonical && hashesMatch {
 			forkBlockNumber = number
 		}
+		rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td)
 		if newCanonical {
 			rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
-		}
-		data, err := rlp.EncodeToBytes(header)
-		if err != nil {
-			log.Crit("Failed to RLP encode header", "err", err)
-		}
-		rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td)
-		if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
-			log.Crit("Failed to store header", "err", err)
+			rawdb.WriteCanonicalHeader(batch, header)
+		} else {
+			data, err := rlp.EncodeToBytes(header)
+			if err != nil {
+				log.Crit("Failed to RLP encode header", "err", err)
+			}
+			if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
+				log.Crit("Failed to store header", "err", err)
+			}
 		}
 	}
 	if deepFork {
@@ -237,17 +239,30 @@ Error: %v
 			}
 
 			rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber)
+			/*rawdb.WriteCanonicalHeader(batch, forkHeader)
+			rawdb.DeleteHeader(batch, forkHash, forkBlockNumber)*/
 			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)
 			forkBlockNumber = forkHeader.Number.Uint64() - 1
 			forkHash = forkHeader.ParentHash
 		}
 		rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
+		/*rawdb.WriteCanonicalHeader(batch, h)
+		rawdb.DeleteHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)*/
 	}
 	reorg := newCanonical && forkBlockNumber < *headNumber
 	if reorg {
 		// Delete any canonical number assignments above the new head
 		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
+			data := rawdb.ReadHeaderRLP(db, common.Hash{}, i)
+			hash, err := rawdb.ReadCanonicalHash(batch, i)
+			if err != nil {
+				return false, 0, err
+			}
 			rawdb.DeleteCanonicalHash(batch, i)
+			rawdb.DeleteCanonicalHeader(batch, i)
+			if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(i, hash), data); err != nil {
+				log.Crit("Failed to store header", "err", err)
+			}
 		}
 	}
 	if newCanonical {
