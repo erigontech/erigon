@@ -639,7 +639,7 @@ type CfgEval struct {
 }
 
 func (eval *CfgEval) printStats() {
-	fmt.Printf("ProgramsPass=%v ProgramsAnalyzed=%v Programs=%v ProgramsPassRate=%v Timeouts=%v Panic=%v CounterLimit=%v ShortStack=%v StackCountLimit=%v Unresolved=%v Imprecision=%v InvalidOp=%v InvalidJumpDest=%v DeadCode=%v OOM=%v CheckerFailed=%v\n",
+	fmt.Printf("ProgramsPass=%v ProgramsAnalyzed=%v Programs=%v ProgramsPassRate=%v Timeouts=%v Panic=%v CounterLimit=%v ShortStack=%v StackCountLimit=%v Unresolved=%v Imprecision=%v InvalidOp=%v InvalidJumpDest=%v DeadCode=%v OOM=%v CheckerFailed=%v MaxProofSize=%v\n",
 		eval.numProgramsPassed,
 		eval.numProgramsAnalyzed,
 		eval.numPrograms,
@@ -655,7 +655,8 @@ func (eval *CfgEval) printStats() {
 		eval.numInvalidJumpDest,
 		eval.numLowCoverage,
 		eval.numOOM,
-		eval.numCheckerFailed)
+		eval.numCheckerFailed,
+		eval.maxProofSizeBytes)
 }
 
 func (eval *CfgEval) update(result *cfgJobResult, count int)  {
