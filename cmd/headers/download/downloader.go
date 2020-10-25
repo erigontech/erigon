@@ -381,7 +381,7 @@ func (cs *ControlServerImpl) GetStatus(context.Context, *empty.Empty) (*proto.St
 
 func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdownload.HeaderRequest) {
 	for _, req := range reqs {
-		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
+		log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
 		bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
 			Amount:  uint64(req.Length),
 			Reverse: true,
