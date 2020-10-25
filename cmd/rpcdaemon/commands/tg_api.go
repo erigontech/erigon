@@ -12,7 +12,7 @@ import (
 // TgAPI TurboGeth specific routines
 type TgAPI interface {
 	// System related (see ./tg_system.go)
-	Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (Forks, error)
+	Forks(ctx context.Context) (Forks, error)
 
 	// Blocks related (see ./tg_blocks.go)
 	GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
