@@ -556,6 +556,7 @@ func (ss *SentryServerImpl) getBlockHeaders(inreq *proto.SendMessageByMinBlockRe
 	}
 	peerID, found := ss.findPeer(inreq.MinBlock, req.Amount)
 	if !found {
+		log.Debug("Could not find peer for request", "minBlock", inreq.MinBlock)
 		return &proto.SentPeers{}, nil
 	}
 	log.Info(fmt.Sprintf("Sending req for hash %x, amount %d to peer %s\n", req.Origin.Hash, req.Amount, peerID))
