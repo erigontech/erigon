@@ -33,7 +33,7 @@ func defrag(chaindata string) error {
 	}
 	var freeRoot0, mainRoot0, txnID0 uint64
 	var freeDepth0, mainDepth0 uint16
-	pos, freeRoot0, freeDepth0, mainRoot0, mainDepth0, txnID0, err = readMetaPage(meta[:], pos)
+	_, freeRoot0, freeDepth0, mainRoot0, mainDepth0, txnID0, err = readMetaPage(meta[:], pos)
 	if err != nil {
 		return fmt.Errorf("reading meta page 0: %v", err)
 	}
@@ -48,7 +48,7 @@ func defrag(chaindata string) error {
 	}
 	var freeRoot1, mainRoot1, txnID1 uint64
 	var freeDepth1, mainDepth1 uint16
-	pos, freeRoot1, freeDepth1, mainRoot1, mainDepth1, txnID1, err = readMetaPage(meta[:], pos)
+	_, freeRoot1, freeDepth1, mainRoot1, mainDepth1, txnID1, err = readMetaPage(meta[:], pos)
 	if err != nil {
 		return fmt.Errorf("reading meta page 1: %v", err)
 	}
@@ -122,7 +122,7 @@ func defrag(chaindata string) error {
 						return fmt.Errorf("reading FREE_DBI overflow page: %v", err)
 					}
 					var overflowNum int
-					pos, flags, overflowNum = readOverflowPageHeader(meta[:], 0)
+					_, flags, overflowNum = readOverflowPageHeader(meta[:], 0)
 					overflows += overflowNum
 					left := dataSize - 8
 					// Start with pos + 8 because first 8 bytes is the size of the list
