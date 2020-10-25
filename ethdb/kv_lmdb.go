@@ -113,8 +113,10 @@ func (opts LmdbOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	if err = os.MkdirAll(opts.path, 0744); err != nil {
-		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+	if !opts.readOnly {
+		if err = os.MkdirAll(opts.path, 0744); err != nil {
+			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		}
 	}
 
 	var flags uint = lmdb.NoReadahead
