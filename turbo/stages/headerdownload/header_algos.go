@@ -448,7 +448,7 @@ func (hd *HeaderDownload) AnchorState() string {
 	for anchorParent, anchors := range hd.anchors {
 		var skip = true
 		for _, anchor := range anchors {
-			if anchor.tipQueue.Len() > 0 {
+			if anchor.maxTipHeight > anchor.blockHeight {
 				skip = false
 				break
 			}
