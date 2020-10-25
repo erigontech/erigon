@@ -278,9 +278,8 @@ func runPeer(
 				Id:     proto.InboundMessageId_BlockHeaders,
 				Data:   bytes,
 			}
-			_, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{})
-			if err != nil {
-				return fmt.Errorf("send block headers to core P2P: %v", err)
+			if _, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				log.Error("Sending block headers to core P2P failed", "error", err)
 			}
 		case eth.GetBlockBodiesMsg:
 			// Decode the retrieval message
@@ -341,9 +340,8 @@ func runPeer(
 				Id:     proto.InboundMessageId_NewBlockHashes,
 				Data:   bytes,
 			}
-			_, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{})
-			if err != nil {
-				return fmt.Errorf("send block header announcement to core P2P: %v", err)
+			if _, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				log.Error("send block header announcement to core P2P failed", "error", err)
 			}
 		case eth.NewBlockMsg:
 			bytes := make([]byte, msg.Size)
@@ -368,9 +366,8 @@ func runPeer(
 				Id:     proto.InboundMessageId_NewBlock,
 				Data:   bytes,
 			}
-			_, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{})
-			if err != nil {
-				return fmt.Errorf("send new block to core P2P: %v", err)
+			if _, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				log.Error("Sending new block to core P2P failed", "error", err)
 			}
 		case eth.NewPooledTransactionHashesMsg:
 			var hashes []common.Hash
