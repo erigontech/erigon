@@ -262,15 +262,17 @@ func runPeer(
 			if err = rlp.DecodeBytes(bytes, &headers); err != nil {
 				return errResp(eth.ErrDecode, "decoding BlockHeadersMsg %v: %v", msg, err)
 			}
-			var hashesStr strings.Builder
-			for _, header := range headers {
-				if hashesStr.Len() > 0 {
-					hashesStr.WriteString(",")
+			/*
+				var hashesStr strings.Builder
+				for _, header := range headers {
+					if hashesStr.Len() > 0 {
+						hashesStr.WriteString(",")
+					}
+					hash := header.Hash()
+					hashesStr.WriteString(fmt.Sprintf("%x-%x(%d)", hash[:4], hash[28:], header.Number.Uint64()))
 				}
-				hash := header.Hash()
-				hashesStr.WriteString(fmt.Sprintf("%x-%x(%d)", hash[:4], hash[28:], header.Number.Uint64()))
-			}
-			log.Info(fmt.Sprintf("[%s] BlockHeadersMsg{%s}", peerID, hashesStr.String()))
+			*/
+			log.Info(fmt.Sprintf("[%s] BlockHeadersMsg{%d hashes}", peerID, len(headers)))
 			outreq := proto.InboundMessage{
 				PeerId: []byte(peerID),
 				Id:     proto.InboundMessageId_BlockHeaders,
@@ -556,7 +558,7 @@ func (ss *SentryServerImpl) getBlockHeaders(inreq *proto.SendMessageByMinBlockRe
 	if !found {
 		return &proto.SentPeers{}, nil
 	}
-	log.Info(fmt.Sprintf("Sending req for hash %x, blocknumber %d, length %d to peer %s\n", req.Origin.Hash, req.Origin.Number, req.Amount, peerID))
+	log.Info(fmt.Sprintf("Sending req for hash %x, amount %d to peer %s\n", req.Origin.Hash, req.Amount, peerID))
 	rwRaw, _ := ss.peerRwMap.Load(peerID)
 	rw, _ := rwRaw.(p2p.MsgReadWriter)
 	if rw == nil {

@@ -443,9 +443,18 @@ func (hd *HeaderDownload) AddHeaderToBuffer(header *types.Header) {
 }
 
 func (hd *HeaderDownload) AnchorState() string {
-	var ss = make([]string, len(hd.anchors))
-	var j int
+	var ss []string
 	for anchorParent, anchors := range hd.anchors {
+		var skip = true
+		for _, anchor := range anchors {
+			if anchor.tipQueue.Len() > 0 {
+				skip = false
+				break
+			}
+		}
+		if skip {
+			continue
+		}
 		var sb strings.Builder
 		for i, anchor := range anchors {
 			if i > 0 {
@@ -493,8 +502,7 @@ func (hd *HeaderDownload) AnchorState() string {
 			}
 		}
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
-		ss[j] = sb.String()
-		j++
+		ss = append(ss, sb.String())
 	}
 	sort.Strings(ss)
 	return strings.Join(ss, "\n")
