@@ -16,8 +16,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func NewIndexGenerator(db ethdb.Database, quitCh <-chan struct{}) *IndexGenerator {
+func NewIndexGenerator(logPrefix string, db ethdb.Database, quitCh <-chan struct{}) *IndexGenerator {
 	return &IndexGenerator{
+		logPrefix:        logPrefix,
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
 		TempDir:          os.TempDir(),
@@ -26,25 +27,26 @@ func NewIndexGenerator(db ethdb.Database, quitCh <-chan struct{}) *IndexGenerato
 }
 
 type IndexGenerator struct {
+	logPrefix        string
 	db               ethdb.Database
 	ChangeSetBufSize int
 	TempDir          string
 	quitCh           <-chan struct{}
 }
 
-func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket string, datadir string) error {
+func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket string, tmpdir string) error {
 	v, ok := changeset.Mapper[changeSetBucket]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
-	log.Debug("Index generation", "from", startBlock, "to", endBlock, "csbucket", changeSetBucket)
+	log.Debug(fmt.Sprintf("[%s] Index generation", ig.logPrefix), "from", startBlock, "to", endBlock, "csbucket", changeSetBucket)
 	if endBlock < startBlock && endBlock != 0 {
 		return fmt.Errorf("generateIndex %s: endBlock %d smaller than startBlock %d", changeSetBucket, endBlock, startBlock)
 	}
 	t := time.Now()
-	err := etl.Transform(ig.db, changeSetBucket,
+	err := etl.Transform(ig.logPrefix, ig.db, changeSetBucket,
 		v.IndexBucket,
-		datadir,
+		tmpdir,
 		getExtractFunc(v.WalkerAdapter),
 		loadFunc,
 		etl.TransformArgs{
@@ -64,7 +66,7 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 		return err
 	}
 
-	log.Debug("Index generation successfully finished", "csbucket", changeSetBucket, "it took", time.Since(t))
+	log.Debug(fmt.Sprintf("[%s] Index generation successfully finished", ig.logPrefix), "csbucket", changeSetBucket, "it took", time.Since(t))
 	return nil
 }
 
@@ -155,7 +157,7 @@ func (ig *IndexGenerator) DropIndex(bucket string) error {
 	if !ok {
 		return errors.New("imposible to drop")
 	}
-	log.Warn("Remove bucket", "bucket", bucket)
+	log.Warn(fmt.Sprintf("[%s] Remove bucket", ig.logPrefix), "bucket", bucket)
 	return casted.ClearBuckets(bucket)
 }
 

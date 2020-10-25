@@ -75,7 +75,7 @@ func TestManagedTx(t *testing.T) {
 		db := db
 		msg := fmt.Sprintf("%T", db)
 		switch db.(type) {
-		case *ethdb.Remote2KV:
+		case *ethdb.RemoteKV:
 		default:
 			continue
 		}
@@ -101,7 +101,7 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []e
 
 	conn := bufconn.Listen(1024 * 1024)
 
-	rdb, _ := ethdb.NewRemote2().InMem(conn).MustOpen()
+	rdb, _ := ethdb.NewRemote().InMem(conn).MustOpen()
 	readDBs = []ethdb.KV{
 		writeDBs[0],
 		writeDBs[1],
@@ -110,8 +110,7 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []e
 
 	grpcServer := grpc.NewServer()
 	go func() {
-		//remote.RegisterKVService(grpcServer, remote.NewKVService(remotedbserver.NewKvServer(writeDBs[1])))
-		remote.RegisterKV2Service(grpcServer, remote.NewKV2Service(remotedbserver.NewKv2Server(writeDBs[1])))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[1]))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
@@ -430,7 +429,7 @@ func TestReadAfterPut(t *testing.T) {
 					require.NoError(t, c3.Put([]byte{i}, []byte{i}))
 				}
 				for i := uint8(0); i < 10; i++ {
-					v, err := tx.Get(dbutils.Buckets[2], []byte{i})
+					v, err := tx.GetOne(dbutils.Buckets[2], []byte{i})
 					require.NoError(t, err)
 					require.Equal(t, []byte{i}, v)
 				}
@@ -444,7 +443,7 @@ func TestReadAfterPut(t *testing.T) {
 			if err := db.Update(ctx, func(tx ethdb.Tx) error {
 				c3 := tx.Cursor(dbutils.Buckets[2])
 				require.NoError(t, c3.Delete([]byte{5}))
-				v, err := tx.Get(dbutils.Buckets[2], []byte{5})
+				v, err := tx.GetOne(dbutils.Buckets[2], []byte{5})
 				require.NoError(t, err)
 				require.Nil(t, v)
 				return nil

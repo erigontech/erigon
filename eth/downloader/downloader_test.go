@@ -301,7 +301,7 @@ func (dl *downloadTester) InsertHeaderChain(headers []*types.Header, checkFreq i
 	return len(headers), nil
 }
 
-func (dl *downloadTester) InsertBodyChain(_ context.Context, blocks types.Blocks) (bool, error) {
+func (dl *downloadTester) InsertBodyChain(_ string, _ context.Context, blocks types.Blocks) (bool, error) {
 	return false, nil
 }
 

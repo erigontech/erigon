@@ -50,7 +50,7 @@ func TestDupSortHashState(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{2}, v)
 
-	tx, err := db.Begin(context.Background())
+	tx, err := db.Begin(context.Background(), ethdb.RW)
 	require.NoError(err)
 	defer tx.Rollback()
 
@@ -109,7 +109,7 @@ func TestDupSortPlainState(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{2}, v)
 
-	tx, err := db.Begin(context.Background())
+	tx, err := db.Begin(context.Background(), ethdb.RW)
 	require.NoError(err)
 	defer tx.Rollback()
 

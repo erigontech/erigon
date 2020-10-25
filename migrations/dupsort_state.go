@@ -12,7 +12,7 @@ import (
 
 var dupSortHashState = Migration{
 	Name: "dupsort_hash_state",
-	Up: func(db ethdb.Database, datadir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.CurrentStateBucketOld1); err != nil {
 			return err
 		} else if !exists {
@@ -27,10 +27,11 @@ var dupSortHashState = Migration{
 		}
 
 		if err := etl.Transform(
+			"dupsort_hash_state",
 			db,
 			dbutils.CurrentStateBucketOld1,
 			dbutils.CurrentStateBucket,
-			datadir,
+			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
 			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
@@ -47,7 +48,7 @@ var dupSortHashState = Migration{
 
 var dupSortPlainState = Migration{
 	Name: "dupsort_plain_state",
-	Up: func(db ethdb.Database, datadir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.PlainStateBucketOld1); err != nil {
 			return err
 		} else if !exists {
@@ -62,10 +63,11 @@ var dupSortPlainState = Migration{
 		}
 
 		if err := etl.Transform(
+			"dupsort_plain_state",
 			db,
 			dbutils.PlainStateBucketOld1,
 			dbutils.PlainStateBucket,
-			datadir,
+			tmpdir,
 			extractFunc,
 			etl.IdentityLoadFunc,
 			etl.TransformArgs{OnLoadCommit: OnLoadCommit},
@@ -82,14 +84,14 @@ var dupSortPlainState = Migration{
 
 var dupSortIH = Migration{
 	Name: "dupsort_intermediate_trie_hashes",
-	Up: func(db ethdb.Database, datadir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
 			return err
 		}
 		buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 		comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
 		buf.SetComparator(comparator)
-		collector := etl.NewCollector(datadir, buf)
+		collector := etl.NewCollector(tmpdir, buf)
 		hashCollector := func(keyHex []byte, hash []byte) error {
 			if len(keyHex) == 0 {
 				return nil
@@ -99,14 +101,14 @@ var dupSortIH = Migration{
 			}
 			return collector.Collect(keyHex, hash)
 		}
-		loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+		loader := trie.NewFlatDBTrieLoader("dupsort_intermediate_trie_hashes", dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 		if err := loader.Reset(trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
 			return err
 		}
 		if _, err := loader.CalcTrieRoot(db, nil); err != nil {
 			return err
 		}
-		if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+		if err := collector.Load("dupsort_intermediate_trie_hashes", db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 			Comparator: comparator,
 		}); err != nil {
 			return fmt.Errorf("gen ih stage: fail load data to bucket: %w", err)
@@ -123,7 +125,7 @@ var dupSortIH = Migration{
 
 var clearIndices = Migration{
 	Name: "clear_log_indices7",
-	Up: func(db ethdb.Database, datadir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.LogAddressIndex, dbutils.LogTopicIndex); err != nil {
 			return err
 		}
@@ -141,7 +143,7 @@ var clearIndices = Migration{
 
 var resetIHBucketToRecoverDB = Migration{
 	Name: "reset_in_bucket_to_recover_db",
-	Up: func(db ethdb.Database, datadir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
 			return err
 		}

@@ -16,7 +16,7 @@ func TestBucketCRUD(t *testing.T) {
 	defer kv.Close()
 
 	ctx := context.Background()
-	tx, err := kv.Begin(ctx, nil, true)
+	tx, err := kv.Begin(ctx, nil, RW)
 	require.NoError(err)
 	defer tx.Rollback()
 
@@ -54,7 +54,7 @@ func TestBucketCRUD(t *testing.T) {
 
 	err = tx.Cursor(deprecatedBucket).Put([]byte{1}, []byte{1})
 	require.NoError(err)
-	v, err := tx.Get(deprecatedBucket, []byte{1})
+	v, err := tx.GetOne(deprecatedBucket, []byte{1})
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
@@ -93,7 +93,7 @@ func TestReadOnlyMode(t *testing.T) {
 		}
 	}).ReadOnly().MustOpen()
 
-	tx, err := db2.Begin(context.Background(), nil, false)
+	tx, err := db2.Begin(context.Background(), nil, RO)
 	if err != nil {
 		t.Fatal(err)
 	}

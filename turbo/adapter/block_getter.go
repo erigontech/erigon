@@ -14,9 +14,8 @@ type blockGetter struct {
 	dbReader rawdb.DatabaseReader
 }
 
-func (g *blockGetter) GetBlockByHash(hash common.Hash) *types.Block {
+func (g *blockGetter) GetBlockByHash(hash common.Hash) (*types.Block, error) {
 	return rawdb.ReadBlockByHash(g.dbReader, hash)
-
 }
 
 func (g *blockGetter) GetBlock(hash common.Hash, number uint64) *types.Block {

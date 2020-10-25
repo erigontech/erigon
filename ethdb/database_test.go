@@ -143,12 +143,15 @@ func testPutGet(db MinDatabase, t *testing.T) {
 }
 
 func testNoPanicAfterDbClosed(db Database, t *testing.T) {
-	tx, err := db.(HasKV).KV().Begin(context.Background(), nil, false)
+	tx, err := db.(HasKV).KV().Begin(context.Background(), nil, RO)
 	require.NoError(t, err)
-	writeTx, err := db.(HasKV).KV().Begin(context.Background(), nil, true)
+	writeTx, err := db.(HasKV).KV().Begin(context.Background(), nil, RW)
 	require.NoError(t, err)
+
+	closeCh := make(chan struct{}, 1)
 	go func() {
 		require.NotPanics(t, func() {
+			<-closeCh
 			db.Close()
 		})
 	}()
@@ -157,11 +160,12 @@ func testNoPanicAfterDbClosed(db Database, t *testing.T) {
 	require.NoError(t, err)
 	err = writeTx.Commit(context.Background())
 	require.NoError(t, err)
-	_, err = tx.Get(dbutils.Buckets[0], []byte{1})
+	_, err = tx.GetOne(dbutils.Buckets[0], []byte{1})
 	require.NoError(t, err)
 	tx.Rollback()
 
 	db.Close() // close db from 2nd goroutine
+	close(closeCh)
 
 	// after db closed, methods must not panic but return some error
 	require.NotPanics(t, func() {

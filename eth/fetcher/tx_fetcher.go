@@ -340,7 +340,7 @@ func (f *TxFetcher) Start() {
 // Stop terminates the announcement based synchroniser, canceling all pending
 // operations.
 func (f *TxFetcher) Stop() {
-	close(f.quit)
+	common.SafeClose(f.quit)
 }
 
 func (f *TxFetcher) loop() {

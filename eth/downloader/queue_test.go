@@ -120,7 +120,7 @@ func TestBasics(t *testing.T) {
 		t.Errorf("new queue should be idle")
 	}
 	q.Prepare(1, FastSync)
-	if res := q.Results(false); len(res) != 0 {
+	if res := q.Results("logPrefix", false); len(res) != 0 {
 		t.Fatal("new queue should have 0 results")
 	}
 
@@ -286,7 +286,7 @@ func XTestDelivery(t *testing.T) {
 		defer wg.Done()
 		tot := 0
 		for {
-			res := q.Results(true)
+			res := q.Results("logPrefix", true)
 			tot += len(res)
 			fmt.Printf("got %d results, %d tot\n", len(res), tot)
 			// Now we can forget about these

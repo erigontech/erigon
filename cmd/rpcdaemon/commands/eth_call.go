@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -20,9 +21,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-// Call executes a new message call immediately without creating a transaction on the block chain.
+// Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
-	tx, err1 := api.db.Begin(ctx, nil, false)
+	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return nil, fmt.Errorf("call cannot open tx: %v", err1)
 	}
@@ -40,17 +41,16 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	return result.Return(), result.Err
 }
 
-// EstimateGas returns an estimate of the amount of gas needed to execute the
-// given transaction against the current pending block.
+// EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
 func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error) {
-	//fixme: blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	// TODO: fixme: blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 	hash := rawdb.ReadHeadBlockHash(api.dbReader)
 
 	return api.DoEstimateGas(ctx, args, rpc.BlockNumberOrHash{BlockHash: &hash}, big.NewInt(0).SetUint64(api.GasCap))
 }
 
 func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, gasCap *big.Int) (hexutil.Uint64, error) {
-	tx, err1 := api.db.Begin(ctx, nil, false)
+	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return 0, fmt.Errorf("estimateGas cannot open tx: %v", err1)
 	}
@@ -107,7 +107,7 @@ func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blo
 		}
 	}
 	// Recap the highest gas allowance with specified gascap.
-	if gasCap != nil && hi > gasCap.Uint64() {
+	if gasCap != nil && gasCap.Sign() > 0 && hi > gasCap.Uint64() {
 		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", gasCap)
 		hi = gasCap.Uint64()
 	}

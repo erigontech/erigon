@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 type HeaderChain interface {
@@ -44,13 +45,13 @@ type HeaderChain interface {
 // sync commands from an existing local database.
 type FakePeer struct {
 	id string
-	db rawdb.DatabaseReader
+	db ethdb.Database
 	hc HeaderChain
 	dl *Downloader
 }
 
 // NewFakePeer creates a new mock downloader peer with the given data sources.
-func NewFakePeer(id string, db rawdb.DatabaseReader, hc HeaderChain, dl *Downloader) *FakePeer {
+func NewFakePeer(id string, db ethdb.Database, hc HeaderChain, dl *Downloader) *FakePeer {
 	return &FakePeer{id: id, db: db, hc: hc, dl: dl}
 }
 

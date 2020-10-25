@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -29,7 +30,7 @@ import (
 // - in the beginning of migration: check that old bucket exists, clear new bucket
 // - in the end:drop old bucket (not in defer!).
 //	Example:
-//	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+//	Up: func(db ethdb.Database, tmpdir string, OnLoadCommit etl.LoadCommitHandler) error {
 //		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
 //			return err
 //		} else if !exists {
@@ -64,11 +65,12 @@ var migrations = []Migration{
 	clearIndices,
 	resetIHBucketToRecoverDB,
 	receiptsCborEncode,
+	receiptsOnePerTx,
 }
 
 type Migration struct {
 	Name string
-	Up   func(db ethdb.Database, dataDir string, progress []byte, OnLoadCommitOnLoadCommit etl.LoadCommitHandler) error
+	Up   func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommitOnLoadCommit etl.LoadCommitHandler) error
 }
 
 var (
@@ -103,7 +105,7 @@ func AppliedMigrations(db ethdb.Database, withPayload bool) (map[string][]byte, 
 	return applied, err
 }
 
-func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
+func (m *Migrator) Apply(db ethdb.Database, tmpdir string) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
@@ -123,7 +125,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		uniqueNameCheck[m.Migrations[i].Name] = true
 	}
 
-	tx, err1 := db.Begin(context.Background())
+	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
 		return err1
 	}
@@ -143,7 +145,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 			return err
 		}
 
-		if err = v.Up(tx, datadir, progress, func(_ ethdb.Putter, key []byte, isDone bool) error {
+		if err = v.Up(tx, path.Join(tmpdir, "migrations", v.Name), progress, func(_ ethdb.Putter, key []byte, isDone bool) error {
 			if !isDone {
 				if key != nil {
 					err = tx.Put(dbutils.Migrations, []byte("_progress_"+v.Name), key)
