@@ -645,7 +645,7 @@ func WriteAncientBlock(db ethdb.AncientWriter, block *types.Block, receipts type
 // DeleteBlock removes all block data associated with a hash.
 func DeleteBlock(db ethdb.Database, hash common.Hash, number uint64) error {
 	if err := DeleteReceipts(db, number); err != nil {
-		panic(err)
+		return err
 	}
 	DeleteHeader(db, hash, number)
 	DeleteBody(db, hash, number)

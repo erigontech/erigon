@@ -130,7 +130,7 @@ func TestBlockStorage(t *testing.T) {
 	// Write and verify the block in the database
 	err := WriteBlock(context.Background(), db, block)
 	if err != nil {
-		panic(err)
+		t.Fatalf("Could not write block: %v", err)
 	}
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored block not found")
@@ -149,7 +149,7 @@ func TestBlockStorage(t *testing.T) {
 	}
 	// Delete the block and verify the execution
 	if err := DeleteBlock(db, block.Hash(), block.NumberU64()); err != nil {
-		panic(err)
+		t.Fatalf("Could not delete block: %v", err)
 	}
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted block returned: %v", entry)
@@ -208,7 +208,7 @@ func TestTdStorage(t *testing.T) {
 	hash, td := common.Hash{}, big.NewInt(314)
 	entry, err := ReadTd(db, hash, 0)
 	if err != nil {
-		panic(err)
+		t.Fatalf("ReadTd failed: %v", err)
 	}
 	if entry != nil {
 		t.Fatalf("Non existent TD returned: %v", entry)
@@ -216,11 +216,11 @@ func TestTdStorage(t *testing.T) {
 	// Write and verify the TD in the database
 	err = WriteTd(db, hash, 0, td)
 	if err != nil {
-		panic(err)
+		t.Fatalf("WriteTd failed: %v", err)
 	}
 	entry, err = ReadTd(db, hash, 0)
 	if err != nil {
-		panic(err)
+		t.Fatalf("ReadTd failed: %v", err)
 	}
 	if entry == nil {
 		t.Fatalf("Stored TD not found")
@@ -230,11 +230,11 @@ func TestTdStorage(t *testing.T) {
 	// Delete the TD and verify the execution
 	err = DeleteTd(db, hash, 0)
 	if err != nil {
-		panic(err)
+		t.Fatalf("DeleteTd failed: %v", err)
 	}
 	entry, err = ReadTd(db, hash, 0)
 	if err != nil {
-		panic(err)
+		t.Fatalf("ReadTd failed: %v", err)
 	}
 	if entry != nil {
 		t.Fatalf("Deleted TD returned: %v", entry)
@@ -250,7 +250,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	hash, number := common.Hash{0: 0xff}, uint64(314)
 	entry, err := ReadCanonicalHash(db, number)
 	if err != nil {
-		panic(err)
+		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
 	if entry != (common.Hash{}) {
 		t.Fatalf("Non existent canonical mapping returned: %v", entry)
@@ -258,11 +258,11 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	// Write and verify the TD in the database
 	err = WriteCanonicalHash(db, hash, number)
 	if err != nil {
-		panic(err)
+		t.Fatalf("WriteCanoncalHash failed: %v", err)
 	}
 	entry, err = ReadCanonicalHash(db, number)
 	if err != nil {
-		panic(err)
+		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
 	if entry == (common.Hash{}) {
 		t.Fatalf("Stored canonical mapping not found")
@@ -272,7 +272,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	// Delete the TD and verify the execution
 	err = DeleteCanonicalHash(db, number)
 	if err != nil {
-		panic(err)
+		t.Fatalf("DeleteCanonicalHash failed: %v", err)
 	}
 	entry, err = ReadCanonicalHash(db, number)
 	if err != nil {
@@ -370,7 +370,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 	// Insert the receipt slice into the database and check presence
 	if err := WriteReceipts(db, 0, receipts); err != nil {
-		panic(err)
+		t.Fatalf("WriteReceipts failed: %v", err)
 	}
 	if rs := ReadReceipts(db, hash, 0); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
@@ -392,7 +392,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	WriteBody(ctx, db, hash, 0, body)
 
 	if err := DeleteReceipts(db, 0); err != nil {
-		panic(err)
+		t.Fatalf("DeleteReceipts failed: %v", err)
 	}
 	if rs := ReadReceipts(db, hash, 0); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
