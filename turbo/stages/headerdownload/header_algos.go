@@ -183,6 +183,15 @@ func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound, tipFou
 		if anchorHeader.Time+hd.newAnchorPastLimit < currentTime {
 			return 0, fmt.Errorf("detached segment too far in the past")
 		}
+		// Check that anchor is not in the middle of known range of headers
+		blockNumber := anchorHeader.Number.Uint64()
+		for _, anchors := range hd.anchors {
+			for _, anchor := range anchors {
+				if blockNumber >= anchor.blockHeight && blockNumber < anchor.maxTipHeight {
+					return 0, fmt.Errorf("detached segment in the middle of known segment")
+				}
+			}
+		}
 	}
 
 	var powDepthSet bool
