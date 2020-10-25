@@ -200,9 +200,10 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 
 type ControlServerImpl struct {
 	proto.UnimplementedControlServer
-	hdLock       sync.Mutex
-	hd           *headerdownload.HeaderDownload
-	sentryClient proto.SentryClient
+	hdLock        sync.Mutex
+	hd            *headerdownload.HeaderDownload
+	sentryClient  proto.SentryClient
+	requestWakeUp chan struct{}
 }
 
 func NewControlServer(filesDir string, bufferSize int, sentryClient proto.SentryClient) (*ControlServerImpl, error) {
@@ -263,7 +264,7 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto.Sentry
 		}
 	}
 	log.Info(hd.AnchorState())
-	return &ControlServerImpl{hd: hd, sentryClient: sentryClient}, nil
+	return &ControlServerImpl{hd: hd, sentryClient: sentryClient, requestWakeUp: make(chan struct{}, 1)}, nil
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
@@ -356,6 +357,9 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto.InboundM
 }
 
 func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
+	defer func() {
+		cs.requestWakeUp <- struct{}{}
+	}()
 	switch inreq.Id {
 	case proto.InboundMessageId_NewBlockHashes:
 		return cs.newBlockHashes(ctx, inreq)
@@ -411,6 +415,7 @@ func (cs *ControlServerImpl) loop(ctx context.Context) {
 		select {
 		case <-timer.C:
 			log.Info("RequestQueueTimer ticked")
+		case <-cs.requestWakeUp:
 		case <-ctx.Done():
 			return
 		}
