@@ -69,11 +69,14 @@ func worker(code []byte) {
 
 	go func() {
 		cfg, _ := vm.GenCfg(code, maxAnlyCounterLimit, maxStackLen, maxStackCount, &metrics)
-		proof := cfg.GenerateProof()
-		cfg.ProofSerialized = proof.Serialize()
-		dproof := vm.DeserializeCfgProof(cfg.ProofSerialized)
-		check := vm.CheckCfg(code, dproof)
-		metrics.CheckerFailed = !check
+		if cfg.Metrics.Valid {
+			proof := cfg.GenerateProof()
+			cfg.ProofSerialized = proof.Serialize()
+			dproof := vm.DeserializeCfgProof(cfg.ProofSerialized)
+			check := vm.CheckCfg(code, dproof)
+			metrics.CheckerFailed = !check
+			metrics.ProofSizeBytes = len(cfg.ProofSerialized)
+		}
 
 		mon <- 0
 	}()
@@ -213,6 +216,7 @@ func batchServer() error {
 							"Elapsed (ms)",
 							"MemUsed (MB)",
 							"Checker",
+							"ProofSize (bytes)",
 							"Bytecode"}
 	_, err = resultsFile.WriteString(strings.Join(headers, "|") + "\n")
 	check(err)
@@ -236,6 +240,7 @@ func batchServer() error {
 							si64(result.metrics.TimeMillis.Milliseconds()),
 							sui64(result.metrics.MemUsedMBs),
 							sb(result.metrics.Checker),
+							si(result.metrics.ProofSizeBytes),
 							hex.EncodeToString(result.job.code)}
 
 		_, err = resultsFile.WriteString(strings.Join(line,"|") + "\n")
@@ -630,6 +635,7 @@ type CfgEval struct {
 	numTimeouts          int
 	numOOM               int
 	numCheckerFailed     int
+	maxProofSizeBytes	 int
 }
 
 func (eval *CfgEval) printStats() {
@@ -700,6 +706,9 @@ func (eval *CfgEval) update(result *cfgJobResult, count int)  {
 	}
 	if metrics.CheckerFailed {
 		eval.numCheckerFailed++
+	}
+	if eval.maxProofSizeBytes < metrics.ProofSizeBytes {
+		eval.maxProofSizeBytes = metrics.ProofSizeBytes
 	}
 }
 

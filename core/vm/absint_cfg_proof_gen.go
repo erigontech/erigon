@@ -430,6 +430,7 @@ type CfgMetrics struct {
 	TimeMillis             time.Duration
 	Checker                bool
 	CheckerFailed          bool
+	ProofSizeBytes		   int
 }
 
 type Cfg struct {
