@@ -169,7 +169,7 @@ func (opts snapshotOpts) MustOpen() KV {
 }
 
 func (s *SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
-	dbTx, err := s.db.Begin(ctx, nil, false)
+	dbTx, err := s.db.Begin(ctx, nil, RO)
 	if err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func (s *SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
 	t := &snapshotTX{
 		dbTX: dbTx,
 		snTX: newVirtualTx(func() (Tx, error) {
-			return s.snapshotDB.Begin(ctx, nil, false)
+			return s.snapshotDB.Begin(ctx, nil, RO)
 		}, s.forBuckets),
 		forBuckets: s.forBuckets,
 	}
@@ -196,8 +196,8 @@ func (s *SnapshotKV) Close() {
 	}
 }
 
-func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx, error) {
-	dbTx, err := s.db.Begin(ctx, parentTx, writable)
+func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, flags TxFlags) (Tx, error) {
+	dbTx, err := s.db.Begin(ctx, parentTx, flags)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +205,7 @@ func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx,
 	t := &snapshotTX{
 		dbTX: dbTx,
 		snTX: newVirtualTx(func() (Tx, error) {
-			return s.snapshotDB.Begin(ctx, parentTx, false)
+			return s.snapshotDB.Begin(ctx, parentTx, flags)
 		}, s.forBuckets),
 		forBuckets: s.forBuckets,
 	}

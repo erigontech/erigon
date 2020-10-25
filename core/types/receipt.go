@@ -31,7 +31,7 @@ import (
 )
 
 // go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go
-//go:generate codecgen -o receipt_codecgen_gen.go -r "Receipts|Receipt|Log" -rt "codec" -nx=true -d 2 receipt.go log.go
+//go:generate codecgen -o receipt_codecgen_gen.go -r "^Receipts$|^Receipt$|^Logs$|^Log$" -st "codec" -j=false -nx=true -ta=true -oe=false -d 2 receipt.go log.go
 
 var (
 	receiptStatusFailedRLP     = []byte{}
@@ -54,7 +54,7 @@ type Receipt struct {
 	Status            uint64 `json:"status" codec:"2"`
 	CumulativeGasUsed uint64 `json:"cumulativeGasUsed" gencodec:"required" codec:"3"`
 	Bloom             Bloom  `json:"logsBloom"         gencodec:"required" codec:"-"`
-	Logs              []*Log `json:"logs"              gencodec:"required" codec:"4"`
+	Logs              Logs   `json:"logs"              gencodec:"required" codec:"-"`
 
 	// Implementation fields: These fields are added by geth when processing a transaction.
 	// They are stored in the chain database.

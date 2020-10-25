@@ -154,6 +154,7 @@ func resetExec(db *ethdb.ObjectDatabase) error {
 		dbutils.PlainStorageChangeSetBucket,
 		dbutils.PlainContractCodeBucket,
 		dbutils.BlockReceiptsPrefix,
+		dbutils.Log,
 		dbutils.IncarnationMapBucket,
 		dbutils.CodeBucket,
 	); err != nil {

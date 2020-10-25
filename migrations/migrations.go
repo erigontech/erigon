@@ -65,6 +65,7 @@ var migrations = []Migration{
 	clearIndices,
 	resetIHBucketToRecoverDB,
 	receiptsCborEncode,
+	receiptsOnePerTx,
 }
 
 type Migration struct {
@@ -124,7 +125,7 @@ func (m *Migrator) Apply(db ethdb.Database, tmpdir string) error {
 		uniqueNameCheck[m.Migrations[i].Name] = true
 	}
 
-	tx, err1 := db.Begin(context.Background(), true)
+	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
 		return err1
 	}

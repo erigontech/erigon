@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 
@@ -20,7 +21,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 		return nil, err
 	}
 
-	tx, err1 := api.db.Begin(ctx, nil, false)
+	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %v", err1)
 	}
@@ -44,7 +45,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		return nil, err
 	}
 	nonce := hexutil.Uint64(0)
-	tx, err1 := api.db.Begin(ctx, nil, false)
+	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %v", err1)
 	}
@@ -64,7 +65,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return nil, err
 	}
 
-	tx, err1 := api.db.Begin(ctx, nil, false)
+	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return nil, fmt.Errorf("getCode cannot open tx: %v", err1)
 	}
@@ -90,7 +91,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
 	}
 
-	tx, err1 := api.db.Begin(ctx, nil, false)
+	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return "", fmt.Errorf("getStorageAt cannot open tx: %v", err1)
 	}

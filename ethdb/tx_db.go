@@ -20,9 +20,9 @@ import (
 // Walk and MultiWalk methods - work outside of Tx object yet, will implement it later
 type TxDb struct {
 	db       Database
-	writable bool
 	tx       Tx
 	ParentTx Tx
+	txFlags  TxFlags
 	cursors  map[string]Cursor
 	len      uint64
 }
@@ -34,17 +34,17 @@ func (m *TxDb) Close() {
 // NewTxDbWithoutTransaction creates TxDb object without opening transaction,
 // such TxDb not usable before .Begin() call on it
 // It allows inject TxDb object into class hierarchy, but open write transaction later
-func NewTxDbWithoutTransaction(db Database, writable bool) *TxDb {
-	return &TxDb{db: db, writable: writable}
+func NewTxDbWithoutTransaction(db Database, flags TxFlags) *TxDb {
+	return &TxDb{db: db, txFlags: flags}
 }
 
-func (m *TxDb) Begin(ctx context.Context, writable bool) (DbWithPendingMutations, error) {
+func (m *TxDb) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
 	batch := m
 	if m.tx != nil {
-		batch = &TxDb{db: m.db}
+		batch = &TxDb{db: m.db, txFlags: flags}
 	}
 
-	if err := batch.begin(ctx, m.tx, writable); err != nil {
+	if err := batch.begin(ctx, m.tx, flags); err != nil {
 		return nil, err
 	}
 	return batch, nil
@@ -87,8 +87,8 @@ func (m *TxDb) NewBatch() DbWithPendingMutations {
 	}
 }
 
-func (m *TxDb) begin(ctx context.Context, parent Tx, writable bool) error {
-	tx, err := m.db.(HasKV).KV().Begin(ctx, parent, writable)
+func (m *TxDb) begin(ctx context.Context, parent Tx, flags TxFlags) error {
+	tx, err := m.db.(HasKV).KV().Begin(ctx, parent, flags)
 	if err != nil {
 		return err
 	}
@@ -230,7 +230,9 @@ func (m *TxDb) IdealBatchSize() int {
 
 func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	m.panicOnEmptyDB()
-	return Walk(m.cursors[bucket], startkey, fixedbits, walker)
+	c := m.tx.Cursor(bucket) // create new cursor, then call other methods of TxDb inside MultiWalk callback will not affect this cursor
+	defer c.Close()
+	return Walk(c, startkey, fixedbits, walker)
 }
 
 func Walk(c Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
@@ -273,7 +275,9 @@ func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
 
 func (m *TxDb) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 	m.panicOnEmptyDB()
-	return MultiWalk(m.cursors[bucket], startkeys, fixedbits, walker)
+	c := m.tx.Cursor(bucket) // create new cursor, then call other methods of TxDb inside MultiWalk callback will not affect this cursor
+	defer c.Close()
+	return MultiWalk(c, startkeys, fixedbits, walker)
 }
 
 func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
@@ -336,12 +340,12 @@ func (m *TxDb) CommitAndBegin(ctx context.Context) error {
 		return err
 	}
 
-	return m.begin(ctx, m.ParentTx, m.writable)
+	return m.begin(ctx, m.ParentTx, m.txFlags)
 }
 
 func (m *TxDb) RollbackAndBegin(ctx context.Context) error {
 	m.Rollback()
-	return m.begin(ctx, m.ParentTx, m.writable)
+	return m.begin(ctx, m.ParentTx, m.txFlags)
 }
 
 func (m *TxDb) Commit() (uint64, error) {
@@ -417,86 +421,6 @@ func (m *TxDb) ClearBuckets(buckets ...string) error {
 			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
 		}
 		if err := migrator.ClearBucket(name); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (m *TxDb) ClearBucketsAndCommitEvery(deleteKeysPerTx uint64, buckets ...string) error {
-	for i := range buckets {
-		name := buckets[i]
-		log.Info("Clear bucket", "name", name)
-		if err := m.removeBucketContentByMultipleTransactions(name, deleteKeysPerTx); err != nil {
-			return err
-		}
-		if err := m.tx.(BucketMigrator).ClearBucket(name); err != nil {
-			return err
-		}
-		if err := m.CommitAndBegin(context.Background()); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (m *TxDb) DropBucketsAndCommitEvery(deleteKeysPerTx uint64, buckets ...string) error {
-	for i := range buckets {
-		name := buckets[i]
-		log.Info("Dropping bucket", "name", name)
-		if err := m.removeBucketContentByMultipleTransactions(name, deleteKeysPerTx); err != nil {
-			return err
-		}
-		if err := m.tx.(BucketMigrator).DropBucket(name); err != nil {
-			return err
-		}
-		if err := m.CommitAndBegin(context.Background()); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// removeBucketContentByMultipleTransactions - allows to avoid single large freelist record inside database and
-// avoid "too big transaction" error
-func (m *TxDb) removeBucketContentByMultipleTransactions(bucket string, deleteKeysPerTx uint64) error {
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	var partialDropDone bool
-	for !partialDropDone {
-		c := m.tx.Cursor(bucket)
-		cnt, err := c.Count()
-		if err != nil {
-			return err
-		}
-		if cnt < deleteKeysPerTx {
-			return nil
-		}
-		var deleted uint64
-		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
-			if err != nil {
-				return err
-			}
-			deleted++
-			if deleted > deleteKeysPerTx {
-				break
-			}
-
-			err = c.DeleteCurrent()
-			if err != nil {
-				return err
-			}
-
-			select {
-			default:
-			case <-logEvery.C:
-				log.Info("ClearBuckets", "bucket", bucket, "records_left", cnt-deleted)
-			}
-		}
-
-		if err := m.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
 	}
