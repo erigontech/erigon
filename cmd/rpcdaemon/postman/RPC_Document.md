@@ -2799,11 +2799,7 @@ Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error)
 POST {{HOST}}
 ```
 
-Returns the genesis block hash and a sorted list of already passed fork block numbers as well as the next fork block (if applicable)
-
-**Parameters**
-
-`QUANTITY|TAG or DATA` - Integer of a block number, the string `"earliest"`, `"latest"` or `"pending"`, or a 32 byte block hash
+Returns the genesis block hash and a sorted list of all forks block numbers
 
 **Returns**
 
@@ -2812,8 +2808,7 @@ A structure of the type Forks
 ```
 type Forks struct {
 	genesis common.Hash // the hash of the genesis block
-	passed []uint64 // array of block numbers passed by this client
-	next *uint64 // the next fork block (may be empty)
+	forks []uint64 // array of forks block numbers
 }
 ```
 
@@ -2834,7 +2829,6 @@ type Forks struct {
 > {
 > 	"jsonrpc":"2.0",
 > 	"method":"tg_forks",
-> 	"params":["latest"],
 > 	"id":1
 > }
 > ```
