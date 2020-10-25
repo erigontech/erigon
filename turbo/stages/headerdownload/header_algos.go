@@ -359,6 +359,8 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 			return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
+	// If we connect to the hard-coded tip, we remove it. Once there is only one hard-coded tip left, it is clear that everything is connected
+	delete(hd.hardTips, tipHeader.ParentHash)
 	return nil
 }
 
@@ -857,7 +859,7 @@ func (hd *HeaderDownload) CheckInitiation(segment *ChainSegment, initialHash com
 	if tip.anchor.hash != initialHash {
 		return false
 	}
-	fmt.Printf("Tip %d %x has total difficulty %d, highest %d\n", tip.blockHeight, tipHash, tip.cumulativeDifficulty.ToBig(), hd.highestTotalDifficulty.ToBig())
+	fmt.Printf("Tip %d %x has total difficulty %d, highest %d, len(hd.hardTips) %d\n", tip.blockHeight, tipHash, tip.cumulativeDifficulty.ToBig(), hd.highestTotalDifficulty.ToBig(), len(hd.hardTips))
 	if tip.cumulativeDifficulty.Gt(&hd.highestTotalDifficulty) {
 		hd.highestTotalDifficulty.Set(&tip.cumulativeDifficulty)
 		return true
