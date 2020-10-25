@@ -673,13 +673,6 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 		fs = append(fs, f)
 		rs = append(rs, r)
 	}
-	// Based on the last anchors, set the hardTips
-	for _, anchor := range lastAnchors {
-		if _, ok := hardTips[anchor.hash]; ok {
-			hd.hardTips[anchor.hash] = struct{}{}
-			fmt.Printf("Adding %d %x to hard-coded tips\n", anchor.blockHeight, anchor.hash)
-		}
-	}
 	for i, f := range fs {
 		r := rs[i]
 		var header types.Header
@@ -775,6 +768,13 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 			if err = he.file.Close(); err != nil {
 				fmt.Printf("closing file: %v\n", err)
 			}
+		}
+	}
+	// Based on the last anchors, set the hardTips
+	for _, anchor := range lastAnchors {
+		if _, ok := hardTips[anchor.hash]; ok {
+			hd.hardTips[anchor.hash] = struct{}{}
+			fmt.Printf("Adding %d %x to hard-coded tips\n", anchor.blockHeight, anchor.hash)
 		}
 	}
 	return hd.anchorSequence > 0, nil
