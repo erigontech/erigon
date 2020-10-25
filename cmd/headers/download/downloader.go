@@ -232,8 +232,8 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto.Sentry
 		3600, /* newAnchor future limit */
 		3600, /* newAnchor past limit */
 	)
-	hd.InitHardCodedTips("hard-coded-headers.dat")
-	if recovered, err := hd.RecoverFromFiles(uint64(time.Now().Unix())); err != nil || !recovered {
+	hardTips := headerdownload.InitHardCodedTips("hard-coded-headers.dat")
+	if recovered, err := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips); err != nil || !recovered {
 		if err != nil {
 			log.Error("Recovery from file failed, will start from scratch", "error", err)
 		}

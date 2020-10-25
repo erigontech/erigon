@@ -443,6 +443,7 @@ func (hd *HeaderDownload) AddHeaderToBuffer(header *types.Header) {
 }
 
 func (hd *HeaderDownload) AnchorState() string {
+	//nolint:prealloc
 	var ss []string
 	for anchorParent, anchors := range hd.anchors {
 		var skip = true
@@ -453,7 +454,7 @@ func (hd *HeaderDownload) AnchorState() string {
 			}
 		}
 		if skip {
-			continue
+			//continue
 		}
 		var sb strings.Builder
 		for i, anchor := range anchors {
@@ -588,8 +589,9 @@ func (hd *HeaderDownload) CheckFiles() error {
 	return nil
 }
 
-func (hd *HeaderDownload) InitHardCodedTips(filename string) {
+func InitHardCodedTips(filename string) map[common.Hash]struct{} {
 	// Insert hard-coded headers if present
+	hardTips := make(map[common.Hash]struct{})
 	if _, err := os.Stat(filename); err == nil {
 		if f, err1 := os.Open(filename); err1 == nil {
 			var hBuffer [HeaderSerLength]byte
@@ -603,7 +605,7 @@ func (hd *HeaderDownload) InitHardCodedTips(filename string) {
 					log.Error("Failed to read hard coded header", "error", err2)
 					break
 				}
-				hd.hardTips[h.Hash()] = struct{}{}
+				hardTips[h.Hash()] = struct{}{}
 			}
 		} else {
 			log.Error("Failed to open hard-coded headers", "file", filename, "error", err1)
@@ -611,9 +613,10 @@ func (hd *HeaderDownload) InitHardCodedTips(filename string) {
 	} else {
 		log.Error("Failed to stat hard-coded headers", "file", filename, "error", err)
 	}
+	return hardTips
 }
 
-func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
+func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]struct{}) (bool, error) {
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
 		return false, err
@@ -669,6 +672,12 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 		}
 		fs = append(fs, f)
 		rs = append(rs, r)
+	}
+	// Based on the last anchors, set the hardTips
+	for _, anchor := range lastAnchors {
+		if _, ok := hardTips[anchor.hash]; ok {
+			hd.hardTips[anchor.hash] = struct{}{}
+		}
 	}
 	for i, f := range fs {
 		r := rs[i]
