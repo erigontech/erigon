@@ -758,6 +758,11 @@ func (cfg *Cfg) GenerateProof() *CfgProof {
 		if opcode == JUMPDEST {
 			entries[pc] = true
 		}
+		if opcode == JUMPI {
+			if pc < len(cfg.Program.Code)-1 {
+				entries[pc+1] = true
+			}
+		}
 	}
 
 	for pc0 := range pcs {

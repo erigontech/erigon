@@ -52,11 +52,11 @@ func testGenCfg() {
 		//absIntTestPrivateFunction02()
 		//absIntTestStaticLoop01()
 		//absIntTestDepositContract()
-		absIntTestPanic00()
+		//absIntTestPanic00()
 		//absIntTestSmallImprecision()
 		//absIntTestSmallInvalidJumpDest()
 		//absIntTestSmallImprecision2()
-		//absIntAndJumpImprecision()
+		absIntAndJumpImprecision()
 		return
 	}
 }
