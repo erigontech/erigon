@@ -276,7 +276,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	}
 	entry, err = ReadCanonicalHash(db, number)
 	if err != nil {
-		panic(err)
+		t.Error(err)
 	}
 	if entry != (common.Hash{}) {
 		t.Fatalf("Deleted canonical mapping returned: %v", entry)

@@ -659,7 +659,7 @@ func DeleteBlock(db ethdb.Database, hash common.Hash, number uint64) error {
 // the hash to number mapping.
 func DeleteBlockWithoutNumber(db ethdb.Database, hash common.Hash, number uint64) error {
 	if err := DeleteReceipts(db, number); err != nil {
-		panic(err)
+		return err
 	}
 	deleteHeaderWithoutNumber(db, hash, number)
 	DeleteBody(db, hash, number)

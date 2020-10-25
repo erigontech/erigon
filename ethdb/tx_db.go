@@ -229,7 +229,9 @@ func (m *TxDb) IdealBatchSize() int {
 
 func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	m.panicOnEmptyDB()
-	return Walk(m.cursors[bucket], startkey, fixedbits, walker)
+	c := m.tx.Cursor(bucket) // create new cursor, then call other methods of TxDb inside MultiWalk callback will not affect this cursor
+	defer c.Close()
+	return Walk(c, startkey, fixedbits, walker)
 }
 
 func Walk(c Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
@@ -272,7 +274,9 @@ func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
 
 func (m *TxDb) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 	m.panicOnEmptyDB()
-	return MultiWalk(m.cursors[bucket], startkeys, fixedbits, walker)
+	c := m.tx.Cursor(bucket) // create new cursor, then call other methods of TxDb inside MultiWalk callback will not affect this cursor
+	defer c.Close()
+	return MultiWalk(c, startkeys, fixedbits, walker)
 }
 
 func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
