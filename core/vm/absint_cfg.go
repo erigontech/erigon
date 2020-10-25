@@ -183,7 +183,6 @@ func (s *astack) String(abbrev bool) string {
 
 func (s *astack) Eq(s1 *astack) bool {
 	if s.hash != s1.hash {
-		fmt.Printf("neq hash %v %v\n", s.hash, s1.hash)
 		return false
 	}
 
@@ -193,7 +192,6 @@ func (s *astack) Eq(s1 *astack) bool {
 
 	for i := 0; i < len(s.values); i++ {
 		if !s.values[i].Eq(s1.values[i]) {
-			fmt.Printf("neq %v %v\n")
 			return false
 		}
 	}

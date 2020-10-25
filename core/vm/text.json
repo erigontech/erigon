@@ -2,6 +2,53 @@
   "Blocks": [
     {
       "Entry": {
+        "Pc": 0,
+        "Stacks": [
+          null
+        ]
+      },
+      "Exit": {
+        "Pc": 10,
+        "Stacks": [
+          [
+            "0xf",
+            "⊤",
+            "⊤"
+          ]
+        ]
+      },
+      "Preds": null,
+      "Succs": [
+        11,
+        15
+      ]
+    },
+    {
+      "Entry": {
+        "Pc": 11,
+        "Stacks": [
+          [
+            "⊤"
+          ]
+        ]
+      },
+      "Exit": {
+        "Pc": 14,
+        "Stacks": [
+          [
+            "x",
+            "x",
+            "⊤"
+          ]
+        ]
+      },
+      "Preds": [
+        10
+      ],
+      "Succs": null
+    },
+    {
+      "Entry": {
         "Pc": 15,
         "Stacks": [
           [
@@ -17,7 +64,39 @@
             "⊤"
           ]
         ]
-      }
+      },
+      "Preds": [
+        10
+      ],
+      "Succs": [
+        24,
+        40
+      ]
+    },
+    {
+      "Entry": {
+        "Pc": 24,
+        "Stacks": [
+          null
+        ]
+      },
+      "Exit": {
+        "Pc": 39,
+        "Stacks": [
+          [
+            "0x2d",
+            "⊤",
+            "⊤"
+          ]
+        ]
+      },
+      "Preds": [
+        23
+      ],
+      "Succs": [
+        40,
+        45
+      ]
     },
     {
       "Entry": {
@@ -28,7 +107,50 @@
           ],
           null
         ]
-      }
+      },
+      "Exit": {
+        "Pc": 44,
+        "Stacks": [
+          [
+            "x",
+            "x",
+            "⊤"
+          ],
+          [
+            "x",
+            "x"
+          ]
+        ]
+      },
+      "Preds": [
+        23,
+        39
+      ],
+      "Succs": null
+    },
+    {
+      "Entry": {
+        "Pc": 45,
+        "Stacks": [
+          [
+            "⊤"
+          ]
+        ]
+      },
+      "Exit": {
+        "Pc": 72,
+        "Stacks": [
+          [
+            "⊤",
+            "⊤",
+            "⊤"
+          ]
+        ]
+      },
+      "Preds": [
+        39
+      ],
+      "Succs": null
     }
   ]
 }

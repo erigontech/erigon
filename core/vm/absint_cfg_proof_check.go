@@ -201,6 +201,7 @@ func postCheck(sem *CfgAbsSem, code []byte, st0 *astate, pc0 int, pc1 int, isJum
 			}
 		}
 
+		stack1.updateHash()
 		st1.Add(stack1)
 	}
 
@@ -215,6 +216,7 @@ func CheckCfg(code []byte, proof *CfgProof) bool {
 		return false
 	}
 
+	preLub := make(map[int][]*astate)
 	for _, block := range proof.Blocks {
 		fmt.Printf("Checking block %v\n", block.Entry.Pc)
 		st := intoAState(block.Entry.Stacks)
@@ -243,21 +245,9 @@ func CheckCfg(code []byte, proof *CfgProof) bool {
 					print("B")
 					return false
 				}
-				for pc1 := range succs {
-					succEntrySt := postCheck(sem, code, st, pc0, pc1, isJump[pc1])
-					succBlock := proof.getBlock(pc1)
-					if succBlock == nil {
-						print("F")
-						return false
-					}
-					if !Eq(succEntrySt, intoAState(succBlock.Entry.Stacks)) {
-						fmt.Printf("entry-pc: %v %v %v\n", pc0, pc1, succBlock.Entry.Pc)
-						fmt.Printf("pre: %v\n", st.String(true))
-						fmt.Printf("post: %v\n", succEntrySt.String(true))
-						fmt.Printf("proof: %v\n", intoAState(succBlock.Entry.Stacks).String(true))
-						print("C")
-						return false
-					}
+				for succEntryPc := range succs {
+					succEntrySt := postCheck(sem, code, st, pc0, succEntryPc, isJump[succEntryPc])
+					preLub[succEntryPc] = append(preLub[succEntryPc], succEntrySt)
 				}
 				break
 			} else {
@@ -268,7 +258,7 @@ func CheckCfg(code []byte, proof *CfgProof) bool {
 
 				pc1 := one(succs)
 				if pc0 >= pc1 || pc1 > block.Exit.Pc {
-					print("E")
+					fmt.Printf("pc0=%v pc1=%v pcx=%v", pc0, pc1, block.Exit.Pc)
 					return false
 				}
 
@@ -278,7 +268,28 @@ func CheckCfg(code []byte, proof *CfgProof) bool {
 		}
 	}
 
-	return false
+	print("checking lubs\n")
+	for _, block := range proof.Blocks {
+		fmt.Printf("pc=%v\n", block.Entry.Pc)
+
+		var inferredEntry *astate
+		if block.Entry.Pc == 0 {
+			inferredEntry = botState()
+		} else {
+			lub := emptyState()
+			for _, preSt := range preLub[block.Entry.Pc] {
+				lub = Lub(lub, preSt)
+			}
+			inferredEntry = lub
+		}
+
+		if !Eq(inferredEntry, intoAState(block.Entry.Stacks)) {
+			print("C")
+			return false
+		}
+	}
+
+	return true
 }
 
 func intMap(succs []int) map[int]bool {

@@ -383,6 +383,7 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 			}
 		}
 
+		stack1.updateHash()
 		st1.Add(stack1)
 	}
 
@@ -753,6 +754,10 @@ func (cfg *Cfg) GenerateProof() *CfgProof {
 				break
 			}
 		}
+		opcode := OpCode(cfg.Program.Code[pc])
+		if opcode == JUMPDEST {
+			entries[pc] = true
+		}
 	}
 
 	for pc0 := range pcs {
@@ -764,6 +769,12 @@ func (cfg *Cfg) GenerateProof() *CfgProof {
 		}
 
 		if len(succEdgeMap[pc0]) == 0 || len(succEdgeMap[pc0]) > 1 {
+			exits[pc0] = true
+		}
+
+		opcode := OpCode(cfg.Program.Code[pc0])
+		if opcode == JUMP || opcode == JUMPI ||
+			opcode == RETURN || opcode == REVERT {
 			exits[pc0] = true
 		}
 	}
