@@ -183,6 +183,7 @@ func (s *astack) String(abbrev bool) string {
 
 func (s *astack) Eq(s1 *astack) bool {
 	if s.hash != s1.hash {
+		fmt.Printf("neq hash %v %v\n", s.hash, s1.hash)
 		return false
 	}
 
@@ -192,6 +193,7 @@ func (s *astack) Eq(s1 *astack) bool {
 
 	for i := 0; i < len(s.values); i++ {
 		if !s.values[i].Eq(s1.values[i]) {
+			fmt.Printf("neq %v %v\n")
 			return false
 		}
 	}
@@ -329,9 +331,32 @@ func (proof *CfgProof) ToString() string {
 	return string(proof.Serialize())
 }
 
+//block.{Entry|Exit}.Pc in code, block.{Succs|Preds} in some block.{Entry}.Pc
+//Entry <= Exit
+//No overlap of blocks
+//Must have block starting at 0 with a empty state
+//Succs,Preds consistency
+//No duplicate succs
+//No duplicate preds
+//succs are sorted
+//preds are sorted
+func (proof *CfgProof) isValid() bool {
+	return true
+}
+
+func (proof *CfgProof) getBlock(pc int) *CfgProofBlock {
+	for _, b := range proof.Blocks {
+		if b.Entry.Pc == pc {
+			return b
+		}
+	}
+	return nil
+}
+
 type edgec struct {
 	pc0    int
 	pc1    int
+	isJump bool
 }
 
 func StringifyAState(st *astate) [][]string {
@@ -348,7 +373,7 @@ func StringifyAState(st *astate) [][]string {
 	return stacks
 }
 
-func DestringifyAState(ststr [][]string) *astate {
+func intoAState(ststr [][]string) *astate {
 	st := astate{}
 
 	for _, stack := range ststr {
@@ -356,8 +381,40 @@ func DestringifyAState(ststr [][]string) *astate {
 		for _, vstr := range stack {
 			astack.values = append(astack.values, AbsValueDestringify(vstr))
 		}
+		astack.updateHash()
 		st.Add(&astack)
 	}
 
 	return &st
+}
+
+func Leq(st0 *astate, st1 *astate) bool {
+	for _, stack0 := range st0.stackset {
+		var found bool
+		for _, stack1 := range st1.stackset {
+			if stack0.Eq(stack1) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func Eq(st0 *astate, st1 *astate) bool {
+	return Leq(st0, st1) && Leq(st1, st0)
+}
+
+func Lub(st0 *astate, st1 *astate) *astate {
+	newState := emptyState()
+	for _, stack := range st0.stackset {
+		newState.Add(stack)
+	}
+	for _, stack := range st1.stackset {
+		newState.Add(stack)
+	}
+	return newState
 }

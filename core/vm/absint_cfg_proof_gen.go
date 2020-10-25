@@ -217,8 +217,6 @@ type ResolveResult struct {
 // destination (in this case, attrubute resolved will be false), or returns one (for a non-JUMPI) or two (for JUMPI)
 // edges that contain program counters of destinations where the executions can possibly come next
 func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
-	isStackTooShort := false
-
 	st0 := cfg.D[pc0]
 
 	stmt := cfg.Program.Stmts[pc0]
@@ -267,11 +265,6 @@ func resolve(cfg *Cfg, pc0 int) ([]edge, error) {
 
 		cfg.Program.Stmts[e.pc0].covered = true
 		cfg.Program.Stmts[e.pc1].covered = true
-	}
-
-	if isStackTooShort {
-		cfg.Metrics.ShortStack = true
-		return nil, errors.New("abstract stack too short: reached unmodelled depth")
 	}
 
 	if isBadJump {
@@ -408,33 +401,6 @@ func isFF(u *uint256.Int) bool {
 		return true
 	}
 	return false
-}
-
-func Leq(st0 *astate, st1 *astate) bool {
-	for _, stack0 := range st0.stackset {
-		var found bool
-		for _, stack1 := range st1.stackset {
-			if stack0.Eq(stack1) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
-}
-
-func Lub(st0 *astate, st1 *astate) *astate {
-	newState := emptyState()
-	for _, stack := range st0.stackset {
-		newState.Add(stack)
-	}
-	for _, stack := range st1.stackset {
-		newState.Add(stack)
-	}
-	return newState
 }
 
 type Block struct {

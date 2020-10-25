@@ -2,7 +2,10 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 	"github.com/holiman/uint256"
+	"log"
+	"reflect"
 )
 
 type CfgOpSem struct {
@@ -78,84 +81,17 @@ func isJumpDest(code []byte, value *uint256.Int) bool {
 	return OpCode(code[pc]) == JUMPDEST
 }
 
-func CheckCfg(code []byte, proof *CfgProof) bool {
-	return false
-	/*sem := NewCfgAbsSem()
-
-	for _, block := range proof.Blocks {
-		pre := DestringifyAState(block.Entry.Stacks)
-
-		edges, err := resolveCheck(sem, code, pre, block.Entry)
-		if err != nil {
-			return false
-		}
-
-		resolveCheck()
-		post, err := postCheck(sem, code, pre, e)
-	}
-
-
-	var workList []edgec
-
-	if len(proof[0].stackset) != 1 || len(proof[0].stackset[0].values) != 0 {
-		return false
-	}
-
-	edges, err := resolveCheck(sem, code, proof, 0)
-	if err != nil {
-		return false
-	}
-
-	visited := make(map[int]bool)
-	for _, e := range edges {
-		workList = append(workList, e)
-	}
-
-	for len(workList) > 0 {
-		var e edgec
-		e, workList = workList[0], workList[1:]
-
-		if visited[e.pc0] {
-			continue
-		}
-		visited[e.pc0] = true
-
-		prePrf := proof[e.pc0]
-		postPrf := proof[e.pc1]
-		post, err := postCheck(sem, code, prePrf, e)
-		if err != nil {
-			return false
-		}
-
-		if !Leq(post, postPrf) {
-			return false
-		}
-
-		edges, err := resolveCheck(sem, code, proof, e.pc1)
-		if err != nil {
-			return false
-		}
-
-		for _, e := range edges {
-			if !visited[e.pc1] {
-				workList = append(workList, e)
-			}
-		}
-	}*/
-}
-
-func resolveCheck(sem *CfgAbsSem, code []byte, proof map[int]*astate, pc0 int) ([]edgec, error) {
-	st0 := proof[pc0]
+func resolveCheck(sem *CfgAbsSem, code []byte, st0 *astate, pc0 int) (map[int]bool, map[int]bool, error) {
 	opcode := OpCode(code[pc0])
 	opsem := (*sem)[opcode]
+	succs := make(map[int]bool)
+	jumps := make(map[int]bool)
 
 	if opsem == nil || opsem.halts || opsem.reverts {
-		return nil, nil
+		return succs, jumps, nil
 	}
 
 	codeLen := len(code)
-
-	var edges []edgec
 
 	for _, stack := range st0.stackset {
 		if opcode == JUMP || opcode == JUMPI {
@@ -164,13 +100,13 @@ func resolveCheck(sem *CfgAbsSem, code []byte, proof map[int]*astate, pc0 int) (
 				if jumpDest.kind == InvalidValue {
 					//program terminates, don't add edges
 				} else if jumpDest.kind == TopValue {
-					return nil, errors.New("unresolvable jumps found")
+					empty := make(map[int]bool)
+					return empty, empty, errors.New("unresolvable jumps found")
 				} else if jumpDest.kind == ConcreteValue {
 					if isJumpDest(code, jumpDest.value) {
 						pc1 := int(jumpDest.value.Uint64())
-						edges = append(edges, edgec{pc0, pc1})
-					} else {
-						//program terminates, don't add edges
+						succs[pc1] = true
+						jumps[pc1] = true
 					}
 				}
 			}
@@ -180,27 +116,26 @@ func resolveCheck(sem *CfgAbsSem, code []byte, proof map[int]*astate, pc0 int) (
 	//fall-thru edge
 	if opcode != JUMP {
 		if pc0 < codeLen-opsem.numBytes {
-			edges = append(edges, edgec{pc0, pc0 + opsem.numBytes})
+			succs[pc0 + opsem.numBytes] = true
 		}
 	}
 
-	return edges, nil
+	return succs, jumps, nil
 }
 
-func postCheck(sem *CfgAbsSem, code []byte, st0 *astate, edge edgec) (*astate, error) {
+func postCheck(sem *CfgAbsSem, code []byte, st0 *astate, pc0 int, pc1 int, isJump bool) *astate {
 	st1 := emptyState()
-	op0 := OpCode(code[edge.pc0])
-	op1 := OpCode(code[edge.pc1])
+	op0 := OpCode(code[pc0])
 	opsem0 := (*sem)[op0]
 
 	for _, stack0 := range st0.stackset {
-		if op1 == JUMPDEST {
+		if isJump {
 			if !stack0.hasIndices(0) {
 				continue
 			}
 
 			elm0 := stack0.values[0]
-			if elm0.kind == ConcreteValue && elm0.value.IsUint64() && int(elm0.value.Uint64()) != edge.pc1 {
+			if elm0.kind == ConcreteValue && elm0.value.IsUint64() && int(elm0.value.Uint64()) != pc1 {
 				continue
 			}
 		}
@@ -208,7 +143,7 @@ func postCheck(sem *CfgAbsSem, code []byte, st0 *astate, edge edgec) (*astate, e
 		stack1 := stack0.Copy()
 
 		if opsem0.isPush {
-			pushValue := getPushValue(code, edge.pc0, opsem0)
+			pushValue := getPushValue(code, pc0, opsem0)
 			if isJumpDest(code, &pushValue) || isFF(&pushValue) {
 				stack1.Push(AbsValueConcrete(pushValue))
 			} else {
@@ -238,19 +173,19 @@ func postCheck(sem *CfgAbsSem, code []byte, st0 *astate, edge edgec) (*astate, e
 				continue
 			}
 
-			a := stack1.Pop(edge.pc0)
-			b := stack1.Pop(edge.pc0)
+			a := stack1.Pop(pc0)
+			b := stack1.Pop(pc0)
 
 			if a.kind == ConcreteValue && b.kind == ConcreteValue {
 				v := uint256.NewInt()
 				v.And(a.value, b.value)
 				stack1.Push(AbsValueConcrete(*v))
 			} else {
-				stack1.Push(AbsValueTop(edge.pc0))
+				stack1.Push(AbsValueTop(pc0))
 			}
 		} else if op0 == PC {
 			v := uint256.NewInt()
-			v.SetUint64(uint64(edge.pc0))
+			v.SetUint64(uint64(pc0))
 			stack1.Push(AbsValueConcrete(*v))
 		} else {
 			if !stack0.hasIndices(opsem0.numPop-1) {
@@ -258,16 +193,106 @@ func postCheck(sem *CfgAbsSem, code []byte, st0 *astate, edge edgec) (*astate, e
 			}
 
 			for i := 0; i < opsem0.numPop; i++ {
-				stack1.Pop(edge.pc0)
+				stack1.Pop(pc0)
 			}
 
 			for i := 0; i < opsem0.numPush; i++ {
-				stack1.Push(AbsValueTop(edge.pc0))
+				stack1.Push(AbsValueTop(pc0))
 			}
 		}
 
 		st1.Add(stack1)
 	}
 
-	return st1, nil
+	return st1
+}
+
+func CheckCfg(code []byte, proof *CfgProof) bool {
+	sem := NewCfgAbsSem()
+
+	if !proof.isValid() {
+		print("G")
+		return false
+	}
+
+	for _, block := range proof.Blocks {
+		fmt.Printf("Checking block %v\n", block.Entry.Pc)
+		st := intoAState(block.Entry.Stacks)
+		pc0 := block.Entry.Pc
+		blockSuccs := intMap(block.Succs)
+		for pc0 <= block.Exit.Pc {
+			fmt.Printf("pc=%v\n", pc0)
+			if pc0 == block.Exit.Pc {
+				if !Eq(st, intoAState(block.Exit.Stacks)) {
+					fmt.Printf("%v\n", st.String(false))
+					fmt.Printf("%v\n", intoAState(block.Exit.Stacks).String(false))
+					print("A")
+					return false
+				}
+			}
+
+			succs, isJump, err := resolveCheck(sem, code, st, pc0)
+			if err != nil {
+				return false
+			}
+
+			if pc0 == block.Exit.Pc {
+				if !reflect.DeepEqual(succs, blockSuccs) {
+					fmt.Printf("%v %v\n", len(succs), succs)
+					fmt.Printf("%v %v\n", len(blockSuccs), blockSuccs)
+					print("B")
+					return false
+				}
+				for pc1 := range succs {
+					succEntrySt := postCheck(sem, code, st, pc0, pc1, isJump[pc1])
+					succBlock := proof.getBlock(pc1)
+					if succBlock == nil {
+						print("F")
+						return false
+					}
+					if !Eq(succEntrySt, intoAState(succBlock.Entry.Stacks)) {
+						fmt.Printf("entry-pc: %v %v %v\n", pc0, pc1, succBlock.Entry.Pc)
+						fmt.Printf("pre: %v\n", st.String(true))
+						fmt.Printf("post: %v\n", succEntrySt.String(true))
+						fmt.Printf("proof: %v\n", intoAState(succBlock.Entry.Stacks).String(true))
+						print("C")
+						return false
+					}
+				}
+				break
+			} else {
+				if len(succs) != 1 {
+					print("D")
+					return false
+				}
+
+				pc1 := one(succs)
+				if pc0 >= pc1 || pc1 > block.Exit.Pc {
+					print("E")
+					return false
+				}
+
+				st = postCheck(sem, code, st, pc0, pc1, false)
+				pc0 = pc1
+			}
+		}
+	}
+
+	return false
+}
+
+func intMap(succs []int) map[int]bool {
+	res := make(map[int]bool)
+	for _, succ := range succs {
+		res[succ] = true
+	}
+	return res
+}
+
+func one(m map[int]bool) int {
+	for k, _ := range m {
+		return k
+	}
+	log.Fatal("must have exactly one element")
+	return -1
 }

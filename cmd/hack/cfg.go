@@ -494,7 +494,7 @@ func runCfgAnly(testName string, code string) {
 		proof := cfg.GenerateProof()
 
 		cfg.ProofSerialized = proof.Serialize()
-		fmt.Printf("Proof:\n%+v", string(cfg.ProofSerialized))
+		fmt.Printf("Proof:\n%+v\n", string(cfg.ProofSerialized))
 
 		dproof := vm.DeserializeCfgProof(cfg.ProofSerialized)
 
