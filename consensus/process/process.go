@@ -55,6 +55,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					c.addVerifyHeaderRequest(req, parents, parentsRequested, allParents)
 				}
 			case parentResp := <-c.HeaderResponses:
+				// fixme лишнее условие похоже
 				fmt.Println("<-c.HeaderResponses-1", parentResp.Number, parentResp.Header == nil, parentResp.Err)
 				if parentResp.Err != nil {
 					c.RequestsMu.Lock()
@@ -152,7 +153,7 @@ func (c *Consensus) verifyRequestsCommonAncestor(header *types.Header) {
 				req.parents = append(req.parents, reqID)
 				toVerify[ancestorBlockNum] = req
 
-				fmt.Printf("TO_VERIFY for %d\n", req.blockNum, req.ancestorBlockNum, request.)
+				fmt.Printf("TO_VERIFY for %d %d %d\n", req.blockNum, req.ancestorBlockNum, request.ID)
 
 				ancMap[reqID] = struct{}{}
 			}

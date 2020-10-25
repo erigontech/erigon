@@ -26,9 +26,11 @@ type VerifyHeaderResponse struct {
 }
 
 type HeadersRequest struct {
-	Number uint64
+	Number uint64 // сколько надо для проверки
+	Highest common.Hash
 }
 
+// ответ в виде пачки на HeadersRequest
 type HeaderResponse struct {
 	Header *types.Header
 	Number uint64

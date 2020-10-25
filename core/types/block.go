@@ -318,6 +318,7 @@ func SearchHeadersByNumber(headers []*Header, blockNumber uint64) ([]*Header, bo
 	if len(headers) == 0 {
 		return nil, false
 	}
+	// fixme: заменить на линейный поиск
 	smallestIDx := sort.Search(len(headers), func(i int) bool {
 		return headers[i].Number.Uint64() >= blockNumber
 	})
