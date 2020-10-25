@@ -56,7 +56,7 @@ func NewObjectDatabase(kv KV) *ObjectDatabase {
 }
 
 func MustOpen(path string) *ObjectDatabase {
-	db, err := Open(path)
+	db, err := Open(path, false)
 	if err != nil {
 		panic(err)
 	}
@@ -65,7 +65,7 @@ func MustOpen(path string) *ObjectDatabase {
 
 // Open - main method to open database. Choosing driver based on path suffix.
 // If env TEST_DB provided - choose driver based on it. Some test using this method to open non-in-memory db
-func Open(path string) (*ObjectDatabase, error) {
+func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 	var kv KV
 	var err error
 	testDB := debug.TestDB()
@@ -73,7 +73,11 @@ func Open(path string) (*ObjectDatabase, error) {
 	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
 		kv, err = NewLMDB().Path(path).Open()
 	default:
-		kv, err = NewLMDB().Path(path).Open()
+		opts := NewLMDB().Path(path)
+		if readOnly {
+			opts = opts.ReadOnly()
+		}
+		kv, err = opts.Open()
 	}
 
 	if err != nil {
