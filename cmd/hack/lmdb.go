@@ -122,7 +122,7 @@ func defrag(chaindata string) error {
 						return fmt.Errorf("reading FREE_DBI overflow page: %v", err)
 					}
 					var overflowNum int
-					_, flags, overflowNum = readOverflowPageHeader(meta[:], 0)
+					_, _, overflowNum = readOverflowPageHeader(meta[:], 0)
 					overflows += overflowNum
 					left := dataSize - 8
 					// Start with pos + 8 because first 8 bytes is the size of the list
