@@ -5,24 +5,26 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
+// Forks is a data type to record a list of forks passed by this node
 type Forks struct {
 	GenesisHash common.Hash `json:"genesis"`
 	Passed      []uint64    `json:"passed"`
 	Next        *uint64     `json:"next,omitempty"`
 }
 
-// Forks returns forkID hash, sorted list of already passed forks and next fork block
+// Forks implements tg_forks. Returns the genesis block hash and a sorted list of already passed fork block numbers as well as the next fork block (if applicable)
 func (api *TgImpl) Forks(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (Forks, error) {
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
 	if err != nil {
 		return Forks{}, err
 	}
 
-	tx, err := api.dbReader.Begin(ctx, false)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return Forks{}, err
 	}

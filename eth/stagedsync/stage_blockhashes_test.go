@@ -24,7 +24,9 @@ func TestBlockHashStage(t *testing.T) {
 	}
 	rawdb.WriteHeader(context.TODO(), db, origin)
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
-	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
+	if err := rawdb.WriteCanonicalHash(db, origin.Hash(), 0); err != nil {
+		panic(err)
+	}
 
 	_, _, err := InsertHeaderChain("logPrefix", db, headers, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
 	assert.NoError(t, err)

@@ -88,9 +88,13 @@ func BenchmarkFilters(b *testing.B) {
 		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
 			panic(err)
 		}
-		rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
+		if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
+			panic(err)
+		}
 		rawdb.WriteHeadBlockHash(db, block.Hash())
-		rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), receipts[i])
+		if err := rawdb.WriteReceipts(db, block.NumberU64(), receipts[i]); err != nil {
+			panic(err)
+		}
 	}
 	b.ResetTimer()
 
@@ -171,9 +175,13 @@ func TestFilters(t *testing.T) {
 		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
 			panic(err)
 		}
-		rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
+		if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
+			panic(err)
+		}
 		rawdb.WriteHeadBlockHash(db, block.Hash())
-		rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), receipts[i])
+		if err := rawdb.WriteReceipts(db, block.NumberU64(), receipts[i]); err != nil {
+			panic(err)
+		}
 	}
 
 	filter := NewRangeFilter(backend, 0, -1, []common.Address{addr}, [][]common.Hash{{hash1, hash2, hash3, hash4}})

@@ -172,7 +172,10 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 			if ch == (common.Hash{}) {
 				break
 			}
-			rawdb.DeleteCanonicalHash(markerBatch, i)
+			err = rawdb.DeleteCanonicalHash(markerBatch, i)
+			if err != nil {
+				return NonStatTy, err
+			}
 		}
 
 		// Overwrite any stale canonical number assignments
@@ -189,14 +192,21 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 			if h == headHash {
 				break
 			}
-			rawdb.WriteCanonicalHash(markerBatch, headHash, headNumber)
+			err = rawdb.WriteCanonicalHash(markerBatch, headHash, headNumber)
+			if err != nil {
+				return NonStatTy, err
+			}
 
 			headHash = headHeader.ParentHash
 			headNumber = headHeader.Number.Uint64() - 1
 			headHeader = hc.GetHeader(headHash, headNumber)
 		}
 		// Extend the canonical chain with the new header
-		rawdb.WriteCanonicalHash(markerBatch, hash, number)
+		err = rawdb.WriteCanonicalHash(markerBatch, hash, number)
+		if err != nil {
+			return NonStatTy, err
+		}
+
 		rawdb.WriteHeadHeaderHash(markerBatch, hash)
 		if _, err := markerBatch.Commit(); err != nil {
 			log.Crit("Failed to write header markers into disk", "err", err)
@@ -481,11 +491,11 @@ type (
 	// before head header is updated. The method will return the actual block it
 	// updated the head to (missing state) and a flag if setHead should continue
 	// rewinding till that forcefully (exceeded ancient limits)
-	UpdateHeadBlocksCallback func(rawdb.DatabaseWriter, *types.Header) (uint64, bool)
+	UpdateHeadBlocksCallback func(ethdb.Database, *types.Header) (uint64, bool)
 
 	// DeleteBlockContentCallback is a callback function that is called by SetHead
 	// before each header is deleted.
-	DeleteBlockContentCallback func(rawdb.DatabaseDeleter, common.Hash, uint64)
+	DeleteBlockContentCallback func(ethdb.Database, common.Hash, uint64)
 )
 
 // SetHead rewinds the local chain to a new head. Everything above the new head
@@ -558,7 +568,9 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 					panic(err)
 				}
 			}
-			rawdb.DeleteCanonicalHash(batch, num)
+			if err := rawdb.DeleteCanonicalHash(batch, num); err != nil {
+				panic(err)
+			}
 		}
 	}
 	if _, err := batch.Commit(); err != nil {

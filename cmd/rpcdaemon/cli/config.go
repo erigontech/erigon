@@ -76,7 +76,7 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.Chaindata != "" {
-		if database, errOpen := ethdb.Open(cfg.Chaindata); errOpen == nil {
+		if database, errOpen := ethdb.Open(cfg.Chaindata, true); errOpen == nil {
 			db = database.KV()
 		} else {
 			err = errOpen

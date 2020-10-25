@@ -14,13 +14,13 @@ import (
 func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	db1 := ethdb.NewMemDatabase()
 	defer db1.Close()
-	tx1, err := db1.Begin(context.Background(), true)
+	tx1, err := db1.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx1.Rollback()
 
 	db2 := ethdb.NewMemDatabase()
 	defer db2.Close()
-	tx2, err := db2.Begin(context.Background(), true)
+	tx2, err := db2.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx2.Rollback()
 
@@ -53,13 +53,13 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	db1 := ethdb.NewMemDatabase()
 	defer db1.Close()
-	tx1, err := db1.Begin(context.Background(), true)
+	tx1, err := db1.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx1.Rollback()
 
 	db2 := ethdb.NewMemDatabase()
 	defer db2.Close()
-	tx2, err := db2.Begin(context.Background(), true)
+	tx2, err := db2.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx2.Rollback()
 
@@ -94,13 +94,13 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	t.Skip("not supported yet, to be restored")
 	db1 := ethdb.NewMemDatabase()
 	defer db1.Close()
-	tx1, err := db1.Begin(context.Background(), true)
+	tx1, err := db1.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx1.Rollback()
 
 	db2 := ethdb.NewMemDatabase()
 	defer db2.Close()
-	tx2, err := db2.Begin(context.Background(), true)
+	tx2, err := db2.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx2.Rollback()
 

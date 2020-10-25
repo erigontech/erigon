@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 
@@ -18,7 +19,7 @@ func TestLogIndex(t *testing.T) {
 
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	tx, err := db.Begin(context.Background(), true)
+	tx, err := db.Begin(context.Background(), ethdb.RW)
 	require.NoError(err)
 	defer tx.Rollback()
 
@@ -44,32 +45,29 @@ func TestLogIndex(t *testing.T) {
 			},
 		},
 	}}
-	err = appendReceipts(tx, receipts1, 1, common.Hash{})
+	err = rawdb.AppendReceipts(tx, 1, receipts1)
 	require.NoError(err)
 
-	err = appendReceipts(tx, receipts2, 2, common.Hash{})
+	err = rawdb.AppendReceipts(tx, 2, receipts2)
 	require.NoError(err)
 
 	err = promoteLogIndex("logPrefix", tx, 0, "", nil)
 	require.NoError(err)
 
 	// Check indices GetCardinality (in how many blocks they meet)
-	logTopicIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogTopicIndex)
-	logAddrIndex := tx.(ethdb.HasTx).Tx().Cursor(dbutils.LogAddressIndex)
-
-	m, err := bitmapdb.Get(logAddrIndex, addr1[:], 0, 10_000_000)
+	m, err := bitmapdb.Get(tx, dbutils.LogAddressIndex, addr1[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(1, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logAddrIndex, addr2[:], 0, 10_000_000)
+	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr2[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(1, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logTopicIndex, topic1[:], 0, 10_000_000)
+	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic1[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(1, int(m.GetCardinality()), 0, 10_000_000)
 
-	m, err = bitmapdb.Get(logTopicIndex, topic2[:], 0, 10_000_000)
+	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic2[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(2, int(m.GetCardinality()))
 
@@ -77,19 +75,19 @@ func TestLogIndex(t *testing.T) {
 	err = unwindLogIndex("logPrefix", tx, 2, 1, nil)
 	require.NoError(err)
 
-	m, err = bitmapdb.Get(logAddrIndex, addr1[:], 0, 10_000_000)
+	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr1[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(1, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logAddrIndex, addr2[:], 0, 10_000_000)
+	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr2[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(0, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logTopicIndex, topic1[:], 0, 10_000_000)
+	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic1[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(1, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logTopicIndex, topic2[:], 0, 10_000_000)
+	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic2[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(1, int(m.GetCardinality()))
 
@@ -97,19 +95,19 @@ func TestLogIndex(t *testing.T) {
 	err = unwindLogIndex("logPrefix", tx, 1, 0, nil)
 	require.NoError(err)
 
-	m, err = bitmapdb.Get(logAddrIndex, addr1[:], 0, 10_000_000)
+	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr1[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(0, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logAddrIndex, addr2[:], 0, 10_000_000)
+	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr2[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(0, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logTopicIndex, topic1[:], 0, 10_000_000)
+	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic1[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(0, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(logTopicIndex, topic2[:], 0, 10_000_000)
+	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic2[:], 0, 10_000_000)
 	require.NoError(err)
 	require.Equal(0, int(m.GetCardinality()))
 }

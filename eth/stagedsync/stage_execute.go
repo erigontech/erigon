@@ -7,14 +7,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -69,7 +66,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = stateDB.Begin(context.Background(), true)
+		tx, err = stateDB.Begin(context.Background(), ethdb.RW)
 		if err != nil {
 			return err
 		}
@@ -128,7 +125,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 
 		if params.WriteReceipts {
-			if err = appendReceipts(tx, receipts, block.NumberU64(), block.Hash()); err != nil {
+			if err = rawdb.AppendReceipts(tx, block.NumberU64(), receipts); err != nil {
 				return err
 			}
 		}
@@ -191,19 +188,6 @@ func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMu
 		"numGC", int(m.NumGC))
 
 	return now
-}
-
-func appendReceipts(tx ethdb.DbWithPendingMutations, receipts types.Receipts, blockNumber uint64, blockHash common.Hash) error {
-	newV := make([]byte, 0, 1024)
-	err := cbor.Marshal(&newV, receipts)
-	if err != nil {
-		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
-	}
-	// Store the flattened receipt slice
-	if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(blockNumber, blockHash), newV); err != nil {
-		return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
-	}
-	return nil
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
@@ -276,12 +260,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		return fmt.Errorf("%s: walking storage changesets: %v", logPrefix, err)
 	}
 	if writeReceipts {
-		if err := stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (bool, error) {
-			if err := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err != nil {
-				return false, fmt.Errorf("%s: delete receipts: %v", logPrefix, err)
-			}
-			return true, nil
-		}); err != nil {
+		if err := rawdb.DeleteNewerReceipts(stateDB, u.UnwindPoint+1); err != nil {
 			return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
 		}
 	}
