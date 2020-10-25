@@ -116,7 +116,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Fatal(commitErr)
 	}
 
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -547,7 +547,7 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 	//walk and collect walkAsOf result
 	var err error
 	var startKey [72]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -710,7 +710,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	//walk and collect walkAsOf result
 	var err error
 	var startKey [60]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -893,7 +893,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	var err error
 	startKey := make([]byte, 60)
 	copy(startKey[:common.AddressLength], addr1.Bytes())
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -1074,7 +1074,7 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 	}
 
 	var startKey [32]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -1232,7 +1232,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	}, true, true)
 
 	var startKey [20]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -1419,7 +1419,7 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 
 	//walk and collect walkAsOf result
 	var startKey [72]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -1578,7 +1578,7 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 	}
 
 	var startKey [60]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -1738,7 +1738,7 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 	}
 
 	var startKey [32]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -1906,7 +1906,7 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 	}
 
 	var startKey [32]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -2101,7 +2101,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		},
 	}, true, true)
 
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
@@ -2243,7 +2243,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 		},
 	}, true, true)
 
-	tx, err1 := db.KV().Begin(context.Background(), nil, false)
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}

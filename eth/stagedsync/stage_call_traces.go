@@ -41,7 +41,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), true)
+		tx, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
 			return err
 		}
@@ -327,7 +327,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background(), true)
+		tx, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
 			return err
 		}
@@ -336,7 +336,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 
 	logPrefix := s.state.LogPrefix()
 	if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, chainConfig, chainContext, quitCh); err != nil {
-		return err
+		return fmt.Errorf("unwindCallTraces fail: %w", err)
 	}
 
 	if err := u.Done(tx); err != nil {
@@ -383,7 +383,7 @@ func unwindCallTraces(logPrefix string, db rawdb.DatabaseReader, from, to uint64
 		stateWriter = state.NewCacheStateWriter()
 
 		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
-			return err
+			return fmt.Errorf("exec block: %w", err)
 		}
 	}
 	for addr := range tracer.froms {

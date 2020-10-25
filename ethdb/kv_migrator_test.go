@@ -16,7 +16,7 @@ func TestBucketCRUD(t *testing.T) {
 	defer kv.Close()
 
 	ctx := context.Background()
-	tx, err := kv.Begin(ctx, nil, true)
+	tx, err := kv.Begin(ctx, nil, RW)
 	require.NoError(err)
 	defer tx.Rollback()
 
@@ -93,7 +93,7 @@ func TestReadOnlyMode(t *testing.T) {
 		}
 	}).ReadOnly().MustOpen()
 
-	tx, err := db2.Begin(context.Background(), nil, false)
+	tx, err := db2.Begin(context.Background(), nil, RO)
 	if err != nil {
 		t.Fatal(err)
 	}

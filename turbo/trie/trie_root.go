@@ -372,7 +372,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{})
 		useExternalTx = true
 	} else {
 		var err error
-		txDB, err = db.Begin(context.Background(), true)
+		txDB, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
 			return EmptyRoot, err
 		}
