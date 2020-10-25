@@ -264,7 +264,7 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto.Sentry
 		}
 	}
 	log.Info(hd.AnchorState())
-	return &ControlServerImpl{hd: hd, sentryClient: sentryClient, requestWakeUp: make(chan struct{}, 1)}, nil
+	return &ControlServerImpl{hd: hd, sentryClient: sentryClient, requestWakeUp: make(chan struct{})}, nil
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
@@ -358,7 +358,10 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto.InboundM
 
 func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
 	defer func() {
-		cs.requestWakeUp <- struct{}{}
+		select {
+		case cs.requestWakeUp <- struct{}{}:
+		default:
+		}
 	}()
 	switch inreq.Id {
 	case proto.InboundMessageId_NewBlockHashes:
@@ -416,6 +419,7 @@ func (cs *ControlServerImpl) loop(ctx context.Context) {
 		case <-timer.C:
 			log.Info("RequestQueueTimer ticked")
 		case <-cs.requestWakeUp:
+			log.Info("Woken up by the incoming request")
 		case <-ctx.Done():
 			return
 		}
