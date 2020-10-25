@@ -33,7 +33,7 @@ func defrag(chaindata string) error {
 	}
 	var freeRoot0, mainRoot0, txnID0 uint64
 	var freeDepth0, mainDepth0 uint16
-	_, freeRoot0, freeDepth0, mainRoot0, mainDepth0, txnID0, err = readMetaPage(meta[:], pos)
+	freeRoot0, freeDepth0, mainRoot0, mainDepth0, txnID0, err = readMetaPage(meta[:], pos)
 	if err != nil {
 		return fmt.Errorf("reading meta page 0: %v", err)
 	}
@@ -48,7 +48,7 @@ func defrag(chaindata string) error {
 	}
 	var freeRoot1, mainRoot1, txnID1 uint64
 	var freeDepth1, mainDepth1 uint16
-	_, freeRoot1, freeDepth1, mainRoot1, mainDepth1, txnID1, err = readMetaPage(meta[:], pos)
+	freeRoot1, freeDepth1, mainRoot1, mainDepth1, txnID1, err = readMetaPage(meta[:], pos)
 	if err != nil {
 		return fmt.Errorf("reading meta page 1: %v", err)
 	}
@@ -169,7 +169,7 @@ func readPageHeader(page []byte, pos int) (newpos int, pageID uint64, flags uint
 	return
 }
 
-func readMetaPage(page []byte, pos int) (newpos int, freeRoot uint64, freeDepth uint16, mainRoot uint64, mainDepth uint16, txnID uint64, err error) {
+func readMetaPage(page []byte, pos int) (freeRoot uint64, freeDepth uint16, mainRoot uint64, mainDepth uint16, txnID uint64, err error) {
 	magic := binary.LittleEndian.Uint32(page[pos:])
 	if magic != MdbMagic {
 		err = fmt.Errorf("meta page has wrong magic: %X != %X", magic, MdbMagic)
@@ -188,8 +188,6 @@ func readMetaPage(page []byte, pos int) (newpos int, freeRoot uint64, freeDepth 
 	pos, mainRoot, mainDepth = readDbRecord(page[:], pos)
 	pos += 8 // Last page
 	txnID = binary.LittleEndian.Uint64(page[pos:])
-	pos += 8
-	newpos = pos
 	return
 }
 
