@@ -182,17 +182,18 @@ func batchServer() error {
 
 				metrics := vm.CfgMetrics{}
 				out, oerr := cmd.Output()
-				if oerr != nil {
-					panic(oerr)
-				}
-				lines := strings.Split(string(out), "\n")
-				merr := json.Unmarshal([]byte(lines[len(lines)-1]), &metrics)
-				if merr != nil {
-					fmt.Printf("Output:\n")
-					fmt.Printf("%v\n", string(out))
-					fmt.Printf("Bytecode:\n")
-					fmt.Printf(hex.EncodeToString(job.code))
-					panic(merr)
+				if oerr == nil {
+					lines := strings.Split(string(out), "\n")
+					merr := json.Unmarshal([]byte(lines[len(lines)-1]), &metrics)
+					if merr != nil {
+						fmt.Printf("Output:\n")
+						fmt.Printf("%v\n", string(out))
+						fmt.Printf("Bytecode:\n")
+						fmt.Printf(hex.EncodeToString(job.code))
+						panic(merr)
+					}
+				} else {
+					fmt.Println("Warning: Could not get output for " + hex.EncodeToString(job.code))
 				}
 				results <- &cfgJobResult{job, &metrics}
 			}
