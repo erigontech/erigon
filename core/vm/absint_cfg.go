@@ -1,8 +1,10 @@
 package vm
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/holiman/uint256"
+	"log"
 	"strconv"
 	"strings"
 )
@@ -90,6 +92,39 @@ func (c0 AbsValue) hash() uint64 {
 		hash += 57 * uint256Hash(c0.value)
 	}
 	return hash
+}
+
+func (c0 AbsValue) Stringify() string {
+	if c0.kind == InvalidValue || c0.kind == TopValue {
+		return c0.kind.String()
+	} else if c0.kind == ConcreteValue {
+		b, err := c0.value.MarshalText()
+		if err != nil {
+			log.Fatal("Can't unmarshall")
+		}
+		return string(b)
+	}
+
+	log.Fatal("Invalid abs value kind")
+	return ""
+}
+
+func AbsValueDestringify(s string) AbsValue {
+	if s == "⊤" {
+		return AbsValueTop(-1)
+	} else if s == "x" {
+		return AbsValueInvalid()
+	} else if strings.HasPrefix(s, "0x") {
+		var i uint256.Int
+		err := i.UnmarshalText([]byte(s))
+		if err != nil {
+			log.Fatal("Can't unmarshall")
+		}
+		return AbsValueConcrete(i)
+	}
+
+	log.Fatal("Invalid abs value kind")
+	return AbsValue{}
 }
 
 //////////////////////////////////////////////////
@@ -255,3 +290,74 @@ func (state *astate) Add(stack *astack) {
 }
 
 //////////////////////////////////////////////////
+
+//-1 block id is invalid jump
+type CfgProofState struct {
+	Pc 		int
+	Stacks 	[][]string
+}
+
+type CfgProofBlock struct {
+	Entry 	*CfgProofState
+	Exit	*CfgProofState
+	Preds	[]int
+	Succs 	[]int
+}
+
+type CfgProof struct {
+	Blocks 	[]*CfgProofBlock
+}
+
+func DeserializeCfgProof(proofBytes []byte) *CfgProof {
+	proof := CfgProof{}
+	err := json.Unmarshal(proofBytes, &proof)
+	if err != nil {
+		log.Fatal("Cannot deserialize proof")
+	}
+	return &proof
+}
+
+func (proof *CfgProof) Serialize() []byte {
+	res, err := json.MarshalIndent(*proof, "", " ")
+	if err != nil {
+		log.Fatal("Cannot serialize proof")
+	}
+	return res
+}
+
+func (proof *CfgProof) ToString() string {
+	return string(proof.Serialize())
+}
+
+type edgec struct {
+	pc0    int
+	pc1    int
+}
+
+func StringifyAState(st *astate) [][]string {
+	var stacks [][]string
+
+	for _, astack := range st.stackset {
+		var stack []string
+		for _, v := range astack.values {
+			stack = append(stack, v.Stringify())
+		}
+		stacks = append(stacks, stack)
+	}
+
+	return stacks
+}
+
+func DestringifyAState(ststr [][]string) *astate {
+	st := astate{}
+
+	for _, stack := range ststr {
+		astack := astack{}
+		for _, vstr := range stack {
+			astack.values = append(astack.values, AbsValueDestringify(vstr))
+		}
+		st.Add(&astack)
+	}
+
+	return &st
+}

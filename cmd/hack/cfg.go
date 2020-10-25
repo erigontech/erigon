@@ -69,8 +69,10 @@ func worker(code []byte) {
 
 	go func() {
 		cfg, _ := vm.GenCfg(code, maxAnlyCounterLimit, maxStackLen, maxStackCount, &metrics)
-
-		check := vm.CheckCfg(code, cfg.D)
+		proof := cfg.GenerateProof()
+		cfg.ProofSerialized = proof.Serialize()
+		dproof := vm.DeserializeCfgProof(cfg.ProofSerialized)
+		check := vm.CheckCfg(code, dproof)
 		metrics.CheckerFailed = !check
 
 		mon <- 0
@@ -489,7 +491,14 @@ func runCfgAnly(testName string, code string) {
 			cfg.GetCoverageStats().Uncovered,
 			cfg.GetCoverageStats().Epilogue)
 
-		check := vm.CheckCfg(decoded, cfg.D)
+		proof := cfg.GenerateProof()
+
+		cfg.ProofSerialized = proof.Serialize()
+		fmt.Printf("Proof:\n%+v", string(cfg.ProofSerialized))
+
+		dproof := vm.DeserializeCfgProof(cfg.ProofSerialized)
+
+		check := vm.CheckCfg(decoded, dproof)
 		if check {
 			fmt.Printf("Proof checker successfully checked proof")
 		} else {

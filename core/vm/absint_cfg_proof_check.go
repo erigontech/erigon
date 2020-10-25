@@ -78,8 +78,22 @@ func isJumpDest(code []byte, value *uint256.Int) bool {
 	return OpCode(code[pc]) == JUMPDEST
 }
 
-func CheckCfg(code []byte, proof map[int]*astate) bool {
-	sem := NewCfgAbsSem()
+func CheckCfg(code []byte, proof *CfgProof) bool {
+	return false
+	/*sem := NewCfgAbsSem()
+
+	for _, block := range proof.Blocks {
+		pre := DestringifyAState(block.Entry.Stacks)
+
+		edges, err := resolveCheck(sem, code, pre, block.Entry)
+		if err != nil {
+			return false
+		}
+
+		resolveCheck()
+		post, err := postCheck(sem, code, pre, e)
+	}
+
 
 	var workList []edgec
 
@@ -127,9 +141,7 @@ func CheckCfg(code []byte, proof map[int]*astate) bool {
 				workList = append(workList, e)
 			}
 		}
-	}
-
-	return true
+	}*/
 }
 
 func resolveCheck(sem *CfgAbsSem, code []byte, proof map[int]*astate, pc0 int) ([]edgec, error) {
@@ -258,9 +270,4 @@ func postCheck(sem *CfgAbsSem, code []byte, st0 *astate, edge edgec) (*astate, e
 	}
 
 	return st1, nil
-}
-
-type edgec struct {
-	pc0    int
-	pc1    int
 }

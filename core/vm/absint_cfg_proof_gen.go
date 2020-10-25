@@ -8,6 +8,7 @@ import (
 	"github.com/emicklei/dot"
 	"github.com/holiman/uint256"
 	"github.com/logrusorgru/aurora"
+	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -465,11 +466,12 @@ type CfgMetrics struct {
 }
 
 type Cfg struct {
-	Program          *Program
-	BadJumps         map[int]bool
-	PrevEdgeMap      map[int]map[int]bool
-	D                map[int]*astate
-	Metrics			 *CfgMetrics
+	Program         *Program
+	BadJumps        map[int]bool
+	PrevEdgeMap     map[int]map[int]bool
+	D               map[int]*astate
+	Metrics         *CfgMetrics
+	ProofSerialized []byte
 }
 
 type CfgCoverageStats struct {
@@ -755,5 +757,79 @@ func GenCfg(code []byte, anlyCounterLimit int, maxStackLen int, maxStackCount in
 	}
 
 	cfg.Metrics.Valid = true
+
 	return cfg, nil
+}
+
+func (cfg *Cfg) GenerateProof() *CfgProof {
+	succEdgeMap := make(map[int][]int)
+	proof := CfgProof{}
+	entries := make(map[int]bool)
+	exits := make(map[int]bool)
+
+	pcs := make(map[int]bool)
+	for pc1,pc0s := range cfg.PrevEdgeMap {
+		for pc0 := range pc0s {
+			succEdgeMap[pc0] = append(succEdgeMap[pc0], pc1)
+			pcs[pc0] = true
+			pcs[pc1] = true
+		}
+	}
+
+	entries[0] = true
+	for pc := range pcs {
+		if pc == 0 || len(cfg.PrevEdgeMap[pc]) > 1 {
+			entries[pc] = true
+		}
+		for pc0 := range cfg.PrevEdgeMap[pc] {
+			if len(succEdgeMap[pc0]) > 1 {
+				entries[pc] = true
+				break
+			}
+		}
+	}
+
+	for pc0 := range pcs {
+		for _,pc1 := range succEdgeMap[pc0] {
+			if entries[pc1] {
+				exits[pc0] = true
+				break
+			}
+		}
+
+		if len(succEdgeMap[pc0]) == 0 || len(succEdgeMap[pc0]) > 1 {
+			exits[pc0] = true
+		}
+	}
+
+	var entriesList []int
+	for pc := range entries {
+		entriesList = append(entriesList, pc)
+	}
+	sort.Ints(entriesList)
+	for _, pc0 := range entriesList {
+		pc1 := pc0
+		for !exits[pc1] {
+			if len(succEdgeMap[pc1]) != 1 {
+				log.Fatal("Inconsistent successors")
+			}
+			pc1 = succEdgeMap[pc1][0]
+		}
+
+		block := CfgProofBlock{}
+		block.Entry = &CfgProofState{pc0, StringifyAState(cfg.D[pc0])}
+		block.Exit = &CfgProofState{pc1, StringifyAState(cfg.D[pc1])}
+		proof.Blocks = append(proof.Blocks, &block)
+	}
+
+	for _, predBlock := range proof.Blocks {
+		for _, succBlock := range proof.Blocks {
+			if cfg.PrevEdgeMap[succBlock.Entry.Pc][predBlock.Exit.Pc] {
+				predBlock.Succs = append(predBlock.Succs, succBlock.Entry.Pc)
+				succBlock.Preds = append(succBlock.Preds, predBlock.Exit.Pc)
+			}
+		}
+	}
+
+	return &proof
 }
