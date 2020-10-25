@@ -2,7 +2,6 @@ package vm
 
 import (
 	"errors"
-	"fmt"
 	"github.com/holiman/uint256"
 	"log"
 	"reflect"
@@ -212,23 +211,18 @@ func CheckCfg(code []byte, proof *CfgProof) bool {
 	sem := NewCfgAbsSem()
 
 	if !proof.isValid() {
-		print("G")
 		return false
 	}
 
 	preLub := make(map[int][]*astate)
 	for _, block := range proof.Blocks {
-		fmt.Printf("Checking block %v\n", block.Entry.Pc)
 		st := intoAState(block.Entry.Stacks)
 		pc0 := block.Entry.Pc
 		blockSuccs := intMap(block.Succs)
 		for pc0 <= block.Exit.Pc {
-			fmt.Printf("pc=%v\n", pc0)
+
 			if pc0 == block.Exit.Pc {
 				if !Eq(st, intoAState(block.Exit.Stacks)) {
-					fmt.Printf("%v\n", st.String(false))
-					fmt.Printf("%v\n", intoAState(block.Exit.Stacks).String(false))
-					print("A")
 					return false
 				}
 			}
@@ -240,9 +234,6 @@ func CheckCfg(code []byte, proof *CfgProof) bool {
 
 			if pc0 == block.Exit.Pc {
 				if !reflect.DeepEqual(succs, blockSuccs) {
-					fmt.Printf("%v %v\n", len(succs), succs)
-					fmt.Printf("%v %v\n", len(blockSuccs), blockSuccs)
-					print("B")
 					return false
 				}
 				for succEntryPc := range succs {
@@ -252,13 +243,11 @@ func CheckCfg(code []byte, proof *CfgProof) bool {
 				break
 			} else {
 				if len(succs) != 1 {
-					print("D")
 					return false
 				}
 
 				pc1 := one(succs)
 				if pc0 >= pc1 || pc1 > block.Exit.Pc {
-					fmt.Printf("pc0=%v pc1=%v pcx=%v", pc0, pc1, block.Exit.Pc)
 					return false
 				}
 
@@ -268,9 +257,7 @@ func CheckCfg(code []byte, proof *CfgProof) bool {
 		}
 	}
 
-	print("checking lubs\n")
 	for _, block := range proof.Blocks {
-		fmt.Printf("pc=%v\n", block.Entry.Pc)
 
 		var inferredEntry *astate
 		if block.Entry.Pc == 0 {
@@ -284,7 +271,6 @@ func CheckCfg(code []byte, proof *CfgProof) bool {
 		}
 
 		if !Eq(inferredEntry, intoAState(block.Entry.Stacks)) {
-			print("C")
 			return false
 		}
 	}
