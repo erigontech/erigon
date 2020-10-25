@@ -2287,4 +2287,9 @@ func main() {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
+	if *action == "defrag" {
+		if err := defrag(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
 }
