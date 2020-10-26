@@ -378,12 +378,12 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 				}
 
 				if cmp == 0 {
-					c2.Delete(ihK)
+					_ = c2.Delete(ihK)
 					break Loop
 				}
 
 				if bytes.HasPrefix(nibs, ihK) {
-					c2.Delete(ihK)
+					_ = c2.Delete(ihK)
 				}
 				l := commonPrefixLen(ihK, nibs)
 				next = nibs[:l+1]
@@ -412,14 +412,14 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 				}
 
 				if cmp == 0 {
-					c2.SeekBothExact(ihK, ihV)
-					c2.DeleteCurrent()
+					_, _, _ = c2.SeekBothExact(ihK, ihV)
+					_ = c2.DeleteCurrent()
 					break Loop
 				}
 
 				if bytes.HasPrefix(nibs2, vv) {
-					c2.SeekBothExact(ihK, ihV)
-					c2.DeleteCurrent()
+					_, _, _ = c2.SeekBothExact(ihK, ihV)
+					_ = c2.DeleteCurrent()
 				}
 				l := commonPrefixLen(vv, nibs2)
 				next = nibs2[:l+1]
