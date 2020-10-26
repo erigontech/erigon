@@ -195,7 +195,6 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
 	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			fmt.Printf("1??\n")
 			newK, err := transformPlainStateKey(k)
 			if err != nil {
 				return err
@@ -223,7 +222,6 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	); err != nil {
 		return err
 	}
-	fmt.Printf("2??\n")
 	return nil
 }
 
@@ -231,10 +229,69 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	p := NewHashPromoter(db, quit)
 	p.TempDir = tmpdir
 	var exclude [][]byte
-	//ihFilter := trie.NewPrefixFilter()
+	tx := db.(ethdb.HasTx).Tx()
+
+	c := tx.CursorDupSort(dbutils.IntermediateTrieHashBucket)
+	c2 := tx.CursorDupSort(dbutils.IntermediateTrieHashBucket)
+	defer c.Close()
+	defer c2.Close()
+	comparator := tx.Comparator(dbutils.IntermediateTrieHashBucket)
+
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		exclude = append(exclude, k)
-		//ihFilter.Add(k)
+		nibs := make([]byte, len(k)*2)
+		trie.DecompressNibbles(k, &nibs)
+
+		nibs1 := nibs
+		if len(nibs) > trie.IHDupKeyLen {
+			nibs1 = nibs[:trie.IHDupKeyLen]
+		}
+
+		next := nibs1[:1]
+		for ihK, _, err := c.Seek(next); ihK != nil; ihK, _, err = c.Seek(next) {
+			if err != nil {
+				return err
+			}
+
+			cmp := bytes.Compare(nibs1, ihK)
+			if cmp == -1 {
+				break
+			}
+
+			if bytes.HasPrefix(nibs1, ihK) {
+				_ = c2.Delete(ihK)
+			}
+			l := commonPrefixLen(ihK, nibs1)
+			next = nibs1[:l+1]
+		}
+
+		if len(nibs) < trie.IHDupKeyLen {
+			return nil
+		}
+
+		nibs2 := nibs[trie.IHDupKeyLen:]
+
+		next = nibs2[:1]
+		for ihK, ihV, err := c.SeekBothRange(nibs1, next); ihK != nil; ihK, ihV, err = c.SeekBothRange(nibs1, next) {
+			if err != nil {
+				return err
+			}
+
+			ihV = ihV[:len(ihV)-32]
+
+			cmp := bytes.Compare(nibs2, ihV)
+			if cmp == -1 {
+				break
+			}
+
+			if bytes.HasPrefix(nibs2, ihV) {
+				_, _, _ = c2.SeekBothExact(ihK, ihV)
+				_ = c2.DeleteCurrent()
+			}
+			l := commonPrefixLen(ihV, nibs2)
+			next = nibs2[:l+1]
+		}
+
+		//exclude = append(exclude, k)
 		return nil
 	}
 
@@ -251,7 +308,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	}
 
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
 	buf.SetComparator(comparator)
 	collector := etl.NewCollector(tmpdir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
@@ -359,78 +415,63 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	comparator := tx.Comparator(dbutils.IntermediateTrieHashBucket)
 
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		fmt.Printf("1: %x\n", k)
-
 		nibs := make([]byte, len(k)*2)
 		trie.DecompressNibbles(k, &nibs)
 
-		next := nibs[:1]
-	Loop:
+		nibs1 := nibs
+		if len(nibs) > trie.IHDupKeyLen {
+			nibs1 = nibs[:trie.IHDupKeyLen]
+		}
+
+		next := nibs1[:1]
 		for ihK, _, err := c.Seek(next); ihK != nil; ihK, _, err = c.Seek(next) {
 			if err != nil {
 				return err
 			}
 
-			if len(ihK) < trie.IHDupKeyLen {
-				cmp := bytes.Compare(nibs, ihK)
-				if cmp == -1 {
-					break Loop
-				}
-
-				if cmp == 0 {
-					_ = c2.Delete(ihK)
-					break Loop
-				}
-
-				if bytes.HasPrefix(nibs, ihK) {
-					_ = c2.Delete(ihK)
-				}
-				l := commonPrefixLen(ihK, nibs)
-				next = nibs[:l+1]
-				continue
+			cmp := bytes.Compare(nibs1, ihK)
+			if cmp == -1 {
+				break
 			}
 
-			if len(nibs) < trie.IHDupKeyLen {
-				break Loop
+			if bytes.HasPrefix(nibs1, ihK) {
+				_ = c2.Delete(ihK)
+			}
+			l := commonPrefixLen(ihK, nibs1)
+			next = nibs1[:l+1]
+		}
+
+		if len(nibs) < trie.IHDupKeyLen {
+			return nil
+		}
+
+		nibs2 := nibs[trie.IHDupKeyLen:]
+
+		next = nibs2[:1]
+		for ihK, ihV, err := c.SeekBothRange(nibs1, next); ihK != nil; ihK, ihV, err = c.SeekBothRange(nibs1, next) {
+			if err != nil {
+				return err
 			}
 
-			nibs1 := nibs[:trie.IHDupKeyLen]
-			nibs2 := nibs[trie.IHDupKeyLen:]
+			ihV = ihV[:len(ihV)-32]
 
-			next = nibs2[:1]
-			for ihK, ihV, err := c.SeekBothRange(nibs1, next); ihK != nil; ihK, ihV, err = c.SeekBothRange(nibs1, next) {
-				if err != nil {
-					return err
-				}
-
-				vv := ihV[:len(ihV)-32]
-
-				cmp := bytes.Compare(nibs2, vv)
-				fmt.Printf("3: %x, %x, %d\n", next, ihV, cmp)
-				if cmp == -1 {
-					break Loop
-				}
-
-				if cmp == 0 {
-					_, _, _ = c2.SeekBothExact(ihK, ihV)
-					_ = c2.DeleteCurrent()
-					break Loop
-				}
-
-				if bytes.HasPrefix(nibs2, vv) {
-					_, _, _ = c2.SeekBothExact(ihK, ihV)
-					_ = c2.DeleteCurrent()
-				}
-				l := commonPrefixLen(vv, nibs2)
-				next = nibs2[:l+1]
+			cmp := bytes.Compare(nibs2, ihV)
+			if cmp == -1 {
+				break
 			}
 
-			break Loop
+			if bytes.HasPrefix(nibs2, ihV) {
+				_, _, _ = c2.SeekBothExact(ihK, ihV)
+				_ = c2.DeleteCurrent()
+			}
+			l := commonPrefixLen(ihV, nibs2)
+			next = nibs2[:l+1]
 		}
 
 		//exclude = append(exclude, k)
 		return nil
 	}
+
 	if err := p.Unwind(logPrefix, s, u, false /* storage */, collect); err != nil {
 		return err
 	}

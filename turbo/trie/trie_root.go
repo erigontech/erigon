@@ -774,6 +774,9 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 		return k, v, nil
 	}
 
+	fmt.Printf("2: %x, %x, %d\n", kCopy, vCopy, len(vCopy))
+	panic(1)
+
 	_, _, err = c.cForDelete.SeekBothExact(kCopy, vCopy)
 	if err != nil {
 		return []byte{}, nil, err
@@ -806,6 +809,9 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 		if c.filter(k) { // if filter allow us, return. otherwise delete and go ahead.
 			return k, v, nil
 		}
+
+		fmt.Printf("1: %x, %x, %d\n", kCopy, vCopy, len(vCopy))
+		panic(1)
 
 		_, _, err = c.cForDelete.SeekBothExact(kCopy, vCopy)
 		if err != nil {

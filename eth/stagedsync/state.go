@@ -98,14 +98,12 @@ func (s *State) LogPrefix() string {
 	if s == nil {
 		return ""
 	}
-	fmt.Printf("2: %d, %d, %d, %s\n", s.currentStage, s.Len(), len(s.stages), s.stages[s.currentStage].ID)
 	return fmt.Sprintf("%d/%d %s", s.currentStage+1, s.Len(), s.stages[s.currentStage].ID)
 }
 
 func (s *State) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
 		if bytes.Equal(stage.ID, id) {
-			fmt.Printf("3: %d, %d, %d, %s, %d\n", s.currentStage, s.Len(), len(s.stages), stage.ID, i)
 			s.currentStage = uint(i)
 			return nil
 		}
