@@ -24,11 +24,11 @@ import (
 	"net"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/mclock"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/p2p/discover/v5wire"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/enr"
+	"github.com/ledgerwatch/turbo-geth/common/mclock"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/p2p/discover/v5wire"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/p2p/enr"
 )
 
 // readError represents an error during packet reading.
@@ -60,11 +60,9 @@ type conn struct {
 	remoteAddr *net.UDPAddr
 	listeners  []net.PacketConn
 
-	log           logger
-	codec         *v5wire.Codec
-	lastRequest   v5wire.Packet
-	lastChallenge *v5wire.Whoareyou
-	idCounter     uint32
+	log       logger
+	codec     *v5wire.Codec
+	idCounter uint32
 }
 
 type logger interface {

@@ -88,10 +88,10 @@ func TestMiner(t *testing.T) {
 	// that would allow entities to present fake high blocks that would
 	// stop mining operations by causing a downloader sync
 	// until it was discovered they were invalid, whereon mining would resume.
-	mux.Post(downloader.StartEvent{})
+	mux.Post(downloader.StartEvent{}) //nolint:errcheck
 	waitForMiningState(t, miner, true)
 
-	mux.Post(downloader.FailedEvent{})
+	mux.Post(downloader.FailedEvent{}) //nolint:errcheck
 	waitForMiningState(t, miner, true)
 }
 
@@ -104,7 +104,7 @@ func TestMinerDownloaderFirstFails(t *testing.T) {
 	miner.Start(common.HexToAddress("0x12345"))
 	waitForMiningState(t, miner, true)
 	// Start the downloader
-	mux.Post(downloader.StartEvent{})
+	mux.Post(downloader.StartEvent{}) //nolint:errcheck
 	waitForMiningState(t, miner, false)
 
 	// Stop the downloader and wait for the update loop to run
@@ -113,20 +113,20 @@ func TestMinerDownloaderFirstFails(t *testing.T) {
 
 	// Since the downloader hasn't yet emitted a successful DoneEvent,
 	// we expect the miner to stop on next StartEvent.
-	mux.Post(downloader.StartEvent{})
+	mux.Post(downloader.StartEvent{}) //nolint:errcheck
 	waitForMiningState(t, miner, false)
 
 	// Downloader finally succeeds.
-	mux.Post(downloader.DoneEvent{})
+	mux.Post(downloader.DoneEvent{}) //nolint:errcheck
 	waitForMiningState(t, miner, true)
 
 	// Downloader starts again.
 	// Since it has achieved a DoneEvent once, we expect miner
 	// state to be unchanged.
-	mux.Post(downloader.StartEvent{})
+	mux.Post(downloader.StartEvent{}) //nolint:errcheck
 	waitForMiningState(t, miner, true)
 
-	mux.Post(downloader.FailedEvent{})
+	mux.Post(downloader.FailedEvent{}) //nolint:errcheck
 	waitForMiningState(t, miner, true)
 }
 
@@ -136,11 +136,11 @@ func TestMinerStartStopAfterDownloaderEvents(t *testing.T) {
 	miner.Start(common.HexToAddress("0x12345"))
 	waitForMiningState(t, miner, true)
 	// Start the downloader
-	mux.Post(downloader.StartEvent{})
+	mux.Post(downloader.StartEvent{}) //nolint:errcheck
 	waitForMiningState(t, miner, false)
 
 	// Downloader finally succeeds.
-	mux.Post(downloader.DoneEvent{})
+	mux.Post(downloader.DoneEvent{}) //nolint:errcheck
 	waitForMiningState(t, miner, true)
 
 	miner.Stop()
@@ -196,12 +196,12 @@ func TestMinerSetEtherbase(t *testing.T) {
 	miner.Start(common.HexToAddress("0xdead"))
 	waitForMiningState(t, miner, true)
 	// Start the downloader
-	mux.Post(downloader.StartEvent{})
+	mux.Post(downloader.StartEvent{}) //nolint:errcheck
 	waitForMiningState(t, miner, false)
 	// Now user tries to configure proper mining address
 	miner.Start(common.HexToAddress("0x1337"))
 	// Stop the downloader and wait for the update loop to run
-	mux.Post(downloader.DoneEvent{})
+	mux.Post(downloader.DoneEvent{}) //nolint:errcheck
 
 	waitForMiningState(t, miner, true)
 	// The miner should now be using the good address

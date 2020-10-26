@@ -595,7 +595,7 @@ func (api *SignerAPI) SignGnosisSafeTx(ctx context.Context, signerAddress common
 	}
 	// If we are in 'rejectMode', then reject rather than show the user warnings
 	if api.rejectMode {
-		if err := msgs.getWarnings(); err != nil {
+		if err = msgs.getWarnings(); err != nil {
 			return nil, err
 		}
 	}

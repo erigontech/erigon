@@ -18,14 +18,15 @@ package v5test
 
 import (
 	"bytes"
+	"errors"
 	"net"
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/internal/utesting"
-	"github.com/ethereum/go-ethereum/p2p/discover/v5wire"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/netutil"
+	"github.com/ledgerwatch/turbo-geth/internal/utesting"
+	"github.com/ledgerwatch/turbo-geth/p2p/discover/v5wire"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 )
 
 // Suite is the discv5 test suite.
@@ -95,7 +96,7 @@ func (s *Suite) TestPingLargeRequestID(t *utesting.T) {
 	case *v5wire.Pong:
 		t.Errorf("PONG response with unknown request ID %x", resp.ReqID)
 	case *readError:
-		if resp.err == v5wire.ErrInvalidReqID {
+		if errors.Is(resp.err, v5wire.ErrInvalidReqID) {
 			t.Error("response with oversized request ID")
 		} else if !netutil.IsTimeout(resp.err) {
 			t.Error(resp)

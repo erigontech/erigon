@@ -350,7 +350,7 @@ func (t *mdLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64
 
 		// format return stack
 		a = a[:0]
-		for _, elem := range rStack.data {
+		for _, elem := range rStack.Data() {
 			a = append(a, fmt.Sprintf("%2d", elem))
 		}
 		b = fmt.Sprintf("[%v]", strings.Join(a, ","))

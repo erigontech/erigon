@@ -30,7 +30,7 @@ var (
 const PolyABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"d\",\"type\":\"address\"}],\"name\":\"DeployEvent\",\"type\":\"event\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"salt\",\"type\":\"uint256\"}],\"name\":\"deploy\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 
 // PolyBin is the compiled bytecode used for deploying new contracts.
-var PolyBin = "0x6080604052348015600f57600080fd5b5060f88061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b6040805180820190915260138082527260606000534360015360ff60025360036000f360681b60208301908152600091849183f5604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a150505056fea26469706673582212209a7c8c49420bed63152dafeb18c6da17e6fe6057b9f800cebc89144ad0b032e864736f6c63430006020033"
+var PolyBin = "0x6080604052348015600f57600080fd5b5060f88061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b6040805180820190915260138082527260606000534360015360ff60025360036000f360681b60208301908152600091849183f5604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a150505056fea264697066735822122032d356806c978fb0bf45bc0b927ecf2af1ebbc7036396fe43793a0d0a312cac164736f6c63430007020033"
 
 // DeployPoly deploys a new Ethereum contract, binding an instance of Poly to it.
 func DeployPoly(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Poly, error) {
@@ -154,7 +154,7 @@ func bindPoly(address common.Address, caller bind.ContractCaller, transactor bin
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Poly *PolyRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Poly *PolyRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Poly.Contract.PolyCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -173,7 +173,7 @@ func (_Poly *PolyRaw) Transact(opts *bind.TransactOpts, method string, params ..
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Poly *PolyCallerRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Poly *PolyCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Poly.Contract.contract.Call(opts, result, method, params...)
 }
 

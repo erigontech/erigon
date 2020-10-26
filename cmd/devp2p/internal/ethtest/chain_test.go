@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//nolint:scopelint
 package ethtest
 
 import (
@@ -21,7 +22,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/stretchr/testify/assert"
 )
 

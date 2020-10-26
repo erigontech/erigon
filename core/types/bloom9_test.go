@@ -21,8 +21,9 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 func TestBloom(t *testing.T) {
@@ -93,9 +94,12 @@ func BenchmarkBloom9Lookup(b *testing.B) {
 
 func BenchmarkCreateBloom(b *testing.B) {
 
+	one, _ := uint256.FromBig(big.NewInt(1))
+	two, _ := uint256.FromBig(big.NewInt(2))
+
 	var txs = Transactions{
-		NewContractCreation(1, big.NewInt(1), 1, big.NewInt(1), nil),
-		NewTransaction(2, common.HexToAddress("0x2"), big.NewInt(2), 2, big.NewInt(2), nil),
+		NewContractCreation(1, one, 1, one, nil),
+		NewTransaction(2, common.HexToAddress("0x2"), two, 2, two, nil),
 	}
 	var rSmall = Receipts{
 		&Receipt{

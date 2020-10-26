@@ -322,7 +322,7 @@ func (api *SignerAPI) SignTypedData(ctx context.Context, addr common.MixedcaseAd
 
 // signTypedData is identical to the capitalized version, except that it also returns the hash (preimage)
 // - the signature preimage (hash)
-func (api *SignerAPI) signTypedData(ctx context.Context, addr common.MixedcaseAddress,
+func (api *SignerAPI) signTypedData(_ context.Context, addr common.MixedcaseAddress,
 	typedData TypedData, validationMessages *ValidationMessages) (hexutil.Bytes, hexutil.Bytes, error) {
 	domainSeparator, err := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
 	if err != nil {

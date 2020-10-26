@@ -21,10 +21,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/devp2p/internal/v5test"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/internal/utesting"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ledgerwatch/turbo-geth/internal/utesting"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/discover"
 	"github.com/urfave/cli"
 )
@@ -132,7 +132,7 @@ func discv5Test(ctx *cli.Context) error {
 	}
 	results := utesting.RunTests(tests, os.Stdout)
 	if fails := utesting.CountFailures(results); fails > 0 {
-		return fmt.Errorf("%v/%v tests passed.", len(tests)-fails, len(tests))
+		return fmt.Errorf("passed: %v/%v tests", len(tests)-fails, len(tests))
 	}
 	fmt.Printf("%v/%v passed\n", len(tests), len(tests))
 	return nil

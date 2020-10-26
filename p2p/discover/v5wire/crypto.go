@@ -25,9 +25,9 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"golang.org/x/crypto/hkdf"
 )
 
@@ -66,10 +66,10 @@ func DecodePubkey(curve elliptic.Curve, e []byte) (*ecdsa.PublicKey, error) {
 // idNonceHash computes the ID signature hash used in the handshake.
 func idNonceHash(h hash.Hash, challenge, ephkey []byte, destID enode.ID) []byte {
 	h.Reset()
-	h.Write([]byte("discovery v5 identity proof"))
-	h.Write(challenge)
-	h.Write(ephkey)
-	h.Write(destID[:])
+	h.Write([]byte("discovery v5 identity proof")) //nolint:errcheck
+	h.Write(challenge)                             //nolint:errcheck
+	h.Write(ephkey)                                //nolint:errcheck
+	h.Write(destID[:])                             //nolint:errcheck
 	return h.Sum(nil)
 }
 
@@ -127,8 +127,8 @@ func deriveKeys(hash hashFn, priv *ecdsa.PrivateKey, pub *ecdsa.PublicKey, n1, n
 	}
 	kdf := hkdf.New(hash, eph, challenge, info)
 	sec := session{writeKey: make([]byte, aesKeySize), readKey: make([]byte, aesKeySize)}
-	kdf.Read(sec.writeKey)
-	kdf.Read(sec.readKey)
+	kdf.Read(sec.writeKey) //nolint:errcheck
+	kdf.Read(sec.readKey)  //nolint:errcheck
 	for i := range eph {
 		eph[i] = 0
 	}
@@ -150,6 +150,7 @@ func ecdh(privkey *ecdsa.PrivateKey, pubkey *ecdsa.PublicKey) []byte {
 // encryptGCM encrypts pt using AES-GCM with the given key and nonce. The ciphertext is
 // appended to dest, which must not overlap with plaintext. The resulting ciphertext is 16
 // bytes longer than plaintext because it contains an authentication tag.
+// nolint:unparam
 func encryptGCM(dest, key, nonce, plaintext, authData []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {

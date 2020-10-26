@@ -31,10 +31,10 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/common/mclock"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/mclock"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 )
 
 // To regenerate discv5 test vectors, run
@@ -339,7 +339,7 @@ func TestTestVectorsV5(t *testing.T) {
 			challenge: &challenge0A,
 			prep: func(net *handshakeTest) {
 				// Update challenge.Header.AuthData.
-				net.nodeA.c.Encode(idB, "", &challenge0A, nil)
+				net.nodeA.c.Encode(idB, "", &challenge0A, nil) //nolint:errcheck
 				net.nodeB.c.sc.storeSentHandshake(idA, addr, &challenge0A)
 			},
 		},
@@ -352,7 +352,7 @@ func TestTestVectorsV5(t *testing.T) {
 			challenge: &challenge1A,
 			prep: func(net *handshakeTest) {
 				// Update challenge data.
-				net.nodeA.c.Encode(idB, "", &challenge1A, nil)
+				net.nodeA.c.Encode(idB, "", &challenge1A, nil) //nolint:errcheck
 				net.nodeB.c.sc.storeSentHandshake(idA, addr, &challenge1A)
 			},
 		},
@@ -589,7 +589,7 @@ func hexFile(file string) []byte {
 	}
 
 	// Gather hex data, ignore comments.
-	var text []byte
+	var text []byte //nolint:prealloc
 	for _, line := range bytes.Split(fileContent, []byte("\n")) {
 		line = bytes.TrimSpace(line)
 		if len(line) > 0 && line[0] == '#' {

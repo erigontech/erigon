@@ -27,10 +27,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/internal/utesting"
 	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ethereum/go-ethereum/internal/utesting"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/rlpx"
+	"github.com/ledgerwatch/turbo-geth/p2p/rlpx"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -218,7 +218,7 @@ func (c *Conn) ReadAndServe(chain *Chain) Message {
 	for {
 		switch msg := c.Read().(type) {
 		case *Ping:
-			c.Write(&Pong{})
+			c.Write(&Pong{}) //nolint:errcheck
 		case *GetBlockHeaders:
 			req := *msg
 			headers, err := chain.GetHeaders(req)
@@ -246,6 +246,7 @@ func (c *Conn) Write(msg Message) error {
 }
 
 // handshake checks to make sure a `HELLO` is received.
+//nolint:unparam
 func (c *Conn) handshake(t *utesting.T) Message {
 	// write protoHandshake to client
 	pub0 := crypto.FromECDSAPub(&c.ourKey.PublicKey)[1:]
@@ -318,7 +319,8 @@ loop:
 		case *Disconnect:
 			t.Fatalf("disconnect received: %v", msg.Reason)
 		case *Ping:
-			c.Write(&Pong{}) // TODO (renaynay): in the future, this should be an error
+			c.Write(&Pong{}) //nolint:errcheck
+			// TODO (renaynay): in the future, this should be an error
 			// (PINGs should not be a response upon fresh connection)
 		default:
 			t.Fatalf("bad status message: %#v", msg)
