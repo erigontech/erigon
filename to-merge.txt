@@ -1,0 +1,604 @@
+commit 8c2f271528f9cccf541c6ea1c022e98407f26872
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Oct 15 12:29:42 2020 +0200
+
+    params: go-ethereum v1.9.23 stable
+
+commit 524aaf5ec65826e19c35f66ddaf1882ad85caf9c
+Author: Felix Lange <fjl@twurst.com>
+Date:   Wed Oct 14 12:28:17 2020 +0200
+
+    p2p/discover: implement v5.1 wire protocol (#21647)
+    
+    This change implements the Discovery v5.1 wire protocol and
+    also adds an interactive test suite for this protocol.
+
+commit 4eb01b21c8691e277ea9d4048038ede7f9621a82
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Wed Oct 14 11:59:11 2020 +0200
+
+    miner: set etherbase even if mining isn't possible at the moment (#21707)
+
+commit bdc755491874426323d245918478e49b1998e427
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Oct 14 17:57:37 2020 +0800
+
+    params: update CHTs (#21706)
+
+commit 1fed2234833aa49ff728474208a65cbc23682ee4
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Tue Oct 13 19:46:43 2020 +0200
+
+    accounts/keystore: fix flaky test (#21703)
+    
+    * accounts/keystore: add timeout to test to prevent failure on travis
+    
+    The TestWalletNotifications test sporadically fails on travis.
+    This is because we shutdown the event collection before all events are received.
+    Adding a small timeout (10 milliseconds) allows the collector to be scheduled
+    and to consume all pending events before we shut it down.
+    
+    * accounts/keystore: added newlines back in
+    
+    * accounts/keystore: properly fix the walletNotifications test
+
+commit 1e10489196fd42ed553ba4ef8bbb547c38042eed
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Oct 13 14:12:06 2020 +0200
+
+    miner: don't interrupt mining after successful sync (#21701)
+    
+    * miner: exit loop when downloader Done or Failed
+    
+    Following the logic of the comment at the method,
+    this fixes a regression introduced at 7cf56d6f064869cb62b1673f9ee437020c595391
+    , which would allow external parties to DoS with
+    blocks, preventing mining progress.
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: remove ineff assign (lint)
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: update test re downloader events
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * Revert "miner: remove ineff assign (lint)"
+    
+    This reverts commit eaefcd34ab4862ebc936fb8a07578aa2744bc058.
+    
+    * Revert "miner: exit loop when downloader Done or Failed"
+    
+    This reverts commit 23abd34265aa246c38fc390bb72572ad6ae9fe3b.
+    
+    * miner: add test showing imprecise TestMiner
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: fix waitForMiningState precision
+    
+    This helper function would return an affirmation
+    on the first positive match on a desired bool.
+    
+    This was imprecise; it return false positives
+    by not waiting initially for an 'updated' value.
+    
+    This fix causes TestMiner_2 to fail, which is
+    expected.
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: remove TestMiner_2 demonstrating broken test
+    
+    This test demonstrated the imprecision of the test
+    helper function waitForMiningState. This function
+    has been fixed with 6d365c2851, and this test test
+    may now be removed.
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: fix test regarding downloader event/mining expectations
+    
+    See comment for logic.
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: add test describing expectations for downloader/mining events
+    
+    We expect that once the downloader emits a DoneEvent,
+    signaling a successful sync, that subsequent StartEvents
+    are not longer permitted to stop the miner.
+    
+    This prevents a security vulnerability where forced syncs via
+    fake high blocks would stall mining operation.
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: use 'canStop' state to fix downloader event handling
+    
+    - Break downloader event handling into event
+    separating Done and Failed events. We need to
+    treat these cases differently since a DoneEvent
+    should prevent the miner from being stopped on
+    subsequent downloader Start events.
+    
+    - Use canStop state to handle the one-off
+    case when a downloader first succeeds.
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: improve comment wording
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: start mining on downloader events iff not already mining
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: refactor miner update logic w/r/t downloader events
+    
+    This makes mining pause/start logic regarding downloader
+    events more explicit. Instead of eternally handling downloader
+    events after the first done event, the subscription is closed
+    when downloader events are no longer actionable.
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: fix handling downloader events on subcription closed
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: (lint:gosimple) use range over chan instead of for/select
+    
+    Signed-off-by: meows <b5c6@protonmail.com>
+    
+    * miner: refactor update loop to remove race condition
+    
+    The go routine handling the downloader events handling
+    vars in parallel with the parent routine, causing a
+    race condition.
+    
+    This change, though ugly, remove the condition while
+    still allowing the downloader event subscription to be
+    closed when the miner has no further use for it (ie DoneEvent).
+    
+    * miner: alternate fix for miner-flaw
+    
+    Co-authored-by: meows <b5c6@protonmail.com>
+
+commit 2a9ea6be87a282ae3d0171a631076ea983d02477
+Author: Giuseppe Bertone <bertone.giuseppe@gmail.com>
+Date:   Tue Oct 13 13:33:10 2020 +0200
+
+    cmd/geth, cmd/utils: fixed flags name (#21700)
+
+commit 7a5a822905d95456a108db52ee68871a73dc54f1
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Oct 13 13:28:24 2020 +0200
+
+    eth, p2p: use truncated names  (#21698)
+    
+    * peer: return localAddr instead of name to prevent spam
+    
+    We currently use the name (which can be freely set by the peer) in several log messages.
+    This enables malicious actors to write spam into your geth log.
+    This commit returns the localAddr instead of the freely settable name.
+    
+    * p2p: reduce usage of peer.Name in warn messages
+    
+    * eth, p2p: use truncated names
+    
+    * Update peer.go
+    
+    Co-authored-by: Marius van der Wijden <m.vanderwijden@live.de>
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit 5c6155f9f49bfef173c4107979185aec59806c38
+Author: mr_franklin <mr_franklin@126.com>
+Date:   Tue Oct 13 19:24:08 2020 +0800
+
+    internal/web3ext: improve some web3 apis (#21639)
+    
+    * imporve some web3-ext apis
+    
+    * Update web3ext.go
+    
+    Co-authored-by: Felix Lange <fjl@twurst.com>
+
+commit 348c3bc47d8173ce24c5b92d697a5be289eea9a0
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Oct 13 13:21:25 2020 +0200
+
+    trie: fix flaw in stacktrie pool reuse (#21699)
+
+commit 94d1f5888af495a2ce08d16cbd753cc1cc947d11
+Author: mr_franklin <mr_franklin@126.com>
+Date:   Tue Oct 13 17:00:42 2020 +0800
+
+    consensus/clique: unexport calcDifficulty and improve comment (#21619)
+
+commit c37e68e7c114c4783557eff727b8fb5e657549d2
+Author: mr_franklin <mr_franklin@126.com>
+Date:   Tue Oct 13 16:58:41 2020 +0800
+
+    all: replace RWMutex with Mutex in places where RLock is not used (#21622)
+
+commit 32341f88e30f55e722f9d335938c4d1ab099f892
+Author: Hanjiang Yu <delacroix.yu@gmail.com>
+Date:   Tue Oct 13 16:55:57 2020 +0800
+
+    console: fix admin.sleepBlocks (#21629)
+
+commit 66c3eb2f1a5c6bb4b5a678ce819f9984ac09e246
+Author: mr_franklin <mr_franklin@126.com>
+Date:   Mon Oct 12 21:02:38 2020 +0800
+
+    accouts, consensus, core: fix some comments (#21617)
+
+commit 86dd005544179818edd78ef6c9396b9574e8a614
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Mon Oct 12 18:08:04 2020 +0800
+
+    trie: polish commit function (#21692)
+    
+    * trie: polish commit function
+    
+    * trie: fix typo
+
+commit 706f5e3b98a419e8b93653d21876b74a60ab3ee6
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Fri Oct 9 11:23:46 2020 +0200
+
+    core: fix txpool off-by-one error (#21683)
+
+commit 19a1c950467db58171532bbfcdc354f50a6e5f8e
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Fri Oct 9 09:09:10 2020 +0200
+
+    eth/downloader: cache parent hash instead of recomputing (#21678)
+
+commit 905ed109edfda340ccd3641ebad4e0ff5dc73440
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Fri Oct 9 14:58:30 2020 +0800
+
+    eth/downloader: fix data race around the ancientlimit (#21681)
+    
+    * eth/downloader: fix data race around the ancientlimit
+    
+    * eth/downloader: initialize the ancientlimit as 0
+
+commit 43cd31ea9f57e26f8f67aa8bd03bbb0a50814465
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Thu Oct 8 14:03:24 2020 +0200
+
+    core/vm: dedup config check in markdown logger (#21655)
+    
+    * core/vm: dedup config check
+    
+    * review feedback: reuse buffer
+
+commit 5e86e4ed291ef0133670f0974b5511618e43e297
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Oct 8 11:19:54 2020 +0200
+
+    p2p/discover: remove use of shared hash instance for key derivation (#21673)
+    
+    For some reason, using the shared hash causes a cryptographic incompatibility
+    when using Go 1.15. I noticed this during the development of Discovery v5.1
+    when I added test vector verification.
+    
+    The go library commit that broke this is golang/go@97240d5, but the
+    way we used HKDF is slightly dodgy anyway and it's not a regression.
+
+commit 6d29e192e92ed51beaad3792b33a0b6c5043a00c
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu Oct 8 10:10:58 2020 +0200
+
+    signer/core: don't mismatch reject and no accounts (#21677)
+    
+    * signer/core: don't mismatch reject and zero accounts, fixes #21674
+    
+    * signer/core: docs
+
+commit 015e78928a374afb016a12db137d9ca7f1a37a03
+Author: Felix Lange <fjl@twurst.com>
+Date:   Wed Oct 7 20:05:14 2020 +0200
+
+    node: relax websocket connection header check (#21646)
+    
+    This makes it accept the "upgrade,keep-alive" header value, which
+    apparently is a thing.
+
+commit 716864deba26d2afea6b3cb62eeb573613d6b86b
+Author: rene <41963722+renaynay@users.noreply.github.com>
+Date:   Wed Oct 7 17:22:44 2020 +0200
+
+    cmd/devp2p/internal/ethtest: improve eth test suite (#21615)
+    
+    This fixes issues with the protocol handshake and status exchange
+    and adds support for responding to GetBlockHeaders requests.
+
+commit e43d827a1987c362dce6efd0afd8e753a6ecf9ae
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Oct 6 15:57:00 2020 +0200
+
+    core/types: optimize bloom filters (#21624)
+    
+    * core/types: tests for bloom
+    
+    * core/types: refactored bloom filter for receipts, added tests
+    
+    core/types: replaced old bloom implementation
+    
+    core/types: change interface of bloom add+test
+    
+    * core/types: refactor bloom
+    
+    * core/types: minor tweak on LogsBloom
+    
+    Co-authored-by: Marius van der Wijden <m.vanderwijden@live.de>
+
+commit eb87121300725623d7f504f7761fb7277579d689
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Oct 6 15:34:29 2020 +0200
+
+    core/bloombits: faster generator (#21625)
+    
+    * core/bloombits: add benchmark
+    
+    * core/bloombits: optimize inserts
+
+commit 2b2fd74158795bfccaff053558b4c1d1d60fa2fa
+Author: Raw Pong Ghmoa <58883403+q9f@users.noreply.github.com>
+Date:   Tue Oct 6 07:35:21 2020 +0200
+
+    params: update goerli testnet bootnodes (#21659)
+    
+    * params: update pegasys besu bootnode
+    
+    * params: update goerli initiative bootnodes
+
+commit d9890a6a8fc245c31dd0852c5fb0e1081708c4bc
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon Oct 5 12:50:26 2020 +0200
+
+    cmd/faucet: enable DNS discovery for known networks (#21636)
+
+commit a15d71a255686541e04f446dd92aadbf9ff496a8
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Oct 5 11:52:36 2020 +0300
+
+    core/state/snapshot: stop generator if it hits missing trie nodes (#21649)
+    
+    * core/state/snapshot: exit Geth if generator hits missing trie nodes
+    
+    * core/state/snapshot: error instead of hard die on generator fault
+    
+    * core/state/snapshot: don't enable logging on the tests
+
+commit 9d1e2027a05ed099b9ef43021a6cb09839e94a3a
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Wed Sep 30 19:49:20 2020 +0200
+
+    trie: add Commit-sequence tests for stacktrie commit (#21643)
+
+commit 053ed9cc847647a9b3ef707d0efe7104c4ab2a4c
+Author: Gary Rong <garyrong0905@gmail.com>
+Date:   Wed Sep 30 19:45:56 2020 +0800
+
+    trie: polishes to trie committer (#21351)
+    
+    * trie: update tests to check commit integrity
+    
+    * trie: polish committer
+    
+    * trie: fix typo
+    
+    * trie: remove hasvalue notion
+    
+    According to the benchmarks, type assertion between the pointer and
+    interface is extremely fast.
+    
+    BenchmarkIntmethod-12           1000000000               1.91 ns/op
+    BenchmarkInterface-12           1000000000               2.13 ns/op
+    BenchmarkTypeSwitch-12          1000000000               1.81 ns/op
+    BenchmarkTypeAssertion-12       2000000000               1.78 ns/op
+    
+    So the overhead for asserting whether the shortnode has "valuenode"
+    child is super tiny. No necessary to have another field.
+    
+    * trie: linter nitpicks
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+
+commit dad26582b6ec5e3870a27db9f25ad1743ae00cbf
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Tue Sep 29 17:40:08 2020 +0200
+
+    accounts, signer: implement gnosis safe support (#21593)
+    
+    * accounts, signer: implement gnosis safe support
+    
+    * common/math: add type for marshalling big to dec
+    
+    * accounts, signer: properly sign gnosis requests
+    
+    * signer, clef: implement account_signGnosisTx
+    
+    * signer: fix auditlog print, change rpc-name (signGnosisTx to signGnosisSafeTx)
+    
+    * signer: pass validation-messages/warnings to the UI for gnonsis-safe txs
+    
+    * signer/core: minor change to validationmessages of typed data
+
+commit 6c8310ebb40d260811580d188e0a815ba314ff9d
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Tue Sep 29 17:38:13 2020 +0200
+
+    trie: use stacktrie for Derivesha operation (#21407)
+    
+    core/types: use stacktrie for derivesha
+    
+    trie: add stacktrie file
+    
+    trie: fix linter
+    
+    core/types: use stacktrie for derivesha
+    
+    rebased: adapt stacktrie to the newer version of DeriveSha
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+    
+    More linter fixes
+    
+    review feedback: no key offset for nodes converted to hashes
+    
+    trie: use EncodeRLP for full nodes
+    
+    core/types: insert txs in order in derivesha
+    
+    trie: tests for derivesha with stacktrie
+    
+    trie: make stacktrie use pooled hashers
+    
+    trie: make stacktrie reuse tmp slice space
+    
+    trie: minor polishes on stacktrie
+    
+    trie/stacktrie: less rlp dancing
+    
+    core/types: explain the contorsions in DeriveSha
+    
+    ci: fix goimport errors
+    
+    trie: clear mem on subtrie hashing
+    
+    squashme: linter fix
+    
+    stracktrie: use pooling, less allocs (#3)
+    
+    trie: in-place hex prefix, reduce allocs and add rawNode.EncodeRLP
+    
+    Reintroduce the `[]node` method, add the missing `EncodeRLP` implementation for `rawNode` and calculate the hex prefix in place.
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+
+commit 4ee11b072e8b3ebaa025354bb346e2ea9cc3b27c
+Author: mr_franklin <mr_franklin@126.com>
+Date:   Tue Sep 29 17:31:14 2020 +0800
+
+    cmd/bootnode,internal/debug: fix some comments (#21623)
+
+commit 901471f733dbd5f08fdf1523a16227afd96efcd9
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Mon Sep 28 20:11:30 2020 +0200
+
+    build: keep geth-sources.jar build result for JavaDoc (#21596)
+    
+    * ci: tooltips for javadoc for mobile app
+    
+    * f space
+
+commit 666092936cf766a88ad7eb972768537127c5adc9
+Author: mr_franklin <mr_franklin@126.com>
+Date:   Tue Sep 29 02:10:11 2020 +0800
+
+    p2p/enode: remove unused code (#21612)
+
+commit b007df89ddc3d91610332f90af18092cd2793202
+Author: shigeyuki azuchi <azuchi@chaintope.com>
+Date:   Mon Sep 28 21:30:10 2020 +0900
+
+    light: fix wrong description in a comment (#21573)
+
+commit a04294d1607d0526002770cdc93bed73ee78a3a5
+Author: mr_franklin <mr_franklin@126.com>
+Date:   Mon Sep 28 20:28:38 2020 +0800
+
+    internal/web3ext: improve eth_getBlockByNumber and eth_getBlockByHash console api (#21608)
+
+commit eebfb13053a06433408f3b7b43837e3b2c7a8145
+Author: aaronbuchwald <aaron.buchwald56@gmail.com>
+Date:   Mon Sep 28 08:24:01 2020 -0400
+
+    core: free pointer from slice after popping element from price heap (#21572)
+    
+    * Fix potential memory leak in price heap
+    
+    * core: nil free pointer slice (alternative version)
+    
+    Co-authored-by: Martin Holst Swende <martin@swende.se>
+
+commit 0ddd4612b7db34a6b23926f05f0dd5807d86c7ab
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Mon Sep 28 14:14:45 2020 +0200
+
+    core/vm, params: make 2200 in line with spec (#21605)
+
+commit a90e645ccda7d8d373783e161e6c6fc4430cb6d0
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Mon Sep 28 14:12:08 2020 +0200
+
+    mobile: added constructor for big int (#21597)
+    
+    * mobile: added constructor for big int
+    
+    * mobile: tiny nitpick
+
+commit 420b78659bef661a83c5c442121b13f13288c09f
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Mon Sep 28 14:10:26 2020 +0200
+
+    accounts/abi: ABI explicit difference between Unpack and UnpackIntoInterface (#21091)
+    
+    * accounts/abi: refactored abi.Unpack
+    
+    * accounts/abi/bind: fixed error
+    
+    * accounts/abi/bind: modified template
+    
+    * accounts/abi/bind: added ToStruct for conversion
+    
+    * accounts/abi: reenabled tests
+    
+    * accounts/abi: fixed tests
+    
+    * accounts/abi: fixed tests for packing/unpacking
+    
+    * accounts/abi: fixed tests
+    
+    * accounts/abi: added more logic to ToStruct
+    
+    * accounts/abi/bind: fixed template
+    
+    * accounts/abi/bind: fixed ToStruct conversion
+    
+    * accounts/abi/: removed unused code
+    
+    * accounts/abi: updated template
+    
+    * accounts/abi: refactored unused code
+    
+    * contracts/checkpointoracle: updated contracts to sol ^0.6.0
+    
+    * accounts/abi: refactored reflection logic
+    
+    * accounts/abi: less code duplication in Unpack*
+    
+    * accounts/abi: fixed rebasing bug
+    
+    * fix a few typos in comments
+    
+    * rebase on master
+    
+    Co-authored-by: Guillaume Ballet <gballet@gmail.com>
+
+commit c9959145a9c1f1141784a2e7e0b2cb070d399065
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Sep 28 11:23:02 2020 +0300
+
+    params: begin v1.9.23 release cycle
