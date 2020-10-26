@@ -247,7 +247,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		}
 
 		next := nibs1[:1]
-		for ihK, _, err := c.Seek(next); ihK != nil; ihK, _, err = c.Seek(next) {
+		for ihK, _, err := c.Seek(next); ihK != nil; ihK, _, err = c.Seek(next) { // del all prefixes of `nibs`
 			if err != nil {
 				return err
 			}
@@ -271,7 +271,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		nibs2 := nibs[trie.IHDupKeyLen:]
 
 		next = nibs2[:1]
-		for ihK, ihV, err := c.SeekBothRange(nibs1, next); ihK != nil; ihK, ihV, err = c.SeekBothRange(nibs1, next) {
+		for ihK, ihV, err := c.SeekBothRange(nibs1, next); ihK != nil; ihK, ihV, err = c.SeekBothRange(nibs1, next) { // del all dupsort prefixes of `nibs2`
 			if err != nil {
 				return err
 			}
