@@ -50,13 +50,13 @@ func ReadCanonicalHash(db DatabaseReader, number uint64) (common.Hash, error) {
 }
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
-func WriteCanonicalHeader(db ethdb.Database, header *types.Header, preserve bool) {
+func WriteCanonicalHeader(db ethdb.Database, header *types.Header) {
 	var (
 		hash   = header.Hash()
 		number = header.Number.Uint64()
 	)
 
-	if preserve && hasCanonicalHeader(db, hash, number, false) {
+	if hasCanonicalHeader(db, hash, number, false) {
 		WriteNonCanonicalHeader(db, ReadHeaderByNumber(db, number))
 		DeleteHeaderWithoutNumber(db, hash, number)
 	}
@@ -68,6 +68,7 @@ func WriteCanonicalHeader(db ethdb.Database, header *types.Header, preserve bool
 	if err := db.Put(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(number), append(hash.Bytes(), data...)); err != nil {
 		log.Crit("Failed to store number to hash mapping", "err", err)
 	}
+	DeleteHeaderWithoutNumber(db, hash, number)
 }
 
 // DeleteCanonicalHash removes the number to the canonical header .
@@ -235,7 +236,7 @@ func hasCanonicalHeader(db DatabaseReader, hash common.Hash, number uint64, chec
 		return false
 	}
 	if !checkHash {
-		return false
+		return true
 	}
 	canonicalHash, _ := ReadCanonicalHash(db, number)
 	if hash != canonicalHash {

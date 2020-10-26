@@ -185,14 +185,14 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 			if h == headHash {
 				break
 			}
-			rawdb.WriteCanonicalHeader(markerBatch, header, true)
+			rawdb.WriteCanonicalHeader(markerBatch, header)
 
 			headHash = headHeader.ParentHash
 			headNumber = headHeader.Number.Uint64() - 1
 			headHeader = hc.GetHeader(headHash, headNumber)
 		}
 		// Extend the canonical chain with the new header
-		rawdb.WriteCanonicalHeader(markerBatch, headHeader, true)
+		rawdb.WriteCanonicalHeader(markerBatch, headHeader)
 		rawdb.WriteHeadHeaderHash(markerBatch, hash)
 		if _, err := markerBatch.Commit(); err != nil {
 			log.Crit("Failed to write header markers into disk", "err", err)

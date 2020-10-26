@@ -212,7 +212,7 @@ Error: %v
 		}
 		rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td)
 		if newCanonical {
-			rawdb.WriteCanonicalHeader(batch, header, false)
+			rawdb.WriteCanonicalHeader(batch, header)
 		} else {
 			rawdb.WriteNonCanonicalHeader(batch, header)
 		}
@@ -232,11 +232,11 @@ Error: %v
 			}
 
 			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)
-			rawdb.WriteCanonicalHeader(batch, forkHeader, true)
+			rawdb.WriteCanonicalHeader(batch, forkHeader)
 			forkBlockNumber = forkHeader.Number.Uint64() - 1
 			forkHash = forkHeader.ParentHash
 		}
-		rawdb.WriteCanonicalHeader(batch, rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1), true)
+		rawdb.WriteCanonicalHeader(batch, rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1))
 		if err != nil {
 			return false, 0, err
 		}
