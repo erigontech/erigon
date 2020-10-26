@@ -33,7 +33,9 @@ func SeedSnapshots(dir string) error {
 	if err != nil {
 		return err
 	}
+	client.Download()
 
+	//Seeding
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		for range ticker.C {

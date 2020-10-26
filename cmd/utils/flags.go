@@ -20,6 +20,7 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -31,8 +32,6 @@ import (
 	"text/tabwriter"
 	"text/template"
 	"time"
-
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ethereum/go-ethereum/common/fdlimit"
@@ -407,7 +406,7 @@ var (
 * s - download state snapshot
 * r - download receipts snapshot
 `,
-		Value: torrent.DefaultSnapshotMode.ToString(),
+		Value: snapshotdownloader.DefaultSnapshotMode.ToString(),
 	}
 	SeedSnapshotsFlag = cli.BoolTFlag{
 		Name:  "seed-snapshots",
@@ -1597,12 +1596,12 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.StorageMode = mode
-	snMode, err := torrent.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
+	snMode, err := snapshotdownloader.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
 	if err != nil {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.SnapshotMode = snMode
-	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
+	cfg.SnapshotSeeding = ctx.GlobalBoolT(SeedSnapshotsFlag.Name)
 
 	cfg.Hdd = ctx.GlobalBool(HddFlag.Name)
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)

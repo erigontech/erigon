@@ -1,16 +1,31 @@
-package torrent
+package bittorrent
 
-//only for mainnet
+import (
+	"errors"
+	"github.com/anacrolix/torrent/metainfo"
+	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
+)
+
 const (
-	HeadersSnapshotName        = "headers"
-	BodiesSnapshotName         = "bodies"
-	StateSnapshotName          = "state"
-	ReceiptsSnapshotName       = "receipts"
+	DefaultChunkSize = 1024 * 1024
+	SnapshotBlock = 11_000_000
+	LmdbFilename     = "data.mdb"
 
 	HeadersSnapshotHash  = "7727174de470b7fe0bb3e36d35e85cc48853d470" //11кk block 1mb chunk
 	BlocksSnapshotHash   = "0546b881c50de9984dd8865d0f18cc5153e4c21b" //11кk block 1mb chunk
 	StateSnapshotHash    = ""
 	ReceiptsSnapshotHash = ""
+)
+
+var (
+	TorrentHashes =  map[uint64]map[string]metainfo.Hash{
+		params.MainnetChainConfig.ChainID.Uint64(): {
+			snapshotdownloader.HeadersSnapshotName: metainfo.NewHashFromHex(HeadersSnapshotHash),
+			snapshotdownloader.BodiesSnapshotName: metainfo.NewHashFromHex(BlocksSnapshotHash),
+		},
+	}
+	ErrInvalidSnapshot = errors.New("this snapshot for this chainID not supported ")
 )
 
 var Trackers = [][]string{{

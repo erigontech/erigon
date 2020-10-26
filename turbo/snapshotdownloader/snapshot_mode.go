@@ -1,4 +1,4 @@
-package torrent
+package snapshotdownloader
 
 import "fmt"
 

@@ -22,6 +22,8 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader/bittorrent"
 	"io/ioutil"
 	"math/big"
 	"os"
@@ -29,8 +31,6 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
-
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"google.golang.org/grpc"
@@ -99,7 +99,7 @@ type Ethereum struct {
 	p2pServer     *p2p.Server
 	txPoolStarted bool
 
-	torrentClient *torrent.Client
+	torrentClient *bittorrent.Client
 
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 }
@@ -155,24 +155,25 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
-	var torrentClient *torrent.Client
-	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
-		config.SnapshotSeeding = true
-		torrentClient = torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
-		err = torrentClient.Run(chainDb)
-		if err != nil {
-			return nil, err
-		}
+	var torrentClient *bittorrent.Client
+	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotdownloader.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
+		torrentClient = bittorrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotSeeding)
+		err = torrentClient.AddSnapshotsTorrens(chainDb,config.NetworkID, config.SnapshotMode)
+		if err == nil {
+			torrentClient.Download()
 
-		snapshotKV := chainDb.KV()
-		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, stack.Config().ResolvePath("snapshots"), config.SnapshotMode)
-		if err != nil {
-			return nil, err
-		}
-		chainDb.SetKV(snapshotKV)
-		err = torrent.PostProcessing(chainDb, config.SnapshotMode)
-		if err != nil {
-			return nil, err
+			snapshotKV := chainDb.KV()
+			snapshotKV, err = snapshotdownloader.WrapBySnapshots(snapshotKV, stack.Config().ResolvePath("snapshots"), config.SnapshotMode)
+			if err != nil {
+				return nil, err
+			}
+			chainDb.SetKV(snapshotKV)
+			err = snapshotdownloader.PostProcessing(chainDb, config.SnapshotMode)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			log.Error("There was an error in snapshot init. Swithing to regular sync", "err", err)
 		}
 	}
 

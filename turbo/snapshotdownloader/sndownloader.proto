@@ -1,0 +1,38 @@
+
+
+syntax = "proto3";
+
+option go_package = "snapshotdownloader";
+option java_multiple_files = true;
+option java_package = "snapshotdownloader";
+
+package snapshotdownloader;
+
+// The greeter service definition.
+service Downloader {
+  // Sends a greeting
+  rpc Download (DownloadSnapshotRequest) returns (SnapshotsInfo) {}
+  rpc Snapshots (SnapshotsInfoRequest) returns (SnapshotsInfoReply) {}
+}
+
+// The request message containing the user's name.
+message DownloadSnapshotRequest {
+  string name = 1;
+  int32 networkid = 2;
+}
+
+message SnapshotsInfo {
+  string name = 1;
+  int32 networkid = 2;
+  int32 readiness = 3;
+  uint64 snapshotBlock = 4;
+}
+
+message SnapshotsInfoRequest {
+}
+
+
+
+message SnapshotsInfoReply {
+  repeated SnapshotsInfo info = 1;
+}
