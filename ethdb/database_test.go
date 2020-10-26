@@ -128,7 +128,7 @@ func testPutGet(db MinDatabase, t *testing.T) {
 	}
 
 	for _, v := range testValues {
-		err := db.Delete(testBucket, []byte(v))
+		err := db.Delete(testBucket, []byte(v), nil)
 		if err != nil {
 			t.Fatalf("delete %q failed: %v", v, err)
 		}
@@ -223,7 +223,7 @@ func testParallelPutGet(db MinDatabase) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			err := db.Delete(testBucket, []byte(key))
+			err := db.Delete(testBucket, []byte(key), nil)
 			if err != nil {
 				panic("delete failed: " + err.Error())
 			}

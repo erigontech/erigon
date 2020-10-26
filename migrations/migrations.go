@@ -204,7 +204,7 @@ func (m *Migrator) Apply(db ethdb.Database, tmpdir string) error {
 				return err
 			}
 
-			err = tx.Delete(dbutils.Migrations, []byte("_progress_"+v.Name))
+			err = tx.Delete(dbutils.Migrations, []byte("_progress_"+v.Name), nil)
 			if err != nil {
 				return err
 			}

@@ -318,11 +318,11 @@ func TestMultipleBuckets(t *testing.T) {
 				}
 
 				// delete from first bucket key 5, then will seek on it and expect to see key 6
-				if err := c.Delete([]byte{5}); err != nil {
+				if err := c.Delete([]byte{5}, nil); err != nil {
 					return err
 				}
 				// delete non-existing key
-				if err := c.Delete([]byte{6, 1}); err != nil {
+				if err := c.Delete([]byte{6, 1}, nil); err != nil {
 					return err
 				}
 
@@ -409,12 +409,12 @@ func TestReadAfterPut(t *testing.T) {
 				}
 
 				{
-					require.NoError(t, c2.Delete([]byte{5}))
+					require.NoError(t, c2.Delete([]byte{5}, nil))
 					v, err := c2.SeekExact([]byte{5})
 					require.NoError(t, err)
 					require.Nil(t, v)
 
-					require.NoError(t, c2.Delete([]byte{255})) // delete non-existing key
+					require.NoError(t, c2.Delete([]byte{255}, nil)) // delete non-existing key
 				}
 
 				return nil
@@ -435,7 +435,7 @@ func TestReadAfterPut(t *testing.T) {
 					require.Equal(t, []byte{i}, v)
 				}
 
-				require.NoError(t, c3.Delete([]byte{255})) // delete non-existing key
+				require.NoError(t, c3.Delete([]byte{255}, nil)) // delete non-existing key
 				return nil
 			}); err != nil {
 				t.Error(err)
@@ -443,7 +443,7 @@ func TestReadAfterPut(t *testing.T) {
 
 			if err := db.Update(ctx, func(tx ethdb.Tx) error {
 				c3 := tx.Cursor(dbutils.Buckets[2])
-				require.NoError(t, c3.Delete([]byte{5}))
+				require.NoError(t, c3.Delete([]byte{5}, nil))
 				v, err := tx.GetOne(dbutils.Buckets[2], []byte{5})
 				require.NoError(t, err)
 				require.Nil(t, v)

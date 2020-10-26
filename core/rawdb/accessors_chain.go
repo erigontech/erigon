@@ -59,7 +59,7 @@ func WriteCanonicalHash(db DatabaseWriter, hash common.Hash, number uint64) erro
 
 // DeleteCanonicalHash removes the number to hash canonical mapping.
 func DeleteCanonicalHash(db DatabaseDeleter, number uint64) error {
-	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number)); err != nil {
+	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number), nil); err != nil {
 		return fmt.Errorf("failed to delete number to hash mapping: %w", err)
 	}
 	return nil
@@ -111,7 +111,7 @@ func WriteHeaderNumber(db DatabaseWriter, hash common.Hash, number uint64) {
 
 // DeleteHeaderNumber removes hash->number mapping.
 func DeleteHeaderNumber(db DatabaseDeleter, hash common.Hash) {
-	if err := db.Delete(dbutils.HeaderNumberPrefix, hash[:]); err != nil {
+	if err := db.Delete(dbutils.HeaderNumberPrefix, hash[:], nil); err != nil {
 		log.Crit("Failed to delete hash to number mapping", "err", err)
 	}
 }
@@ -251,10 +251,10 @@ func WriteHeader(ctx context.Context, db DatabaseWriter, header *types.Header) {
 
 // DeleteHeader removes all block header data associated with a hash.
 func DeleteHeader(db DatabaseDeleter, hash common.Hash, number uint64) {
-	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash)); err != nil {
+	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash), nil); err != nil {
 		log.Crit("Failed to delete header", "err", err)
 	}
-	if err := db.Delete(dbutils.HeaderNumberPrefix, hash.Bytes()); err != nil {
+	if err := db.Delete(dbutils.HeaderNumberPrefix, hash.Bytes(), nil); err != nil {
 		log.Crit("Failed to delete hash to number mapping", "err", err)
 	}
 }
@@ -262,7 +262,7 @@ func DeleteHeader(db DatabaseDeleter, hash common.Hash, number uint64) {
 // deleteHeaderWithoutNumber removes only the block header but does not remove
 // the hash to number mapping.
 func deleteHeaderWithoutNumber(db DatabaseDeleter, hash common.Hash, number uint64) {
-	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash)); err != nil {
+	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash), nil); err != nil {
 		log.Crit("Failed to delete header", "err", err)
 	}
 }
@@ -356,7 +356,7 @@ func WriteSenders(ctx context.Context, db DatabaseWriter, hash common.Hash, numb
 
 // DeleteBody removes all block body data associated with a hash.
 func DeleteBody(db DatabaseDeleter, hash common.Hash, number uint64) {
-	if err := db.Delete(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash)); err != nil {
+	if err := db.Delete(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), nil); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
 	}
 }
@@ -408,7 +408,7 @@ func WriteTd(db DatabaseWriter, hash common.Hash, number uint64, td *big.Int) er
 
 // DeleteTd removes all block total difficulty data associated with a hash.
 func DeleteTd(db DatabaseDeleter, hash common.Hash, number uint64) error {
-	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderTDKey(number, hash)); err != nil {
+	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderTDKey(number, hash), nil); err != nil {
 		return fmt.Errorf("failed to delete block total difficulty: %w", err)
 	}
 	return nil
@@ -547,12 +547,12 @@ func AppendReceipts(tx ethdb.DbWithPendingMutations, blockNumber uint64, receipt
 
 // DeleteReceipts removes all receipt data associated with a block hash.
 func DeleteReceipts(db ethdb.Database, number uint64) error {
-	if err := db.Delete(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number)); err != nil {
+	if err := db.Delete(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number), nil); err != nil {
 		return fmt.Errorf("receipts delete failed: %d, %w", number, err)
 	}
 
 	if err := db.Walk(dbutils.Log, dbutils.LogKey(number, 0), 8*8, func(k, v []byte) (bool, error) {
-		if err := db.Delete(dbutils.Log, k); err != nil {
+		if err := db.Delete(dbutils.Log, k, nil); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -565,7 +565,7 @@ func DeleteReceipts(db ethdb.Database, number uint64) error {
 // DeleteNewerReceipts removes all receipt for given block number or newer
 func DeleteNewerReceipts(db ethdb.Database, number uint64) error {
 	if err := db.Walk(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number), 0, func(k, v []byte) (bool, error) {
-		if err := db.Delete(dbutils.BlockReceiptsPrefix, k); err != nil {
+		if err := db.Delete(dbutils.BlockReceiptsPrefix, k, nil); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -574,7 +574,7 @@ func DeleteNewerReceipts(db ethdb.Database, number uint64) error {
 	}
 
 	if err := db.Walk(dbutils.Log, dbutils.LogKey(number, 0), 0, func(k, v []byte) (bool, error) {
-		if err := db.Delete(dbutils.Log, k); err != nil {
+		if err := db.Delete(dbutils.Log, k, nil); err != nil {
 			return false, err
 		}
 		return true, nil
