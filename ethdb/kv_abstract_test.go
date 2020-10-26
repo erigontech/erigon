@@ -47,7 +47,7 @@ func TestManagedTx(t *testing.T) {
 
 	for _, db := range writeDBs {
 		db := db
-		tx, err := db.Begin(ctx, nil, true)
+		tx, err := db.Begin(ctx, nil, ethdb.RW)
 		require.NoError(t, err)
 		defer tx.Rollback()
 
