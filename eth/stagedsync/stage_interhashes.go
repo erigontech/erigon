@@ -258,7 +258,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 			}
 
 			if bytes.HasPrefix(nibs1, ihK) {
-				_ = c2.Delete(ihK)
+				if err = c2.Delete(ihK); err != nil {
+					return err
+				}
 			}
 			l := commonPrefixLen(ihK, nibs1)
 			next = nibs1[:l+1]
@@ -284,8 +286,12 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 			}
 
 			if bytes.HasPrefix(nibs2, ihV) {
-				_, _, _ = c2.SeekBothExact(ihK, ihV)
-				_ = c2.DeleteCurrent()
+				if _, _, err = c2.SeekBothExact(ihK, ihV); err != nil {
+					return err
+				}
+				if err = c2.DeleteCurrent(); err != nil {
+					return err
+				}
 			}
 			l := commonPrefixLen(ihV, nibs2)
 			next = nibs2[:l+1]
