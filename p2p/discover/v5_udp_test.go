@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/internal/testlog"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/p2p/discover/v5wire"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -455,7 +457,7 @@ func TestUDPv5_talkHandling(t *testing.T) {
 		if string(p.Message) != "test response" {
 			t.Errorf("wrong talk response message: %q", p.Message)
 		}
-		if string(recvMessage) != "test request" {
+		if string(recvMessage) != "test request" { //nolint:goconst
 			t.Errorf("wrong message received in handler: %q", recvMessage)
 		}
 	})
@@ -495,7 +497,7 @@ func TestUDPv5_talkRequest(t *testing.T) {
 		done <- err
 	}()
 	test.waitPacketOut(func(p *v5wire.TalkRequest, addr *net.UDPAddr, _ v5wire.Nonce) {})
-	if err := <-done; err != errTimeout {
+	if err := <-done; !errors.Is(err, errTimeout) {
 		t.Fatalf("want errTimeout, got %q", err)
 	}
 

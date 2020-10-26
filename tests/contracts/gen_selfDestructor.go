@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/event"
 )
@@ -21,7 +20,6 @@ var (
 	_ = big.NewInt
 	_ = strings.NewReader
 	_ = ethereum.NotFound
-	_ = math.U256
 	_ = bind.Bind
 	_ = common.Big1
 	_ = types.BloomLookup
@@ -29,10 +27,10 @@ var (
 )
 
 // SelfDestructorABI is the input ABI used to generate the binding from.
-const SelfDestructorABI = "[{\"constant\":false,\"inputs\":[],\"name\":\"selfDestruct\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"}]"
+const SelfDestructorABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"selfDestruct\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 
 // SelfDestructorBin is the compiled bytecode used for deploying new contracts.
-const SelfDestructorBin = `0x6080604052348015600f57600080fd5b5060016000556088806100236000396000f3fe608060405260043610603e5763ffffffff7c01000000000000000000000000000000000000000000000000000000006000350416639cb8a26a81146043575b600080fd5b348015604e57600080fd5b5060556057565b005b600080fffea165627a7a72305820f8d7728d6ca62cbe2a73a4b619690e6823f0ef86d8f5a561099c251544dc9db70029`
+var SelfDestructorBin = "0x6080604052348015600f57600080fd5b50600160005560708060226000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c80639cb8a26a14602d575b600080fd5b60336035565b005b600080fffea2646970667358221220a74afcbd1431019f7f78bcea3f22970f82560adb72829f56b28140de356bf95164736f6c63430007020033"
 
 // DeploySelfDestructor deploys a new Ethereum contract, binding an instance of SelfDestructor to it.
 func DeploySelfDestructor(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *SelfDestructor, error) {
@@ -40,6 +38,7 @@ func DeploySelfDestructor(auth *bind.TransactOpts, backend bind.ContractBackend)
 	if err != nil {
 		return common.Address{}, nil, nil, err
 	}
+
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(SelfDestructorBin), backend)
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -155,7 +154,7 @@ func bindSelfDestructor(address common.Address, caller bind.ContractCaller, tran
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_SelfDestructor *SelfDestructorRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_SelfDestructor *SelfDestructorRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _SelfDestructor.Contract.SelfDestructorCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -174,7 +173,7 @@ func (_SelfDestructor *SelfDestructorRaw) Transact(opts *bind.TransactOpts, meth
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_SelfDestructor *SelfDestructorCallerRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_SelfDestructor *SelfDestructorCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _SelfDestructor.Contract.contract.Call(opts, result, method, params...)
 }
 

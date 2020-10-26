@@ -23,7 +23,9 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+
 	"github.com/hashicorp/golang-lru/simplelru"
 )
 

@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/event"
 )
@@ -21,7 +20,6 @@ var (
 	_ = big.NewInt
 	_ = strings.NewReader
 	_ = ethereum.NotFound
-	_ = math.U256
 	_ = bind.Bind
 	_ = common.Big1
 	_ = types.BloomLookup
@@ -29,10 +27,10 @@ var (
 )
 
 // SelfdestructABI is the input ABI used to generate the binding from.
-const SelfdestructABI = "[{\"constant\":false,\"inputs\":[],\"name\":\"destruct\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[],\"name\":\"change\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"payable\":true,\"stateMutability\":\"payable\",\"type\":\"fallback\"}]"
+const SelfdestructABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"change\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"destruct\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"stateMutability\":\"payable\",\"type\":\"receive\"}]"
 
 // SelfdestructBin is the compiled bytecode used for deploying new contracts.
-const SelfdestructBin = `608060405234801561001057600080fd5b50640100000000600055600260018190556003905560ba806100336000396000f3fe60806040526004361060485763ffffffff7c01000000000000000000000000000000000000000000000000000000006000350416632b68b9c68114604a5780632ee79ded14605c575b005b348015605557600080fd5b506048606e565b348015606757600080fd5b5060486071565b30ff5b60008054600190810190915580548101815560028054909101905556fea165627a7a72305820e49fa5f7c67f3950748bcd6231418ed1b93be742c71840fdc6014656d2e56d8b0029`
+var SelfdestructBin = "0x6080604052348015600f57600080fd5b50640100000000600055600260018190556003905560b0806100326000396000f3fe60806040526004361060295760003560e01c80632b68b9c61460345780632ee79ded14604857602f565b36602f57005b600080fd5b348015603f57600080fd5b506046605a565b005b348015605357600080fd5b506046605d565b30ff5b60008054600190810190915580548101815560028054909101905556fea2646970667358221220caae26a119b18c374d0a657f2582ca8ab59c89f78ec97da1efbc9d426f23a5c764736f6c63430007020033"
 
 // DeploySelfdestruct deploys a new Ethereum contract, binding an instance of Selfdestruct to it.
 func DeploySelfdestruct(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Selfdestruct, error) {
@@ -40,6 +38,7 @@ func DeploySelfdestruct(auth *bind.TransactOpts, backend bind.ContractBackend) (
 	if err != nil {
 		return common.Address{}, nil, nil, err
 	}
+
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(SelfdestructBin), backend)
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -155,7 +154,7 @@ func bindSelfdestruct(address common.Address, caller bind.ContractCaller, transa
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Selfdestruct *SelfdestructRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Selfdestruct *SelfdestructRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Selfdestruct.Contract.SelfdestructCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -174,7 +173,7 @@ func (_Selfdestruct *SelfdestructRaw) Transact(opts *bind.TransactOpts, method s
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Selfdestruct *SelfdestructCallerRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Selfdestruct *SelfdestructCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Selfdestruct.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -229,4 +228,25 @@ func (_Selfdestruct *SelfdestructSession) Destruct() (*types.Transaction, error)
 // Solidity: function destruct() returns()
 func (_Selfdestruct *SelfdestructTransactorSession) Destruct() (*types.Transaction, error) {
 	return _Selfdestruct.Contract.Destruct(&_Selfdestruct.TransactOpts)
+}
+
+// Receive is a paid mutator transaction binding the contract receive function.
+//
+// Solidity: receive() payable returns()
+func (_Selfdestruct *SelfdestructTransactor) Receive(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _Selfdestruct.contract.RawTransact(opts, nil) // calldata is disallowed for receive function
+}
+
+// Receive is a paid mutator transaction binding the contract receive function.
+//
+// Solidity: receive() payable returns()
+func (_Selfdestruct *SelfdestructSession) Receive() (*types.Transaction, error) {
+	return _Selfdestruct.Contract.Receive(&_Selfdestruct.TransactOpts)
+}
+
+// Receive is a paid mutator transaction binding the contract receive function.
+//
+// Solidity: receive() payable returns()
+func (_Selfdestruct *SelfdestructTransactorSession) Receive() (*types.Transaction, error) {
+	return _Selfdestruct.Contract.Receive(&_Selfdestruct.TransactOpts)
 }

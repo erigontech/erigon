@@ -23,7 +23,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"golang.org/x/crypto/sha3"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 type bytesBacked interface {
@@ -111,7 +111,6 @@ type keccakState interface {
 
 func CreateBloom(receipts Receipts) Bloom {
 	buf := make([]byte, 6)
-	sha3 := sha3.NewLegacyKeccak256().(keccakState)
 	var bin Bloom
 	for _, receipt := range receipts {
 		for _, log := range receipt.Logs {
@@ -122,18 +121,12 @@ func CreateBloom(receipts Receipts) Bloom {
 		}
 	}
 	return bin
+}
+
 // LogsBloom returns the bloom bytes for the given logs
-}
-
 func LogsBloom(logs []*Log) []byte {
-	var buf [6]byte
-	h := sha3.NewLegacyKeccak256().(keccakState)
 	buf := make([]byte, 6)
-	logsBloom(logs, buf, n, h)
 	var bin Bloom
-}
-
-func logsBloom(logs []*Log, buf [6]byte, n *big.Int, h keccakState) {
 	for _, log := range logs {
 		bin.add(log.Address.Bytes(), buf)
 		for _, b := range log.Topics {
@@ -154,8 +147,8 @@ func Bloom9(data []byte) []byte {
 func bloomValues(data []byte, hashbuf []byte) (uint, byte, uint, byte, uint, byte) {
 	sha := hasherPool.Get().(crypto.KeccakState)
 	sha.Reset()
-	sha.Write(data)
-	sha.Read(hashbuf)
+	sha.Write(data)   //nolint:errcheck
+	sha.Read(hashbuf) //nolint:errcheck
 	hasherPool.Put(sha)
 	// The actual bits to flip
 	v1 := byte(1 << (hashbuf[1] & 0x7))
@@ -165,12 +158,7 @@ func bloomValues(data []byte, hashbuf []byte) (uint, byte, uint, byte, uint, byt
 	i1 := BloomByteLength - uint((binary.BigEndian.Uint16(hashbuf)&0x7ff)>>3) - 1
 	i2 := BloomByteLength - uint((binary.BigEndian.Uint16(hashbuf[2:])&0x7ff)>>3) - 1
 	i3 := BloomByteLength - uint((binary.BigEndian.Uint16(hashbuf[4:])&0x7ff)>>3) - 1
-}
 
-func Bloom9(b []byte) *big.Int {
-	var buf [6]byte
-	h := sha3.NewLegacyKeccak256().(keccakState)
-	n := new(big.Int)
 	return i1, v1, i2, v2, i3, v3
 }
 

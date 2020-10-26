@@ -31,6 +31,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/p2p/discover/v5wire"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
@@ -301,7 +302,7 @@ func (t *UDPv5) lookupWorker(destNode *node, target enode.ID) ([]*node, error) {
 	)
 	var r []*enode.Node
 	r, err = t.findnode(unwrapNode(destNode), dists)
-	if err == errClosed {
+	if errors.Is(err, errClosed) {
 		return nil, err
 	}
 	for _, n := range r {
@@ -735,6 +736,7 @@ func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr *
 }
 
 // matchWithCall checks whether a handshake attempt matches the active call.
+//nolint:unparam
 func (t *UDPv5) matchWithCall(fromID enode.ID, nonce v5wire.Nonce) (*callV5, error) {
 	c := t.activeCallByAuth[nonce]
 	if c == nil {
@@ -748,6 +750,7 @@ func (t *UDPv5) matchWithCall(fromID enode.ID, nonce v5wire.Nonce) (*callV5, err
 
 // handlePing sends a PONG response.
 func (t *UDPv5) handlePing(p *v5wire.Ping, fromID enode.ID, fromAddr *net.UDPAddr) {
+	//nolint:errcheck
 	t.sendResponse(fromID, fromAddr, &v5wire.Pong{
 		ReqID:  p.ReqID,
 		ToIP:   fromAddr.IP,
@@ -760,7 +763,7 @@ func (t *UDPv5) handlePing(p *v5wire.Ping, fromID enode.ID, fromAddr *net.UDPAdd
 func (t *UDPv5) handleFindnode(p *v5wire.Findnode, fromID enode.ID, fromAddr *net.UDPAddr) {
 	nodes := t.collectTableNodes(fromAddr.IP, p.Distances, findnodeResultLimit)
 	for _, resp := range packNodes(p.ReqID, nodes) {
-		t.sendResponse(fromID, fromAddr, resp)
+		t.sendResponse(fromID, fromAddr, resp) //nolint:errcheck
 	}
 }
 
@@ -832,5 +835,5 @@ func (t *UDPv5) handleTalkRequest(p *v5wire.TalkRequest, fromID enode.ID, fromAd
 		response = handler(p.Message)
 	}
 	resp := &v5wire.TalkResponse{ReqID: p.ReqID, Message: response}
-	t.sendResponse(fromID, fromAddr, resp)
+	t.sendResponse(fromID, fromAddr, resp) //nolint:errcheck
 }
