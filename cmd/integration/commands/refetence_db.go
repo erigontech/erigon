@@ -242,7 +242,7 @@ func fToMdbx(ctx context.Context, to string) error {
 	defer file.Close()
 
 	dst := ethdb.NewMDBX().Path(to).MustOpen()
-	dstTx, err1 := dst.Begin(ctx, nil, true)
+	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW)
 	if err1 != nil {
 		return err1
 	}
@@ -300,12 +300,12 @@ func toMdbx(ctx context.Context, from, to string) error {
 
 	src := ethdb.NewLMDB().Path(from).MustOpen()
 	dst := ethdb.NewMDBX().Path(to).MustOpen()
-	srcTx, err1 := src.Begin(ctx, nil, false)
+	srcTx, err1 := src.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return err1
 	}
 	defer srcTx.Rollback()
-	dstTx, err1 := dst.Begin(ctx, nil, true)
+	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW)
 	if err1 != nil {
 		return err1
 	}
@@ -348,7 +348,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 				if err2 := dstTx.Commit(ctx); err2 != nil {
 					return err2
 				}
-				dstTx, err = dst.Begin(ctx, nil, true)
+				dstTx, err = dst.Begin(ctx, nil, ethdb.RW)
 				if err != nil {
 					return err
 				}
