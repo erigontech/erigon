@@ -44,7 +44,7 @@ func HeaderHashKey(number uint64) []byte {
 }
 
 func CheckCanonicalKey(k []byte) bool {
-	return len(k) == 8+len(HeaderHashSuffix) && bytes.Equal(k[8:], HeaderHashSuffix)
+	return len(k) == 8
 }
 
 func IsHeaderHashKey(k []byte) bool {

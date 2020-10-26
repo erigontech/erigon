@@ -52,7 +52,7 @@ func (d *Downloader) SpawnBodyDownloadStage(
 		// Skip non relevant records
 		if dbutils.CheckCanonicalKey(k) {
 			// This is how we learn about canonical chain
-			blockNumber := binary.BigEndian.Uint64(k[:8])
+			blockNumber := binary.BigEndian.Uint64(k)
 			if blockNumber != currentNumber {
 				log.Warn("Canonical hash is missing", "number", currentNumber, "got", blockNumber)
 				missingHeader = currentNumber
@@ -60,14 +60,15 @@ func (d *Downloader) SpawnBodyDownloadStage(
 			}
 			currentNumber++
 			if hashCount < len(hashes) {
-				copy(hashes[hashCount][:], v)
+				copy(hashes[hashCount][:], v[:common.HashLength])
 				hashCount++
 			}
-			return true, nil
+			v = v[common.HashLength:]
 		}
 		if len(k) != 8+common.HashLength && len(k) != 8 {
 			return true, nil
 		}
+
 		header := new(types.Header)
 		if err1 := rlp.Decode(bytes.NewReader(v), header); err1 != nil {
 			log.Error("Invalid block header RLP", "err", err1)

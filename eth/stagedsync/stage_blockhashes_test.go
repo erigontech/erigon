@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"context"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -20,9 +19,8 @@ func TestBlockHashStage(t *testing.T) {
 	// prepare db so it works with our test
 	rawdb.WriteHeaderNumber(db, origin.Hash(), 0)
 	rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty)
-	rawdb.WriteHeader(context.TODO(), db, origin)
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
-	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
+	rawdb.WriteCanonicalHeader(db, origin)
 
 	_, _, err := InsertHeaderChain(db, headers, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
 	assert.NoError(t, err)

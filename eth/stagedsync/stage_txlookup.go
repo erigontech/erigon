@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -29,7 +28,7 @@ func SpawnTxLookup(s *StageState, db ethdb.Database, dataDir string, quitCh <-ch
 	}
 
 	startKey = dbutils.HeaderHashKey(blockNum)
-	if err = TxLookupTransform(db, startKey, dbutils.HeaderHashKey(syncHeadNumber), quitCh, dataDir); err != nil {
+	if err = TxLookupTransform(db, startKey, dbutils.EncodeBlockNumber(syncHeadNumber), quitCh, dataDir); err != nil {
 		return err
 	}
 
@@ -42,15 +41,14 @@ func TxLookupTransform(db ethdb.Database, startKey, endKey []byte, quitCh <-chan
 			return nil
 		}
 		blocknum := binary.BigEndian.Uint64(k)
-		blockHash := common.BytesToHash(v)
+		blockHash := common.BytesToHash(v[:common.HashLength])
 		body := rawdb.ReadBody(db, blockHash, blocknum)
 		if body == nil {
 			return fmt.Errorf("tx lookup generation, empty block body %d, hash %x", blocknum, v)
 		}
 
-		blockNumBytes := new(big.Int).SetUint64(blocknum).Bytes()
 		for _, tx := range body.Transactions {
-			if err := next(k, tx.Hash().Bytes(), blockNumBytes); err != nil {
+			if err := next(k, tx.Hash().Bytes(), k); err != nil {
 				return err
 			}
 		}

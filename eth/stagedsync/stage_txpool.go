@@ -73,7 +73,7 @@ func incrementalTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter
 			return false, nil
 		}
 
-		copy(canonical[currentHeaderIdx][:], v)
+		copy(canonical[currentHeaderIdx][:], v[:common.HashLength])
 		currentHeaderIdx++
 		return true, nil
 	}); err != nil {
@@ -158,7 +158,7 @@ func unwindTxPoolUpdate(from, to uint64, pool *core.TxPool, db ethdb.Getter, qui
 			return false, nil
 		}
 
-		copy(canonical[blockNumber-from-1][:], v)
+		copy(canonical[blockNumber-from-1][:], v[:common.HashLength])
 		return true, nil
 	}); err != nil {
 		return err

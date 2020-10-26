@@ -604,7 +604,7 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	updateHeads := h != block.Hash()
 
 	// Add the block to the canonical chain number scheme and mark as the head
-	rawdb.WriteCanonicalHash(bc.db, block.Hash(), block.NumberU64())
+	rawdb.WriteCanonicalHeader(bc.db, block.Header(), true)
 	if bc.enableTxLookupIndex && !bc.cacheConfig.DownloadOnly {
 		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
@@ -1841,7 +1841,7 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	}
 	// Delete the old chain
 	for _, oldBlock := range oldChain {
-		rawdb.DeleteCanonicalHash(bc.db, oldBlock.NumberU64())
+		rawdb.DeleteCanonicalHeader(bc.db, oldBlock.NumberU64())
 	}
 	bc.writeHeadBlock(commonBlock)
 	// Insert the new chain, taking care of the proper incremental order
@@ -1873,7 +1873,7 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		if hash == (common.Hash{}) {
 			break
 		}
-		rawdb.DeleteCanonicalHash(bc.db, i)
+		rawdb.DeleteCanonicalHeader(bc.db, i)
 	}
 
 	// If any logs need to be fired, do it now. In theory we could avoid creating

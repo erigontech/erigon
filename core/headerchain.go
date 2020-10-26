@@ -170,7 +170,7 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 			if ch == (common.Hash{}) {
 				break
 			}
-			rawdb.DeleteCanonicalHash(markerBatch, i)
+			rawdb.DeleteCanonicalHeader(markerBatch, i)
 		}
 
 		// Overwrite any stale canonical number assignments
@@ -180,21 +180,19 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 			headHeader = hc.GetHeader(headHash, headNumber)
 		)
 		for {
-			h, err := rawdb.ReadCanonicalHash(hc.chainDb, headNumber)
-			if err != nil {
-				return NonStatTy, err
-			}
+			header := rawdb.ReadHeader(hc.chainDb, headHash, headNumber)
+			h := header.Hash()
 			if h == headHash {
 				break
 			}
-			rawdb.WriteCanonicalHash(markerBatch, headHash, headNumber)
+			rawdb.WriteCanonicalHeader(markerBatch, header, true)
 
 			headHash = headHeader.ParentHash
 			headNumber = headHeader.Number.Uint64() - 1
 			headHeader = hc.GetHeader(headHash, headNumber)
 		}
 		// Extend the canonical chain with the new header
-		rawdb.WriteCanonicalHash(markerBatch, hash, number)
+		rawdb.WriteCanonicalHeader(markerBatch, headHeader, true)
 		rawdb.WriteHeadHeaderHash(markerBatch, hash)
 		if _, err := markerBatch.Commit(); err != nil {
 			log.Crit("Failed to write header markers into disk", "err", err)
@@ -557,7 +555,7 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 				rawdb.DeleteHeader(batch, hash, num)
 				rawdb.DeleteTd(batch, hash, num)
 			}
-			rawdb.DeleteCanonicalHash(batch, num)
+			rawdb.DeleteCanonicalHeader(batch, num)
 		}
 	}
 	if _, err := batch.Commit(); err != nil {

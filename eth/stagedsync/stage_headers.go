@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
@@ -213,18 +212,12 @@ Error: %v
 		}
 		rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td)
 		if newCanonical {
-			rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
-			rawdb.WriteCanonicalHeader(batch, header)
+			rawdb.WriteCanonicalHeader(batch, header, false)
 		} else {
-			data, err := rlp.EncodeToBytes(header)
-			if err != nil {
-				log.Crit("Failed to RLP encode header", "err", err)
-			}
-			if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
-				log.Crit("Failed to store header", "err", err)
-			}
+			rawdb.WriteNonCanonicalHeader(batch, header)
 		}
 	}
+
 	if deepFork {
 		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 		forkBlockNumber = forkHeader.Number.Uint64() - 1
@@ -238,27 +231,25 @@ Error: %v
 				break
 			}
 
-			rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber)
-			/*rawdb.WriteCanonicalHeader(batch, forkHeader)
-			rawdb.DeleteHeader(batch, forkHash, forkBlockNumber)*/
 			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)
+			rawdb.WriteCanonicalHeader(batch, forkHeader, true)
 			forkBlockNumber = forkHeader.Number.Uint64() - 1
 			forkHash = forkHeader.ParentHash
 		}
-		rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
-		/*rawdb.WriteCanonicalHeader(batch, h)
-		rawdb.DeleteHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)*/
+		rawdb.WriteCanonicalHeader(batch, rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1), true)
+		if err != nil {
+			return false, 0, err
+		}
 	}
 	reorg := newCanonical && forkBlockNumber < *headNumber
 	if reorg {
 		// Delete any canonical number assignments above the new head
 		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
-			data := rawdb.ReadHeaderRLP(db, common.Hash{}, i)
+			data := rawdb.ReadHeaderRLP(batch, common.Hash{}, i)
 			hash, err := rawdb.ReadCanonicalHash(batch, i)
 			if err != nil {
 				return false, 0, err
 			}
-			rawdb.DeleteCanonicalHash(batch, i)
 			rawdb.DeleteCanonicalHeader(batch, i)
 			if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(i, hash), data); err != nil {
 				log.Crit("Failed to store header", "err", err)

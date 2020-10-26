@@ -98,7 +98,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			return false, nil
 		}
 
-		copy(canonical[currentHeaderIdx][:], v)
+		copy(canonical[currentHeaderIdx][:], v[:common.HashLength])
 		currentHeaderIdx++
 		return true, nil
 	}); err != nil {

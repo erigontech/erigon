@@ -39,38 +39,34 @@ import (
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
 func ReadCanonicalHash(db DatabaseReader, number uint64) (common.Hash, error) {
-	data, err := db.Get(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number))
+	data, err := db.Get(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(number))
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return common.Hash{}, fmt.Errorf("failed ReadCanonicalHash: %w, number=%d", err, number)
 	}
 	if len(data) == 0 {
 		return common.Hash{}, nil
 	}
-	return common.BytesToHash(data), nil
+	return common.BytesToHash(data[:common.HashLength]), nil
 }
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
-func WriteCanonicalHash(db DatabaseWriter, hash common.Hash, number uint64) {
-	if err := db.Put(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number), hash.Bytes()); err != nil {
-		log.Crit("Failed to store number to hash mapping", "err", err)
+func WriteCanonicalHeader(db ethdb.Database, header *types.Header, preserve bool) {
+	var (
+		hash   = header.Hash()
+		number = header.Number.Uint64()
+	)
+
+	if preserve && hasCanonicalHeader(db, hash, number, false) {
+		WriteNonCanonicalHeader(db, ReadHeaderByNumber(db, number))
+		DeleteHeaderWithoutNumber(db, hash, number)
 	}
-}
 
-// WriteCanonicalHash stores the hash assigned to a canonical block number.
-func WriteCanonicalHeader(db DatabaseWriter, header *types.Header) {
 	data, err := rlp.EncodeToBytes(header)
 	if err != nil {
 		log.Crit("Failed to RLP encode header", "err", err)
 	}
-	if err := db.Put(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(header.Number.Uint64()), data); err != nil {
+	if err := db.Put(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(number), append(hash.Bytes(), data...)); err != nil {
 		log.Crit("Failed to store number to hash mapping", "err", err)
-	}
-}
-
-// DeleteCanonicalHash removes the number to hash canonical mapping.
-func DeleteCanonicalHash(db DatabaseDeleter, number uint64) {
-	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderHashKey(number)); err != nil {
-		log.Crit("Failed to delete number to hash mapping", "err", err)
 	}
 }
 
@@ -221,17 +217,36 @@ func ReadHeaderRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawVa
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			log.Error("ReadHeaderRLP failed", "err", err)
 		}
+		if len(data) == 0 {
+			return data
+		}
+		return common.CopyBytes(data[common.HashLength:])
 	}
 	return data
 }
 
 // HasHeader verifies the existence of a block header corresponding to the hash.
 func HasHeader(db DatabaseReader, hash common.Hash, number uint64) bool {
+	return hasNonCanonicalHeader(db, hash, number) || hasCanonicalHeader(db, hash, number, true)
+}
+
+func hasCanonicalHeader(db DatabaseReader, hash common.Hash, number uint64, checkHash bool) bool {
+	if has, err := db.Has(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(number)); !has || err != nil {
+		return false
+	}
+	if !checkHash {
+		return false
+	}
+	canonicalHash, _ := ReadCanonicalHash(db, number)
+	if hash != canonicalHash {
+		return false
+	}
+	return true
+}
+
+func hasNonCanonicalHeader(db DatabaseReader, hash common.Hash, number uint64) bool {
 	if has, err := db.Has(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash)); !has || err != nil {
-		canonicalHash, err := ReadCanonicalHash(db, number)
-		if err != nil || hash != canonicalHash {
-			return false
-		}
+		return false
 	}
 	return true
 }
@@ -264,6 +279,22 @@ func WriteHeader(ctx context.Context, db DatabaseWriter, header *types.Header) {
 	if err := db.Put(dbutils.HeaderNumberPrefix, hash[:], encoded); err != nil {
 		log.Crit("Failed to store hash to number mapping", "err", err)
 	}
+	// Write the encoded header
+	data, err := rlp.EncodeToBytes(header)
+	if err != nil {
+		log.Crit("Failed to RLP encode header", "err", err)
+	}
+	if err := db.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash), data); err != nil {
+		log.Crit("Failed to store header", "err", err)
+	}
+}
+
+// WriteNonCanonicalHeader stores a non canonical block header into the database.
+func WriteNonCanonicalHeader(db DatabaseWriter, header *types.Header) {
+	var (
+		hash   = header.Hash()
+		number = header.Number.Uint64()
+	)
 	// Write the encoded header
 	data, err := rlp.EncodeToBytes(header)
 	if err != nil {

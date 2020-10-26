@@ -1,7 +1,6 @@
 package torrent
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -84,12 +83,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 			case len(k) == 40:
 				return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
 			case len(k) == 8:
-				header := new(types.Header)
-				if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
-					log.Error("Invalid block header RLP", "err", err)
-					return nil
-				}
-				return next(k, header.Hash().Bytes(), k)
+				return next(k, common.CopyBytes(v[:common.HashLength]), k)
 			default:
 				return nil
 			}
@@ -121,6 +115,9 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 				return nil
 			}
 			header := &types.Header{}
+			if len(k) == 8 {
+				v = v[common.HashLength:]
+			}
 			innerErr := rlp.DecodeBytes(v, header)
 			if innerErr != nil {
 				return innerErr
@@ -133,13 +130,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 				return innerErr
 			}
 
-			innerErr = next(k, dbutils.HeaderTDKey(header.Number.Uint64(), header.Hash()), tdBytes)
-			if innerErr != nil {
-				return innerErr
-			}
-
-			//canonical
-			return next(k, dbutils.HeaderHashKey(header.Number.Uint64()), header.Hash().Bytes())
+			return next(k, dbutils.HeaderTDKey(header.Number.Uint64(), header.Hash()), tdBytes)
 		}, etl.IdentityLoadFunc, etl.TransformArgs{
 			Quit: ctx.Done(),
 			OnLoadCommit: func(db ethdb.Putter, key []byte, isDone bool) error {

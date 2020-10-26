@@ -219,42 +219,6 @@ func TestTdStorage(t *testing.T) {
 }
 
 // Tests that canonical numbers can be mapped to hashes and retrieved.
-func TestCanonicalMappingStorage(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-
-	// Create a test canonical number and assinged hash to move around
-	hash, number := common.Hash{0: 0xff}, uint64(314)
-	entry, err := ReadCanonicalHash(db, number)
-	if err != nil {
-		panic(err)
-	}
-	if entry != (common.Hash{}) {
-		t.Fatalf("Non existent canonical mapping returned: %v", entry)
-	}
-	// Write and verify the TD in the database
-	WriteCanonicalHash(db, hash, number)
-	entry, err = ReadCanonicalHash(db, number)
-	if err != nil {
-		panic(err)
-	}
-	if entry == (common.Hash{}) {
-		t.Fatalf("Stored canonical mapping not found")
-	} else if entry != hash {
-		t.Fatalf("Retrieved canonical mapping mismatch: have %v, want %v", entry, hash)
-	}
-	// Delete the TD and verify the execution
-	DeleteCanonicalHash(db, number)
-	entry, err = ReadCanonicalHash(db, number)
-	if err != nil {
-		panic(err)
-	}
-	if entry != (common.Hash{}) {
-		t.Fatalf("Deleted canonical mapping returned: %v", entry)
-	}
-}
-
-// Tests that head headers and head blocks can be assigned, individually.
 func TestHeadStorage(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()

@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"context"
 	"math/big"
 	"testing"
 
@@ -81,9 +80,8 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	// prepare db so it works with our test
 	rawdb.WriteHeaderNumber(db, origin.Hash(), 0)
 	rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty)
-	rawdb.WriteHeader(context.TODO(), db, origin)
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
-	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
+	rawdb.WriteCanonicalHeader(db, origin)
 
 	reorg, _, err := InsertHeaderChain(db, headers1, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
 	assert.NoError(t, err)

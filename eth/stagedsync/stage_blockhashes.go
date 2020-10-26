@@ -1,17 +1,13 @@
 package stagedsync
 
 import (
-	"bytes"
 	"encoding/binary"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
@@ -20,12 +16,7 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 	case len(k) == 40:
 		return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
 	case len(k) == 8:
-		header := new(types.Header)
-		if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
-			log.Error("Invalid block header RLP", "err", err)
-			return nil
-		}
-		return next(k, header.Hash().Bytes(), k)
+		return next(k, common.CopyBytes(v[:common.HashLength]), k)
 	default:
 		return nil
 	}
