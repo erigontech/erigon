@@ -216,6 +216,12 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	chainreader := &fakeChainReader{config: config}
 	dbCopy := db.MemCopy()
 	defer dbCopy.Close()
+	tx, err := dbCopy.Begin(context.Background(), ethdb.RW)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
 		stateWriter *state.DbStateWriter, plainStateWriter *state.PlainStateWriter) (*types.Block, types.Receipts, error) {
 		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, stateWriter: stateWriter, config: config, engine: engine, txs: make([]*types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1)}
@@ -251,13 +257,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", i)
-				if err := dbCopy.KV().View(context.Background(), func(tx ethdb.Tx) error {
-					cursor := tx.Cursor(dbutils.CurrentStateBucket)
-					k, v, e := cursor.First()
-					for ; k != nil && e == nil; k, v, e = cursor.Next() {
-						fmt.Printf("%x: %x\n", k, v)
-					}
-					return e
+				if err := tx.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
+					fmt.Printf("%x: %x\n", k, v)
+					return true, nil
 				}); err != nil {
 					return nil, nil, fmt.Errorf("print state: %w", err)
 				}
@@ -267,7 +269,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			var collector *etl.Collector
 			unfurl := trie.NewRetainList(0)
 			if intermediateHashes {
-				collector = etl.NewCollector("", etl.NewSortableBuffer(etl.BufferOptimalSize))
+				buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
+				buf.SetComparator(tx.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket))
+				collector = etl.NewCollector("", buf)
 				hashCollector = func(keyHex []byte, hash []byte) error {
 					if len(keyHex) == 0 {
 						return nil
@@ -297,13 +301,13 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
-			if hash, err := loader.CalcTrieRoot(dbCopy, nil); err == nil {
+			if hash, err := loader.CalcTrieRoot(tx, nil); err == nil {
 				b.header.Root = hash
 			} else {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
 			if intermediateHashes {
-				if err := collector.Load("GenerateChain", dbCopy, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+				if err := collector.Load("GenerateChain", tx, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 					return nil, nil, fmt.Errorf("loading intermediate hashes: %w", err)
 				}
 			}
@@ -316,9 +320,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	}
 
 	for i := 0; i < n; i++ {
-		stateReader := state.NewPlainStateReader(dbCopy)
-		stateWriter := state.NewDbStateWriter(dbCopy, parent.Number().Uint64()+uint64(i)+1)
-		plainStateWriter := state.NewPlainStateWriter(dbCopy, nil, parent.Number().Uint64()+uint64(i)+1)
+		stateReader := state.NewPlainStateReader(tx)
+		stateWriter := state.NewDbStateWriter(tx, parent.Number().Uint64()+uint64(i)+1)
+		plainStateWriter := state.NewPlainStateWriter(tx, nil, parent.Number().Uint64()+uint64(i)+1)
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter, plainStateWriter)
 		if err != nil {
@@ -327,6 +331,11 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		blocks[i] = block
 		receipts[i] = receipt
 		parent = block
+	}
+
+	_, err = tx.Commit()
+	if err != nil {
+		return nil, nil, err
 	}
 	return blocks, receipts, nil
 }
