@@ -32,9 +32,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
-
-	"github.com/c2h5oh/datasize"
 	pcsclite "github.com/gballet/go-libpcsclite"
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
@@ -391,47 +388,10 @@ var (
 		Name:  "trie-cache-gens",
 		Usage: "Number of trie node generations to keep in memory",
 	}
-	StorageModeFlag = cli.StringFlag{
-		Name: "storage-mode",
-		Usage: `Configures the storage mode of the app:
-* h - write history to the DB
-* r - write receipts to the DB
-* t - write tx lookup index to the DB`,
-		Value: ethdb.DefaultStorageMode.ToString(),
-	}
-	SnapshotModeFlag = cli.StringFlag{
-		Name: "snapshot-mode",
-		Usage: `Configures the storage mode of the app:
-* h - download headers snapshot
-* b - download bodies snapshot
-* s - download state snapshot
-* r - download receipts snapshot
-`,
-		Value: torrent.DefaultSnapshotMode.ToString(),
-	}
-	SeedSnapshotsFlag = cli.BoolTFlag{
-		Name:  "seed-snapshots",
-		Usage: `Seed snapshot seeding`,
-	}
 	ArchiveSyncInterval = cli.IntFlag{
 		Name:  "archive-sync-interval",
 		Usage: "When to switch from full to archive sync",
 		Value: 1024,
-	}
-	DatabaseFlag = cli.StringFlag{
-		Name:  "database",
-		Usage: "Which database software to use? Currently supported values: lmdb",
-		Value: "lmdb",
-	}
-	BatchSizeFlag = cli.StringFlag{
-		Name:  "batchSize",
-		Usage: "Batch size for the execution stage",
-		Value: "512M",
-	}
-	PrivateApiAddr = cli.StringFlag{
-		Name:  "private.api.addr",
-		Usage: "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
-		Value: "",
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -783,18 +743,6 @@ var (
 		Usage: "External EVM configuration (default = built-in interpreter)",
 		Value: "",
 	}
-
-	// LMDB flags
-	LMDBMapSizeFlag = cli.StringFlag{
-		Name:  "lmdb.mapSize",
-		Usage: "Sets Memory map size. Lower it if you have issues with opening the DB",
-		Value: ethdb.LMDBDefaultMapSize.String(),
-	}
-	LMDBMaxFreelistReuseFlag = cli.UintFlag{
-		Name:  "lmdb.maxFreelistReuse",
-		Usage: "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.",
-		Value: ethdb.LMDBDefaultMaxFreelistReuse,
-	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -1013,27 +961,6 @@ func SplitAndTrim(input string) (ret []string) {
 //	}
 //}
 
-// setPrivateApi populates configuration fields related to the remote
-// read-only interface to the databae
-func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
-	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
-	if ctx.GlobalBool(TLSFlag.Name) {
-		certFile := ctx.GlobalString(TLSCertFlag.Name)
-		keyFile := ctx.GlobalString(TLSKeyFlag.Name)
-		if certFile == "" {
-			log.Warn("Could not establish TLS grpc: missing certificate")
-			return
-		} else if keyFile == "" {
-			log.Warn("Could not establish TLS grpc: missing key file")
-			return
-		}
-		cfg.TLSConnection = true
-		cfg.TLSCertFile = certFile
-		cfg.TLSKeyFile = keyFile
-		cfg.TLSCACert = ctx.GlobalString(TLSCACertFlag.Name)
-	}
-}
-
 // setIPC creates an IPC path configuration from the set command line flags,
 // returning an empty string if IPC was explicitly disabled, or the set path.
 //func setIPC(ctx *cli.Context, cfg *node.Config) {
@@ -1248,7 +1175,6 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	//setIPC(ctx, cfg)
 	//setGraphQL(ctx, cfg)
 	//setWS(ctx, cfg)
-	setPrivateApi(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 	setSmartCard(ctx, cfg)
@@ -1284,34 +1210,6 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 		cfg.InsecureUnlockAllowed = ctx.GlobalBool(InsecureUnlockAllowedFlag.Name)
 	}
 
-	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
-	cfg.LMDB = strings.EqualFold(databaseFlag, "lmdb") //case insensitive
-	if cfg.LMDB && ctx.GlobalString(LMDBMapSizeFlag.Name) != "" {
-		err := cfg.LMDBMapSize.UnmarshalText([]byte(ctx.GlobalString(LMDBMapSizeFlag.Name)))
-		if err != nil {
-			log.Error("Invalid LMDB map size provided. Will use defaults",
-				"lmdb.mapSize", ethdb.LMDBDefaultMapSize.HumanReadable(),
-				"err", err,
-			)
-		} else {
-			if cfg.LMDBMapSize < 1*datasize.GB {
-				log.Error("Invalid LMDB map size provided. Will use defaults",
-					"lmdb.mapSize", ethdb.LMDBDefaultMapSize.HumanReadable(),
-					"err", "the value should be at least 1 GB",
-				)
-			}
-		}
-	}
-
-	if cfg.LMDB {
-		cfg.LMDBMaxFreelistReuse = ctx.GlobalUint(LMDBMaxFreelistReuseFlag.Name)
-		if cfg.LMDBMaxFreelistReuse < 16 {
-			log.Error("Invalid LMDB MaxFreelistReuse provided. Will use defaults",
-				"lmdb.maxFreelistReuse", ethdb.LMDBDefaultMaxFreelistReuse,
-				"err", "the value should be at least 16",
-			)
-		}
-	}
 }
 
 func setSmartCard(ctx *cli.Context, cfg *node.Config) {
@@ -1593,24 +1491,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 
 	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
 
-	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
-	if err != nil {
-		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-	}
-	cfg.StorageMode = mode
-	snMode, err := torrent.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
-	if err != nil {
-		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-	}
-	cfg.SnapshotMode = snMode
-	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
-
-	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
-		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))
-		if err != nil {
-			Fatalf("Invalid batchSize provided: %v", err)
-		}
-	}
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 
 	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheTrieFlag.Name) {

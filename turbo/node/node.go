@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
+	turbocli "github.com/ledgerwatch/turbo-geth/turbo/cli"
 
 	"github.com/urfave/cli"
 
@@ -86,6 +87,7 @@ func New(
 func makeEthConfig(ctx *cli.Context, node *node.Node) *eth.Config {
 	ethConfig := &eth.DefaultConfig
 	utils.SetEthConfig(ctx, node, ethConfig)
+	turbocli.ApplyFlagsForEthConfig(ctx, ethConfig)
 	return ethConfig
 }
 
@@ -102,6 +104,7 @@ func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
 	nodeConfig.NoUSB = true
 
 	utils.SetNodeConfig(ctx, &nodeConfig)
+	turbocli.ApplyFlagsForNodeConfig(ctx, &nodeConfig)
 
 	return &nodeConfig
 }
