@@ -131,7 +131,7 @@ func countStorageDepths() {
 			sameAddr := bytes.Equal(addr, prevAddr[:])
 			if !sameAddr {
 				copy(prevAddr[:], addr)
-				v, err := tx.Get(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
+				v, err := tx.GetOne(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
 				if err != nil {
 					return err
 				}

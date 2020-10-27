@@ -1670,7 +1670,7 @@ func iterateOverCode(chaindata string) error {
 func zstd(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, errBegin := db.Begin(context.Background())
+	tx, errBegin := db.Begin(context.Background(), ethdb.RW)
 	check(errBegin)
 	defer tx.Rollback()
 
@@ -1696,7 +1696,7 @@ func zstd(chaindata string) error {
 		}
 
 		storageReceipts := types.Receipts{}
-		err = cbor.Unmarshal(&storageReceipts, v)
+		err = cbor.Unmarshal(&storageReceipts, bytes.NewReader(v))
 		check(err)
 
 		samples1 = append(samples1, v)
@@ -1862,7 +1862,7 @@ func zstd(chaindata string) error {
 func benchRlp(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.Begin(context.Background())
+	tx, err := db.Begin(context.Background(), ethdb.RW)
 	check(err)
 	defer tx.Rollback()
 
@@ -1885,7 +1885,7 @@ func benchRlp(chaindata string) error {
 	var cbor_decode3 time.Duration
 	var cbor_compress time.Duration
 
-	bufSlice := make([]byte, 0, 100_000)
+	buf := bytes.NewBuffer(make([]byte, 0, 100_000))
 	compressBuf := make([]byte, 0, 100_000)
 
 	var samplesCbor [][]byte
@@ -1902,7 +1902,7 @@ func benchRlp(chaindata string) error {
 		}
 
 		receipts := types.Receipts{}
-		err = cbor.Unmarshal(&receipts, v)
+		err = cbor.Unmarshal(&receipts, bytes.NewReader(v))
 		check(err)
 
 		select {
@@ -1925,13 +1925,14 @@ func benchRlp(chaindata string) error {
 		blockNum := binary.BigEndian.Uint64(k)
 
 		storageReceipts := types.Receipts{}
-		err = cbor.Unmarshal(&storageReceipts, v)
+		err = cbor.Unmarshal(&storageReceipts, bytes.NewReader(v))
 		check(err)
 
 		t := time.Now()
-		err = cbor.Marshal(&bufSlice, storageReceipts)
+		buf.Reset()
+		err = cbor.Marshal(buf, storageReceipts)
 		cbor_encode += time.Since(t)
-		total_cbor += len(bufSlice)
+		total_cbor += buf.Len()
 		check(err)
 
 		t = time.Now()
@@ -1941,7 +1942,7 @@ func benchRlp(chaindata string) error {
 
 		storageReceipts2 := types.Receipts{}
 		t = time.Now()
-		err = cbor.Unmarshal(&storageReceipts2, bufSlice)
+		err = cbor.Unmarshal(&storageReceipts2, bytes.NewReader(buf.Bytes()))
 		cbor_decode += time.Since(t)
 		check(err)
 
@@ -2081,7 +2082,10 @@ func extracHeaders(chaindata string, block uint64) error {
 	fmt.Printf("Last block is %d\n", b)
 
 	hash := rawdb.ReadHeadHeaderHash(db)
-	h := rawdb.ReadHeaderByHash(db, hash)
+	h, err := rawdb.ReadHeaderByHash(db, hash)
+	if err != nil {
+		return err
+	}
 	fmt.Printf("Latest header timestamp: %d, current time: %d\n", h.Time, uint64(time.Now().Unix()))
 	return nil
 }
@@ -2089,12 +2093,13 @@ func extracHeaders(chaindata string, block uint64) error {
 func receiptSizes(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.KV().Begin(context.Background(), nil, false)
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	c := tx.Cursor(dbutils.BlockReceiptsPrefix)
+
+	c := tx.Cursor(dbutils.Log)
 	defer c.Close()
 	sizes := make(map[int]int)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
@@ -2111,6 +2116,9 @@ func receiptSizes(chaindata string) error {
 	}
 	sort.Ints(lens)
 	for _, l := range lens {
+		if sizes[l] < 100000 {
+			continue
+		}
 		fmt.Printf("%6d - %d\n", l, sizes[l])
 	}
 	return nil
@@ -2276,6 +2284,11 @@ func main() {
 	}
 	if *action == "receiptSizes" {
 		if err := receiptSizes(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "defrag" {
+		if err := defrag(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

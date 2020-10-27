@@ -184,7 +184,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 				bucketName := bucketName
 				c := readTx.Cursor(bucketName)
 				if err2 := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
-					if firstV, _ := firstTx.Get(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
+					if firstV, _ := firstTx.GetOne(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
 						// Skip the record that is the same as in the first Db
 						return true, nil
 					}

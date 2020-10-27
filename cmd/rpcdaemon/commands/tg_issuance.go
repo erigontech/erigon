@@ -2,57 +2,60 @@ package commands
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
 // BlockReward returns the block reward for this block
-func (api *TgImpl) BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	tx, err := api.dbReader.Begin(ctx)
-	if err != nil {
-		return Issuance{}, err
-	}
-	defer tx.Rollback()
-
-	return api.rewardCalc(tx, blockNr, "block") // nolint goconst
-}
+// func (api *TgImpl) BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
+//	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+//	if err != nil {
+//		return Issuance{}, err
+//	}
+//	defer tx.Rollback()
+//
+//	return api.rewardCalc(tx, blockNr, "block") // nolint goconst
+//}
 
 // UncleReward returns the uncle reward for this block
-func (api *TgImpl) UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	tx, err := api.dbReader.Begin(ctx)
-	if err != nil {
-		return Issuance{}, err
-	}
-	defer tx.Rollback()
+// func (api *TgImpl) UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
+//	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+//	if err != nil {
+//		return Issuance{}, err
+//	}
+//	defer tx.Rollback()
+//
+//	return api.rewardCalc(tx, blockNr, "uncle") // nolint goconst
+//}
 
-	return api.rewardCalc(tx, blockNr, "uncle") // nolint goconst
-}
-
-// Issuance returns the issuance for this block
+// Issuance implements tg_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
 func (api *TgImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return Issuance{}, err
 	}
 	defer tx.Rollback()
 
-	return api.rewardCalc(tx, blockNr, "issuance")
-}
-
-func (api *TgImpl) rewardCalc(db rawdb.DatabaseReader, blockNr rpc.BlockNumber, which string) (Issuance, error) {
-	genesisHash := rawdb.ReadBlockByNumber(db, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(db, genesisHash)
+	genesis, err := rawdb.ReadBlockByNumber(tx, 0)
+	if err != nil {
+		return Issuance{}, err
+	}
+	genesisHash := genesis.Hash()
+	chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
+	if err != nil {
+		return Issuance{}, err
+	}
 	if chainConfig.Ethash == nil {
 		// Clique for example has no issuance
 		return Issuance{}, nil
 	}
 
-	block, err := api.getBlockByRPCNumber(db, blockNr)
+	block, err := api.getBlockByRPCNumber(tx, blockNr)
 	if err != nil {
 		return Issuance{}, err
 	}
@@ -64,22 +67,11 @@ func (api *TgImpl) rewardCalc(db rawdb.DatabaseReader, blockNr rpc.BlockNumber, 
 	}
 
 	var ret Issuance
-	switch which {
-	case "block": // nolint goconst
-		ret.BlockReward = hexutil.EncodeBig(minerReward.ToBig())
-		return ret, nil
-	case "uncle": // nolint goconst
-		issuance.Sub(&issuance, &minerReward)
-		ret.UncleReward = hexutil.EncodeBig(issuance.ToBig())
-		return ret, nil
-	case "issuance":
-		ret.BlockReward = hexutil.EncodeBig(minerReward.ToBig())
-		ret.Issuance = hexutil.EncodeBig(issuance.ToBig())
-		issuance.Sub(&issuance, &minerReward)
-		ret.UncleReward = hexutil.EncodeBig(issuance.ToBig())
-		return ret, nil
-	}
-	return Issuance{}, fmt.Errorf("should not happen in rewardCalc")
+	ret.BlockReward = hexutil.EncodeBig(minerReward.ToBig())
+	ret.Issuance = hexutil.EncodeBig(issuance.ToBig())
+	issuance.Sub(&issuance, &minerReward)
+	ret.UncleReward = hexutil.EncodeBig(issuance.ToBig())
+	return ret, nil
 }
 
 func (api *TgImpl) getBlockByRPCNumber(db rawdb.DatabaseReader, blockNr rpc.BlockNumber) (*types.Block, error) {
@@ -87,7 +79,7 @@ func (api *TgImpl) getBlockByRPCNumber(db rawdb.DatabaseReader, blockNr rpc.Bloc
 	if err != nil {
 		return nil, err
 	}
-	return rawdb.ReadBlockByNumber(db, blockNum), nil
+	return rawdb.ReadBlockByNumber(db, blockNum)
 }
 
 // Issuance structure to return information about issuance

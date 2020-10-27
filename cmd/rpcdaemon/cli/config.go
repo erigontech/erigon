@@ -76,13 +76,13 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.Chaindata != "" {
-		if database, errOpen := ethdb.Open(cfg.Chaindata); errOpen == nil {
+		if database, errOpen := ethdb.Open(cfg.Chaindata, true); errOpen == nil {
 			db = database.KV()
 		} else {
 			err = errOpen
 		}
 	} else if cfg.PrivateApiAddr != "" {
-		db, txPool, err = ethdb.NewRemote2().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+		db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
 		if err != nil {
 			return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
 		}

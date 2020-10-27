@@ -4,19 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
-	"runtime/pprof"
 	"time"
-
-	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -42,7 +37,7 @@ type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.Database, blo
 type ExecuteBlockStageParams struct {
 	ToBlock       uint64 // not setting this params means no limit
 	WriteReceipts bool
-	Hdd           bool
+	BatchSize     int
 	ChangeSetHook ChangeSetHook
 	ReaderBuilder StateReaderBuilder
 	WriterBuilder StateWriterBuilder
@@ -61,19 +56,8 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		s.Done()
 		return nil
 	}
-	log.Info(fmt.Sprintf("[%s] Blocks execution", stages.Execution), "from", s.BlockNumber, "to", to)
-
-	if prof {
-		f, err := os.Create(fmt.Sprintf("cpu-%d.prof", s.BlockNumber))
-		if err != nil {
-			log.Error("could not create CPU profile", "error", err)
-			return err
-		}
-		if err = pprof.StartCPUProfile(f); err != nil {
-			log.Error("could not start CPU profile", "error", err)
-			return err
-		}
-	}
+	logPrefix := s.state.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
@@ -82,7 +66,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = stateDB.Begin(context.Background())
+		tx, err = stateDB.Begin(context.Background(), ethdb.RW)
 		if err != nil {
 			return err
 		}
@@ -99,8 +83,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	defer logEvery.Stop()
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
-	// Warmup only works for HDD sync, and for long ranges
-	var warmup = params.Hdd && (to-s.BlockNumber) > 30000
 
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
@@ -115,25 +97,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 		block := rawdb.ReadBlock(tx, blockHash, blockNum)
 		if block == nil {
-			log.Error(fmt.Sprintf("[%s] Empty block", stages.Execution), "hash", blockHash.String(), "blocknum", blockNum)
+			log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "hash", blockHash.String(), "blocknum", blockNum)
 			break
 		}
 		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
-
-		if warmup {
-			log.Info(fmt.Sprintf("[%s] Running a warmup...", stages.Execution))
-			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.PlainStateBucket, logEvery, quit); err != nil {
-				return err
-			}
-
-			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.CodeBucket, logEvery, quit); err != nil {
-				return err
-			}
-
-			warmup = false
-			log.Info(fmt.Sprintf("[%s] Warm up done.", stages.Execution))
-		}
 
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
@@ -157,12 +125,12 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 
 		if params.WriteReceipts {
-			if err = appendReceipts(tx, receipts, block.NumberU64(), block.Hash()); err != nil {
+			if err = rawdb.AppendReceipts(tx, block.NumberU64(), receipts); err != nil {
 				return err
 			}
 		}
 
-		if batch.BatchSize() >= batch.IdealBatchSize() {
+		if batch.BatchSize() >= params.BatchSize {
 			if err = s.Update(batch, blockNum); err != nil {
 				return err
 			}
@@ -175,14 +143,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				}
 				chainContext.SetDB(tx)
 			}
-			warmup = params.Hdd && (to-blockNum) > 30000
-		}
-
-		if prof {
-			if blockNum-s.BlockNumber == 100000 {
-				// Flush the CPU profiler
-				pprof.StopCPUProfile()
-			}
 		}
 
 		if params.ChangeSetHook != nil {
@@ -194,7 +154,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock = logProgress(logBlock, blockNum, batch)
+			logBlock = logProgress(logPrefix, logBlock, blockNum, batch)
 		}
 	}
 
@@ -202,7 +162,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		return err
 	}
 	if _, err := batch.Commit(); err != nil {
-		return fmt.Errorf("sync Execute: failed to write batch commit: %v", err)
+		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 	}
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
@@ -210,16 +170,16 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 	}
 
-	log.Info(fmt.Sprintf("[%s] Completed on", stages.Execution), "block", stageProgress)
+	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	s.Done()
 	return nil
 }
 
-func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
+func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Info(fmt.Sprintf("[%s] Executed blocks", stages.Execution),
+	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix),
 		"number", now,
 		"blk/second", speed,
 		"batch", common.StorageSize(batch.BatchSize()),
@@ -230,26 +190,14 @@ func logProgress(prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 	return now
 }
 
-func appendReceipts(tx ethdb.DbWithPendingMutations, receipts types.Receipts, blockNumber uint64, blockHash common.Hash) error {
-	newV := make([]byte, 0, 1024)
-	err := cbor.Marshal(&newV, receipts)
-	if err != nil {
-		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
-	}
-	// Store the flattened receipt slice
-	if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(blockNumber, blockHash), newV); err != nil {
-		return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
-	}
-	return nil
-}
-
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
 	}
 
-	log.Info("Unwind Execution stage", "from", s.BlockNumber, "to", u.UnwindPoint)
+	logPrefix := s.state.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 	batch := stateDB.NewBatch()
 	defer batch.Rollback()
 
@@ -262,7 +210,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 
 	accountMap, storageMap, errRewind := rewindFunc(stateDB, s.BlockNumber, u.UnwindPoint)
 	if errRewind != nil {
-		return fmt.Errorf("unwind Execution: getting rewind data: %v", errRewind)
+		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
 
 	for key, value := range accountMap {
@@ -274,7 +222,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 
 			// Fetch the code hash
 			recoverCodeHashFunc(&acc, stateDB, key)
-			if err := writeAccountFunc(batch, key, acc); err != nil {
+			if err := writeAccountFunc(logPrefix, batch, key, acc); err != nil {
 				return err
 			}
 		} else {
@@ -297,63 +245,42 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 
 	if err := stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
 		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket, common.CopyBytes(k)); err1 != nil {
-			return false, fmt.Errorf("unwind Execution: delete account changesets: %v", err1)
+			return false, fmt.Errorf("%s: delete account changesets: %v", logPrefix, err1)
 		}
 		return true, nil
 	}); err != nil {
-		return fmt.Errorf("unwind Execution: walking account changesets: %v", err)
+		return fmt.Errorf("%s: walking account changesets: %v", logPrefix, err)
 	}
 	if err := stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
 		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket, common.CopyBytes(k)); err1 != nil {
-			return false, fmt.Errorf("unwind Execution: delete storage changesets: %v", err1)
+			return false, fmt.Errorf("%s: delete storage changesets: %v", logPrefix, err1)
 		}
 		return true, nil
 	}); err != nil {
-		return fmt.Errorf("unwind Execution: walking storage changesets: %v", err)
+		return fmt.Errorf("%s: walking storage changesets: %v", logPrefix, err)
 	}
 	if writeReceipts {
-		if err := stateDB.Walk(dbutils.BlockReceiptsPrefix, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (bool, error) {
-			if err := batch.Delete(dbutils.BlockReceiptsPrefix, common.CopyBytes(k)); err != nil {
-				return false, fmt.Errorf("unwind Execution: delete receipts: %v", err)
-			}
-			return true, nil
-		}); err != nil {
-			return fmt.Errorf("unwind Execution: walking receipts: %v", err)
+		if err := rawdb.DeleteNewerReceipts(stateDB, u.UnwindPoint+1); err != nil {
+			return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
 		}
 	}
 
 	if err := u.Done(batch); err != nil {
-		return fmt.Errorf("unwind Execution: reset: %v", err)
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
 
 	_, err := batch.Commit()
 	if err != nil {
-		return fmt.Errorf("unwind Execute: failed to write db commit: %v", err)
+		return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
 	}
 	return nil
 }
 
-func writeAccountHashed(db ethdb.Database, key string, acc accounts.Account) error {
-	var addrHash common.Hash
-	copy(addrHash[:], []byte(key))
-	if err := cleanupContractCodeBucket(
-		db,
-		dbutils.ContractCodeBucket,
-		acc,
-		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
-			return rawdb.ReadAccount(db, addrHash, out)
-		},
-		func(inc uint64) []byte { return dbutils.GenerateStoragePrefix(addrHash[:], inc) },
-	); err != nil {
-		return err
-	}
-	return rawdb.WriteAccount(db, addrHash, acc)
-}
-
-func writeAccountPlain(db ethdb.Database, key string, acc accounts.Account) error {
+func writeAccountPlain(logPrefix string, db ethdb.Database, key string, acc accounts.Account) error {
 	var address common.Address
 	copy(address[:], []byte(key))
 	if err := cleanupContractCodeBucket(
+		logPrefix,
 		db,
 		dbutils.PlainContractCodeBucket,
 		acc,
@@ -362,7 +289,7 @@ func writeAccountPlain(db ethdb.Database, key string, acc accounts.Account) erro
 		},
 		func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
 	); err != nil {
-		return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
+		return fmt.Errorf("%s: writeAccountPlain for %x: %w", logPrefix, address, err)
 	}
 
 	return rawdb.PlainWriteAccount(db, address, acc)
@@ -379,6 +306,7 @@ func recoverCodeHashHashed(acc *accounts.Account, db ethdb.Getter, key string) {
 }
 
 func cleanupContractCodeBucket(
+	logPrefix string,
 	db ethdb.Database,
 	bucket string,
 	acc accounts.Account,
@@ -388,7 +316,7 @@ func cleanupContractCodeBucket(
 	var original accounts.Account
 	got, err := readAccountFunc(db, &original)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		return fmt.Errorf("cleanupContractCodeBucket: %w", err)
+		return fmt.Errorf("%s: cleanupContractCodeBucket: %w", logPrefix, err)
 	}
 	if got {
 		// clean up all the code incarnations original incarnation and the new one

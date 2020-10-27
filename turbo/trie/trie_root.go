@@ -73,6 +73,7 @@ Then delete this account (SELFDESTRUCT).
 //
 // Each intermediate hash key firstly pass to RetainDecider, only if it returns "false" - such IH can be used.
 type FlatDBTrieLoader struct {
+	logPrefix                string
 	trace                    bool
 	itemPresent              bool
 	itemType                 StreamItem
@@ -126,8 +127,9 @@ func NewRootHashAggregator() *RootHashAggregator {
 	}
 }
 
-func NewFlatDBTrieLoader(stateBucket, intermediateHashesBucket string) *FlatDBTrieLoader {
+func NewFlatDBTrieLoader(logPrefix, stateBucket, intermediateHashesBucket string) *FlatDBTrieLoader {
 	return &FlatDBTrieLoader{
+		logPrefix:                logPrefix,
 		defaultReceiver:          NewRootHashAggregator(),
 		stateBucket:              stateBucket,
 		intermediateHashesBucket: intermediateHashesBucket,
@@ -370,7 +372,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{})
 		useExternalTx = true
 	} else {
 		var err error
-		txDB, err = db.Begin(context.Background())
+		txDB, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
 			return EmptyRoot, err
 		}
@@ -432,7 +434,7 @@ func (l *FlatDBTrieLoader) logProgress() {
 	} else if l.ihK != nil {
 		k = makeCurrentKeyStr(l.ihK)
 	}
-	log.Info("Calculating Merkle root", "current key", k)
+	log.Info(fmt.Sprintf("[%s] Calculating Merkle root", l.logPrefix), "current key", k)
 }
 
 func (r *RootHashAggregator) RetainNothing(_ []byte) bool {

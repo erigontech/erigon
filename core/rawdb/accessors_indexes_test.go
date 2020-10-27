@@ -63,8 +63,12 @@ func TestLookupStorage(t *testing.T) {
 				}
 			}
 			// Insert all the transactions into the database, and verify contents
-			WriteCanonicalHeader(db, block.Header())
-			WriteBlock(ctx, db, block)
+			if err := WriteCanonicalHeader(db, block.Header()); err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteBlock(ctx, db, block); err != nil {
+				t.Fatal(err)
+			}
 			tc.writeTxLookupEntries(db, block)
 
 			for i, tx := range txs {

@@ -19,7 +19,7 @@ func main() {
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		db, backend, err := cli.OpenDB(*cfg)
 		if err != nil {
-			log.Error("Could not connect to remoteDb", "error", err)
+			log.Error("Could not connect to DB", "error", err)
 			return nil
 		}
 		defer db.Close()

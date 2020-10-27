@@ -58,7 +58,10 @@ func Retrace(blockNumber, chain string, kv ethdb.KV, db ethdb.Getter) (RetraceRe
 	if err != nil {
 		return RetraceResponse{}, err
 	}
-	block := rawdb.ReadBlockByNumber(db, uint64(bn))
+	block, err := rawdb.ReadBlockByNumber(db, uint64(bn))
+	if err != nil {
+		return RetraceResponse{}, err
+	}
 	chainCtx := NewRemoteContext(kv, db)
 	writer := state.NewChangeSetWriterPlain(uint64(bn - 1))
 	reader := NewRemoteReader(kv, uint64(bn))
@@ -144,7 +147,7 @@ func ReadChainConfig(db ethdb.KV, chain string) (*params.ChainConfig, error) {
 		k = params.GoerliGenesisHash[:]
 	}
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		d, err := tx.Get(dbutils.ConfigPrefix, k)
+		d, err := tx.GetOne(dbutils.ConfigPrefix, k)
 		if err != nil {
 			return err
 		}

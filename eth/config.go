@@ -17,13 +17,15 @@
 package eth
 
 import (
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"math/big"
 	"os"
 	"os/user"
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -125,8 +127,8 @@ type Config struct {
 	NoPrefetch    bool   // Whether to disable prefetching and only load state on demand
 	TxLookupLimit uint64 `toml:",omitempty"` // The maximum number of blocks from head whose tx indices are reserved.
 
-	StorageMode ethdb.StorageMode
-	Hdd         bool // Whether to use warm up strategy to deal with the high latency of HDD
+	StorageMode     ethdb.StorageMode
+	BatchSize       datasize.ByteSize // Batch size for execution stage
 	SnapshotMode    torrent.SnapshotMode
 	SnapshotSeeding bool
 

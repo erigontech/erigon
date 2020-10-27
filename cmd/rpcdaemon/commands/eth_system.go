@@ -7,9 +7,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-// BlockNumber returns the latest block number of the chain
+// BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
 func (api *APIImpl) BlockNumber(_ context.Context) (hexutil.Uint64, error) {
 	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
 	if err != nil {
@@ -18,7 +19,7 @@ func (api *APIImpl) BlockNumber(_ context.Context) (hexutil.Uint64, error) {
 	return hexutil.Uint64(execution), nil
 }
 
-// Syncing - we can return the progress of the very first stage as the highest block, and then the progress of the very last stage as the current block
+// Syncing implements eth_syncing. Returns a data object detaling the status of the sync process or false if not syncing.
 func (api *APIImpl) Syncing(_ context.Context) (interface{}, error) {
 	highestBlock, _, err := stages.GetStageProgress(api.dbReader, stages.Headers)
 	if err != nil {
@@ -41,24 +42,27 @@ func (api *APIImpl) Syncing(_ context.Context) (interface{}, error) {
 	}, nil
 }
 
-// ChainId returns the chain id from the config
+// ChainId implements eth_chainId. Returns the current ethereum chainId.
 func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
 
-	chainConfig := getChainConfig(tx)
+	chainConfig, err := getChainConfig(tx)
+	if err != nil {
+		return 0, err
+	}
 	return hexutil.Uint64(chainConfig.ChainID.Uint64()), nil
 }
 
-// ProtocolVersion returns the chain id from the config
+// ProtocolVersion implements eth_protocolVersion. Returns the current ethereum protocol version.
 func (api *APIImpl) ProtocolVersion(_ context.Context) (hexutil.Uint, error) {
 	return hexutil.Uint(eth.ProtocolVersions[0]), nil
 }
 
-// GasPrice returns a suggestion for a gas price.
+// GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
 func (api *APIImpl) GasPrice(_ context.Context) (*hexutil.Big, error) {
 	return nil, fmt.Errorf(NotImplemented, "eth_getPrice")
 	// price, err := eth.SuggestPrice(ctx)

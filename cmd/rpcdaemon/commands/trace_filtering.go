@@ -20,10 +20,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-// Transaction Implements trace_transaction
+// Transaction implements trace_transaction
 // TODO(tjayrush): I think this should return an []interface{}, so we can return both Parity and Geth traces
 func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
@@ -36,14 +36,14 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	return traces, err
 }
 
-// Get Implements trace_get
+// Get implements trace_get
 // TODO(tjayrush): This command should take an rpc.BlockNumber .This would allow blockNumbers and 'latest',
 // TODO(tjayrush): 'pending', etc. Parity only accepts block hash.
 // TODO(tjayrush): Also, for some reason, Parity definesthe second parameter as an array of indexes, but
 // TODO(tjayrush): only accepts a single one
 // TODO(tjayrush): I think this should return an interface{}, so we can return both Parity and Geth traces
 func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64) (*ParityTrace, error) {
-	tx, err := api.db.Begin(ctx, nil, false)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 	return nil, err
 }
 
-// Block Implements trace_block
+// Block implements trace_block
 func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error) {
 	blockNum, err := getBlockNumber(blockNr, api.dbReader)
 	if err != nil {
@@ -91,7 +91,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	return traces, err
 }
 
-// Filter Implements trace_filter
+// Filter implements trace_filter
 // TODO(tjayrush): Eventually, we will need to protect ourselves from 'large' queries. Parity crashes when a range query of a very large size
 // is sent. We need to protect ourselves with maxTraces. It may already be done
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error) {
@@ -164,7 +164,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 
 				for _, num := range blockNumbers {
 
-					block := rawdb.ReadBlockByNumber(api.dbReader, num)
+					block, err := rawdb.ReadBlockByNumber(api.dbReader, num)
+					if err != nil {
+						return err
+					}
 					senders := rawdb.ReadSenders(api.dbReader, block.Hash(), num)
 					txs := block.Transactions()
 					for i, tx := range txs {
@@ -205,7 +208,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		} else if req.FromBlock != nil || req.ToBlock != nil { // iterate over blocks
 
 			for blockNum := fromBlock; blockNum < toBlock+1; blockNum++ {
-				block := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+				block, err := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
+				if err != nil {
+					return err
+				}
 				blockTransactions := block.Transactions()
 				for _, tx := range blockTransactions {
 					if uint64(len(filteredHashes)) == maxTracesCount {
@@ -239,11 +245,18 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	}
 	getter := adapter.NewBlockGetter(api.dbReader)
 	chainContext := adapter.NewChainContext(api.dbReader)
-	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+	genesis, err := rawdb.ReadBlockByNumber(api.dbReader, 0)
+	if err != nil {
+		return nil, err
+	}
+	genesisHash := genesis.Hash()
+	chainConfig, err := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+	if err != nil {
+		return nil, err
+	}
 	traceType := "callTracer" // nolint: goconst
 	traces := ParityTraces{}
-	dbtx, err1 := api.db.Begin(ctx, nil, false)
+	dbtx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return nil, fmt.Errorf("traceFilter cannot open tx: %v", err1)
 	}
@@ -252,7 +265,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		if traceTypes[i] {
 			// In this case, we're processing a block (or uncle) reward trace. The hash is a block hash
 			// Because Geth does not return blockReward or uncleReward traces, we must create them here
-			block := rawdb.ReadBlockByHash(api.dbReader, txOrBlockHash)
+			block, err := rawdb.ReadBlockByHash(api.dbReader, txOrBlockHash)
+			if err != nil {
+				return nil, err
+			}
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
 			var tr ParityTrace
 			tr.Action.Author = strings.ToLower(block.Coinbase().String())
@@ -360,15 +376,22 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 // -- For convienience, we return both Parity and Geth traces for now. In the future we will either separate
 //    these functions or eliminate Geth traces
 // -- The function convertToParityTraces takes a hierarchical Geth trace and returns a flattened Parity trace
-func (api *TraceAPIImpl) getTransactionTraces(dbtx ethdb.Tx, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
+func (api *TraceAPIImpl) getTransactionTraces(dbtx rawdb.DatabaseReader, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
 	getter := adapter.NewBlockGetter(dbtx)
 	chainContext := adapter.NewChainContext(dbtx)
-	genesisHash := rawdb.ReadBlockByNumber(dbtx, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(dbtx, genesisHash)
+	genesis, err := rawdb.ReadBlockByNumber(dbtx, 0)
+	if err != nil {
+		return nil, err
+	}
+	genesisHash := genesis.Hash()
+	chainConfig, err := rawdb.ReadChainConfig(dbtx, genesisHash)
+	if err != nil {
+		return nil, err
+	}
 	traceType := "callTracer" // nolint: goconst
 
 	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(dbtx, txHash)
-	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, dbtx, blockHash, txIndex)
+	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, dbtx.(ethdb.HasTx).Tx(), blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

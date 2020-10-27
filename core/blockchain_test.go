@@ -197,8 +197,13 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 		if err := blockWriter.WriteChangeSets(); err != nil {
 			return err
 		}
-		rawdb.WriteTd(blockchain.db, block.Hash(), block.NumberU64(), new(big.Int).Add(block.Difficulty(), blockchain.GetTdByHash(block.ParentHash())))
-		rawdb.WriteBlock(context.Background(), blockchain.db, block)
+		if err := rawdb.WriteTd(blockchain.db, block.Hash(), block.NumberU64(), new(big.Int).Add(block.Difficulty(), blockchain.GetTdByHash(block.ParentHash()))); err != nil {
+			panic(err)
+		}
+		if err := rawdb.WriteBlock(context.Background(), blockchain.db, block); err != nil {
+			blockchain.reportBlock(block, receipts, err)
+			return err
+		}
 		blockchain.chainmu.Unlock()
 	}
 	return nil
@@ -214,7 +219,9 @@ func testHeaderChainImport(chain []*types.Header, blockchain *BlockChain) error 
 		}
 		// Manually insert the header into the database, but don't reorganise (allows subsequent testing)
 		blockchain.chainmu.Lock()
-		rawdb.WriteTd(blockchain.db, header.Hash(), header.Number.Uint64(), new(big.Int).Add(header.Difficulty, blockchain.GetTdByHash(header.ParentHash)))
+		if err := rawdb.WriteTd(blockchain.db, header.Hash(), header.Number.Uint64(), new(big.Int).Add(header.Difficulty, blockchain.GetTdByHash(header.ParentHash))); err != nil {
+			return err
+		}
 		rawdb.WriteHeader(context.Background(), blockchain.db, header)
 		blockchain.chainmu.Unlock()
 	}
