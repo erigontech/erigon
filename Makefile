@@ -94,7 +94,7 @@ semantics/z3/build/libz3.a:
 integration:
 	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
 	@echo "Done building."
-	   cxzzz@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
+	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
 headers:
 	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers
