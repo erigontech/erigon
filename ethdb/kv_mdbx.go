@@ -482,7 +482,8 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 		}
 		c := tx.Cursor(name)
 		i := 0
-		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
+		var k []byte
+		for k, _, err = c.First(); k != nil; k, _, err = c.First() {
 			if err != nil {
 				return err
 			}
@@ -504,13 +505,15 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 
 		c.Close()
 		_, err = tx.tx.Commit()
+		if err != nil {
+			return err
+		}
 		txn, err := tx.db.env.BeginTxn(nil, mdbx.TxRW)
 		if err != nil {
 			return err
 		}
 		txn.RawRead = true
 		tx.tx = txn
-		c = tx.Cursor(name)
 	}
 
 	if err := tx.tx.Drop(mdbx.DBI(dbi), true); err != nil {
