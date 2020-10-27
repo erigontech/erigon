@@ -123,17 +123,29 @@ func New(conf *Config) (*Node, error) {
 	node.ephemKeystore = ephemeralKeystore
 
 	// Initialize the p2p server. This creates the node key and discovery databases.
-	node.server.Config.PrivateKey = node.config.NodeKey()
+	node.server.Config.PrivateKey, err = node.config.NodeKey()
+	if err != nil {
+		return nil, err
+	}
 	node.server.Config.Name = node.config.NodeName()
 	node.server.Config.Logger = node.log
 	if node.server.Config.StaticNodes == nil {
-		node.server.Config.StaticNodes = node.config.StaticNodes()
+		node.server.Config.StaticNodes, err = node.config.StaticNodes()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if node.server.Config.TrustedNodes == nil {
-		node.server.Config.TrustedNodes = node.config.TrustedNodes()
+		node.server.Config.TrustedNodes, err = node.config.TrustedNodes()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if node.server.Config.NodeDatabase == "" {
-		node.server.Config.NodeDatabase = node.config.NodeDB()
+		node.server.Config.NodeDatabase, err = node.config.NodeDB()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Configure RPC servers.
@@ -549,9 +561,13 @@ func (n *Node) ApplyMigrations(name string, tmpdir string) error {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
-	kv, err := ethdb.NewLMDB().Path(n.config.ResolvePath(name)).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Exclusive().Open()
+	dbPath, err := n.config.ResolvePath(name)
 	if err != nil {
 		return err
+	}
+	kv, err := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Exclusive().Open()
+	if err != nil {
+		return fmt.Errorf("failed to open kv inside stack.ApplyMigrations: %w", err)
 	}
 	defer kv.Close()
 
@@ -586,7 +602,11 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 			db = ethdb.NewObjectDatabase(kv)
 		} else {
 			log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR(), "maxFreelistReuse", n.config.LMDBMaxFreelistReuse)
-			kv, err := ethdb.NewLMDB().Path(n.config.ResolvePath(name)).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Open()
+			dbPath, err := n.config.ResolvePath(name)
+			if err != nil {
+				return nil, err
+			}
+			kv, err := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Open()
 			if err != nil {
 				return nil, err
 			}
@@ -599,6 +619,6 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.
-func (n *Node) ResolvePath(x string) string {
+func (n *Node) ResolvePath(x string) (string, error) {
 	return n.config.ResolvePath(x)
 }
