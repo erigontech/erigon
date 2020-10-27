@@ -151,7 +151,7 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 				_ = exclusiveLock.Release()
 			}
 		}()
-	} else { // check exclusive lock (release immediately)
+	} else { // try exclusive lock (release immediately)
 		exclusiveLock, _, err = fileutil.Flock(path.Join(opts.path, "LOCK"))
 		if err != nil {
 			return nil, fmt.Errorf("failed exclusive Flock for lmdb, path=%s: %w", opts.path, err)
