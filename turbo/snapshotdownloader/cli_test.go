@@ -24,7 +24,6 @@ func TestName(t *testing.T) {
 		opts = append(opts, grpc.WithInsecure())
 	//}
 
-	opts = append(opts, grpc.WithBlock())
 	conn, err := grpc.Dial("127.0.0.1:9191", opts...)
 	if err != nil {
 		log.Fatalf("fail to dial: %v", err)
@@ -32,8 +31,22 @@ func TestName(t *testing.T) {
 	defer conn.Close()
 
 	cli:=NewDownloaderClient(conn)
-	rep,err:=cli.Download(context.TODO(),&DownloadSnapshotRequest{Networkid: 1, Name: "headers"})
-	spew.Dump(rep)
-	spew.Dump(err)
-	time.Sleep(time.Second)
+	i:=0
+	for {
+		rep,err:=cli.Snapshots(context.TODO(),&SnapshotsInfoRequest{})
+		spew.Dump(rep)
+		spew.Dump(err)
+		time.Sleep(time.Second)
+		if i>3 {
+			break
+		}
+		i++
+	}
+
+	for {
+		rep,err:=cli.Download(context.TODO(),&DownloadSnapshotRequest{Networkid: 4, Name: "headers"})
+		spew.Dump(rep)
+		spew.Dump(err)
+		time.Sleep(time.Second)
+	}
 }

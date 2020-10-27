@@ -37,7 +37,7 @@ func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotdown
 	if !ok {
 		return nil, ErrNotSupportedSnapshot
 	}
-	ctx, cancel:=context.WithTimeout(ctx, 1 * time.Minute)
+	ctx, cancel:=context.WithTimeout(ctx, 1 * time.Second)
 	defer cancel()
 	err :=  S.t.AddTorrent(ctx, S.db, request.Name, hash)
 	if err!=nil {

@@ -94,7 +94,7 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotNa
 
 	case <-ctx.Done():
 		log.Warn("Init failure", "snapshot", snapshotName, "err", ctx.Err())
-		return ctx.Err()
+		return errors.New("add torrent timeout")
 	}
 	return nil
 }

@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -10,10 +12,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader/bittorrent"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
+	"time"
 )
 
 func init() {
@@ -95,7 +100,25 @@ func runDownloader(cmd *cobra.Command, args []string) error{
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 	var opts []grpc.ServerOption
+	var (
+		streamInterceptors []grpc.StreamServerInterceptor
+		unaryInterceptors  []grpc.UnaryServerInterceptor
+	)
+	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 
+	cpus := uint32(runtime.GOMAXPROCS(-1))
+	opts = []grpc.ServerOption{
+		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
+		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
+		grpc.ReadBufferSize(1024),
+		grpc.MaxConcurrentStreams(100), // to force clients reduce concurrency level
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time: 10 * time.Minute,
+		}),
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+	}
 	grpcServer := grpc.NewServer(opts...)
 	snapshotdownloader.RegisterDownloaderServer(grpcServer, bittorrent.NewServer(cfg.Dir, cfg.Seeding))
 	go func() {
