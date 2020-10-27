@@ -117,6 +117,7 @@ func keyTape(t *trie.Trie, number int) error {
 
 var bucketLabels = map[string]string{
 	dbutils.BlockReceiptsPrefix:         "Receipts",
+	dbutils.Log:                         "Event Logs",
 	dbutils.AccountsHistoryBucket:       "History Of Accounts",
 	dbutils.StorageHistoryBucket:        "History Of Storage",
 	dbutils.HeaderPrefix:                "Headers",
@@ -133,6 +134,7 @@ var bucketLabels = map[string]string{
 	dbutils.PlainAccountChangeSetBucket: "Account Changes",
 	dbutils.PlainStorageChangeSetBucket: "Storage Changes",
 	dbutils.IncarnationMapBucket:        "Incarnations",
+	dbutils.Senders:                     "Transaction Senders",
 }
 
 /*dbutils.PlainContractCodeBucket,
