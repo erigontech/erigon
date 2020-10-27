@@ -473,7 +473,7 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	for {
-		s, err := tx.BucketStat(mdbx.DBI(dbi))
+		s, err := tx.BucketStat(name)
 		if err != nil {
 			return err
 		}
