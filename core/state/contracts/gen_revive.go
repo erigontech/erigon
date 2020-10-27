@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/event"
 )
@@ -21,7 +20,6 @@ var (
 	_ = big.NewInt
 	_ = strings.NewReader
 	_ = ethereum.NotFound
-	_ = math.U256
 	_ = bind.Bind
 	_ = common.Big1
 	_ = types.BloomLookup
@@ -32,7 +30,7 @@ var (
 const ReviveABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"d\",\"type\":\"address\"}],\"name\":\"DeployEvent\",\"type\":\"event\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"salt\",\"type\":\"uint256\"}],\"name\":\"deploy\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 
 // ReviveBin is the compiled bytecode used for deploying new contracts.
-var ReviveBin = "0x6080604052348015600f57600080fd5b5060f88061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b6040805180820190915260138082527260424355603060005360ff60015360026000f360681b60208301908152600091849183f5604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a150505056fea2646970667358221220855dd55ebe1fcb1f01e25d5255c5c7a31d14ea2be941590bf8e916d24abad06164736f6c63430006060033"
+var ReviveBin = "0x6080604052348015600f57600080fd5b5060f88061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b6040805180820190915260138082527260424355603060005360ff60015360026000f360681b60208301908152600091849183f5604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a150505056fea26469706673582212205d3337629b15c78b9915ebb927a3e974fe4df0d021b8c091ca1923cf2258ed2564736f6c63430007020033"
 
 // DeployRevive deploys a new Ethereum contract, binding an instance of Revive to it.
 func DeployRevive(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Revive, error) {
@@ -156,7 +154,7 @@ func bindRevive(address common.Address, caller bind.ContractCaller, transactor b
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Revive *ReviveRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Revive *ReviveRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Revive.Contract.ReviveCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -175,7 +173,7 @@ func (_Revive *ReviveRaw) Transact(opts *bind.TransactOpts, method string, param
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Revive *ReviveCallerRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Revive *ReviveCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Revive.Contract.contract.Call(opts, result, method, params...)
 }
 

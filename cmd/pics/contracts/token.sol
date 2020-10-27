@@ -1,4 +1,4 @@
-pragma solidity ^0.5.0;
+pragma solidity >=0.6.0;
 
 // solc --allow-paths ., --abi --bin --overwrite --optimize -o cmd/pics/contracts/build cmd/pics/contracts/token.sol
 // ./build/bin/abigen -abi cmd/pics/contracts/build/Token.abi -bin cmd/pics/contracts/build/Token.bin -pkg contracts -type token -out cmd/pics/contracts/gen_token.go

@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/event"
 )
@@ -21,7 +20,6 @@ var (
 	_ = big.NewInt
 	_ = strings.NewReader
 	_ = ethereum.NotFound
-	_ = math.U256
 	_ = bind.Bind
 	_ = common.Big1
 	_ = types.BloomLookup
@@ -32,7 +30,7 @@ var (
 const ChangerABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"change\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 
 // ChangerBin is the compiled bytecode used for deploying new contracts.
-var ChangerBin = "0x6080604052348015600f57600080fd5b50607e8061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c80632ee79ded14602d575b600080fd5b60336035565b005b600160008190556002908190556003905556fea2646970667358221220295042fc397156c3427733083adcea0f603399e412c10daf640f04a57e35e03f64736f6c63430006060033"
+var ChangerBin = "0x6080604052348015600f57600080fd5b50607e8061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c80632ee79ded14602d575b600080fd5b60336035565b005b600160008190556002908190556003905556fea264697066735822122055759a7d66bd94e58f9e8393e991422147044bd5fddc39451c4ef60edbcfa29264736f6c63430007020033"
 
 // DeployChanger deploys a new Ethereum contract, binding an instance of Changer to it.
 func DeployChanger(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Changer, error) {
@@ -156,7 +154,7 @@ func bindChanger(address common.Address, caller bind.ContractCaller, transactor 
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Changer *ChangerRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Changer *ChangerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Changer.Contract.ChangerCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -175,7 +173,7 @@ func (_Changer *ChangerRaw) Transact(opts *bind.TransactOpts, method string, par
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Changer *ChangerCallerRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Changer *ChangerCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Changer.Contract.contract.Call(opts, result, method, params...)
 }
 
