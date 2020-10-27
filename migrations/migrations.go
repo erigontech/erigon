@@ -119,16 +119,16 @@ func (m *Migrator) PendingMigrations(db ethdb.Database) ([]Migration, error) {
 		return nil, err
 	}
 
-	i := 0
+	counter := 0
 	for i := range m.Migrations {
 		v := m.Migrations[i]
 		if _, ok := applied[v.Name]; ok {
 			continue
 		}
-		i++
+		counter++
 	}
 
-	pending := make([]Migration, 0, i)
+	pending := make([]Migration, 0, counter)
 	for i := range m.Migrations {
 		v := m.Migrations[i]
 		if _, ok := applied[v.Name]; ok {
