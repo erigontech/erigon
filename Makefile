@@ -102,16 +102,13 @@ headers:
 	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
 
 db-tools:
-	$(GOBUILD) -o $(GOBIN)/lmdb_stat github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
-	$(GOBUILD) -o $(GOBIN)/lmdb_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
+	go mod vendor
+	cd vendor/github.com/ledgerwatch/lmdb-go/lmdb && DESTDIR=$(GOBIN) make clean && DESTDIR=$(GOBIN) make install
+	$(GOBUILD) -o $(GOBIN)/lmdbgo_stat github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
+	$(GOBUILD) -o $(GOBIN)/lmdbgo_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
 
 	cd ethdb/mdbx/dist/ && make tools
-	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_copy $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_dump $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_chk $(GOBIN)
-	@echo "Done building."
+	cp ethdb/mdbx/dist/mdbx_* $(GOBIN)
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
 ethdb/mdbx/dist/libmdbx.a:
