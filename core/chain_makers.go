@@ -216,9 +216,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	chainreader := &fakeChainReader{config: config}
 	dbCopy := db.MemCopy()
 	defer dbCopy.Close()
-	tx, err := dbCopy.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		return nil, nil, err
+	tx, errBegin := dbCopy.Begin(context.Background(), ethdb.RW)
+	if errBegin != nil {
+		return nil, nil, errBegin
 	}
 	defer tx.Rollback()
 
@@ -333,8 +333,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		parent = block
 	}
 
-	_, err = tx.Commit()
-	if err != nil {
+	if _, err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
 	return blocks, receipts, nil
