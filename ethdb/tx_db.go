@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -83,7 +82,7 @@ func (m *TxDb) Delete(bucket string, key []byte) error {
 func (m *TxDb) NewBatch() DbWithPendingMutations {
 	return &mutation{
 		db:   m,
-		puts: btree.New(32),
+		puts: newPuts(),
 	}
 }
 
