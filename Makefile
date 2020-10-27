@@ -103,7 +103,8 @@ headers:
 
 db-tools:
 	go mod vendor
-	cd vendor/github.com/ledgerwatch/lmdb-go/dist && DESTDIR=$(GOBIN) make clean && DESTDIR=$(GOBIN) make install
+	cd vendor/github.com/ledgerwatch/lmdb-go/dist && DESTDIR=$(GOBIN) make clean && DESTDIR=$(GOBIN) make tools
+	mv $(GOBIN)/usr/local/bin/* $(GOBIN); rm -rf $(GOBIN)/usr
 	$(GOBUILD) -o $(GOBIN)/lmdbgo_stat github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
 	$(GOBUILD) -o $(GOBIN)/lmdbgo_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
 
