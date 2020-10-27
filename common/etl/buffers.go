@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
@@ -18,9 +19,10 @@ const (
 	// if first v1 was added under key K, then v2; only v1 will stay
 	SortableOldestAppearedBuffer
 
-	BufferOptimalSize = 256 * 1024 * 1024 /* 256 mb | var because we want to sometimes change it from tests */
-	BufIOSize         = 64 * 4096         // 64 pages | default is 1 page | increasing further doesn't show speedup on SSD
+	BufIOSize = 64 * 4096 // 64 pages | default is 1 page | increasing further doesn't show speedup on SSD
 )
+
+var BufferOptimalSize = 256 * datasize.MB /*  var because we want to sometimes change it from tests or command-line flags */
 
 type Buffer interface {
 	Put(k, v []byte)
@@ -44,11 +46,11 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
-func NewSortableBuffer(bufferOptimalSize int) *sortableBuffer {
+func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 	return &sortableBuffer{
 		entries:     make([]sortableBufferEntry, 0),
 		size:        0,
-		optimalSize: bufferOptimalSize,
+		optimalSize: int(bufferOptimalSize.Bytes()),
 	}
 }
 
@@ -108,11 +110,11 @@ func (b *sortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
-func NewAppendBuffer(bufferOptimalSize int) *appendSortableBuffer {
+func NewAppendBuffer(bufferOptimalSize datasize.ByteSize) *appendSortableBuffer {
 	return &appendSortableBuffer{
 		entries:     make(map[string][]byte),
 		size:        0,
-		optimalSize: bufferOptimalSize,
+		optimalSize: int(bufferOptimalSize.Bytes()),
 	}
 }
 
@@ -181,11 +183,11 @@ func (b *appendSortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
-func NewOldestEntryBuffer(bufferOptimalSize int) *oldestEntrySortableBuffer {
+func NewOldestEntryBuffer(bufferOptimalSize datasize.ByteSize) *oldestEntrySortableBuffer {
 	return &oldestEntrySortableBuffer{
 		entries:     make(map[string][]byte),
 		size:        0,
-		optimalSize: bufferOptimalSize,
+		optimalSize: int(bufferOptimalSize.Bytes()),
 	}
 }
 
@@ -260,7 +262,7 @@ func (b *oldestEntrySortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
-func getBufferByType(tp int, size int) Buffer {
+func getBufferByType(tp int, size datasize.ByteSize) Buffer {
 	switch tp {
 	case SortableSliceBuffer:
 		return NewSortableBuffer(size)
