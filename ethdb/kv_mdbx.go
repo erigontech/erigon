@@ -9,6 +9,7 @@ import (
 	"path"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -468,6 +469,33 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 			return err
 		}
 		dbi = dbutils.DBI(nativeDBI)
+	}
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	for {
+		s, err := tx.BucketStat(mdbx.DBI(dbi))
+		if err != nil {
+			return err
+		}
+		if s.Entries < 100_000 {
+			break
+		}
+		c := tx.Cursor(name)
+		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
+			if err != nil {
+				return err
+			}
+			err = c.DeleteCurrent()
+			if err != nil {
+				return err
+			}
+
+			select {
+			default:
+			case <-logEvery.C:
+				log.Info("dropping bucket", "name", name, "current key", fmt.Sprintf("%x", k))
+			}
+		}
 	}
 	if err := tx.tx.Drop(mdbx.DBI(dbi), true); err != nil {
 		return err
