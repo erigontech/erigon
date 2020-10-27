@@ -1155,7 +1155,7 @@ func TestEip2200Gas(t *testing.T) {
 	}
 	balanceAfter := st.GetBalance(address)
 	gasSpent := big.NewInt(0).Sub(balanceBefore.ToBig(), balanceAfter.ToBig())
-	expectedGasSpent := big.NewInt(192245) // In the incorrect version, it is 179645
+	expectedGasSpent := big.NewInt(190373) //(192245) // In the incorrect version, it is 179645
 	if gasSpent.Cmp(expectedGasSpent) != 0 {
 		t.Errorf("Expected gas spent: %d, got %d", expectedGasSpent, gasSpent)
 	}

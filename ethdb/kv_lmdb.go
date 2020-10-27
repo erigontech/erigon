@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/prometheus/tsdb/fileutil"
 )
 
 const (
@@ -36,6 +37,7 @@ type LmdbOpts struct {
 	inMem            bool
 	readOnly         bool
 	path             string
+	exclusive        bool
 	bucketsCfg       BucketConfigsFunc
 	mapSize          datasize.ByteSize
 	maxFreelistReuse uint
@@ -67,6 +69,11 @@ func (opts LmdbOpts) MaxFreelistReuse(pages uint) LmdbOpts {
 
 func (opts LmdbOpts) ReadOnly() LmdbOpts {
 	opts.readOnly = true
+	return opts
+}
+
+func (opts LmdbOpts) Exclusive() LmdbOpts {
+	opts.exclusive = true
 	return opts
 }
 
@@ -122,6 +129,14 @@ func (opts LmdbOpts) Open() (KV, error) {
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 		}
+	}
+
+	if opts.exclusive {
+		releaser, _, err := fileutil.Flock(path.Join(opts.path, "data.mdb"))
+		if err != nil {
+			return nil, err
+		}
+		defer releaser.Release()
 	}
 
 	var flags uint = lmdb.NoReadahead

@@ -321,7 +321,7 @@ func initialState1() error {
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		theAddr  = common.Address{1}
 		gspec    = &core.Genesis{
-			Config: params.MainnetChainConfig,
+			Config: params.AllEthashProtocolChanges,
 			Alloc: core.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
