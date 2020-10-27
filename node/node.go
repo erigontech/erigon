@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/prometheus/tsdb/fileutil"
@@ -542,6 +543,19 @@ func (n *Node) EventMux() *event.TypeMux {
 // ephemeral, a memory database is returned.
 func (n *Node) OpenDatabase(name string) (*ethdb.ObjectDatabase, error) {
 	return n.OpenDatabaseWithFreezer(name, 0, 0, "", "")
+}
+
+func (n *Node) ApplyMigrations(name string, tmpdir string) error {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	kv, err := ethdb.NewLMDB().Path(n.config.ResolvePath(name)).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Exclusive().Open()
+	if err != nil {
+		return err
+	}
+	defer kv.Close()
+
+	return migrations.NewMigrator().Apply(ethdb.NewObjectDatabase(kv), tmpdir)
 }
 
 // OpenDatabaseWithFreezer opens an existing database with the given name (or

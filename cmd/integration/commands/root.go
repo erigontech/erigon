@@ -27,10 +27,13 @@ func RootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
+func openDatabase(path string, applyMigrations bool, exclusive bool) *ethdb.ObjectDatabase {
 	var kv ethdb.KV
 	if database == "mdbx" {
 		opts := ethdb.NewMDBX().Path(path)
+		if exclusive {
+			opts = opts.Exclusive()
+		}
 		if mapSizeStr != "" {
 			var mapSize datasize.ByteSize
 			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
@@ -42,6 +45,9 @@ func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
 		kv = opts.MustOpen()
 	} else {
 		opts := ethdb.NewLMDB().Path(path)
+		if exclusive {
+			opts = opts.Exclusive()
+		}
 		if mapSizeStr != "" {
 			var mapSize datasize.ByteSize
 			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
