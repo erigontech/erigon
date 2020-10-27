@@ -481,6 +481,7 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 			break
 		}
 		c := tx.Cursor(name)
+		i := 0
 		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
 			if err != nil {
 				return err
@@ -489,6 +490,10 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 			if err != nil {
 				return err
 			}
+			i++
+			if i > 100_000 {
+				break
+			}
 
 			select {
 			default:
@@ -496,7 +501,18 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 				log.Info("dropping bucket", "name", name, "current key", fmt.Sprintf("%x", k))
 			}
 		}
+
+		c.Close()
+		_, err = tx.tx.Commit()
+		txn, err := tx.db.env.BeginTxn(nil, mdbx.TxRW)
+		if err != nil {
+			return err
+		}
+		txn.RawRead = true
+		tx.tx = txn
+		c = tx.Cursor(name)
 	}
+
 	if err := tx.tx.Drop(mdbx.DBI(dbi), true); err != nil {
 		return err
 	}
