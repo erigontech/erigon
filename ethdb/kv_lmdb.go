@@ -142,7 +142,7 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 
 	var exclusiveLock fileutil.Releaser
 	if opts.exclusive {
-		exclusiveLock, _, err = fileutil.Flock(path.Join(opts.path, "data.mdb"))
+		exclusiveLock, _, err = fileutil.Flock(path.Join(opts.path, "LOCK"))
 		if err != nil {
 			return nil, err
 		}
