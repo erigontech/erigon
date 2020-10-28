@@ -105,6 +105,40 @@ func AppliedMigrations(db ethdb.Database, withPayload bool) (map[string][]byte, 
 	return applied, err
 }
 
+func (m *Migrator) HasPendingMigrations(db ethdb.Database) (bool, error) {
+	pending, err := m.PendingMigrations(db)
+	if err != nil {
+		return false, err
+	}
+	return len(pending) > 0, nil
+}
+
+func (m *Migrator) PendingMigrations(db ethdb.Database) ([]Migration, error) {
+	applied, err := AppliedMigrations(db, false)
+	if err != nil {
+		return nil, err
+	}
+
+	counter := 0
+	for i := range m.Migrations {
+		v := m.Migrations[i]
+		if _, ok := applied[v.Name]; ok {
+			continue
+		}
+		counter++
+	}
+
+	pending := make([]Migration, 0, counter)
+	for i := range m.Migrations {
+		v := m.Migrations[i]
+		if _, ok := applied[v.Name]; ok {
+			continue
+		}
+		pending = append(pending, v)
+	}
+	return pending, nil
+}
+
 func (m *Migrator) Apply(db ethdb.Database, tmpdir string) error {
 	if len(m.Migrations) == 0 {
 		return nil

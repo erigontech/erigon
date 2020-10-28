@@ -19,6 +19,7 @@ import (
 
 type MdbxOpts struct {
 	inMem            bool
+	exclusive        bool
 	readOnly         bool
 	path             string
 	bucketsCfg       BucketConfigsFunc
@@ -37,6 +38,11 @@ func (opts MdbxOpts) Set(opt MdbxOpts) MdbxOpts {
 
 func (opts MdbxOpts) InMem() MdbxOpts {
 	opts.inMem = true
+	return opts
+}
+
+func (opts MdbxOpts) Exclusive() MdbxOpts {
+	opts.exclusive = true
 	return opts
 }
 
@@ -110,6 +116,9 @@ func (opts MdbxOpts) Open() (KV, error) {
 	}
 	if opts.inMem {
 		flags |= mdbx.NoMetaSync | mdbx.SafeNoSync
+	}
+	if opts.exclusive {
+		flags |= mdbx.Exclusive
 	}
 
 	//flags |= mdbx.LifoReclaim

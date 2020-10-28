@@ -57,7 +57,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -130,6 +129,8 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		config.TrieDirtyCache = 0
 	}
 
+	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
+
 	// Assemble the Ethereum object
 	var chainDb *ethdb.ObjectDatabase
 	var err error
@@ -139,16 +140,15 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		}
 		chainDb = ethdb.MustOpen("simulator")
 	} else {
+		err = stack.ApplyMigrations("chaindata", tmpdir)
+		if err != nil {
+			return nil, fmt.Errorf("failed stack.ApplyMigrations: %w", err)
+		}
+
 		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", 0, 0, "", "")
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
-	err = migrations.NewMigrator().Apply(chainDb, tmpdir)
-	if err != nil {
-		return nil, err
 	}
 
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
@@ -161,14 +161,19 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	var torrentClient *torrent.Client
 	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
 		config.SnapshotSeeding = true
-		torrentClient = torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
+		var dbPath string
+		dbPath, err = stack.Config().ResolvePath("snapshots")
+		if err != nil {
+			return nil, err
+		}
+		torrentClient = torrent.New(dbPath, config.SnapshotMode, config.SnapshotSeeding)
 		err = torrentClient.Run(chainDb)
 		if err != nil {
 			return nil, err
 		}
 
 		snapshotKV := chainDb.KV()
-		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, stack.Config().ResolvePath("snapshots"), config.SnapshotMode)
+		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, dbPath, config.SnapshotMode)
 		if err != nil {
 			return nil, err
 		}
@@ -253,7 +258,10 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 
 	if config.TxPool.Journal != "" {
-		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
+		config.TxPool.Journal, err = stack.ResolvePath(config.TxPool.Journal)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
