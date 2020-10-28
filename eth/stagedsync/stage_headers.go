@@ -233,14 +233,8 @@ Error: %v
 	if reorg {
 		// Delete any canonical number assignments above the new head
 		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
-			data := rawdb.ReadHeaderRLP(batch, common.Hash{}, i)
-			hash, err := rawdb.ReadCanonicalHash(batch, i)
-			if err != nil {
-				return false, 0, err
-			}
-			rawdb.DeleteCanonicalHeader(batch, i)
-			if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(i, hash), data); err != nil {
-				log.Crit("Failed to store header", "err", err)
+			if err := rawdb.DeleteCanonicalHeader(batch, i); err != nil {
+				log.Crit("Failed to delete canonical header", "err", err)
 			}
 		}
 	}

@@ -451,15 +451,7 @@ func (hc *HeaderChain) HasHeader(hash common.Hash, number uint64) bool {
 // GetHeaderByNumber retrieves a block header from the database by number,
 // caching it (associated with its hash) if found.
 func (hc *HeaderChain) GetHeaderByNumber(number uint64) *types.Header {
-	hash, err := rawdb.ReadCanonicalHash(hc.chainDb, number)
-	if err != nil {
-		panic(err)
-	}
-
-	if hash == (common.Hash{}) {
-		return nil
-	}
-	return hc.GetHeader(hash, number)
+	return rawdb.ReadHeaderByNumber(hc.chainDb, number)
 }
 
 func (hc *HeaderChain) GetCanonicalHash(number uint64) common.Hash {
