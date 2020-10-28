@@ -66,7 +66,6 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
 
 ```
 
-
 ## ethdb.AbstractKV design:
 
 - InMemory, ReadOnly: `NewLMDB().InMem().ReadOnly().Open()`
@@ -74,13 +73,14 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
 
 
 - 1 Transaction object can be used only withing 1 goroutine.
-- Only 1 write transaction can be active at a time (other will wait). 
+- Only 1 write transaction can be active at a time (other will wait).
 - Unlimited read transactions can be active concurrently (not blocked by write transaction).
 
 
 - Methods db.Update, db.View - can be used to open and close short transaction.
 - Methods Begin/Commit/Rollback - for long transaction.
 - it's safe to call .Rollback() after .Commit(), multiple rollbacks are also safe. Common transaction patter:
+
 ```
 tx, err := db.Begin(true, nil, ethdb.RW)
 if err != nil {
@@ -124,7 +124,36 @@ for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 
 ## ethdb.TxDb design:
 - holds inside 1 long-running transaction and 1 cursor per table
-- method Begin DOESN'T create new TxDb object, it means this object can be passed into other objects by pointer, 
-  and high-level app code can start/commit transactions when it needs without re-creating all objects which holds 
+- method Begin DOESN'T create new TxDb object, it means this object can be passed into other objects by pointer,
+  and high-level app code can start/commit transactions when it needs without re-creating all objects which holds
   TxDb pointer.
-- This is reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pinter to TxDb stays valid.  
+- This is reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pinter to TxDb stays valid.
+
+## How to dump/load table
+
+Install all database tools: `make db-tools` - tools with prefix `mdb_` is for 
+lmdb, `lmdbgo_` is for lmdb written in go, `mdbx_` is for mdbx.
+
+```
+./build/bin/mdbx_dump -a /path/to/chaindata | lz4 > dump.lz4
+lz4 -d < dump.lz4 | ./build/bin/mdbx_load -an /path/to/chaindata
+```
+
+## How to get table checksum
+
+```
+./build/bin/mdbx_dump -s table_name /path/to/chaindata | tail -n +4 | sha256sum # tail here is for excluding header 
+
+Header example:
+VERSION=3
+geometry=l268435456,c268435456,u25769803776,s268435456,g268435456
+mapsize=756375552
+maxreaders=120
+format=bytevalue
+database=TBL0001
+type=btree
+db_pagesize=4096
+duplicates=1
+dupsort=1
+HEADER=END
+```
