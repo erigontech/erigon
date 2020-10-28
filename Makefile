@@ -1,6 +1,6 @@
 GOBIN = $(CURDIR)/build/bin
 GOBUILD = env GO111MODULE=on go build -trimpath
-GOTEST = go test ./... -p 1
+GOTEST = go test ./... -p 1 --tags 'mdbx'
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
 ifeq ($(LATEST_COMMIT),)
@@ -125,7 +125,7 @@ test-lmdb: semantics/z3/build/libz3.a
 	TEST_DB=lmdb $(GOTEST)
 
 test-mdbx: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
-	TEST_DB=mdbx $(GOTEST)
+	TEST_DB=mdbx $(GOTEST_MDBX)
 
 lint: lintci
 
