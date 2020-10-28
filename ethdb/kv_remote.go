@@ -609,8 +609,8 @@ func (c *remoteCursorDupSort) Prefetch(v uint) Cursor {
 //		return fmt.Errorf("class remoteCursorDupSort not compatible with AutoDupSortKeysConversion buckets")
 //	}
 //
-//	if c.bucketCfg.Flags&lmdb.DupSort == 0 {
-//		return fmt.Errorf("class remoteCursorDupSort can be used only if bucket created with flag lmdb.DupSort")
+//	if c.bucketCfg.Flags&dbutils.DupSort == 0 {
+//		return fmt.Errorf("class remoteCursorDupSort can be used only if bucket created with flag dbutils.DupSort")
 //	}
 //
 //	return c.remoteCursor.initCursor()

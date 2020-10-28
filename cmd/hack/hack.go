@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
+	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -335,6 +336,7 @@ func accountSavings(db ethdb.KV) (int, int) {
 
 func bucketStats(chaindata string) error {
 	ethDb := ethdb.MustOpen(chaindata)
+	defer ethDb.Close()
 
 	var bucketList []string
 	if err1 := ethDb.KV().View(context.Background(), func(txa ethdb.Tx) error {
@@ -348,34 +350,49 @@ func bucketStats(chaindata string) error {
 		ethDb.Close()
 		return err1
 	}
-	ethDb.Close()
-	env, err := lmdb.NewEnv()
-	if err != nil {
-		return err
-	}
-	err = env.SetMaxDBs(100)
-	if err != nil {
-		return err
-	}
-	err = env.Open(chaindata, lmdb.Readonly, 0664)
-	if err != nil {
-		return err
-	}
+
 	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
-	return env.View(func(tx *lmdb.Txn) error {
-		for _, bucket := range bucketList {
-			dbi, bucketErr := tx.OpenDBI(bucket, 0)
-			if bucketErr != nil {
-				fmt.Printf("opening bucket %s: %v\n", bucket, bucketErr)
-				continue
-			}
-			bs, statErr := tx.Stat(dbi)
-			check(statErr)
-			fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
-				bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+	switch kv := ethDb.KV().(type) {
+	case *ethdb.LmdbKV:
+		type LmdbStat interface {
+			BucketStat(name string) (*lmdb.Stat, error)
 		}
-		return nil
-	})
+		if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
+			for _, bucket := range bucketList {
+				bs, statErr := tx.(LmdbStat).BucketStat(bucket)
+				check(statErr)
+				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
+					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			}
+
+			bs, statErr := tx.(LmdbStat).BucketStat("freelist")
+			check(statErr)
+			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	case *ethdb.MdbxKV:
+		type MdbxStat interface {
+			BucketStat(name string) (*mdbx.Stat, error)
+		}
+
+		if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
+			for _, bucket := range bucketList {
+				bs, statErr := tx.(MdbxStat).BucketStat(bucket)
+				check(statErr)
+				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
+					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			}
+			bs, statErr := tx.(MdbxStat).BucketStat("freelist")
+			check(statErr)
+			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	}
+	return nil
 }
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {

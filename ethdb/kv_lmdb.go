@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	NonExistingDBI = 999_999_999
+	NonExistingDBI dbutils.DBI = 999_999_999
 )
 
 const (
@@ -217,7 +217,7 @@ func (opts LmdbOpts) Open() (KV, error) {
 				}
 			}
 			cnfCopy := db.buckets[name]
-			cnfCopy.DBI = dbi
+			cnfCopy.DBI = dbutils.DBI(dbi)
 
 			switch cnfCopy.CustomDupComparator {
 			case dbutils.DupCmpSuffix32:
@@ -349,8 +349,8 @@ func (db *LmdbKV) Env() *lmdb.Env {
 	return db.env
 }
 
-func (db *LmdbKV) AllDBI() map[string]lmdb.DBI {
-	res := map[string]lmdb.DBI{}
+func (db *LmdbKV) AllDBI() map[string]dbutils.DBI {
+	res := map[string]dbutils.DBI{}
 	for name, cfg := range db.buckets {
 		res[name] = cfg.DBI
 	}
@@ -363,17 +363,17 @@ func (db *LmdbKV) AllBuckets() dbutils.BucketsCfg {
 
 func (tx *lmdbTx) Comparator(bucket string) dbutils.CmpFunc {
 	b := tx.db.buckets[bucket]
-	return chooseComparator(tx.tx, b.DBI, b)
+	return chooseComparator(tx.tx, lmdb.DBI(b.DBI), b)
 }
 
 // Cmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
 func (tx *lmdbTx) Cmp(bucket string, a, b []byte) int {
-	return tx.tx.Cmp(tx.db.buckets[bucket].DBI, a, b)
+	return tx.tx.Cmp(lmdb.DBI(tx.db.buckets[bucket].DBI), a, b)
 }
 
 // DCmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
 func (tx *lmdbTx) DCmp(bucket string, a, b []byte) int {
-	return tx.tx.DCmp(tx.db.buckets[bucket].DBI, a, b)
+	return tx.tx.DCmp(lmdb.DBI(tx.db.buckets[bucket].DBI), a, b)
 }
 
 // All buckets stored as keys of un-named bucket
@@ -437,15 +437,22 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 
 func (tx *lmdbTx) CreateBucket(name string) error {
 	var flags = tx.db.buckets[name].Flags
+	var nativeFlags uint
 	if !tx.db.opts.readOnly {
-		flags |= lmdb.Create
+		nativeFlags |= lmdb.Create
 	}
-	dbi, err := tx.tx.OpenDBI(name, flags)
+	switch flags {
+	case dbutils.DupSort:
+		nativeFlags |= lmdb.DupSort
+	case dbutils.DupFixed:
+		nativeFlags |= lmdb.DupFixed
+	}
+	dbi, err := tx.tx.OpenDBI(name, nativeFlags)
 	if err != nil {
 		return err
 	}
 	cnfCopy := tx.db.buckets[name]
-	cnfCopy.DBI = dbi
+	cnfCopy.DBI = dbutils.DBI(dbi)
 
 	switch cnfCopy.CustomDupComparator {
 	case dbutils.DupCmpSuffix32:
@@ -493,16 +500,16 @@ func (tx *lmdbTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	// if bucket was not open on db start, then it's may be deprecated
 	// try to open it now without `Create` flag, and if fail then nothing to drop
 	if dbi == NonExistingDBI {
-		var err error
-		dbi, err = tx.tx.OpenDBI(name, 0)
+		nativeDBI, err := tx.tx.OpenDBI(name, 0)
 		if err != nil {
 			if lmdb.IsNotFound(err) {
 				return nil // DBI doesn't exists means no drop needed
 			}
 			return err
 		}
+		dbi = dbutils.DBI(nativeDBI)
 	}
-	if err := tx.tx.Drop(dbi, true); err != nil {
+	if err := tx.tx.Drop(lmdb.DBI(dbi), true); err != nil {
 		return err
 	}
 	cnfCopy := tx.db.buckets[name]
@@ -513,7 +520,7 @@ func (tx *lmdbTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 
 func (tx *lmdbTx) ClearBucket(bucket string) error {
 	if err := tx.dropEvenIfBucketIsNotDeprecated(bucket); err != nil {
-		return nil
+		return err
 	}
 	return tx.CreateBucket(bucket)
 }
@@ -634,7 +641,7 @@ func (tx *lmdbTx) GetOne(bucket string, key []byte) ([]byte, error) {
 		return v[from-to:], nil
 	}
 
-	val, err := tx.get(b.DBI, key)
+	val, err := tx.get(lmdb.DBI(b.DBI), key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
 			return nil, nil
@@ -663,7 +670,7 @@ func (tx *lmdbTx) HasOne(bucket string, key []byte) (bool, error) {
 		return bytes.Equal(key[to:], v[:from-to]), nil
 	}
 
-	if _, err := tx.get(b.DBI, key); err == nil {
+	if _, err := tx.get(lmdb.DBI(b.DBI), key); err == nil {
 		return true, nil
 	} else if lmdb.IsNotFound(err) {
 		return false, nil
@@ -673,7 +680,7 @@ func (tx *lmdbTx) HasOne(bucket string, key []byte) (bool, error) {
 }
 
 func (tx *lmdbTx) BucketSize(name string) (uint64, error) {
-	st, err := tx.tx.Stat(tx.db.buckets[name].DBI)
+	st, err := tx.tx.Stat(lmdb.DBI(tx.db.buckets[name].DBI))
 	if err != nil {
 		return 0, err
 	}
@@ -687,7 +694,7 @@ func (tx *lmdbTx) BucketStat(name string) (*lmdb.Stat, error) {
 	if name == "root" { //nolint:goconst
 		return tx.tx.Stat(lmdb.DBI(1))
 	}
-	return tx.tx.Stat(tx.db.buckets[name].DBI)
+	return tx.tx.Stat(lmdb.DBI(tx.db.buckets[name].DBI))
 }
 
 func (tx *lmdbTx) Cursor(bucket string) Cursor {
@@ -696,11 +703,11 @@ func (tx *lmdbTx) Cursor(bucket string) Cursor {
 		return tx.stdCursor(bucket)
 	}
 
-	if b.Flags&lmdb.DupFixed != 0 {
+	if b.Flags&dbutils.DupFixed != 0 {
 		return tx.CursorDupFixed(bucket)
 	}
 
-	if b.Flags&lmdb.DupSort != 0 {
+	if b.Flags&dbutils.DupSort != 0 {
 		return tx.CursorDupSort(bucket)
 	}
 
@@ -709,7 +716,7 @@ func (tx *lmdbTx) Cursor(bucket string) Cursor {
 
 func (tx *lmdbTx) stdCursor(bucket string) Cursor {
 	b := tx.db.buckets[bucket]
-	return &LmdbCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: tx.db.buckets[bucket].DBI}
+	return &LmdbCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: lmdb.DBI(tx.db.buckets[bucket].DBI)}
 }
 
 func (tx *lmdbTx) CursorDupSort(bucket string) CursorDupSort {
@@ -767,7 +774,7 @@ func (c *LmdbCursor) initCursor() error {
 	tx := c.tx
 
 	var err error
-	c.c, err = tx.tx.OpenCursor(c.tx.db.buckets[c.bucketName].DBI)
+	c.c, err = tx.tx.OpenCursor(c.dbi)
 	if err != nil {
 		return err
 	}
@@ -781,7 +788,7 @@ func (c *LmdbCursor) initCursor() error {
 }
 
 func (c *LmdbCursor) Count() (uint64, error) {
-	st, err := c.tx.tx.Stat(c.bucketCfg.DBI)
+	st, err := c.tx.tx.Stat(c.dbi)
 	if err != nil {
 		return 0, err
 	}

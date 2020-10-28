@@ -563,12 +563,21 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 		fmt.Printf("Opening In-memory Database (LMDB): %s\n", name)
 		db = ethdb.NewMemDatabase()
 	} else {
-		log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR(), "maxFreelistReuse", n.config.LMDBMaxFreelistReuse)
-		kv, err := ethdb.NewLMDB().Path(n.config.ResolvePath(name)).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Open()
-		if err != nil {
-			return nil, err
+		if n.config.MDBX {
+			log.Info("Opening Database (MDBX)", "mapSize", n.config.LMDBMapSize.HR())
+			kv, err := ethdb.NewMDBX().Path(n.config.ResolvePath(name)).MapSize(n.config.LMDBMapSize).Open()
+			if err != nil {
+				return nil, err
+			}
+			db = ethdb.NewObjectDatabase(kv)
+		} else {
+			log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR(), "maxFreelistReuse", n.config.LMDBMaxFreelistReuse)
+			kv, err := ethdb.NewLMDB().Path(n.config.ResolvePath(name)).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Open()
+			if err != nil {
+				return nil, err
+			}
+			db = ethdb.NewObjectDatabase(kv)
 		}
-		db = ethdb.NewObjectDatabase(kv)
 	}
 
 	n.databases = append(n.databases, db)

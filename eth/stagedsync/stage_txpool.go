@@ -79,7 +79,8 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	}); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Reading canonical hashes complete", logPrefix), "hashes", len(canonical))
+
+	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
 	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
 			return false, err
@@ -164,7 +165,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, db
 	}); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Reading canonical hashes complete", logPrefix), "hashes", len(canonical))
+	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
 	senders := make([][]common.Address, to-from+1)
 	if err := db.Walk(dbutils.Senders, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {

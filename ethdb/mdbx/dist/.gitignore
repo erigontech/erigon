@@ -1,0 +1,11 @@
+*.a
+*.dylib
+*.o
+*.dSYM
+config.h
+
+mdbx_chk
+mdbx_copy
+mdbx_dump
+mdbx_load
+mdbx_stat

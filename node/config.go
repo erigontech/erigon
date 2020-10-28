@@ -186,6 +186,7 @@ type Config struct {
 	LMDB                 bool
 	LMDBMapSize          datasize.ByteSize
 	LMDBMaxFreelistReuse uint
+	MDBX                 bool
 	SnapshotMode         torrent.SnapshotMode
 
 	// Address to listen to when launchig listener for remote database access

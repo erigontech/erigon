@@ -73,6 +73,8 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 	switch true {
 	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
 		kv, err = NewLMDB().Path(path).Open()
+	case testDB == "mdbx" || strings.HasSuffix(path, "_mdbx"):
+		kv, err = NewMDBX().Path(path).Open()
 	default:
 		opts := NewLMDB().Path(path)
 		if readOnly {
@@ -323,6 +325,9 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	case *LmdbKV:
 		opts := db.kv.(*LmdbKV).opts
 		mem = NewObjectDatabase(NewLMDB().Set(opts).MustOpen())
+	case *MdbxKV:
+		opts := db.kv.(*MdbxKV).opts
+		mem = NewObjectDatabase(NewMDBX().Set(opts).MustOpen())
 	}
 
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {

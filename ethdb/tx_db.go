@@ -169,7 +169,8 @@ func MultiPut(tx Tx, tuples ...[]byte) error {
 		bucketEnd := bucketStart
 		for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 		}
-		c := tx.Cursor(string(tuples[bucketStart]))
+		bucketName := string(tuples[bucketStart])
+		c := tx.Cursor(bucketName)
 
 		// move cursor to a first element in batch
 		// if it's nil, it means all keys in batch gonna be inserted after end of bucket (batch is sorted and has no duplicates here)
@@ -210,7 +211,7 @@ func MultiPut(tx Tx, tuples ...[]byte) error {
 			default:
 			case <-logEvery.C:
 				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
-				log.Info("Write to db", "progress", progress)
+				log.Info("Write to db", "progress", progress, "current table", bucketName)
 			}
 		}
 

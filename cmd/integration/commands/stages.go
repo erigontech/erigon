@@ -9,20 +9,20 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/migrations"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
-
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +31,10 @@ var cmdStageSenders = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := stageSenders(ctx); err != nil {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := stageSenders(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -44,7 +47,10 @@ var cmdStageExec = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := stageExec(ctx); err != nil {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := stageExec(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -57,7 +63,10 @@ var cmdStageIHash = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := stageIHash(ctx); err != nil {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := stageIHash(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -70,7 +79,10 @@ var cmdStageHashState = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := stageHashState(ctx); err != nil {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := stageHashState(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -83,7 +95,10 @@ var cmdStageHistory = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := stageHistory(ctx); err != nil {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := stageHistory(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -96,7 +111,10 @@ var cmdLogIndex = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := stageLogIndex(ctx); err != nil {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := stageLogIndex(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -109,7 +127,10 @@ var cmdCallTraces = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := stageCallTraces(ctx); err != nil {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := stageCallTraces(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -122,7 +143,10 @@ var cmdStageTxLookup = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := stageTxLookup(ctx); err != nil {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := stageTxLookup(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -134,7 +158,10 @@ var cmdPrintStages = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := printAllStages(ctx); err != nil {
+		db := openDatabase(chaindata, false)
+		defer db.Close()
+
+		if err := printAllStages(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -147,7 +174,9 @@ var cmdPrintMigrations = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := printAppliedMigrations(ctx); err != nil {
+		db := openDatabase(chaindata, false)
+		defer db.Close()
+		if err := printAppliedMigrations(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -160,7 +189,9 @@ var cmdRemoveMigration = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := removeMigration(ctx); err != nil {
+		db := openDatabase(chaindata, false)
+		defer db.Close()
+		if err := removeMigration(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -172,6 +203,8 @@ var cmdRunMigrations = &cobra.Command{
 	Use:   "run_migrations",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		db := openDatabase(chaindata, false)
+		defer db.Close()
 		// Nothing to do, migrations will be applied automatically
 		return nil
 	},
@@ -179,12 +212,11 @@ var cmdRunMigrations = &cobra.Command{
 
 func init() {
 	withChaindata(cmdPrintStages)
-	withMapSize(cmdPrintStages)
+	withLmdbFlags(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
 	withChaindata(cmdStageSenders)
-	withMapSize(cmdStageSenders)
-	withFreelistReuse(cmdStageSenders)
+	withLmdbFlags(cmdStageSenders)
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	withUnwind(cmdStageSenders)
@@ -193,8 +225,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageSenders)
 
 	withChaindata(cmdStageExec)
-	withMapSize(cmdStageExec)
-	withFreelistReuse(cmdStageExec)
+	withLmdbFlags(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
@@ -203,8 +234,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageExec)
 
 	withChaindata(cmdStageIHash)
-	withMapSize(cmdStageIHash)
-	withFreelistReuse(cmdStageIHash)
+	withLmdbFlags(cmdStageIHash)
 	withReset(cmdStageIHash)
 	withBlock(cmdStageIHash)
 	withUnwind(cmdStageIHash)
@@ -213,8 +243,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageIHash)
 
 	withChaindata(cmdStageHashState)
-	withMapSize(cmdStageHashState)
-	withFreelistReuse(cmdStageHashState)
+	withLmdbFlags(cmdStageHashState)
 	withReset(cmdStageHashState)
 	withBlock(cmdStageHashState)
 	withUnwind(cmdStageHashState)
@@ -223,8 +252,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageHashState)
 
 	withChaindata(cmdStageHistory)
-	withMapSize(cmdStageHistory)
-	withFreelistReuse(cmdStageHistory)
+	withLmdbFlags(cmdStageHistory)
 	withReset(cmdStageHistory)
 	withBlock(cmdStageHistory)
 	withUnwind(cmdStageHistory)
@@ -233,8 +261,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageHistory)
 
 	withChaindata(cmdLogIndex)
-	withMapSize(cmdLogIndex)
-	withFreelistReuse(cmdLogIndex)
+	withLmdbFlags(cmdLogIndex)
 	withReset(cmdLogIndex)
 	withBlock(cmdLogIndex)
 	withUnwind(cmdLogIndex)
@@ -243,8 +270,7 @@ func init() {
 	rootCmd.AddCommand(cmdLogIndex)
 
 	withChaindata(cmdCallTraces)
-	withMapSize(cmdCallTraces)
-	withFreelistReuse(cmdCallTraces)
+	withLmdbFlags(cmdCallTraces)
 	withReset(cmdCallTraces)
 	withBlock(cmdCallTraces)
 	withUnwind(cmdCallTraces)
@@ -253,8 +279,7 @@ func init() {
 	rootCmd.AddCommand(cmdCallTraces)
 
 	withChaindata(cmdStageTxLookup)
-	withMapSize(cmdStageTxLookup)
-	withFreelistReuse(cmdStageTxLookup)
+	withLmdbFlags(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
 	withBlock(cmdStageTxLookup)
 	withUnwind(cmdStageTxLookup)
@@ -266,29 +291,18 @@ func init() {
 	rootCmd.AddCommand(cmdPrintMigrations)
 
 	withChaindata(cmdRemoveMigration)
-	withMapSize(cmdRemoveMigration)
-	withFreelistReuse(cmdRemoveMigration)
+	withLmdbFlags(cmdRemoveMigration)
 	withMigration(cmdRemoveMigration)
 	rootCmd.AddCommand(cmdRemoveMigration)
 
 	withChaindata(cmdRunMigrations)
-	withMapSize(cmdRunMigrations)
-	withFreelistReuse(cmdRunMigrations)
+	withLmdbFlags(cmdRunMigrations)
 	withDatadir(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
 }
 
-func stageSenders(ctx context.Context) error {
+func stageSenders(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-
-	db := openDatabase()
-	defer db.Close()
-
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
-
 	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
@@ -321,16 +335,8 @@ func stageSenders(ctx context.Context) error {
 	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, tmpdir, ch)
 }
 
-func stageExec(ctx context.Context) error {
+func stageExec(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
-
-	db := openDatabase()
-	defer db.Close()
-
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
 
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
@@ -364,12 +370,9 @@ func stageExec(ctx context.Context) error {
 
 }
 
-func stageIHash(ctx context.Context) error {
+func stageIHash(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-
-	db := openDatabase()
-	defer db.Close()
 
 	if err := migrations.NewMigrator().Apply(db, tmpdir); err != nil {
 		panic(err)
@@ -403,12 +406,9 @@ func stageIHash(ctx context.Context) error {
 	return stagedsync.SpawnIntermediateHashesStage(stage5, db, tmpdir, ch)
 }
 
-func stageHashState(ctx context.Context) error {
+func stageHashState(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-
-	db := openDatabase()
-	defer db.Close()
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
 	if err != nil {
@@ -438,12 +438,9 @@ func stageHashState(ctx context.Context) error {
 	return stagedsync.SpawnHashStateStage(stage6, db, tmpdir, ch)
 }
 
-func stageLogIndex(ctx context.Context) error {
+func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-
-	db := openDatabase()
-	defer db.Close()
 
 	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
@@ -471,12 +468,9 @@ func stageLogIndex(ctx context.Context) error {
 	return nil
 }
 
-func stageCallTraces(ctx context.Context) error {
+func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-
-	db := openDatabase()
-	defer db.Close()
 
 	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
@@ -508,12 +502,9 @@ func stageCallTraces(ctx context.Context) error {
 	return nil
 }
 
-func stageHistory(ctx context.Context) error {
+func stageHistory(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-
-	db := openDatabase()
-	defer db.Close()
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
 	if err != nil {
@@ -550,12 +541,9 @@ func stageHistory(ctx context.Context) error {
 	return nil
 }
 
-func stageTxLookup(ctx context.Context) error {
+func stageTxLookup(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-
-	db := openDatabase()
-	defer db.Close()
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
 	if err != nil {
@@ -584,17 +572,11 @@ func stageTxLookup(ctx context.Context) error {
 	return stagedsync.SpawnTxLookup(stage9, db, tmpdir, ch)
 }
 
-func printAllStages(_ context.Context) error {
-	db := openDatabase()
-	defer db.Close()
-
+func printAllStages(db rawdb.DatabaseReader, _ context.Context) error {
 	return printStages(db)
 }
 
-func printAppliedMigrations(_ context.Context) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-
+func printAppliedMigrations(db ethdb.Database, _ context.Context) error {
 	applied, err := migrations.AppliedMigrations(db, false /* withPayload */)
 	if err != nil {
 		return err
@@ -610,9 +592,7 @@ func printAppliedMigrations(_ context.Context) error {
 	return nil
 }
 
-func removeMigration(_ context.Context) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
+func removeMigration(db rawdb.DatabaseDeleter, _ context.Context) error {
 	if err := db.Delete(dbutils.Migrations, []byte(migration)); err != nil {
 		return err
 	}
@@ -653,7 +633,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 			}
 			return s
 		}
-		s, err := st.StageState(stage, db)
+		s, err := st.StageState(stage, tx)
 		if err != nil {
 			panic(err)
 		}
@@ -671,19 +651,19 @@ func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, er
 	return params.MainnetChainConfig, blockchain, nil
 }
 
-func SetSnapshotKV(db *ethdb.ObjectDatabase, snapshotDir, snapshotMode string) error {
+func SetSnapshotKV(db ethdb.Database, snapshotDir, snapshotMode string) error {
 	if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
 		mode, err := torrent.SnapshotModeFromString(snapshotMode)
 		if err != nil {
 			panic(err)
 		}
 
-		snapshotKV := db.KV()
+		snapshotKV := db.(ethdb.HasKV).KV()
 		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, snapshotDir, mode)
 		if err != nil {
 			return err
 		}
-		db.SetKV(snapshotKV)
+		db.(ethdb.HasKV).SetKV(snapshotKV)
 	}
 	return nil
 }

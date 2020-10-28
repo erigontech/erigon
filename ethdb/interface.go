@@ -153,6 +153,7 @@ type DbWithPendingMutations interface {
 
 type HasKV interface {
 	KV() KV
+	SetKV(kv KV)
 }
 
 type HasTx interface {

@@ -78,13 +78,13 @@ var receiptsCborEncode = Migration{
 
 		// Commit clearing of the bucket - freelist should now be written to the database
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
-			return fmt.Errorf("committing the removal of receipt table")
+			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 
 	LoadStep:
 		// Commit again
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
-			return fmt.Errorf("committing again to create a stable view the removal of receipt table")
+			return fmt.Errorf("committing again to create a stable view the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
 		if err := collector.Load("receipts_cbor_encode", db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: CommitProgress}); err != nil {
@@ -234,13 +234,13 @@ var receiptsOnePerTx = Migration{
 
 		// Commit clearing of the bucket - freelist should now be written to the database
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
-			return fmt.Errorf("committing the removal of receipt table")
+			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 
 	LoadStep:
 		// Commit again
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
-			return fmt.Errorf("committing the removal of receipt table")
+			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
 		if err := collectorR.Load(logPrefix, db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
