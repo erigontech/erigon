@@ -38,7 +38,7 @@ geth:
 tg:
 	@echo "Building mdbx"
 	cd ethdb/mdbx/dist/ && make clean && make libmdbx.a && cat config.h
-	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
+	$(GOBUILD) -o $(GOBIN)/tg -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
