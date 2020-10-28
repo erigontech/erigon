@@ -366,13 +366,3 @@ Date:   Wed Oct 28 20:27:37 2020 +0800
     * core/state/snapshot: simplify the function
     
     * core/state: panic for undefined layer
-
-commit 18145adf084b9659c41343609677e6e94c0640c6
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed Oct 28 20:00:22 2020 +0800
-
-    core/state: maintain one more diff layer (#21730)
-    
-    * core/state: maintain one more diff layer
-    
-    * core/state: address comment
