@@ -238,5 +238,5 @@ var _Sentry_serviceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "p2psentry/sentry.proto",
+	Metadata: "sentry.proto",
 }
