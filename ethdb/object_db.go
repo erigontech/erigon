@@ -39,6 +39,10 @@ var (
 	dbPutTimer = metrics.NewRegisteredTimer("db/put", nil)
 )
 
+type DbCopier interface {
+	NewDbWithTheSameParameters() *ObjectDatabase
+}
+
 // ObjectDatabase - is an object-style interface of DB accessing
 type ObjectDatabase struct {
 	kv  KV
@@ -321,13 +325,11 @@ func (db *ObjectDatabase) SetKV(kv KV) {
 func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	var mem *ObjectDatabase
 	// Open the db and recover any potential corruptions
-	switch db.kv.(type) {
-	case *LmdbKV:
-		opts := db.kv.(*LmdbKV).opts
-		mem = NewObjectDatabase(NewLMDB().Set(opts).MustOpen())
-	case *MdbxKV:
-		opts := db.kv.(*MdbxKV).opts
-		mem = NewObjectDatabase(NewMDBX().Set(opts).MustOpen())
+	switch t := db.kv.(type) {
+	case DbCopier:
+		mem = t.NewDbWithTheSameParameters()
+	default:
+		panic(fmt.Sprintf("MemCopy is not implemented for type %T", t))
 	}
 
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {

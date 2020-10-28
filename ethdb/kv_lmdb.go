@@ -18,6 +18,8 @@ import (
 	"github.com/prometheus/tsdb/fileutil"
 )
 
+var _ DbCopier = &LmdbKV{}
+
 const (
 	NonExistingDBI dbutils.DBI = 999_999_999
 )
@@ -275,6 +277,10 @@ type LmdbKV struct {
 
 func NewLMDB() LmdbOpts {
 	return LmdbOpts{bucketsCfg: DefaultBucketConfigs}
+}
+func (db *LmdbKV) NewDbWithTheSameParameters() *ObjectDatabase {
+	opts := db.opts
+	return NewObjectDatabase(NewLMDB().Set(opts).MustOpen())
 }
 
 // Close closes db
