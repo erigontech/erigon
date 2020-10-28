@@ -9,5 +9,5 @@ git subtree add --prefix interfaces --squash https://github.com/ledgerwatch/inte
 When you need to update the subtree to a specific commit or tag, you can use this command:
 
 ```
-git subtree merge --prefix interfaces --squash <tag_or_commit>
+git subtree pull --prefix interfaces --squash https://github.com/ledgerwatch/interfaces <tag_or_commit>
 ```
