@@ -4,6 +4,8 @@ import "google/protobuf/empty.proto";
 
 package control;
 
+option go_package = "./core;core";
+
 enum InboundMessageId {
   NewBlockHashes = 0; BlockHeaders = 1; BlockBodies = 2; NewBlock = 3;
   NodeData = 4;
