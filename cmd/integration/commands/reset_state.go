@@ -3,20 +3,19 @@ package commands
 import (
 	"context"
 	"fmt"
-	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"os"
 	"path"
 	"sync"
 	"text/tabwriter"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"

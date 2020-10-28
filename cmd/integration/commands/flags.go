@@ -31,15 +31,6 @@ func must(err error) {
 	}
 }
 
-//func chaindataFlag() *pflag.FlagSet {
-//	set := pflag.NewFlagSet("chaindata", pflag.ContinueOnError)
-//	set.StringVar(&chaindata, "chaindata", "", "path to the db")
-//	must(set.SetAnnotation("chaindata", cobra.BashCompSubdirsInDir, []string{}))
-//	return set
-//
-// 	cmd.Flags().AddFlagSet(chaindataFlag())
-//}
-
 func withChaindata(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
