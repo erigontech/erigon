@@ -1,20 +1,16 @@
 #### `Ethdb` package hold's bouquet of objects to access DB
 
-Words "KV" and "DB" have special meaning here:
+Words "KV" and "DB" have special meaning here: 
+- KV - key-value-style API to access data: let developer manage transactions, stateful cursors. 
+- DB - object-oriented-style API to access data: Get/Put/Delete/WalkOverTable/MultiPut, managing transactions internally.
 
-- KV - key-value-style API to access data: let developer manage transactions, stateful cursors.
-- DB - object-oriented-style API to access data: Get/Put/Delete/WalkOverTable/MultiPut, managing transactions
-  internally.
+So, DB abstraction fits 95% times and leads to more maintainable code - because it's looks stateless. 
 
-So, DB abstraction fits 95% times and leads to more maintainable code - because it's looks stateless.
+About "key-value-style": Modern key-value databases don't provide Get/Put/Delete methods, 
+  because it's very hard-drive-unfriendly - it pushes developers do random-disk-access which is [order of magnitude slower than sequential read](https://www.seagate.com/sg/en/tech-insights/lies-damn-lies-and-ssd-benchmark-master-ti/).
+  To enforce sequential-reads - introduced stateful cursors/iterators - they intentionally look as file-api: open_cursor/seek/write_data_from_current_position/move_to_end/step_back/step_forward/delete_key_on_current_position/append.
 
-About "key-value-style": Modern key-value databases don't provide Get/Put/Delete methods, because it's very
-hard-drive-unfriendly - it pushes developers do random-disk-access which
-is [order of magnitude slower than sequential read](https://www.seagate.com/sg/en/tech-insights/lies-damn-lies-and-ssd-benchmark-master-ti/)
-. To enforce sequential-reads - introduced stateful cursors/iterators - they intentionally look as file-api:
-open_cursor/seek/write_data_from_current_position/move_to_end/step_back/step_forward/delete_key_on_current_position/append.
-
-## Class diagram:
+## Class diagram: 
 
 ```asciiflow.com
 // This is not call graph, just show classes from low-level to high-level. 
@@ -100,45 +96,45 @@ if err != nil {
 }
 ```
 
-- No internal copies/allocations. It means: 1. app must copy keys/values before put to database. 2. Data after read from
-  db - valid only during current transaction - copy it if plan use data after transaction Commit/Rollback.
+
+- No internal copies/allocations. It means: 1. app must copy keys/values before put to database. 2. Data after read from db - valid only during current transaction - copy it if plan use data after transaction Commit/Rollback.
 - Methods .Bucket() and .Cursor(), can’t return nil, can't return error.
-- Bucket and Cursor - are interfaces - means different classes can satisfy it: for example `LmdbCursor`
-  , `LmdbDupSortCursor`, `LmdbDupFixedCursor` classes satisfy it. If your are not familiar with "DupSort" concept,
-  please read [indices.md](./../docs/programmers_guide/indices.md) first.
+- Bucket and Cursor - are interfaces - means different classes can satisfy it: for example `LmdbCursor`, `LmdbDupSortCursor`, `LmdbDupFixedCursor` classes satisfy it. 
+  If your are not familiar with "DupSort" concept, please read [indices.md](./../docs/programmers_guide/indices.md) first.
 
 
-- If Cursor returns err!=nil then key SHOULD be != nil (can be []byte{} for example). Then traversal code look as:
-
+- If Cursor returns err!=nil then key SHOULD be != nil (can be []byte{} for example). 
+Then traversal code look as: 
 ```go
 for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-if err != nil {
-return err
-}
-// logic
+    if err != nil {
+        return err
+    }
+    // logic
 }
 ``` 
-
 - Move cursor: `cursor.Seek(key)`
+
+
 
 ## ethdb.Database design:
 
-- Allows pass multiple implementations
-- Allows traversal tables by `db.Walk` and `db.MultiWalk`
+- Allows pass multiple implementations 
+- Allows traversal tables by `db.Walk` and `db.MultiWalk` 
 
 ## ethdb.TxDb design:
-
 - holds inside 1 long-running transaction and 1 cursor per table
-- method Begin DOESN'T create new TxDb object, it means this object can be passed into other objects by pointer, and
-  high-level app code can start/commit transactions when it needs without re-creating all objects which holds TxDb
-  pointer.
-- This is reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pinter to TxDb stays
-  valid.
+- method Begin DOESN'T create new TxDb object, it means this object can be passed into other objects by pointer,
+  and high-level app code can start/commit transactions when it needs without re-creating all objects which holds
+  TxDb pointer.
+- This is reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pinter to TxDb stays valid.
 
 ## How to dump/load table
 
+Install all database tools: `make db-tools` - tools with prefix `mdb_` is for 
+lmdb, `lmdbgo_` is for lmdb written in go, `mdbx_` is for mdbx.
+
 ```
-make db-tools
 ./build/bin/mdbx_dump -a /path/to/chaindata | lz4 > dump.lz4
 lz4 -d < dump.lz4 | ./build/bin/mdbx_load -an /path/to/chaindata
 ```
