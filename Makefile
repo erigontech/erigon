@@ -81,16 +81,6 @@ rpcdaemon:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
-semantics: semantics/z3/build/libz3.a
-	build/env.sh go run build/ci.go install ./cmd/semantics
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/semantics\" to launch semantics."
-
-semantics/z3/build/libz3.a:
-	cd semantics/z3 && python scripts/mk_make.py --staticlib
-	cd semantics/z3/build && ${MAKE} -j8
-	cp semantics/z3/build/libz3.a .
-
 integration:
 	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
 	@echo "Done building."
@@ -118,18 +108,18 @@ ethdb/mdbx/dist/libmdbx.a:
 	echo "Building mdbx"
 	cd ethdb/mdbx/dist/ && make libmdbx.a && cat config.h
 
-test: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
+test: ethdb/mdbx/dist/libmdbx.a
 	$(GOTEST)
 
-test-lmdb: semantics/z3/build/libz3.a
+test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
 
-test-mdbx: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
+test-mdbx: ethdb/mdbx/dist/libmdbx.a
 	TEST_DB=mdbx $(GOTEST_MDBX)
 
 lint: lintci
 
-lintci: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
+lintci: ethdb/mdbx/dist/libmdbx.a
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
