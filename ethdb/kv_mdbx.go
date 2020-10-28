@@ -267,7 +267,7 @@ func (db *MdbxKV) Close() {
 
 func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
 	opts := db.opts
-	return NewObjectDatabase(NewLMDB().Set(opts).MustOpen())
+	return NewObjectDatabase(NewMDBX().Set(opts).MustOpen())
 }
 
 func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {

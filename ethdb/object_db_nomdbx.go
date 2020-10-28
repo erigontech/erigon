@@ -1,4 +1,4 @@
-//-build mdbx
+//+build !mdbx
 
 package ethdb
 
