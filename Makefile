@@ -107,7 +107,11 @@ db-tools:
 	$(GOBUILD) -o $(GOBIN)/lmdbgo_stat github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
 
 	cd ethdb/mdbx/dist/ && make tools
-	cp ethdb/mdbx/dist/mdbx_* $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_chk $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_copy $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_dump $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
 ethdb/mdbx/dist/libmdbx.a:
