@@ -1,3 +1,5 @@
+//+build mdbx
+
 package ethdb
 
 import (
@@ -16,6 +18,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
+
+var _ DbCopier = &MdbxKV{}
 
 type MdbxOpts struct {
 	inMem            bool
@@ -259,6 +263,11 @@ func (db *MdbxKV) Close() {
 		}
 	}
 
+}
+
+func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
+	opts := db.opts
+	return NewObjectDatabase(NewMDBX().Set(opts).MustOpen())
 }
 
 func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {

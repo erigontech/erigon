@@ -1,6 +1,6 @@
 GOBIN = $(CURDIR)/build/bin
 GOBUILD = env GO111MODULE=on go build -trimpath
-GOTEST = go test ./... -p 1
+GOTEST = go test ./... -p 1 --tags 'mdbx'
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
 ifeq ($(LATEST_COMMIT),)
@@ -31,19 +31,19 @@ docker-compose:
 	docker-compose up
 
 geth:
-	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
+	$(GOBUILD) -o $(GOBIN)/tg -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 tg:
 	@echo "Building mdbx"
 	cd ethdb/mdbx/dist/ && make clean && make libmdbx.a && cat config.h
-	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
+	$(GOBUILD) -o $(GOBIN)/tg -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 hack:
-	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
+	$(GOBUILD) -o $(GOBIN)/hack  -tags "mdbx" ./cmd/hack
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/hack\" to launch hack."
 
@@ -102,8 +102,8 @@ headers:
 	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
 
 db-tools:
-	$(GOBUILD) -o $(GOBIN)/lmdb_stat github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
-	$(GOBUILD) -o $(GOBIN)/lmdb_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
+	$(GOBUILD) -o $(GOBIN)/lmdb_stat  -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
+	$(GOBUILD) -o $(GOBIN)/lmdb_copy  -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
 
 	cd ethdb/mdbx/dist/ && make tools
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
@@ -125,7 +125,7 @@ test-lmdb: semantics/z3/build/libz3.a
 	TEST_DB=lmdb $(GOTEST)
 
 test-mdbx: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
-	TEST_DB=mdbx $(GOTEST)
+	TEST_DB=mdbx $(GOTEST_MDBX)
 
 lint: lintci
 
@@ -133,19 +133,23 @@ lintci: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step1.yml \
 	    --exclude "which can be annoying to use"
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step2.yml
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step3.yml
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step4.yml
 
 lintci-deps:

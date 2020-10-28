@@ -1,3 +1,5 @@
+// +build mdbx
+
 /*
 Package lmdb provides bindings to the lmdb C API.  The package bindings are
 fairly low level and are designed to provide a minimal interface that prevents
