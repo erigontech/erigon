@@ -3,7 +3,8 @@ syntax = "proto3";
 import "google/protobuf/empty.proto";
 
 package sentry;
-go_package sentry;
+
+option go_package = "./sentry;sentry";
 
 enum OutboundMessageId {
   GetBlockHeaders = 0; GetBlockBodies = 1; GetNodeData = 2;
