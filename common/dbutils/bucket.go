@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
@@ -272,14 +271,37 @@ func DefaultDupCmpFunc(k1, k2, v1, v2 []byte) int {
 type BucketsCfg map[string]BucketConfigItem
 type Bucket string
 
+type DBI uint
+type BucketFlags uint
+
+const (
+	Default    BucketFlags = 0x00
+	ReverseKey BucketFlags = 0x02
+	DupSort    BucketFlags = 0x04
+	IntegerKey BucketFlags = 0x08
+	DupFixed   BucketFlags = 0x10
+	IntegerDup BucketFlags = 0x20
+	ReverseDup BucketFlags = 0x40
+)
+
+type TxFlags uint
+
+const (
+	RO         TxFlags = 0x00
+	RW         TxFlags = 0x02
+	Try        TxFlags = 0x04
+	NoMetaSync TxFlags = 0x08
+	NoSync     TxFlags = 0x10
+)
+
 type BucketConfigItem struct {
-	Flags uint
+	Flags BucketFlags
 	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
 	// Use it wisely - it helps to do experiments with DB format faster, but better reduce amount of Magic in app.
 	// If good DB format found, push app code to accept this format and then disable this property.
 	AutoDupSortKeysConversion bool
 	IsDeprecated              bool
-	DBI                       lmdb.DBI
+	DBI                       DBI
 	// DupFromLen - if user provide key of this length, then next transformation applied:
 	// v = append(k[DupToLen:], v...)
 	// k = k[:DupToLen]
@@ -294,19 +316,19 @@ type BucketConfigItem struct {
 
 var BucketsConfigs = BucketsCfg{
 	CurrentStateBucket: {
-		Flags:                     lmdb.DupSort,
+		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                72,
 		DupToLen:                  40,
 	},
 	PlainStateBucket: {
-		Flags:                     lmdb.DupSort,
+		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                60,
 		DupToLen:                  28,
 	},
 	IntermediateTrieHashBucket: {
-		Flags:               lmdb.DupSort,
+		Flags:               DupSort,
 		CustomDupComparator: DupCmpSuffix32,
 	},
 }

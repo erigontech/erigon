@@ -31,7 +31,10 @@ var stateStags = &cobra.Command{
 	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind_every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := syncBySmallSteps(ctx, chaindata); err != nil {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := syncBySmallSteps(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -58,10 +61,8 @@ func init() {
 	rootCmd.AddCommand(stateStags)
 }
 
-func syncBySmallSteps(ctx context.Context, chaindata string) error {
+func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
 
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {

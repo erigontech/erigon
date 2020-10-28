@@ -7,9 +7,11 @@ import (
 
 var (
 	chaindata          string
+	database           string
 	snapshotMode       string
 	snapshotDir        string
 	compact            bool
+	toChaindata        string
 	referenceChaindata string
 	block              uint64
 	unwind             uint64
@@ -35,13 +37,11 @@ func withChaindata(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("chaindata"))
 	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
 	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
+	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
 }
 
-func withMapSize(cmd *cobra.Command) {
+func withLmdbFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
-}
-
-func withFreelistReuse(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&freelistReuse, "maxFreelistReuse", 0, "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.")
 }
 
@@ -52,6 +52,11 @@ func withCompact(cmd *cobra.Command) {
 func withReferenceChaindata(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&referenceChaindata, "reference_chaindata", "", "path to the 2nd (reference/etalon) db")
 	must(cmd.MarkFlagDirname("reference_chaindata"))
+}
+
+func withToChaindata(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&toChaindata, "to_chaindata", "", "target chaindata")
+	must(cmd.MarkFlagDirname("to_chaindata"))
 }
 
 func withBlock(cmd *cobra.Command) {

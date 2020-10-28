@@ -87,7 +87,7 @@ func Transform(
 ) error {
 	bufferSize := BufferOptimalSize
 	if args.BufferSize > 0 {
-		bufferSize = args.BufferSize
+		bufferSize = datasize.ByteSize(args.BufferSize)
 	}
 	buffer := getBufferByType(args.BufferType, bufferSize)
 	collector := NewCollector(tmpdir, buffer)

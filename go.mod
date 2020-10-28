@@ -25,7 +25,6 @@ require (
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/emicklei/dot v0.11.0
 	github.com/ethereum/evmc/v7 v7.3.0
-	github.com/ethereum/go-ethereum v1.9.23
 	github.com/fatih/color v1.7.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
@@ -35,6 +34,7 @@ require (
 	github.com/go-stack/stack v1.8.0
 	github.com/golang/protobuf v1.4.2
 	github.com/golang/snappy v0.0.2-0.20200707131729-196ae77b8a26
+	github.com/google/btree v1.0.0
 	github.com/google/gofuzz v1.1.1-0.20200604201612-c04b05f3adfa
 	github.com/gorilla/websocket v1.4.2
 	github.com/graph-gophers/graphql-go v0.0.0-20200819123640-3b5ddcd884ae
@@ -62,7 +62,7 @@ require (
 	github.com/prometheus/tsdb v0.10.0
 	github.com/rs/cors v1.7.0
 	github.com/shirou/gopsutil v2.20.8+incompatible
-	github.com/spf13/cobra v1.0.0
+	github.com/spf13/cobra v1.1.1
 	github.com/status-im/keycard-go v0.0.0-20200402102358-957c09536969
 	github.com/stretchr/testify v1.6.1
 	github.com/tyler-smith/go-bip39 v1.0.2

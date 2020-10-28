@@ -1,11 +1,16 @@
 package commands
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"os"
+	"strings"
+	"time"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -63,6 +68,34 @@ var cmdCompareStates = &cobra.Command{
 	},
 }
 
+var cmdToMdbx = &cobra.Command{
+	Use:   "to_mdbx",
+	Short: "copy data from '--chaindata' to '--reference_chaindata'",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		err := toMdbx(ctx, chaindata, toChaindata)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		return nil
+	},
+}
+
+var cmdFToMdbx = &cobra.Command{
+	Use:   "f_to_mdbx",
+	Short: "copy data from '--chaindata' to '--reference_chaindata'",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		err := fToMdbx(ctx, toChaindata)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(cmdCompareBucket)
 	withReferenceChaindata(cmdCompareBucket)
@@ -75,6 +108,17 @@ func init() {
 	withBucket(cmdCompareStates)
 
 	rootCmd.AddCommand(cmdCompareStates)
+
+	withChaindata(cmdToMdbx)
+	withToChaindata(cmdToMdbx)
+	withBucket(cmdToMdbx)
+
+	rootCmd.AddCommand(cmdToMdbx)
+
+	withToChaindata(cmdFToMdbx)
+	withBucket(cmdFToMdbx)
+
+	rootCmd.AddCommand(cmdFToMdbx)
 }
 
 func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {
@@ -186,5 +230,143 @@ func compareBuckets(ctx context.Context, tx ethdb.Tx, b string, refTx ethdb.Tx, 
 			}
 		}
 	}
+	return nil
+}
+
+func fToMdbx(ctx context.Context, to string) error {
+	file, err := os.Open("/media/alex/evo/alex_full.log")
+	if err != nil {
+		fmt.Printf("Failed to open file: %s", err)
+		os.Exit(1)
+	}
+	defer file.Close()
+
+	dst := ethdb.NewMDBX().Path(to).MustOpen()
+	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW)
+	if err1 != nil {
+		return err1
+	}
+	defer func() {
+		dstTx.Rollback()
+	}()
+
+	logEvery := time.NewTicker(15 * time.Second)
+	defer logEvery.Stop()
+
+	commitEvery := time.NewTicker(5 * time.Minute)
+	defer commitEvery.Stop()
+
+	//r := csv.NewReader(bufio.NewReaderSize(file, 1024*1024))
+	//r.Read()
+	//_ = dstTx.(ethdb.BucketMigrator).ClearBucket(dbutils.CurrentStateBucket)
+
+	fileScanner := bufio.NewScanner(file)
+	c := dstTx.CursorDupSort(dbutils.CurrentStateBucket)
+	i := 0
+	for fileScanner.Scan() {
+		i++
+		kv := strings.Split(fileScanner.Text(), ",")
+		k, _ := hex.DecodeString(kv[0])
+		v, _ := hex.DecodeString(kv[1])
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Progress", "key", fmt.Sprintf("%x", k))
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+
+		if k[0] < uint8(50) {
+			continue
+		}
+		if err = c.AppendDup(k, v); err != nil {
+			return err
+		}
+	}
+	err = fileScanner.Err()
+	if err != nil {
+		panic(err)
+	}
+	err = dstTx.Commit(context.Background())
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func toMdbx(ctx context.Context, from, to string) error {
+	_ = os.RemoveAll(to)
+
+	src := ethdb.NewLMDB().Path(from).MustOpen()
+	dst := ethdb.NewMDBX().Path(to).MustOpen()
+	srcTx, err1 := src.Begin(ctx, nil, ethdb.RO)
+	if err1 != nil {
+		return err1
+	}
+	defer srcTx.Rollback()
+	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW)
+	if err1 != nil {
+		return err1
+	}
+	defer func() {
+		dstTx.Rollback()
+	}()
+
+	logEvery := time.NewTicker(15 * time.Second)
+	defer logEvery.Stop()
+
+	commitEvery := time.NewTicker(5 * time.Minute)
+	defer commitEvery.Stop()
+
+	for name, b := range dbutils.BucketsConfigs {
+		if b.IsDeprecated {
+			continue
+		}
+
+		c := dstTx.Cursor(name)
+		appendFunc := c.Append
+		if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
+			appendFunc = c.(ethdb.CursorDupSort).AppendDup
+		}
+
+		srcC := srcTx.Cursor(name)
+		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
+			if err != nil {
+				return err
+			}
+
+			if err = appendFunc(k, v); err != nil {
+				return err
+			}
+
+			select {
+			default:
+			case <-logEvery.C:
+				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
+			case <-commitEvery.C:
+				if err2 := dstTx.Commit(ctx); err2 != nil {
+					return err2
+				}
+				dstTx, err = dst.Begin(ctx, nil, ethdb.RW)
+				if err != nil {
+					return err
+				}
+				c = dstTx.Cursor(name)
+				appendFunc = c.Append
+				if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
+					appendFunc = c.(ethdb.CursorDupSort).AppendDup
+				}
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+
+	err := dstTx.Commit(context.Background())
+	if err != nil {
+		return err
+	}
+	srcTx.Rollback()
 	return nil
 }

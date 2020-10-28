@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -324,6 +325,8 @@ func DefaultStages() StageBuilders {
 						if executionAt, err = s.ExecutionAt(world.TX); err != nil {
 							return err
 						}
+						logPrefix := s.state.LogPrefix()
+						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
 						return s.DoneAndUpdate(world.TX, executionAt)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {

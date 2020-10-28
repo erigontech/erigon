@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -37,6 +38,10 @@ var (
 	dbGetTimer = metrics.NewRegisteredTimer("db/get", nil)
 	dbPutTimer = metrics.NewRegisteredTimer("db/put", nil)
 )
+
+type DbCopier interface {
+	NewDbWithTheSameParameters() *ObjectDatabase
+}
 
 // ObjectDatabase - is an object-style interface of DB accessing
 type ObjectDatabase struct {
@@ -72,6 +77,8 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 	switch true {
 	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
 		kv, err = NewLMDB().Path(path).Open()
+	case testDB == "mdbx" || strings.HasSuffix(path, "_mdbx"):
+		kv, err = NewMDBX().Path(path).Open()
 	default:
 		opts := NewLMDB().Path(path)
 		if readOnly {
@@ -318,10 +325,11 @@ func (db *ObjectDatabase) SetKV(kv KV) {
 func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	var mem *ObjectDatabase
 	// Open the db and recover any potential corruptions
-	switch db.kv.(type) {
-	case *LmdbKV:
-		opts := db.kv.(*LmdbKV).opts
-		mem = NewObjectDatabase(NewLMDB().Set(opts).MustOpen())
+	switch t := db.kv.(type) {
+	case DbCopier:
+		mem = t.NewDbWithTheSameParameters()
+	default:
+		panic(fmt.Sprintf("MemCopy is not implemented for type %T", t))
 	}
 
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {
@@ -350,7 +358,7 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:   db,
-		puts: newPuts(),
+		puts: btree.New(32),
 	}
 	return m
 }

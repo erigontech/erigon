@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"net/http"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 type Flags struct {
 	PrivateApiAddr    string
 	Chaindata         string
+	SnapshotDir       string
+	SnapshotMode      string
 	HttpListenAddress string
 	TLSCertfile       string
 	TLSCACert         string
@@ -53,6 +56,13 @@ func RootCommand() (*cobra.Command, *Flags) {
 	cfg := &Flags{}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
+	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshotDir", "", "path to snapshot dir(only for chaindata mode)")
+	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotMode, "snapshot-mode", "", `Configures the storage mode of the app(only for chaindata mode):
+* h - use headers snapshot
+* b - use bodies snapshot
+* s - use state snapshot
+* r - use receipts snapshot
+`)
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
@@ -80,6 +90,17 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 			db = database.KV()
 		} else {
 			err = errOpen
+		}
+		if cfg.SnapshotMode != "" {
+			mode, innerErr := torrent.SnapshotModeFromString(cfg.SnapshotMode)
+			if innerErr != nil {
+				return nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
+			}
+			kv, innerErr := torrent.WrapBySnapshots(db, cfg.SnapshotDir, mode)
+			if innerErr != nil {
+				return nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
+			}
+			db = kv
 		}
 	} else if cfg.PrivateApiAddr != "" {
 		db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)

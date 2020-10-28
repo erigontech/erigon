@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -32,7 +31,7 @@ func TestManagedTx(t *testing.T) {
 	writeDBs, readDBs, closeAll := setupDatabases(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return map[string]dbutils.BucketConfigItem{
 			bucket1: {
-				Flags:                     lmdb.DupSort,
+				Flags:                     dbutils.DupSort,
 				AutoDupSortKeysConversion: true,
 				DupToLen:                  4,
 				DupFromLen:                6,
@@ -48,27 +47,28 @@ func TestManagedTx(t *testing.T) {
 
 	for _, db := range writeDBs {
 		db := db
-		if err := db.Update(ctx, func(tx ethdb.Tx) error {
-			c := tx.Cursor(bucket1)
-			c1 := tx.Cursor(bucket2)
-			require.NoError(t, c.Append([]byte{0}, []byte{1}))
-			require.NoError(t, c1.Append([]byte{0}, []byte{1}))
-			require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1})) // prefixes of len=FromLen for DupSort test (other keys must be <ToLen)
-			require.NoError(t, c1.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1}))
-			require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 2}, []byte{1}))
-			require.NoError(t, c1.Append([]byte{0, 0, 0, 0, 0, 2}, []byte{1}))
-			require.NoError(t, c.Append([]byte{0, 0, 1}, []byte{1}))
-			require.NoError(t, c1.Append([]byte{0, 0, 1}, []byte{1}))
-			for i := uint8(1); i < 10; i++ {
-				require.NoError(t, c.Append([]byte{i}, []byte{1}))
-				require.NoError(t, c1.Append([]byte{i}, []byte{1}))
-			}
-			require.NoError(t, c.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
-			require.NoError(t, c1.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
-			return nil
-		}); err != nil {
-			require.NoError(t, err)
+		tx, err := db.Begin(ctx, nil, ethdb.RW)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		c := tx.Cursor(bucket1)
+		c1 := tx.Cursor(bucket2)
+		require.NoError(t, c.Append([]byte{0}, []byte{1}))
+		require.NoError(t, c1.Append([]byte{0}, []byte{1}))
+		require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1})) // prefixes of len=FromLen for DupSort test (other keys must be <ToLen)
+		require.NoError(t, c1.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1}))
+		require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 2}, []byte{1}))
+		require.NoError(t, c1.Append([]byte{0, 0, 0, 0, 0, 2}, []byte{1}))
+		require.NoError(t, c.Append([]byte{0, 0, 1}, []byte{1}))
+		require.NoError(t, c1.Append([]byte{0, 0, 1}, []byte{1}))
+		for i := uint8(1); i < 10; i++ {
+			require.NoError(t, c.Append([]byte{i}, []byte{1}))
+			require.NoError(t, c1.Append([]byte{i}, []byte{1}))
 		}
+		require.NoError(t, c.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
+		require.NoError(t, c1.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
+		err = tx.Commit(context.Background())
+		require.NoError(t, err)
 	}
 
 	for _, db := range readDBs {
@@ -96,6 +96,7 @@ func TestManagedTx(t *testing.T) {
 func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []ethdb.KV, close func()) {
 	writeDBs = []ethdb.KV{
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(),
+		ethdb.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
 	}
 

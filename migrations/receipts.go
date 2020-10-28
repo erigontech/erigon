@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
@@ -78,13 +79,13 @@ var receiptsCborEncode = Migration{
 
 		// Commit clearing of the bucket - freelist should now be written to the database
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
-			return fmt.Errorf("committing the removal of receipt table")
+			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 
 	LoadStep:
 		// Commit again
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
-			return fmt.Errorf("committing again to create a stable view the removal of receipt table")
+			return fmt.Errorf("committing again to create a stable view the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
 		if err := collector.Load("receipts_cbor_encode", db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: CommitProgress}); err != nil {
@@ -170,6 +171,14 @@ var receiptsOnePerTx = Migration{
 		}()
 		if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
 			blockNum := binary.BigEndian.Uint64(k[:8])
+			canonicalHash, err := rawdb.ReadCanonicalHash(db, blockNum)
+			if err != nil {
+				return false, err
+			}
+			if !bytes.Equal(k[8:], canonicalHash[:]) {
+				return true, nil
+			}
+
 			select {
 			default:
 			case <-logEvery.C:
@@ -234,13 +243,13 @@ var receiptsOnePerTx = Migration{
 
 		// Commit clearing of the bucket - freelist should now be written to the database
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
-			return fmt.Errorf("committing the removal of receipt table")
+			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 
 	LoadStep:
 		// Commit again
 		if err := CommitProgress(db, []byte(loadStep), false); err != nil {
-			return fmt.Errorf("committing the removal of receipt table")
+			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
 		if err := collectorR.Load(logPrefix, db, dbutils.BlockReceiptsPrefix, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
