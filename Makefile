@@ -133,19 +133,23 @@ lintci: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step1.yml \
 	    --exclude "which can be annoying to use"
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step2.yml
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step3.yml
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step4.yml
 
 lintci-deps:
