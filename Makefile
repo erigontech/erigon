@@ -177,6 +177,7 @@ grpc:
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	PATH=$(GOBIN):$(PATH) go generate ./ethdb
+	PATH=$(GOBIN):$(PATH) go generate ./turbo/snapshotdownloader
 
 grpc2:
 	rm -f ./build/bin/protoc*

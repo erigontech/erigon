@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
@@ -28,7 +29,7 @@ type SNDownloaderServer struct {
 	db ethdb.Database
 }
 
-func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotdownloader.DownloadSnapshotRequest) (*snapshotdownloader.SnapshotsInfo, error) {
+func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotdownloader.DownloadSnapshotRequest) (*empty.Empty, error) {
 	m,ok:=TorrentHashes[uint64(request.Networkid)]
 	if !ok {
 		return nil, ErrNotSupportedNetworkID
@@ -44,19 +45,14 @@ func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotdown
 		log.Error("Add torrent failure", "err", err)
 		return nil, err
 	}
-	var readiness int32
-	if t, ok:=S.t.Cli.Torrent(hash); ok && t!=nil {
-		readiness = int32(100*(float64(t.BytesCompleted())/float64(t.BytesMissing()+t.BytesCompleted())))
-	}
-	return &snapshotdownloader.SnapshotsInfo{
-		Name: request.Name,
-		Networkid: request.Networkid,
-		SnapshotBlock: SnapshotBlock,
-		Readiness: readiness,
-	}, nil
+	//var readiness int32
+	//if t, ok:=S.t.Cli.Torrent(hash); ok && t!=nil {
+	//	readiness = int32(100*(float64(t.BytesCompleted())/float64(t.BytesMissing()+t.BytesCompleted())))
+	//}
+	return &empty.Empty{}, nil
 }
 
-func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotdownloader.SnapshotsInfoRequest) (*snapshotdownloader.SnapshotsInfoReply, error) {
+func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *empty.Empty) (*snapshotdownloader.SnapshotsInfoReply, error) {
 	reply:= snapshotdownloader.SnapshotsInfoReply{}
 	//for _,t:=range S.t.Cli.Torrents() {
 	//	reply.Info=append(reply.Info, &SnapshotsInfoReply_SnapshotsInfo{

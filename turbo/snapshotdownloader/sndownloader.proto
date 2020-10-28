@@ -1,18 +1,17 @@
-
-
 syntax = "proto3";
+import "google/protobuf/empty.proto";
 
-option go_package = "snapshotdownloader";
+option go_package = "./snapshotdownloader;snapshotdownloader";
 option java_multiple_files = true;
-option java_package = "snapshotdownloader";
+option java_package = "io.turbo-geth.turbo.p2p";
 
 package snapshotdownloader;
 
 // The greeter service definition.
 service Downloader {
   // Sends a greeting
-  rpc Download (DownloadSnapshotRequest) returns (SnapshotsInfo) {}
-  rpc Snapshots (SnapshotsInfoRequest) returns (SnapshotsInfoReply) {}
+  rpc Download (DownloadSnapshotRequest) returns (google.protobuf.Empty) {}
+  rpc Snapshots (google.protobuf.Empty) returns (SnapshotsInfoReply) {}
 }
 
 // The request message containing the user's name.
@@ -26,9 +25,6 @@ message SnapshotsInfo {
   int32 networkid = 2;
   int32 readiness = 3;
   uint64 snapshotBlock = 4;
-}
-
-message SnapshotsInfoRequest {
 }
 
 
