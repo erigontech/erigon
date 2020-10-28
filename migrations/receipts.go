@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
@@ -170,6 +171,14 @@ var receiptsOnePerTx = Migration{
 		}()
 		if err := db.Walk(dbutils.BlockReceiptsPrefix, nil, 0, func(k, v []byte) (bool, error) {
 			blockNum := binary.BigEndian.Uint64(k[:8])
+			canonicalHash, err := rawdb.ReadCanonicalHash(db, blockNum)
+			if err != nil {
+				return false, err
+			}
+			if !bytes.Equal(k[8:], canonicalHash[:]) {
+				return true, nil
+			}
+
 			select {
 			default:
 			case <-logEvery.C:
