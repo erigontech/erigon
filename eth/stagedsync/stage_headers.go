@@ -198,11 +198,18 @@ Error: %v
 		} else if newCanonical && hashesMatch {
 			forkBlockNumber = number
 		}
-		rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td)
+
+		if err := rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td); err != nil {
+			return false, 0, err
+		}
 		if newCanonical {
-			rawdb.WriteCanonicalHeader(batch, header)
+			if err := rawdb.WriteCanonicalHeader(batch, header); err != nil {
+				return false, 0, err
+			}
 		} else {
-			rawdb.WriteNonCanonicalHeader(batch, header)
+			if err := rawdb.WriteNonCanonicalHeader(batch, header); err != nil {
+				return false, 0, err
+			}
 		}
 	}
 
@@ -220,12 +227,13 @@ Error: %v
 			}
 
 			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)
-			rawdb.WriteCanonicalHeader(batch, forkHeader)
+			if err := rawdb.WriteCanonicalHeader(batch, forkHeader); err != nil {
+				return false, 0, err
+			}
 			forkBlockNumber = forkHeader.Number.Uint64() - 1
 			forkHash = forkHeader.ParentHash
 		}
-		rawdb.WriteCanonicalHeader(batch, rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1))
-		if err != nil {
+		if err := rawdb.WriteCanonicalHeader(batch, rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)); err != nil {
 			return false, 0, err
 		}
 	}

@@ -185,12 +185,14 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 			headHeader = hc.GetHeader(headHash, headNumber)
 		)
 		for {
-			header := rawdb.ReadHeader(hc.chainDb, headHash, headNumber)
-			h := header.Hash()
+			h, err := rawdb.ReadCanonicalHash(hc.chainDb, headNumber)
+			if err != nil {
+				return NonStatTy, err
+			}
 			if h == headHash {
 				break
 			}
-			err = rawdb.WriteCanonicalHeader(markerBatch, headHeader)
+			err = rawdb.WriteCanonicalHeader(markerBatch, rawdb.ReadHeader(hc.chainDb, headHash, headNumber))
 			if err != nil {
 				return NonStatTy, err
 			}
@@ -200,7 +202,7 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 			headHeader = hc.GetHeader(headHash, headNumber)
 		}
 		// Extend the canonical chain with the new header
-		err = rawdb.WriteCanonicalHeader(markerBatch, header)
+		err = rawdb.WriteCanonicalHeader(markerBatch, rawdb.ReadHeader(hc.chainDb, hash, number))
 		if err != nil {
 			return NonStatTy, err
 		}
@@ -451,7 +453,15 @@ func (hc *HeaderChain) HasHeader(hash common.Hash, number uint64) bool {
 // GetHeaderByNumber retrieves a block header from the database by number,
 // caching it (associated with its hash) if found.
 func (hc *HeaderChain) GetHeaderByNumber(number uint64) *types.Header {
-	return rawdb.ReadHeaderByNumber(hc.chainDb, number)
+	hash, err := rawdb.ReadCanonicalHash(hc.chainDb, number)
+	if err != nil {
+		panic(err)
+	}
+
+	if hash == (common.Hash{}) {
+		return nil
+	}
+	return hc.GetHeader(hash, number)
 }
 
 func (hc *HeaderChain) GetCanonicalHash(number uint64) common.Hash {

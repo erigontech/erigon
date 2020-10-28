@@ -1470,7 +1470,8 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 		// But we still write the blocks to the database because others might build on top of them
 		td := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)
-		for _, block := range chain {
+		for i, block := range chain {
+			fmt.Println(i)
 			log.Warn("Saving", "block", block.NumberU64(), "hash", block.Hash())
 			td = new(big.Int).Add(block.Difficulty(), td)
 			if err := rawdb.WriteBlock(ctx, bc.db, block); err != nil {

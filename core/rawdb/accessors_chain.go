@@ -57,7 +57,9 @@ func WriteCanonicalHeader(db ethdb.Database, header *types.Header) error {
 	)
 
 	if hasCanonicalHeader(db, hash, number, false) {
-		WriteNonCanonicalHeader(db, ReadHeaderByNumber(db, number))
+		if err := WriteNonCanonicalHeader(db, ReadHeaderByNumber(db, number)); err != nil {
+			return err
+		}
 	}
 
 	data, err := rlp.EncodeToBytes(header)
@@ -66,15 +68,13 @@ func WriteCanonicalHeader(db ethdb.Database, header *types.Header) error {
 		return err
 	}
 	if err := db.Put(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(number), append(hash.Bytes(), data...)); err != nil {
-		log.Crit("Failed to store number to hash mapping", "err", err)
 		return err
 	}
-	deleteNonCanonicalHeader(db, hash, number)
-	return nil
+	return deleteNonCanonicalHeader(db, hash, number)
 }
 
 // DeleteCanonicalHeader removes a canonical header .
-func DeleteCanonicalHeader(db ethdb.Database, number uint64) error {
+func DeleteCanonicalHeader(db ethdb.MinDatabase, number uint64) error {
 	data, err := db.Get(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(number))
 	if err != nil {
 		return err
@@ -86,7 +86,6 @@ func DeleteCanonicalHeader(db ethdb.Database, number uint64) error {
 
 	hash := common.BytesToHash(data[:common.HashLength])
 	if err := db.Delete(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(number)); err != nil {
-		log.Crit("Failed to delete number to hash mapping", "err", err)
 		return err
 	}
 
@@ -241,6 +240,9 @@ func ReadHeaderRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawVa
 		if len(data) == 0 {
 			return data
 		}
+		if hash != common.BytesToHash(data[:common.HashLength]) {
+			return rlp.RawValue{}
+		}
 		return common.CopyBytes(data[common.HashLength:])
 	}
 	return data
@@ -258,11 +260,11 @@ func hasCanonicalHeader(db DatabaseReader, hash common.Hash, number uint64, chec
 	if !checkHash {
 		return true
 	}
-	canonicalHash, _ := ReadCanonicalHash(db, number)
-	if hash != canonicalHash {
+	canonicalHash, err := ReadCanonicalHash(db, number)
+	if err != nil {
 		return false
 	}
-	return true
+	return hash == canonicalHash
 }
 
 func hasNonCanonicalHeader(db DatabaseReader, hash common.Hash, number uint64) bool {
@@ -311,7 +313,12 @@ func WriteHeader(ctx context.Context, db DatabaseWriter, header *types.Header) {
 }
 
 // WriteNonCanonicalHeader stores a non canonical block header into the database.
-func WriteNonCanonicalHeader(db DatabaseWriter, header *types.Header) {
+func WriteNonCanonicalHeader(db DatabaseWriter, header *types.Header) error {
+
+	if header == nil {
+		return nil
+	}
+
 	var (
 		hash   = header.Hash()
 		number = header.Number.Uint64()
@@ -319,11 +326,12 @@ func WriteNonCanonicalHeader(db DatabaseWriter, header *types.Header) {
 	// Write the encoded header
 	data, err := rlp.EncodeToBytes(header)
 	if err != nil {
-		log.Crit("Failed to RLP encode header", "err", err)
+		return err
 	}
 	if err := db.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash), data); err != nil {
-		log.Crit("Failed to store header", "err", err)
+		return err
 	}
+	return nil
 }
 
 // DeleteHeader removes all block header data associated with a hash.
@@ -336,19 +344,20 @@ func DeleteHeader(db DatabaseDeleter, hash common.Hash, number uint64) {
 	}
 }
 
-func deleteHeaderWithoutNumber(db ethdb.Database, hash common.Hash, number uint64) {
+func deleteHeaderWithoutNumber(db ethdb.Database, hash common.Hash, number uint64) error {
 	if hasCanonicalHeader(db, hash, number, true) {
 		if err := db.Delete(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(number)); err != nil {
-			log.Crit("Failed to delete header", "err", err)
+			return err
 		}
 	}
-	deleteNonCanonicalHeader(db, hash, number)
+	return deleteNonCanonicalHeader(db, hash, number)
 }
 
-func deleteNonCanonicalHeader(db ethdb.Database, hash common.Hash, number uint64) {
+func deleteNonCanonicalHeader(db DatabaseDeleter, hash common.Hash, number uint64) error {
 	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash)); err != nil {
-		log.Crit("Failed to delete header", "err", err)
+		return err
 	}
+	return nil
 }
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
@@ -742,7 +751,9 @@ func DeleteBlock(db ethdb.Database, hash common.Hash, number uint64) error {
 // DeleteBlockWithoutNumber removes all block data associated with a hash, except
 // the hash to number mapping.
 func DeleteBlockWithoutNumber(db ethdb.Database, hash common.Hash, number uint64) error {
-	DeleteReceipts(db, number)
+	if err := DeleteReceipts(db, number); err != nil {
+		return err
+	}
 	deleteHeaderWithoutNumber(db, hash, number)
 	DeleteBody(db, hash, number)
 	if err := DeleteTd(db, hash, number); err != nil {
@@ -799,7 +810,16 @@ func ReadBlockByHash(db DatabaseReader, hash common.Hash) (*types.Block, error) 
 }
 
 func ReadHeaderByNumber(db DatabaseReader, number uint64) *types.Header {
-	return ReadHeader(db, common.Hash{}, number)
+	data, err := db.Get(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(number))
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		log.Error("ReadHeaderRLP failed", "err", err)
+	}
+	header := new(types.Header)
+	if err := rlp.Decode(bytes.NewReader(data[common.HashLength:]), header); err != nil {
+		log.Error("Invalid block header RLP", "err", err)
+		return nil
+	}
+	return header
 }
 
 func ReadHeaderByHash(db DatabaseReader, hash common.Hash) (*types.Header, error) {
