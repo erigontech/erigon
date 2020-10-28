@@ -43,7 +43,7 @@ tg:
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 hack:
-	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
+	$(GOBUILD) -o $(GOBIN)/hack  -tags "mdbx" ./cmd/hack
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/hack\" to launch hack."
 
@@ -102,8 +102,8 @@ headers:
 	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
 
 db-tools:
-	$(GOBUILD) -o $(GOBIN)/lmdb_stat github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
-	$(GOBUILD) -o $(GOBIN)/lmdb_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
+	$(GOBUILD) -o $(GOBIN)/lmdb_stat  -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
+	$(GOBUILD) -o $(GOBIN)/lmdb_copy  -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
 
 	cd ethdb/mdbx/dist/ && make tools
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
