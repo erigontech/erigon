@@ -227,7 +227,7 @@ Happy testing! 🥤
 Known issues
 ============
 
-#### `htop` shows incorrect memory usage
+## 1. `htop` shows incorrect memory usage
 
 TurboGeth's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
 ([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html), [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
@@ -252,7 +252,7 @@ it impacts performance - one of main TG optimisations: "reduce Disk random acces
 We do not recommend run multiple genesis syncs on same Disk. 
 If genesis sync passed, then it's fine to run multiple TG on same Disk.
 
-#### `go run` doesn't work `no such file or directory: <>./ethdb/mdbx/dist/libmdbx.a`
+## 2. `go run` doesn't work `no such file or directory: <>./ethdb/mdbx/dist/libmdbx.a`
 
 If you are trying to run our binaries with `go run` you might end up with an issue like that
 
