@@ -386,12 +386,9 @@ type segPrefix struct {
 
 // OpcodeTracer re-executes historical transactions in read-only mode
 // and traces them at the opcode level
-func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, historyfile string, numBlocks uint64,
+func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numBlocks uint64,
 	saveOpcodes bool, saveSegments bool) error {
 	blockNumOrig := blockNum
-	if len(historyfile) == 0 {
-		historyfile = chaindata
-	}
 
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -408,9 +405,6 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, hist
 	chainDb := ethdb.MustOpen(chaindata)
 	defer chainDb.Close()
 	historyDb := chainDb
-	if chaindata != historyfile {
-		historyDb = ethdb.MustOpen(historyfile)
-	}
 	historyTx, err1 := historyDb.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		return err1
