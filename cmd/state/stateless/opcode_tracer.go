@@ -2,16 +2,13 @@ package stateless
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -40,7 +37,6 @@ type opcode struct {
 	//MaxStack 		int
 	//MaxRStack 		int
 	Fault    		string
-	//Depth 			int
 }
 
 type	RetStackTop	[]uint32
@@ -59,9 +55,8 @@ type tx struct {
 	OpcodeFault		string		//a fault set by CaptureState
 	Opcodes         sliceOpcodes
 	CodeSize		int
-	//lastOpWasPush 		bool
 	lastPc16   			uint16
-	lastOp				vm.OpCode// = 0xfe // op INVALID
+	lastOp				vm.OpCode
 }
 
 // types for slices are necessary for easyjson's generated un/marshalers
@@ -76,12 +71,7 @@ type opcodeTracer struct {
 	Txs             	slicePtrTx
 	fsumWriter			*bufio.Writer
 	stack 				slicePtrTx
-	//stackIndexes		[]int
-	//showNext			bool
-	//lastLine			string
 	txsInDepth			[]int16
-
-	//SegmentDumps 		sliceSegmentDump
 	saveOpcodes			bool
 	saveSegments		bool
 	blockNumber 		uint64
@@ -112,15 +102,6 @@ func resetOpcodeTracer(ot *opcodeTracer) {
 	// reset the counter of Txs at depth 0
 	ot.txsInDepth[0] = 0
 }
-
-//type ByteSliceAsHex struct {
-//	ByteSlice	[]byte
-//}
-//
-//func (bs ByteSliceAsHex) MarshalJSON() ([]byte, error) {
-//	return json.Marshal(fmt.Sprintf("%x", bs.ByteSlice))
-//}
-
 
 func min(a int, b int) int {
 	if a<b {
@@ -154,12 +135,6 @@ type segmentDump struct {
 	CodeSize	int
 }
 
-
-/*type blockSegments struct {
-	BlockNum uint64
-	Segments []segmentDump
-}*/
-
 type blockTxs struct {
 	BlockNum	uint64
 	Txs 		slicePtrTx
@@ -174,9 +149,7 @@ func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.A
 	if ltid-1 != depth {
 		panic(fmt.Sprintf("Wrong addr slice depth: d=%d, slice len=%d", depth, ltid))
 	}
-	//if depth > ltid-1  {
-	//	ot.txsInDepth = append(ot.txsInDepth, 0)
-	//}
+
 	ot.txsInDepth[depth]++
 	ot.txsInDepth = append(ot.txsInDepth, 0)
 
@@ -188,30 +161,16 @@ func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.A
 		txAddr = strconv.Itoa(int(ot.txsInDepth[depth]))
 	}
 
-	//newSegs := make(sliceSegment, 0, 8)
 	newTx := tx{From: from, To: to,  Create: create, Input: input, Depth: depth, TxAddr: txAddr, lastOp: 0xfe, lastPc16: MaxUint16}
 	ot.Txs = append(ot.Txs, &newTx)
 
 	// take note in our own stack that the tx stack has grown
-	//ltxs := len(ot.Txs)
 	ot.stack = append(ot.stack, &newTx)
-	//newSeg := segmentDump{
-	//	TxAddr:   txAddr,
-	//	Segments: &newSegs,
-	//}
-	//ot.SegmentDumps = append(ot.SegmentDumps, newSeg)
-
-	//ot.showNext = true
-
-	//fmt.Fprintf(ot.summary, "%sStart addr=%s from=%v to=%v d=%d \n", strings.Repeat("\t",depth), txAddr, from.String(), to.String(),depth)
 
 	return nil
 }
 
 func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
-	//lt := len(ot.Txs)
-	//lastEntry := &ot.Txs[lt-1]
-
 	// When a CaptureEnd is called, a Tx has finished. Pop our stack
 	ls := len(ot.stack)
 	currentEntry := ot.stack[ls-1]
@@ -236,23 +195,12 @@ func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t t
 		}
 	}
 
-
 	errstr := ""
 	if err != nil {
 		errstr = err.Error()
 		currentEntry.Fault = errstr
 	}
-	//if currentEntry.OpcodeFault != errstr {
-	//	// This happens (for example) with Out-Of-Gas faults
-	//	fmt.Fprintf(ot.fsumWriter, "CaptureEnd FAULT different to opcode's. opFault=%s, txFault=%s, txaddr=%s tx=%v\n",
-	//		currentEntry.OpcodeFault, errstr, currentEntry.TxAddr, currentEntry.TxHash)
-	//}
 
-
-	//fmt.Fprint(ot.summary, ot.lastLine)
-	//ot.lastLine = ""
-
-	//ot.showNext = true
 	return nil
 }
 
@@ -339,17 +287,6 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 		currentEntry.OpcodeFault = errstr
 	}
 
-
-/*	line := fmt.Sprintf("%s%d-%s", strings.Repeat("\t", currentTxDepth), currentTxDepth, currentTxHash.String() )
-	line += fmt.Sprintf("\tops=%d\tpc=%x\top=%s", len(currentEntry.Opcodes), pc, op.String())
-	if errstr != "" {
-		line += fmt.Sprintf(" ---- FAULT=%s\t", errstr)
-	}
-	//line += stackAsString(st)
-	line += fmt.Sprintf("\n")
-	ot.fsumWriter.WriteString(line)
-	//ot.fsumWriter.Flush()
-*/
 	faultAndRepeated := false
 
 	if pc16 == currentEntry.lastPc16 && op == currentEntry.lastOp {
@@ -409,7 +346,6 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	}
 
 	currentEntry.lastPc16 = pc16
-	//currentEntry.lastOpWasPush = op.IsPush()
 	currentEntry.lastOp = op
 	return nil
 }
@@ -434,8 +370,6 @@ func (ot *opcodeTracer) CaptureAccountWrite(account common.Address) error {
 }
 
 func stackAsString(st *stack.Stack) (str string) {
-	//print the stack
-
 	if l := st.Len(); l>0 {
 		str = fmt.Sprintf("%d:", l)
 		for i := 0; i < l; i++ {
@@ -450,10 +384,10 @@ type segPrefix struct {
 	NumTxs 		uint
 }
 
-// CheckChangeSets re-executes historical transactions in read-only mode
-// and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool,
-	writeReceipts bool, numBlocks uint64, saveOpcodes bool, saveSegments bool) error {
+// OpcodeTracer re-executes historical transactions in read-only mode
+// and traces them at the opcode level
+func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, historyfile string, numBlocks uint64,
+	saveOpcodes bool, saveSegments bool) error {
 	blockNumOrig := blockNum
 	if len(historyfile) == 0 {
 		historyfile = chaindata
@@ -581,9 +515,6 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 					fWriter.WriteString(",\n")
 				}
 
-				//err = fwEnc.Encode(sp)
-				//check(err)
-
 				fWriter.WriteString("\""+bnStr+"\":[\n")
 
 				for i:=uint(0); i < sp.NumTxs; i++ {
@@ -610,7 +541,6 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			if  lsp>0 || lsd > 0  {
 				panic(fmt.Sprintf("Segment channels not empty at the end: sp=%d sd=%d", lsp, lsd))
 			}
-
 		}()
 	}
 
@@ -626,21 +556,14 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		if fsum == nil {
 			fsum, err = os.Create("./summary-"+bnStr)
 			check(err)
-			//defer fsum.Close()
 			ot.fsumWriter = bufio.NewWriter(fsum)
-			//defer summary.Flush()
 		}
 		
 		dbstate := state.NewPlainDBState(historyTx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		intraBlockState.SetTracer(ot)
-		csw := state.NewChangeSetWriterPlain(block.NumberU64() - 1)
 		var blockWriter state.StateWriter
-		if nocheck {
-			blockWriter = noOpWriter
-		} else {
-			blockWriter = csw
-		}
+		blockWriter = noOpWriter
 
 		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, bc, block, vmConfig)
 		if err1 != nil {
@@ -652,11 +575,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 			}
 		}
-		if writeReceipts {
-			if err := rawdb.WriteReceipts(batch, block.NumberU64(), receipts); err != nil {
-				return err
-			}
-		}
+
 		if batch.BatchSize() >= batch.IdealBatchSize() {
 			log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
 			if err := batch.CommitAndBegin(context.Background()); err != nil {
@@ -664,121 +583,8 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			}
 		}
 
-		if !nocheck {
-			accountChanges, err := csw.GetAccountChanges()
-			if err != nil {
-				return err
-			}
-			var expectedAccountChanges []byte
-			expectedAccountChanges, err = changeset.EncodeAccountsPlain(accountChanges)
-			if err != nil {
-				return err
-			}
-
-			dbAccountChanges, err := ethdb.GetChangeSetByBlock(historyDb, false /* storage */, blockNum)
-			if err != nil {
-				return err
-			}
-
-			if !bytes.Equal(dbAccountChanges, expectedAccountChanges) {
-				fmt.Printf("Unexpected account changes in block %d\nIn the database: ======================\n", blockNum)
-				if err = changeset.AccountChangeSetPlainBytes(dbAccountChanges).Walk(func(k, v []byte) error {
-					fmt.Printf("0x%x: %x\n", k, v)
-					return nil
-				}); err != nil {
-					return err
-				}
-				fmt.Printf("Expected: ==========================\n")
-				if err = changeset.AccountChangeSetPlainBytes(expectedAccountChanges).Walk(func(k, v []byte) error {
-					fmt.Printf("0x%x %x\n", k, v)
-					return nil
-				}); err != nil {
-					return err
-				}
-				return nil
-			}
-
-			expectedStorageChanges, err := csw.GetStorageChanges()
-			if err != nil {
-				return err
-			}
-			expectedtorageSerialized := make([]byte, 0)
-			if expectedStorageChanges.Len() > 0 {
-				expectedtorageSerialized, err = changeset.EncodeStoragePlain(expectedStorageChanges)
-				if err != nil {
-					return err
-				}
-			}
-
-			dbStorageChanges, err := ethdb.GetChangeSetByBlock(historyDb, true /* storage */, blockNum)
-			if err != nil {
-				return err
-			}
-			equal := true
-			if !bytes.Equal(dbStorageChanges, expectedtorageSerialized) {
-				var addrs [][]byte
-				var keys [][]byte
-				var vals [][]byte
-				if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
-					addrs = append(addrs, common.CopyBytes(k[:common.AddressLength]))
-					keys = append(keys, common.CopyBytes(k[common.AddressLength+common.IncarnationLength:]))
-					vals = append(vals, common.CopyBytes(v))
-					return nil
-				}); err != nil {
-					return err
-				}
-				i := 0
-				if err = changeset.StorageChangeSetPlainBytes(expectedtorageSerialized).Walk(func(k, v []byte) error {
-					if !equal {
-						return nil
-					}
-					if i >= len(addrs) {
-						equal = false
-						return nil
-					}
-					if !bytes.Equal(k[:common.AddressLength], addrs[i]) {
-						equal = false
-						return nil
-					}
-					if !bytes.Equal(k[common.AddressLength+common.IncarnationLength:], keys[i]) {
-						equal = false
-						return nil
-					}
-					if !bytes.Equal(v, vals[i]) {
-						equal = false
-						return nil
-					}
-					i++
-					return nil
-				}); err != nil {
-					return err
-				}
-			}
-			if !equal {
-				fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
-				if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
-					fmt.Printf("0x%x: [%x]\n", k, v)
-					return nil
-				}); err != nil {
-					return err
-				}
-				fmt.Printf("Expected: ==========================\n")
-				if err = changeset.StorageChangeSetPlainBytes(expectedtorageSerialized).Walk(func(k, v []byte) error {
-					fmt.Printf("0x%x: [%x]\n", k, v)
-					return nil
-				}); err != nil {
-					return err
-				}
-				return nil
-			}
-		}
-
-
 		// go through the traces and act on them
-		// To save the segments, we need a clear structure to later read the gob: blockNum, Num of txs, and for each tx save its data and segments
 		if saveSegments {
-			//fsegEnc.Encode(blockNum)
-			//fsegEnc.Encode(len(ot.Txs))
 			sp := segPrefix{blockNum,uint(len(ot.Txs))}
 			chanSegPrefix <- sp
 		}
@@ -838,10 +644,8 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			fmt.Fprintf(ot.fsumWriter, "Tx FAULT\tb=%d opF=%s\tTxF=%s\ttaddr=%s\ttx=%s\n", blockNum, t.OpcodeFault, t.Fault, t.TxAddr, ths)
 		}
 		if chanSegmentsIsBlocking {
-			log.Info("Channel for segments got full and caused some blocking", "block", blockNum)
-
+			log.Debug("Channel for segments got full and caused some blocking", "block", blockNum)
 		}
-
 
 		if saveOpcodes {
 			// just save everything
@@ -849,7 +653,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			chanOpcodesIsBlocking := len(chanOpcodes) == cap(chanOpcodes)-1
 			chanOpcodes <- bt
 			if chanOpcodesIsBlocking {
-				log.Info("Channel for opcodes got full and caused some blocking", "block", blockNum)
+				log.Debug("Channel for opcodes got full and caused some blocking", "block", blockNum)
 			}
 		}
 
@@ -878,20 +682,12 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			ot.fsumWriter.Flush()
 			fi, err := fsum.Stat()
 			check(err)
+			// if the summary file for the just-finished range of blocks is empty, delete it
 			if fi.Size() == 0 {
 				os.Remove(fi.Name())
-			} else {
-				//log.Info("Wrote summary file")
 			}
 			fsum.Close()
 			fsum = nil
-
-		}
-	}
-	if writeReceipts {
-		log.Info("Committing final receipts", "batch size", common.StorageSize(batch.BatchSize()))
-		if _, err := batch.Commit(); err != nil {
-			return err
 		}
 	}
 
