@@ -297,7 +297,7 @@ func testMultiCursor(t *testing.T, db ethdb.KV, bucket1, bucket2 string) {
 	}
 }
 
-func TestMultipleBuckets(t *testing.T) {
+func _TestMultipleBuckets(t *testing.T) {
 	writeDBs, readDBs, closeAll := setupDatabases(ethdb.DefaultBucketConfigs)
 	defer closeAll()
 
