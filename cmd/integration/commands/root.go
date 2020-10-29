@@ -28,41 +28,51 @@ func RootCommand() *cobra.Command {
 }
 
 func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
-	var kv ethdb.KV
-	if database == "mdbx" {
-		opts := ethdb.NewMDBX().Path(path)
-		if mapSizeStr != "" {
-			var mapSize datasize.ByteSize
-			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
-			opts = opts.MapSize(mapSize)
-		}
-		if freelistReuse > 0 {
-			opts = opts.MaxFreelistReuse(uint(freelistReuse))
-		}
-		kv = opts.MustOpen()
-	} else {
-		opts := ethdb.NewLMDB().Path(path)
-		if mapSizeStr != "" {
-			var mapSize datasize.ByteSize
-			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
-			opts = opts.MapSize(mapSize)
-		}
-		if freelistReuse > 0 {
-			opts = opts.MaxFreelistReuse(uint(freelistReuse))
-		}
-		kv = opts.MustOpen()
-	}
-
-	db := ethdb.NewObjectDatabase(kv)
 	if applyMigrations {
+		db := ethdb.NewObjectDatabase(openKV(path, true))
 		if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
 			panic(err)
 		}
+		db.Close()
 	}
+
+	db := ethdb.NewObjectDatabase(openKV(path, false))
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
 	if err != nil {
 		panic(err)
 	}
 
 	return db
+}
+
+func openKV(path string, exclusive bool) ethdb.KV {
+	if database == "mdbx" {
+		opts := ethdb.NewMDBX().Path(path)
+		if exclusive {
+			opts = opts.Exclusive()
+		}
+		if mapSizeStr != "" {
+			var mapSize datasize.ByteSize
+			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
+			opts = opts.MapSize(mapSize)
+		}
+		if freelistReuse > 0 {
+			opts = opts.MaxFreelistReuse(uint(freelistReuse))
+		}
+		return opts.MustOpen()
+	}
+
+	opts := ethdb.NewLMDB().Path(path)
+	if exclusive {
+		opts = opts.Exclusive()
+	}
+	if mapSizeStr != "" {
+		var mapSize datasize.ByteSize
+		must(mapSize.UnmarshalText([]byte(mapSizeStr)))
+		opts = opts.MapSize(mapSize)
+	}
+	if freelistReuse > 0 {
+		opts = opts.MaxFreelistReuse(uint(freelistReuse))
+	}
+	return opts.MustOpen()
 }

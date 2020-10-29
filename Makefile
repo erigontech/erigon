@@ -1,6 +1,6 @@
 GOBIN = $(CURDIR)/build/bin
 GOBUILD = env GO111MODULE=on go build -trimpath
-GOTEST = go test ./... -p 1
+GOTEST = go test ./... -p 1 --tags 'mdbx'
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
 ifeq ($(LATEST_COMMIT),)
@@ -31,19 +31,19 @@ docker-compose:
 	docker-compose up
 
 geth:
-	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
+	$(GOBUILD) -o $(GOBIN)/tg -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 tg:
 	@echo "Building mdbx"
 	cd ethdb/mdbx/dist/ && make clean && make libmdbx.a && cat config.h
-	$(GOBUILD) -o $(GOBIN)/tg -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
+	$(GOBUILD) -o $(GOBIN)/tg -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 hack:
-	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
+	$(GOBUILD) -o $(GOBIN)/hack  -tags "mdbx" ./cmd/hack
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/hack\" to launch hack."
 
@@ -81,16 +81,6 @@ rpcdaemon:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
-semantics: semantics/z3/build/libz3.a
-	build/env.sh go run build/ci.go install ./cmd/semantics
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/semantics\" to launch semantics."
-
-semantics/z3/build/libz3.a:
-	cd semantics/z3 && python scripts/mk_make.py --staticlib
-	cd semantics/z3/build && ${MAKE} -j8
-	cp semantics/z3/build/libz3.a .
-
 integration:
 	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
 	@echo "Done building."
@@ -103,8 +93,8 @@ headers:
 
 db-tools:
 	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; DESTDIR=$(GOBIN) make clean mdb_stat mdb_copy mdb_dump mdb_load; cd ../../../../..; rm -rf vendor
-	$(GOBUILD) -o $(GOBIN)/lmdbgo_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
-	$(GOBUILD) -o $(GOBIN)/lmdbgo_stat github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
+	$(GOBUILD) -o $(GOBIN)/lmdbgo_copy -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
+	$(GOBUILD) -o $(GOBIN)/lmdbgo_stat -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
 
 	cd ethdb/mdbx/dist/ && make tools
 	cp ethdb/mdbx/dist/mdbx_chk $(GOBIN)
@@ -118,34 +108,38 @@ ethdb/mdbx/dist/libmdbx.a:
 	echo "Building mdbx"
 	cd ethdb/mdbx/dist/ && make libmdbx.a && cat config.h
 
-test: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
+test: ethdb/mdbx/dist/libmdbx.a
 	$(GOTEST)
 
-test-lmdb: semantics/z3/build/libz3.a
+test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
 
-test-mdbx: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
-	TEST_DB=mdbx $(GOTEST)
+test-mdbx: ethdb/mdbx/dist/libmdbx.a
+	TEST_DB=mdbx $(GOTEST_MDBX)
 
 lint: lintci
 
-lintci: semantics/z3/build/libz3.a ethdb/mdbx/dist/libmdbx.a
+lintci: ethdb/mdbx/dist/libmdbx.a
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step1.yml \
 	    --exclude "which can be annoying to use"
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step2.yml
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step3.yml
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+		--build-tags="mdbx" \
 	    --config ./.golangci/step4.yml
 
 lintci-deps:

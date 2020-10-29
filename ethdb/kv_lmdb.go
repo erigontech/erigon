@@ -18,6 +18,8 @@ import (
 	"github.com/prometheus/tsdb/fileutil"
 )
 
+var _ DbCopier = &LmdbKV{}
+
 const (
 	NonExistingDBI dbutils.DBI = 999_999_999
 )
@@ -86,7 +88,7 @@ func DefaultBucketConfigs(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg 
 	return defaultBuckets
 }
 
-func (opts LmdbOpts) Open() (KV, error) {
+func (opts LmdbOpts) Open() (kv KV, err error) {
 	env, err := lmdb.NewEnv()
 	if err != nil {
 		return nil, err
@@ -131,14 +133,6 @@ func (opts LmdbOpts) Open() (KV, error) {
 		}
 	}
 
-	if opts.exclusive {
-		releaser, _, err := fileutil.Flock(path.Join(opts.path, "data.mdb"))
-		if err != nil {
-			return nil, err
-		}
-		defer releaser.Release()
-	}
-
 	var flags uint = lmdb.NoReadahead
 	if opts.readOnly {
 		flags |= lmdb.Readonly
@@ -147,18 +141,40 @@ func (opts LmdbOpts) Open() (KV, error) {
 		flags |= lmdb.NoMetaSync
 	}
 	flags |= lmdb.NoSync
+
+	var exclusiveLock fileutil.Releaser
+	if opts.exclusive {
+		exclusiveLock, _, err = fileutil.Flock(path.Join(opts.path, "LOCK"))
+		if err != nil {
+			return nil, fmt.Errorf("failed exclusive Flock for lmdb, path=%s: %w", opts.path, err)
+		}
+		defer func() { // if kv.Open() returns error - then kv.Close() will not called - just release lock
+			if err != nil && exclusiveLock != nil {
+				_ = exclusiveLock.Release()
+			}
+		}()
+	} else { // try exclusive lock (release immediately)
+		exclusiveLock, _, err = fileutil.Flock(path.Join(opts.path, "LOCK"))
+		if err != nil {
+			return nil, fmt.Errorf("failed exclusive Flock for lmdb, path=%s: %w", opts.path, err)
+		}
+		_ = exclusiveLock.Release()
+	}
+
+	db := &LmdbKV{
+		exclusiveLock: exclusiveLock,
+		opts:          opts,
+		env:           env,
+		log:           logger,
+		wg:            &sync.WaitGroup{},
+		buckets:       dbutils.BucketsCfg{},
+	}
+
 	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
-	db := &LmdbKV{
-		opts:    opts,
-		env:     env,
-		log:     logger,
-		wg:      &sync.WaitGroup{},
-		buckets: dbutils.BucketsCfg{},
-	}
 	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
 		db.buckets[name] = cfg
@@ -251,15 +267,20 @@ func (opts LmdbOpts) MustOpen() KV {
 }
 
 type LmdbKV struct {
-	opts    LmdbOpts
-	env     *lmdb.Env
-	log     log.Logger
-	buckets dbutils.BucketsCfg
-	wg      *sync.WaitGroup
+	opts          LmdbOpts
+	env           *lmdb.Env
+	log           log.Logger
+	buckets       dbutils.BucketsCfg
+	wg            *sync.WaitGroup
+	exclusiveLock fileutil.Releaser
 }
 
 func NewLMDB() LmdbOpts {
 	return LmdbOpts{bucketsCfg: DefaultBucketConfigs}
+}
+func (db *LmdbKV) NewDbWithTheSameParameters() *ObjectDatabase {
+	opts := db.opts
+	return NewObjectDatabase(NewLMDB().Set(opts).MustOpen())
 }
 
 // Close closes db
@@ -267,6 +288,10 @@ func NewLMDB() LmdbOpts {
 func (db *LmdbKV) Close() {
 	if db.env != nil {
 		db.wg.Wait()
+	}
+
+	if db.exclusiveLock != nil {
+		_ = db.exclusiveLock.Release()
 	}
 
 	if db.env != nil {
@@ -284,7 +309,6 @@ func (db *LmdbKV) Close() {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	}
-
 }
 
 func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {

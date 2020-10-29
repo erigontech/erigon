@@ -1,3 +1,5 @@
+//+build mdbx
+
 package ethdb
 
 import (
@@ -17,8 +19,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+var _ DbCopier = &MdbxKV{}
+
 type MdbxOpts struct {
 	inMem            bool
+	exclusive        bool
 	readOnly         bool
 	path             string
 	bucketsCfg       BucketConfigsFunc
@@ -37,6 +42,11 @@ func (opts MdbxOpts) Set(opt MdbxOpts) MdbxOpts {
 
 func (opts MdbxOpts) InMem() MdbxOpts {
 	opts.inMem = true
+	return opts
+}
+
+func (opts MdbxOpts) Exclusive() MdbxOpts {
+	opts.exclusive = true
 	return opts
 }
 
@@ -110,6 +120,9 @@ func (opts MdbxOpts) Open() (KV, error) {
 	}
 	if opts.inMem {
 		flags |= mdbx.NoMetaSync | mdbx.SafeNoSync
+	}
+	if opts.exclusive {
+		flags |= mdbx.Exclusive
 	}
 
 	//flags |= mdbx.LifoReclaim
@@ -250,6 +263,11 @@ func (db *MdbxKV) Close() {
 		}
 	}
 
+}
+
+func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
+	opts := db.opts
+	return NewObjectDatabase(NewMDBX().Set(opts).MustOpen())
 }
 
 func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
