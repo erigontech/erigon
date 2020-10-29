@@ -2,14 +2,13 @@ syntax = "proto3";
 
 import "google/protobuf/empty.proto";
 
-package proto;
+package sentry;
 
-option go_package = "./proto;proto";
-option java_multiple_files = true;
-option java_package = "io.turbo-geth.p2p";
-option java_outer_classname = "P2pSentry";
+option go_package = "./sentry;sentry";
 
-enum OutboundMessageId { GetBlockHeaders = 0; GetBlockBodies = 1; }
+enum OutboundMessageId {
+  GetBlockHeaders = 0; GetBlockBodies = 1; GetNodeData = 2;
+}
 
 message OutboundMessageData {
   OutboundMessageId id = 1;
