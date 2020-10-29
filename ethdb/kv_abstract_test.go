@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
@@ -297,83 +296,83 @@ func testMultiCursor(t *testing.T, db ethdb.KV, bucket1, bucket2 string) {
 	}
 }
 
-func _TestMultipleBuckets(t *testing.T) {
-	writeDBs, readDBs, closeAll := setupDatabases(ethdb.DefaultBucketConfigs)
-	defer closeAll()
-
-	ctx := context.Background()
-
-	for _, db := range writeDBs {
-		db := db
-		msg := fmt.Sprintf("%T", db)
-		t.Run("FillBuckets "+msg, func(t *testing.T) {
-			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-				c := tx.Cursor(dbutils.Buckets[0])
-				for i := uint8(0); i < 10; i++ {
-					require.NoError(t, c.Put([]byte{i}, []byte{i}))
-				}
-				c2 := tx.Cursor(dbutils.Buckets[1])
-				for i := uint8(0); i < 12; i++ {
-					require.NoError(t, c2.Put([]byte{i}, []byte{i}))
-				}
-
-				// delete from first bucket key 5, then will seek on it and expect to see key 6
-				if err := c.Delete([]byte{5}, nil); err != nil {
-					return err
-				}
-				// delete non-existing key
-				if err := c.Delete([]byte{6, 1}, nil); err != nil {
-					return err
-				}
-
-				return nil
-			}); err != nil {
-				require.NoError(t, err)
-			}
-		})
-	}
-
-	for _, db := range readDBs {
-		db := db
-		msg := fmt.Sprintf("%T", db)
-		t.Run("MultipleBuckets "+msg, func(t *testing.T) {
-			counter2, counter := 0, 0
-			var key, value []byte
-			err := db.View(ctx, func(tx ethdb.Tx) error {
-				c := tx.Cursor(dbutils.Buckets[0])
-				for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-					if err != nil {
-						return err
-					}
-					counter++
-				}
-
-				c2 := tx.Cursor(dbutils.Buckets[1])
-				for k, _, err := c2.First(); k != nil; k, _, err = c2.Next() {
-					if err != nil {
-						return err
-					}
-					counter2++
-				}
-
-				c3 := tx.Cursor(dbutils.Buckets[0])
-				k, v, err := c3.Seek([]byte{5})
-				if err != nil {
-					return err
-				}
-				key = common.CopyBytes(k)
-				value = common.CopyBytes(v)
-
-				return nil
-			})
-			require.NoError(t, err)
-			assert.Equal(t, 9, counter)
-			assert.Equal(t, 12, counter2)
-			assert.Equal(t, []byte{6}, key)
-			assert.Equal(t, []byte{6}, value)
-		})
-	}
-}
+//func TestMultipleBuckets(t *testing.T) {
+//	writeDBs, readDBs, closeAll := setupDatabases(ethdb.DefaultBucketConfigs)
+//	defer closeAll()
+//
+//	ctx := context.Background()
+//
+//	for _, db := range writeDBs {
+//		db := db
+//		msg := fmt.Sprintf("%T", db)
+//		t.Run("FillBuckets "+msg, func(t *testing.T) {
+//			if err := db.Update(ctx, func(tx ethdb.Tx) error {
+//				c := tx.Cursor(dbutils.Buckets[0])
+//				for i := uint8(0); i < 10; i++ {
+//					require.NoError(t, c.Put([]byte{i}, []byte{i}))
+//				}
+//				c2 := tx.Cursor(dbutils.Buckets[1])
+//				for i := uint8(0); i < 12; i++ {
+//					require.NoError(t, c2.Put([]byte{i}, []byte{i}))
+//				}
+//
+//				// delete from first bucket key 5, then will seek on it and expect to see key 6
+//				if err := c.Delete([]byte{5}, nil); err != nil {
+//					return err
+//				}
+//				// delete non-existing key
+//				if err := c.Delete([]byte{6, 1}, nil); err != nil {
+//					return err
+//				}
+//
+//				return nil
+//			}); err != nil {
+//				require.NoError(t, err)
+//			}
+//		})
+//	}
+//
+//	for _, db := range readDBs {
+//		db := db
+//		msg := fmt.Sprintf("%T", db)
+//		t.Run("MultipleBuckets "+msg, func(t *testing.T) {
+//			counter2, counter := 0, 0
+//			var key, value []byte
+//			err := db.View(ctx, func(tx ethdb.Tx) error {
+//				c := tx.Cursor(dbutils.Buckets[0])
+//				for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+//					if err != nil {
+//						return err
+//					}
+//					counter++
+//				}
+//
+//				c2 := tx.Cursor(dbutils.Buckets[1])
+//				for k, _, err := c2.First(); k != nil; k, _, err = c2.Next() {
+//					if err != nil {
+//						return err
+//					}
+//					counter2++
+//				}
+//
+//				c3 := tx.Cursor(dbutils.Buckets[0])
+//				k, v, err := c3.Seek([]byte{5})
+//				if err != nil {
+//					return err
+//				}
+//				key = common.CopyBytes(k)
+//				value = common.CopyBytes(v)
+//
+//				return nil
+//			})
+//			require.NoError(t, err)
+//			assert.Equal(t, 9, counter)
+//			assert.Equal(t, 12, counter2)
+//			assert.Equal(t, []byte{6}, key)
+//			assert.Equal(t, []byte{6}, value)
+//		})
+//	}
+//}
 
 func TestReadAfterPut(t *testing.T) {
 	writeDBs, _, closeAll := setupDatabases(ethdb.DefaultBucketConfigs)
