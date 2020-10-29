@@ -22,8 +22,8 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader/bittorrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"io/ioutil"
 	"math/big"
 	"os"
@@ -156,19 +156,19 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	var torrentClient *bittorrent.Client
-	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotdownloader.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
+	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
 		torrentClient = bittorrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotSeeding)
 		err = torrentClient.AddSnapshotsTorrens(chainDb,config.NetworkID, config.SnapshotMode)
 		if err == nil {
 			torrentClient.Download()
 
 			snapshotKV := chainDb.KV()
-			snapshotKV, err = snapshotdownloader.WrapBySnapshots(snapshotKV, stack.Config().ResolvePath("snapshots"), config.SnapshotMode)
+			snapshotKV, err = snapshotsync.WrapBySnapshots(snapshotKV, stack.Config().ResolvePath("snapshots"), config.SnapshotMode)
 			if err != nil {
 				return nil, err
 			}
 			chainDb.SetKV(snapshotKV)
-			err = snapshotdownloader.PostProcessing(chainDb, config.SnapshotMode)
+			err = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
 			if err != nil {
 				return nil, err
 			}

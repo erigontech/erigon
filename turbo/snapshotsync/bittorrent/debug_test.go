@@ -18,7 +18,7 @@ func TestTorrentAddTorrent(t *testing.T) {
 	db := ethdb.NewObjectDatabase(kv)
 
 	cli := New(path, true)
-	err := cli.AddTorrent(context.Background(), db, snapshotdownloader.HeadersSnapshotName, HeadersSnapshotHash)
+	err := cli.AddTorrent(context.Background(), db, snapshotsync.HeadersSnapshotName, HeadersSnapshotHash)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -39,7 +39,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 
 )
 
@@ -187,7 +187,7 @@ type Config struct {
 	LMDB                 bool
 	LMDBMapSize          datasize.ByteSize
 	LMDBMaxFreelistReuse uint
-	SnapshotMode         snapshotdownloader.SnapshotMode
+	SnapshotMode         snapshotsync.SnapshotMode
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener

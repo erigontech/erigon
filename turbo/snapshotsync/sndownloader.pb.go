@@ -4,7 +4,7 @@
 // 	protoc        v3.13.0
 // source: sndownloader.proto
 
-package snapshotdownloader
+package snapshotsync
 
 import (
 	proto "github.com/golang/protobuf/proto"

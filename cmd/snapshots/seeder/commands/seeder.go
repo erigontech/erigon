@@ -1,4 +1,4 @@
-package generate
+package commands
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
-	trnt "github.com/ledgerwatch/turbo-geth/turbo/torrent"
+	trnt "github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"os"
 	"os/signal"
 	"time"

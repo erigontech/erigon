@@ -9,7 +9,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/migrations"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -660,13 +660,13 @@ func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, er
 
 func SetSnapshotKV(db *ethdb.ObjectDatabase, snapshotDir, snapshotMode string) error {
 	if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
-		mode, err := torrent.SnapshotModeFromString(snapshotMode)
+		mode, err := snapshotsync.SnapshotModeFromString(snapshotMode)
 		if err != nil {
 			panic(err)
 		}
 
 		snapshotKV := db.KV()
-		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, snapshotDir, mode)
+		snapshotKV, err = snapshotsync.WrapBySnapshots(snapshotKV, snapshotDir, mode)
 		if err != nil {
 			return err
 		}

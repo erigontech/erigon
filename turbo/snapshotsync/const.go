@@ -1,4 +1,4 @@
-package snapshotdownloader
+package snapshotsync
 
 // generate the messages
 //go:generate protoc --go_out=. "./sndownloader.proto" -I=. -I=./../../build/include/google

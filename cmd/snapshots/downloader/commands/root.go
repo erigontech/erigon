@@ -8,8 +8,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader/bittorrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -30,6 +30,12 @@ func init() {
 
 }
 
+type Config struct {
+	Addr string
+	Dir string
+	Seeding bool
+}
+
 func Execute() {
 	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
 		fmt.Println(err)
@@ -37,11 +43,6 @@ func Execute() {
 	}
 }
 
-type Config struct {
-	Addr string
-	Dir string
-	Seeding bool
-}
 func rootContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -120,7 +121,7 @@ func runDownloader(cmd *cobra.Command, args []string) error{
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer := grpc.NewServer(opts...)
-	snapshotdownloader.RegisterDownloaderServer(grpcServer, bittorrent.NewServer(cfg.Dir, cfg.Seeding))
+	snapshotsync.RegisterDownloaderServer(grpcServer, bittorrent.NewServer(cfg.Dir, cfg.Seeding))
 	go func() {
 		err:=grpcServer.Serve(lis)
 		if err!=nil {

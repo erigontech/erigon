@@ -4,7 +4,7 @@ import (
 	"errors"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 const (
@@ -21,8 +21,8 @@ const (
 var (
 	TorrentHashes =  map[uint64]map[string]metainfo.Hash{
 		params.MainnetChainConfig.ChainID.Uint64(): {
-			snapshotdownloader.HeadersSnapshotName: metainfo.NewHashFromHex(HeadersSnapshotHash),
-			snapshotdownloader.BodiesSnapshotName: metainfo.NewHashFromHex(BlocksSnapshotHash),
+			snapshotsync.HeadersSnapshotName: metainfo.NewHashFromHex(HeadersSnapshotHash),
+			snapshotsync.BodiesSnapshotName:  metainfo.NewHashFromHex(BlocksSnapshotHash),
 		},
 	}
 	ErrInvalidSnapshot = errors.New("this snapshot for this chainID not supported ")

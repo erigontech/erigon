@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"golang.org/x/sync/errgroup"
 	"time"
 )
@@ -99,7 +99,7 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotNa
 	return nil
 }
 
-func (cli *Client) AddSnapshotsTorrens(db ethdb.Database, networkId uint64,  mode snapshotdownloader.SnapshotMode) error {
+func (cli *Client) AddSnapshotsTorrens(db ethdb.Database, networkId uint64,  mode snapshotsync.SnapshotMode) error {
 	ctx := context.Background()
 	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(time.Minute*10))
 	defer cancel()
@@ -107,41 +107,41 @@ func (cli *Client) AddSnapshotsTorrens(db ethdb.Database, networkId uint64,  mod
 
 	if mode.Headers {
 		eg.Go(func() error {
-			hash,ok:= TorrentHashes[networkId][snapshotdownloader.HeadersSnapshotName]
+			hash,ok:= TorrentHashes[networkId][snapshotsync.HeadersSnapshotName]
 			if !ok {
 				return ErrInvalidSnapshot
 			}
-			return cli.AddTorrent(ctx, db, snapshotdownloader.HeadersSnapshotName, hash)
+			return cli.AddTorrent(ctx, db, snapshotsync.HeadersSnapshotName, hash)
 		})
 	}
 	if mode.Bodies {
 		eg.Go(func() error {
-			hash,ok:= TorrentHashes[networkId][snapshotdownloader.BodiesSnapshotName]
+			hash,ok:= TorrentHashes[networkId][snapshotsync.BodiesSnapshotName]
 			if !ok {
 				return ErrInvalidSnapshot
 			}
 
-			return cli.AddTorrent(ctx, db, snapshotdownloader.BodiesSnapshotName, hash)
+			return cli.AddTorrent(ctx, db, snapshotsync.BodiesSnapshotName, hash)
 		})
 	}
 	if mode.State {
 		eg.Go(func() error {
-			hash,ok:= TorrentHashes[networkId][snapshotdownloader.StateSnapshotName]
+			hash,ok:= TorrentHashes[networkId][snapshotsync.StateSnapshotName]
 			if !ok {
 				return ErrInvalidSnapshot
 			}
 
-			return cli.AddTorrent(ctx, db, snapshotdownloader.StateSnapshotName, hash)
+			return cli.AddTorrent(ctx, db, snapshotsync.StateSnapshotName, hash)
 		})
 	}
 	if mode.Receipts {
 		eg.Go(func() error {
-			hash,ok:= TorrentHashes[networkId][snapshotdownloader.ReceiptsSnapshotName]
+			hash,ok:= TorrentHashes[networkId][snapshotsync.ReceiptsSnapshotName]
 			if !ok {
 				return ErrInvalidSnapshot
 			}
 
-			return cli.AddTorrent(ctx, db, snapshotdownloader.ReceiptsSnapshotName, hash)
+			return cli.AddTorrent(ctx, db, snapshotsync.ReceiptsSnapshotName, hash)
 		})
 	}
 	err := eg.Wait()

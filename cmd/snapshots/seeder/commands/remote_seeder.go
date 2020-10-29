@@ -1,23 +1,19 @@
-package generate
+package commands
 
 import (
 	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader/bittorrent"
 	"os"
 	"os/signal"
 	"time"
 )
 
 func SeedSnapshots(dir string) error {
-	client := torrent.New(dir, torrent.SnapshotMode{
-		Headers:  true,
-		Bodies:   true,
-		State:    false,
-		Receipts: false,
-	}, true)
+	client := bittorrent.New(dir, true)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -29,7 +25,9 @@ func SeedSnapshots(dir string) error {
 	}()
 
 	db := ethdb.NewLMDB().Path(dir + "/tmpdb").MustOpen()
-	err := client.Run(ethdb.NewObjectDatabase(db))
+	//todo
+	client.AddSnapshotsTorrens(ethdb.NewObjectDatabase(db), 1, snapshotsync.SnapshotMode{})
+	//err := client.Run(ethdb.NewObjectDatabase(db))
 	if err != nil {
 		return err
 	}

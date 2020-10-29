@@ -1,9 +1,10 @@
-package generate
+package commands
 
 import (
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
+	"github.com/spf13/cobra"
+
 	"math/big"
 	"os"
 	"os/signal"
@@ -12,11 +13,28 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-//example: go run cmd/state/main.go headersSnapshot --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode "hb"
+func init() {
+	//commands.withSnapshotData(generateHeadersSnapshotCmd)
+	rootCmd.AddCommand(generateHeadersSnapshotCmd)
+}
+
+var generateHeadersSnapshotCmd = &cobra.Command{
+	Use:   "headers",
+	Short: "Generate headers snapshot",
+	Example: "go run cmd/state/main.go headersSnapshot --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\"",
+	ValidArgs: []string{"chaindata", "snapshotdir", "block"},
+	//ArgAliases : []string{"chaindata", "snapshotdir", "block"},
+	Args: cobra.OnlyValidArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return HeaderSnapshot(chaindata, snapshotFile, block, snapshotDir, snapshotMode)
+	},
+}
+
 func HeaderSnapshot(dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	if snapshotPath == "" {
 		return errors.New("empty snapshot path")
@@ -28,13 +46,13 @@ func HeaderSnapshot(dbPath, snapshotPath string, toBlock uint64, snapshotDir str
 	kv := ethdb.NewLMDB().Path(dbPath).MustOpen()
 
 	if snapshotDir != "" {
-		var mode torrent.SnapshotMode
-		mode, err = torrent.SnapshotModeFromString(snapshotMode)
+		var mode snapshotsync.SnapshotMode
+		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
 		if err != nil {
 			return err
 		}
 
-		kv, err = torrent.WrapBySnapshots(kv, snapshotDir, mode)
+		kv, err = snapshotsync.WrapBySnapshots(kv, snapshotDir, mode)
 		if err != nil {
 			return err
 		}

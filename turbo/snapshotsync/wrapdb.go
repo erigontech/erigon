@@ -1,4 +1,4 @@
-package snapshotdownloader
+package snapshotsync
 
 import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"

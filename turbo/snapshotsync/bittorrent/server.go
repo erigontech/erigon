@@ -8,7 +8,7 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"time"
 )
 
@@ -24,12 +24,12 @@ func NewServer(dir string, seeding bool) *SNDownloaderServer {
 }
 
 type SNDownloaderServer struct {
-	snapshotdownloader.DownloaderServer
+	snapshotsync.DownloaderServer
 	t *Client
 	db ethdb.Database
 }
 
-func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotdownloader.DownloadSnapshotRequest) (*empty.Empty, error) {
+func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotsync.DownloadSnapshotRequest) (*empty.Empty, error) {
 	m,ok:=TorrentHashes[uint64(request.Networkid)]
 	if !ok {
 		return nil, ErrNotSupportedNetworkID
@@ -52,8 +52,8 @@ func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotdown
 	return &empty.Empty{}, nil
 }
 
-func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *empty.Empty) (*snapshotdownloader.SnapshotsInfoReply, error) {
-	reply:= snapshotdownloader.SnapshotsInfoReply{}
+func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *empty.Empty) (*snapshotsync.SnapshotsInfoReply, error) {
+	reply:= snapshotsync.SnapshotsInfoReply{}
 	//for _,t:=range S.t.Cli.Torrents() {
 	//	reply.Info=append(reply.Info, &SnapshotsInfoReply_SnapshotsInfo{
 	//		Name: t.Name(),

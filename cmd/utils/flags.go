@@ -20,7 +20,7 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -406,7 +406,7 @@ var (
 * s - download state snapshot
 * r - download receipts snapshot
 `,
-		Value: snapshotdownloader.DefaultSnapshotMode.ToString(),
+		Value: snapshotsync.DefaultSnapshotMode.ToString(),
 	}
 	SeedSnapshotsFlag = cli.BoolTFlag{
 		Name:  "seed-snapshots",
@@ -1596,7 +1596,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.StorageMode = mode
-	snMode, err := snapshotdownloader.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
+	snMode, err := snapshotsync.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
 	if err != nil {
 		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
