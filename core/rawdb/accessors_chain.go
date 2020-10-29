@@ -70,6 +70,7 @@ func WriteCanonicalHeader(db ethdb.Database, header *types.Header) error {
 	if err := db.Put(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(number), append(hash.Bytes(), data...)); err != nil {
 		return err
 	}
+
 	return deleteNonCanonicalHeader(db, hash, number)
 }
 
@@ -353,7 +354,10 @@ func deleteHeaderWithoutNumber(db ethdb.Database, hash common.Hash, number uint6
 	return deleteNonCanonicalHeader(db, hash, number)
 }
 
-func deleteNonCanonicalHeader(db DatabaseDeleter, hash common.Hash, number uint64) error {
+func deleteNonCanonicalHeader(db ethdb.Database, hash common.Hash, number uint64) error {
+	if !hasNonCanonicalHeader(db, hash, number) {
+		return nil
+	}
 	if err := db.Delete(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash)); err != nil {
 		return err
 	}
