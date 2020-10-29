@@ -239,6 +239,7 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto_sentry
 		if err != nil {
 			log.Error("Recovery from file failed, will start from scratch", "error", err)
 		}
+		hd.SetHardCodedTips(hardTips)
 		// Insert hard-coded headers if present
 		if _, err := os.Stat("hard-coded-headers.dat"); err == nil {
 			if f, err1 := os.Open("hard-coded-headers.dat"); err1 == nil {
