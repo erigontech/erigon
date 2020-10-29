@@ -201,7 +201,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 			return nil // nothing to delete after end of bucket
 		}
 		if len(v) == 0 {
-			if err := tx.Delete(bucket, k); err != nil {
+			if err := tx.Delete(bucket, k, nil); err != nil {
 				return err
 			}
 			return nil
