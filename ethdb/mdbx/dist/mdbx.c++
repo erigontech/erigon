@@ -11,7 +11,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_ALLOY 1n#define MDBX_BUILD_SOURCERY e8754d452194a57d79e25d7c7923f991b403b70c238ecfb3ce34dab15aa2ddde_v0_9_1_41_g97b47de
+#define MDBX_ALLOY 1n#define MDBX_BUILD_SOURCERY 9841d0290164f3458317aeeb50fd9784b9f323706a9cdb3fdb3911cfdee9ac90_v0_9_1_66_g16c900b
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -1979,7 +1979,7 @@ typedef struct MDBX_meta {
 typedef struct MDBX_page {
   union {
     struct MDBX_page *mp_next; /* for in-memory list of freed pages */
-    uint64_t mp_txnid;         /* txnid during which the page has been COW-ed */
+    uint64_t mp_txnid;         /* txnid that committed this page */
   };
   uint16_t mp_leaf2_ksize; /* key size if this is a LEAF2 page */
 #define P_BRANCH 0x01      /* branch page */

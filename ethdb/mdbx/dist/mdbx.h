@@ -1163,7 +1163,7 @@ enum MDBX_env_flags_t {
 
   /** Don't sync anything but keep previous steady commits.
    *
-   * Like \ref MDBX_UTTERLY_NOSYNC the `MDBX_SAFE_NOSYNC` flag similarly disable
+   * Like \ref MDBX_UTTERLY_NOSYNC the `MDBX_SAFE_NOSYNC` flag disable similarly
    * flush system buffers to disk when committing a transaction. But there is a
    * huge difference in how are recycled the MVCC snapshots corresponding to
    * previous "steady" transactions (see below).
@@ -2833,9 +2833,9 @@ struct MDBX_txn_info {
   uint64_t txn_id;
 
   /** For READ-ONLY transaction: the lag from a recent MVCC-snapshot, i.e. the
-     number of committed transaction since read transaction started. For WRITE
-     transaction (provided if `scan_rlt=true`): the lag of the oldest reader
-     from current transaction (i.e. at least 1 if any reader running). */
+     number of committed transaction since read transaction started.
+     For WRITE transaction (provided if `scan_rlt=true`): the lag of the oldest
+     reader from current transaction (i.e. at least 1 if any reader running). */
   uint64_t txn_reader_lag;
 
   /** Used space by this transaction, i.e. corresponding to the last used
@@ -2859,7 +2859,8 @@ struct MDBX_txn_info {
 
   /** For READ-ONLY transaction: the space available for writer(s) and that
      must be exhausted for reason to call the Handle-Slow-Readers callback for
-     this read transaction. For WRITE transaction: the space inside transaction
+     this read transaction.
+     For WRITE transaction: the space inside transaction
      that left to `MDBX_TXN_FULL` error. */
   uint64_t txn_space_leftover;
 

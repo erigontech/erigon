@@ -2001,7 +2001,7 @@ typedef struct MDBX_meta {
 typedef struct MDBX_page {
   union {
     struct MDBX_page *mp_next; /* for in-memory list of freed pages */
-    uint64_t mp_txnid;         /* txnid during which the page has been COW-ed */
+    uint64_t mp_txnid;         /* txnid that committed this page */
   };
   uint16_t mp_leaf2_ksize; /* key size if this is a LEAF2 page */
 #define P_BRANCH 0x01      /* branch page */
@@ -3234,7 +3234,6 @@ static MDBX_envinfo envinfo;
 static int mode = GLOBAL;
 
 static MDBX_val kbuf, dbuf;
-static MDBX_val k0buf;
 
 #define STRLENOF(s) (sizeof(s) - 1)
 
@@ -3597,11 +3596,9 @@ int main(int argc, char *argv[]) {
   MDBX_cursor *mc = nullptr;
   MDBX_dbi dbi;
   char *envname = nullptr;
-  int envflags = MDBX_UTTERLY_NOSYNC, putflags = 0;
-  bool append = false;
+  int envflags = MDBX_UTTERLY_NOSYNC, putflags = MDBX_UPSERT;
   bool quiet = false;
   bool rescue = false;
-  MDBX_val prevk;
 
   prog = argv[0];
   if (argc < 2)
@@ -3624,7 +3621,7 @@ int main(int argc, char *argv[]) {
              mdbx_build.options);
       return EXIT_SUCCESS;
     case 'a':
-      append = true;
+      putflags |= MDBX_APPEND;
       break;
     case 'f':
       if (freopen(optarg, "r", stdin) == nullptr) {
@@ -3640,7 +3637,7 @@ int main(int argc, char *argv[]) {
       subname = mdbx_strdup(optarg);
       break;
     case 'N':
-      putflags = MDBX_NOOVERWRITE | MDBX_NODUPDATA;
+      putflags |= MDBX_NOOVERWRITE | MDBX_NODUPDATA;
       break;
     case 'T':
       mode |= NOHDR | PRINT;
@@ -3681,6 +3678,11 @@ int main(int argc, char *argv[]) {
 
   dbuf.iov_len = 4096;
   dbuf.iov_base = mdbx_malloc(dbuf.iov_len);
+  if (!dbuf.iov_base) {
+    rc = MDBX_ENOMEM;
+    error("value-buffer", rc);
+    goto env_close;
+  }
 
   /* read first header for mapsize= */
   if (!(mode & NOHDR)) {
@@ -3741,17 +3743,19 @@ int main(int argc, char *argv[]) {
     goto env_close;
   }
 
-  kbuf.iov_len = mdbx_env_get_maxvalsize_ex(env, MDBX_DUPSORT);
-  if (kbuf.iov_len >= INTPTR_MAX / 4) {
+  kbuf.iov_len = mdbx_env_get_maxvalsize_ex(env, 0) + 1;
+  if (kbuf.iov_len >= INTPTR_MAX / 2) {
     fprintf(stderr, "mdbx_env_get_maxkeysize() failed, returns %zu\n",
             kbuf.iov_len);
     goto env_close;
   }
-  kbuf.iov_len = (kbuf.iov_len + 1) * 2;
-  kbuf.iov_base = malloc(kbuf.iov_len * 2);
-  k0buf.iov_len = kbuf.iov_len;
-  k0buf.iov_base = (char *)kbuf.iov_base + kbuf.iov_len;
-  prevk.iov_base = k0buf.iov_base;
+
+  kbuf.iov_base = malloc(kbuf.iov_len);
+  if (!kbuf.iov_base) {
+    rc = MDBX_ENOMEM;
+    error("key-buffer", rc);
+    goto env_close;
+  }
 
   while (rc == MDBX_SUCCESS) {
     if (user_break) {
@@ -3777,9 +3781,10 @@ int main(int argc, char *argv[]) {
     }
 
     const char *const dbi_name = subname ? subname : "@MAIN";
-    rc = mdbx_dbi_open_ex(txn, subname, dbi_flags | MDBX_CREATE, &dbi,
-                          append ? equal_or_greater : nullptr,
-                          append ? equal_or_greater : nullptr);
+    rc =
+        mdbx_dbi_open_ex(txn, subname, dbi_flags | MDBX_CREATE, &dbi,
+                         (putflags & MDBX_APPEND) ? equal_or_greater : nullptr,
+                         (putflags & MDBX_APPEND) ? equal_or_greater : nullptr);
     if (unlikely(rc != MDBX_SUCCESS)) {
       error("mdbx_dbi_open_ex", rc);
       goto txn_abort;
@@ -3807,19 +3812,17 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    if (putflags & MDBX_APPEND)
+      putflags = (dbi_flags & MDBX_DUPSORT) ? putflags | MDBX_APPENDDUP
+                                            : putflags & ~MDBX_APPENDDUP;
+
     rc = mdbx_cursor_open(txn, dbi, &mc);
     if (unlikely(rc != MDBX_SUCCESS)) {
       error("mdbx_cursor_open", rc);
       goto txn_abort;
     }
-    /* if (append) {
-      mc->mc_flags |= C_SKIPORD;
-      if (mc->mc_xcursor)
-        mc->mc_xcursor->mx_cursor.mc_flags |= C_SKIPORD;
-    } */
 
     int batch = 0;
-    prevk.iov_len = 0;
     while (rc == MDBX_SUCCESS) {
       MDBX_val key, data;
       rc = readline(&key, &kbuf);
@@ -3834,18 +3837,7 @@ int main(int argc, char *argv[]) {
         goto txn_abort;
       }
 
-      int appflag = 0;
-      if (append) {
-        appflag = MDBX_APPEND;
-        if (dbi_flags & MDBX_DUPSORT) {
-          if (prevk.iov_len == key.iov_len &&
-              memcmp(prevk.iov_base, key.iov_base, key.iov_len) == 0)
-            appflag = MDBX_APPEND | MDBX_APPENDDUP;
-          else
-            memcpy(prevk.iov_base, key.iov_base, prevk.iov_len = key.iov_len);
-        }
-      }
-      rc = mdbx_cursor_put(mc, &key, &data, putflags | appflag);
+      rc = mdbx_cursor_put(mc, &key, &data, putflags);
       if (rc == MDBX_KEYEXIST && putflags)
         continue;
       if (rc == MDBX_BAD_VALSIZE && rescue) {
@@ -3886,11 +3878,6 @@ int main(int argc, char *argv[]) {
           error("mdbx_cursor_open", rc);
           goto txn_abort;
         }
-        /* if (append) {
-          mc->mc_flags |= C_SKIPORD;
-          if (mc->mc_xcursor)
-            mc->mc_xcursor->mx_cursor.mc_flags |= C_SKIPORD;
-        } */
       }
     }
 
@@ -3931,6 +3918,8 @@ txn_abort:
   mdbx_txn_abort(txn);
 env_close:
   mdbx_env_close(env);
+  free(kbuf.iov_base);
+  free(dbuf.iov_base);
 
   return rc ? EXIT_FAILURE : EXIT_SUCCESS;
 }

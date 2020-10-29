@@ -2001,7 +2001,7 @@ typedef struct MDBX_meta {
 typedef struct MDBX_page {
   union {
     struct MDBX_page *mp_next; /* for in-memory list of freed pages */
-    uint64_t mp_txnid;         /* txnid during which the page has been COW-ed */
+    uint64_t mp_txnid;         /* txnid that committed this page */
   };
   uint16_t mp_leaf2_ksize; /* key size if this is a LEAF2 page */
 #define P_BRANCH 0x01      /* branch page */
@@ -3325,6 +3325,8 @@ static int dump_sdb(MDBX_txn *txn, MDBX_dbi dbi, char *name) {
     rc = MDBX_SUCCESS;
   if (unlikely(rc != MDBX_SUCCESS))
     error("mdbx_cursor_get", rc);
+
+  mdbx_cursor_close(cursor);
   return rc;
 }
 
@@ -3359,7 +3361,7 @@ int main(int argc, char *argv[]) {
   MDBX_dbi dbi;
   prog = argv[0];
   char *envname;
-  char *subname = nullptr;
+  char *subname = nullptr, *buf4free = nullptr;
   unsigned envflags = 0;
   bool alldbs = false, list = false;
 
@@ -3505,7 +3507,13 @@ int main(int argc, char *argv[]) {
 
       if (memchr(key.iov_base, '\0', key.iov_len))
         continue;
-      subname = mdbx_malloc(key.iov_len + 1);
+      subname = mdbx_realloc(buf4free, key.iov_len + 1);
+      if (!subname) {
+        rc = MDBX_ENOMEM;
+        break;
+      }
+
+      buf4free = subname;
       memcpy(subname, key.iov_base, key.iov_len);
       subname[key.iov_len] = '\0';
 
@@ -3558,7 +3566,6 @@ int main(int argc, char *argv[]) {
           break;
         }
       }
-      mdbx_free(subname);
     }
     mdbx_cursor_close(cursor);
     cursor = nullptr;
@@ -3592,6 +3599,7 @@ txn_abort:
   mdbx_txn_abort(txn);
 env_close:
   mdbx_env_close(env);
+  free(buf4free);
 
   return rc ? EXIT_FAILURE : EXIT_SUCCESS;
 }
