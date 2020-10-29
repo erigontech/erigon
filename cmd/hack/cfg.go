@@ -41,7 +41,7 @@ func testGenCfg() {
 	}
 
 	if *mode == "test" {
-		//absIntTestSimple00()
+		absIntTestSimple00()
 		//absIntTestRequires00()
 		//absIntTestCall01()
 		//absIntTestDiv00()
@@ -56,7 +56,7 @@ func testGenCfg() {
 		//absIntTestSmallImprecision()
 		//absIntTestSmallInvalidJumpDest()
 		//absIntTestSmallImprecision2()
-		absIntAndJumpImprecision()
+		//absIntAndJumpImprecision()
 		return
 	}
 }

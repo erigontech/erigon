@@ -1,9 +1,12 @@
 package vm
 
 import (
+	"bytes"
+	"compress/zlib"
 	"encoding/json"
 	"fmt"
 	"github.com/holiman/uint256"
+	"io/ioutil"
 	"log"
 	"strconv"
 	"strings"
@@ -310,7 +313,7 @@ type CfgProof struct {
 
 func DeserializeCfgProof(proofBytes []byte) *CfgProof {
 	proof := CfgProof{}
-	err := json.Unmarshal(proofBytes, &proof)
+	err := json.Unmarshal(DecompressProof(proofBytes), &proof)
 	if err != nil {
 		log.Fatal("Cannot deserialize proof")
 	}
@@ -321,6 +324,30 @@ func (proof *CfgProof) Serialize() []byte {
 	res, err := json.MarshalIndent(*proof, "", " ")
 	if err != nil {
 		log.Fatal("Cannot serialize proof")
+	}
+	return CompressProof(res)
+}
+
+func CompressProof(in []byte) []byte {
+	var b bytes.Buffer
+	w := zlib.NewWriter(&b)
+	_, err := w.Write(in)
+	if err != nil {
+		log.Fatal("cannot write proof")
+	}
+	err = w.Close()
+	if err != nil {
+		log.Fatal("cannot close file")
+	}
+	return b.Bytes()
+}
+
+func DecompressProof(in []byte) []byte {
+	reader := bytes.NewReader(in)
+	breader, err := zlib.NewReader(reader)
+	res, err := ioutil.ReadAll(breader)
+	if err != nil {
+		log.Fatal("cannot read")
 	}
 	return res
 }
