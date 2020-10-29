@@ -60,7 +60,7 @@ func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account)
 }
 
 func DeleteAccount(db DatabaseDeleter, addrHash common.Hash) error {
-	return db.Delete(dbutils.CurrentStateBucket, addrHash[:])
+	return db.Delete(dbutils.CurrentStateBucket, addrHash[:], nil)
 }
 
 func PlainReadAccount(db DatabaseReader, address common.Address, acc *accounts.Account) (bool, error) {
@@ -82,5 +82,5 @@ func PlainWriteAccount(db DatabaseWriter, address common.Address, acc accounts.A
 }
 
 func PlainDeleteAccount(db DatabaseDeleter, address common.Address) error {
-	return db.Delete(dbutils.PlainStateBucket, address[:])
+	return db.Delete(dbutils.PlainStateBucket, address[:], nil)
 }

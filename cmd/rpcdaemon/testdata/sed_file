@@ -1,0 +1,22 @@
+s/,\"id\":\"1\"//g
+s/\"result\":null,/\"result\":\{\},/g
+s/suicide/selfdestruct/g
+s/\"gasUsed\":\"0x0\",//g
+s/,\"value\":\"0x0\"//g
+
+s/invalid argument 1: json: cannot unmarshal hex string \\\"0x\\\" into Go value of type hexutil.Uint64/Invalid params: Invalid index: cannot parse integer from empty string./
+s/invalid argument 1: json: cannot unmarshal number into Go value of type \[\]hexutil.Uint64/Invalid params: invalid type: integer `0`, expected a sequence./
+s/missing value for required argument 1/Invalid params: invalid length 1, expected a tuple of size 2./
+s/Invalid params: invalid type: string \\\"0x0\\\", expected a sequence./invalid argument 1: json: cannot unmarshal string into Go value of type \[\]hexutil.Uint64/
+s/Invalid params\: Invalid block number\: number too large to fit in target type./invalid argument 0: hex number > 64 bits/
+s/the method trace_junk12 does not exist\/is not available/Method not found/
+
+s/,\"traceAddress\":null/,\"traceAddress\":[]/g
+s/\"0x0000000000000000000000000000000000000000000000000000000000000000\"/\"0x\"/g
+s/\"transactionHash\":\"0x\",\"transactionPosition\":0/\"transactionHash\":null,\"transactionPosition\":null/g
+s/\"result\":null/\"result\":[]/g
+
+s/\"error\":{\"code\":-32000,\"message\":\"function trace_replayBlockTransactions not implemented\"}/\"result\":\[\]/
+s/\"error\":{\"code\":-32000,\"message\":\"function trace_replayTransaction not implemented\"}/\"result\":{\"output\":\"0x\",\"stateDiff\":null,\"trace\":\[\],\"vmTrace\":null}/
+s/\"error\":{\"code\":-32602,\"message\":\"invalid argument 0: json: cannot unmarshal array into Go value of type commands.CallParam\"}/\"result\":\[{\"output\":\"0x\",\"stateDiff\":null,\"trace\":\[\],\"vmTrace\":null},{\"output\":\"0x\",\"stateDiff\":null,\"trace\":\[\],\"vmTrace\":null}]/
+s/\"error\":{\"code\":-32602,\"message\":\"invalid argument 0: hex string has length 82, want 64 for common.Hash\"}/\"error\":{\"code\":-32602,\"data\":\"RlpIncorrectListLen\",\"message\":\"Couldn't parse parameters: Transaction is not valid RLP\"}/

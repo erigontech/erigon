@@ -3,7 +3,6 @@ package migrations
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -51,23 +50,20 @@ func TestDupSortHashState(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{2}, v)
 
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.CurrentStateBucket)
 	// test low-level data layout
-	rawKV := db.KV().(*ethdb.LmdbKV)
-	env := rawKV.Env()
-	allDBI := rawKV.AllDBI()
-
-	tx, err := env.BeginTxn(nil, lmdb.Readonly)
-	require.NoError(err)
-	c, err := tx.OpenCursor(allDBI[dbutils.CurrentStateBucket])
 	require.NoError(err)
 
-	k, v, err := c.Get([]byte(accKey), nil, lmdb.Set)
+	v, err = c.SeekExact([]byte(accKey))
 	require.NoError(err)
-	require.Equal([]byte(accKey), k)
 	require.Equal([]byte{1}, v)
 
 	keyLen := common.HashLength + common.IncarnationLength
-	k, v, err = c.Get([]byte(storageKey)[:keyLen], []byte(storageKey)[keyLen:], lmdb.GetBothRange)
+	k, v, err := c.SeekBothRange([]byte(storageKey)[:keyLen], []byte(storageKey)[keyLen:])
 	require.NoError(err)
 	require.Equal([]byte(storageKey)[:keyLen], k)
 	require.Equal([]byte(storageKey)[keyLen:], v[:common.HashLength])
@@ -113,23 +109,17 @@ func TestDupSortPlainState(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{2}, v)
 
-	// test low-level data layout
-	rawKV := db.KV().(*ethdb.LmdbKV)
-	env := rawKV.Env()
-	allDBI := rawKV.AllDBI()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	require.NoError(err)
+	defer tx.Rollback()
 
-	tx, err := env.BeginTxn(nil, lmdb.Readonly)
+	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainStateBucket)
+	v, err = c.SeekExact([]byte(accKey))
 	require.NoError(err)
-	c, err := tx.OpenCursor(allDBI[dbutils.PlainStateBucket])
-	require.NoError(err)
-
-	k, v, err := c.Get([]byte(accKey), nil, lmdb.Set)
-	require.NoError(err)
-	require.Equal([]byte(accKey), k)
 	require.Equal([]byte{1}, v)
 
 	keyLen := common.AddressLength + common.IncarnationLength
-	k, v, err = c.Get([]byte(storageKey)[:keyLen], []byte(storageKey)[keyLen:], lmdb.GetBothRange)
+	k, v, err := c.SeekBothRange([]byte(storageKey)[:keyLen], []byte(storageKey)[keyLen:])
 	require.NoError(err)
 	require.Equal([]byte(storageKey)[:keyLen], k)
 	require.Equal([]byte(storageKey)[keyLen:], v[:common.HashLength])

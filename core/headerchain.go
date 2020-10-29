@@ -138,7 +138,9 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 
 	// Irrelevant of the canonical status, write the td and header to the database
 	headerBatch := hc.chainDb.NewBatch()
-	rawdb.WriteTd(headerBatch, hash, number, externTd)
+	if err := rawdb.WriteTd(headerBatch, hash, number, externTd); err != nil {
+		return NonStatTy, err
+	}
 	rawdb.WriteHeader(ctx, headerBatch, header)
 	if _, err := headerBatch.Commit(); err != nil {
 		log.Crit("Failed to write header into disk", "err", err)
@@ -163,11 +165,17 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 		// Delete any canonical number assignments above the new head
 		markerBatch := hc.chainDb.NewBatch()
 		for i := number + 1; ; i++ {
-			hash := rawdb.ReadCanonicalHash(hc.chainDb, i)
-			if hash == (common.Hash{}) {
+			ch, err := rawdb.ReadCanonicalHash(hc.chainDb, i)
+			if err != nil {
+				return NonStatTy, err
+			}
+			if ch == (common.Hash{}) {
 				break
 			}
-			rawdb.DeleteCanonicalHash(markerBatch, i)
+			err = rawdb.DeleteCanonicalHash(markerBatch, i)
+			if err != nil {
+				return NonStatTy, err
+			}
 		}
 
 		// Overwrite any stale canonical number assignments
@@ -176,15 +184,29 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 			headNumber = header.Number.Uint64() - 1
 			headHeader = hc.GetHeader(headHash, headNumber)
 		)
-		for rawdb.ReadCanonicalHash(hc.chainDb, headNumber) != headHash {
-			rawdb.WriteCanonicalHash(markerBatch, headHash, headNumber)
+		for {
+			h, err := rawdb.ReadCanonicalHash(hc.chainDb, headNumber)
+			if err != nil {
+				return NonStatTy, err
+			}
+			if h == headHash {
+				break
+			}
+			err = rawdb.WriteCanonicalHash(markerBatch, headHash, headNumber)
+			if err != nil {
+				return NonStatTy, err
+			}
 
 			headHash = headHeader.ParentHash
 			headNumber = headHeader.Number.Uint64() - 1
 			headHeader = hc.GetHeader(headHash, headNumber)
 		}
 		// Extend the canonical chain with the new header
-		rawdb.WriteCanonicalHash(markerBatch, hash, number)
+		err = rawdb.WriteCanonicalHash(markerBatch, hash, number)
+		if err != nil {
+			return NonStatTy, err
+		}
+
 		rawdb.WriteHeadHeaderHash(markerBatch, hash)
 		if _, err := markerBatch.Commit(); err != nil {
 			log.Crit("Failed to write header markers into disk", "err", err)
@@ -351,9 +373,20 @@ func (hc *HeaderChain) GetAncestor(hash common.Hash, number, ancestor uint64, ma
 		}
 	}
 	for ancestor != 0 {
-		if rawdb.ReadCanonicalHash(hc.chainDb, number) == hash {
-			ancestorHash := rawdb.ReadCanonicalHash(hc.chainDb, number-ancestor)
-			if rawdb.ReadCanonicalHash(hc.chainDb, number) == hash {
+		h, err := rawdb.ReadCanonicalHash(hc.chainDb, number)
+		if err != nil {
+			panic(err)
+		}
+		if h == hash {
+			ancestorHash, err := rawdb.ReadCanonicalHash(hc.chainDb, number-ancestor)
+			if err != nil {
+				panic(err)
+			}
+			h, err := rawdb.ReadCanonicalHash(hc.chainDb, number)
+			if err != nil {
+				panic(err)
+			}
+			if h == hash {
 				number -= ancestor
 				return ancestorHash, number
 			}
@@ -376,10 +409,7 @@ func (hc *HeaderChain) GetAncestor(hash common.Hash, number, ancestor uint64, ma
 // GetTd retrieves a block's total difficulty in the canonical chain from the
 // database by hash and number, caching it if found.
 func (hc *HeaderChain) GetTd(dbr ethdb.Getter, hash common.Hash, number uint64) *big.Int {
-	td := rawdb.ReadTd(dbr, hash, number)
-	if td == nil {
-		return nil
-	}
+	td, _ := rawdb.ReadTd(dbr, hash, number)
 	return td
 }
 
@@ -423,7 +453,11 @@ func (hc *HeaderChain) HasHeader(hash common.Hash, number uint64) bool {
 // GetHeaderByNumber retrieves a block header from the database by number,
 // caching it (associated with its hash) if found.
 func (hc *HeaderChain) GetHeaderByNumber(number uint64) *types.Header {
-	hash := rawdb.ReadCanonicalHash(hc.chainDb, number)
+	hash, err := rawdb.ReadCanonicalHash(hc.chainDb, number)
+	if err != nil {
+		panic(err)
+	}
+
 	if hash == (common.Hash{}) {
 		return nil
 	}
@@ -431,7 +465,11 @@ func (hc *HeaderChain) GetHeaderByNumber(number uint64) *types.Header {
 }
 
 func (hc *HeaderChain) GetCanonicalHash(number uint64) common.Hash {
-	return rawdb.ReadCanonicalHash(hc.chainDb, number)
+	h, err := rawdb.ReadCanonicalHash(hc.chainDb, number)
+	if err != nil {
+		panic(err)
+	}
+	return h
 }
 
 // CurrentHeader retrieves the current head header of the canonical chain. The
@@ -453,11 +491,11 @@ type (
 	// before head header is updated. The method will return the actual block it
 	// updated the head to (missing state) and a flag if setHead should continue
 	// rewinding till that forcefully (exceeded ancient limits)
-	UpdateHeadBlocksCallback func(rawdb.DatabaseWriter, *types.Header) (uint64, bool)
+	UpdateHeadBlocksCallback func(ethdb.Database, *types.Header) (uint64, bool)
 
 	// DeleteBlockContentCallback is a callback function that is called by SetHead
 	// before each header is deleted.
-	DeleteBlockContentCallback func(rawdb.DatabaseDeleter, common.Hash, uint64)
+	DeleteBlockContentCallback func(ethdb.Database, common.Hash, uint64)
 )
 
 // SetHead rewinds the local chain to a new head. Everything above the new head
@@ -526,9 +564,13 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 					delFn(batch, hash, num)
 				}
 				rawdb.DeleteHeader(batch, hash, num)
-				rawdb.DeleteTd(batch, hash, num)
+				if err := rawdb.DeleteTd(batch, hash, num); err != nil {
+					panic(err)
+				}
 			}
-			rawdb.DeleteCanonicalHash(batch, num)
+			if err := rawdb.DeleteCanonicalHash(batch, num); err != nil {
+				panic(err)
+			}
 		}
 	}
 	if _, err := batch.Commit(); err != nil {

@@ -279,9 +279,10 @@ func TestHeader(t *testing.T) {
 }
 
 func TestBalanceAt(t *testing.T) {
+	t.Skip("Leaks")
 	backend, _ := newTestBackend(t)
-	client, _ := backend.Attach()
 	defer backend.Close()
+	client, _ := backend.Attach()
 	defer client.Close()
 
 	tests := map[string]struct {
@@ -312,7 +313,6 @@ func TestBalanceAt(t *testing.T) {
 			ec := NewClient(client)
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
-
 			got, err := ec.BalanceAt(ctx, tt.account, tt.block)
 			if tt.wantErr != nil && (err == nil || err.Error() != tt.wantErr.Error()) {
 				t.Fatalf("BalanceAt(%x, %v) error = %q, want %q", tt.account, tt.block, err, tt.wantErr)
@@ -355,5 +355,21 @@ func TestChainID(t *testing.T) {
 	}
 	if id == nil || id.ToBig().Cmp(params.AllEthashProtocolChanges.ChainID) != 0 {
 		t.Fatalf("ChainID returned wrong number: %+v", id)
+	}
+}
+
+func TestBlockNumber(t *testing.T) {
+	backend, _ := newTestBackend(t)
+	client, _ := backend.Attach()
+	defer backend.Close()
+	defer client.Close()
+	ec := NewClient(client)
+
+	blockNumber, err := ec.BlockNumber(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if blockNumber != 1 {
+		t.Fatalf("BlockNumber returned wrong number: %d", blockNumber)
 	}
 }

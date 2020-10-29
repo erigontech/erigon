@@ -5,7 +5,9 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
 const (
@@ -17,9 +19,10 @@ const (
 	// if first v1 was added under key K, then v2; only v1 will stay
 	SortableOldestAppearedBuffer
 
-	BufferOptimalSize = 256 * 1024 * 1024 /* 256 mb | var because we want to sometimes change it from tests */
-	BufIOSize         = 64 * 4096         // 64 pages | default is 1 page | increasing further doesn't show speedup on SSD
+	BufIOSize = 64 * 4096 // 64 pages | default is 1 page | increasing further doesn't show speedup on SSD
 )
+
+var BufferOptimalSize = 256 * datasize.MB /*  var because we want to sometimes change it from tests or command-line flags */
 
 type Buffer interface {
 	Put(k, v []byte)
@@ -29,6 +32,7 @@ type Buffer interface {
 	GetEntries() []sortableBufferEntry
 	Sort()
 	CheckFlushSize() bool
+	SetComparator(cmp dbutils.CmpFunc)
 }
 
 type sortableBufferEntry struct {
@@ -42,11 +46,11 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
-func NewSortableBuffer(bufferOptimalSize int) *sortableBuffer {
+func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 	return &sortableBuffer{
 		entries:     make([]sortableBufferEntry, 0),
 		size:        0,
-		optimalSize: bufferOptimalSize,
+		optimalSize: int(bufferOptimalSize.Bytes()),
 	}
 }
 
@@ -54,6 +58,7 @@ type sortableBuffer struct {
 	entries     []sortableBufferEntry
 	size        int
 	optimalSize int
+	comparator  dbutils.CmpFunc
 }
 
 func (b *sortableBuffer) Put(k, v []byte) {
@@ -70,7 +75,14 @@ func (b *sortableBuffer) Len() int {
 	return len(b.entries)
 }
 
+func (b *sortableBuffer) SetComparator(cmp dbutils.CmpFunc) {
+	b.comparator = cmp
+}
+
 func (b *sortableBuffer) Less(i, j int) bool {
+	if b.comparator != nil {
+		return b.comparator(b.entries[i].key, b.entries[j].key, b.entries[i].value, b.entries[j].value) < 0
+	}
 	return bytes.Compare(b.entries[i].key, b.entries[j].key) < 0
 }
 
@@ -98,11 +110,11 @@ func (b *sortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
-func NewAppendBuffer(bufferOptimalSize int) *appendSortableBuffer {
+func NewAppendBuffer(bufferOptimalSize datasize.ByteSize) *appendSortableBuffer {
 	return &appendSortableBuffer{
 		entries:     make(map[string][]byte),
 		size:        0,
-		optimalSize: bufferOptimalSize,
+		optimalSize: int(bufferOptimalSize.Bytes()),
 	}
 }
 
@@ -111,6 +123,7 @@ type appendSortableBuffer struct {
 	size        int
 	optimalSize int
 	sortedBuf   []sortableBufferEntry
+	comparator  dbutils.CmpFunc
 }
 
 func (b *appendSortableBuffer) Put(k, v []byte) {
@@ -122,6 +135,10 @@ func (b *appendSortableBuffer) Put(k, v []byte) {
 	b.size += len(v)
 	stored = append(stored, v...)
 	b.entries[ks] = stored
+}
+
+func (b *appendSortableBuffer) SetComparator(cmp dbutils.CmpFunc) {
+	b.comparator = cmp
 }
 
 func (b *appendSortableBuffer) Size() int {
@@ -139,6 +156,9 @@ func (b *appendSortableBuffer) Sort() {
 }
 
 func (b *appendSortableBuffer) Less(i, j int) bool {
+	if b.comparator != nil {
+		return b.comparator(b.sortedBuf[i].key, b.sortedBuf[j].key, b.sortedBuf[i].value, b.sortedBuf[j].value) < 0
+	}
 	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
 }
 
@@ -163,11 +183,11 @@ func (b *appendSortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
-func NewOldestEntryBuffer(bufferOptimalSize int) *oldestEntrySortableBuffer {
+func NewOldestEntryBuffer(bufferOptimalSize datasize.ByteSize) *oldestEntrySortableBuffer {
 	return &oldestEntrySortableBuffer{
 		entries:     make(map[string][]byte),
 		size:        0,
-		optimalSize: bufferOptimalSize,
+		optimalSize: int(bufferOptimalSize.Bytes()),
 	}
 }
 
@@ -176,6 +196,11 @@ type oldestEntrySortableBuffer struct {
 	size        int
 	optimalSize int
 	sortedBuf   []sortableBufferEntry
+	comparator  dbutils.CmpFunc
+}
+
+func (b *oldestEntrySortableBuffer) SetComparator(cmp dbutils.CmpFunc) {
+	b.comparator = cmp
 }
 
 func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
@@ -201,6 +226,7 @@ func (b *oldestEntrySortableBuffer) Size() int {
 func (b *oldestEntrySortableBuffer) Len() int {
 	return len(b.entries)
 }
+
 func (b *oldestEntrySortableBuffer) Sort() {
 	for k, v := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
@@ -209,6 +235,9 @@ func (b *oldestEntrySortableBuffer) Sort() {
 }
 
 func (b *oldestEntrySortableBuffer) Less(i, j int) bool {
+	if b.comparator != nil {
+		return b.comparator(b.sortedBuf[i].key, b.sortedBuf[j].key, b.sortedBuf[i].value, b.sortedBuf[j].value) < 0
+	}
 	return bytes.Compare(b.sortedBuf[i].key, b.sortedBuf[j].key) < 0
 }
 
@@ -233,7 +262,7 @@ func (b *oldestEntrySortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
-func getBufferByType(tp int, size int) Buffer {
+func getBufferByType(tp int, size datasize.ByteSize) Buffer {
 	switch tp {
 	case SortableSliceBuffer:
 		return NewSortableBuffer(size)

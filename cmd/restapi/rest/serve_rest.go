@@ -36,10 +36,10 @@ func ServeREST(ctx context.Context, restHost, rpcHost string, chaindata string) 
 	var back ethdb.Backend
 	var err error
 	if rpcHost != "" {
-		kv, back, err = ethdb.NewRemote().Path(rpcHost).Open()
+		kv, back, err = ethdb.NewRemote().Path(rpcHost).Open("", "", "")
 		db = ethdb.NewObjectDatabase(kv)
 	} else if chaindata != "" {
-		database, errOpen := ethdb.Open(chaindata)
+		database, errOpen := ethdb.Open(chaindata, true)
 		if errOpen != nil {
 			return errOpen
 		}

@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 // Result structs for GetProof
@@ -139,7 +139,10 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	if err1 != nil {
 		return nil, err1
 	}
-	hash := rawdb.ReadCanonicalHash(db, block-1)
+	hash, err := rawdb.ReadCanonicalHash(db, block-1)
+	if err != nil {
+		return nil, err
+	}
 	header := rawdb.ReadHeader(db, hash, block-1)
 	tr := trie.New(header.Root)
 	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {

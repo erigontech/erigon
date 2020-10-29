@@ -387,11 +387,13 @@ func (hashes Hashes) Swap(i, j int) {
 	hashes[i], hashes[j] = hashes[j], hashes[i]
 }
 
+const StorageKeyLen = 2*HashLength + IncarnationLength
+
 // StorageKey is representation of address of a contract storage item
 // It consists of two parts, each of which are 32-byte hashes:
 // 1. Hash of the contract's address
 // 2. Hash of the item's key
-type StorageKey [2*HashLength + IncarnationLength]byte
+type StorageKey [StorageKeyLen]byte
 
 // StorageKeys is a slice of StorageKey, implementing sort.Interface
 type StorageKeys []StorageKey

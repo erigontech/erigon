@@ -69,7 +69,12 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(s.kv, 1).DefaultDump())
+	tx, err1 := s.kv.Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		c.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	got := string(NewDumper(tx, 1).DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -346,7 +351,12 @@ func TestDump(t *testing.T) {
 	}
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(db.KV(), 2).DefaultDump())
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	got := string(NewDumper(tx, 2).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {

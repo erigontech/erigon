@@ -28,6 +28,8 @@ import (
 )
 
 // SyncStage represents the stages of syncronisation in the SyncMode.StagedSync mode
+// It is used to persist the information about the stage state into the database.
+// It should not be empty and should be unique.
 type SyncStage []byte
 
 var (
@@ -40,6 +42,8 @@ var (
 	HashState           SyncStage = []byte("HashState")           // Apply Keccak256 to all the keys in the state
 	AccountHistoryIndex SyncStage = []byte("AccountHistoryIndex") // Generating history index for accounts
 	StorageHistoryIndex SyncStage = []byte("StorageHistoryIndex") // Generating history index for storage
+	LogIndex            SyncStage = []byte("LogIndex")            // Generating logs index (from receipts)
+	CallTraces          SyncStage = []byte("CallTraces")          // Generating call traces index
 	TxLookup            SyncStage = []byte("TxLookup")            // Generating transactions lookup index
 	TxPool              SyncStage = []byte("TxPool")              // Starts Backend
 	Finish              SyncStage = []byte("Finish")              // Nominal stage after all other stages
@@ -55,6 +59,8 @@ var AllStages = []SyncStage{
 	HashState,
 	AccountHistoryIndex,
 	StorageHistoryIndex,
+	LogIndex,
+	CallTraces,
 	TxLookup,
 	TxPool,
 	Finish,
@@ -62,7 +68,7 @@ var AllStages = []SyncStage{
 
 // GetStageProgress retrieves saved progress of given sync stage from the database
 func GetStageProgress(db rawdb.DatabaseReader, stage SyncStage) (uint64, []byte, error) {
-	v, err := db.Get(dbutils.SyncStageProgress, []byte(stage))
+	v, err := db.Get(dbutils.SyncStageProgress, stage)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err
 	}

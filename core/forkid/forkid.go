@@ -24,10 +24,10 @@ import (
 	"math"
 	"math/big"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -44,18 +44,6 @@ var (
 	ErrLocalIncompatibleOrStale = errors.New("local incompatible or needs update")
 )
 
-// Blockchain defines all necessary method to build a forkID.
-type Blockchain interface {
-	// Config retrieves the chain's fork configuration.
-	Config() *params.ChainConfig
-
-	// Genesis retrieves the chain's genesis block.
-	Genesis() *types.Block
-
-	// CurrentHeader retrieves the current head header of the canonical chain.
-	CurrentHeader() *types.Header
-}
-
 // ID is a fork identifier as defined by EIP-2124.
 type ID struct {
 	Hash [4]byte // CRC32 checksum of the genesis block and passed fork block numbers
@@ -65,14 +53,14 @@ type ID struct {
 // Filter is a fork id filter to validate a remotely advertised ID.
 type Filter func(id ID) error
 
-// NewID calculates the Ethereum fork ID from the chain config and head.
+// NewID calculates the Ethereum fork ID from the chain config, genesis hash, and head.
 func NewID(config *params.ChainConfig, genesis common.Hash, head uint64) ID {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
 
 	// Calculate the current fork checksum and the next fork block
 	var next uint64
-	for _, fork := range gatherForks(config) {
+	for _, fork := range GatherForks(config) {
 		if fork <= head {
 			// Fork already passed, checksum the previous hash and the fork number
 			hash = checksumUpdate(hash, fork)
@@ -86,12 +74,12 @@ func NewID(config *params.ChainConfig, genesis common.Hash, head uint64) ID {
 
 // NewFilter creates a filter that returns if a fork ID should be rejected or not
 // based on the local chain's status.
-func NewFilter(chain Blockchain) Filter {
+func NewFilter(config *params.ChainConfig, genesis common.Hash, head uint64) Filter {
 	return newFilter(
-		chain.Config(),
-		chain.Genesis().Hash(),
+		config,
+		genesis,
 		func() uint64 {
-			return chain.CurrentHeader().Number.Uint64()
+			return head
 		},
 	)
 }
@@ -108,7 +96,7 @@ func NewStaticFilter(config *params.ChainConfig, genesis common.Hash) Filter {
 func newFilter(config *params.ChainConfig, genesis common.Hash, headfn func() uint64) Filter {
 	// Calculate the all the valid fork hash and fork next combos
 	var (
-		forks = gatherForks(config)
+		forks = GatherForks(config)
 		sums  = make([][4]byte, len(forks)+1) // 0th is the genesis
 	)
 	hash := crc32.ChecksumIEEE(genesis[:])
@@ -202,13 +190,13 @@ func checksumToBytes(hash uint32) [4]byte {
 	return blob
 }
 
-// gatherForks gathers all the known forks and creates a sorted list out of them.
-func gatherForks(config *params.ChainConfig) []uint64 {
+// GatherForks gathers all the known forks and creates a sorted list out of them.
+func GatherForks(config *params.ChainConfig) []uint64 {
 	// Gather all the fork block numbers via reflection
 	kind := reflect.TypeOf(params.ChainConfig{})
 	conf := reflect.ValueOf(config).Elem()
 
-	var forks []uint64
+	forks := make(map[uint64]struct{})
 	for i := 0; i < kind.NumField(); i++ {
 		// Fetch the next field and skip non-fork rules
 		field := kind.Field(i)
@@ -221,27 +209,21 @@ func gatherForks(config *params.ChainConfig) []uint64 {
 		// Extract the fork rule block number and aggregate it
 		rule := conf.Field(i).Interface().(*big.Int)
 		if rule != nil {
-			forks = append(forks, rule.Uint64())
+			forks[rule.Uint64()] = struct{}{}
 		}
 	}
+
 	// Sort the fork block numbers to permit chronological XOR
-	for i := 0; i < len(forks); i++ {
-		for j := i + 1; j < len(forks); j++ {
-			if forks[i] > forks[j] {
-				forks[i], forks[j] = forks[j], forks[i]
-			}
-		}
+	forkBlocks := make([]uint64, 0, len(forks))
+	for num := range forks {
+		forkBlocks = append(forkBlocks, num)
 	}
-	// Deduplicate block numbers applying multiple forks
-	for i := 1; i < len(forks); i++ {
-		if forks[i] == forks[i-1] {
-			forks = append(forks[:i], forks[i+1:]...)
-			i--
-		}
-	}
+	sort.SliceStable(forkBlocks, func(i, j int) bool {
+		return forkBlocks[i] < forkBlocks[j]
+	})
 	// Skip any forks in block 0, that's the genesis ruleset
-	if len(forks) > 0 && forks[0] == 0 {
-		forks = forks[1:]
+	if len(forkBlocks) > 0 && forkBlocks[0] == 0 {
+		forkBlocks = forkBlocks[1:]
 	}
-	return forks
+	return forkBlocks
 }

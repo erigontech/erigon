@@ -9,12 +9,13 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -27,7 +28,10 @@ var cmdResetState = &cobra.Command{
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		err := resetState(ctx)
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		err := resetState(db, ctx)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -47,7 +51,10 @@ var cmdClearUnwindStack = &cobra.Command{
 	Short: "Clear unwind stack",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		err := clearUnwindStack(ctx)
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		err := clearUnwindStack(db, ctx)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -68,10 +75,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearUnwindStack)
 }
 
-func clearUnwindStack(_ context.Context) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-
+func clearUnwindStack(db rawdb.DatabaseWriter, _ context.Context) error {
 	for _, stage := range stages.AllStages {
 		if err := stages.SaveStageUnwind(db, stage, 0, nil); err != nil {
 			return err
@@ -80,9 +84,7 @@ func clearUnwindStack(_ context.Context) error {
 	return nil
 }
 
-func resetState(_ context.Context) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
+func resetState(db ethdb.Database, _ context.Context) error {
 	fmt.Printf("Before reset: \n")
 	if err := printStages(db); err != nil {
 		return err
@@ -99,10 +101,19 @@ func resetState(_ context.Context) error {
 	if err := resetHistory(db); err != nil {
 		return err
 	}
+	if err := resetLogIndex(db); err != nil {
+		return err
+	}
+	if err := resetCallTraces(db); err != nil {
+		return err
+	}
 	if err := resetTxLookup(db); err != nil {
 		return err
 	}
 	if err := resetTxPool(db); err != nil {
+		return err
+	}
+	if err := resetFinish(db); err != nil {
 		return err
 	}
 
@@ -118,8 +129,8 @@ func resetState(_ context.Context) error {
 	return nil
 }
 
-func resetSenders(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
+func resetSenders(db rawdb.DatabaseWriter) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.Senders,
 	); err != nil {
 		return err
@@ -133,8 +144,8 @@ func resetSenders(db *ethdb.ObjectDatabase) error {
 	return nil
 }
 
-func resetExec(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
+func resetExec(db rawdb.DatabaseWriter) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.CurrentStateBucket,
 		dbutils.AccountChangeSetBucket,
 		dbutils.StorageChangeSetBucket,
@@ -144,6 +155,7 @@ func resetExec(db *ethdb.ObjectDatabase) error {
 		dbutils.PlainStorageChangeSetBucket,
 		dbutils.PlainContractCodeBucket,
 		dbutils.BlockReceiptsPrefix,
+		dbutils.Log,
 		dbutils.IncarnationMapBucket,
 		dbutils.CodeBucket,
 	); err != nil {
@@ -158,8 +170,8 @@ func resetExec(db *ethdb.ObjectDatabase) error {
 	return nil
 }
 
-func resetHistory(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
+func resetHistory(db rawdb.DatabaseWriter) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.AccountsHistoryBucket,
 		dbutils.StorageHistoryBucket,
 	); err != nil {
@@ -181,8 +193,42 @@ func resetHistory(db *ethdb.ObjectDatabase) error {
 	return nil
 }
 
-func resetTxLookup(db *ethdb.ObjectDatabase) error {
-	if err := db.ClearBuckets(
+func resetLogIndex(db rawdb.DatabaseWriter) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
+		dbutils.LogAddressIndex,
+		dbutils.LogTopicIndex,
+	); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(db, stages.LogIndex, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.LogIndex, 0, nil); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func resetCallTraces(db rawdb.DatabaseWriter) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
+		dbutils.CallFromIndex,
+		dbutils.CallToIndex,
+	); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(db, stages.CallTraces, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.CallTraces, 0, nil); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func resetTxLookup(db rawdb.DatabaseWriter) error {
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
 		dbutils.TxLookupPrefix,
 	); err != nil {
 		return err
@@ -208,7 +254,18 @@ func resetTxPool(db ethdb.Putter) error {
 	return nil
 }
 
-func printStages(db *ethdb.ObjectDatabase) error {
+func resetFinish(db ethdb.Putter) error {
+	if err := stages.SaveStageProgress(db, stages.Finish, 0, nil); err != nil {
+		return err
+	}
+	if err := stages.SaveStageUnwind(db, stages.Finish, 0, nil); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func printStages(db rawdb.DatabaseReader) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -242,7 +299,14 @@ func copyCompact() error {
 	if err := os.MkdirAll(to, 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", to, err)
 	}
-	if err := env.SetMapSize(int64(ethdb.LMDBMapSize.Bytes())); err != nil {
+
+	f1, err := os.Stat(path.Join(from, "data.mdb"))
+	if err != nil {
+		return err
+	}
+
+	err = env.SetMapSize(f1.Size() + int64((1 * datasize.GB).Bytes()))
+	if err != nil {
 		return err
 	}
 

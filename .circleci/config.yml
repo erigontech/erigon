@@ -16,18 +16,14 @@ jobs:
               source $BASH_ENV
 
       - checkout
+      - setup_remote_docker
       - run: mkdir -p ${TEST_RESULTS}
       - run: go env
       - run: git submodule update --init --recursive
-      - run: git submodule status semantics/z3 | awk '{ print $1 }' > /tmp/z3.version
 
       - restore_cache:
           keys:
             - v1-pkg-cache-{{ arch }}-{{ checksum "go.sum" }}
-
-      - restore_cache:
-          keys:
-            - v1-z3-cache-{{ arch }}-{{ checksum "/tmp/z3.version" }}
 
       - run: go mod tidy && test -z "$(git status --porcelain)"
       - run: go mod download
@@ -53,13 +49,12 @@ jobs:
           key: v1-pkg-cache-{{ arch }}-{{ checksum "go.sum" }}
           paths: "/go/pkg/mod"
 
-      - save_cache:
-          key: v1-z3-cache-{{ arch }}-{{ checksum "/tmp/z3.version" }}
-          paths: "/go/src/github.com/ledgerwatch/turbo-geth/semantics/z3/build"
-
       - store_artifacts:
           path: /tmp/test-results
           destination: raw-test-output
 
       - store_test_results:
           path: /tmp/test-results
+
+
+      - run: docker build .

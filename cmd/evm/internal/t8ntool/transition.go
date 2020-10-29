@@ -17,6 +17,7 @@
 package t8ntool
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -29,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/tests"
@@ -210,7 +212,12 @@ func Main(ctx *cli.Context) error {
 	//postAlloc := state.DumpGenesisFormat(false, false, false)
 	collector := make(Alloc)
 
-	dumper := state.NewDumper(db, 0)
+	tx, err1 := db.Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		return fmt.Errorf("transition cannot open tx: %v", err1)
+	}
+	defer tx.Rollback()
+	dumper := state.NewDumper(tx, 0)
 
 	dumper.DumpToCollector(collector, false, false, false, nil, -1) //nolint:errcheck
 	return dispatchOutput(ctx, baseDir, result, collector)

@@ -6,6 +6,7 @@ import (
 	"github.com/urfave/cli"
 )
 
+// DefaultFlags contains all flags that are used and supported by turbo-geth binary.
 var DefaultFlags = []cli.Flag{
 	utils.DataDirFlag,
 	utils.KeyStoreDirFlag,
@@ -22,11 +23,18 @@ var DefaultFlags = []cli.Flag{
 	utils.TxPoolGlobalQueueFlag,
 	utils.TxPoolLifetimeFlag,
 	utils.TxLookupLimitFlag,
-	utils.StorageModeFlag,
-	utils.HddFlag,
-	utils.DatabaseFlag,
-	utils.LMDBMapSizeFlag,
-	utils.PrivateApiAddr,
+	StorageModeFlag,
+	SnapshotModeFlag,
+	BatchSizeFlag,
+	DatabaseFlag,
+	PrivateApiAddr,
+	EtlBufferSizeFlag,
+	LMDBMapSizeFlag,
+	LMDBMaxFreelistReuseFlag,
+	TLSFlag,
+	TLSCertFlag,
+	TLSKeyFlag,
+	TLSCACertFlag,
 	utils.ListenPortFlag,
 	utils.NATFlag,
 	utils.NoDiscoverFlag,
@@ -46,8 +54,6 @@ var DefaultFlags = []cli.Flag{
 	utils.GpoPercentileFlag,
 	utils.EWASMInterpreterFlag,
 	utils.EVMInterpreterFlag,
-	utils.IPCDisabledFlag,
-	utils.IPCPathFlag,
 	utils.InsecureUnlockAllowedFlag,
 	utils.MetricsEnabledFlag,
 	utils.MetricsEnabledExpensiveFlag,

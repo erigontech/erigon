@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/event"
 )
@@ -21,7 +20,6 @@ var (
 	_ = big.NewInt
 	_ = strings.NewReader
 	_ = ethereum.NotFound
-	_ = math.U256
 	_ = bind.Bind
 	_ = common.Big1
 	_ = types.BloomLookup
@@ -32,7 +30,7 @@ var (
 const PhoenixABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"die\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"increment\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"store\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"stateMutability\":\"payable\",\"type\":\"receive\"}]"
 
 // PhoenixBin is the compiled bytecode used for deploying new contracts.
-var PhoenixBin = "0x608060405234801561001057600080fd5b50610162806100206000396000f3fe6080604052600436106100385760003560e01c806335f4699414610044578063975057e71461005b578063d09de08a146100705761003f565b3661003f57005b600080fd5b34801561005057600080fd5b50610059610085565b005b34801561006757600080fd5b50610059610089565b34801561007c57600080fd5b506100596100a5565b6000ff5b6000805481526002602052604081206001908190558154019055565b60005460015411156100e85760405162461bcd60e51b81526004018080602001828103825260248152602001806101096024913960400191505060405180910390fd5b60018054600090815260026020526040902080548201905580548101905556fe74727920746f20696e6372656d656e74206e6f7420637265617465642073746f72616765a26469706673582212208d15025063bbf5edd68a8d1c73784bc9d80f3a6db7a8b30bf8dace4c6d72a23064736f6c63430006060033"
+var PhoenixBin = "0x608060405234801561001057600080fd5b50610162806100206000396000f3fe6080604052600436106100385760003560e01c806335f4699414610044578063975057e71461005b578063d09de08a146100705761003f565b3661003f57005b600080fd5b34801561005057600080fd5b50610059610085565b005b34801561006757600080fd5b50610059610089565b34801561007c57600080fd5b506100596100a5565b6000ff5b6000805481526002602052604081206001908190558154019055565b60005460015411156100e85760405162461bcd60e51b81526004018080602001828103825260248152602001806101096024913960400191505060405180910390fd5b60018054600090815260026020526040902080548201905580548101905556fe74727920746f20696e6372656d656e74206e6f7420637265617465642073746f72616765a26469706673582212203dc5a4364bf970d846c31c315e6089e8c7fb3e9cc867396397d456f0094a9d8464736f6c63430007020033"
 
 // DeployPhoenix deploys a new Ethereum contract, binding an instance of Phoenix to it.
 func DeployPhoenix(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Phoenix, error) {
@@ -156,7 +154,7 @@ func bindPhoenix(address common.Address, caller bind.ContractCaller, transactor 
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Phoenix *PhoenixRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Phoenix *PhoenixRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Phoenix.Contract.PhoenixCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -175,7 +173,7 @@ func (_Phoenix *PhoenixRaw) Transact(opts *bind.TransactOpts, method string, par
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Phoenix *PhoenixCallerRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Phoenix *PhoenixCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Phoenix.Contract.contract.Call(opts, result, method, params...)
 }
 

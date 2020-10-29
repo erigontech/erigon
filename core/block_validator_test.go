@@ -204,11 +204,16 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 	verified := 0
 	for depleted := false; !depleted; {
 		select {
-		case result := <-results:
-			if result != nil {
-				t.Errorf("header %d: validation failed: %v", verified, result)
+		case result, ok := <-results:
+			if !ok {
+				// the channel is closed
+				depleted = true
+			} else {
+				if result != nil {
+					t.Errorf("header %d: validation failed: %v", verified, result)
+				}
+				verified++
 			}
-			verified++
 		case <-time.After(50 * time.Millisecond):
 			depleted = true
 		}

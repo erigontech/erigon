@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/spf13/cobra"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/ledgerwatch/turbo-geth/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/spf13/cobra"
 )
 
 func main() {
@@ -45,10 +46,10 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench1(tgURL, gethURL, needCompare, fullTest)
+			rpctest.Bench1(tgURL, gethURL, needCompare, fullTest, blockNum)
 		},
 	}
-	with(bench1Cmd, withTGUrl, withGethUrl, withNeedCompare)
+	with(bench1Cmd, withTGUrl, withGethUrl, withNeedCompare, withBlockNum)
 	bench1Cmd.Flags().BoolVar(&fullTest, "fullTest", false, "some text")
 
 	var bench2Cmd = &cobra.Command{
@@ -109,14 +110,14 @@ func main() {
 	with(bench7Cmd, withTGUrl, withGethUrl)
 
 	var bench8Cmd = &cobra.Command{
-		Use:   "bench6",
+		Use:   "bench8",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench8(tgURL)
+			rpctest.Bench8(tgURL, gethURL, needCompare, blockNum)
 		},
 	}
-	with(bench8Cmd, withTGUrl)
+	with(bench8Cmd, withTGUrl, withGethUrl, withNeedCompare, withBlockNum)
 
 	var bench9Cmd = &cobra.Command{
 		Use:   "bench9",
@@ -129,7 +130,7 @@ func main() {
 	with(bench9Cmd, withTGUrl, withGethUrl, withNeedCompare)
 
 	var bench10Cmd = &cobra.Command{
-		Use:   "bench6",
+		Use:   "bench10",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {

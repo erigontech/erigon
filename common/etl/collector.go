@@ -3,8 +3,12 @@ package etl
 import (
 	"bytes"
 	"container/heap"
+	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -14,8 +18,10 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
+const TmpDirName = "etl-temp"
+
 type LoadNextFunc func(originalK, k, v []byte) error
-type LoadFunc func(k []byte, value []byte, state State, next LoadNextFunc) error
+type LoadFunc func(k []byte, value []byte, table CurrentTableReader, next LoadNextFunc) error
 
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
 // as a Collect Transform Load
@@ -24,10 +30,42 @@ type Collector struct {
 	flushBuffer     func([]byte, bool) error
 	dataProviders   []dataProvider
 	allFlushed      bool
+	autoClean       bool
 }
 
-func NewCollector(datadir string, sortableBuffer Buffer) *Collector {
-	c := &Collector{}
+// NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
+func NewCollectorFromFiles(tmpdir string) (*Collector, error) {
+	if _, err := os.Stat(tmpdir); os.IsNotExist(err) {
+		return nil, nil
+	}
+	fileInfos, err := ioutil.ReadDir(tmpdir)
+	if err != nil {
+		return nil, fmt.Errorf("collector from files - reading directory %s: %w", tmpdir, err)
+	}
+	if len(fileInfos) == 0 {
+		return nil, nil
+	}
+	dataProviders := make([]dataProvider, len(fileInfos))
+	for i, fileInfo := range fileInfos {
+		var dataProvider fileDataProvider
+		dataProvider.file, err = os.Open(filepath.Join(tmpdir, fileInfo.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("collector from files - opening file %s: %w", fileInfo.Name(), err)
+		}
+		dataProviders[i] = &dataProvider
+	}
+	return &Collector{dataProviders: dataProviders, allFlushed: true, autoClean: false}, nil
+}
+
+// NewCriticalCollector does not clean up temporary files if loading has failed
+func NewCriticalCollector(tmpdir string, sortableBuffer Buffer) *Collector {
+	c := NewCollector(tmpdir, sortableBuffer)
+	c.autoClean = false
+	return c
+}
+
+func NewCollector(tmpdir string, sortableBuffer Buffer) *Collector {
+	c := &Collector{autoClean: true}
 	encoder := codec.NewEncoder(nil, &cbor)
 
 	c.flushBuffer = func(currentKey []byte, canStoreInRam bool) error {
@@ -41,7 +79,7 @@ func NewCollector(datadir string, sortableBuffer Buffer) *Collector {
 			provider = KeepInRAM(sortableBuffer)
 			c.allFlushed = true
 		} else {
-			provider, err = FlushToDisk(encoder, currentKey, sortableBuffer, datadir)
+			provider, err = FlushToDisk(encoder, currentKey, sortableBuffer, tmpdir)
 		}
 		if err != nil {
 			return err
@@ -68,30 +106,41 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
-func (c *Collector) Load(db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
+func (c *Collector) Load(logPrefix string, db ethdb.Database, toBucket string, loadFunc LoadFunc, args TransformArgs) (err error) {
 	defer func() {
-		disposeProviders(c.dataProviders)
+		if c.autoClean {
+			c.Close(logPrefix)
+		}
 	}()
 	if !c.allFlushed {
 		if err := c.flushBuffer(nil, true); err != nil {
 			return err
 		}
 	}
-	return loadFilesIntoBucket(db, toBucket, c.dataProviders, loadFunc, args)
+	err = loadFilesIntoBucket(logPrefix, db, toBucket, c.dataProviders, loadFunc, args)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
+func (c *Collector) Close(logPrefix string) {
+	disposeProviders(logPrefix, c.dataProviders)
+}
+
+func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
-	h := &Heap{}
+
+	h := &Heap{comparator: args.Comparator}
 	heap.Init(h)
 	for i, provider := range providers {
 		if key, value, err := provider.Next(decoder); err == nil {
 			he := HeapElem{key, i, value}
 			heap.Push(h, he)
 		} else /* we must have at least one entry per file */ {
-			eee := fmt.Errorf("error reading first readers: n=%d current=%d provider=%s err=%v",
-				len(providers), i, provider, err)
+			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%v",
+				logPrefix, len(providers), i, provider, err)
 			panic(eee)
 		}
 	}
@@ -103,14 +152,14 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin()
+		tx, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
-	state := &bucketState{tx, bucket, args.Quit}
+	currentTable := &currentTableReader{tx, bucket}
 	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
 	var lastKey []byte
 	if bucket != "" { // passing empty bucket name is valid case for etl when DB modification is not expected
@@ -145,26 +194,26 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 
 			runtime.ReadMemStats(&m)
 			logArs = append(logArs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-			log.Info("ETL [2/2] Loading", logArs...)
+			log.Info(fmt.Sprintf("[%s] ETL [2/2] Loading", logPrefix), logArs...)
 		}
 
 		if canUseAppend && len(v) == 0 {
 			return nil // nothing to delete after end of bucket
 		}
 		if len(v) == 0 {
-			if err := tx.Delete(bucket, k); err != nil {
+			if err := tx.Delete(bucket, k, nil); err != nil {
 				return err
 			}
 			return nil
 		}
 		if canUseAppend {
 			if err := tx.(*ethdb.TxDb).Append(bucket, k, v); err != nil {
-				return err
+				return fmt.Errorf("%s: append: k=%x, %w", logPrefix, k, err)
 			}
 			return nil
 		}
 		if err := tx.Put(bucket, k, v); err != nil {
-			return err
+			return fmt.Errorf("%s: put: k=%x, %w", logPrefix, k, err)
 		}
 		return nil
 	}
@@ -176,14 +225,14 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 
 		element := (heap.Pop(h)).(HeapElem)
 		provider := providers[element.TimeIdx]
-		err := loadFunc(element.Key, element.Value, state, loadNextFunc)
+		err := loadFunc(element.Key, element.Value, currentTable, loadNextFunc)
 		if err != nil {
 			return err
 		}
 		if element.Key, element.Value, err = provider.Next(decoder); err == nil {
 			heap.Push(h, element)
 		} else if err != io.EOF {
-			return fmt.Errorf("error while reading next element from disk: %v", err)
+			return fmt.Errorf("%s: error while reading next element from disk: %v", logPrefix, err)
 		}
 	}
 	// Final commit
@@ -202,7 +251,7 @@ func loadFilesIntoBucket(db ethdb.Database, bucket string, providers []dataProvi
 
 	runtime.ReadMemStats(&m)
 	log.Debug(
-		"Committed batch",
+		fmt.Sprintf("[%s] Committed batch", logPrefix),
 		"bucket", bucket,
 		"commit", commitTook,
 		"records", i,
@@ -219,7 +268,7 @@ func makeCurrentKeyStr(k []byte) string {
 	} else if len(k) < 4 {
 		currentKeyStr = fmt.Sprintf("%x", k)
 	} else if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8 { // if key has leading zeroes, show a bit more info
-		currentKeyStr = fmt.Sprintf("%x...", k[:8])
+		currentKeyStr = fmt.Sprintf("%x", k)
 	} else {
 		currentKeyStr = fmt.Sprintf("%x...", k[:4])
 	}

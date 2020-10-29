@@ -8,10 +8,13 @@ import (
 var (
 	chaindata       string
 	statsfile       string
+	snapshotFile    string
 	block           uint64
 	privateApiAddr  string
 	changeSetBucket string
 	indexBucket     string
+	snapshotMode    string
+	snapshotDir     string
 )
 
 func must(err error) {
@@ -22,6 +25,10 @@ func must(err error) {
 
 func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 1, "specifies a block number for operation")
+}
+func withSnapshotData(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
+	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
 }
 
 func withChaindata(cmd *cobra.Command) {
@@ -44,4 +51,8 @@ func withCSBucket(cmd *cobra.Command) {
 
 func withIndexBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&indexBucket, "index-bucket", string(dbutils.AccountsHistoryBucket), string(dbutils.AccountsHistoryBucket)+" for account and "+string(dbutils.StorageHistoryBucket)+" for storage")
+}
+
+func withSnapshotFile(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&snapshotFile, "snapshot", "", "path where to write the snapshot file")
 }

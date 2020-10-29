@@ -618,10 +618,10 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	return hash
 }
 
-// AccumulateRewards credits the coinbase of the given block with the mining
-// reward. The total reward consists of the static block reward and rewards for
-// included uncles. The coinbase of each uncle block is also rewarded.
-func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) {
+// AccumulateRewards returns rewards for a given block. The mining reward consists
+// of the static blockReward plus a reward for each included uncle (if any). Individual
+// uncle rewards are also returned in an array.
+func AccumulateRewards(config *params.ChainConfig, header *types.Header, uncles []*types.Header) (uint256.Int, []uint256.Int) {
 	// Select the correct block reward based on chain progression
 	blockReward := FrontierBlockReward
 	if config.IsByzantium(header.Number) {
@@ -631,6 +631,7 @@ func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState,
 		blockReward = ConstantinopleBlockReward
 	}
 	// Accumulate the rewards for the miner and any included uncles
+	uncleRewards := []uint256.Int{}
 	reward := new(uint256.Int).Set(blockReward)
 	r := new(uint256.Int)
 	headerNum, _ := uint256.FromBig(header.Number)
@@ -640,10 +641,21 @@ func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState,
 		r.Sub(r, headerNum)
 		r.Mul(r, blockReward)
 		r.Div(r, u256.Num8)
-		state.AddBalance(uncle.Coinbase, r)
+		uncleRewards = append(uncleRewards, *r)
 
 		r.Div(blockReward, u256.Num32)
 		reward.Add(reward, r)
 	}
-	state.AddBalance(header.Coinbase, reward)
+	return *reward, uncleRewards
+}
+
+// accumulateRewards retreives rewards for a block and applies them to the coinbase accounts for miner and uncle miners
+func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) {
+	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
+	for i, uncle := range uncles {
+		if i < len(uncleRewards) {
+			state.AddBalance(uncle.Coinbase, &uncleRewards[i])
+		}
+	}
+	state.AddBalance(header.Coinbase, &minerReward)
 }

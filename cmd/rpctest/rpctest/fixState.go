@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"net/http"
+	"runtime"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -13,10 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/trie"
-	"net/http"
-	"runtime"
-	"time"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 func FixState(chaindata string, url string) {
@@ -113,7 +114,7 @@ func FixState(chaindata string, url string) {
 					copy(kh[:], k[common.HashLength+common.IncarnationLength:])
 					if _, ok := sm[kh]; !ok {
 						fmt.Printf("Key: %x, dbValue: %x\n", kh, v)
-						if err := stateDb.Delete(dbutils.CurrentStateBucket, k); err != nil {
+						if err := stateDb.Delete(dbutils.CurrentStateBucket, k, nil); err != nil {
 							fmt.Printf("%v\n", err)
 						}
 					}

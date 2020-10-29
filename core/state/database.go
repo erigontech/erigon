@@ -37,7 +37,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 var _ StateWriter = (*TrieStateWriter)(nil)
@@ -98,6 +98,14 @@ func (nw *NoopWriter) WriteAccountStorage(_ context.Context, address common.Addr
 }
 
 func (nw *NoopWriter) CreateContract(address common.Address) error {
+	return nil
+}
+
+func (nw *NoopWriter) WriteChangeSets() error {
+	return nil
+}
+
+func (nw *NoopWriter) WriteHistory() error {
 	return nil
 }
 
@@ -893,7 +901,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			}
 		} else {
 			m[keyHash] = nil
-			if err := tds.db.Delete(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
+			if err := tds.db.Delete(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], nil); err != nil {
 				return err
 			}
 		}
@@ -931,12 +939,12 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 		return err
 	}
 	if len(changedAccounts) > 0 {
-		if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
+		if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey, nil); err != nil {
 			return err
 		}
 	}
 	if len(changedStorage) > 0 {
-		if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
+		if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey, nil); err != nil {
 			return err
 		}
 	}
@@ -998,7 +1006,7 @@ func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[strin
 	}
 	for key, value := range accountHistoryEffects {
 		if value == nil {
-			if err := tds.db.Delete(dbutils.AccountsHistoryBucket, []byte(key)); err != nil {
+			if err := tds.db.Delete(dbutils.AccountsHistoryBucket, []byte(key), nil); err != nil {
 				return err
 			}
 		} else {
@@ -1009,7 +1017,7 @@ func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[strin
 	}
 	for key, value := range storageHistoryEffects {
 		if value == nil {
-			if err := tds.db.Delete(dbutils.StorageHistoryBucket, []byte(key)); err != nil {
+			if err := tds.db.Delete(dbutils.StorageHistoryBucket, []byte(key), nil); err != nil {
 				return err
 			}
 		} else {

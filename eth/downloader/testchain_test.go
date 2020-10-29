@@ -38,25 +38,67 @@ import (
 var (
 	testKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddress = crypto.PubkeyToAddress(testKey.PublicKey)
+
 	testDb      = ethdb.NewMemDatabase()
-	testGenesis = core.GenesisBlockForTesting(testDb, testAddress, big.NewInt(1000000000))
+	testGenesis = core.GenesisWithAccounts(testDb, []core.GenAccount{
+		{testAddress,
+			big.NewInt(1000000000),
+		},
+	})
+
+	// The common prefix of all test chains:
+	// Different forks on top of the base chain:
+	testChainBase   *testChain
+	testChainBaseMu sync.Mutex
+
+	testChainForkLightA   *testChain
+	testChainForkLightAMu sync.Mutex
+
+	testChainForkLightB   *testChain
+	testChainForkLightBMu sync.Mutex
+
+	testChainForkHeavy   *testChain
+	testChainForkHeavyMu sync.Mutex
 )
 
-// The common prefix of all test chains:
-var testChainBase = newTestChain(OwerwriteBlockCacheItems+200, testDb, testGenesis)
+func getTestChainForkLightA() *testChain {
+	testChainForkLightAMu.Lock()
+	defer testChainForkLightAMu.Unlock()
+	if testChainForkLightA == nil {
+		testChainForkLightA = getTestChainBase().makeFork(getForkLen(), false, 1)
+	}
+	return testChainForkLightA
+}
+func getTestChainForkLightB() *testChain {
+	testChainForkLightBMu.Lock()
+	defer testChainForkLightBMu.Unlock()
+	if testChainForkLightB == nil {
+		testChainForkLightB = getTestChainBase().makeFork(getForkLen(), false, 2)
+	}
+	return testChainForkLightB
+}
+func getTestChainForkHeavy() *testChain {
+	testChainForkHeavyMu.Lock()
+	defer testChainForkHeavyMu.Unlock()
+	if testChainForkHeavy == nil {
+		testChainForkHeavy = getTestChainBase().makeFork(getForkLen()+1, true, 3)
+	}
+	return testChainForkHeavy
+}
+func getTestChainBase() *testChain {
+	testChainBaseMu.Lock()
+	defer testChainBaseMu.Unlock()
+	if testChainBase == nil {
+		testChainBase = newTestChain(OverwriteBlockCacheItems+200, testDb, testGenesis)
+	}
+	return testChainBase
+}
 
-// Different forks on top of the base chain:
-var testChainForkLightA, testChainForkLightB, testChainForkHeavy *testChain
+func getForkLen() int {
+	return int(fullMaxForkAncestry + 50)
+}
 
 func TestMain(m *testing.M) {
-	var forkLen = int(fullMaxForkAncestry + 50)
-	var wg sync.WaitGroup
-	wg.Add(3)
-	go func() { testChainForkLightA = testChainBase.makeFork(forkLen, false, 1); wg.Done() }()
-	go func() { testChainForkLightB = testChainBase.makeFork(forkLen, false, 2); wg.Done() }()
-	go func() { testChainForkHeavy = testChainBase.makeFork(forkLen+1, true, 3); wg.Done() }()
-	wg.Wait()
-
 	result := m.Run()
 
 	// teardown
@@ -108,9 +150,13 @@ func (tc *testChain) shorten(length int) *testChain {
 func (tc *testChain) copy(newlen int) *testChain {
 	tc.cpyLock.Lock()
 	defer tc.cpyLock.Unlock()
+	db := tc.db
+	if tc.db != nil {
+		db = tc.db.MemCopy()
+	}
 	cpy := &testChain{
 		genesis:  tc.genesis,
-		db:       tc.db,
+		db:       db,
 		headerm:  make(map[common.Hash]*types.Header, newlen),
 		blockm:   make(map[common.Hash]*types.Block, newlen),
 		receiptm: make(map[common.Hash][]*types.Receipt, newlen),
@@ -137,37 +183,56 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	tc.cpyLock.Lock()
 	defer tc.cpyLock.Unlock()
 
+	zeroAddress := common.Address{0}
+	seedAddress := common.Address{seed}
+	amount := uint256.NewInt().SetUint64(1000)
+
+	var parentBlock *types.Block
 	existingLen := len(tc.chain) - 1
-	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db, existingLen+n, func(i int, block *core.BlockGen) {
+	totalLen := existingLen + n
+	signer := types.MakeSigner(params.TestChainConfig, big.NewInt(1))
+
+	testGenesisNonce := int64(-1)
+	blocks, receipts, err := core.GenerateChain(params.TestChainConfig, tc.genesis, ethash.NewFaker(), tc.db, totalLen, func(i int, block *core.BlockGen) {
 		if i < existingLen || existingLen == 0 {
-			block.SetCoinbase(common.Address{0})
+			block.SetCoinbase(zeroAddress)
+
 			// Include transactions to the miner to make blocks more interesting.
 			if i%22 == 0 {
-				signer := types.MakeSigner(params.TestChainConfig, block.Number())
-				tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddress), common.Address{0}, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), signer, testKey)
+				if testGenesisNonce == -1 {
+					testGenesisNonce = int64(block.TxNonce(testAddress))
+				}
+				tx, err := types.SignTx(types.NewTransaction(uint64(testGenesisNonce), zeroAddress, amount, params.TxGas, nil, nil), signer, testKey)
 				if err != nil {
 					panic(err)
 				}
+
 				block.AddTx(tx)
+				testGenesisNonce++
 			}
+
 			// if the block number is a multiple of 5, add a bonus uncle to the block
 			if i > 0 && i%5 == 0 {
+				parentBlock = block.GetParent()
 				block.AddUncle(&types.Header{
-					ParentHash: block.PrevBlock(i - 1).Hash(),
-					Number:     big.NewInt(block.Number().Int64() - 1),
+					ParentHash: parentBlock.Hash(),
+					Number:     parentBlock.Number(),
 				})
 			}
 		} else {
-			block.SetCoinbase(common.Address{seed})
+			block.SetCoinbase(seedAddress)
+
 			// If a heavy chain is requested, delay blocks to raise difficulty
 			if heavy {
 				block.OffsetTime(-1)
 			}
+
 			// if the block number is a multiple of 5, add a bonus uncle to the block
 			if i > existingLen && (i-existingLen)%5 == 0 {
+				parentBlock = block.GetParent()
 				block.AddUncle(&types.Header{
-					ParentHash: block.PrevBlock(i - existingLen - 1).Hash(),
-					Number:     big.NewInt(block.Number().Int64() - 1),
+					ParentHash: parentBlock.Hash(),
+					Number:     parentBlock.Number(),
 				})
 			}
 		}
@@ -204,18 +269,27 @@ func (tc *testChain) td(hash common.Hash) *big.Int {
 	return tc.tdm[hash]
 }
 
-// headersByHash returns headers in ascending order from the given hash.
-func (tc *testChain) headersByHash(origin common.Hash, amount int, skip int) []*types.Header {
+// headersByHash returns headers in order from the given hash.
+func (tc *testChain) headersByHash(origin common.Hash, amount int, skip int, reverse bool) []*types.Header {
 	num, _ := tc.hashToNumber(origin)
-	return tc.headersByNumber(num, amount, skip)
+	return tc.headersByNumber(num, amount, skip, reverse)
 }
 
-// headersByNumber returns headers in ascending order from the given number.
-func (tc *testChain) headersByNumber(origin uint64, amount int, skip int) []*types.Header {
+// headersByNumber returns headers from the given number.
+func (tc *testChain) headersByNumber(origin uint64, amount int, skip int, reverse bool) []*types.Header {
 	result := make([]*types.Header, 0, amount)
-	for num := origin; num < uint64(len(tc.chain)) && len(result) < amount; num += uint64(skip) + 1 {
-		if header, ok := tc.headerm[tc.chain[int(num)]]; ok {
-			result = append(result, header)
+
+	if !reverse {
+		for num := origin; num < uint64(len(tc.chain)) && len(result) < amount; num += uint64(skip) + 1 {
+			if header, ok := tc.headerm[tc.chain[int(num)]]; ok {
+				result = append(result, header)
+			}
+		}
+	} else {
+		for num := int64(origin); num >= 0 && len(result) < amount; num -= int64(skip) + 1 {
+			if header, ok := tc.headerm[tc.chain[int(num)]]; ok {
+				result = append(result, header)
+			}
 		}
 	}
 	return result

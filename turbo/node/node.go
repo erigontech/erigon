@@ -1,7 +1,9 @@
+// Package node contains classes for running a turbo-geth node.
 package node
 
 import (
 	"math"
+	"net"
 	"runtime/debug"
 	"strconv"
 	"time"
@@ -14,17 +16,25 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
+	turbocli "github.com/ledgerwatch/turbo-geth/turbo/cli"
 
 	"github.com/urfave/cli"
 
 	gopsutil "github.com/shirou/gopsutil/mem"
 )
 
+// TurboGethNode represents a single node, that runs sync and p2p network.
+// it also can export the private endpoint for RPC daemon, etc.
 type TurboGethNode struct {
 	stack   *node.Node
 	backend *eth.Ethereum
 }
 
+func (tg *TurboGethNode) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
+	tg.stack.SetP2PListenFunc(listenFunc)
+}
+
+// Serve runs the node and blocks the execution. It returns when the node is existed.
 func (tg *TurboGethNode) Serve() error {
 	defer tg.stack.Close()
 
@@ -42,20 +52,28 @@ func (tg *TurboGethNode) run() {
 	// see cmd/geth/main.go#startNode for full implementation
 }
 
+// Params contains optional parameters for creating a node.
+// * GitCommit is a commit from which then node was built.
+// * CustomBuckets is a `map[string]dbutils.BucketConfigItem`, that contains bucket name and its properties.
+//
+// NB: You have to declare your custom buckets here to be able to use them in the app.
 type Params struct {
-	GitDate       string
 	GitCommit     string
 	CustomBuckets dbutils.BucketsCfg
 }
 
+// New creates a new `TurboGethNode`.
+// * ctx - `*cli.Context` from the main function. Necessary to be able to configure the node based on the command-line flags
+// * sync - `stagedsync.StagedSync`, an instance of staged sync, setup just as needed.
+// * optionalParams - additional parameters for running a node.
 func New(
 	ctx *cli.Context,
 	sync *stagedsync.StagedSync,
-	p Params,
+	optionalParams Params,
 ) *TurboGethNode {
-	prepareBuckets(p.CustomBuckets)
+	prepareBuckets(optionalParams.CustomBuckets)
 	prepare(ctx)
-	nodeConfig := makeNodeConfig(ctx, p)
+	nodeConfig := makeNodeConfig(ctx, optionalParams)
 	node := makeConfigNode(nodeConfig)
 	ethConfig := makeEthConfig(ctx, node)
 
@@ -69,22 +87,24 @@ func New(
 func makeEthConfig(ctx *cli.Context, node *node.Node) *eth.Config {
 	ethConfig := &eth.DefaultConfig
 	utils.SetEthConfig(ctx, node, ethConfig)
+	turbocli.ApplyFlagsForEthConfig(ctx, ethConfig)
 	return ethConfig
 }
 
 func makeNodeConfig(ctx *cli.Context, p Params) *node.Config {
 	nodeConfig := node.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
-	if commit, date := p.GitCommit, p.GitDate; commit != "" && date != "" {
-		nodeConfig.Version = params.VersionWithCommit(commit, date)
+	if commit := p.GitCommit; commit != "" {
+		nodeConfig.Version = params.VersionWithCommit(commit, "")
 	} else {
 		nodeConfig.Version = params.Version
 	}
-	nodeConfig.IPCPath = "tg.ipc"
+	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "turbo-geth"
 	nodeConfig.NoUSB = true
 
 	utils.SetNodeConfig(ctx, &nodeConfig)
+	turbocli.ApplyFlagsForNodeConfig(ctx, &nodeConfig)
 
 	return &nodeConfig
 }

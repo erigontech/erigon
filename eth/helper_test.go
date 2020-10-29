@@ -228,9 +228,11 @@ func newTestPeer(name string, version int, pm *ProtocolManager, shake bool) (*te
 			head    = pm.blockchain.CurrentHeader()
 			td      = pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
 		)
-		tp.handshake(nil, td, head.Hash(), genesis.Hash(), forkid.NewID(pm.blockchain.Config(), genesis.Hash(), head.Number.Uint64()), forkid.NewFilter(pm.blockchain))
+		forkID := forkid.NewID(pm.blockchain.Config(), pm.blockchain.Genesis().Hash(), pm.blockchain.CurrentHeader().Number.Uint64())
+		tp.handshake(nil, td, head.Hash(), genesis.Hash(), forkID, forkid.NewFilter(pm.blockchain.Config(), genesis.Hash(), head.Number.Uint64()))
+
 		// Newly connected peer will query the header that was announced during the handshake
-		if err := p2p.ExpectMsg(tp.app, 0x03, &getBlockHeadersData{Origin: hashOrNumber{Hash: pm.blockchain.CurrentBlock().Hash()}, Amount: 1}); err != nil {
+		if err := p2p.ExpectMsg(tp.app, 0x03, &GetBlockHeadersData{Origin: HashOrNumber{Hash: pm.blockchain.CurrentBlock().Hash()}, Amount: 1}); err != nil {
 			fmt.Printf("ExpectMsg error: %v\n", err)
 			panic(err)
 		}
@@ -275,7 +277,7 @@ func (p *testPeer) handshake(t *testing.T, td *big.Int, head common.Hash, genesi
 	var msg interface{}
 	switch {
 	case p.version >= eth64:
-		msg = &statusData{
+		msg = &StatusData{
 			ProtocolVersion: uint32(p.version),
 			NetworkID:       DefaultConfig.NetworkID,
 			TD:              td,

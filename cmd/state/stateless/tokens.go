@@ -3,6 +3,7 @@ package stateless
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/csv"
 	"fmt"
 	"math"
@@ -15,9 +16,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/bolt"
-	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -27,6 +25,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -133,6 +132,9 @@ func makeTokens(blockNum uint64) {
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, ethdb.RO)
+	check(err1)
+	defer ethTx.Rollback()
 	chainConfig := params.MainnetChainConfig
 	tt := NewTokenTracer()
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
@@ -155,7 +157,7 @@ func makeTokens(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethTx, block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		for _, tx := range block.Transactions() {
@@ -196,22 +198,28 @@ func makeTokenBalances() {
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, ethdb.RO)
+	check(err1)
+	defer ethTx.Rollback()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	check(err)
+	bc, errf := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+	check(errf)
 	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
+	const bucket = "sha3"
 
-	pdb, err := bolt.Open("/Volumes/tb41/turbo-geth/sha3preimages", 0600, &bolt.Options{})
-	check(err)
+	pdb := ethdb.NewLMDB().Path("/Volumes/tb41/turbo-geth/sha3preimages").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			bucket: {},
+		}
+	}).MustOpen()
 	defer pdb.Close()
-	bucket := []byte("sha3")
 
 	var tokens []common.Address
-	tokenFile, err := os.Open("/Volumes/tb41/turbo-geth/tokens.csv")
-	check(err)
+	tokenFile, errf := os.Open("/Volumes/tb41/turbo-geth/tokens.csv")
+	check(errf)
 	tokenReader := csv.NewReader(bufio.NewReader(tokenFile))
 	for records, _ := tokenReader.Read(); records != nil; records, _ = tokenReader.Read() {
 		tokens = append(tokens, common.HexToAddress(records[0]))
@@ -219,8 +227,8 @@ func makeTokenBalances() {
 	tokenFile.Close()
 	//tokens = append(tokens, common.HexToAddress("0xB8c77482e45F1F44dE1745F52C74426C631bDD52"))
 	caller := common.HexToAddress("0x742d35cc6634c0532925a3b844bc454e4438f44e")
-	f, err := os.Create("/Volumes/tb41/turbo-geth/token_balances.csv")
-	check(err)
+	f, errf := os.Create("/Volumes/tb41/turbo-geth/token_balances.csv")
+	check(errf)
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
@@ -239,7 +247,7 @@ func makeTokenBalances() {
 		fmt.Printf("Analysing token %x...", token)
 		count := 0
 		addrCount := 0
-		dbstate := state.NewPlainDBState(ethDb.KV(), currentBlockNr)
+		dbstate := state.NewPlainDBState(ethTx, currentBlockNr)
 		statedb := state.New(dbstate)
 		msg := types.NewMessage(
 			caller,
@@ -251,17 +259,20 @@ func makeTokenBalances() {
 			common.FromHex(fmt.Sprintf("0x70a08231000000000000000000000000%x", common.HexToAddress("0xe477292f1b3268687a29376116b0ed27a9c76170"))),
 			false, // checkNonce
 		)
-		chainConfig := params.MainnetChainConfig
-		vmConfig := vm.Config{EnablePreimageRecording: true}
-		context := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
-		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-		result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
-		if err != nil {
-			fmt.Printf("Call failed with error: %v\n", err)
-		}
-		if result.Failed() {
-			fmt.Printf("Call failed\n")
+
+		{
+			chainConfig := params.MainnetChainConfig
+			vmConfig := vm.Config{EnablePreimageRecording: true}
+			ctx := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
+			// Not yet the searched for transaction, execute on top of the current state
+			vmenv := vm.NewEVM(ctx, statedb, chainConfig, vmConfig)
+			result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
+			if err != nil {
+				fmt.Printf("Call failed with error: %v\n", err)
+			}
+			if result.Failed() {
+				fmt.Printf("Call failed\n")
+			}
 		}
 		pi := statedb.Preimages()
 		var base byte
@@ -286,23 +297,20 @@ func makeTokenBalances() {
 		if plen != 1 {
 			fmt.Printf(" balanceOf preimages: %d\n", plen)
 		}
-		err = ethDb.Walk(dbutils.CurrentStateBucket, token[:], 160, func(k, v []byte) (bool, error) {
-			var key []byte
-			key, err = ethDb.Get(dbutils.PreimagePrefix, k[20:])
+		if err := ethDb.Walk(dbutils.CurrentStateBucket, token[:], 160, func(k, v []byte) (bool, error) {
+			key, err := ethDb.Get(dbutils.PreimagePrefix, k[20:])
+			if err != nil {
+				return false, err
+			}
 			var preimage []byte
 			if key != nil {
-				err := pdb.View(func(tx *bolt.Tx) error {
-					b := tx.Bucket(bucket)
-					if b == nil {
-						return nil
-					}
-					preimage, _ = b.Get(key)
+				if err := pdb.View(context.Background(), func(tx ethdb.Tx) error {
+					preimage, _ = tx.Cursor(bucket).SeekExact(key)
 					if preimage != nil {
 						preimage = common.CopyBytes(preimage)
 					}
 					return nil
-				})
-				if err != nil {
+				}); err != nil {
 					return false, err
 				}
 			}
@@ -329,8 +337,7 @@ func makeTokenBalances() {
 			}
 			count++
 			return true, nil
-		})
-		if err != nil {
+		}); err != nil {
 			fmt.Printf("Error walking: %v\n", err)
 			return
 		}
@@ -417,22 +424,28 @@ func makeTokenAllowances() {
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, ethdb.RO)
+	check(err1)
+	defer ethTx.Rollback()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	check(err)
+	bc, errf := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+	check(errf)
 	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 
-	pdb, err := bolt.Open("/Volumes/tb41/turbo-geth/sha3preimages", 0600, &bolt.Options{})
-	check(err)
+	const bucket = "sha3"
+	pdb := ethdb.NewLMDB().Path("/Volumes/tb41/turbo-geth/sha3preimages").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			bucket: {},
+		}
+	}).MustOpen()
 	defer pdb.Close()
-	bucket := []byte("sha3")
 
 	var tokens []common.Address
-	tokenFile, err := os.Open("/Volumes/tb41/turbo-geth/tokens.csv")
-	check(err)
+	tokenFile, errf := os.Open("/Volumes/tb41/turbo-geth/tokens.csv")
+	check(errf)
 	tokenReader := csv.NewReader(bufio.NewReader(tokenFile))
 	for records, _ := tokenReader.Read(); records != nil; records, _ = tokenReader.Read() {
 		tokens = append(tokens, common.HexToAddress(records[0]))
@@ -440,8 +453,8 @@ func makeTokenAllowances() {
 	tokenFile.Close()
 	//tokens = append(tokens, common.HexToAddress("0xB8c77482e45F1F44dE1745F52C74426C631bDD52"))
 	caller := common.HexToAddress("0x742d35cc6634c0532925a3b844bc454e4438f44e")
-	f, err := os.Create("/Volumes/tb41/turbo-geth/token_allowances.csv")
-	check(err)
+	f, errf := os.Create("/Volumes/tb41/turbo-geth/token_allowances.csv")
+	check(errf)
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
@@ -460,7 +473,7 @@ func makeTokenAllowances() {
 		fmt.Printf("Analysing token %x...", token)
 		count := 0
 		addrCount := 0
-		dbstate := state.NewPlainDBState(ethDb.KV(), currentBlockNr)
+		dbstate := state.NewPlainDBState(ethTx, currentBlockNr)
 		statedb := state.New(dbstate)
 		msg := types.NewMessage(
 			caller,
@@ -475,17 +488,19 @@ func makeTokenAllowances() {
 			)),
 			false, // checkNonce
 		)
-		chainConfig := params.MainnetChainConfig
-		vmConfig := vm.Config{EnablePreimageRecording: true}
-		context := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
-		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-		result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
-		if err != nil {
-			fmt.Printf("Call failed with error: %v\n", err)
-		}
-		if result.Failed() {
-			fmt.Printf("Call failed\n")
+		{
+			chainConfig := params.MainnetChainConfig
+			vmConfig := vm.Config{EnablePreimageRecording: true}
+			ctx := core.NewEVMContext(msg, currentBlock.Header(), bc, nil)
+			// Not yet the searched for transaction, execute on top of the current state
+			vmenv := vm.NewEVM(ctx, statedb, chainConfig, vmConfig)
+			result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(math.MaxUint64))
+			if err != nil {
+				fmt.Printf("Call failed with error: %v\n", err)
+			}
+			if result.Failed() {
+				fmt.Printf("Call failed\n")
+			}
 		}
 		pi := statedb.Preimages()
 		var base byte
@@ -525,25 +540,23 @@ func makeTokenAllowances() {
 			fmt.Printf("allowance base not found\n")
 			continue
 		}
-		err = ethDb.Walk(dbutils.CurrentStateBucket, token[:], 160, func(k, v []byte) (bool, error) {
-			var key []byte
-			key, err = ethDb.Get(dbutils.PreimagePrefix, k[20:])
+		if err := ethDb.Walk(dbutils.CurrentStateBucket, token[:], 160, func(k, v []byte) (bool, error) {
+			key, err := ethDb.Get(dbutils.PreimagePrefix, k[20:])
+			if err != nil {
+				return false, err
+			}
 			var index2 common.Hash
 			var preimage []byte
 			if key != nil {
-				err := pdb.View(func(tx *bolt.Tx) error {
-					b := tx.Bucket(bucket)
-					if b == nil {
-						return nil
-					}
-					preimage, _ = b.Get(key)
+				if err := pdb.View(context.Background(), func(tx ethdb.Tx) error {
+					c := tx.Cursor(bucket)
+					preimage, _ = c.SeekExact(key)
 					if preimage != nil && len(preimage) == 64 {
 						copy(index2[:], preimage[:32])
-						preimage, _ = b.Get(preimage[32:])
+						preimage, _ = c.SeekExact(preimage[32:])
 					}
 					return nil
-				})
-				if err != nil {
+				}); err != nil {
 					return false, err
 				}
 			}
@@ -577,8 +590,7 @@ func makeTokenAllowances() {
 			}
 			count++
 			return true, nil
-		})
-		if err != nil {
+		}); err != nil {
 			fmt.Printf("Error walking: %v\n", err)
 			return
 		}

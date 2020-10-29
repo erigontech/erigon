@@ -1,10 +1,10 @@
 package dbutils
 
 import (
+	"bytes"
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
@@ -95,11 +95,12 @@ var (
 	StorageChangeSetBucket = "SCS"
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
-	IntermediateTrieHashBucket = "iTh"
-	//IntermediateTrieHashBucket2 = "iTh2"
+	IntermediateTrieHashBucket     = "iTh2"
+	IntermediateTrieHashBucketOld1 = "iTh"
 
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = "DBINFO"
+	SnapshotInfoBucket = "SNINFO"
 
 	// databaseVerisionKey tracks the current database version.
 	DatabaseVerisionKey = "DatabaseVersion"
@@ -110,8 +111,25 @@ var (
 	HeaderHashSuffix   = []byte("n") // headerPrefix + num (uint64 big endian) + headerHashSuffix -> hash
 	HeaderNumberPrefix = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
 
-	BlockBodyPrefix     = "b" // blockBodyPrefix + num (uint64 big endian) + hash -> block body
-	BlockReceiptsPrefix = "r" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+	BlockBodyPrefix     = "b"   // blockBodyPrefix + num (uint64 big endian) + hash -> block body
+	BlockReceiptsPrefix = "r"   // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+	Log                 = "log" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+
+	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
+	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
+	// indices are sharded - because some bitmaps are >1Mb and when new incoming blocks process it
+	//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (LMDB does copy-on-write).
+	//
+	// if last existing shard size merge it with delta
+	// if serialized size of delta > ShardLimit - break down to multiple shards
+	// shard number - it's biggest value in bitmap
+	LogTopicIndex   = "log_topic_index"
+	LogAddressIndex = "log_address_index"
+
+	// Indices for call traces - have the same format as LogTopicIndex and LogAddressIndex
+	// Store bitmap indices - in which block number we saw calls from (CallFromIndex) or to (CallToIndex) some addresses
+	CallFromIndex = "call_from_index"
+	CallToIndex   = "call_to_index"
 
 	TxLookupPrefix  = "l" // txLookupPrefix + hash -> transaction/receipt lookup metadata
 	BloomBitsPrefix = "B" // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
@@ -161,8 +179,15 @@ var (
 	StorageModeReceipts = []byte("smReceipts")
 	//StorageModeTxIndex - does node save transactions index.
 	StorageModeTxIndex = []byte("smTxIndex")
+	//StorageModeCallTraces - does not build index of call traces
+	StorageModeCallTraces = []byte("smCallTraces")
 
 	HeadHeaderKey = "LastHeader"
+
+	SnapshotHeadersHeadNumber = "SnapshotLastHeaderNumber"
+	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
+	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
+	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
 )
 
 // Metrics
@@ -202,13 +227,18 @@ var Buckets = []string{
 	PlainContractCodeBucket,
 	PlainAccountChangeSetBucket,
 	PlainStorageChangeSetBucket,
-	InodesBucket,
 	Senders,
 	FastTrieProgressKey,
 	HeadBlockKey,
 	HeadFastBlockKey,
 	HeadHeaderKey,
 	Migrations,
+	LogTopicIndex,
+	LogAddressIndex,
+	SnapshotInfoBucket,
+	CallFromIndex,
+	CallToIndex,
+	Log,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
@@ -217,25 +247,61 @@ var DeprecatedBuckets = []string{
 	SyncStageUnwindOld1,
 	CurrentStateBucketOld1,
 	PlainStateBucketOld1,
+	IntermediateTrieHashBucketOld1,
 }
 
 type CustomComparator string
 
 const (
+	DefaultCmp     CustomComparator = ""
 	DupCmpSuffix32 CustomComparator = "dup_cmp_suffix32"
 )
+
+type CmpFunc func(k1, k2, v1, v2 []byte) int
+
+func DefaultCmpFunc(k1, k2, v1, v2 []byte) int { return bytes.Compare(k1, k2) }
+func DefaultDupCmpFunc(k1, k2, v1, v2 []byte) int {
+	cmp := bytes.Compare(k1, k2)
+	if cmp == 0 {
+		cmp = bytes.Compare(v1, v2)
+	}
+	return cmp
+}
 
 type BucketsCfg map[string]BucketConfigItem
 type Bucket string
 
+type DBI uint
+type BucketFlags uint
+
+const (
+	Default    BucketFlags = 0x00
+	ReverseKey BucketFlags = 0x02
+	DupSort    BucketFlags = 0x04
+	IntegerKey BucketFlags = 0x08
+	DupFixed   BucketFlags = 0x10
+	IntegerDup BucketFlags = 0x20
+	ReverseDup BucketFlags = 0x40
+)
+
+type TxFlags uint
+
+const (
+	RO         TxFlags = 0x00
+	RW         TxFlags = 0x02
+	Try        TxFlags = 0x04
+	NoMetaSync TxFlags = 0x08
+	NoSync     TxFlags = 0x10
+)
+
 type BucketConfigItem struct {
-	Flags uint
+	Flags BucketFlags
 	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
 	// Use it wisely - it helps to do experiments with DB format faster, but better reduce amount of Magic in app.
 	// If good DB format found, push app code to accept this format and then disable this property.
 	AutoDupSortKeysConversion bool
 	IsDeprecated              bool
-	DBI                       lmdb.DBI
+	DBI                       DBI
 	// DupFromLen - if user provide key of this length, then next transformation applied:
 	// v = append(k[DupToLen:], v...)
 	// k = k[:DupToLen]
@@ -250,22 +316,21 @@ type BucketConfigItem struct {
 
 var BucketsConfigs = BucketsCfg{
 	CurrentStateBucket: {
-		Flags:                     lmdb.DupSort,
+		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                72,
 		DupToLen:                  40,
 	},
 	PlainStateBucket: {
-		Flags:                     lmdb.DupSort,
+		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                60,
 		DupToLen:                  28,
 	},
-	//IntermediateTrieHashBucket2: {
-	//	Flags:               		lmdb.DupSort,
-	//	CustomDupComparator:	 	DupCmpSuffix32,
-	//	AutoDupSortKeysConversion:  false,
-	//},
+	IntermediateTrieHashBucket: {
+		Flags:               DupSort,
+		CustomDupComparator: DupCmpSuffix32,
+	},
 }
 
 func sortBuckets() {

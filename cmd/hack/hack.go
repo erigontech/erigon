@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -35,11 +34,15 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
+	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/valyala/gozstd"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 )
@@ -306,13 +309,16 @@ func mychart() {
 	check(err)
 }
 
-func accountSavings(db *bolt.DB) (int, int) {
+//nolint
+func accountSavings(db ethdb.KV) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
-	check(db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(dbutils.CurrentStateBucket))
-		c := b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+	check(db.View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.CurrentStateBucket)
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if len(k) != 32 {
 				continue
 			}
@@ -328,50 +334,65 @@ func accountSavings(db *bolt.DB) (int, int) {
 	return emptyRoots, emptyCodes
 }
 
-func bucketStats(chaindata string) {
-	t := ethdb.Lmdb
-	bucketList := dbutils.Buckets
+func bucketStats(chaindata string) error {
+	ethDb := ethdb.MustOpen(chaindata)
+	defer ethDb.Close()
 
-	switch t {
-	case ethdb.Bolt:
-		db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
-		check(err)
+	var bucketList []string
+	if err1 := ethDb.KV().View(context.Background(), func(txa ethdb.Tx) error {
+		if bl, err := txa.(ethdb.BucketMigrator).ExistingBuckets(); err == nil {
+			bucketList = bl
+		} else {
+			return err
+		}
+		return nil
+	}); err1 != nil {
+		ethDb.Close()
+		return err1
+	}
 
-		fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
-		_ = db.View(func(tx *bolt.Tx) error {
+	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
+	switch kv := ethDb.KV().(type) {
+	case *ethdb.LmdbKV:
+		type LmdbStat interface {
+			BucketStat(name string) (*lmdb.Stat, error)
+		}
+		if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
 			for _, bucket := range bucketList {
-				b := tx.Bucket([]byte(bucket))
-				bs := b.Stats()
-				fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
-					bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
-					bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
-			}
-			return nil
-		})
-	case ethdb.Lmdb:
-		env, err := lmdb.NewEnv()
-		check(err)
-		err = env.SetMaxDBs(100)
-		check(err)
-		err = env.Open(chaindata, lmdb.Readonly, 0664)
-		check(err)
-
-		fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
-		_ = env.View(func(tx *lmdb.Txn) error {
-			for _, bucket := range bucketList {
-				dbi, bucketErr := tx.OpenDBI(string(bucket), 0)
-				if bucketErr != nil {
-					fmt.Printf("opening bucket %s: %v\n", bucket, bucketErr)
-					continue
-				}
-				bs, statErr := tx.Stat(dbi)
+				bs, statErr := tx.(LmdbStat).BucketStat(bucket)
 				check(statErr)
-				fmt.Printf("%s,%d,%d,%d,%d\n", string(bucket),
+				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
 					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
 			}
+
+			bs, statErr := tx.(LmdbStat).BucketStat("freelist")
+			check(statErr)
+			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
 			return nil
-		})
+		}); err != nil {
+			panic(err)
+		}
+	case *ethdb.MdbxKV:
+		type MdbxStat interface {
+			BucketStat(name string) (*mdbx.Stat, error)
+		}
+
+		if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
+			for _, bucket := range bucketList {
+				bs, statErr := tx.(MdbxStat).BucketStat(bucket)
+				check(statErr)
+				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
+					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			}
+			bs, statErr := tx.(MdbxStat).BucketStat("freelist")
+			check(statErr)
+			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			return nil
+		}); err != nil {
+			panic(err)
+		}
 	}
+	return nil
 }
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
@@ -824,7 +845,10 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 	defer ethDb.Close()
 	blocksToSearch := 10000000
 	for i := uint64(block); i < uint64(block+blocksToSearch); i++ {
-		hash := rawdb.ReadCanonicalHash(ethDb, i)
+		hash, err := rawdb.ReadCanonicalHash(ethDb, i)
+		if err != nil {
+			panic(err)
+		}
 		header := rawdb.ReadHeader(ethDb, hash, i)
 		if header.Root == stateRoot || stateRoot == (common.Hash{}) {
 			fmt.Printf("\n===============\nCanonical hash for %d: %x\n", i, hash)
@@ -847,7 +871,8 @@ func printTxHashes() {
 	ethDb := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
 	defer ethDb.Close()
 	for b := uint64(0); b < uint64(100000); b++ {
-		hash := rawdb.ReadCanonicalHash(ethDb, b)
+		hash, err := rawdb.ReadCanonicalHash(ethDb, b)
+		check(err)
 		block := rawdb.ReadBlock(ethDb, hash, b)
 		if block == nil {
 			break
@@ -1016,7 +1041,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 	var found bool
 	var incarnationBytes [common.IncarnationLength]byte
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits int = 8 * common.HashLength
+	var fixedbits = 8 * common.HashLength
 	copy(startkey, addrHash[:])
 	if err := ethDb.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 		copy(incarnationBytes[:], k[common.HashLength:])
@@ -1126,7 +1151,8 @@ func validateTxLookups2(db rawdb.DatabaseReader, startBlock uint64, interruptCh 
 	// Validation Process
 	blockBytes := big.NewInt(0)
 	for !interrupt {
-		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		blockHash, err := rawdb.ReadCanonicalHash(db, blockNum)
+		check(err)
 		body := rawdb.ReadBody(db, blockHash, blockNum)
 
 		if body == nil {
@@ -1157,11 +1183,13 @@ func validateTxLookups2(db rawdb.DatabaseReader, startBlock uint64, interruptCh 
 }
 
 func getModifiedAccounts(chaindata string) {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	addrs, err := ethdb.GetModifiedAccounts(db, 49300, 49400)
-	check(err)
-	fmt.Printf("Len(addrs)=%d\n", len(addrs))
+	// TODO(tjayrush): The call to GetModifiedAccounts needs a database tx
+	fmt.Println("hack - getModiiedAccounts is temporarily disabled.")
+	// db := ethdb.MustOpen(chaindata)
+	// defer db.Close()
+	// addrs, err := ethdb.GetModifiedAccounts(db, 49300, 49400)
+	// check(err)
+	// fmt.Printf("Len(addrs)=%d\n", len(addrs))
 }
 
 type Receiver struct {
@@ -1405,7 +1433,8 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	runtime.ReadMemStats(&m)
 	log.Info("Loaded subtries",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	hash := rawdb.ReadCanonicalHash(db, block)
+	hash, err := rawdb.ReadCanonicalHash(db, block)
+	check(err)
 	header := rawdb.ReadHeader(db, hash, block)
 	tr := trie.New(common.Hash{})
 	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
@@ -1655,6 +1684,302 @@ func iterateOverCode(chaindata string) error {
 	return nil
 }
 
+func zstd(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, errBegin := db.Begin(context.Background(), ethdb.RW)
+	check(errBegin)
+	defer tx.Rollback()
+
+	logEvery := time.NewTicker(5 * time.Second)
+	defer logEvery.Stop()
+
+	// train
+	var samples1 [][]byte
+	var samples2 [][]byte
+
+	bucket := dbutils.BlockReceiptsPrefix
+	fmt.Printf("bucket: %s\n", bucket)
+	c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
+	count, _ := c.Count()
+	blockNBytes := make([]byte, 8)
+	trainFrom := count - 2_000_000
+	for blockN := trainFrom; blockN < count; blockN += 2_000_000 / 4_000 {
+		binary.BigEndian.PutUint64(blockNBytes, blockN)
+		var v []byte
+		_, v, err := c.Seek(blockNBytes)
+		if err != nil {
+			return err
+		}
+
+		storageReceipts := types.Receipts{}
+		err = cbor.Unmarshal(&storageReceipts, bytes.NewReader(v))
+		check(err)
+
+		samples1 = append(samples1, v)
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Progress sampling", "blockNum", blockN)
+		}
+	}
+
+	fmt.Printf("samples1: %d, samples2: %d\n", len(samples1), len(samples2))
+	t := time.Now()
+	dict128 := gozstd.BuildDict(samples1, 64*1024)
+	fmt.Printf("dict128: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict128_100k := gozstd.BuildDict(samples2, 64*1024)
+	fmt.Printf("dict128_100k: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict64 := gozstd.BuildDict(samples1, 32*1024)
+	fmt.Printf("dict64: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict64_100k := gozstd.BuildDict(samples2, 32*1024)
+	fmt.Printf("dict64_100k: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict32 := gozstd.BuildDict(samples1, 16*1024)
+	fmt.Printf("dict32: %s\n", time.Since(t))
+
+	t = time.Now()
+	dict32_100k := gozstd.BuildDict(samples2, 16*1024)
+	fmt.Printf("dict32_100k: %s\n", time.Since(t))
+
+	cd128_s1_minus2, err := gozstd.NewCDictLevel(dict128, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd128_s1_minus2.Release()
+
+	cd128_s100k_minus2, err := gozstd.NewCDictLevel(dict128_100k, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd128_s100k_minus2.Release()
+
+	cd64_minus2, err := gozstd.NewCDictLevel(dict64, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd64_minus2.Release()
+
+	cd64_s100k_minus2, err := gozstd.NewCDictLevel(dict64_100k, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd64_s100k_minus2.Release()
+
+	cd32_minus2, err := gozstd.NewCDictLevel(dict32, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd64_minus2.Release()
+
+	cd32_s100k_minus2, err := gozstd.NewCDictLevel(dict32_100k, -2)
+	if err != nil {
+		panic(err)
+	}
+	defer cd32_s100k_minus2.Release()
+
+	//cd128_19, err := gozstd.NewCDictLevel(dict128, 19)
+	//if err != nil {
+	//	return err
+	//}
+	//defer cd128_19.Release()
+	//
+	//cd128_22, err := gozstd.NewCDictLevel(dict128, 22)
+	//if err != nil {
+	//	return err
+	//}
+	//defer cd128_22.Release()
+
+	//total32 := 0
+	//total64 := 0
+	//total64_minus3 := 0
+	total128_s1_minus2 := 0
+	total128_s2_minus2 := 0
+	total64_s1_minus2 := 0
+	total64_s2_minus2 := 0
+	total32_s1_minus2 := 0
+	total32_s2_minus2 := 0
+
+	total := 0
+	var d_s1_minus2 time.Duration
+	var d_s2_minus2 time.Duration
+
+	var d64_s1_minus2 time.Duration
+	var d64_s2_minus2 time.Duration
+
+	var d32_s1_minus2 time.Duration
+	var d32_s2_minus2 time.Duration
+
+	buf := make([]byte, 0, 1024)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		total += len(v)
+		blockNum := binary.BigEndian.Uint64(k)
+
+		t := time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd128_s1_minus2)
+		d_s1_minus2 += time.Since(t)
+		total128_s1_minus2 += len(buf)
+
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd128_s100k_minus2)
+		d_s2_minus2 += time.Since(t)
+		total128_s2_minus2 += len(buf)
+
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd64_minus2)
+		d64_s1_minus2 += time.Since(t)
+		total64_s1_minus2 += len(buf)
+
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd64_s100k_minus2)
+		d64_s2_minus2 += time.Since(t)
+		total64_s2_minus2 += len(buf)
+
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd32_minus2)
+		d32_s1_minus2 += time.Since(t)
+		total32_s1_minus2 += len(buf)
+
+		t = time.Now()
+		buf = gozstd.CompressDict(buf[:0], v, cd32_s100k_minus2)
+		d32_s2_minus2 += time.Since(t)
+		total32_s2_minus2 += len(buf)
+
+		select {
+		default:
+		case <-logEvery.C:
+			totalf := float64(total)
+			log.Info("Progress 8", "blockNum", blockNum, "before", common.StorageSize(total),
+				"128_s1_minus2", fmt.Sprintf("%.2f", totalf/float64(total128_s1_minus2)), "d_s1_minus2", d_s1_minus2,
+				"128_s2_minus2", fmt.Sprintf("%.2f", totalf/float64(total128_s2_minus2)), "d_s2_minus2", d_s2_minus2,
+
+				"64_s1_minus2", fmt.Sprintf("%.2f", totalf/float64(total64_s1_minus2)), "d64_s1_minus2", d64_s1_minus2,
+				"64_s2_minus2", fmt.Sprintf("%.2f", totalf/float64(total64_s2_minus2)), "d64_s2_minus2", d64_s2_minus2,
+
+				"32_s1_minus2", fmt.Sprintf("%.2f", totalf/float64(total32_s1_minus2)), "d32_s1_minus2", d32_s1_minus2,
+				"32_s2_minus2", fmt.Sprintf("%.2f", totalf/float64(total32_s2_minus2)), "d32_s2_minus2", d32_s2_minus2,
+			)
+		}
+	}
+
+	return nil
+}
+
+func benchRlp(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RW)
+	check(err)
+	defer tx.Rollback()
+
+	logEvery := time.NewTicker(5 * time.Second)
+	defer logEvery.Stop()
+
+	// train
+	total := 0
+	bucket := dbutils.BlockReceiptsPrefix
+	fmt.Printf("bucket: %s\n", bucket)
+	c := tx.(ethdb.HasTx).Tx().Cursor(bucket)
+
+	total_cbor := 0
+	total_compress_cbor := 0
+
+	total = 0
+	var cbor_encode time.Duration
+	var cbor_decode time.Duration
+	var cbor_decode2 time.Duration
+	var cbor_decode3 time.Duration
+	var cbor_compress time.Duration
+
+	buf := bytes.NewBuffer(make([]byte, 0, 100_000))
+	compressBuf := make([]byte, 0, 100_000)
+
+	var samplesCbor [][]byte
+
+	count, _ := c.Count()
+	blockNBytes := make([]byte, 8)
+	trainFrom := count - 2_000_000
+	for blockN := trainFrom; blockN < count; blockN += 2_000_000 / 4_000 {
+		binary.BigEndian.PutUint64(blockNBytes, blockN)
+		var v []byte
+		_, v, err = c.Seek(blockNBytes)
+		if err != nil {
+			return err
+		}
+
+		receipts := types.Receipts{}
+		err = cbor.Unmarshal(&receipts, bytes.NewReader(v))
+		check(err)
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Progress sampling", "blockNum", blockN)
+		}
+	}
+
+	compressorCbor, err := gozstd.NewCDictLevel(gozstd.BuildDict(samplesCbor, 32*1024), -2)
+	check(err)
+	defer compressorCbor.Release()
+
+	binary.BigEndian.PutUint64(blockNBytes, trainFrom)
+	for k, v, err := c.Seek(blockNBytes); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		total += len(v)
+		blockNum := binary.BigEndian.Uint64(k)
+
+		storageReceipts := types.Receipts{}
+		err = cbor.Unmarshal(&storageReceipts, bytes.NewReader(v))
+		check(err)
+
+		t := time.Now()
+		buf.Reset()
+		err = cbor.Marshal(buf, storageReceipts)
+		cbor_encode += time.Since(t)
+		total_cbor += buf.Len()
+		check(err)
+
+		t = time.Now()
+		//compressBuf = gozstd.CompressDict(compressBuf[:0], buf.Bytes(), compressorCbor)
+		cbor_compress += time.Since(t)
+		total_compress_cbor += len(compressBuf)
+
+		storageReceipts2 := types.Receipts{}
+		t = time.Now()
+		err = cbor.Unmarshal(&storageReceipts2, bytes.NewReader(buf.Bytes()))
+		cbor_decode += time.Since(t)
+		check(err)
+
+		select {
+		default:
+		case <-logEvery.C:
+			totalf := float64(total)
+			log.Info("Progress 8", "blockNum", blockNum, "before", common.StorageSize(total),
+				//"rlp_decode", rlp_decode,
+				"total_cbor", fmt.Sprintf("%.2f", float64(total_cbor)/totalf), "cbor_encode", cbor_encode, "cbor_decode", cbor_decode,
+				"cbor_decode2", cbor_decode2, "cbor_decode3", cbor_decode3,
+				//"compress_rlp_ratio", fmt.Sprintf("%.2f", totalf/float64(total_compress_rlp)), "rlp_compress", rlp_compress,
+				"compress_cbor_ratio", fmt.Sprintf("%.2f", totalf/float64(total_compress_cbor)), "cbor_compress", cbor_compress,
+			)
+		}
+	}
+
+	return nil
+}
+
 func mint(chaindata string, block uint64) error {
 	f, err := os.Create("mint.csv")
 	if err != nil {
@@ -1683,7 +2008,11 @@ func mint(chaindata string, block uint64) error {
 				continue
 			}
 			canonical[common.BytesToHash(v)] = struct{}{}
+			if len(canonical)%100_000 == 0 {
+				log.Info("Read canonical hashes", "count", len(canonical))
+			}
 		}
+		log.Info("Read canonical hashes", "count", len(canonical))
 		c = tx.Cursor(dbutils.BlockBodyPrefix)
 		var prevBlock uint64
 		var burntGas uint64
@@ -1731,10 +2060,83 @@ func mint(chaindata string, block uint64) error {
 				burntGas += header.GasUsed
 				fmt.Fprintf(w, "%d, %d\n", burntGas, gasPrice)
 			}
+			if blockNumber%100_000 == 0 {
+				log.Info("Processed", "blocks", blockNumber)
+			}
 		}
 		return nil
 	}); err1 != nil {
 		return err1
+	}
+	return nil
+}
+
+func extracHeaders(chaindata string, block uint64) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	b := uint64(0)
+	f, err := os.Create("hard-coded-headers.dat")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	var hBuffer [headerdownload.HeaderSerLength]byte
+	for {
+		hash, err := rawdb.ReadCanonicalHash(db, b)
+		check(err)
+		if hash == (common.Hash{}) {
+			break
+		}
+		h := rawdb.ReadHeader(db, hash, b)
+		headerdownload.SerialiseHeader(h, hBuffer[:])
+		if _, err := w.Write(hBuffer[:]); err != nil {
+			return err
+		}
+		b += block
+	}
+	fmt.Printf("Last block is %d\n", b)
+
+	hash := rawdb.ReadHeadHeaderHash(db)
+	h, err := rawdb.ReadHeaderByHash(db, hash)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Latest header timestamp: %d, current time: %d\n", h.Time, uint64(time.Now().Unix()))
+	return nil
+}
+
+func receiptSizes(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	c := tx.Cursor(dbutils.Log)
+	defer c.Close()
+	sizes := make(map[int]int)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		sizes[len(v)]++
+	}
+	var lens = make([]int, len(sizes))
+	i := 0
+	for l := range sizes {
+		lens[i] = l
+		i++
+	}
+	sort.Ints(lens)
+	for _, l := range lens {
+		if sizes[l] < 100000 {
+			continue
+		}
+		fmt.Printf("%6d - %d\n", l, sizes[l])
 	}
 	return nil
 }
@@ -1764,7 +2166,9 @@ func main() {
 		testGenCfg()
 	}
 	if *action == "bucketStats" {
-		bucketStats(*chaindata)
+		if err := bucketStats(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 	if *action == "syncChart" {
 		mychart()
@@ -1815,7 +2219,6 @@ func main() {
 		nextIncarnation(*chaindata, common.HexToHash(*account))
 	}
 	//repairCurrent()
-	//testMemBolt()
 	//fmt.Printf("\u00b3\n")
 	if *action == "dumpStorage" {
 		dumpStorage()
@@ -1878,6 +2281,31 @@ func main() {
 	}
 	if *action == "mint" {
 		if err := mint(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "zstd" {
+		if err := zstd(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "benchRlp" {
+		if err := benchRlp(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "extractHeaders" {
+		if err := extracHeaders(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "receiptSizes" {
+		if err := receiptSizes(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "defrag" {
+		if err := defrag(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

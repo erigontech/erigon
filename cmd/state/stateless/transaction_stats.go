@@ -2,6 +2,7 @@ package stateless
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"math/big"
 	"os"
@@ -172,6 +173,9 @@ func transactionStats(blockNum uint64) {
 	//ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	defer ethDb.Close()
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, ethdb.RO)
+	check(err1)
+	defer ethTx.Rollback()
 	f, err := os.OpenFile("txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer f.Close()
@@ -205,7 +209,7 @@ func transactionStats(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethTx, block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		for txIdx, tx := range block.Transactions() {

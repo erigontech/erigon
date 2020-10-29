@@ -81,9 +81,10 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 			if dec.CumulativeGasUsed != receipt.CumulativeGasUsed {
 				t.Fatalf("Receipt CumulativeGasUsed mismatch, want %v, have %v", receipt.CumulativeGasUsed, dec.CumulativeGasUsed)
 			}
-			if dec.Bloom != receipt.Bloom {
-				t.Fatalf("Bloom data mismatch, want %v, have %v", receipt.Bloom, dec.Bloom)
-			}
+			// rlp.Decode doesn't restore .Bloom field anymore because TG switched to bitmap indices, see dbutils.LogIndex
+			//if dec.Bloom != receipt.Bloom {
+			//	t.Fatalf("Bloom data mismatch, want %x, have %x", receipt.Bloom, dec.Bloom)
+			//}
 			if len(dec.Logs) != len(receipt.Logs) {
 				t.Fatalf("Receipt log number mismatch, want %v, have %v", len(receipt.Logs), len(dec.Logs))
 			}
@@ -151,7 +152,7 @@ func TestDeriveFields(t *testing.T) {
 	hash := common.BytesToHash([]byte{0x03, 0x14})
 
 	clearComputedFieldsOnReceipts(t, receipts)
-	if err := receipts.DeriveFields(params.TestChainConfig, hash, number.Uint64(), txs); err != nil {
+	if err := receipts.DeriveFields(hash, number.Uint64(), txs, []common.Address{common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0})}); err != nil {
 		t.Fatalf("DeriveFields(...) = %v, want <nil>", err)
 	}
 	// Iterate over all the computed fields and check that they're correct

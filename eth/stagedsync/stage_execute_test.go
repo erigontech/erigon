@@ -1,6 +1,8 @@
 package stagedsync
 
 import (
+	"context"
+	"github.com/stretchr/testify/require"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -10,72 +12,120 @@ import (
 )
 
 func TestUnwindExecutionStagePlainStatic(t *testing.T) {
-	initialDb := ethdb.NewMemDatabase()
-	defer initialDb.Close()
-	generateBlocks(t, 1, 50, plainWriterGen(initialDb), staticCodeStaticIncarnations)
+	db1 := ethdb.NewMemDatabase()
+	defer db1.Close()
+	tx1, err := db1.Begin(context.Background(), ethdb.RW)
+	require.NoError(t, err)
+	defer tx1.Rollback()
 
-	mutation := ethdb.NewMemDatabase()
-	defer mutation.Close()
-	generateBlocks(t, 1, 100, plainWriterGen(mutation), staticCodeStaticIncarnations)
+	db2 := ethdb.NewMemDatabase()
+	defer db2.Close()
+	tx2, err := db2.Begin(context.Background(), ethdb.RW)
+	require.NoError(t, err)
+	defer tx2.Rollback()
 
-	err := stages.SaveStageProgress(mutation, stages.Execution, 100, nil)
+	generateBlocks(t, 1, 50, plainWriterGen(tx1), staticCodeStaticIncarnations)
+	generateBlocks(t, 1, 100, plainWriterGen(tx2), staticCodeStaticIncarnations)
+
+	err = stages.SaveStageProgress(tx2, stages.Execution, 100, nil)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
 	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
 	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, mutation, true)
+	err = UnwindExecutionStage(u, s, tx2, true)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	compareCurrentState(t, initialDb, mutation, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
+	_, err = tx1.Commit()
+	if err != nil {
+		t.Errorf("error while committing state: %v", err)
+	}
+	_, err = tx2.Commit()
+	if err != nil {
+		t.Errorf("error while committing state: %v", err)
+	}
+
+	compareCurrentState(t, db1, db2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
 }
 
 func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
-	initialDb := ethdb.NewMemDatabase()
-	defer initialDb.Close()
-	generateBlocks(t, 1, 50, plainWriterGen(initialDb), changeCodeWithIncarnations)
+	db1 := ethdb.NewMemDatabase()
+	defer db1.Close()
+	tx1, err := db1.Begin(context.Background(), ethdb.RW)
+	require.NoError(t, err)
+	defer tx1.Rollback()
 
-	mutation := ethdb.NewMemDatabase()
-	defer mutation.Close()
-	generateBlocks(t, 1, 100, plainWriterGen(mutation), changeCodeWithIncarnations)
+	db2 := ethdb.NewMemDatabase()
+	defer db2.Close()
+	tx2, err := db2.Begin(context.Background(), ethdb.RW)
+	require.NoError(t, err)
+	defer tx2.Rollback()
 
-	err := stages.SaveStageProgress(mutation, stages.Execution, 100, nil)
+	generateBlocks(t, 1, 50, plainWriterGen(tx1), changeCodeWithIncarnations)
+	generateBlocks(t, 1, 100, plainWriterGen(tx2), changeCodeWithIncarnations)
+
+	err = stages.SaveStageProgress(tx2, stages.Execution, 100, nil)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
 	core.UsePlainStateExecution = true
 	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
 	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, mutation, true)
+	err = UnwindExecutionStage(u, s, tx2, true)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	compareCurrentState(t, initialDb, mutation, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
+	_, err = tx1.Commit()
+	if err != nil {
+		t.Errorf("error while committing state: %v", err)
+	}
+	_, err = tx2.Commit()
+	if err != nil {
+		t.Errorf("error while committing state: %v", err)
+	}
+
+	compareCurrentState(t, db1, db2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
 }
 
 func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	t.Skip("not supported yet, to be restored")
-	initialDb := ethdb.NewMemDatabase()
-	defer initialDb.Close()
-	generateBlocks(t, 1, 50, plainWriterGen(initialDb), changeCodeIndepenentlyOfIncarnations)
+	db1 := ethdb.NewMemDatabase()
+	defer db1.Close()
+	tx1, err := db1.Begin(context.Background(), ethdb.RW)
+	require.NoError(t, err)
+	defer tx1.Rollback()
 
-	mutation := ethdb.NewMemDatabase()
-	defer mutation.Close()
-	generateBlocks(t, 1, 100, plainWriterGen(mutation), changeCodeIndepenentlyOfIncarnations)
+	db2 := ethdb.NewMemDatabase()
+	defer db2.Close()
+	tx2, err := db2.Begin(context.Background(), ethdb.RW)
+	require.NoError(t, err)
+	defer tx2.Rollback()
 
-	err := stages.SaveStageProgress(mutation, stages.Execution, 100, nil)
+	generateBlocks(t, 1, 50, plainWriterGen(tx1), changeCodeIndepenentlyOfIncarnations)
+	generateBlocks(t, 1, 100, plainWriterGen(tx2), changeCodeIndepenentlyOfIncarnations)
+
+	err = stages.SaveStageProgress(tx2, stages.Execution, 100, nil)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
 	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
 	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, mutation, true)
+	err = UnwindExecutionStage(u, s, tx2, true)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	compareCurrentState(t, initialDb, mutation, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
+	_, err = tx1.Commit()
+	if err != nil {
+		t.Errorf("error while committing state: %v", err)
+	}
+	_, err = tx2.Commit()
+	if err != nil {
+		t.Errorf("error while committing state: %v", err)
+	}
+
+	compareCurrentState(t, db1, db2, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket)
 }

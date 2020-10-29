@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/event"
 )
@@ -21,7 +20,6 @@ var (
 	_ = big.NewInt
 	_ = strings.NewReader
 	_ = ethereum.NotFound
-	_ = math.U256
 	_ = bind.Bind
 	_ = common.Big1
 	_ = types.BloomLookup
@@ -29,10 +27,10 @@ var (
 )
 
 // TokenABI is the input ABI used to generate the binding from.
-const TokenABI = "[{\"constant\":true,\"inputs\":[],\"name\":\"minter\",\"outputs\":[{\"name\":\"\",\"type\":\"address\"}],\"payable\":false,\"stateMutability\":\"view\",\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"totalSupply\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"payable\":false,\"stateMutability\":\"view\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_to\",\"type\":\"address\"},{\"name\":\"_value\",\"type\":\"uint256\"}],\"name\":\"mint\",\"outputs\":[{\"name\":\"\",\"type\":\"bool\"}],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":true,\"inputs\":[{\"name\":\"\",\"type\":\"address\"}],\"name\":\"balanceOf\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"payable\":false,\"stateMutability\":\"view\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_to\",\"type\":\"address\"},{\"name\":\"_value\",\"type\":\"uint256\"}],\"name\":\"transfer\",\"outputs\":[{\"name\":\"\",\"type\":\"bool\"}],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"name\":\"_minter\",\"type\":\"address\"}],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"}]"
+const TokenABI = "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_minter\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"balanceOf\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_to\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"_value\",\"type\":\"uint256\"}],\"name\":\"mint\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"minter\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"totalSupply\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_to\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"_value\",\"type\":\"uint256\"}],\"name\":\"transfer\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 
 // TokenBin is the compiled bytecode used for deploying new contracts.
-const TokenBin = `608060405234801561001057600080fd5b506040516020806103168339810180604052602081101561003057600080fd5b505160028054600160a060020a031916600160a060020a039092169190911790556102b6806100606000396000f3fe60806040526004361061006c5763ffffffff7c010000000000000000000000000000000000000000000000000000000060003504166307546172811461007157806318160ddd146100a257806340c10f19146100c957806370a0823114610116578063a9059cbb14610149575b600080fd5b34801561007d57600080fd5b50610086610182565b60408051600160a060020a039092168252519081900360200190f35b3480156100ae57600080fd5b506100b7610191565b60408051918252519081900360200190f35b3480156100d557600080fd5b50610102600480360360408110156100ec57600080fd5b50600160a060020a038135169060200135610197565b604080519115158252519081900360200190f35b34801561012257600080fd5b506100b76004803603602081101561013957600080fd5b5035600160a060020a0316610207565b34801561015557600080fd5b506101026004803603604081101561016c57600080fd5b50600160a060020a038135169060200135610219565b600254600160a060020a031681565b60005481565b600254600090600160a060020a031633146101b157600080fd5b600160a060020a0383166000908152600160205260409020548281018111156101d957600080fd5b600160a060020a03841660009081526001602081905260408220928501909255805484019055905092915050565b60016020526000908152604090205481565b3360009081526001602052604080822054600160a060020a0385168352908220548382101561024757600080fd5b83810181111561025657600080fd5b33600090815260016020819052604080832094879003909455600160a060020a03969096168152919091209201909155509056fea165627a7a72305820fd6f993c884a8ef66c151644b52b0f09049c0d42583a05b8033ddcf285267a7a0029`
+var TokenBin = "0x608060405234801561001057600080fd5b506040516102cd3803806102cd8339818101604052602081101561003357600080fd5b5051600280546001600160a01b0319166001600160a01b0390921691909117905561026a806100636000396000f3fe608060405234801561001057600080fd5b50600436106100575760003560e01c8063075461721461005c57806318160ddd1461008057806340c10f191461009a57806370a08231146100da578063a9059cbb14610100575b600080fd5b61006461012c565b604080516001600160a01b039092168252519081900360200190f35b61008861013b565b60408051918252519081900360200190f35b6100c6600480360360408110156100b057600080fd5b506001600160a01b038135169060200135610141565b604080519115158252519081900360200190f35b610088600480360360208110156100f057600080fd5b50356001600160a01b03166101b1565b6100c66004803603604081101561011657600080fd5b506001600160a01b0381351690602001356101c3565b6002546001600160a01b031681565b60005481565b6002546000906001600160a01b0316331461015b57600080fd5b6001600160a01b03831660009081526001602052604090205482810181111561018357600080fd5b6001600160a01b03841660009081526001602081905260408220928501909255805484019055905092915050565b60016020526000908152604090205481565b33600090815260016020526040808220546001600160a01b038516835290822054838210156101f157600080fd5b80848201101561020057600080fd5b336000908152600160208190526040808320948790039094556001600160a01b03969096168152919091209201909155509056fea2646970667358221220db4c7b3ba8d073604af68ade92006926639bb4003f2a18929524d580777155fb64736f6c63430007020033"
 
 // DeployToken deploys a new Ethereum contract, binding an instance of Token to it.
 func DeployToken(auth *bind.TransactOpts, backend bind.ContractBackend, _minter common.Address) (common.Address, *types.Transaction, *Token, error) {
@@ -40,6 +38,7 @@ func DeployToken(auth *bind.TransactOpts, backend bind.ContractBackend, _minter 
 	if err != nil {
 		return common.Address{}, nil, nil, err
 	}
+
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(TokenBin), backend, _minter)
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -155,7 +154,7 @@ func bindToken(address common.Address, caller bind.ContractCaller, transactor bi
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Token *TokenRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Token *TokenRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Token.Contract.TokenCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -174,7 +173,7 @@ func (_Token *TokenRaw) Transact(opts *bind.TransactOpts, method string, params 
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Token *TokenCallerRaw) Call(opts *bind.CallOpts, result interface{}, method string, params ...interface{}) error {
+func (_Token *TokenCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
 	return _Token.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -191,78 +190,93 @@ func (_Token *TokenTransactorRaw) Transact(opts *bind.TransactOpts, method strin
 
 // BalanceOf is a free data retrieval call binding the contract method 0x70a08231.
 //
-// Solidity: function balanceOf(address ) constant returns(uint256)
+// Solidity: function balanceOf(address ) view returns(uint256)
 func (_Token *TokenCaller) BalanceOf(opts *bind.CallOpts, arg0 common.Address) (*big.Int, error) {
-	var (
-		ret0 = new(*big.Int)
-	)
-	out := ret0
-	err := _Token.contract.Call(opts, out, "balanceOf", arg0)
-	return *ret0, err
+	var out []interface{}
+	err := _Token.contract.Call(opts, &out, "balanceOf", arg0)
+
+	if err != nil {
+		return *new(*big.Int), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(*big.Int)).(**big.Int)
+
+	return out0, err
+
 }
 
 // BalanceOf is a free data retrieval call binding the contract method 0x70a08231.
 //
-// Solidity: function balanceOf(address ) constant returns(uint256)
+// Solidity: function balanceOf(address ) view returns(uint256)
 func (_Token *TokenSession) BalanceOf(arg0 common.Address) (*big.Int, error) {
 	return _Token.Contract.BalanceOf(&_Token.CallOpts, arg0)
 }
 
 // BalanceOf is a free data retrieval call binding the contract method 0x70a08231.
 //
-// Solidity: function balanceOf(address ) constant returns(uint256)
+// Solidity: function balanceOf(address ) view returns(uint256)
 func (_Token *TokenCallerSession) BalanceOf(arg0 common.Address) (*big.Int, error) {
 	return _Token.Contract.BalanceOf(&_Token.CallOpts, arg0)
 }
 
 // Minter is a free data retrieval call binding the contract method 0x07546172.
 //
-// Solidity: function minter() constant returns(address)
+// Solidity: function minter() view returns(address)
 func (_Token *TokenCaller) Minter(opts *bind.CallOpts) (common.Address, error) {
-	var (
-		ret0 = new(common.Address)
-	)
-	out := ret0
-	err := _Token.contract.Call(opts, out, "minter")
-	return *ret0, err
+	var out []interface{}
+	err := _Token.contract.Call(opts, &out, "minter")
+
+	if err != nil {
+		return *new(common.Address), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
+
+	return out0, err
+
 }
 
 // Minter is a free data retrieval call binding the contract method 0x07546172.
 //
-// Solidity: function minter() constant returns(address)
+// Solidity: function minter() view returns(address)
 func (_Token *TokenSession) Minter() (common.Address, error) {
 	return _Token.Contract.Minter(&_Token.CallOpts)
 }
 
 // Minter is a free data retrieval call binding the contract method 0x07546172.
 //
-// Solidity: function minter() constant returns(address)
+// Solidity: function minter() view returns(address)
 func (_Token *TokenCallerSession) Minter() (common.Address, error) {
 	return _Token.Contract.Minter(&_Token.CallOpts)
 }
 
 // TotalSupply is a free data retrieval call binding the contract method 0x18160ddd.
 //
-// Solidity: function totalSupply() constant returns(uint256)
+// Solidity: function totalSupply() view returns(uint256)
 func (_Token *TokenCaller) TotalSupply(opts *bind.CallOpts) (*big.Int, error) {
-	var (
-		ret0 = new(*big.Int)
-	)
-	out := ret0
-	err := _Token.contract.Call(opts, out, "totalSupply")
-	return *ret0, err
+	var out []interface{}
+	err := _Token.contract.Call(opts, &out, "totalSupply")
+
+	if err != nil {
+		return *new(*big.Int), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(*big.Int)).(**big.Int)
+
+	return out0, err
+
 }
 
 // TotalSupply is a free data retrieval call binding the contract method 0x18160ddd.
 //
-// Solidity: function totalSupply() constant returns(uint256)
+// Solidity: function totalSupply() view returns(uint256)
 func (_Token *TokenSession) TotalSupply() (*big.Int, error) {
 	return _Token.Contract.TotalSupply(&_Token.CallOpts)
 }
 
 // TotalSupply is a free data retrieval call binding the contract method 0x18160ddd.
 //
-// Solidity: function totalSupply() constant returns(uint256)
+// Solidity: function totalSupply() view returns(uint256)
 func (_Token *TokenCallerSession) TotalSupply() (*big.Int, error) {
 	return _Token.Contract.TotalSupply(&_Token.CallOpts)
 }

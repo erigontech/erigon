@@ -2,6 +2,7 @@ package stateless
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -44,7 +45,11 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	if chaindata != historyfile {
 		historyDb = ethdb.MustOpen(historyfile)
 	}
-
+	historyTx, err1 := historyDb.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		return err1
+	}
+	defer historyTx.Rollback()
 	chainConfig := genesis.Config
 	engine := ethash.NewFaker()
 	vmConfig := vm.Config{}
@@ -66,7 +71,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			break
 		}
 
-		dbstate := state.NewPlainDBState(historyDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(historyTx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		csw := state.NewChangeSetWriterPlain(block.NumberU64() - 1)
 		var blockWriter state.StateWriter
@@ -76,7 +81,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			blockWriter = csw
 		}
 
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, bc, block)
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, bc, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
@@ -87,12 +92,14 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			}
 		}
 		if writeReceipts {
-			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receipts)
-			if batch.BatchSize() >= batch.IdealBatchSize() {
-				log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
-				if err := batch.CommitAndBegin(); err != nil {
-					return err
-				}
+			if err := rawdb.WriteReceipts(batch, block.NumberU64(), receipts); err != nil {
+				return err
+			}
+		}
+		if batch.BatchSize() >= batch.IdealBatchSize() {
+			log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
+			if err := batch.CommitAndBegin(context.Background()); err != nil {
+				return err
 			}
 		}
 

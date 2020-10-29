@@ -17,6 +17,7 @@
 package ethdb
 
 import (
+	"context"
 	"errors"
 )
 
@@ -61,7 +62,7 @@ type GetterPutter interface {
 // Deleter wraps the database delete operations.
 type Deleter interface {
 	// Delete removes a single entry.
-	Delete(bucket string, key []byte) error
+	Delete(bucket string, k, v []byte) error
 }
 
 type Closer interface {
@@ -89,8 +90,8 @@ type Database interface {
 	// ... some calculations on `batch`
 	// batch.Commit()
 	//
-	NewBatch() DbWithPendingMutations       //
-	Begin() (DbWithPendingMutations, error) // starts db transaction
+	NewBatch() DbWithPendingMutations                                         //
+	Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) // starts db transaction
 	Last(bucket string) ([]byte, []byte, error)
 
 	// IdealBatchSize defines the size of the data batches should ideally add in one write.
@@ -109,7 +110,7 @@ type Database interface {
 type MinDatabase interface {
 	Get(bucket string, key []byte) ([]byte, error)
 	Put(bucket string, key, value []byte) error
-	Delete(bucket string, key []byte) error
+	Delete(bucket string, k, v []byte) error
 }
 
 // DbWithPendingMutations is an extended version of the Database,
@@ -143,13 +144,16 @@ type DbWithPendingMutations interface {
 	// }
 	// tx.Commit()
 	//
-	CommitAndBegin() error
+	CommitAndBegin(ctx context.Context) error
 	Rollback()
 	BatchSize() int
+
+	Reserve(bucket string, key []byte, i int) ([]byte, error)
 }
 
 type HasKV interface {
 	KV() KV
+	SetKV(kv KV)
 }
 
 type HasTx interface {
@@ -160,7 +164,7 @@ type HasNetInterface interface {
 	DB() Database
 }
 
-type NonTransactional interface {
+type BucketsMigrator interface {
 	BucketExists(bucket string) (bool, error) // makes them empty
 	ClearBuckets(buckets ...string) error     // makes them empty
 	DropBuckets(buckets ...string) error      // drops them, use of them after drop will panic

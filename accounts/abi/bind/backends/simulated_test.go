@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -133,8 +134,12 @@ func TestNewSimulatedBackend(t *testing.T) {
 	if sim.blockchain.Config() != params.AllEthashProtocolChanges {
 		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.config)
 	}
-
-	statedb := state.New(state.NewPlainDBState(sim.KV(), sim.blockchain.CurrentBlock().NumberU64()))
+	tx, err1 := sim.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Errorf("TestNewSimulatedBackend create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	statedb := state.New(state.NewPlainDBState(tx, sim.blockchain.CurrentBlock().NumberU64()))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)
@@ -148,14 +153,55 @@ func TestSimulatedBackend_AdjustTime(t *testing.T) {
 	defer sim.Close()
 
 	prevTime := sim.pendingBlock.Time()
-	err := sim.AdjustTime(time.Second)
-	if err != nil {
+	if err := sim.AdjustTime(time.Second); err != nil {
 		t.Error(err)
 	}
 	newTime := sim.pendingBlock.Time()
 
 	if newTime-prevTime != uint64(time.Second.Seconds()) {
 		t.Errorf("adjusted time not equal to a second. prev: %v, new: %v", prevTime, newTime)
+	}
+}
+
+func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+	sim := simTestBackend(testAddr)
+	// Create tx and send
+	amount, _ := uint256.FromBig(big.NewInt(1000))
+	gasPrice, _ := uint256.FromBig(big.NewInt(1))
+	tx := types.NewTransaction(0, testAddr, amount, params.TxGas, gasPrice, nil)
+	signedTx, err := types.SignTx(tx, types.HomesteadSigner{}, testKey)
+	if err != nil {
+		t.Errorf("could not sign tx: %v", err)
+	}
+	sim.SendTransaction(context.Background(), signedTx) //nolint:errcheck
+	// AdjustTime should fail on non-empty block
+	if err = sim.AdjustTime(time.Second); err == nil {
+		t.Error("Expected adjust time to error on non-empty block")
+	}
+	sim.Commit()
+
+	prevTime := sim.pendingBlock.Time()
+	if err = sim.AdjustTime(time.Minute); err != nil {
+		t.Error(err)
+	}
+	newTime := sim.pendingBlock.Time()
+	if newTime-prevTime != uint64(time.Minute.Seconds()) {
+		t.Errorf("adjusted time not equal to a minute. prev: %v, new: %v", prevTime, newTime)
+	}
+	// Put a transaction after adjusting time
+	amount2, _ := uint256.FromBig(big.NewInt(1000))
+	gasPrice2, _ := uint256.FromBig(big.NewInt(1))
+	tx2 := types.NewTransaction(1, testAddr, amount2, params.TxGas, gasPrice2, nil)
+	signedTx2, err := types.SignTx(tx2, types.HomesteadSigner{}, testKey)
+	if err != nil {
+		t.Errorf("could not sign tx: %v", err)
+	}
+	sim.SendTransaction(context.Background(), signedTx2) //nolint:errcheck
+	sim.Commit()
+	newTime = sim.pendingBlock.Time()
+	if newTime-prevTime >= uint64(time.Minute.Seconds()) {
+		t.Errorf("time adjusted, but shouldn't be: prev: %v, new: %v", prevTime, newTime)
 	}
 }
 
@@ -489,7 +535,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 	sim := NewSimulatedBackend(core.GenesisAlloc{addr: {Balance: big.NewInt(params.Ether*2 + 2e17)}}, 10000000)
 	defer sim.Close()
 
-	receipant := common.HexToAddress("deadbeef")
+	recipient := common.HexToAddress("deadbeef")
 	var cases = []struct {
 		name        string
 		message     ethereum.CallMsg
@@ -498,7 +544,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 	}{
 		{"EstimateWithoutPrice", ethereum.CallMsg{
 			From:     addr,
-			To:       &receipant,
+			To:       &recipient,
 			Gas:      0,
 			GasPrice: uint256.NewInt(),
 			Value:    uint256.NewInt().SetUint64(1000),
@@ -507,7 +553,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 
 		{"EstimateWithPrice", ethereum.CallMsg{
 			From:     addr,
-			To:       &receipant,
+			To:       &recipient,
 			Gas:      0,
 			GasPrice: uint256.NewInt().SetUint64(1000),
 			Value:    uint256.NewInt().SetUint64(1000),
@@ -516,7 +562,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 
 		{"EstimateWithVeryHighPrice", ethereum.CallMsg{
 			From:     addr,
-			To:       &receipant,
+			To:       &recipient,
 			Gas:      0,
 			GasPrice: uint256.NewInt().SetUint64(1e14), // gascost = 2.1ether
 			Value:    uint256.NewInt().SetUint64(1e17), // the remaining balance for fee is 2.1ether
@@ -525,7 +571,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 
 		{"EstimateWithSuperhighPrice", ethereum.CallMsg{
 			From:     addr,
-			To:       &receipant,
+			To:       &recipient,
 			Gas:      0,
 			GasPrice: uint256.NewInt().SetUint64(2e14), // gascost = 4.2ether
 			Value:    uint256.NewInt().SetUint64(1000),

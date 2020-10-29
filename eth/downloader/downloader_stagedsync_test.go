@@ -39,13 +39,18 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	tester.db = ethdb.NewMemDatabase()
 	// This needs to match the genesis in the file testchain_test.go
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
-	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
-	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
+	if err := rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty()); err != nil {
+		panic(err)
+	}
+	if err := rawdb.WriteBlock(context.Background(), tester.db, testGenesis); err != nil {
+		panic(err)
+	}
 	tester.downloader = New(uint64(StagedSync), tester.db, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	tester.downloader.SetStagedSync(
 		stagedsync.New(
 			stagedsync.DefaultStages(),
 			stagedsync.DefaultUnwindOrder(),
+			stagedsync.OptionalParameters{},
 		),
 	)
 	clear := func() {
@@ -112,7 +117,11 @@ func (st *stagedSyncTester) GetBlockByHash(hash common.Hash) *types.Block {
 
 // GetBlockByNumber is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) GetBlockByNumber(number uint64) *types.Block {
-	hash := rawdb.ReadCanonicalHash(st.db, number)
+	hash, err := rawdb.ReadCanonicalHash(st.db, number)
+	if err != nil {
+		log.Error("ReadCanonicalHash failed", "err", err)
+		return nil
+	}
 	return rawdb.ReadBlock(st.db, hash, number)
 }
 
@@ -126,7 +135,11 @@ func (st *stagedSyncTester) GetHeaderByHash(hash common.Hash) *types.Header {
 func (st *stagedSyncTester) GetTd(hash common.Hash, number uint64) *big.Int {
 	st.lock.RLock()
 	defer st.lock.RUnlock()
-	return rawdb.ReadTd(st.db, hash, number)
+	td, err := rawdb.ReadTd(st.db, hash, number)
+	if err != nil {
+		log.Error("failed ReadTd: %w", err)
+	}
+	return td
 }
 
 // HasBlock is part of the implementation of BlockChain interface defined in downloader.go
@@ -145,11 +158,13 @@ func (st *stagedSyncTester) HasHeader(hash common.Hash, number uint64) bool {
 }
 
 // InsertBodyChain is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) InsertBodyChain(_ context.Context, blocks types.Blocks) (bool, error) {
+func (st *stagedSyncTester) InsertBodyChain(_ string, _ context.Context, blocks types.Blocks) (bool, error) {
 	st.lock.Lock()
 	defer st.lock.Unlock()
 	for _, block := range blocks {
-		rawdb.WriteBlock(context.Background(), st.db, block)
+		if err := rawdb.WriteBlock(context.Background(), st.db, block); err != nil {
+			panic(err)
+		}
 	}
 	return false, nil
 }
@@ -235,7 +250,7 @@ func (stp *stagedSyncTesterPeer) RequestHeadersByHash(origin common.Hash, amount
 		panic("reverse header requests not supported")
 	}
 
-	result := stp.chain.headersByHash(origin, amount, skip)
+	result := stp.chain.headersByHash(origin, amount, skip, false /*reverse */)
 	return stp.st.downloader.DeliverHeaders(stp.id, result)
 }
 
@@ -245,7 +260,7 @@ func (stp *stagedSyncTesterPeer) RequestHeadersByNumber(origin uint64, amount in
 		panic("reverse header requests not supported")
 	}
 
-	result := stp.chain.headersByNumber(origin, amount, skip)
+	result := stp.chain.headersByNumber(origin, amount, skip, false /* reverse */)
 	return stp.st.downloader.DeliverHeaders(stp.id, result)
 }
 
@@ -266,16 +281,16 @@ func TestStagedBase(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	tester, clear := newStagedSyncTester()
 	defer clear()
-	if err := tester.newPeer("peer", 65, testChainBase); err != nil {
+	if err := tester.newPeer("peer", 65, getTestChainBase()); err != nil {
 		t.Fatal(err)
 	}
 	if err := tester.sync("peer", nil); err != nil {
 		t.Fatal(err)
 	}
 	currentHeader := tester.CurrentHeader()
-	expectedHash := testChainBase.chain[len(testChainBase.chain)-1]
-	if int(currentHeader.Number.Uint64()) != len(testChainBase.chain)-1 {
-		t.Errorf("last block expected number %d, got %d", len(testChainBase.chain)-1, currentHeader.Number.Uint64())
+	expectedHash := getTestChainBase().chain[len(getTestChainBase().chain)-1]
+	if int(currentHeader.Number.Uint64()) != len(getTestChainBase().chain)-1 {
+		t.Errorf("last block expected number %d, got %d", len(getTestChainBase().chain)-1, currentHeader.Number.Uint64())
 	}
 	if currentHeader.Hash() != expectedHash {
 		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())
@@ -287,14 +302,14 @@ func TestUnwind(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	tester, clear := newStagedSyncTester()
 	defer clear()
-	if err := tester.newPeer("peer", 65, testChainForkLightA); err != nil {
+	if err := tester.newPeer("peer", 65, getTestChainForkLightA()); err != nil {
 		t.Fatal(err)
 	}
 	if err := tester.sync("peer", nil); err != nil {
 		t.Fatal(err)
 	}
 	fmt.Println("sync heavy")
-	if err := tester.newPeer("forkpeer", 65, testChainForkHeavy); err != nil {
+	if err := tester.newPeer("forkpeer", 65, getTestChainForkHeavy()); err != nil {
 		t.Fatal(err)
 	}
 	if err := tester.sync("forkpeer", nil); err != nil {
@@ -304,10 +319,12 @@ func TestUnwind(t *testing.T) {
 	if err := tester.sync("forkpeer", nil); err != nil {
 		t.Fatal(err)
 	}
+
 	currentHeader := tester.CurrentHeader()
-	expectedHash := testChainForkHeavy.chain[len(testChainForkHeavy.chain)-1]
-	if int(currentHeader.Number.Uint64()) != len(testChainForkHeavy.chain)-1 {
-		t.Errorf("last block expected number %d, got %d", len(testChainForkHeavy.chain)-1, currentHeader.Number.Uint64())
+	heavyChainLen := len(getTestChainForkHeavy().chain) - 1
+	expectedHash := getTestChainForkHeavy().chain[heavyChainLen]
+	if int(currentHeader.Number.Uint64()) != heavyChainLen {
+		t.Errorf("last block expected number %d, got %d", heavyChainLen, currentHeader.Number.Uint64())
 	}
 	if currentHeader.Hash() != expectedHash {
 		t.Errorf("last block expected hash %x, got %x", expectedHash, currentHeader.Hash())

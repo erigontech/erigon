@@ -157,7 +157,13 @@ func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.
 	if header == nil {
 		return nil, nil, errors.New("header not found")
 	}
-	ds := state.NewPlainDBState(b.eth.ChainKV(), bn)
+	//WARNING - this will leak transaction
+	fmt.Printf("LEAK!\n")
+	tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		return nil, nil, err1
+	}
+	ds := state.NewPlainDBState(tx, bn)
 	stateDb := state.New(ds)
 	return stateDb, header, nil
 
@@ -178,7 +184,13 @@ func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockN
 		if blockNrOrHash.RequireCanonical && b.eth.blockchain.GetCanonicalHash(header.Number.Uint64()) != hash {
 			return nil, nil, errors.New("hash is not currently canonical")
 		}
-		ds := state.NewPlainDBState(b.eth.ChainKV(), header.Number.Uint64())
+		//WARNING - this will leak transaction
+		fmt.Printf("LEAK!\n")
+		tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, ethdb.RO)
+		if err1 != nil {
+			return nil, nil, err1
+		}
+		ds := state.NewPlainDBState(tx, header.Number.Uint64())
 		stateDb := state.New(ds)
 		return stateDb, header, nil
 	}
@@ -201,7 +213,13 @@ func (b *EthAPIBackend) GetReceipts(ctx context.Context, hash common.Hash) (type
 }
 
 func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, number uint64) (types.Receipts, error) {
-	dbstate := state.NewPlainDBState(b.eth.ChainKV(), number-1)
+	//WARNING - this will leak transaction
+	fmt.Printf("LEAK!\n")
+	tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		return nil, err1
+	}
+	dbstate := state.NewPlainDBState(tx, number-1)
 	statedb := state.New(dbstate)
 	header := block.Header()
 	var receipts types.Receipts
@@ -227,7 +245,6 @@ func (b *EthAPIBackend) tryGetReceiptsFromDb(block *types.Block) types.Receipts 
 		b.eth.chainDb,
 		block.Hash(),
 		block.NumberU64(),
-		b.eth.blockchain.Config(),
 	)
 }
 
@@ -367,8 +384,7 @@ func (b *EthAPIBackend) RPCTxFeeCap() float64 {
 }
 
 func (b *EthAPIBackend) BloomStatus() (uint64, uint64) {
-	sections, _, _ := b.eth.bloomIndexer.Sections()
-	return params.BloomBitsBlocks, sections
+	return 0, 0
 }
 
 func (b *EthAPIBackend) ServiceFilter(ctx context.Context, session *bloombits.MatcherSession) {

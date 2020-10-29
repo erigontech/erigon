@@ -11,7 +11,7 @@ import (
 
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the grpc package it is being compiled against.
-const _ = grpc.SupportPackageIsVersion6
+const _ = grpc.SupportPackageIsVersion7
 
 // DBClient is the client API for DB service.
 //
@@ -60,15 +60,22 @@ type DBServer interface {
 type UnimplementedDBServer struct {
 }
 
-func (*UnimplementedDBServer) Size(context.Context, *SizeRequest) (*SizeReply, error) {
+func (UnimplementedDBServer) Size(context.Context, *SizeRequest) (*SizeReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Size not implemented")
 }
-func (*UnimplementedDBServer) BucketSize(context.Context, *BucketSizeRequest) (*BucketSizeReply, error) {
+func (UnimplementedDBServer) BucketSize(context.Context, *BucketSizeRequest) (*BucketSizeReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BucketSize not implemented")
 }
-func (*UnimplementedDBServer) mustEmbedUnimplementedDBServer() {}
+func (UnimplementedDBServer) mustEmbedUnimplementedDBServer() {}
 
-func RegisterDBServer(s *grpc.Server, srv DBServer) {
+// UnsafeDBServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to DBServer will
+// result in compilation errors.
+type UnsafeDBServer interface {
+	mustEmbedUnimplementedDBServer()
+}
+
+func RegisterDBServer(s grpc.ServiceRegistrar, srv DBServer) {
 	s.RegisterService(&_DB_serviceDesc, srv)
 }
 

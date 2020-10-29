@@ -22,10 +22,10 @@ import (
 
 func NewMemDatabase() *ObjectDatabase {
 	switch debug.TestDB() {
-	case "bolt":
-		return NewObjectDatabase(NewBolt().InMem().MustOpen())
 	case "lmdb":
 		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
+	case "mdbx": //nolint:goconst
+		return NewObjectDatabase(NewMDBX().InMem().MustOpen())
 	default:
 		return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 	}

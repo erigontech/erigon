@@ -29,5 +29,5 @@ type DatabaseWriter interface {
 
 // DatabaseDeleter wraps the Delete method of a backing data store.
 type DatabaseDeleter interface {
-	Delete(bucket string, key []byte) error
+	Delete(bucket string, k, v []byte) error
 }

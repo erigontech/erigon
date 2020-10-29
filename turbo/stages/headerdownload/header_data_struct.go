@@ -1,11 +1,11 @@
 package headerdownload
 
 import (
-	"bytes"
-	"container/heap"
+	"container/list"
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -13,14 +13,70 @@ import (
 	"github.com/petar/GoLLRB/llrb"
 )
 
+// AnchorTipItem is element of the priority queue of tips belonging to an anchor
+// This queue is prioritised by block heights, lowest block height being first out
+type AnchorTipItem struct {
+	hash   common.Hash
+	height uint64
+	hard   bool // Whether the tip is hard coded
+}
+
+type AnchorTipQueue []AnchorTipItem
+
+func (atq AnchorTipQueue) Len() int {
+	return len(atq)
+}
+
+func (atq AnchorTipQueue) Less(i, j int) bool {
+	if atq[i].hard == atq[j].hard {
+		return atq[i].height < atq[j].height
+	}
+	return !atq[i].hard
+}
+
+func (atq AnchorTipQueue) Swap(i, j int) {
+	atq[i], atq[j] = atq[j], atq[i]
+}
+
+func (atq *AnchorTipQueue) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	*atq = append(*atq, x.(AnchorTipItem))
+}
+
+func (atq *AnchorTipQueue) Pop() interface{} {
+	old := *atq
+	n := len(old)
+	x := old[n-1]
+	*atq = old[0 : n-1]
+	return x
+}
+
 type Anchor struct {
-	powDepth        int
-	totalDifficulty uint256.Int
-	tips            []common.Hash
-	difficulty      uint256.Int
-	hash            common.Hash
-	blockHeight     uint64
-	timestamp       uint64
+	powDepth     int
+	tipQueue     *AnchorTipQueue
+	difficulty   uint256.Int
+	hash         common.Hash
+	blockHeight  uint64
+	timestamp    uint64
+	maxTipHeight uint64 // Maximum value of `blockHeight` of all tips associated with this anchor
+	anchorID     int    // Unique ID of this anchor to be able to find it in the balanced tree
+}
+
+// For placing anchors into the sorting tree
+func (a *Anchor) Less(bi llrb.Item) bool {
+	b := bi.(*Anchor)
+	if a.tipStretch() == b.tipStretch() {
+		return a.anchorID < b.anchorID
+	}
+	return a.tipStretch() > b.tipStretch()
+}
+
+func (a *Anchor) tipStretch() uint64 {
+	if a.tipQueue.Len() == 0 {
+		return 0
+	}
+	return a.maxTipHeight - (*a.tipQueue)[0].height
 }
 
 type Tip struct {
@@ -30,18 +86,12 @@ type Tip struct {
 	difficulty           uint256.Int
 	blockHeight          uint64
 	uncleHash            common.Hash
-	noPrepend            bool
-}
-
-type TipItem struct {
-	tipHash              common.Hash
-	cumulativeDifficulty uint256.Int
 }
 
 // First item in ChainSegment is the anchor
 // ChainSegment must be contigous and must not include bad headers
 type ChainSegment struct {
-	headers []*types.Header
+	Headers []*types.Header
 }
 
 type PeerHandle int // This is int just for the PoC phase - will be replaced by more appropriate type to find a peer
@@ -66,49 +116,50 @@ type PeerPenalty struct {
 	err        error // Underlying error if available
 }
 
-type RequestQueueItem struct {
-	anchorParent common.Hash
-	waitUntil    uint64
-}
-
-type RequestQueue []RequestQueueItem
-
 // Request for chain segment starting with hash and going to its parent, etc, with length headers in total
 type HeaderRequest struct {
-	hash   common.Hash
-	length int
+	Hash   common.Hash
+	Number uint64
+	Length int
 }
 
 type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
 type HeaderDownload struct {
-	buffer   []byte
-	filesDir string
-	//currentFile            *os.File
-	//currentFileWriter      io.Writer
+	buffer                 []byte
+	bufferLimit            int
+	filesDir               string
+	anchorSequence         uint32 // Sequence number to be used for recording anchors next time the buffer is flushed
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
-	tips                   map[common.Hash]*Tip
-	tipLimiter             *llrb.LLRB
-	tipLimit               int
-	initPowDepth           int    // powDepth assigned to the newly inserted anchor
-	newAnchorFutureLimit   uint64 // How far in the future (relative to current time) the new anchors are allowed to be
-	newAnchorPastLimit     uint64 // How far in the past (relative to current time) the new anchors are allowed to be
+	anchorTree             *llrb.LLRB                // Balanced tree of anchors sorted by tip stretch (longest stretch first)
+	nextAnchorID           int
+	hardTips               map[common.Hash]struct{} // Set of hashes for hard-coded tips
+	tips                   map[common.Hash]*Tip     // Tips by tip hash
+	tipCount               int                      // Total number of tips associated to all anchors
+	tipLimit               int                      // Maximum allowed number of tips
+	initPowDepth           int                      // powDepth assigned to the newly inserted anchor
+	newAnchorFutureLimit   uint64                   // How far in the future (relative to current time) the new anchors are allowed to be
+	newAnchorPastLimit     uint64                   // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
-	requestQueue           *RequestQueue
+	requestQueue           *list.List
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
+	RequestQueueTimer      *time.Timer
 }
 
-func (a *TipItem) Less(b llrb.Item) bool {
-	bi := b.(*TipItem)
-	if a.cumulativeDifficulty.Eq(&bi.cumulativeDifficulty) {
-		// hash is unique and it breaks the ties
-		return bytes.Compare(a.tipHash[:], bi.tipHash[:]) < 0
-	}
-	return a.cumulativeDifficulty.Lt(&bi.cumulativeDifficulty)
+type TipQueueItem struct {
+	tip     *Tip
+	tipHash common.Hash
 }
+
+type RequestQueueItem struct {
+	anchorParent common.Hash
+	waitUntil    uint64
+}
+
+type RequestQueue []RequestQueueItem
 
 func (rq RequestQueue) Len() int {
 	return len(rq)
@@ -137,26 +188,28 @@ func (rq *RequestQueue) Pop() interface{} {
 }
 
 func NewHeaderDownload(filesDir string,
-	tipLimit, initPowDepth int,
+	bufferLimit, tipLimit, initPowDepth int,
 	calcDifficultyFunc CalcDifficultyFunc,
 	verifySealFunc VerifySealFunc,
 	newAnchorFutureLimit, newAnchorPastLimit uint64,
 ) *HeaderDownload {
 	hd := &HeaderDownload{
 		filesDir:             filesDir,
+		bufferLimit:          bufferLimit,
 		badHeaders:           make(map[common.Hash]struct{}),
 		anchors:              make(map[common.Hash][]*Anchor),
-		tips:                 make(map[common.Hash]*Tip),
-		tipLimiter:           llrb.New(),
 		tipLimit:             tipLimit,
 		initPowDepth:         initPowDepth,
-		requestQueue:         &RequestQueue{},
+		requestQueue:         list.New(),
+		anchorTree:           llrb.New(),
 		calcDifficultyFunc:   calcDifficultyFunc,
 		verifySealFunc:       verifySealFunc,
 		newAnchorFutureLimit: newAnchorFutureLimit,
 		newAnchorPastLimit:   newAnchorPastLimit,
+		hardTips:             make(map[common.Hash]struct{}),
+		tips:                 make(map[common.Hash]*Tip),
 	}
-	heap.Init(hd.requestQueue)
+	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd
 }
 
@@ -188,8 +241,8 @@ func (pp PeerPenalty) String() string {
 }
 
 const HeaderPreBlockHeight = 32 /*ParentHash*/ + 32 /*UncleHash*/ + 20 /*Coinbase*/ + 32 /*Root*/ + 32 /*TxHash*/ + 32 /*ReceiptHash*/ +
-																256 /*Bloom*/ + 16 /*Difficulty */
-const HeaderPostBlockHeight = 8 /*Number*/ + 8 /*GasLimit*/ + 8 /*GasUsed*/ + 8 /*Time*/ + 1 /*len(Extra)*/ + 32 /*Extra*/ + 8 /*Nonce*/
+																			256 /*Bloom*/ + 16 /*Difficulty */
+const HeaderPostBlockHeight = 8 /*Number*/ + 8 /*GasLimit*/ + 8 /*GasUsed*/ + 8 /*Time*/ + 1 /*len(Extra)*/ + 32 /*Extra*/ + 32 /* MixDigest */ + 8 /*Nonce*/
 
 const HeaderSerLength = HeaderPreBlockHeight + HeaderPostBlockHeight
 
@@ -228,6 +281,8 @@ func SerialiseHeader(header *types.Header, buffer []byte) {
 	buffer[pos] = byte(len(header.Extra))
 	pos++
 	copy(buffer[pos:pos+32], header.Extra)
+	pos += 32
+	copy(buffer[pos:pos+32], header.MixDigest[:])
 	pos += 32
 	binary.BigEndian.PutUint64(buffer[pos:pos+8], header.Nonce.Uint64())
 }
@@ -268,6 +323,8 @@ func DeserialiseHeader(header *types.Header, buffer []byte) {
 	pos++
 	header.Extra = header.Extra[:0]
 	header.Extra = append(header.Extra, buffer[pos:pos+extraLen]...)
+	pos += 32
+	copy(header.MixDigest[:], buffer[pos:pos+32])
 	pos += 32
 	header.Nonce = types.EncodeNonce(binary.BigEndian.Uint64(buffer[pos : pos+8]))
 }

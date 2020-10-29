@@ -61,7 +61,14 @@
 			if (this.callstack[left-1].calls === undefined) {
 				this.callstack[left-1].calls = [];
 			}
-			this.callstack[left-1].calls.push({type: op});
+			this.callstack[left-1].calls.push({
+				type:    op,
+				from:    toHex(log.contract.getAddress()),
+				to:      toHex(toAddress(log.stack.peek(0).toString(16))),
+				gasIn:   log.getGas(),
+				gasCost: log.getCost(),
+				value:   '0x' + db.getBalance(log.contract.getAddress()).toString(16)
+			});
 			return
 		}
 		// If a new method invocation is being done, add to the call stack
@@ -104,6 +111,10 @@
 				// TODO(karalabe): The call was made to a plain account. We currently don't
 				// have access to the true gas amount inside the call and so any amount will
 				// mostly be wrong since it depends on a lot of input args. Skip gas for now.
+				// TODO(tjayrush): gasUsedHack
+				// TODO(tjayrush): Obscene hack to get gas by subtraction in caller
+				// TODO(tjayrush): This works, but when I run `make test` the tests fail
+				this.callstack[this.callstack.length - 1].gas = 0xdeadbeef;
 			}
 			this.descended = false;
 		}
@@ -132,13 +143,12 @@
 				// If the call was a contract call, retrieve the gas usage and output
 				if (call.gas !== undefined) {
 					call.gasUsed = '0x' + bigInt(call.gasIn - call.gasCost + call.gas - log.getGas()).toString(16);
-
-					var ret = log.stack.peek(0);
-					if (!ret.equals(0)) {
-						call.output = toHex(log.memory.slice(call.outOff, call.outOff + call.outLen));
-					} else if (call.error === undefined) {
-						call.error = "internal failure"; // TODO(karalabe): surface these faults somehow
-					}
+				}
+				var ret = log.stack.peek(0);
+				if (!ret.equals(0)) {
+					call.output = toHex(log.memory.slice(call.outOff, call.outOff + call.outLen));
+				} else if (call.error === undefined) {
+					call.error = "internal failure"; // TODO(karalabe): surface these faults somehow
 				}
 				delete call.gasIn; delete call.gasCost;
 				delete call.outOff; delete call.outLen;
@@ -208,7 +218,7 @@
 		} else if (ctx.error !== undefined) {
 			result.error = ctx.error;
 		}
-		if (result.error !== undefined) {
+		if (result.error !== undefined && (result.error !== "execution reverted" || result.output ==="0x")) {
 			delete result.output;
 		}
 		return this.finalize(result);

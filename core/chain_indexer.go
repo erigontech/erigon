@@ -92,7 +92,7 @@ type ChainIndexer struct {
 	throttling time.Duration // Disk throttling to prevent a heavy upgrade from hogging resources
 
 	log  log.Logger
-	lock sync.RWMutex
+	lock sync.Mutex
 }
 
 // NewChainIndexer creates a new chain indexer to do background processing on
@@ -226,7 +226,11 @@ func (c *ChainIndexer) eventLoop(currentHeader *types.Header, events chan ChainH
 				// Reorg to the common ancestor if needed (might not exist in light sync mode, skip reorg then)
 				// TODO(karalabe, zsfelfoldi): This seems a bit brittle, can we detect this case explicitly?
 
-				if rawdb.ReadCanonicalHash(c.chainDb, prevHeader.Number.Uint64()) != prevHash {
+				h, err := rawdb.ReadCanonicalHash(c.chainDb, prevHeader.Number.Uint64())
+				if err != nil {
+					panic(err)
+				}
+				if h != prevHash {
 					if h := rawdb.FindCommonAncestor(c.chainDb, prevHeader, header); h != nil {
 						c.newHead(h.Number.Uint64(), true)
 					}
@@ -283,7 +287,10 @@ func (c *ChainIndexer) newHead(head uint64, reorg bool) {
 		if sections > c.knownSections {
 			if c.knownSections < c.checkpointSections {
 				// syncing reached the checkpoint, verify section head
-				syncedHead := rawdb.ReadCanonicalHash(c.chainDb, c.checkpointSections*c.sectionSize-1)
+				syncedHead, err := rawdb.ReadCanonicalHash(c.chainDb, c.checkpointSections*c.sectionSize-1)
+				if err != nil {
+					panic(err)
+				}
 				if syncedHead != c.checkpointHead {
 					c.log.Error("Synced chain does not match checkpoint", "number", c.checkpointSections*c.sectionSize-1, "expected", c.checkpointHead, "synced", syncedHead)
 					return
@@ -395,7 +402,10 @@ func (c *ChainIndexer) processSection(section uint64, lastHead common.Hash) (com
 	}
 
 	for number := section * c.sectionSize; number < (section+1)*c.sectionSize; number++ {
-		hash := rawdb.ReadCanonicalHash(c.chainDb, number)
+		hash, err := rawdb.ReadCanonicalHash(c.chainDb, number)
+		if err != nil {
+			return common.Hash{}, err
+		}
 		if hash == (common.Hash{}) {
 			return common.Hash{}, fmt.Errorf("canonical block #%d unknown", number)
 		}
@@ -422,7 +432,11 @@ func (c *ChainIndexer) processSection(section uint64, lastHead common.Hash) (com
 // sections are all valid
 func (c *ChainIndexer) verifyLastHead() {
 	for c.storedSections > 0 && c.storedSections > c.checkpointSections {
-		if c.SectionHead(c.storedSections-1) == rawdb.ReadCanonicalHash(c.chainDb, c.storedSections*c.sectionSize-1) {
+		h, err := rawdb.ReadCanonicalHash(c.chainDb, c.storedSections*c.sectionSize-1)
+		if err != nil {
+			panic(err)
+		}
+		if c.SectionHead(c.storedSections-1) == h {
 			return
 		}
 		c.setValidSections(c.storedSections - 1)
@@ -476,7 +490,7 @@ func (c *ChainIndexer) setValidSections(sections uint64) {
 	// Set the current number of valid sections in the database
 	var data [8]byte
 	binary.BigEndian.PutUint64(data[:], sections)
-	c.chainDb.Put(c.bucket, []byte("count"), data[:])
+	_ = c.chainDb.Put(c.bucket, []byte("count"), data[:])
 
 	// Remove any reorged sections, caching the valids in the mean time
 	for c.storedSections > sections {
@@ -505,7 +519,7 @@ func (c *ChainIndexer) setSectionHead(section uint64, hash common.Hash) {
 	var data [8]byte
 	binary.BigEndian.PutUint64(data[:], section)
 
-	c.chainDb.Put(c.sectionHeadBucket, data[:], hash.Bytes())
+	_ = c.chainDb.Put(c.sectionHeadBucket, data[:], hash.Bytes())
 }
 
 // removeSectionHead removes the reference to a processed section from the index
@@ -514,5 +528,5 @@ func (c *ChainIndexer) removeSectionHead(section uint64) {
 	var data [8]byte
 	binary.BigEndian.PutUint64(data[:], section)
 
-	c.chainDb.Delete(c.sectionHeadBucket, data[:])
+	_ = c.chainDb.Delete(c.sectionHeadBucket, data[:], nil)
 }

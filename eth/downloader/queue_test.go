@@ -71,15 +71,27 @@ type chainData struct {
 
 var chain *chainData
 var emptyChain *chainData
+var chainsMu sync.Mutex
 
-func init() {
-	// Create a chain of blocks to import
-	targetBlocks := 128
-	blocks, _ := makeChain(targetBlocks, 0, genesis, false)
-	chain = &chainData{blocks, 0}
+const targetTestBlocks = 128
 
-	blocks, _ = makeChain(targetBlocks, 0, genesis, true)
-	emptyChain = &chainData{blocks, 0}
+func getEmptyChain() *chainData {
+	chainsMu.Lock()
+	defer chainsMu.Unlock()
+	if emptyChain == nil {
+		blocks, _ := makeChain(targetTestBlocks, 0, genesis, true)
+		emptyChain = &chainData{blocks, 0}
+	}
+	return emptyChain
+}
+func getChain() *chainData {
+	chainsMu.Lock()
+	defer chainsMu.Unlock()
+	if chain == nil {
+		blocks, _ := makeChain(targetTestBlocks, 0, genesis, false)
+		chain = &chainData{blocks, 0}
+	}
+	return chain
 }
 
 func (chain *chainData) headers() []*types.Header {
@@ -103,21 +115,21 @@ func dummyPeer(id string) *peerConnection {
 }
 
 func TestBasics(t *testing.T) {
-	q := newQueue(10)
+	q := newQueue(10, 10)
 	if !q.Idle() {
 		t.Errorf("new queue should be idle")
 	}
 	q.Prepare(1, FastSync)
-	if res := q.Results(false); len(res) != 0 {
+	if res := q.Results("logPrefix", false); len(res) != 0 {
 		t.Fatal("new queue should have 0 results")
 	}
 
 	// Schedule a batch of headers
-	q.Schedule(chain.headers(), 1)
+	q.Schedule(getChain().headers(), 1)
 	if q.Idle() {
 		t.Errorf("queue should not be idle")
 	}
-	if got, exp := q.PendingBlocks(), chain.Len(); got != exp {
+	if got, exp := q.PendingBlocks(), getChain().Len(); got != exp {
 		t.Errorf("wrong pending block count, got %d, exp %d", got, exp)
 	}
 	// Only non-empty receipts get added to task-queue
@@ -180,15 +192,15 @@ func TestBasics(t *testing.T) {
 }
 
 func TestEmptyBlocks(t *testing.T) {
-	q := newQueue(10)
+	q := newQueue(10, 10)
 
 	q.Prepare(1, FastSync)
 	// Schedule a batch of headers
-	q.Schedule(emptyChain.headers(), 1)
+	q.Schedule(getEmptyChain().headers(), 1)
 	if q.Idle() {
 		t.Errorf("queue should not be idle")
 	}
-	if got, exp := q.PendingBlocks(), len(emptyChain.blocks); got != exp {
+	if got, exp := q.PendingBlocks(), len(getEmptyChain().blocks); got != exp {
 		t.Errorf("wrong pending block count, got %d, exp %d", got, exp)
 	}
 	if got, exp := q.PendingReceipts(), 0; got != exp {
@@ -214,7 +226,7 @@ func TestEmptyBlocks(t *testing.T) {
 		}
 
 	}
-	if q.blockTaskQueue.Size() != len(emptyChain.blocks)-10 {
+	if q.blockTaskQueue.Size() != len(getEmptyChain().blocks)-10 {
 		t.Errorf("expected block task queue to be 0, got %d", q.blockTaskQueue.Size())
 	}
 	if q.receiptTaskQueue.Size() != 0 {
@@ -250,7 +262,7 @@ func XTestDelivery(t *testing.T) {
 		log.Root().SetHandler(log.StdoutHandler)
 
 	}
-	q := newQueue(10)
+	q := newQueue(10, 10)
 	var wg sync.WaitGroup
 	q.Prepare(1, FastSync)
 	wg.Add(1)
@@ -274,7 +286,7 @@ func XTestDelivery(t *testing.T) {
 		defer wg.Done()
 		tot := 0
 		for {
-			res := q.Results(true)
+			res := q.Results("logPrefix", true)
 			tot += len(res)
 			fmt.Printf("got %d results, %d tot\n", len(res), tot)
 			// Now we can forget about these

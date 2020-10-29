@@ -37,7 +37,7 @@ if cmd == "stats":
         with env.begin(write=False) as txn:
             stat = txn.stat(b)
             size = stat['psize'] * (stat['branch_pages'] + stat['leaf_pages'] + stat['overflow_pages'])
-            print("%s: %dMb" % (bucket, size/1024/1024))
+            print("%s: %dMb %dM" % (bucket, size/1024/1024, stat['entries']/1000/1000))
 #             data["name"].append(bucket)
 #             data["size"].append(stat['psize'] * (stat['branch_pages'] + stat['leaf_pages'] + stat['overflow_pages']))
 #     df = pd.DataFrame.from_dict(data)

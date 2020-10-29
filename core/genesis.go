@@ -164,7 +164,10 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, errGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
-	stored := rawdb.ReadCanonicalHash(db, 0)
+	stored, err := rawdb.ReadCanonicalHash(db, 0)
+	if err != nil {
+		return nil, common.Hash{}, nil, err
+	}
 	if overwrite || (stored == common.Hash{}) {
 		if genesis == nil {
 			log.Info("Writing default main-net genesis block")
@@ -196,10 +199,16 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
 		return newcfg, common.Hash{}, nil, err
 	}
-	storedcfg := rawdb.ReadChainConfig(db, stored)
+	storedcfg, err := rawdb.ReadChainConfig(db, stored)
+	if err != nil {
+		return newcfg, common.Hash{}, nil, err
+	}
 	if overwrite || storedcfg == nil {
 		log.Warn("Found genesis block without chain config")
-		rawdb.WriteChainConfig(db, stored, newcfg)
+		err1 := rawdb.WriteChainConfig(db, stored, newcfg)
+		if err1 != nil {
+			return newcfg, common.Hash{}, nil, err1
+		}
 		return newcfg, stored, stateDB, nil
 	}
 	// Special case: don't change the existing config of a non-mainnet chain if no new
@@ -219,7 +228,9 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 	if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
 		return newcfg, stored, stateDB, compatErr
 	}
-	rawdb.WriteChainConfig(db, stored, newcfg)
+	if err := rawdb.WriteChainConfig(db, stored, newcfg); err != nil {
+		return newcfg, common.Hash{}, nil, err
+	}
 	return newcfg, stored, stateDB, nil
 }
 
@@ -362,14 +373,24 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if err := config.CheckConfigForkOrder(); err != nil {
 		return nil, nil, err
 	}
-	rawdb.WriteTd(db, block.Hash(), block.NumberU64(), g.Difficulty)
-	rawdb.WriteBlock(context.Background(), db, block)
-	rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), nil)
-	rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
+	if err := rawdb.WriteTd(db, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
+		return nil, nil, err
+	}
+	if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
+		return nil, nil, err
+	}
+	if err := rawdb.WriteReceipts(db, block.NumberU64(), nil); err != nil {
+		return nil, nil, err
+	}
+	if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
+		return nil, nil, err
+	}
 	rawdb.WriteHeadBlockHash(db, block.Hash())
 	rawdb.WriteHeadFastBlockHash(db, block.Hash())
 	rawdb.WriteHeadHeaderHash(db, block.Hash())
-	rawdb.WriteChainConfig(db, block.Hash(), config)
+	if err := rawdb.WriteChainConfig(db, block.Hash(), config); err != nil {
+		return nil, nil, err
+	}
 	return block, statedb, nil
 }
 
@@ -386,6 +407,22 @@ func (g *Genesis) MustCommit(db ethdb.Database) *types.Block {
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
 func GenesisBlockForTesting(db ethdb.Database, addr common.Address, balance *big.Int) *types.Block {
 	g := Genesis{Alloc: GenesisAlloc{addr: {Balance: balance}}, Config: params.TestChainConfig}
+	block := g.MustCommit(db)
+	return block
+}
+
+type GenAccount struct {
+	Addr    common.Address
+	Balance *big.Int
+}
+
+func GenesisWithAccounts(db ethdb.Database, accs []GenAccount) *types.Block {
+	g := Genesis{Config: params.TestChainConfig}
+	allocs := make(map[common.Address]GenesisAccount)
+	for _, acc := range accs {
+		allocs[acc.Addr] = GenesisAccount{Balance: acc.Balance}
+	}
+	g.Alloc = allocs
 	block := g.MustCommit(db)
 	return block
 }

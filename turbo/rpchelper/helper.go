@@ -23,8 +23,13 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader rawdb.Database
 			if err != nil {
 				return 0, common.Hash{}, fmt.Errorf("getting latest block number: %v", err)
 			}
-		} else if number == rpc.PendingBlockNumber || number == rpc.EarliestBlockNumber {
-			return 0, common.Hash{}, fmt.Errorf("pending and earliest blocks are not supported")
+
+		} else if number == rpc.EarliestBlockNumber {
+			blockNumber = 0
+
+		} else if number == rpc.PendingBlockNumber {
+			return 0, common.Hash{}, fmt.Errorf("pending blocks are not supported")
+
 		} else {
 			blockNumber = uint64(number.Int64())
 		}
@@ -33,30 +38,40 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader rawdb.Database
 			return 0, common.Hash{}, err
 		}
 	} else {
-		block := rawdb.ReadBlockByHash(dbReader, hash)
+		block, err := rawdb.ReadBlockByHash(dbReader, hash)
+		if err != nil {
+			return 0, common.Hash{}, err
+		}
 		if block == nil {
 			return 0, common.Hash{}, fmt.Errorf("block %x not found", hash)
 		}
 		blockNumber = block.NumberU64()
 
-		if blockNrOrHash.RequireCanonical && rawdb.ReadCanonicalHash(dbReader, blockNumber) != hash {
+		ch, err := rawdb.ReadCanonicalHash(dbReader, blockNumber)
+		if err != nil {
+			return 0, common.Hash{}, err
+		}
+		if blockNrOrHash.RequireCanonical && ch != hash {
 			return 0, common.Hash{}, fmt.Errorf("hash %q is not currently canonical", hash.String())
 		}
 	}
 	return blockNumber, hash, nil
 }
 
-func GetAccount(chainKV ethdb.KV, blockNumber uint64, address common.Address) (*accounts.Account, error) {
-	reader := adapter.NewStateReader(chainKV, blockNumber)
+func GetAccount(tx ethdb.Tx, blockNumber uint64, address common.Address) (*accounts.Account, error) {
+	reader := adapter.NewStateReader(tx, blockNumber)
 	return reader.ReadAccountData(address)
 }
 
 func GetHashByNumber(blockNumber uint64, requireCanonical bool, dbReader rawdb.DatabaseReader) (common.Hash, error) {
 	if requireCanonical {
-		return rawdb.ReadCanonicalHash(dbReader, blockNumber), nil
+		return rawdb.ReadCanonicalHash(dbReader, blockNumber)
 	}
 
-	block := rawdb.ReadBlockByNumber(dbReader, blockNumber)
+	block, err := rawdb.ReadBlockByNumber(dbReader, blockNumber)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("block read fail: %w", err)
+	}
 	if block == nil {
 		return common.Hash{}, fmt.Errorf("block %d not found", blockNumber)
 	}

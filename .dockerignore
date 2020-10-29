@@ -1,8 +1,10 @@
 **/*_test.go
+**/*.a
+**/*.dylib
+**/*.o
+**/*.dSYM
 
-build/bin
-build/_workspace
-build/_bin
+build
 tests/testdata
 debug-web-ui
 cmd/prometheus

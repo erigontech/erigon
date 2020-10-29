@@ -39,9 +39,10 @@ const (
 )
 
 var (
-	blockCacheItems      = 8192             // Maximum number of blocks to cache before throttling the download
-	blockCacheMemory     = 64 * 1024 * 1024 // Maximum amount of memory to use for block caching
-	blockCacheSizeWeight = 0.1              // Multiplier to approximate the average block size based on past ones
+	blockCacheMaxItems     = 8192             // Maximum number of blocks to cache before throttling the download
+	blockCacheInitialItems = 2048             // Initial number of blocks to start fetching, before we know the sizes of the blocks
+	blockCacheMemory       = 64 * 1024 * 1024 // Maximum amount of memory to use for block caching
+	blockCacheSizeWeight   = 0.1              // Multiplier to approximate the average block size based on past ones
 )
 
 var (
@@ -141,7 +142,7 @@ type queue struct {
 }
 
 // newQueue creates a new download queue for scheduling block retrieval.
-func newQueue(blockCacheLimit int) *queue {
+func newQueue(blockCacheLimit int, thresholdInitialSize int) *queue {
 	lock := new(sync.RWMutex)
 	q := &queue{
 		headerContCh:     make(chan bool),
@@ -150,12 +151,12 @@ func newQueue(blockCacheLimit int) *queue {
 		active:           sync.NewCond(lock),
 		lock:             lock,
 	}
-	q.Reset(blockCacheLimit)
+	q.Reset(blockCacheLimit, thresholdInitialSize)
 	return q
 }
 
 // Reset clears out the queue contents.
-func (q *queue) Reset(blockCacheLimit int) {
+func (q *queue) Reset(blockCacheLimit int, thresholdInitialSize int) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
 
@@ -174,6 +175,7 @@ func (q *queue) Reset(blockCacheLimit int) {
 	q.receiptPendPool = make(map[string]*fetchRequest)
 
 	q.resultCache = newResultStore(blockCacheLimit)
+	q.resultCache.SetThrottleThreshold(uint64(thresholdInitialSize))
 }
 
 // Close marks the end of the sync, unblocking Results.
@@ -357,7 +359,7 @@ func (q *queue) Schedule(headers []*types.Header, from uint64) []*types.Header {
 // the cache. the result slice will be empty if the queue has been closed.
 // Results can be called concurrently with Deliver and Schedule,
 // but assumes that there are not two simultaneous callers to Results
-func (q *queue) Results(block bool) []*fetchResult {
+func (q *queue) Results(logPrefix string, block bool) []*fetchResult {
 	// Abort early if there are no items and non-blocking requested
 	if !block && !q.resultCache.HasCompletedItems() {
 		return nil
@@ -404,11 +406,11 @@ func (q *queue) Results(block bool) []*fetchResult {
 	throttleThreshold = q.resultCache.SetThrottleThreshold(throttleThreshold)
 
 	// Log some info at certain times
-	if time.Since(q.lastStatLog) > 10*time.Second {
+	if time.Since(q.lastStatLog) > 60*time.Second {
 		q.lastStatLog = time.Now()
 		info := q.Stats()
 		info = append(info, "throttle", throttleThreshold)
-		log.Info("Downloader queue stats", info...)
+		log.Info(fmt.Sprintf("[%s] Downloader queue stats", logPrefix), info...)
 	}
 	return results
 }
@@ -732,6 +734,7 @@ func (q *queue) DeliverHeaders(id string, headers []*types.Header, headerProcCh 
 		}
 	}
 	if accepted {
+		parentHash := headers[0].Hash()
 		for i, header := range headers[1:] {
 			hash := header.Hash()
 			if want := request.From + 1 + uint64(i); header.Number.Uint64() != want {
@@ -739,11 +742,13 @@ func (q *queue) DeliverHeaders(id string, headers []*types.Header, headerProcCh 
 				accepted = false
 				break
 			}
-			if headers[i].Hash() != header.ParentHash {
+			if parentHash != header.ParentHash {
 				log.Warn("Header broke chain ancestry", "peer", id, "number", header.Number, "hash", hash)
 				accepted = false
 				break
 			}
+			// Set-up parent hash for next round
+			parentHash = hash
 		}
 	}
 	// If the batch of headers wasn't accepted, mark as unavailable

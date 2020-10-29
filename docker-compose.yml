@@ -5,48 +5,34 @@ services:
   turbo-geth:
     image: turbo-geth:latest
     build: .
-    command: tg --metrics --pprof.addr="0.0.0.0" --pprof.port="6060" --private.api.addr="0.0.0.0:9090" --ipcdisable
+    command: tg --metrics --metrics.addr="0.0.0.0" --metrics.port="6060" --private.api.addr="0.0.0.0:9090" --pprof --pprof.addr="0.0.0.0" --pprof.port="6061"
     volumes:
       - ${XDG_DATA_HOME:-~/.local/share}/turbogeth:/root/.local/share/turbogeth
     ports:
       - 30303:30303
 
   prometheus:
-    image: prom/prometheus:v2.20.1
+    image: prom/prometheus:v2.22.0
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports:
       - 9090:9090
     volumes:
-      - ./cmd/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ${TG_PROMETHEUS_CONFIG:-./cmd/prometheus/prometheus.yml}:/etc/prometheus/prometheus.yml
       - ${XDG_DATA_HOME:-~/.local/share}/tg-prometheus:/prometheus
 
   grafana:
-    image: grafana/grafana:7.1.5
+    image: grafana/grafana:7.2.1
     ports:
       - 3000:3000
     volumes:
-      - ./cmd/prometheus/grafana.ini:/etc/grafana/grafana.ini
+      - ${TG_GRAFANA_CONFIG:-./cmd/prometheus/grafana.ini}:/etc/grafana/grafana.ini
       - ./cmd/prometheus/datasources:/etc/grafana/provisioning/datasources
       - ./cmd/prometheus/dashboards:/etc/grafana/provisioning/dashboards
       - ${XDG_DATA_HOME:-~/.local/share}/tg-grafana:/var/lib/grafana
-
-  restapi:
-    image: turbo-geth:latest
-    command: restapi --http.addr="0.0.0.0:8080" --private.api.addr="turbo-geth:9090"
-    ports:
-      - 8080:8080
 
   rpcdaemon:
     image: turbo-geth:latest
     command: rpcdaemon --private.api.addr="turbo-geth:9090" --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug,net"
     ports:
       - 8545:8545
-
-  debugui:
-    image: turbo-geth:debugui
-    build: ./debug-web-ui/
-    stdin_open: true
-    ports:
-      - 3001:3000
-
 

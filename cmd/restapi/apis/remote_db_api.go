@@ -26,7 +26,7 @@ func (e *Env) GetDB(c *gin.Context) {
 
 func (e *Env) PostDB(c *gin.Context) {
 	newAddr := c.Query("host") + ":" + c.Query("port")
-	kv, back, err := ethdb.NewRemote().Path(newAddr).Open()
+	kv, back, err := ethdb.NewRemote().Path(newAddr).Open("", "", "")
 	if err != nil {
 		c.Error(err) //nolint:errcheck
 		return

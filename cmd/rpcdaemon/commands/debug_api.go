@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -18,7 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-// PrivateDebugAPI
+// PrivateDebugAPI Exposed RPC endpoints for debugging use
 type PrivateDebugAPI interface {
 	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
 	TraceTransaction(ctx context.Context, hash common.Hash, config *eth.TraceConfig) (interface{}, error)
@@ -27,36 +26,55 @@ type PrivateDebugAPI interface {
 	GetModifiedAccountsByHash(_ context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
 }
 
-// APIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
+// PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
 	db           ethdb.KV
-	dbReader     ethdb.Getter
+	dbReader     ethdb.Database
 	chainContext core.ChainContext
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Database) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
 		db:       db,
 		dbReader: dbReader,
 	}
 }
 
-// StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
+// StorageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
-	bc := adapter.NewBlockGetter(api.dbReader)
-	cc := adapter.NewChainContext(api.dbReader)
-	genesisHash := rawdb.ReadBlockByNumber(api.dbReader, 0).Hash()
-	chainConfig := rawdb.ReadChainConfig(api.dbReader, genesisHash)
-	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, api.db, blockHash, txIndex)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+	defer tx.Rollback()
+
+	bc := adapter.NewBlockGetter(tx)
+	cc := adapter.NewChainContext(tx)
+	genesis, err := rawdb.ReadBlockByNumber(tx, 0)
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+	genesisHash := genesis.Hash()
+	chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+	_, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
 	return StorageRangeAt(stateReader, contractAddress, keyStart, maxResult)
 }
 
-// AccountRange re-implementation of eth/api.go:AccountRange
-func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error) {
+// AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block range
+func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, startKey []byte, maxResults int, excludeCode, excludeStorage, excludeMissingPreimages bool) (state.IteratorDump, error) {
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return state.IteratorDump{}, err
+	}
+	defer tx.Rollback()
+
 	var blockNumber uint64
 
 	if number, ok := blockNrOrHash.Number(); ok {
@@ -66,16 +84,19 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		if number == rpc.LatestBlockNumber {
 			var err error
 
-			blockNumber, _, err = stages.GetStageProgress(api.dbReader, stages.Execution)
+			blockNumber, _, err = stages.GetStageProgress(tx, stages.Execution)
 			if err != nil {
-				return state.IteratorDump{}, fmt.Errorf("las block has not found: %w", err)
+				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
 			}
 		} else {
 			blockNumber = uint64(number)
 		}
 
 	} else if hash, ok := blockNrOrHash.Hash(); ok {
-		block := rawdb.ReadBlockByHash(api.dbReader, hash)
+		block, err1 := rawdb.ReadBlockByHash(tx, hash)
+		if err1 != nil {
+			return state.IteratorDump{}, err1
+		}
 		if block == nil {
 			return state.IteratorDump{}, fmt.Errorf("block %s not found", hash.Hex())
 		}
@@ -86,15 +107,18 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		maxResults = eth.AccountRangeMaxResults
 	}
 
-	dumper := state.NewDumper(api.db, blockNumber)
-	res, err := dumper.IteratorDump(nocode, nostorage, incompletes, start, maxResults)
+	dumper := state.NewDumper(tx.(ethdb.HasTx).Tx(), blockNumber)
+	res, err := dumper.IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages, startKey, maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
 
-	hash := rawdb.ReadCanonicalHash(api.dbReader, blockNumber)
+	hash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
+	if err != nil {
+		return state.IteratorDump{}, err
+	}
 	if hash != (common.Hash{}) {
-		header := rawdb.ReadHeader(api.dbReader, hash, blockNumber)
+		header := rawdb.ReadHeader(tx, hash, blockNumber)
 		if header != nil {
 			res.Root = header.Root.String()
 		}
@@ -103,55 +127,75 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	return res, nil
 }
 
-func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(_ context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error) {
-	if endNum != nil && startNum.Int64() >= endNum.Int64() {
-		return nil, fmt.Errorf("start block height (%d) must be less than end block height (%d)", startNum.Int64(), endNum.Int64())
+// GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
+func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return nil, err
 	}
+	defer tx.Rollback()
 
-	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Execution)
+	latestBlock, _, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return nil, err
 	}
 
-	lastBlockNumber := execution
-
-	if startNum.Int64() < 1 || uint64(startNum.Int64()) > lastBlockNumber {
-		return nil, fmt.Errorf("start block %x not found", uint64(startNum.Int64()))
+	// forces negative numbers to fail (too large) but allows zero
+	startNum := uint64(startNumber.Int64())
+	if startNum > latestBlock {
+		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
 	}
 
-	if endNum == nil {
-		*endNum = startNum
-	} else {
-		if endNum.Int64() < 1 || uint64(endNum.Int64()) > lastBlockNumber {
-			return nil, fmt.Errorf("end block %x not found", uint64(endNum.Int64()))
-		}
+	endNum := startNum // allows for single param calls
+	if endNumber != nil {
+		// forces negative numbers to fail (too large) but allows zero
+		endNum = uint64(endNumber.Int64())
 	}
 
-	return api.getModifiedAccounts(uint64(startNum.Int64()), uint64(endNum.Int64()))
+	// is endNum too big?
+	if endNum > latestBlock {
+		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
+	}
+
+	if startNum > endNum {
+		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
+	}
+
+	return ethdb.GetModifiedAccounts(tx.(ethdb.HasTx).Tx(), startNum, endNum)
 }
 
-func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(_ context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
-	startBlock := rawdb.ReadBlockByHash(api.dbReader, startHash)
+// GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash. Returns a list of accounts modified in the given block.
+func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	startBlock, err := rawdb.ReadBlockByHash(tx, startHash)
+	if err != nil {
+		return nil, err
+	}
 	if startBlock == nil {
 		return nil, fmt.Errorf("start block %x not found", startHash)
 	}
+	startNum := startBlock.NumberU64()
+	endNum := startNum // allows for single parameter calls
 
-	var endBlock *types.Block
-	if endHash == nil {
-		endBlock = startBlock
-	} else {
-		endBlock = rawdb.ReadBlockByHash(api.dbReader, *endHash)
+	if endHash != nil {
+		endBlock, err := rawdb.ReadBlockByHash(tx, *endHash)
+		if err != nil {
+			return nil, err
+		}
 		if endBlock == nil {
 			return nil, fmt.Errorf("end block %x not found", *endHash)
 		}
-	}
-	return api.getModifiedAccounts(startBlock.NumberU64(), endBlock.NumberU64())
-}
-
-func (api *PrivateDebugAPIImpl) getModifiedAccounts(startNum, endNum uint64) ([]common.Address, error) {
-	if startNum >= endNum {
-		return nil, fmt.Errorf("start block height (%d) must be less than end block height (%d)", startNum, endNum)
+		endNum = endBlock.NumberU64()
 	}
 
-	return ethdb.GetModifiedAccounts(api.dbReader, startNum, endNum)
+	if startNum > endNum {
+		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
+	}
+
+	return ethdb.GetModifiedAccounts(tx.(ethdb.HasTx).Tx(), startNum, endNum)
 }

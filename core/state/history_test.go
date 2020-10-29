@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 func TestMutation_DeleteTimestamp(t *testing.T) {
@@ -116,6 +116,11 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Fatal(commitErr)
 	}
 
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
 	for i, addr := range addrs {
 		acc := accounts.NewAccount()
 		if ok, err := rawdb.PlainReadAccount(db, addr, &acc); err != nil {
@@ -161,7 +166,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		for k, v := range accHistoryStateStorage[i] {
-			res, err := GetAsOf(db.KV(), true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr, acc.Incarnation, k), 1)
+			res, err := GetAsOf(tx, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr, acc.Incarnation, k), 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -542,7 +547,12 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 	//walk and collect walkAsOf result
 	var err error
 	var startKey [72]byte
-	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -555,7 +565,7 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 	}
 	assertChangesEquals(t, block2, block2Expected)
 
-	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -583,7 +593,7 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 
 	assertChangesEquals(t, block4, block4Expected)
 
-	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -700,7 +710,12 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	//walk and collect walkAsOf result
 	var err error
 	var startKey [60]byte
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -715,7 +730,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -745,7 +760,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -878,7 +893,12 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	var err error
 	startKey := make([]byte, 60)
 	copy(startKey[:common.AddressLength], addr1.Bytes())
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -893,7 +913,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, common.AddressLength*8, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, common.AddressLength*8, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -921,7 +941,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	assertChangesEquals(t, block4, block4Expected)
 
 	block4.Changes = block4.Changes[:0]
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, make([]byte, 60), 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, make([]byte, 60), 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -941,7 +961,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, common.AddressLength*8, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, common.AddressLength*8, 6, func(k []byte, v []byte) (b bool, e error) {
 		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -965,7 +985,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	assertChangesEquals(t, block6, block6Expected)
 
 	block6.Changes = block6.Changes[:0]
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, make([]byte, 60), 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, make([]byte, 60), 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -1054,7 +1074,12 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 	}
 
 	var startKey [32]byte
-	err := WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	err := WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -1085,7 +1110,7 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 			},
 		},
 	}
-	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -1119,7 +1144,7 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -1207,7 +1232,12 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	}, true, true)
 
 	var startKey [20]byte
-	err := WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	err := WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -1240,7 +1270,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -1273,7 +1303,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -1389,7 +1419,12 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 
 	//walk and collect walkAsOf result
 	var startKey [72]byte
-	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -1410,7 +1445,7 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -1438,7 +1473,7 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 
 	assertChangesEquals(t, block4, block4Expected)
 
-	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -1543,7 +1578,12 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 	}
 
 	var startKey [60]byte
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -1560,7 +1600,7 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -1589,7 +1629,7 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -1698,7 +1738,12 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 	}
 
 	var startKey [32]byte
-	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -1731,7 +1776,7 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -1764,7 +1809,7 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(db.KV(), dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -1861,7 +1906,12 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 	}
 
 	var startKey [32]byte
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -1877,7 +1927,7 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -1909,7 +1959,7 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -2051,13 +2101,18 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		},
 	}, true, true)
 
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
 	for _, blockNum := range []uint64{5, 100, 1000, 1050} {
 		obtained := &changeset.ChangeSet{
 			Changes: make([]changeset.Change, 0),
 		}
 
 		var startKey [20]byte
-		err := WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, blockNum, func(k []byte, v []byte) (b bool, e error) {
+		err := WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, blockNum, func(k []byte, v []byte) (b bool, e error) {
 			innerErr := obtained.Add(common.CopyBytes(k), common.CopyBytes(v))
 			if innerErr != nil {
 				t.Fatal(innerErr)
@@ -2188,13 +2243,18 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 		},
 	}, true, true)
 
+	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	if err1 != nil {
+		t.Fatalf("create tx: %v", err1)
+	}
+	defer tx.Rollback()
 	for _, blockNum := range []uint64{5, 100, 1000, 1050} {
 		obtained := &changeset.ChangeSet{
 			Changes: make([]changeset.Change, 0),
 		}
 
 		var startKey [20]byte
-		err := WalkAsOf(db.KV(), dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, blockNum, func(k []byte, v []byte) (b bool, e error) {
+		err := WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, blockNum, func(k []byte, v []byte) (b bool, e error) {
 			innerErr := obtained.Add(common.CopyBytes(k), common.CopyBytes(v))
 			if innerErr != nil {
 				t.Fatal(innerErr)

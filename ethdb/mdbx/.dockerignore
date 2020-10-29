@@ -1,0 +1,5 @@
+dist/config.h
+**/*.a
+**/*.dylib
+**/*.o
+**/*.dSYM

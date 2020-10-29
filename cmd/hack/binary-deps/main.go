@@ -17,7 +17,10 @@ package main
 import (
 	_ "github.com/fjl/gencodec"
 	_ "github.com/kevinburke/go-bindata"
+	_ "github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy"
+	_ "github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat"
+	_ "github.com/ledgerwatch/lmdb-go/dist"
+	_ "github.com/ugorji/go/codec/codecgen"
 	_ "golang.org/x/tools/cmd/stringer"
 	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
-	_ "google.golang.org/protobuf/cmd/protoc-gen-go"
 )

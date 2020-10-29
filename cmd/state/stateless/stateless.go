@@ -26,7 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
@@ -40,10 +40,9 @@ var chartColors = []drawing.Color{
 }
 
 func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
-	chainConfig *params.ChainConfig, bcb core.ChainContext, block *types.Block,
-) (types.Receipts, error) {
+	chainConfig *params.ChainConfig, bcb core.ChainContext, block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
 	header := block.Header()
-	vmConfig := vm.Config{TraceJumpDest: true}
+	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
@@ -399,7 +398,7 @@ func Stateless(
 			ibs := state.New(s)
 			ibs.SetTrace(trace)
 			s.SetBlockNr(blockNum)
-			if _, err = runBlock(ibs, s, s, chainConfig, blockProvider, block); err != nil {
+			if _, err = runBlock(ibs, s, s, chainConfig, blockProvider, block, vmConfig); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
 			} else if !binary {

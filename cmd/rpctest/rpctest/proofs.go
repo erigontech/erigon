@@ -2,15 +2,16 @@ package rpctest
 
 import (
 	"fmt"
+	"net/http"
+	"os"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/trie"
-	"net/http"
-	"os"
-	"time"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 func Proofs(chaindata string, url string, block uint64) {

@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
@@ -87,6 +86,7 @@ type ProtocolManager struct {
 	eventMux      *event.TypeMux
 	txsCh         chan core.NewTxsEvent
 	txsSub        event.Subscription
+	txsSubMu      sync.RWMutex
 	minedBlockSub *event.TypeMuxSubscription
 
 	whitelist map[uint64]common.Hash
@@ -102,9 +102,10 @@ type ProtocolManager struct {
 	// Test fields or hooks
 	broadcastTxAnnouncesOnly bool // Testing field, disable transaction propagation
 
-	mode    downloader.SyncMode // Sync mode passed from the command line
-	datadir string
-	hdd     bool
+	mode          downloader.SyncMode // Sync mode passed from the command line
+	tmpdir        string
+	batchSize     int
+	currentHeight uint64 // Atomic variable to contain chain height
 }
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
@@ -112,11 +113,11 @@ type ProtocolManager struct {
 func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb *ethdb.ObjectDatabase, whitelist map[uint64]common.Hash, stagedSync *stagedsync.StagedSync) (*ProtocolManager, error) {
 	// Create the protocol manager with the base fields
 	if stagedSync == nil {
-		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder())
+		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{})
 	}
 	manager := &ProtocolManager{
 		networkID:   networkID,
-		forkFilter:  forkid.NewFilter(blockchain),
+		forkFilter:  forkid.NewFilter(config, blockchain.Genesis().Hash(), blockchain.CurrentHeader().Number.Uint64()),
 		eventMux:    mux,
 		txpool:      txpool,
 		chainConfig: config,
@@ -165,17 +166,17 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 	return manager, nil
 }
 
-func (pm *ProtocolManager) SetDataDir(datadir string) {
-	pm.datadir = datadir
+func (pm *ProtocolManager) SetTmpDir(tmpdir string) {
+	pm.tmpdir = tmpdir
 	if pm.downloader != nil {
-		pm.downloader.SetDataDir(datadir)
+		pm.downloader.SetTmpDir(tmpdir)
 	}
 }
 
-func (pm *ProtocolManager) SetHdd(hdd bool) {
-	pm.hdd = hdd
+func (pm *ProtocolManager) SetBatchSize(batchSize int) {
+	pm.batchSize = batchSize
 	if pm.downloader != nil {
-		pm.downloader.SetHdd(hdd)
+		pm.downloader.SetBatchSize(batchSize)
 	}
 }
 
@@ -189,8 +190,8 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		manager.downloader.Cancel()
 	}
 	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
-	manager.downloader.SetDataDir(manager.datadir)
-	manager.downloader.SetHdd(manager.hdd)
+	manager.downloader.SetTmpDir(manager.tmpdir)
+	manager.downloader.SetBatchSize(manager.batchSize)
 	manager.downloader.SetStagedSync(manager.stagedSync)
 
 	// Construct the fetcher (short sync)
@@ -198,9 +199,7 @@ func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *para
 		return engine.VerifyHeader(blockchain, header, true)
 	}
 	heighter := func() uint64 {
-		headHash := rawdb.ReadHeadHeaderHash(chaindb)
-		headNumber := rawdb.ReadHeaderNumber(chaindb, headHash)
-		return *headNumber
+		return atomic.LoadUint64(&manager.currentHeight)
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
 		atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
@@ -344,20 +343,28 @@ func (pm *ProtocolManager) StartTxPool() error {
 	}
 	pm.txFetcher = fetcher.NewTxFetcher(pm.txpool.Has, pm.txpool.AddRemotes, fetchTx)
 
-	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
+	if pm.txsCh == nil {
+		pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
+	}
+	pm.txsSubMu.Lock()
 	pm.txsSub = pm.txpool.SubscribeNewTxsEvent(pm.txsCh)
 	if pm.txsSub != nil {
 		pm.wg.Add(1)
 		go pm.txBroadcastLoop()
 	}
+	pm.txsSubMu.Unlock()
 
 	pm.txFetcher.Start()
 	return nil
 }
 
 func (pm *ProtocolManager) StopTxPool() {
-	if pm.txsSub != nil {
+	pm.txsSubMu.RLock()
+	ok := pm.txsSub != nil
+	pm.txsSubMu.RUnlock()
+	if ok {
 		pm.txsSub.Unsubscribe() // quits txBroadcastLoop
+		pm.txFetcher.Stop()
 	}
 }
 
@@ -413,8 +420,8 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		number  = head.Number.Uint64()
 		td      = pm.blockchain.GetTd(hash, number)
 	)
-
-	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkid.NewID(pm.chainConfig, genesis.Hash(), number), pm.forkFilter); err != nil {
+	forkID := forkid.NewID(pm.blockchain.Config(), pm.blockchain.Genesis().Hash(), pm.blockchain.CurrentHeader().Number.Uint64())
+	if err := p.Handshake(pm.networkID, td, hash, genesis.Hash(), forkID, pm.forkFilter); err != nil {
 		p.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}
@@ -522,7 +529,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 	// Block header query, collect the requested headers and reply
 	case msg.Code == GetBlockHeadersMsg:
 		// Decode the complex header query
-		var query getBlockHeadersData
+		var query GetBlockHeadersData
 		if err := msg.Decode(&query); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
 		}
@@ -824,7 +831,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		}
 
 	case msg.Code == NewBlockHashesMsg:
-		var announces newBlockHashesData
+		var announces NewBlockHashesData
 		if err := msg.Decode(&announces); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
 		}
@@ -833,7 +840,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			p.MarkBlock(block.Hash)
 		}
 		// Schedule all the unknown hashes for retrieval
-		unknown := make(newBlockHashesData, 0, len(announces))
+		unknown := make(NewBlockHashesData, 0, len(announces))
 		for _, block := range announces {
 			if !pm.blockchain.HasBlock(block.Hash, block.Number) {
 				unknown = append(unknown, block)
@@ -845,7 +852,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 
 	case msg.Code == NewBlockMsg:
 		// Retrieve and decode the propagated block
-		var request newBlockData
+		var request NewBlockData
 		if err := msg.Decode(&request); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
 		}
@@ -1133,10 +1140,16 @@ func (pm *ProtocolManager) txBroadcastLoop() {
 			pm.BroadcastTransactions(event.Txs, true)  // First propagate transactions to peers
 			pm.BroadcastTransactions(event.Txs, false) // Only then announce to the rest
 
-		case <-pm.txsSub.Err():
+		case <-pm.txsSubErr():
 			return
 		}
 	}
+}
+
+func (pm *ProtocolManager) txsSubErr() <-chan error {
+	pm.txsSubMu.RLock()
+	defer pm.txsSubMu.RUnlock()
+	return pm.txsSub.Err()
 }
 
 // NodeInfo represents a short summary of the Ethereum sub-protocol metadata

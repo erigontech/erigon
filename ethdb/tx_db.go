@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/metrics"
 	"time"
 
+	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 // TxDb - provides Database interface around ethdb.Tx
@@ -21,7 +22,8 @@ type TxDb struct {
 	db       Database
 	tx       Tx
 	ParentTx Tx
-	cursors  map[string]*LmdbCursor
+	txFlags  TxFlags
+	cursors  map[string]Cursor
 	len      uint64
 }
 
@@ -32,17 +34,17 @@ func (m *TxDb) Close() {
 // NewTxDbWithoutTransaction creates TxDb object without opening transaction,
 // such TxDb not usable before .Begin() call on it
 // It allows inject TxDb object into class hierarchy, but open write transaction later
-func NewTxDbWithoutTransaction(db Database) *TxDb {
-	return &TxDb{db: db}
+func NewTxDbWithoutTransaction(db Database, flags TxFlags) *TxDb {
+	return &TxDb{db: db, txFlags: flags}
 }
 
-func (m *TxDb) Begin() (DbWithPendingMutations, error) {
+func (m *TxDb) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
 	batch := m
 	if m.tx != nil {
-		batch = &TxDb{db: m.db}
+		batch = &TxDb{db: m.db, txFlags: flags}
 	}
 
-	if err := batch.begin(m.tx); err != nil {
+	if err := batch.begin(ctx, m.tx, flags); err != nil {
 		return nil, err
 	}
 	return batch, nil
@@ -58,36 +60,43 @@ func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
 	return m.cursors[bucket].Put(key, value)
 }
 
-func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
-	m.len += uint64(len(key) + len(value))
-	return m.cursors[bucket].Append(key, value)
+func (m *TxDb) Reserve(bucket string, key []byte, i int) ([]byte, error) {
+	m.len += uint64(len(key) + i)
+	return m.cursors[bucket].Reserve(key, i)
 }
 
-func (m *TxDb) Delete(bucket string, key []byte) error {
-	m.len += uint64(len(key))
-	return m.cursors[bucket].Delete(key)
+func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
+	m.len += uint64(len(key) + len(value))
+	switch c := m.cursors[bucket].(type) {
+	case CursorDupSort:
+		return c.AppendDup(key, value)
+	default:
+		return c.Append(key, value)
+	}
+}
+
+func (m *TxDb) Delete(bucket string, k, v []byte) error {
+	m.len += uint64(len(k))
+	return m.cursors[bucket].Delete(k, v)
 }
 
 func (m *TxDb) NewBatch() DbWithPendingMutations {
 	return &mutation{
 		db:   m,
-		puts: newPuts(),
+		puts: btree.New(32),
 	}
 }
 
-func (m *TxDb) begin(parent Tx) error {
-	tx, err := m.db.(HasKV).KV().Begin(context.Background(), parent, true)
+func (m *TxDb) begin(ctx context.Context, parent Tx, flags TxFlags) error {
+	tx, err := m.db.(HasKV).KV().Begin(ctx, parent, flags)
 	if err != nil {
 		return err
 	}
 	m.tx = tx
 	m.ParentTx = parent
-	m.cursors = make(map[string]*LmdbCursor, 16)
-	for i := range dbutils.Buckets {
-		m.cursors[dbutils.Buckets[i]] = tx.Cursor(dbutils.Buckets[i]).(*LmdbCursor)
-		if err := m.cursors[dbutils.Buckets[i]].initCursor(); err != nil {
-			return err
-		}
+	m.cursors = make(map[string]Cursor, 16)
+	for name := range m.db.(HasKV).KV().AllBuckets() {
+		m.cursors[name] = tx.Cursor(name)
 	}
 	return nil
 }
@@ -160,7 +169,8 @@ func MultiPut(tx Tx, tuples ...[]byte) error {
 		bucketEnd := bucketStart
 		for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 		}
-		c := tx.Cursor(string(tuples[bucketStart]))
+		bucketName := string(tuples[bucketStart])
+		c := tx.Cursor(bucketName)
 
 		// move cursor to a first element in batch
 		// if it's nil, it means all keys in batch gonna be inserted after end of bucket (batch is sorted and has no duplicates here)
@@ -185,7 +195,7 @@ func MultiPut(tx Tx, tuples ...[]byte) error {
 				}
 			} else {
 				if v == nil {
-					if err := c.Delete(k); err != nil {
+					if err := c.Delete(k, nil); err != nil {
 						return err
 					}
 				} else {
@@ -201,7 +211,7 @@ func MultiPut(tx Tx, tuples ...[]byte) error {
 			default:
 			case <-logEvery.C:
 				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
-				log.Info("Write to db", "progress", progress)
+				log.Info("Write to db", "progress", progress, "current table", bucketName)
 			}
 		}
 
@@ -221,10 +231,12 @@ func (m *TxDb) IdealBatchSize() int {
 
 func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
 	m.panicOnEmptyDB()
-	return Walk(m.cursors[bucket], startkey, fixedbits, walker)
+	c := m.tx.Cursor(bucket) // create new cursor, then call other methods of TxDb inside MultiWalk callback will not affect this cursor
+	defer c.Close()
+	return Walk(c, startkey, fixedbits, walker)
 }
 
-func Walk(c Cursor, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
+func Walk(c Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	k, v, err := c.Seek(startkey)
 	if err != nil {
@@ -246,7 +258,7 @@ func Walk(c Cursor, startkey []byte, fixedbits int, walker func([]byte, []byte) 
 	return nil
 }
 
-func ForEach(c Cursor, walker func([]byte, []byte) (bool, error)) error {
+func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -264,7 +276,9 @@ func ForEach(c Cursor, walker func([]byte, []byte) (bool, error)) error {
 
 func (m *TxDb) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
 	m.panicOnEmptyDB()
-	return MultiWalk(m.cursors[bucket], startkeys, fixedbits, walker)
+	c := m.tx.Cursor(bucket) // create new cursor, then call other methods of TxDb inside MultiWalk callback will not affect this cursor
+	defer c.Close()
+	return MultiWalk(c, startkeys, fixedbits, walker)
 }
 
 func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
@@ -321,13 +335,18 @@ func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, [
 	return nil
 }
 
-func (m *TxDb) CommitAndBegin() error {
+func (m *TxDb) CommitAndBegin(ctx context.Context) error {
 	_, err := m.Commit()
 	if err != nil {
 		return err
 	}
 
-	return m.begin(m.ParentTx)
+	return m.begin(ctx, m.ParentTx, m.txFlags)
+}
+
+func (m *TxDb) RollbackAndBegin(ctx context.Context) error {
+	m.Rollback()
+	return m.begin(ctx, m.ParentTx, m.txFlags)
 }
 
 func (m *TxDb) Commit() (uint64, error) {
@@ -382,4 +401,45 @@ func (m *TxDb) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (m *TxDb) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+func (m *TxDb) BucketExists(name string) (bool, error) {
+	exists := false
+	migrator, ok := m.tx.(BucketMigrator)
+	if !ok {
+		return false, fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
+	}
+	exists = migrator.ExistsBucket(name)
+	return exists, nil
+}
+
+func (m *TxDb) ClearBuckets(buckets ...string) error {
+	for i := range buckets {
+		name := buckets[i]
+
+		migrator, ok := m.tx.(BucketMigrator)
+		if !ok {
+			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
+		}
+		if err := migrator.ClearBucket(name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *TxDb) DropBuckets(buckets ...string) error {
+	for i := range buckets {
+		name := buckets[i]
+		log.Info("Dropping bucket", "name", name)
+		migrator, ok := m.tx.(BucketMigrator)
+		if !ok {
+			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
+		}
+		if err := migrator.DropBucket(name); err != nil {
+			return err
+		}
+	}
+	return nil
 }

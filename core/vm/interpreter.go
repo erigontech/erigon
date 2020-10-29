@@ -34,6 +34,8 @@ type Config struct {
 	EnablePreimageRecording bool   // Enables recording of SHA3/keccak preimages
 	SkipAnalysis            bool   // Whether we can skip jumpdest analysis based on the checked history
 	TraceJumpDest           bool   // Print transaction hashes where jumpdest analysis was useful
+	NoReceipts              bool   // Do not calculate receipts
+	ReadOnly                bool   // Do no perform any block finalisation
 
 	EWASMInterpreter string // External EWASM interpreter options
 	EVMInterpreter   string // External EVM interpreter options
@@ -116,15 +118,13 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		jt = &frontierInstructionSet
 	}
 	if len(cfg.ExtraEips) > 0 {
-		jtCopy := *jt
 		for i, eip := range cfg.ExtraEips {
-			if err := EnableEIP(eip, &jtCopy); err != nil {
+			if err := EnableEIP(eip, jt); err != nil {
 				// Disable it, so caller can check if it's activated or not
 				cfg.ExtraEips = append(cfg.ExtraEips[:i], cfg.ExtraEips[i+1:]...)
 				log.Error("EIP activation failed", "eip", eip, "error", err)
 			}
 		}
-		jt = &jtCopy
 	}
 
 	return &EVMInterpreter{

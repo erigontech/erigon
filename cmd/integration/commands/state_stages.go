@@ -5,11 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -30,7 +31,10 @@ var stateStags = &cobra.Command{
 	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind_every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := syncBySmallSteps(ctx, chaindata); err != nil {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := syncBySmallSteps(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -52,15 +56,18 @@ func init() {
 	withUnwind(stateStags)
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
-	withHDD(stateStags)
+	withBatchSize(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 }
 
-func syncBySmallSteps(ctx context.Context, chaindata string) error {
+func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
+
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		panic(err)
+	}
 
 	ch := ctx.Done()
 
@@ -88,20 +95,20 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	}
 
-	tx, errBegin := db.Begin()
-	if errBegin != nil {
-		return errBegin
-	}
+	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	bc, st, progress := newSync(ch, db, tx, changeSetHook)
+	cc, bc, st, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
+	cc.SetDB(tx)
 
-	if err := tx.CommitAndBegin(); err != nil {
+	tx, err = tx.Begin(ctx, ethdb.RO)
+	if err != nil {
 		return err
 	}
 
 	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
+	_ = st.SetCurrentStage(stages.Execution)
 
 	senderStageProgress := progress(stages.Senders).BlockNumber
 
@@ -110,20 +117,22 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		stopAt = block
 	}
 
-	for progress(stages.Execution).BlockNumber < stopAt {
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	for progress(stages.Execution).BlockNumber < stopAt || (unwind <= unwindEvery) {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
 		}
 
-		if err := tx.CommitAndBegin(); err != nil {
+		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
 
 		// All stages forward to `execStage + unwindEvery` block
 		execAtBlock := progress(stages.Execution).BlockNumber
-		execToBlock := execAtBlock + unwindEvery
+		execToBlock := execAtBlock - unwind + unwindEvery
 		if execToBlock > stopAt {
 			execToBlock = stopAt + 1
 			unwind = 0
@@ -131,7 +140,16 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 
 		// set block limit of execute stage
 		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-			if err := stagedsync.SpawnExecuteBlocksStage(stageState, tx, bc.Config(), bc, bc.GetVMConfig(), execToBlock, ch, false, hdd, changeSetHook); err != nil {
+			if err := stagedsync.SpawnExecuteBlocksStage(
+				stageState, tx,
+				bc.Config(), cc, bc.GetVMConfig(),
+				ch,
+				stagedsync.ExecuteBlockStageParams{
+					ToBlock:       execToBlock, // limit execution to the specified block
+					WriteReceipts: sm.Receipts,
+					BatchSize:     int(batchSize),
+					ChangeSetHook: changeSetHook,
+				}); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 			return nil

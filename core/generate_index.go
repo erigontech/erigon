@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -15,8 +16,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func NewIndexGenerator(db ethdb.Database, quitCh <-chan struct{}) *IndexGenerator {
+func NewIndexGenerator(logPrefix string, db ethdb.Database, quitCh <-chan struct{}) *IndexGenerator {
 	return &IndexGenerator{
+		logPrefix:        logPrefix,
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
 		TempDir:          os.TempDir(),
@@ -25,25 +27,26 @@ func NewIndexGenerator(db ethdb.Database, quitCh <-chan struct{}) *IndexGenerato
 }
 
 type IndexGenerator struct {
+	logPrefix        string
 	db               ethdb.Database
 	ChangeSetBufSize int
 	TempDir          string
 	quitCh           <-chan struct{}
 }
 
-func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket string, datadir string) error {
+func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket string, tmpdir string) error {
 	v, ok := changeset.Mapper[changeSetBucket]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
-	log.Debug("Index generation", "from", startBlock, "to", endBlock, "csbucket", changeSetBucket)
+	log.Debug(fmt.Sprintf("[%s] Index generation", ig.logPrefix), "from", startBlock, "to", endBlock, "csbucket", changeSetBucket)
 	if endBlock < startBlock && endBlock != 0 {
 		return fmt.Errorf("generateIndex %s: endBlock %d smaller than startBlock %d", changeSetBucket, endBlock, startBlock)
 	}
 	t := time.Now()
-	err := etl.Transform(ig.db, changeSetBucket,
+	err := etl.Transform(ig.logPrefix, ig.db, changeSetBucket,
 		v.IndexBucket,
-		datadir,
+		tmpdir,
 		getExtractFunc(v.WalkerAdapter),
 		loadFunc,
 		etl.TransformArgs{
@@ -63,7 +66,7 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 		return err
 	}
 
-	log.Debug("Index generation successfully finished", "csbucket", changeSetBucket, "it took", time.Since(t))
+	log.Debug(fmt.Sprintf("[%s] Index generation successfully finished", ig.logPrefix), "csbucket", changeSetBucket, "it took", time.Since(t))
 	return nil
 }
 
@@ -131,7 +134,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 
 	for key, value := range historyEffects {
 		if value == nil {
-			if err := mutation.Delete(vv.IndexBucket, []byte(key)); err != nil {
+			if err := mutation.Delete(vv.IndexBucket, []byte(key), nil); err != nil {
 				return err
 			}
 		} else {
@@ -140,7 +143,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 			}
 		}
 		if mutation.BatchSize() >= mutation.IdealBatchSize() {
-			if err := mutation.CommitAndBegin(); err != nil {
+			if err := mutation.CommitAndBegin(context.Background()); err != nil {
 				return err
 			}
 		}
@@ -150,15 +153,15 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 }
 
 func (ig *IndexGenerator) DropIndex(bucket string) error {
-	casted, ok := ig.db.(ethdb.NonTransactional)
+	casted, ok := ig.db.(ethdb.BucketsMigrator)
 	if !ok {
 		return errors.New("imposible to drop")
 	}
-	log.Warn("Remove bucket", "bucket", bucket)
+	log.Warn(fmt.Sprintf("[%s] Remove bucket", ig.logPrefix), "bucket", bucket)
 	return casted.ClearBuckets(bucket)
 }
 
-func loadFunc(k []byte, value []byte, state etl.State, next etl.LoadNextFunc) error {
+func loadFunc(k []byte, value []byte, state etl.CurrentTableReader, next etl.LoadNextFunc) error {
 	if len(value)%9 != 0 {
 		log.Error("Value must be a multiple of 9", "ln", len(value), "k", common.Bytes2Hex(k))
 		return errors.New("incorrect value")

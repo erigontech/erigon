@@ -11,7 +11,6 @@ service ETHBACKEND {
   rpc Add(TxRequest) returns (AddReply);
   rpc Etherbase(EtherbaseRequest) returns (EtherbaseReply);
   rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
-  rpc BloomStatus(BloomStatusRequest) returns (BloomStatusReply);
 }
 
 message TxRequest {
@@ -20,15 +19,6 @@ message TxRequest {
 
 message AddReply {
   bytes hash = 1;
-}
-
-message BloomStatusRequest {
-}
-
-message BloomStatusReply {
-  uint64 size = 1;
-  uint64 sections = 2;
-  bytes hash = 3;
 }
 
 message EtherbaseRequest {

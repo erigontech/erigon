@@ -21,9 +21,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 )
 
-const callTimeout = 5 * time.Second
+const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, kv ethdb.KV, dbReader rawdb.DatabaseReader, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, dbReader ethdb.Getter, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -31,17 +31,17 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, kv ethdb.KV, dbReader raw
 			return state, block.Header(), nil
 		}
 	*/
-
 	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, dbReader)
 	if err != nil {
 		return nil, err
 	}
-
-	ds := state.NewPlainDBState(kv, blockNumber)
-	state := state.New(ds)
-	if state == nil {
-		return nil, fmt.Errorf("can't get the state for %d", blockNumber)
+	var stateReader state.StateReader
+	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+		stateReader = state.NewPlainStateReader(dbReader)
+	} else {
+		stateReader = state.NewPlainDBState(tx, blockNumber)
 	}
+	state := state.New(stateReader)
 
 	header := rawdb.ReadHeader(dbReader, hash, blockNumber)
 	if header == nil {

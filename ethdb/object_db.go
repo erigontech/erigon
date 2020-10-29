@@ -22,19 +22,26 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
-	"strings"
 )
 
 var (
 	dbGetTimer = metrics.NewRegisteredTimer("db/get", nil)
 	dbPutTimer = metrics.NewRegisteredTimer("db/put", nil)
 )
+
+type DbCopier interface {
+	NewDbWithTheSameParameters() *ObjectDatabase
+}
 
 // ObjectDatabase - is an object-style interface of DB accessing
 type ObjectDatabase struct {
@@ -54,7 +61,7 @@ func NewObjectDatabase(kv KV) *ObjectDatabase {
 }
 
 func MustOpen(path string) *ObjectDatabase {
-	db, err := Open(path)
+	db, err := Open(path, false)
 	if err != nil {
 		panic(err)
 	}
@@ -63,18 +70,23 @@ func MustOpen(path string) *ObjectDatabase {
 
 // Open - main method to open database. Choosing driver based on path suffix.
 // If env TEST_DB provided - choose driver based on it. Some test using this method to open non-in-memory db
-func Open(path string) (*ObjectDatabase, error) {
+func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 	var kv KV
 	var err error
 	testDB := debug.TestDB()
 	switch true {
 	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
 		kv, err = NewLMDB().Path(path).Open()
-	case testDB == "bolt" || strings.HasSuffix(path, "_bolt"):
-		kv, err = NewBolt().Path(path).Open()
+	case testDB == "mdbx" || strings.HasSuffix(path, "_mdbx"):
+		kv, err = NewMDBX().Path(path).Open()
 	default:
-		kv, err = NewLMDB().Path(path).Open()
+		opts := NewLMDB().Path(path)
+		if readOnly {
+			opts = opts.ReadOnly()
+		}
+		kv, err = opts.Open()
 	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +123,7 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
 	var has bool
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(bucket, key)
+		v, err := tx.GetOne(bucket, key)
 		if err != nil {
 			return err
 		}
@@ -133,7 +145,7 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
 	var dat []byte
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(bucket, key)
+		v, err := tx.GetOne(bucket, key)
 		if err != nil {
 			return err
 		}
@@ -214,10 +226,10 @@ func (db *ObjectDatabase) MultiWalk(bucket string, startkeys [][]byte, fixedbits
 }
 
 // Delete deletes the key from the queue and database
-func (db *ObjectDatabase) Delete(bucket string, key []byte) error {
+func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
 	// Execute the actual operation
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.Cursor(bucket).Delete(key)
+		return tx.Cursor(bucket).Delete(k, v)
 	})
 	return err
 }
@@ -306,14 +318,18 @@ func (db *ObjectDatabase) KV() KV {
 	return db.kv
 }
 
+func (db *ObjectDatabase) SetKV(kv KV) {
+	db.kv = kv
+}
+
 func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	var mem *ObjectDatabase
 	// Open the db and recover any potential corruptions
-	switch db.kv.(type) {
-	case *LmdbKV:
-		mem = NewObjectDatabase(NewLMDB().InMem().MustOpen())
-	case *BoltKV:
-		mem = NewObjectDatabase(NewBolt().InMem().MustOpen())
+	switch t := db.kv.(type) {
+	case DbCopier:
+		mem = t.NewDbWithTheSameParameters()
+	default:
+		panic(fmt.Sprintf("MemCopy is not implemented for type %T", t))
 	}
 
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {
@@ -342,14 +358,14 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:   db,
-		puts: newPuts(),
+		puts: btree.New(32),
 	}
 	return m
 }
 
-func (db *ObjectDatabase) Begin() (DbWithPendingMutations, error) {
+func (db *ObjectDatabase) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
 	batch := &TxDb{db: db}
-	if err := batch.begin(nil); err != nil {
+	if err := batch.begin(ctx, nil, flags); err != nil {
 		panic(err)
 	}
 	return batch, nil
@@ -369,6 +385,10 @@ func (db *ObjectDatabase) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (db *ObjectDatabase) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+func (db *ObjectDatabase) Reserve(bucket string, key []byte, i int) ([]byte, error) {
+	panic("supported only by TxDb")
 }
 
 // Type which expecting sequence of triplets: dbi, key, value, ....
@@ -396,20 +416,17 @@ func (t MultiPutTuples) Swap(i, j int) {
 	t[i3+2], t[j3+2] = t[j3+2], t[i3+2]
 }
 
-func Get(db KV, bucket string, key []byte) ([]byte, error) {
+func Get(tx Tx, bucket string, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
-	err := db.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(bucket, key)
-		if err != nil {
-			return err
-		}
-		if v != nil {
-			dat = make([]byte, len(v))
-			copy(dat, v)
-		}
-		return nil
-	})
+	v, err := tx.GetOne(bucket, key)
+	if err != nil {
+		return nil, err
+	}
+	if v != nil {
+		dat = make([]byte, len(v))
+		copy(dat, v)
+	}
 	if dat == nil {
 		return nil, ErrKeyNotFound
 	}
@@ -446,4 +463,29 @@ func InspectDatabase(db Database) error {
 func NewDatabaseWithFreezer(db *ObjectDatabase, dir, suffix string) (*ObjectDatabase, error) {
 	// FIXME: implement freezer in Turbo-Geth
 	return db, nil
+}
+
+func WarmUp(tx Tx, bucket string, logEvery *time.Ticker, quit <-chan struct{}) error {
+	count := 0
+	c := tx.Cursor(bucket)
+	totalKeys, errCount := c.Count()
+	if errCount != nil {
+		return errCount
+	}
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		count++
+
+		select {
+		default:
+		case <-quit:
+			return common.ErrStopped
+		case <-logEvery.C:
+			log.Info("Warmed up state", "progress", fmt.Sprintf("%.2fM/%.2fM", float64(count)/1_000_000, float64(totalKeys)/1_000_000))
+		}
+	}
+
+	return nil
 }

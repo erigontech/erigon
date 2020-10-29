@@ -33,26 +33,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestBoltDB() (Database, func()) {
-	db := NewObjectDatabase(NewBolt().InMem().MustOpen())
-	return db, func() {
-		db.Close()
-	}
-}
-
 func newTestLmdb() *ObjectDatabase {
 	return NewObjectDatabase(NewLMDB().InMem().MustOpen())
 }
 
 var testBucket = dbutils.CurrentStateBucket
 var testValues = []string{"a", "1251", "\x00123\x00"}
-
-func TestBoltDB_PutGet(t *testing.T) {
-	db, remove := newTestBoltDB()
-	defer remove()
-	testPutGet(db, t)
-	testNoPanicAfterDbClosed(db, t)
-}
 
 func TestMemoryDB_PutGet(t *testing.T) {
 	db := NewMemDatabase()
@@ -142,7 +128,7 @@ func testPutGet(db MinDatabase, t *testing.T) {
 	}
 
 	for _, v := range testValues {
-		err := db.Delete(testBucket, []byte(v))
+		err := db.Delete(testBucket, []byte(v), nil)
 		if err != nil {
 			t.Fatalf("delete %q failed: %v", v, err)
 		}
@@ -157,12 +143,15 @@ func testPutGet(db MinDatabase, t *testing.T) {
 }
 
 func testNoPanicAfterDbClosed(db Database, t *testing.T) {
-	tx, err := db.(HasKV).KV().Begin(context.Background(), nil, false)
+	tx, err := db.(HasKV).KV().Begin(context.Background(), nil, RO)
 	require.NoError(t, err)
-	writeTx, err := db.(HasKV).KV().Begin(context.Background(), nil, true)
+	writeTx, err := db.(HasKV).KV().Begin(context.Background(), nil, RW)
 	require.NoError(t, err)
+
+	closeCh := make(chan struct{}, 1)
 	go func() {
 		require.NotPanics(t, func() {
+			<-closeCh
 			db.Close()
 		})
 	}()
@@ -171,11 +160,12 @@ func testNoPanicAfterDbClosed(db Database, t *testing.T) {
 	require.NoError(t, err)
 	err = writeTx.Commit(context.Background())
 	require.NoError(t, err)
-	_, err = tx.Get(dbutils.Buckets[0], []byte{1})
+	_, err = tx.GetOne(dbutils.Buckets[0], []byte{1})
 	require.NoError(t, err)
 	tx.Rollback()
 
 	db.Close() // close db from 2nd goroutine
+	close(closeCh)
 
 	// after db closed, methods must not panic but return some error
 	require.NotPanics(t, func() {
@@ -184,12 +174,6 @@ func testNoPanicAfterDbClosed(db Database, t *testing.T) {
 		err = db.Put(testBucket, []byte{11}, []byte{11})
 		require.Error(t, err)
 	})
-}
-
-func TestBoltDB_ParallelPutGet(t *testing.T) {
-	db, remove := newTestBoltDB()
-	defer remove()
-	testParallelPutGet(db)
 }
 
 func TestMemoryDB_ParallelPutGet(t *testing.T) {
@@ -239,7 +223,7 @@ func testParallelPutGet(db MinDatabase) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			err := db.Delete(testBucket, []byte(key))
+			err := db.Delete(testBucket, []byte(key), nil)
 			if err != nil {
 				panic("delete failed: " + err.Error())
 			}
@@ -266,12 +250,6 @@ func TestMemoryDB_Walk(t *testing.T) {
 	testWalk(db, t)
 }
 
-func TestBoltDB_Walk(t *testing.T) {
-	db, remove := newTestBoltDB()
-	defer remove()
-	testWalk(db, t)
-}
-
 func TestLMDB_Walk(t *testing.T) {
 	db := newTestLmdb()
 	defer db.Close()
@@ -288,7 +266,7 @@ var hexEntries = map[string]string{
 }
 
 var startKey = common.FromHex("a0")
-var fixedBits int = 3
+var fixedBits = 3
 
 var keysInRange = [][]byte{common.FromHex("a8"), common.FromHex("bb"), common.FromHex("bd")}
 

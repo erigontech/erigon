@@ -3,8 +3,8 @@ package ethdb
 import (
 	"context"
 	"errors"
-	"github.com/ledgerwatch/turbo-geth/common"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
@@ -24,7 +24,7 @@ var (
 // }
 //
 // Common pattern for long-living transactions:
-//	tx, err := db.Begin(true)
+//	tx, err := db.Begin(ethdb.RW)
 //	if err != nil {
 //		return err
 //	}
@@ -55,9 +55,19 @@ type KV interface {
 	//	as its parent. Transactions may be nested to any level. A parent
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
-	Begin(ctx context.Context, parent Tx, writable bool) (Tx, error)
+	Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, error)
 	AllBuckets() dbutils.BucketsCfg
 }
+
+type TxFlags uint
+
+const (
+	RW         TxFlags = 0x00 // default
+	RO         TxFlags = 0x02
+	Try        TxFlags = 0x04
+	NoMetaSync TxFlags = 0x08
+	NoSync     TxFlags = 0x10
+)
 
 type Tx interface {
 	// Cursor - creates cursor object on top of given bucket. Type of cursor - depends on bucket configuration.
@@ -70,12 +80,17 @@ type Tx interface {
 	Cursor(bucket string) Cursor
 	CursorDupSort(bucket string) CursorDupSort   // CursorDupSort - can be used if bucket has lmdb.DupSort flag
 	CursorDupFixed(bucket string) CursorDupFixed // CursorDupSort - can be used if bucket has lmdb.DupFixed flag
-	Get(bucket string, key []byte) (val []byte, err error)
+	GetOne(bucket string, key []byte) (val []byte, err error)
+	HasOne(bucket string, key []byte) (bool, error)
 
 	Commit(ctx context.Context) error // Commit all the operations of a transaction into the database.
 	Rollback()                        // Rollback - abandon all the operations of the transaction instead of saving them.
 
 	BucketSize(name string) (uint64, error)
+
+	Comparator(bucket string) dbutils.CmpFunc
+	Cmp(bucket string, a, b []byte) int
+	DCmp(bucket string, a, b []byte) int
 }
 
 // Interface used for buckets migration, don't use it in usual app code
@@ -113,7 +128,7 @@ type Cursor interface {
 
 	Put(k, v []byte) error           // Put - based on order
 	Append(k []byte, v []byte) error // Append - append the given key/data pair to the end of the database. This option allows fast bulk loading when keys are already known to be in the correct order.
-	Delete(key []byte) error
+	Delete(k, v []byte) error        // Delete - short version of SeekExact+DeleteCurrent or SeekBothExact+DeleteCurrent
 
 	// DeleteCurrent This function deletes the key/data pair to which the cursor refers.
 	// This does not invalidate the cursor, so operations such as MDB_NEXT
@@ -123,26 +138,27 @@ type Cursor interface {
 	DeleteCurrent() error
 
 	// PutNoOverwrite(key, value []byte) error
-	// Reserve()
+	Reserve(k []byte, n int) ([]byte, error)
 
 	// PutCurrent - replace the item at the current cursor position.
-	//	The key parameter must still be provided, and must match it.
-	//	If using sorted duplicates (#MDB_DUPSORT) the data item must still
-	//	sort into the same place. This is intended to be used when the
-	//	new data is the same size as the old. Otherwise it will simply
-	//	perform a delete of the old record followed by an insert.
 	PutCurrent(key, value []byte) error
+
+	Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
+
+	Close()
 }
 
 type CursorDupSort interface {
 	Cursor
 
+	// SeekBothExact -
+	// second parameter can be nil only if searched key has no duplicates, or return error
 	SeekBothExact(key, value []byte) ([]byte, []byte, error)
 	SeekBothRange(key, value []byte) ([]byte, []byte, error)
 	FirstDup() ([]byte, error)          // FirstDup - position at first data item of current key
 	NextDup() ([]byte, []byte, error)   // NextDup - position at next data item of current key
 	NextNoDup() ([]byte, []byte, error) // NextNoDup - position at first data item of next key
-	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
+	LastDup(k []byte) ([]byte, error)   // LastDup - position at last data item of current key
 
 	CountDuplicates() (uint64, error)  // CountDuplicates - number of duplicates for the current key
 	DeleteCurrentDuplicates() error    // DeleteCurrentDuplicates - deletes all of the data items for the current key
@@ -166,7 +182,6 @@ type CursorDupFixed interface {
 	// Panics if len(page) is not a multiple of stride.
 	// The cursor's bucket must be DupFixed and DupSort.
 	PutMulti(key []byte, page []byte, stride int) error
-	// ReserveMulti()
 }
 
 type HasStats interface {
@@ -177,13 +192,11 @@ type Backend interface {
 	AddLocal([]byte) ([]byte, error)
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
-	BloomStatus() (uint64, uint64, common.Hash)
 }
 
 type DbProvider uint8
 
 const (
-	Bolt DbProvider = iota
-	Remote
+	Remote DbProvider = iota
 	Lmdb
 )

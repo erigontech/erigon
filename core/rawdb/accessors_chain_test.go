@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -129,7 +128,10 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 	// Write and verify the block in the database
-	WriteBlock(context.Background(), db, block)
+	err := WriteBlock(context.Background(), db, block)
+	if err != nil {
+		t.Fatalf("Could not write block: %v", err)
+	}
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored block not found")
 	} else if entry.Hash() != block.Hash() {
@@ -146,7 +148,9 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
 	}
 	// Delete the block and verify the execution
-	DeleteBlock(db, block.Hash(), block.NumberU64())
+	if err := DeleteBlock(db, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatalf("Could not delete block: %v", err)
+	}
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted block returned: %v", entry)
 	}
@@ -202,19 +206,37 @@ func TestTdStorage(t *testing.T) {
 
 	// Create a test TD to move around the database and make sure it's really new
 	hash, td := common.Hash{}, big.NewInt(314)
-	if entry := ReadTd(db, hash, 0); entry != nil {
+	entry, err := ReadTd(db, hash, 0)
+	if err != nil {
+		t.Fatalf("ReadTd failed: %v", err)
+	}
+	if entry != nil {
 		t.Fatalf("Non existent TD returned: %v", entry)
 	}
 	// Write and verify the TD in the database
-	WriteTd(db, hash, 0, td)
-	if entry := ReadTd(db, hash, 0); entry == nil {
+	err = WriteTd(db, hash, 0, td)
+	if err != nil {
+		t.Fatalf("WriteTd failed: %v", err)
+	}
+	entry, err = ReadTd(db, hash, 0)
+	if err != nil {
+		t.Fatalf("ReadTd failed: %v", err)
+	}
+	if entry == nil {
 		t.Fatalf("Stored TD not found")
 	} else if entry.Cmp(td) != 0 {
 		t.Fatalf("Retrieved TD mismatch: have %v, want %v", entry, td)
 	}
 	// Delete the TD and verify the execution
-	DeleteTd(db, hash, 0)
-	if entry := ReadTd(db, hash, 0); entry != nil {
+	err = DeleteTd(db, hash, 0)
+	if err != nil {
+		t.Fatalf("DeleteTd failed: %v", err)
+	}
+	entry, err = ReadTd(db, hash, 0)
+	if err != nil {
+		t.Fatalf("ReadTd failed: %v", err)
+	}
+	if entry != nil {
 		t.Fatalf("Deleted TD returned: %v", entry)
 	}
 }
@@ -226,19 +248,37 @@ func TestCanonicalMappingStorage(t *testing.T) {
 
 	// Create a test canonical number and assinged hash to move around
 	hash, number := common.Hash{0: 0xff}, uint64(314)
-	if entry := ReadCanonicalHash(db, number); entry != (common.Hash{}) {
+	entry, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		t.Fatalf("ReadCanonicalHash failed: %v", err)
+	}
+	if entry != (common.Hash{}) {
 		t.Fatalf("Non existent canonical mapping returned: %v", entry)
 	}
 	// Write and verify the TD in the database
-	WriteCanonicalHash(db, hash, number)
-	if entry := ReadCanonicalHash(db, number); entry == (common.Hash{}) {
+	err = WriteCanonicalHash(db, hash, number)
+	if err != nil {
+		t.Fatalf("WriteCanoncalHash failed: %v", err)
+	}
+	entry, err = ReadCanonicalHash(db, number)
+	if err != nil {
+		t.Fatalf("ReadCanonicalHash failed: %v", err)
+	}
+	if entry == (common.Hash{}) {
 		t.Fatalf("Stored canonical mapping not found")
 	} else if entry != hash {
 		t.Fatalf("Retrieved canonical mapping mismatch: have %v, want %v", entry, hash)
 	}
 	// Delete the TD and verify the execution
-	DeleteCanonicalHash(db, number)
-	if entry := ReadCanonicalHash(db, number); entry != (common.Hash{}) {
+	err = DeleteCanonicalHash(db, number)
+	if err != nil {
+		t.Fatalf("DeleteCanonicalHash failed: %v", err)
+	}
+	entry, err = ReadCanonicalHash(db, number)
+	if err != nil {
+		t.Error(err)
+	}
+	if entry != (common.Hash{}) {
 		t.Fatalf("Deleted canonical mapping returned: %v", entry)
 	}
 }
@@ -304,7 +344,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
 	}
-	receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
+	//receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
 
 	receipt2 := &types.Receipt{
 		PostState:         common.Hash{2}.Bytes(),
@@ -317,20 +357,22 @@ func TestBlockReceiptStorage(t *testing.T) {
 		ContractAddress: common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
 		GasUsed:         222222,
 	}
-	receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
+	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
 	receipts := []*types.Receipt{receipt1, receipt2}
 
 	// Check that no receipt entries are in a pristine database
 	hash := common.BytesToHash([]byte{0x03, 0x14})
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); len(rs) != 0 {
+	if rs := ReadReceipts(db, hash, 0); len(rs) != 0 {
 		t.Fatalf("non existent receipts returned: %v", rs)
 	}
 	// Insert the body that corresponds to the receipts
 	WriteBody(ctx, db, hash, 0, body)
 
 	// Insert the receipt slice into the database and check presence
-	WriteReceipts(db, hash, 0, receipts)
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); len(rs) == 0 {
+	if err := WriteReceipts(db, 0, receipts); err != nil {
+		t.Fatalf("WriteReceipts failed: %v", err)
+	}
+	if rs := ReadReceipts(db, hash, 0); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
 	} else {
 		if err := checkReceiptsRLP(rs, receipts); err != nil {
@@ -339,7 +381,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
 	DeleteBody(db, hash, 0)
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); rs != nil {
+	if rs := ReadReceipts(db, hash, 0); rs != nil {
 		t.Fatalf("receipts returned when body was deleted: %v", rs)
 	}
 	// Ensure that receipts without metadata can be returned without the block body too
@@ -349,8 +391,10 @@ func TestBlockReceiptStorage(t *testing.T) {
 	// Sanity check that body alone without the receipt is a full purge
 	WriteBody(ctx, db, hash, 0, body)
 
-	DeleteReceipts(db, hash, 0)
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); len(rs) != 0 {
+	if err := DeleteReceipts(db, 0); err != nil {
+		t.Fatalf("DeleteReceipts failed: %v", err)
+	}
+	if rs := ReadReceipts(db, hash, 0); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}
 }

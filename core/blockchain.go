@@ -30,6 +30,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
@@ -395,7 +396,7 @@ func (bc *BlockChain) SetHead(head uint64) error {
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	updateFn := func(db rawdb.DatabaseWriter, header *types.Header) (uint64, bool) {
+	updateFn := func(db ethdb.Database, header *types.Header) (uint64, bool) {
 		// Rewind the block chain, ensuring we don't end up with a stateless head block
 		if currentBlock := bc.CurrentBlock(); currentBlock != nil && header.Number.Uint64() < currentBlock.NumberU64() {
 			newHeadBlock := bc.GetBlock(header.Hash(), header.Number.Uint64())
@@ -435,7 +436,7 @@ func (bc *BlockChain) SetHead(head uint64) error {
 	}
 
 	// Rewind the header chain, deleting all block bodies until then
-	delFn := func(db rawdb.DatabaseDeleter, hash common.Hash, num uint64) {
+	delFn := func(db ethdb.Database, hash common.Hash, num uint64) {
 		// Ignore the error here since light client won't hit this path
 		frozen, _ := bc.db.Ancients()
 		if num+1 <= frozen {
@@ -452,7 +453,9 @@ func (bc *BlockChain) SetHead(head uint64) error {
 			// The header, total difficulty and canonical hash will be
 			// removed in the hc.SetHead function.
 			rawdb.DeleteBody(db, hash, num)
-			rawdb.DeleteReceipts(db, hash, num)
+			if err := rawdb.DeleteReceipts(db, num); err != nil {
+				panic(err)
+			}
 		}
 		// Todo(rjl493456442) txlookup, bloombits, etc
 	}
@@ -539,9 +542,15 @@ func (bc *BlockChain) ResetWithGenesisBlock(genesis *types.Block) error {
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	rawdb.WriteTd(bc.db, genesis.Hash(), genesis.NumberU64(), genesis.Difficulty())
-	rawdb.WriteBlock(context.Background(), bc.db, genesis)
-	bc.writeHeadBlock(genesis)
+	if err := rawdb.WriteTd(bc.db, genesis.Hash(), genesis.NumberU64(), genesis.Difficulty()); err != nil {
+		return err
+	}
+	if err := rawdb.WriteBlock(context.Background(), bc.db, genesis); err != nil {
+		return err
+	}
+	if err := bc.writeHeadBlock(genesis); err != nil {
+		return err
+	}
 
 	// Last update all in-memory chain markers
 	bc.genesisBlock = genesis
@@ -592,12 +601,19 @@ func (bc *BlockChain) ExportN(w io.Writer, first uint64, last uint64) error {
 // or if they are on a different side chain.
 //
 // Note, this function assumes that the `mu` mutex is held!
-func (bc *BlockChain) writeHeadBlock(block *types.Block) {
+func (bc *BlockChain) writeHeadBlock(block *types.Block) error {
 	// If the block is on a side chain or an unknown one, force other heads onto it too
-	updateHeads := rawdb.ReadCanonicalHash(bc.db, block.NumberU64()) != block.Hash()
+	h, err := rawdb.ReadCanonicalHash(bc.db, block.NumberU64())
+	if err != nil {
+		return err
+	}
+
+	updateHeads := h != block.Hash()
 
 	// Add the block to the canonical chain number scheme and mark as the head
-	rawdb.WriteCanonicalHash(bc.db, block.Hash(), block.NumberU64())
+	if err := rawdb.WriteCanonicalHash(bc.db, block.Hash(), block.NumberU64()); err != nil {
+		log.Error("failed WriteCanonicalHash", "err", err)
+	}
 	if bc.enableTxLookupIndex && !bc.cacheConfig.DownloadOnly {
 		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
@@ -615,6 +631,7 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	}
 	bc.currentBlock.Store(block)
 	headBlockGauge.Update(int64(block.NumberU64()))
+	return nil
 }
 
 // Genesis retrieves the chain's genesis block.
@@ -700,7 +717,12 @@ func (bc *BlockChain) GetBlockByHash(hash common.Hash) *types.Block {
 // GetBlockByNumber retrieves a block from the database by number, caching it
 // (associated with its hash) if found.
 func (bc *BlockChain) GetBlockByNumber(number uint64) *types.Block {
-	hash := rawdb.ReadCanonicalHash(bc.db, number)
+	hash, err := rawdb.ReadCanonicalHash(bc.db, number)
+	if err != nil {
+		log.Warn("ReadCanonicalHash failed", "err", err)
+		return nil
+	}
+
 	if hash == (common.Hash{}) {
 		return nil
 	}
@@ -716,7 +738,7 @@ func (bc *BlockChain) GetReceiptsByHash(hash common.Hash) types.Receipts {
 	if number == nil {
 		return nil
 	}
-	receipts := rawdb.ReadReceipts(bc.db, hash, *number, bc.chainConfig)
+	receipts := rawdb.ReadReceipts(bc.db, hash, *number)
 	if receipts == nil {
 		return nil
 	}
@@ -1006,7 +1028,9 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			}
 			// Write all the data out into the database
 			rawdb.WriteBody(context.Background(), batch, block.Hash(), block.NumberU64(), block.Body())
-			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receiptChain[i])
+			if err := rawdb.WriteReceipts(batch, block.NumberU64(), receiptChain[i]); err != nil {
+				return 0, err
+			}
 			if bc.enableTxLookupIndex {
 				rawdb.WriteTxLookupEntries(batch, block)
 			}
@@ -1014,7 +1038,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			stats.processed++
 			if batch.BatchSize() >= batch.IdealBatchSize() {
 				size += batch.BatchSize()
-				if err := batch.CommitAndBegin(); err != nil {
+				if err := batch.CommitAndBegin(context.Background()); err != nil {
 					return 0, err
 				}
 			}
@@ -1119,8 +1143,18 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	if common.IsCanceled(ctx) {
 		return NonStatTy, ctx.Err()
 	}
-	rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd)
+	if err := rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd); err != nil {
+		return NonStatTy, err
+	}
 	rawdb.WriteBody(ctx, bc.db, block.Hash(), block.NumberU64(), block.Body())
+	sendersData := make([]byte, len(block.Transactions())*common.AddressLength)
+	senders := block.Body().SendersFromTxs()
+	for i, sender := range senders {
+		copy(sendersData[i*common.AddressLength:], sender[:])
+	}
+	if err := bc.db.Put(dbutils.Senders, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()), sendersData); err != nil {
+		return NonStatTy, err
+	}
 	rawdb.WriteHeader(ctx, bc.db, block.Header())
 
 	if tds != nil {
@@ -1149,7 +1183,9 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 		}
 	}
 	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
-		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
+		if err := rawdb.WriteReceipts(bc.db, block.NumberU64(), receipts); err != nil {
+			return NonStatTy, err
+		}
 	}
 
 	// If the total difficulty is higher than our known, add it to the canonical chain
@@ -1187,7 +1223,9 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	status = CanonStatTy
 
 	// Set new head.
-	bc.writeHeadBlock(block)
+	if err := bc.writeHeadBlock(block); err != nil {
+		return NonStatTy, err
+	}
 	bc.futureBlocks.Remove(block.Hash())
 
 	bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
@@ -1219,7 +1257,7 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 
 // InsertBodyChain attempts to insert the given batch of block into the
 // canonical chain, without executing those blocks
-func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (bool, error) {
+func (bc *BlockChain) InsertBodyChain(logPrefix string, ctx context.Context, chain types.Blocks) (bool, error) {
 	// Sanity check that we have something meaningful to import
 	if len(chain) == 0 {
 		return true, nil
@@ -1254,6 +1292,7 @@ func (bc *BlockChain) InsertBodyChain(ctx context.Context, chain types.Blocks) (
 	}()
 
 	return InsertBodies(
+		logPrefix,
 		ctx,
 		&bc.procInterrupt,
 		chain,
@@ -1366,7 +1405,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				// state, but if it's this special case here(skip reexecution) we will lose
 				// the empty receipt entry.
 				if len(block.Transactions()) == 0 {
-					rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), nil)
+					if err1 := rawdb.WriteReceipts(bc.db, block.NumberU64(), nil); err1 != nil {
+						return i, err1
+					}
 				} else {
 					log.Error("Please file an issue, skip known block execution without receipt",
 						"hash", block.Hash(), "number", block.NumberU64())
@@ -1416,7 +1457,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	for verifyFrom = 0; verifyFrom < len(chain) && localTd.Cmp(externTd) >= 0; verifyFrom++ {
 		header := chain[verifyFrom].Header()
 		externTd = externTd.Add(externTd, header.Difficulty)
-		rawdb.WriteTd(bc.db, header.Hash(), header.Number.Uint64(), externTd)
+		_ = rawdb.WriteTd(bc.db, header.Hash(), header.Number.Uint64(), externTd)
 	}
 
 	if localTd.Cmp(externTd) >= 0 {
@@ -1432,8 +1473,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		for _, block := range chain {
 			log.Warn("Saving", "block", block.NumberU64(), "hash", block.Hash())
 			td = new(big.Int).Add(block.Difficulty(), td)
-			rawdb.WriteBlock(ctx, bc.db, block)
-			rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), td)
+			if err := rawdb.WriteBlock(ctx, bc.db, block); err != nil {
+				return 0, err
+			}
+			_ = rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), td)
 		}
 		return 0, nil
 	}
@@ -1450,7 +1493,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 	}
 
-	canonicalHash := rawdb.ReadCanonicalHash(bc.db, parentNumber)
+	canonicalHash, err := rawdb.ReadCanonicalHash(bc.db, parentNumber)
+	if err != nil {
+		return 0, err
+	}
 	for canonicalHash != parentHash {
 		log.Warn("Chain segment's parent not on canonical hash, adding to pre-blocks", "block", parentNumber, "hash", parentHash)
 		preBlocks = append(preBlocks, parent)
@@ -1462,7 +1508,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
 			return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 		}
-		canonicalHash = rawdb.ReadCanonicalHash(bc.db, parentNumber)
+		canonicalHash, err = rawdb.ReadCanonicalHash(bc.db, parentNumber)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	for left, right := 0, len(preBlocks)-1; left < right; left, right = left+1, right-1 {
@@ -1627,7 +1676,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		stats.Processed++
 		stats.UsedGas += usedGas
 		toCommit := stats.NeedToCommit(chain, i)
-		stats.Report(chain, i, toCommit)
+		stats.Report("logPrefix", chain, i, toCommit)
 		if toCommit {
 			bc.committedBlock.Store(bc.currentBlock.Load())
 			committedK = k
@@ -1657,7 +1706,7 @@ func (st *InsertStats) NeedToCommit(chain []*types.Block, index int) bool {
 
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
-func (st *InsertStats) Report(chain []*types.Block, index int, toCommit bool) {
+func (st *InsertStats) Report(logPrefix string, chain []*types.Block, index int, toCommit bool) {
 	// Fetch the timings for the batch
 	var (
 		now     = mclock.Now()
@@ -1685,7 +1734,7 @@ func (st *InsertStats) Report(chain []*types.Block, index int, toCommit bool) {
 		if st.ignored > 0 {
 			context = append(context, []interface{}{"ignored", st.ignored}...)
 		}
-		log.Info("Imported new chain segment", context...)
+		log.Info(fmt.Sprintf("[%s] Imported new chain segment", logPrefix), context...)
 		*st = InsertStats{StartTime: now, lastIndex: index + 1}
 	}
 }
@@ -1714,7 +1763,7 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 			if number == nil {
 				return
 			}
-			receipts := rawdb.ReadReceipts(bc.db, hash, *number, bc.chainConfig)
+			receipts := rawdb.ReadReceipts(bc.db, hash, *number)
 
 			var logs []*types.Log
 			for _, receipt := range receipts {
@@ -1815,13 +1864,13 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	}
 	// Delete the old chain
 	for _, oldBlock := range oldChain {
-		rawdb.DeleteCanonicalHash(bc.db, oldBlock.NumberU64())
+		_ = rawdb.DeleteCanonicalHash(bc.db, oldBlock.NumberU64())
 	}
-	bc.writeHeadBlock(commonBlock)
+	_ = bc.writeHeadBlock(commonBlock)
 	// Insert the new chain, taking care of the proper incremental order
 	for i := len(newChain) - 1; i >= 0; i-- {
 		// insert the block in the canonical way, re-writing history
-		bc.writeHeadBlock(newChain[i])
+		_ = bc.writeHeadBlock(newChain[i])
 
 		// Collect reborn logs due to chain reorg
 		collectLogs(newChain[i].Hash(), false)
@@ -1835,16 +1884,19 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	// When transactions get deleted from the database, the receipts that were
 	// created in the fork must also be deleted
 	for _, tx := range types.TxDifference(deletedTxs, addedTxs) {
-		rawdb.DeleteTxLookupEntry(bc.db, tx.Hash())
+		_ = rawdb.DeleteTxLookupEntry(bc.db, tx.Hash())
 	}
 	// Delete any canonical number assignments above the new head
 	number := bc.CurrentBlock().NumberU64()
 	for i := number + 1; ; i++ {
-		hash := rawdb.ReadCanonicalHash(bc.db, i)
+		hash, err := rawdb.ReadCanonicalHash(bc.db, i)
+		if err != nil {
+			return err
+		}
 		if hash == (common.Hash{}) {
 			break
 		}
-		rawdb.DeleteCanonicalHash(bc.db, i)
+		_ = rawdb.DeleteCanonicalHash(bc.db, i)
 	}
 
 	// If any logs need to be fired, do it now. In theory we could avoid creating
@@ -2142,33 +2194,37 @@ func ExecuteBlockEphemerally(
 	}
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		if !vmConfig.NoReceipts {
+			ibs.Prepare(tx.Hash(), block.Hash(), i)
+		}
 		receipt, err := ApplyTransaction(chainConfig, chainContext, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
-		receipts = append(receipts, receipt)
+		if !vmConfig.NoReceipts {
+			receipts = append(receipts, receipt)
+		}
 	}
 
-	if chainConfig.IsByzantium(header.Number) {
+	if chainConfig.IsByzantium(header.Number) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.Header().ReceiptHash {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
-	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
-		return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
-	}
+	if !vmConfig.ReadOnly {
+		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+		engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles())
 
-	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-		return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
-	}
+		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+		if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
+		}
 
-	if err := stateWriter.WriteChangeSets(); err != nil {
-		return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		if err := stateWriter.WriteChangeSets(); err != nil {
+			return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
+		}
 	}
 
 	return receipts, nil
@@ -2176,6 +2232,7 @@ func ExecuteBlockEphemerally(
 
 // InsertBodies is insertChain with execute=false and ommission of blockchain object
 func InsertBodies(
+	logPrefix string,
 	ctx context.Context,
 	procInterrupt *int32,
 	chain types.Blocks,
@@ -2214,7 +2271,10 @@ func InsertBodies(
 		}
 
 		// Calculate the total difficulty of the block
-		ptd := rawdb.ReadTd(batch, block.ParentHash(), block.NumberU64()-1)
+		ptd, err := rawdb.ReadTd(batch, block.ParentHash(), block.NumberU64()-1)
+		if err != nil {
+			return true, err
+		}
 
 		if ptd == nil {
 			return true, consensus.ErrUnknownAncestor
@@ -2236,7 +2296,7 @@ func InsertBodies(
 			"root", block.Root())
 	}
 	stats.Processed = len(chain)
-	stats.Report(chain, len(chain)-1, true)
+	stats.Report(logPrefix, chain, len(chain)-1, true)
 	rawdb.WriteHeadBlockHash(db, chain[len(chain)-1].Hash())
 	if _, err := batch.Commit(); err != nil {
 		return true, fmt.Errorf("commit inserting bodies: %w", err)

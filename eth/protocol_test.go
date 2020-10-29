@@ -69,19 +69,19 @@ func TestStatusMsgErrors64(t *testing.T) {
 			wantError: errResp(ErrNoStatusMsg, "first msg has code 2 (!= 0)"),
 		},
 		{
-			code: StatusMsg, data: statusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrProtocolVersionMismatch, "10 (!= %d)", 64),
 		},
 		{
-			code: StatusMsg, data: statusData{64, 999, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{64, 999, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkID),
 		},
 		{
-			code: StatusMsg, data: statusData{64, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
+			code: StatusMsg, data: StatusData{64, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
 			wantError: errResp(ErrGenesisMismatch, "0300000000000000000000000000000000000000000000000000000000000000 (!= %x)", genesis.Hash()),
 		},
 		{
-			code: StatusMsg, data: statusData{64, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
+			code: StatusMsg, data: StatusData{64, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
 			wantError: errResp(ErrForkIDRejected, forkid.ErrLocalIncompatibleOrStale.Error()),
 		},
 	}
@@ -112,7 +112,7 @@ func TestStatusMsgErrors65(t *testing.T) {
 		genesis = pm.blockchain.Genesis()
 		head    = pm.blockchain.CurrentHeader()
 		td      = pm.blockchain.GetTd(head.Hash(), head.Number.Uint64())
-		forkID  = forkid.NewID(pm.blockchain.Config(), genesis.Hash(), head.Number.Uint64())
+		forkID  = forkid.NewID(pm.blockchain.Config(), pm.blockchain.Genesis().Hash(), pm.blockchain.CurrentHeader().Number.Uint64())
 	)
 
 	tests := []struct {
@@ -125,19 +125,19 @@ func TestStatusMsgErrors65(t *testing.T) {
 			wantError: errResp(ErrNoStatusMsg, "first msg has code 2 (!= 0)"),
 		},
 		{
-			code: StatusMsg, data: statusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrProtocolVersionMismatch, "10 (!= %d)", 65),
 		},
 		{
-			code: StatusMsg, data: statusData{65, 999, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: StatusData{65, 999, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkID),
 		},
 		{
-			code: StatusMsg, data: statusData{65, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
+			code: StatusMsg, data: StatusData{65, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
 			wantError: errResp(ErrGenesisMismatch, "0300000000000000000000000000000000000000000000000000000000000000 (!= %x)", genesis.Hash()),
 		},
 		{
-			code: StatusMsg, data: statusData{65, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
+			code: StatusMsg, data: StatusData{65, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
 			wantError: errResp(ErrForkIDRejected, forkid.ErrLocalIncompatibleOrStale.Error()),
 		},
 	}
@@ -241,12 +241,12 @@ func TestForkIDSplit(t *testing.T) {
 	peerNoFork = newPeer(64, p2p.NewPeer(enode.ID{1}, "", nil), p2pNoFork, nil)
 	peerProFork = newPeer(64, p2p.NewPeer(enode.ID{2}, "", nil), p2pProFork, nil)
 
-	errc = make(chan error, 2)
-	go func() { errc <- ethNoFork.handle(peerProFork) }()
-	go func() { errc <- ethProFork.handle(peerNoFork) }()
+	errcHomesteadNoFork := make(chan error, 2)
+	go func() { errcHomesteadNoFork <- ethNoFork.handle(peerProFork) }()
+	go func() { errcHomesteadNoFork <- ethProFork.handle(peerNoFork) }()
 
 	select {
-	case err := <-errc:
+	case err := <-errcHomesteadNoFork:
 		t.Fatalf("homestead nofork <-> profork failed: %v", err)
 	case <-time.After(250 * time.Millisecond):
 		p2pNoFork.Close()
@@ -260,12 +260,12 @@ func TestForkIDSplit(t *testing.T) {
 	peerNoFork = newPeer(64, p2p.NewPeer(enode.ID{1}, "", nil), p2pNoFork, nil)
 	peerProFork = newPeer(64, p2p.NewPeer(enode.ID{2}, "", nil), p2pProFork, nil)
 
-	errc = make(chan error, 2)
-	go func() { errc <- ethNoFork.handle(peerProFork) }()
-	go func() { errc <- ethProFork.handle(peerNoFork) }()
+	errcSpuriousNoFork := make(chan error, 2)
+	go func() { errcSpuriousNoFork <- ethNoFork.handle(peerProFork) }()
+	go func() { errcSpuriousNoFork <- ethProFork.handle(peerNoFork) }()
 
 	select {
-	case err := <-errc:
+	case err := <-errcSpuriousNoFork:
 		if want := errResp(ErrForkIDRejected, forkid.ErrLocalIncompatibleOrStale.Error()); err.Error() != want.Error() {
 			t.Fatalf("fork ID rejection error mismatch: have %v, want %v", err, want)
 		}
@@ -453,19 +453,19 @@ func TestGetBlockHeadersDataEncodeDecode(t *testing.T) {
 	}
 	// Assemble some table driven tests
 	tests := []struct {
-		packet *getBlockHeadersData
+		packet *GetBlockHeadersData
 		fail   bool
 	}{
 		// Providing the origin as either a hash or a number should both work
-		{fail: false, packet: &getBlockHeadersData{Origin: hashOrNumber{Number: 314}}},
-		{fail: false, packet: &getBlockHeadersData{Origin: hashOrNumber{Hash: hash}}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: HashOrNumber{Number: 314}}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: HashOrNumber{Hash: hash}}},
 
 		// Providing arbitrary query field should also work
-		{fail: false, packet: &getBlockHeadersData{Origin: hashOrNumber{Number: 314}, Amount: 314, Skip: 1, Reverse: true}},
-		{fail: false, packet: &getBlockHeadersData{Origin: hashOrNumber{Hash: hash}, Amount: 314, Skip: 1, Reverse: true}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: HashOrNumber{Number: 314}, Amount: 314, Skip: 1, Reverse: true}},
+		{fail: false, packet: &GetBlockHeadersData{Origin: HashOrNumber{Hash: hash}, Amount: 314, Skip: 1, Reverse: true}},
 
 		// Providing both the origin hash and origin number must fail
-		{fail: true, packet: &getBlockHeadersData{Origin: hashOrNumber{Hash: hash, Number: 314}}},
+		{fail: true, packet: &GetBlockHeadersData{Origin: HashOrNumber{Hash: hash, Number: 314}}},
 	}
 	// Iterate over each of the tests and try to encode and then decode
 	for i, tt := range tests {
@@ -476,7 +476,7 @@ func TestGetBlockHeadersDataEncodeDecode(t *testing.T) {
 			t.Fatalf("test %d: encode should have failed", i)
 		}
 		if !tt.fail {
-			packet := new(getBlockHeadersData)
+			packet := new(GetBlockHeadersData)
 			if err := rlp.DecodeBytes(bytes, packet); err != nil {
 				t.Fatalf("test %d: failed to decode packet: %v", i, err)
 			}

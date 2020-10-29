@@ -92,7 +92,6 @@ func init() {
 }
 
 func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFunc, name string) {
-
 	var (
 		env            = NewEVM(Context{}, nil, params.TestChainConfig, Config{})
 		rstack         = stack.NewReturnStack()

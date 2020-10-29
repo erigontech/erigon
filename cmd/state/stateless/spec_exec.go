@@ -3,6 +3,7 @@ package stateless
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/csv"
 	"fmt"
 	"io/ioutil"
@@ -161,6 +162,9 @@ func speculativeExecution(blockNum uint64) {
 
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth-10/geth/chaindata")
 	defer ethDb.Close()
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, ethdb.RO)
+	check(err1)
+	defer ethTx.Rollback()
 	chainConfig := params.MainnetChainConfig
 	depFile, err := os.OpenFile("/Volumes/tb41/turbo-geth/spec_execution.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
@@ -183,7 +187,7 @@ func speculativeExecution(blockNum uint64) {
 		if block == nil {
 			break
 		}
-		dbstate := state.NewPlainDBState(ethDb.KV(), block.NumberU64()-1)
+		dbstate := state.NewPlainDBState(ethTx, block.NumberU64()-1)
 
 		// First pass - execute transactions in sequence
 		statedb1 := state.New(dbstate)

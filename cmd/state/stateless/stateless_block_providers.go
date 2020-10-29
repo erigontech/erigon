@@ -132,7 +132,7 @@ func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
 }
 
 func getTempFileName() string {
-	tmpfile, err := ioutil.TempFile("", "headers.*_bolt")
+	tmpfile, err := ioutil.TempFile("", "headers.*")
 	if err != nil {
 		panic(fmt.Errorf("failed to create a temp file: %w", err))
 	}
