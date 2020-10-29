@@ -496,7 +496,8 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 		return stagedsync.UnwindCallTraces(u, s, db, bc.Config(), bc, ch)
 	}
 
-	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, tmpdir, ch); err != nil {
+	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, tmpdir, ch,
+		stagedsync.CallTracesStageParams{}); err != nil {
 		return err
 	}
 	return nil

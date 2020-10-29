@@ -33,7 +33,15 @@ const (
 	callIndicesCheckSizeEvery = 30 * time.Second
 )
 
-func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, tmpdir string, quit <-chan struct{}) error {
+type StateAccessBuilder func(db ethdb.Database, blockNumber uint64,
+	accountCache, storageCache, codeCache, codeSizeCache *fastcache.Cache) (state.StateReader, state.WriterWithChangeSets)
+
+type CallTracesStageParams struct {
+	ToBlock       uint64 // not setting this params means no limit
+	AccessBuilder StateAccessBuilder
+}
+
+func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -49,6 +57,9 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 	}
 
 	endBlock, err := s.ExecutionAt(tx)
+	if params.ToBlock > 0 && params.ToBlock < endBlock {
+		endBlock = params.ToBlock
+	}
 	logPrefix := s.state.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
@@ -58,7 +69,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 		return nil
 	}
 
-	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, chainConfig, chainContext, tmpdir, quit); err != nil {
+	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, chainConfig, chainContext, tmpdir, quit, params); err != nil {
 		return err
 	}
 
@@ -74,7 +85,7 @@ func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.Chain
 	return nil
 }
 
-func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, tmpdir string, quit <-chan struct{}) error {
+func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -215,18 +226,28 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 				}
 			}
 		}
-		stateReader := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
-		stateWriter := state.NewCacheStateWriter()
 
-		if caching {
-			stateReader.SetAccountCache(accountCache)
-			stateReader.SetStorageCache(storageCache)
-			stateReader.SetCodeCache(codeCache)
-			stateReader.SetCodeSizeCache(codeSizeCache)
-			stateWriter.SetAccountCache(accountCache)
-			stateWriter.SetStorageCache(storageCache)
-			stateWriter.SetCodeCache(codeCache)
-			stateWriter.SetCodeSizeCache(codeSizeCache)
+		var stateReader state.StateReader
+		var stateWriter state.WriterWithChangeSets
+		if params.AccessBuilder != nil {
+			reader, writer := params.AccessBuilder(tx, blockNum-1, accountCache, storageCache, codeCache, codeSizeCache)
+			stateReader = reader
+			stateWriter = writer
+		} else {
+			reader := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
+			writer := state.NewCacheStateWriter()
+			if caching {
+				reader.SetAccountCache(accountCache)
+				reader.SetStorageCache(storageCache)
+				reader.SetCodeCache(codeCache)
+				reader.SetCodeSizeCache(codeSizeCache)
+				writer.SetAccountCache(accountCache)
+				writer.SetStorageCache(storageCache)
+				writer.SetCodeCache(codeCache)
+				writer.SetCodeSizeCache(codeSizeCache)
+			}
+			stateReader = reader
+			stateWriter = writer
 		}
 
 		tracer := NewCallTracer()
