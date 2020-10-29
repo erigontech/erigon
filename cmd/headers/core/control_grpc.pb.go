@@ -130,5 +130,5 @@ var _Control_serviceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "p2psentry/control.proto",
+	Metadata: "control.proto",
 }
