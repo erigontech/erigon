@@ -101,6 +101,9 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 				hd.AddSegmentToBuffer(segment, start, end)
 				log.Info("Extended Up", "start", start, "end", end)
 			}
+			if start == 0 || end > 0 {
+				hd.CheckInitiation(segment, params.MainnetGenesisHash)
+			}
 		}
 	} else {
 		// NewAnchor
@@ -110,9 +113,6 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			hd.AddSegmentToBuffer(segment, start, end)
 			log.Info("NewAnchor", "start", start, "end", end)
 		}
-	}
-	if start == 0 || end > 0 {
-		hd.CheckInitiation(segment, params.MainnetGenesisHash)
 	}
 }
 
