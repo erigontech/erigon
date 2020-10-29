@@ -258,7 +258,7 @@ func fToMdbx(ctx context.Context, to string) error {
 
 	//r := csv.NewReader(bufio.NewReaderSize(file, 1024*1024))
 	//r.Read()
-	//_ = dstTx.(ethdb.BucketMigrator).ClearBucket(dbutils.CurrentStateBucket)
+	_ = dstTx.(ethdb.BucketMigrator).ClearBucket(dbutils.CurrentStateBucket)
 
 	fileScanner := bufio.NewScanner(file)
 	c := dstTx.CursorDupSort(dbutils.CurrentStateBucket)
