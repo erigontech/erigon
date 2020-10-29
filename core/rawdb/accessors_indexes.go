@@ -58,7 +58,7 @@ func WriteTxLookupEntries(db DatabaseWriter, block *types.Block) {
 
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
 func DeleteTxLookupEntry(db DatabaseDeleter, hash common.Hash) error {
-	return db.Delete(dbutils.TxLookupPrefix, hash.Bytes())
+	return db.Delete(dbutils.TxLookupPrefix, hash.Bytes(), nil)
 }
 
 // ReadTransaction retrieves a specific transaction from the database, along with

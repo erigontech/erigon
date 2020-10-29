@@ -62,7 +62,7 @@ type GetterPutter interface {
 // Deleter wraps the database delete operations.
 type Deleter interface {
 	// Delete removes a single entry.
-	Delete(bucket string, key []byte) error
+	Delete(bucket string, k, v []byte) error
 }
 
 type Closer interface {
@@ -110,7 +110,7 @@ type Database interface {
 type MinDatabase interface {
 	Get(bucket string, key []byte) ([]byte, error)
 	Put(bucket string, key, value []byte) error
-	Delete(bucket string, key []byte) error
+	Delete(bucket string, k, v []byte) error
 }
 
 // DbWithPendingMutations is an extended version of the Database,

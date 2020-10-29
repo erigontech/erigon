@@ -101,7 +101,7 @@ func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Add
 		binary.BigEndian.PutUint32(b[:], 0)
 		w.codeSizeCache.Set(address[:], b[:])
 	}
-	if err := w.db.Delete(dbutils.PlainStateBucket, address[:]); err != nil {
+	if err := w.db.Delete(dbutils.PlainStateBucket, address[:], nil); err != nil {
 		return err
 	}
 	if original.Incarnation > 0 {
@@ -128,7 +128,7 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 		w.storageCache.Set(compositeKey, v)
 	}
 	if len(v) == 0 {
-		return w.db.Delete(dbutils.PlainStateBucket, compositeKey)
+		return w.db.Delete(dbutils.PlainStateBucket, compositeKey, nil)
 	}
 	return w.db.Put(dbutils.PlainStateBucket, compositeKey, v)
 }
@@ -137,7 +137,7 @@ func (w *PlainStateWriter) CreateContract(address common.Address) error {
 	if err := w.csw.CreateContract(address); err != nil {
 		return err
 	}
-	if err := w.db.Delete(dbutils.IncarnationMapBucket, address[:]); err != nil {
+	if err := w.db.Delete(dbutils.IncarnationMapBucket, address[:], nil); err != nil {
 		return err
 	}
 	return nil
