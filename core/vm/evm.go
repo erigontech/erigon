@@ -406,7 +406,6 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		}(gas, time.Now())
 	}
 
-
 	if p, isPrecompile := evm.precompile(addr); isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
 	} else {
