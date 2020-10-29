@@ -75,9 +75,9 @@ func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
 	}
 }
 
-func (m *TxDb) Delete(bucket string, key []byte) error {
-	m.len += uint64(len(key))
-	return m.cursors[bucket].Delete(key)
+func (m *TxDb) Delete(bucket string, k, v []byte) error {
+	m.len += uint64(len(k))
+	return m.cursors[bucket].Delete(k, v)
 }
 
 func (m *TxDb) NewBatch() DbWithPendingMutations {
@@ -195,7 +195,7 @@ func MultiPut(tx Tx, tuples ...[]byte) error {
 				}
 			} else {
 				if v == nil {
-					if err := c.Delete(k); err != nil {
+					if err := c.Delete(k, nil); err != nil {
 						return err
 					}
 				} else {

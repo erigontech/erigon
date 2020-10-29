@@ -3,6 +3,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -176,8 +177,12 @@ func (m *mutation) MultiWalk(table string, startkeys [][]byte, fixedbits []int, 
 	return m.db.MultiWalk(table, startkeys, fixedbits, walker)
 }
 
-func (m *mutation) Delete(table string, key []byte) error {
-	return m.Put(table, key, nil)
+func (m *mutation) Delete(table string, k, v []byte) error {
+	if v != nil {
+		return fmt.Errorf("mutation doesn't implement dupsort values deletion yet")
+	}
+	//m.puts.Delete(table, k)
+	return m.Put(table, k, nil)
 }
 
 func (m *mutation) CommitAndBegin(ctx context.Context) error {
@@ -218,7 +223,7 @@ func (m *mutation) doCommit(tx Tx) error {
 				}
 			}
 		} else if len(mi.value) == 0 {
-			if err := c.Delete(mi.key); err != nil {
+			if err := c.Delete(mi.key, nil); err != nil {
 				innerErr = err
 				return false
 			}
@@ -369,9 +374,9 @@ func (d *RWCounterDecorator) MultiWalk(bucket string, startkeys [][]byte, fixedb
 	atomic.AddUint64(&d.DBCounterStats.MultiWalk, 1)
 	return d.Database.MultiWalk(bucket, startkeys, fixedbits, walker)
 }
-func (d *RWCounterDecorator) Delete(bucket string, key []byte) error {
+func (d *RWCounterDecorator) Delete(bucket string, k, v []byte) error {
 	atomic.AddUint64(&d.DBCounterStats.Delete, 1)
-	return d.Database.Delete(bucket, key)
+	return d.Database.Delete(bucket, k, v)
 }
 func (d *RWCounterDecorator) MultiPut(tuples ...[]byte) (uint64, error) {
 	atomic.AddUint64(&d.DBCounterStats.MultiPut, 1)

@@ -482,8 +482,8 @@ func (s *snapshotCursor) Put(key []byte, value []byte) error {
 	return s.dbCursor.Put(key, value)
 }
 
-func (s *snapshotCursor) Delete(key []byte) error {
-	return s.dbCursor.Delete(key)
+func (s *snapshotCursor) Delete(k, v []byte) error {
+	return s.dbCursor.Delete(k, v)
 }
 
 func (s *snapshotCursor) Append(key []byte, value []byte) error {

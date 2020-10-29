@@ -331,7 +331,7 @@ func deleteRange(db ethdb.KV, prefix []byte) {
 			if err != nil {
 				return err
 			}
-			if err := c.Delete(k); err != nil {
+			if err := c.Delete(k, nil); err != nil {
 				return nil
 			}
 		}
