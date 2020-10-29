@@ -2,7 +2,6 @@ package consensus
 
 import (
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -26,13 +25,21 @@ type VerifyHeaderResponse struct {
 }
 
 type HeadersRequest struct {
-	Number uint64 // сколько надо для проверки
-	Highest common.Hash
+	ID                 uint64
+	HighestHash        common.Hash
+	HighestBlockNumber uint64
+	Number             uint64
 }
 
 // ответ в виде пачки на HeadersRequest
 type HeaderResponse struct {
-	Header *types.Header
+	ID      uint64
+	Headers []*types.Header
+	BlockError
+}
+
+type BlockError struct {
+	Hash   common.Hash
 	Number uint64
 	Err    error
 }
@@ -56,11 +63,8 @@ type Process struct {
 	VerifiedBlocks   *lru.Cache // common.Hash->*types.Header
 	VerifiedBlocksMu sync.RWMutex
 
-	RequestedBlocks   map[uint64]uint
-	RequestedBlocksMu sync.RWMutex
-
-	RequestsToParents map[uint64]map[uint64]*VerifyRequest // ParentBlockNum->reqID->VerifyRequest
-	RequestsMu        sync.RWMutex
+	ProcessingRequests   map[uint64]*VerifyRequest // reqID->VerifyRequest
+	ProcessingRequestsMu sync.RWMutex
 }
 
 type VerifyRequest struct {
@@ -72,6 +76,7 @@ type VerifyRequest struct {
 }
 
 const (
+	// fixme reduce numbers
 	size        = 65536
 	storageSize = 60000
 	retry       = 100 * time.Millisecond
@@ -87,8 +92,7 @@ func NewProcess(chain ChainHeaderReader) *Process {
 		HeadersRequests:       make(chan HeadersRequest, size),
 		HeaderResponses:       make(chan HeaderResponse, size),
 		VerifiedBlocks:        verifiedBlocks,
-		RequestedBlocks:       make(map[uint64]uint, size),
-		RequestsToParents:     make(map[uint64]map[uint64]*VerifyRequest),
+		ProcessingRequests:    make(map[uint64]*VerifyRequest, size),
 	}
 }
 
@@ -109,7 +113,7 @@ func (p *Process) AddVerifiedBlocks(header *types.Header) {
 	defer p.VerifiedBlocksMu.Unlock()
 
 	blockNum := header.Number.Uint64()
-	blocksContainer, ok := p.VerifiedBlocks.Get(blockNum) // is already sorted
+	blocksContainer, ok := p.VerifiedBlocks.Get(blockNum)
 	var blocks []*types.Header
 	if ok {
 		blocks = blocksContainer.([]*types.Header)
@@ -120,42 +124,43 @@ func (p *Process) AddVerifiedBlocks(header *types.Header) {
 		return
 	}
 
-	if ok = types.SearchHeader(blocks, header.Hash()); ok {
-		fmt.Println("AddVerifiedBlocks-2-!ok", blockNum)
-		return
+	for _, h := range blocks {
+		if h.Hash() == header.Hash() {
+			fmt.Println("AddVerifiedBlocks-2-!ok", blockNum)
+			return
+		}
 	}
 
 	blocks = append(blocks, header)
-
-	sort.SliceStable(blocks, func(i, j int) bool {
-		return blocks[i].Hash().String() < blocks[j].Hash().String()
-	})
 
 	p.VerifiedBlocks.Add(blockNum, blocks)
 	fmt.Println("AddVerifiedBlocks-3-ok", blockNum)
 }
 
-func (p *Process) GetVerifiedBlocks(blockNum uint64) ([]*types.Header, bool) {
+// fixme rename
+func (p *Process) GetVerifiedBlocks(parentHash common.Hash, blockNum uint64) *types.Header {
 	p.VerifiedBlocksMu.RLock()
 	defer p.VerifiedBlocksMu.RUnlock()
 
 	h, ok := p.VerifiedBlocks.Get(blockNum)
 	if !ok {
 		fmt.Println("GetVerifiedBlocks-1", blockNum, false)
-		return nil, false
+		return nil
 	}
 
 	headers, ok := h.([]*types.Header)
 	if !ok {
 		fmt.Println("GetVerifiedBlocks-2", blockNum, false)
-		return nil, false
+		return nil
 	}
 
-	res := make([]*types.Header, len(headers))
-	copy(res, headers)
+	for _, h := range headers {
+		if h.Hash() == parentHash {
+			return h
+		}
+	}
 
-	fmt.Println("GetVerifiedBlocks-3", blockNum, false)
-	return res, true
+	return nil
 }
 
 func (p *Process) GetVerifiedBlock(blockNum uint64, hash common.Hash) bool {
@@ -173,37 +178,4 @@ func (p *Process) GetVerifiedBlock(blockNum uint64, hash common.Hash) bool {
 	}
 
 	return types.SearchHeader(headers, hash)
-}
-
-func (p *Process) AddRequestedBlocks(num uint64) bool {
-	p.RequestedBlocksMu.Lock()
-	defer p.RequestedBlocksMu.Unlock()
-
-	n, ok := p.RequestedBlocks[num]
-	p.RequestedBlocks[num] = n + 1
-
-	return ok
-}
-
-func (p *Process) DeleteRequestedBlocks(num uint64) {
-	p.RequestedBlocksMu.Lock()
-	defer p.RequestedBlocksMu.Unlock()
-	n, ok := p.RequestedBlocks[num]
-	if !ok {
-		return
-	}
-
-	n--
-	if n == 0 {
-		delete(p.RequestedBlocks, num)
-	} else {
-		p.RequestedBlocks[num] = n
-	}
-}
-
-func (p *Process) IsRequestedBlocks(num uint64) bool {
-	p.RequestedBlocksMu.RLock()
-	defer p.RequestedBlocksMu.RUnlock()
-	_, ok := p.RequestedBlocks[num]
-	return ok
 }

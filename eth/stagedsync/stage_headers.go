@@ -298,6 +298,7 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 
 	requests := make(chan consensus.VerifyHeaderRequest, toVerify)
 	go func() {
+		// fixme make batch request also
 		for _, n := range idxs {
 			requests <- consensus.VerifyHeaderRequest{rand.Uint64(), headers[n], seals[n], nil}
 		}
@@ -322,12 +323,42 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 			}
 		case result := <-engine.HeaderRequest():
 			var err error
-			h := rawdb.ReadHeaderByNumber(db, result.Number)
-			if h == nil {
-				err = ErrUnknownParent
+
+			headers := make([]*types.Header, result.Number)
+
+			parentHash := result.HighestHash
+			parentNumber := result.HighestBlockNumber
+
+			fmt.Println("+++ for block", result.ID, "requested", result.Number, result.HighestBlockNumber, result.HighestHash.String())
+
+			for i := 0; i < int(result.Number); i++ {
+				h := rawdb.ReadHeaderByHash(db, parentHash)
+				parentNumber = result.HighestBlockNumber - uint64(i)
+
+				if h == nil {
+					err = ErrUnknownParent
+					break
+				}
+
+				parentHash = h.ParentHash
+				headers[i] = h
+
+				fmt.Println("+++ for block", result.ID, i, result.Number, "added", h.Number.Uint64(), h.Hash().String())
 			}
 
-			engine.HeaderResponse() <- consensus.HeaderResponse{h, result.Number, err}
+			if err != nil {
+				engine.HeaderResponse() <- consensus.HeaderResponse{
+					result.ID,
+					nil,
+					consensus.BlockError{
+						parentHash,
+						parentNumber,
+						err,
+					},
+				}
+			} else {
+				engine.HeaderResponse() <- consensus.HeaderResponse{result.ID, headers, consensus.BlockError{}}
+			}
 		}
 	}
 }
