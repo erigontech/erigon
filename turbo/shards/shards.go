@@ -1,23 +1,22 @@
-
+package shards
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
-	"math/big"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
-	"github.com/petar/GoLLRB/llrb"
 )
+
+var emptyCodeHash = crypto.Keccak256(nil)
 
 // Implements StateReader and StateWriter, for specified shard
 type Shard struct {
@@ -29,7 +28,7 @@ type Shard struct {
 	codeSizeCache *fastcache.Cache
 }
 
-func NewShard(tx ethdb.Tx, blockNr uint64) *PlainDBState {
+func NewShard(tx ethdb.Tx, blockNr uint64) *Shard {
 	return &Shard{
 		tx:      tx,
 		blockNr: blockNr,
@@ -68,7 +67,7 @@ func (s *Shard) ReadAccountData(address common.Address) (*accounts.Account, erro
 	}
 	if !ok {
 		var err error
-		enc, err = GetAsOf(s.tx, false /* storage */, address[:], s.blockNr+1)
+		enc, err = state.GetAsOf(s.tx, false /* storage */, address[:], s.blockNr+1)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return nil, err
 		}
@@ -98,12 +97,12 @@ func (s *Shard) ReadAccountData(address common.Address) (*accounts.Account, erro
 
 func (s *Shard) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
-	if dbs.storageCache != nil {
-		if enc, ok := dbs.storageCache.HasGet(nil, compositeKey); ok {
+	if s.storageCache != nil {
+		if enc, ok := s.storageCache.HasGet(nil, compositeKey); ok {
 			return enc, nil
 		}
 	}
-	enc, err := GetAsOf(s.tx, true /* storage */, compositeKey, s.blockNr+1)
+	enc, err := state.GetAsOf(s.tx, true /* storage */, compositeKey, s.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
@@ -159,7 +158,7 @@ func (s *Shard) ReadAccountCodeSize(address common.Address, codeHash common.Hash
 }
 
 func (s *Shard) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc, err := GetAsOf(s.tx, false /* storage */, address[:], dbs.blockNr+2)
+	enc, err := state.GetAsOf(s.tx, false /* storage */, address[:], s.blockNr+2)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, err
 	}
@@ -240,6 +239,6 @@ func (s *Shard) WriteHistory() error {
 	return nil
 }
 
-func (s *Shard) ChangeSetWriter() *ChangeSetWriter {
+func (s *Shard) ChangeSetWriter() *state.ChangeSetWriter {
 	return nil
 }
