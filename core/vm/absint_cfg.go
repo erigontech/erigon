@@ -373,15 +373,6 @@ func (proof *CfgProof) isValid() bool {
 	return true
 }
 
-func (proof *CfgProof) getBlock(pc int) *CfgProofBlock {
-	for _, b := range proof.Blocks {
-		if b.Entry.Pc == pc {
-			return b
-		}
-	}
-	return nil
-}
-
 func StringifyAState(st *astate) [][]string {
 	stacks := make([][]string, 0)
 

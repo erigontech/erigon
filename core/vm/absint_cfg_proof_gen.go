@@ -410,20 +410,20 @@ type CfgMetrics struct {
 	Unresolved             bool
 	ShortStack             bool
 	AnlyCounterLimit       bool
-	AnlyCounter            int
 	LowCoverage            bool
 	BadJumpImprecision     bool
 	BadJumpInvalidOp       bool
 	BadJumpInvalidJumpDest bool
 	StackCountLimitReached bool
-	NumStacks              int
 	OOM                    bool
 	Timeout                bool
-	MemUsedMBs             uint64
-	Time                   time.Duration
 	Checker                bool
 	CheckerFailed          bool
+	AnlyCounter            int
+	NumStacks              int
 	ProofSizeBytes         int
+	Time                   time.Duration
+	MemUsedMBs             uint64
 }
 
 type Cfg struct {

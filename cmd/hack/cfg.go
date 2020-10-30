@@ -174,11 +174,12 @@ func batchServer() {
 	for i := 0; i < numWorkers; i++ {
 		go func(id int) {
 			for job := range jobs {
+				enc := hex.EncodeToString(job.code)
 				cmd := exec.Command("./build/bin/hack",
 					"--action", "cfg",
 					"--mode", "worker",
 					"--quiet",
-					"--bytecode", hex.EncodeToString(job.code))
+					"--bytecode", enc)
 
 				metrics := vm.CfgMetrics{}
 				out, oerr := cmd.Output()

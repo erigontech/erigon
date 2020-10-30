@@ -10,10 +10,10 @@ import (
 type CfgOpSem struct {
 	reverts  bool
 	halts    bool
-	numBytes int
 	isPush   bool
 	isDup    bool
 	isSwap   bool
+	numBytes int
 	opNum    int
 	numPush  int
 	numPop   int
