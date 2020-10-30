@@ -16,7 +16,7 @@ type CfgOpSem struct {
 	isSwap   bool
 	opNum    int
 	numPush  int
-	numPop 	 int
+	numPop   int
 }
 
 type CfgAbsSem map[OpCode]*CfgOpSem
@@ -34,7 +34,7 @@ func NewCfgAbsSem() *CfgAbsSem {
 		opsem.reverts = op.reverts
 		opsem.halts = op.halts
 		opsem.isPush = op.isPush
-		opsem.isDup =  op.isDup
+		opsem.isDup = op.isDup
 		opsem.isSwap = op.isSwap
 		opsem.opNum = op.opNum
 		opsem.numPush = op.numPush
@@ -115,7 +115,7 @@ func resolveCheck(sem *CfgAbsSem, code []byte, st0 *astate, pc0 int) (map[int]bo
 	//fall-thru edge
 	if opcode != JUMP {
 		if pc0 < codeLen-opsem.numBytes {
-			succs[pc0 + opsem.numBytes] = true
+			succs[pc0+opsem.numBytes] = true
 		}
 	}
 
@@ -149,7 +149,7 @@ func postCheck(sem *CfgAbsSem, code []byte, st0 *astate, pc0 int, pc1 int, isJum
 				stack1.Push(AbsValueInvalid())
 			}
 		} else if opsem0.isDup {
-			if !stack0.hasIndices(opsem0.opNum-1) {
+			if !stack0.hasIndices(opsem0.opNum - 1) {
 				continue
 			}
 
@@ -167,7 +167,7 @@ func postCheck(sem *CfgAbsSem, code []byte, st0 *astate, pc0 int, pc1 int, isJum
 			stack1.values[0] = b
 			stack1.values[opNum] = a
 
-		}  else if op0 == AND {
+		} else if op0 == AND {
 			if !stack0.hasIndices(0, 1) {
 				continue
 			}
@@ -187,7 +187,7 @@ func postCheck(sem *CfgAbsSem, code []byte, st0 *astate, pc0 int, pc1 int, isJum
 			v.SetUint64(uint64(pc0))
 			stack1.Push(AbsValueConcrete(*v))
 		} else {
-			if !stack0.hasIndices(opsem0.numPop-1) {
+			if !stack0.hasIndices(opsem0.numPop - 1) {
 				continue
 			}
 
@@ -287,7 +287,7 @@ func intMap(succs []int) map[int]bool {
 }
 
 func one(m map[int]bool) int {
-	for k, _ := range m {
+	for k := range m {
 		return k
 	}
 	log.Fatal("must have exactly one element")

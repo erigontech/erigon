@@ -43,8 +43,8 @@ func (d AbsValueKind) hash() uint64 {
 
 type AbsValue struct {
 	kind  AbsValueKind
-	value *uint256.Int 			//only when kind=ConcreteValue
-	pc    int   //only when kind=TopValue
+	value *uint256.Int //only when kind=ConcreteValue
+	pc    int          //only when kind=TopValue
 }
 
 func (c0 AbsValue) String(abbrev bool) string {
@@ -52,7 +52,7 @@ func (c0 AbsValue) String(abbrev bool) string {
 		return c0.kind.String()
 	} else if c0.kind == BotValue {
 		return c0.kind.String()
-	}  else if c0.kind == TopValue {
+	} else if c0.kind == TopValue {
 		if !abbrev {
 			return fmt.Sprintf("%v%v", c0.kind.String(), c0.pc)
 		}
@@ -133,7 +133,7 @@ func AbsValueDestringify(s string) AbsValue {
 //////////////////////////////////////////////////
 type astack struct {
 	values []AbsValue
-	hash uint64
+	hash   uint64
 }
 
 func newStack() *astack {
@@ -150,7 +150,7 @@ func (s *astack) Copy() *astack {
 }
 
 func uint256Hash(e *uint256.Int) uint64 {
-	return 19 * e[0] + 23 * e[1] + 29 * e[2] * 37 * e[3]
+	return 19*e[0] + 23*e[1] + 29*e[2]*37*e[3]
 }
 
 func (s *astack) updateHash() {
@@ -296,19 +296,19 @@ func (state *astate) Add(stack *astack) {
 
 //-1 block id is invalid jump
 type CfgProofState struct {
-	Pc 		int
-	Stacks 	[][]string
+	Pc     int
+	Stacks [][]string
 }
 
 type CfgProofBlock struct {
-	Entry 	*CfgProofState
-	Exit	*CfgProofState
-	Preds	[]int
-	Succs 	[]int
+	Entry *CfgProofState
+	Exit  *CfgProofState
+	Preds []int
+	Succs []int
 }
 
 type CfgProof struct {
-	Blocks 	[]*CfgProofBlock
+	Blocks []*CfgProofBlock
 }
 
 func DeserializeCfgProof(proofBytes []byte) *CfgProof {

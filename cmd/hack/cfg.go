@@ -157,7 +157,7 @@ func batchServer() error {
 		check(perr)
 
 		code, _ := hex.DecodeString(row[1][2:])
-		jobList = append(jobList, &cfgJob{int(txcnt),code})
+		jobList = append(jobList, &cfgJob{int(txcnt), code})
 	}
 	file.Close()
 	fmt.Printf("Finished parsing %v jobs\n", len(jobList))
@@ -175,10 +175,10 @@ func batchServer() error {
 		go func(id int) {
 			for job := range jobs {
 				cmd := exec.Command("./build/bin/hack",
-											"--action", "cfg",
-													"--mode", "worker",
-													"--quiet",
-													"--bytecode", hex.EncodeToString(job.code))
+					"--action", "cfg",
+					"--mode", "worker",
+					"--quiet",
+					"--bytecode", hex.EncodeToString(job.code))
 
 				metrics := vm.CfgMetrics{}
 				out, oerr := cmd.Output()
@@ -206,19 +206,19 @@ func batchServer() error {
 	fmt.Printf("Writing results to %v\n", filename)
 	resultsFile, err := os.Create(filename)
 	check(err)
-	headers := []string{	"TxCount",
-							"BytecodeLen",
-							"Valid",
-							"BadJumpReason",
-							"StackCountLimitReached",
-							"ShortStack",
-							"Timeout",
-							"OOM",
-							"Elapsed (ms)",
-							"MemUsed (MB)",
-							"Checker",
-							"ProofSize (bytes)",
-							"Bytecode"}
+	headers := []string{"TxCount",
+		"BytecodeLen",
+		"Valid",
+		"BadJumpReason",
+		"StackCountLimitReached",
+		"ShortStack",
+		"Timeout",
+		"OOM",
+		"Elapsed (ms)",
+		"MemUsed (MB)",
+		"Checker",
+		"ProofSize (bytes)",
+		"Bytecode"}
 	_, err = resultsFile.WriteString(strings.Join(headers, "|") + "\n")
 	check(err)
 	err = resultsFile.Sync()
@@ -228,23 +228,23 @@ func batchServer() error {
 	//numJobs := len(jobList)
 	numJobs := len(jobList)
 	for j := 0; j < numJobs; j++ {
-		result := <- results
+		result := <-results
 
-		line := []string{	si(result.job.txcnt),
-							si(len(result.job.code)),
-							sb(result.metrics.Valid),
-							result.metrics.GetBadJumpReason(),
-							sb(result.metrics.StackCountLimitReached),
-							sb(result.metrics.ShortStack),
-							sb(result.metrics.Timeout),
-							sb(result.metrics.OOM),
-							si64(result.metrics.TimeMillis.Milliseconds()),
-							sui64(result.metrics.MemUsedMBs),
-							sb(result.metrics.Checker),
-							si(result.metrics.ProofSizeBytes),
-							hex.EncodeToString(result.job.code)}
+		line := []string{si(result.job.txcnt),
+			si(len(result.job.code)),
+			sb(result.metrics.Valid),
+			result.metrics.GetBadJumpReason(),
+			sb(result.metrics.StackCountLimitReached),
+			sb(result.metrics.ShortStack),
+			sb(result.metrics.Timeout),
+			sb(result.metrics.OOM),
+			si64(result.metrics.TimeMillis.Milliseconds()),
+			sui64(result.metrics.MemUsedMBs),
+			sb(result.metrics.Checker),
+			si(result.metrics.ProofSizeBytes),
+			hex.EncodeToString(result.job.code)}
 
-		_, err = resultsFile.WriteString(strings.Join(line,"|") + "\n")
+		_, err = resultsFile.WriteString(strings.Join(line, "|") + "\n")
 		check(err)
 
 		err = resultsFile.Sync()
@@ -335,7 +335,6 @@ func absIntAndJumpImprecision() {
 	const s = "6080604052600436106100775763ffffffff7c010000000000000000000000000000000000000000000000000000000060003504166329cb924d811461015f578063520ab54d146101865780636f7bc9be146101a757806378e97925146101f05780638f84aa0914610205578063f3f7d63314610236575b336000908152602081905260409020662386f26fc10000341061012757600354600160a060020a03166108fc6100c560646100b934600a63ffffffff61024b16565b9063ffffffff61028416565b6040518115909202916000818181858888f193505050501580156100ed573d6000803e3d6000fd5b50805415156100ff5760018054810190555b610108336102a7565b805461011a903463ffffffff61039316565b815542600182015561015c565b3466038d7ea4c6800014156101535761013f336102a7565b60038101805460ff1916600117905561015c565b61015c336102a7565b50005b34801561016b57600080fd5b506101746103a5565b60408051918252519081900360200190f35b34801561019257600080fd5b50610174600160a060020a03600435166103a9565b3480156101b357600080fd5b506101c8600160a060020a0360043516610486565b6040805194855260208501939093528383019190915215156060830152519081900360800190f35b3480156101fc57600080fd5b506101746104b0565b34801561021157600080fd5b5061021a6104b6565b60408051600160a060020a039092168252519081900360200190f35b34801561024257600080fd5b506101746104c5565b60008083151561025e576000915061027d565b5082820282848281151561026e57fe5b041461027957600080fd5b8091505b5092915050565b60008080831161029357600080fd5b828481151561029e57fe5b04949350505050565b600160a060020a0381166000908152602081905260408120906102c9836103a9565b9050600082600001541180156102df5750600081115b1561038e5730318111156102f1575030315b6002820154610306908263ffffffff61039316565b6002830155426001830155815461032b906064906100b990609b63ffffffff61024b16565b60028301541061035f5760008083556001808401829055600284019190915560038301805460ff1916905580546000190190555b604051339082156108fc029083906000818181858888f1935050505015801561038c573d6000803e3d6000fd5b505b505050565b60008282018381101561027957600080fd5b4290565b600160a060020a038116600090815260208190526040812060018101548290819081906103e490603c906100b990429063ffffffff6104cb16565b600385015490935060ff161561044b57600091506105a08310610407576105a091505b61044462dbba006100b9856104386104296105a084848a63ffffffff6104cb16565b8954906004026101900161024b565b9063ffffffff61024b16565b945061047d565b8354610465906064906100b990600463ffffffff61024b16565b90506104446105a06100b9838663ffffffff61024b16565b50505050919050565b60006020819052908152604090208054600182015460028301546003909301549192909160ff1684565b60025481565b600354600160a060020a031681565b60015481565b600080838311156104db57600080fd5b50509003905600a165627a7a7230582003e15824efbf4304f8ab122e9796d73f32a7330964528bf24ac011046e16f1070029"
 	runCfgAnly("AndJumpImprecision00", s)
 }
-
 
 //17891 transactions, 588 bytecode len
 func absIntTestSmallImprecision2() {
@@ -486,7 +485,7 @@ func runCfgAnly(testName string, code string) {
 	cfg, err := vm.GenCfg(decoded, 0, maxStackLen, maxStackCount, &metrics)
 	cfg.PrintAnlyState()
 	if !cfg.Metrics.Valid || err != nil {
-		fmt.Printf("Test failed: %v %v\n", testName, err, )
+		fmt.Printf("Test failed: %v %v\n", testName, err)
 		fmt.Printf("Bad jump reason: %v\n", cfg.Metrics.GetBadJumpReason())
 		fmt.Printf("# bad jumps: %v\n", len(cfg.BadJumps))
 	} else {
@@ -615,8 +614,6 @@ func testGenCfg() error {
 	return nil
 }*/
 
-
-
 type CfgEval struct {
 	numProgramsPassed    int
 	numPanic             int
@@ -636,7 +633,7 @@ type CfgEval struct {
 	numTimeouts          int
 	numOOM               int
 	numCheckerFailed     int
-	maxProofSizeBytes	 int
+	maxProofSizeBytes    int
 }
 
 func (eval *CfgEval) printStats() {
@@ -644,7 +641,7 @@ func (eval *CfgEval) printStats() {
 		eval.numProgramsPassed,
 		eval.numProgramsAnalyzed,
 		eval.numPrograms,
-		percent(eval.numProgramsPassed,eval.numProgramsAnalyzed),
+		percent(eval.numProgramsPassed, eval.numProgramsAnalyzed),
 		eval.numTimeouts,
 		eval.numPanic,
 		eval.numAnlyCounterLimit,
@@ -660,7 +657,7 @@ func (eval *CfgEval) printStats() {
 		eval.maxProofSizeBytes)
 }
 
-func (eval *CfgEval) update(result *cfgJobResult, count int)  {
+func (eval *CfgEval) update(result *cfgJobResult, count int) {
 	eval.numProgramsAnalyzed++
 	eval.numAddressesAnalyzed += count
 	if result.metrics.Timeout {
@@ -716,14 +713,13 @@ func (eval *CfgEval) update(result *cfgJobResult, count int)  {
 
 type cfgJob struct {
 	txcnt int
-	code []byte
+	code  []byte
 }
 
 type cfgJobResult struct {
 	job     *cfgJob
 	metrics *vm.CfgMetrics
 }
-
 
 func sb(b bool) string {
 	return fmt.Sprintf("%v", b)

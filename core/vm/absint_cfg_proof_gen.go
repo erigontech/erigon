@@ -45,7 +45,7 @@ func (stmt *Astmt) String() string {
 }
 
 type Program struct {
-	Code 		[]byte
+	Code        []byte
 	Stmts       []*Astmt
 	Blocks      []*Block
 	Entry2block map[int]*Block
@@ -165,24 +165,24 @@ func toProgram(code []byte) *Program {
 	}
 
 	/*
-	epilogue := []byte{0xa1, 0x65, 0x62, 0x7a, 0x7a, 0x72}
+		epilogue := []byte{0xa1, 0x65, 0x62, 0x7a, 0x7a, 0x72}
 
-	for i := 0; i < len(program.Stmts) - len(epilogue) + 1; i++ {
-		match := true
-		for e := 0; e < len(epilogue); e++ {
-			if byte(program.Stmts[i+e].opcode) != epilogue[e] {
-				match = false
+		for i := 0; i < len(program.Stmts) - len(epilogue) + 1; i++ {
+			match := true
+			for e := 0; e < len(epilogue); e++ {
+				if byte(program.Stmts[i+e].opcode) != epilogue[e] {
+					match = false
+					break
+				}
+			}
+			if match {
+				for j := i; j < len(program.Stmts); j++ {
+					program.Stmts[j].inferredAsData = true
+					program.Stmts[j].epilogue = true
+				}
 				break
 			}
-		}
-		if match {
-			for j := i; j < len(program.Stmts); j++ {
-				program.Stmts[j].inferredAsData = true
-				program.Stmts[j].epilogue = true
-			}
-			break
-		}
-	}*/
+		}*/
 
 	return program
 }
@@ -291,7 +291,7 @@ func sortAndUnique(edges []edge) []edge {
 	edgeMap := make(map[edgeKey]bool)
 	for i := 0; i < len(edges); i++ {
 		e := edges[i]
-		ek := edgeKey{e.pc0,e.pc1}
+		ek := edgeKey{e.pc0, e.pc1}
 		if edgeMap[ek] {
 			continue
 		}
@@ -332,7 +332,7 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 				stack1.Push(AbsValueInvalid())
 			}
 		} else if stmt.operation.isDup {
-			if !stack0.hasIndices(stmt.operation.opNum-1) {
+			if !stack0.hasIndices(stmt.operation.opNum - 1) {
 				continue
 			}
 
@@ -350,7 +350,7 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 			stack1.values[0] = b
 			stack1.values[opNum] = a
 
-		}  else if stmt.opcode == AND {
+		} else if stmt.opcode == AND {
 			if !stack0.hasIndices(0, 1) {
 				continue
 			}
@@ -370,7 +370,7 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 			v.SetUint64(uint64(stmt.pc))
 			stack1.Push(AbsValueConcrete(*v))
 		} else {
-			if !stack0.hasIndices(stmt.operation.numPop-1) {
+			if !stack0.hasIndices(stmt.operation.numPop - 1) {
 				continue
 			}
 
@@ -410,7 +410,6 @@ type Block struct {
 	Stmts   []*Astmt
 }
 
-
 type CfgMetrics struct {
 	Valid                  bool
 	Panic                  bool
@@ -430,7 +429,7 @@ type CfgMetrics struct {
 	TimeMillis             time.Duration
 	Checker                bool
 	CheckerFailed          bool
-	ProofSizeBytes		   int
+	ProofSizeBytes         int
 }
 
 type Cfg struct {
@@ -443,11 +442,11 @@ type Cfg struct {
 }
 
 type CfgCoverageStats struct {
-	Covered				int
-	Uncovered			int
-	Instructions		int
-	Coverage            int
-	Epilogue		    int
+	Covered      int
+	Uncovered    int
+	Instructions int
+	Coverage     int
+	Epilogue     int
 }
 
 func (cfg *Cfg) Clear() {
@@ -472,7 +471,6 @@ func (cfg *Cfg) checkRep() {
 		}
 	}
 }
-
 
 func (cfg *Cfg) GetCoverageStats() CfgCoverageStats {
 	stats := CfgCoverageStats{}
@@ -641,7 +639,6 @@ func pushNewEdges(workList []edge, edges []edge) []edge {
 	return workList
 }
 
-
 func GenCfg(code []byte, anlyCounterLimit int, maxStackLen int, maxStackCount int, metrics *CfgMetrics) (cfg *Cfg, err error) {
 	program := toProgram(code)
 	cfg = &Cfg{Metrics: metrics}
@@ -736,7 +733,7 @@ func (cfg *Cfg) GenerateProof() *CfgProof {
 	exits := make(map[int]bool)
 
 	pcs := make(map[int]bool)
-	for pc1,pc0s := range cfg.PrevEdgeMap {
+	for pc1, pc0s := range cfg.PrevEdgeMap {
 		for pc0 := range pc0s {
 			succEdgeMap[pc0] = append(succEdgeMap[pc0], pc1)
 			pcs[pc0] = true
@@ -767,7 +764,7 @@ func (cfg *Cfg) GenerateProof() *CfgProof {
 	}
 
 	for pc0 := range pcs {
-		for _,pc1 := range succEdgeMap[pc0] {
+		for _, pc1 := range succEdgeMap[pc0] {
 			if entries[pc1] {
 				exits[pc0] = true
 				break
