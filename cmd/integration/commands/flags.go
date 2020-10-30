@@ -95,7 +95,7 @@ func withMigration(cmd *cobra.Command) {
 }
 
 func withDispatcher(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&dispatcherAddr, "dispatcherAddr", "", "address of shard dispatcher")
+	cmd.Flags().StringVar(&dispatcherAddr, "dispatcher_addr", "", "address of shard dispatcher")
 }
 
 func withShard(cmd *cobra.Command) {

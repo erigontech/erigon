@@ -48,10 +48,10 @@ func NewShard(tx ethdb.Tx,
 		shardBits: shardBits,
 		shardID:   shardID,
 	}
-	shard.SetAccountCache(accountCache)
-	shard.SetStorageCache(storageCache)
-	shard.SetCodeCache(codeCache)
-	shard.SetCodeSizeCache(codeSizeCache)
+	//shard.SetAccountCache(accountCache)
+	//shard.SetStorageCache(storageCache)
+	//shard.SetCodeCache(codeCache)
+	//shard.SetCodeSizeCache(codeSizeCache)
 	return shard
 }
 
