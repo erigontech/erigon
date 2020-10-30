@@ -390,7 +390,7 @@ func post(cfg *Cfg, st0 *astate, edge edge, maxStackLen int) (*astate, error) {
 	for _, stack := range st1.stackset {
 		if len(stack.values) > maxStackLen {
 			cfg.Metrics.ShortStack = true
-			return nil, errors.New("Max stack length reached")
+			return nil, errors.New("max stack length reached")
 		}
 	}
 
