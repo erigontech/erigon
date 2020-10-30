@@ -108,13 +108,13 @@ func worker(code []byte) {
 		if !*quiet {
 			fmt.Printf("Done\n")
 		}
-		metrics.TimeMillis = time.Since(start)
+		metrics.Time = time.Since(start)
 	case <-time.After(time.Duration(maxSecs) * time.Second):
 		if !*quiet {
 			fmt.Printf("Timed out\n")
 		}
 		metrics.Timeout = true
-		metrics.TimeMillis = time.Since(start)
+		metrics.Time = time.Since(start)
 	case <-oom:
 		if !*quiet {
 			fmt.Printf("OOM\n")
@@ -189,7 +189,7 @@ func batchServer() error {
 						fmt.Printf("Output:\n")
 						fmt.Printf("%v\n", string(out))
 						fmt.Printf("Bytecode:\n")
-						fmt.Printf(hex.EncodeToString(job.code))
+						fmt.Printf("%v\n", hex.EncodeToString(job.code))
 						panic(merr)
 					}
 				} else {
@@ -238,7 +238,7 @@ func batchServer() error {
 			sb(result.metrics.ShortStack),
 			sb(result.metrics.Timeout),
 			sb(result.metrics.OOM),
-			si64(result.metrics.TimeMillis.Milliseconds()),
+			si64(result.metrics.Time.Milliseconds()),
 			sui64(result.metrics.MemUsedMBs),
 			sb(result.metrics.Checker),
 			si(result.metrics.ProofSizeBytes),
@@ -627,7 +627,6 @@ type CfgEval struct {
 	numInvalidOpcode     int
 	numInvalidJumpDest   int
 	numPrograms          int
-	numAddresses         int
 	numAddressesPassed   int
 	numAddressesAnalyzed int
 	numTimeouts          int

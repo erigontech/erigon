@@ -73,7 +73,7 @@ func isJumpDest(code []byte, value *uint256.Int) bool {
 	}
 
 	pc := value.Uint64()
-	if pc < 0 || pc >= uint64(len(code)) {
+	if pc >= uint64(len(code)) {
 		return false
 	}
 

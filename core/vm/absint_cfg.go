@@ -345,6 +345,10 @@ func CompressProof(in []byte) []byte {
 func DecompressProof(in []byte) []byte {
 	reader := bytes.NewReader(in)
 	breader, err := zlib.NewReader(reader)
+	if err != nil {
+		log.Fatal("cannot read")
+	}
+
 	res, err := ioutil.ReadAll(breader)
 	if err != nil {
 		log.Fatal("cannot read")
@@ -378,12 +382,6 @@ func (proof *CfgProof) getBlock(pc int) *CfgProofBlock {
 	return nil
 }
 
-type edgec struct {
-	pc0    int
-	pc1    int
-	isJump bool
-}
-
 func StringifyAState(st *astate) [][]string {
 	var stacks [][]string
 
@@ -402,12 +400,12 @@ func intoAState(ststr [][]string) *astate {
 	st := astate{}
 
 	for _, stack := range ststr {
-		astack := astack{}
+		s := astack{}
 		for _, vstr := range stack {
-			astack.values = append(astack.values, AbsValueDestringify(vstr))
+			s.values = append(s.values, AbsValueDestringify(vstr))
 		}
-		astack.updateHash()
-		st.Add(&astack)
+		s.updateHash()
+		st.Add(&s)
 	}
 
 	return &st

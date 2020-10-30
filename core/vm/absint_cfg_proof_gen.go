@@ -33,7 +33,6 @@ type Astmt struct {
 	pc             int
 	numBytes       int
 	value          uint256.Int
-	epilogue       bool
 }
 
 func (stmt *Astmt) String() string {
@@ -62,7 +61,7 @@ func (program *Program) isJumpDest(value *uint256.Int) bool {
 	}
 
 	pc := value.Uint64()
-	if pc < 0 || pc >= uint64(len(program.Stmts)) {
+	if pc >= uint64(len(program.Stmts)) {
 		return false
 	}
 
@@ -205,11 +204,6 @@ type edge struct {
 
 func (e edge) String() string {
 	return fmt.Sprintf("%v %v %v", e.pc0, e.pc1, e.stmt.opcode)
-}
-
-type ResolveResult struct {
-	edges    []edge
-	resolved bool
 }
 
 // resolve analyses given executable instruction at given program counter in the context of given state
@@ -426,7 +420,7 @@ type CfgMetrics struct {
 	OOM                    bool
 	Timeout                bool
 	MemUsedMBs             uint64
-	TimeMillis             time.Duration
+	Time		           time.Duration
 	Checker                bool
 	CheckerFailed          bool
 	ProofSizeBytes         int
