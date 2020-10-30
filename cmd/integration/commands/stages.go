@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -302,6 +303,7 @@ func init() {
 	withUnwind(cmdCallTraces)
 	withDatadir(cmdCallTraces)
 	withDispatcher(cmdCallTraces)
+	withShard(cmdCallTraces)
 
 	rootCmd.AddCommand(cmdCallTraces)
 
@@ -551,7 +553,7 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 			return fmt.Errorf("starting shard dispatch: %w", err)
 		}
 		accessBuilder = func(db ethdb.Database, blockNumber uint64, accountCache, storageCache, codeCache, codeSizeCache *fastcache.Cache) (state.StateReader, state.WriterWithChangeSets) {
-			shard := shards.NewShard(db.(ethdb.HasTx).Tx(), blockNumber, client, accountCache, storageCache, codeCache, codeSizeCache)
+			shard := shards.NewShard(db.(ethdb.HasTx).Tx(), blockNumber, client, accountCache, storageCache, codeCache, codeSizeCache, shardBits, byte(shardID))
 			return shard, shard
 		}
 	}
@@ -716,9 +718,56 @@ func shardDispatcher(ctx context.Context) error {
 
 type DispatcherServerImpl struct {
 	shards.UnimplementedDispatcherServer
+	connMutex   sync.RWMutex
+	connections map[int]shards.Dispatcher_StartDispatchServer
+	nextConnID  int
 }
 
-func (ds *DispatcherServerImpl) StartDispatch(server shards.Dispatcher_StartDispatchServer) error {
+func NewDispatcherServerImpl() *DispatcherServerImpl {
+	return &DispatcherServerImpl{
+		connections: make(map[int]shards.Dispatcher_StartDispatchServer),
+	}
+}
+
+func (ds *DispatcherServerImpl) addConnection(connection shards.Dispatcher_StartDispatchServer) int {
+	ds.connMutex.Lock()
+	defer ds.connMutex.Unlock()
+	connID := ds.nextConnID
+	ds.nextConnID++
+	ds.connections[connID] = connection
+	return connID
+}
+
+func (ds *DispatcherServerImpl) removeConnection(connID int) {
+	ds.connMutex.Lock()
+	defer ds.connMutex.Unlock()
+	delete(ds.connections, connID)
+}
+
+func (ds *DispatcherServerImpl) makeBroadcastList(connID int) []shards.Dispatcher_StartDispatchServer {
+	ds.connMutex.RLock()
+	defer ds.connMutex.RUnlock()
+	var list []shards.Dispatcher_StartDispatchServer
+	for id, conn := range ds.connections {
+		if id != connID {
+			list = append(list, conn)
+		}
+	}
+	return list
+}
+
+func (ds *DispatcherServerImpl) StartDispatch(connection shards.Dispatcher_StartDispatchServer) error {
+	connID := ds.addConnection(connection)
+	defer ds.removeConnection(connID)
+	for stateRead, recvErr := connection.Recv(); recvErr == nil; stateRead, recvErr = connection.Recv() {
+		// Get list of connections to broadcast to
+		broadcastList := ds.makeBroadcastList(connID)
+		for _, conn := range broadcastList {
+			if err := conn.Send(stateRead); err != nil {
+				return fmt.Errorf("could not send broadcast", "for connection", connID, "error", err)
+			}
+		}
+	}
 	return nil
 }
 

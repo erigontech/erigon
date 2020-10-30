@@ -29,13 +29,23 @@ type Shard struct {
 	codeCache     *fastcache.Cache
 	codeSizeCache *fastcache.Cache
 	client        Dispatcher_StartDispatchClient
+	shardBits     int  // Number of high bits in the key that determine the shard ID (maximum 7)
+	shardID       byte // Shard ID in the lower bit
 }
 
-func NewShard(tx ethdb.Tx, blockNr uint64, client Dispatcher_StartDispatchClient, accountCache, storageCache, codeCache, codeSizeCache *fastcache.Cache) *Shard {
+func NewShard(tx ethdb.Tx,
+	blockNr uint64,
+	client Dispatcher_StartDispatchClient,
+	accountCache, storageCache, codeCache, codeSizeCache *fastcache.Cache,
+	shardBits int,
+	shardID byte,
+) *Shard {
 	shard := &Shard{
-		tx:      tx,
-		blockNr: blockNr,
-		client:  client,
+		tx:        tx,
+		blockNr:   blockNr,
+		client:    client,
+		shardBits: shardBits,
+		shardID:   shardID,
 	}
 	shard.SetAccountCache(accountCache)
 	shard.SetStorageCache(storageCache)

@@ -24,6 +24,8 @@ var (
 	freelistReuse      int
 	migration          string
 	dispatcherAddr     string
+	shardBits          int
+	shardID            int
 )
 
 func must(err error) {
@@ -94,4 +96,9 @@ func withMigration(cmd *cobra.Command) {
 
 func withDispatcher(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&dispatcherAddr, "dispatcherAddr", "", "address of shard dispatcher")
+}
+
+func withShard(cmd *cobra.Command) {
+	cmd.Flags().IntVar(&shardBits, "shard_bits", 2, "number of bits in the key used to derive shardID")
+	cmd.Flags().IntVar(&shardID, "shard_id", 0, "shard ID")
 }
