@@ -11,6 +11,7 @@ import (
 )
 
 func TestDownloaderCli(t *testing.T) {
+	t.Skip()
 	opts:=[]grpc.DialOption{
 		grpc.WithInsecure(),
 	}

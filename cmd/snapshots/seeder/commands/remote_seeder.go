@@ -5,8 +5,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader/bittorrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"os"
 	"os/signal"
 	"time"
@@ -26,7 +26,7 @@ func SeedSnapshots(dir string) error {
 
 	db := ethdb.NewLMDB().Path(dir + "/tmpdb").MustOpen()
 	//todo
-	client.AddSnapshotsTorrens(ethdb.NewObjectDatabase(db), 1, snapshotsync.SnapshotMode{})
+	err:=client.AddSnapshotsTorrens(ethdb.NewObjectDatabase(db), 1, snapshotsync.SnapshotMode{})
 	//err := client.Run(ethdb.NewObjectDatabase(db))
 	if err != nil {
 		return err

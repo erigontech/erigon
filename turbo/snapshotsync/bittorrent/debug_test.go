@@ -2,14 +2,16 @@ package bittorrent
 
 import (
 	"context"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotdownloader"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"os"
 	"testing"
 )
 
 func TestTorrentAddTorrent(t *testing.T) {
+	t.Skip()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	path := os.TempDir() + "/trnt_test3"
 	os.RemoveAll(path)
@@ -18,7 +20,7 @@ func TestTorrentAddTorrent(t *testing.T) {
 	db := ethdb.NewObjectDatabase(kv)
 
 	cli := New(path, true)
-	err := cli.AddTorrent(context.Background(), db, snapshotsync.HeadersSnapshotName, HeadersSnapshotHash)
+	err := cli.AddTorrent(context.Background(), db, snapshotsync.HeadersSnapshotName, metainfo.NewHashFromHex(HeadersSnapshotHash))
 	if err != nil {
 		t.Fatal(err)
 	}
