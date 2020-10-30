@@ -29,58 +29,59 @@ import (
 const MaxUint16 = ^uint16(0)
 
 type opcode struct {
-	Pc       		uint16
-	Op       		vm.OpCode
+	Pc uint16
+	Op vm.OpCode
 	//StackTop 		*stack.Stack
 	//StackTop 		[]uint256.Int
 	//RetStackTop		RetStackTop
 	//MaxStack 		int
 	//MaxRStack 		int
-	Fault    		string
+	Fault string
 }
 
-type	RetStackTop	[]uint32
+type RetStackTop []uint32
 
 type tx struct {
-	TxHash          *common.Hash
-	Depth 			int
-	TxAddr			string
-	CodeHash 		*common.Hash
-	From            common.Address
-	To              common.Address
-	Input 			sliceBytes //ByteSliceAsHex
-	Segments 		sliceSegment
-	Create			bool
-	Fault 			string		//a fault set by CaptureEnd
-	OpcodeFault		string		//a fault set by CaptureState
-	Opcodes         sliceOpcodes
-	CodeSize		int
-	lastPc16   			uint16
-	lastOp				vm.OpCode
+	TxHash      *common.Hash
+	Depth       int
+	TxAddr      string
+	CodeHash    *common.Hash
+	From        common.Address
+	To          common.Address
+	Input       sliceBytes //ByteSliceAsHex
+	Segments    sliceSegment
+	Create      bool
+	Fault       string //a fault set by CaptureEnd
+	OpcodeFault string //a fault set by CaptureState
+	Opcodes     sliceOpcodes
+	CodeSize    int
+	lastPc16    uint16
+	lastOp      vm.OpCode
 }
 
 // types for slices are necessary for easyjson's generated un/marshalers
-type sliceBytes 		[]byte
-type sliceOpcodes		[]opcode
-type sliceSegment		[]segment
-type sliceSegmentDump 	[]segmentDump
+type sliceBytes []byte
+type sliceOpcodes []opcode
+type sliceSegment []segment
+type sliceSegmentDump []segmentDump
+
 //easyjson:json
-type slicePtrTx			[]*tx
+type slicePtrTx []*tx
 
 type opcodeTracer struct {
-	Txs             	slicePtrTx
-	fsumWriter			*bufio.Writer
-	stack 				slicePtrTx
-	txsInDepth			[]int16
-	saveOpcodes			bool
-	saveSegments		bool
-	blockNumber 		uint64
-}
+	Txs        slicePtrTx
+	fsumWriter *bufio.Writer
+	stack      slicePtrTx
+	txsInDepth []int16
 
+	saveOpcodes  bool
+	saveSegments bool
+	blockNumber  uint64
+}
 
 func NewOpcodeTracer(blockNum uint64, saveOpcodes bool, saveSegments bool) *opcodeTracer {
 	res := new(opcodeTracer)
-	res.txsInDepth = make([]int16,1,4)
+	res.txsInDepth = make([]int16, 1, 4)
 	res.stack = make([]*tx, 0, 8)
 	res.Txs = make([]*tx, 0, 64)
 	res.saveOpcodes = saveOpcodes
@@ -93,9 +94,9 @@ func NewOpcodeTracer(blockNum uint64, saveOpcodes bool, saveSegments bool) *opco
 func resetOpcodeTracer(ot *opcodeTracer) {
 	//sanity check
 	// at the end of a block, when no transactions are running, depth == 0. Our tracking should reflect that.
-	if len(ot.txsInDepth) != 1 || len(ot.stack) !=0 {
+	if len(ot.txsInDepth) != 1 || len(ot.stack) != 0 {
 		panic(fmt.Sprintf("At end of block, tracer should be almost reset but isn't: lstack=%d, lTID=%d, TID[0]=%d",
-			len(ot.stack), len(ot.txsInDepth),ot.txsInDepth[0]))
+			len(ot.stack), len(ot.txsInDepth), ot.txsInDepth[0]))
 	}
 	// allocate new storage, allow past storage to be GCed
 	ot.Txs = make([]*tx, 0, 64)
@@ -104,7 +105,7 @@ func resetOpcodeTracer(ot *opcodeTracer) {
 }
 
 func min(a int, b int) int {
-	if a<b {
+	if a < b {
 		return a
 	} else {
 		return b
@@ -112,7 +113,7 @@ func min(a int, b int) int {
 }
 
 func max(a int, b int) int {
-	if a>b {
+	if a > b {
 		return a
 	} else {
 		return b
@@ -120,24 +121,24 @@ func max(a int, b int) int {
 }
 
 type segment struct {
-	Start 	uint16
-	End		uint16
+	Start uint16
+	End   uint16
 }
 
 type segmentDump struct {
-	Tx			*common.Hash
-	TxAddr		*string
-	CodeHash	*common.Hash
-	Segments 	*sliceSegment
+	Tx          *common.Hash
+	TxAddr      *string
+	CodeHash    *common.Hash
+	Segments    *sliceSegment
 	OpcodeFault *string
-	Fault		*string
-	Create 		bool
-	CodeSize	int
+	Fault       *string
+	Create      bool
+	CodeSize    int
 }
 
 type blockTxs struct {
-	BlockNum	uint64
-	Txs 		slicePtrTx
+	BlockNum uint64
+	Txs      slicePtrTx
 }
 
 func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
@@ -155,13 +156,13 @@ func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.A
 
 	ls := len(ot.stack)
 	txAddr := ""
-	if ls>0 {
-		txAddr = ot.stack[ls-1].TxAddr + "-" + strconv.Itoa(int(ot.txsInDepth[depth]))// fmt.Sprintf("%s-%d", ot.stack[ls-1].TxAddr, ot.txsInDepth[depth])
+	if ls > 0 {
+		txAddr = ot.stack[ls-1].TxAddr + "-" + strconv.Itoa(int(ot.txsInDepth[depth])) // fmt.Sprintf("%s-%d", ot.stack[ls-1].TxAddr, ot.txsInDepth[depth])
 	} else {
 		txAddr = strconv.Itoa(int(ot.txsInDepth[depth]))
 	}
 
-	newTx := tx{From: from, To: to,  Create: create, Input: input, Depth: depth, TxAddr: txAddr, lastOp: 0xfe, lastPc16: MaxUint16}
+	newTx := tx{From: from, To: to, Create: create, Input: input, Depth: depth, TxAddr: txAddr, lastOp: 0xfe, lastPc16: MaxUint16}
 	ot.Txs = append(ot.Txs, &newTx)
 
 	// take note in our own stack that the tx stack has grown
@@ -174,7 +175,7 @@ func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t t
 	// When a CaptureEnd is called, a Tx has finished. Pop our stack
 	ls := len(ot.stack)
 	currentEntry := ot.stack[ls-1]
-	ot.stack = ot.stack[ : ls-1]
+	ot.stack = ot.stack[:ls-1]
 	ot.txsInDepth = ot.txsInDepth[:depth+1]
 
 	// sanity check: depth of stack == depth reported by system
@@ -185,7 +186,7 @@ func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t t
 	// Close the last segment
 	if ot.saveSegments {
 		lseg := len(currentEntry.Segments)
-		if lseg>0 {
+		if lseg > 0 {
 			cee := currentEntry.Segments[lseg-1].End
 			if cee != 0 && cee != currentEntry.lastPc16 {
 				panic(fmt.Sprintf("CaptureEnd wanted to close last segment with %d but already contains %d", currentEntry.lastPc16, cee))
@@ -244,11 +245,10 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 		}
 		//fmt.Fprintf(ot.w, "%sFilled in TxHash\n", strings.Repeat("\t",depth))
 
-		if ot.saveSegments{
+		if ot.saveSegments {
 			currentEntry.Segments = make(sliceSegment, 0, 10)
 		}
 	}
-
 
 	// prepare the opcode's stack for saving
 	//stackTop := &stack.Stack{Data: make([]uint256.Int, 0, 7)}//stack.New()
@@ -267,8 +267,8 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	// deal with the RStack - is it used at all??
 	lrs := len(retst.Data())
 	var retStackTop []uint32
-	if lrs>0 {
-		fmt.Fprintf(ot.fsumWriter,"RStack used in b=%d, tx=%s, txaddr=%s", ot.blockNumber, currentEntry.TxHash, currentEntry.TxAddr)
+	if lrs > 0 {
+		fmt.Fprintf(ot.fsumWriter, "RStack used in b=%d, tx=%s, txaddr=%s", ot.blockNumber, currentEntry.TxHash, currentEntry.TxAddr)
 		//fmt.Printf("RStack used in b=%d, tx=%s, txaddr=%s", ot.blockNumber, currentEntry.TxHash, currentEntry.TxAddr)
 		retStackTop = make([]uint32, lrs, lrs)
 		copy(retStackTop, retst.Data())
@@ -309,7 +309,6 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 			currentEntry.Opcodes = append(currentEntry.Opcodes, newOpcode)
 		}
 	}
-
 
 	// detect and store segments
 	if ot.saveSegments {
@@ -370,18 +369,18 @@ func (ot *opcodeTracer) CaptureAccountWrite(account common.Address) error {
 }
 
 func stackAsString(st *stack.Stack) (str string) {
-	if l := st.Len(); l>0 {
+	if l := st.Len(); l > 0 {
 		str = fmt.Sprintf("%d:", l)
 		for i := 0; i < l; i++ {
-			str+=fmt.Sprintf("%x ", st.Back(i))
+			str += fmt.Sprintf("%x ", st.Back(i))
 		}
 	}
 	return str
 }
 
 type segPrefix struct {
-	BlockNum	uint64
-	NumTxs 		uint
+	BlockNum uint64
+	NumTxs   uint
 }
 
 // OpcodeTracer re-executes historical transactions in read-only mode
@@ -423,11 +422,8 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	noOpWriter := state.NewNoopWriter()
 
 	interrupt := false
-	batch := chainDb.NewBatch()
-	defer batch.Rollback()
 
-
-	var fsum		*os.File
+	var fsum *os.File
 
 	var chanOpcodes chan blockTxs
 	if saveOpcodes {
@@ -462,12 +458,14 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 			}
 
-			fopsWriter.Flush()
-			fops.Close()
-			fops = nil
+			if fopsWriter != nil {
+				fopsWriter.Flush()
+				fops.Close()
+				fops = nil
+			}
 
 			lo := len(chanOpcodes)
-			if  lo>0 {
+			if lo > 0 {
 				panic(fmt.Sprintf("Opcode channel not empty at the end: lo=%d", lo))
 			}
 
@@ -509,30 +507,29 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 					fWriter.WriteString(",\n")
 				}
 
-				fWriter.WriteString("\""+bnStr+"\":[\n")
+				fWriter.WriteString("\"" + bnStr + "\":[\n")
 
-				for i:=uint(0); i < sp.NumTxs; i++ {
-					if i!=0 {
+				for i := uint(0); i < sp.NumTxs; i++ {
+					if i != 0 {
 						fWriter.WriteString(",")
 					}
-					sd := <- chanSegDump
+					sd := <-chanSegDump
 					err = fwEnc.Encode(sd)
 					check(err)
 				}
 				fWriter.WriteString("]")
-
-
-
-
 			}
-			fWriter.WriteString("\n}")
-			fWriter.Flush()
-			f.Close()
-			f = nil
+
+			if fWriter != nil {
+				fWriter.WriteString("\n}")
+				fWriter.Flush()
+				f.Close()
+				f = nil
+			}
 
 			lsp := len(chanSegPrefix)
-			lsd :=len(chanSegDump)
-			if  lsp>0 || lsd > 0  {
+			lsd := len(chanSegDump)
+			if lsp > 0 || lsd > 0 {
 				panic(fmt.Sprintf("Segment channels not empty at the end: sp=%d sd=%d", lsp, lsd))
 			}
 		}()
@@ -548,18 +545,16 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		bnStr := strconv.Itoa(int(blockNum))
 
 		if fsum == nil {
-			fsum, err = os.Create("./summary-"+bnStr)
+			fsum, err = os.Create("./summary-" + bnStr)
 			check(err)
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
-		
+
 		dbstate := state.NewPlainDBState(historyTx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		intraBlockState.SetTracer(ot)
-		var blockWriter state.StateWriter
-		blockWriter = noOpWriter
 
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, bc, block, vmConfig)
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, bc, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
@@ -570,19 +565,11 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			}
 		}
 
-		if batch.BatchSize() >= batch.IdealBatchSize() {
-			log.Info("Committing receipts", "up to block", block.NumberU64(), "batch size", common.StorageSize(batch.BatchSize()))
-			if err := batch.CommitAndBegin(context.Background()); err != nil {
-				return err
-			}
-		}
-
 		// go through the traces and act on them
 		if saveSegments {
-			sp := segPrefix{blockNum,uint(len(ot.Txs))}
+			sp := segPrefix{blockNum, uint(len(ot.Txs))}
 			chanSegPrefix <- sp
 		}
-
 		chanSegmentsIsBlocking := false
 		for i := range ot.Txs {
 			t := ot.Txs[i]
@@ -593,6 +580,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 				chanSegmentsIsBlocking = len(chanSegDump) == cap(chanSegDump)-1
 				chanSegDump <- sd
 			}
+
 			for j := range t.Opcodes {
 				o := &t.Opcodes[j]
 				//only print to the summary the opcodes that are interesting
@@ -662,12 +650,12 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		default:
 		}
 
-		if blockNum>=blockNumOrig + numBlocks {
+		if blockNum >= blockNumOrig+numBlocks {
 			interrupt = true
 		}
 
 		if interrupt || blockNum%1000 == 0 {
-			bps := float64(blockNum-blockNumLastReport)/time.Since(timeLastBlock).Seconds()
+			bps := float64(blockNum-blockNumLastReport) / time.Since(timeLastBlock).Seconds()
 			timeLastBlock = time.Now()
 			blockNumLastReport = blockNum
 			bpss := fmt.Sprintf("%.2f", bps)
@@ -685,10 +673,9 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		}
 	}
 
-	bps := float64(blockNum-blockNumOrig)/time.Since(startTime).Seconds()
+	bps := float64(blockNum-blockNumOrig) / time.Since(startTime).Seconds()
 	bpss := fmt.Sprintf("%.2f", bps)
 	log.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime), "blocks/s", bpss)
 
 	return nil
 }
-

@@ -6,9 +6,9 @@ import (
 )
 
 var (
-	numBlocks	  uint64
-	saveOpcodes	  bool
-	saveSegments  bool
+	numBlocks    uint64
+	saveOpcodes  bool
+	saveSegments bool
 )
 
 func init() {
@@ -17,7 +17,7 @@ func init() {
 	opcodeTracer.Flags().Uint64Var(&numBlocks, "numBlocks", 1, "number of blocks to run the operation on")
 	opcodeTracer.Flags().BoolVar(&saveOpcodes, "saveOpcodes", false, "set to save the opcodes")
 	opcodeTracer.Flags().BoolVar(&saveSegments, "saveSegments", false, "set to save the segments")
-	
+
 	rootCmd.AddCommand(opcodeTracer)
 }
 
