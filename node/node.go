@@ -565,9 +565,18 @@ func (n *Node) ApplyMigrations(name string, tmpdir string) error {
 	if err != nil {
 		return err
 	}
-	kv, err := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Exclusive().Open()
-	if err != nil {
-		return fmt.Errorf("failed to open kv inside stack.ApplyMigrations: %w", err)
+	var kv ethdb.KV
+
+	if n.config.MDBX {
+		kv, err = ethdb.NewMDBX().Path(dbPath).Exclusive().Open()
+		if err != nil {
+			return fmt.Errorf("failed to open kv inside stack.ApplyMigrations: %w", err)
+		}
+	} else {
+		kv, err = ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Exclusive().Open()
+		if err != nil {
+			return fmt.Errorf("failed to open kv inside stack.ApplyMigrations: %w", err)
+		}
 	}
 	defer kv.Close()
 
