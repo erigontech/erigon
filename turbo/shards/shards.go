@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 //go:generate protoc --proto_path=. --go_out=.. --go-grpc_out=.. "shards.proto" -I=. -I=./../../build/include/google
@@ -48,10 +49,10 @@ func NewShard(tx ethdb.Tx,
 		shardBits: shardBits,
 		shardID:   shardID,
 	}
-	//shard.SetAccountCache(accountCache)
-	//shard.SetStorageCache(storageCache)
-	//shard.SetCodeCache(codeCache)
-	//shard.SetCodeSizeCache(codeSizeCache)
+	shard.SetAccountCache(accountCache)
+	shard.SetStorageCache(storageCache)
+	shard.SetCodeCache(codeCache)
+	shard.SetCodeSizeCache(codeSizeCache)
 	return shard
 }
 
@@ -87,6 +88,7 @@ func (s *Shard) ReadAccountData(address common.Address) (*accounts.Account, erro
 	var enc []byte
 	var ok bool
 	if !s.isMyShard(address[0]) {
+		log.Info("ReadAccountData from remote shard", "address", address)
 		stateRead, err := s.client.Recv()
 		if err != nil {
 			return nil, fmt.Errorf("reading remote state for ReadAccountData %x: %w", address, err)
@@ -109,6 +111,7 @@ func (s *Shard) ReadAccountData(address common.Address) (*accounts.Account, erro
 		if !ok && s.accountCache != nil {
 			s.accountCache.Set(address[:], enc)
 		}
+		log.Info("sending ReadAccountData to remote shards", "address", address)
 		if err := s.client.Send(&StateRead{K: address.Bytes(), V: enc}); err != nil {
 			return nil, fmt.Errorf("sending remove state for ReadAccountData %x: %w", address, err)
 		}
