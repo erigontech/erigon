@@ -1,5 +1,8 @@
 FROM golang:1.15-alpine3.12 as builder
 
+ARG git_commit
+ENV GIT_COMMIT=$git_commit
+
 RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
 
 WORKDIR /app
