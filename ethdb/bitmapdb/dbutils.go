@@ -82,7 +82,7 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 
 		bm.RemoveRange(from, to)
 		if bm.GetCardinality() == 0 { // don't store empty bitmaps
-			err = cForDelete.Delete(k)
+			err = cForDelete.Delete(k, nil)
 			if err != nil {
 				return err
 			}
@@ -127,7 +127,7 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 	}
 
 	copyV := common.CopyBytes(v)
-	err = cForDelete.Delete(k)
+	err = cForDelete.Delete(k, nil)
 	if err != nil {
 		return err
 	}
@@ -142,31 +142,27 @@ func TruncateRange(tx ethdb.Tx, bucket string, key []byte, from, to uint64) erro
 
 // Get - reading as much chunks as needed to satisfy [from, to] condition
 // join all chunks to 1 bitmap by Or operator
-func Get(c ethdb.Cursor, key []byte, from, to uint32) (*roaring.Bitmap, error) {
+func Get(db ethdb.Getter, bucket string, key []byte, from, to uint32) (*roaring.Bitmap, error) {
 	var chunks []*roaring.Bitmap
 
 	fromKey := make([]byte, len(key)+4)
 	copy(fromKey, key)
 	binary.BigEndian.PutUint32(fromKey[len(fromKey)-4:], from)
-	for k, v, err := c.Seek(fromKey); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return nil, err
-		}
 
-		if !bytes.HasPrefix(k, key) {
-			break
-		}
-
+	if err := db.Walk(bucket, fromKey, len(key)*8, func(k, v []byte) (bool, error) {
 		bm := roaring.New()
 		_, err := bm.FromBuffer(v)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 		chunks = append(chunks, bm)
 
 		if binary.BigEndian.Uint32(k[len(k)-4:]) >= to {
-			break
+			return false, nil
 		}
+		return true, nil
+	}); err != nil {
+		return nil, err
 	}
 
 	if len(chunks) == 0 {

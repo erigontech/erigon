@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package control;
+
+option go_package = "./core;core";
+
+enum InboundMessageId {
+  NewBlockHashes = 0; BlockHeaders = 1; BlockBodies = 2; NewBlock = 3;
+  NodeData = 4;
+}
+
+message InboundMessage {
+  InboundMessageId id = 1;
+  bytes data = 2;
+  bytes peer_id = 3;
+}
+
+message Forks {
+  bytes genesis = 1;
+  repeated uint64 forks = 2;
+}
+
+message StatusData {
+  uint64 network_id = 1;
+  bytes total_difficulty = 2;
+  bytes best_hash = 3;
+  Forks fork_data = 4;
+}
+
+service Control {
+  rpc ForwardInboundMessage(InboundMessage) returns(google.protobuf.Empty);
+  rpc GetStatus(google.protobuf.Empty) returns(StatusData);
+}

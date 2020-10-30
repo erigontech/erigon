@@ -187,6 +187,7 @@ type Config struct {
 	LMDB                 bool
 	LMDBMapSize          datasize.ByteSize
 	LMDBMaxFreelistReuse uint
+	MDBX                 bool
 	SnapshotMode         snapshotsync.SnapshotMode
 
 	// Address to listen to when launchig listener for remote database access
@@ -229,7 +230,7 @@ func (c *Config) IPCEndpoint() string {
 }
 
 // NodeDB returns the path to the discovery node database.
-func (c *Config) NodeDB() string {
+func (c *Config) NodeDB() (string, error) {
 	return c.ResolvePath(datadirNodeDatabase)
 }
 
@@ -307,14 +308,14 @@ func (c *Config) name() string {
 }
 
 // ResolvePath resolves path in the instance directory.
-func (c *Config) ResolvePath(path string) string {
+func (c *Config) ResolvePath(path string) (string, error) {
 	if filepath.IsAbs(path) {
-		return path
+		return path, nil
 	}
 	if c.DataDir == "" {
-		return ""
+		return filepath.Abs("")
 	}
-	return filepath.Join(c.instanceDir(), path)
+	return filepath.Join(c.instanceDir(), path), nil
 }
 
 func (c *Config) instanceDir() string {
@@ -331,23 +332,26 @@ func (c *Config) instanceDir() string {
 // NodeKey retrieves the currently configured private key of the node, checking
 // first any manually set key, falling back to the one found in the configured
 // data folder. If no key can be found, a new one is generated.
-func (c *Config) NodeKey() *ecdsa.PrivateKey {
+func (c *Config) NodeKey() (*ecdsa.PrivateKey, error) {
 	// Use any specifically configured key.
 	if c.P2P.PrivateKey != nil {
-		return c.P2P.PrivateKey
+		return c.P2P.PrivateKey, nil
 	}
 	// Generate ephemeral key if no datadir is being used.
 	if c.DataDir == "" {
 		key, err := crypto.GenerateKey()
 		if err != nil {
-			log.Crit(fmt.Sprintf("Failed to generate ephemeral node key: %v", err))
+			return key, fmt.Errorf("failed to generate ephemeral node key: %w", err)
 		}
-		return key
+		return key, nil
 	}
 
-	keyfile := c.ResolvePath(datadirPrivateKey)
+	keyfile, err := c.ResolvePath(datadirPrivateKey)
+	if err != nil {
+		return nil, err
+	}
 	if key, err := crypto.LoadECDSA(keyfile); err == nil {
-		return key
+		return key, nil
 	}
 	// No persistent key found, generate and store a new one.
 	key, err := crypto.GenerateKey()
@@ -357,23 +361,31 @@ func (c *Config) NodeKey() *ecdsa.PrivateKey {
 	instanceDir := c.instanceDir()
 	if err := os.MkdirAll(instanceDir, 0700); err != nil {
 		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
-		return key
+		return key, nil
 	}
 	keyfile = filepath.Join(instanceDir, datadirPrivateKey)
 	if err := crypto.SaveECDSA(keyfile, key); err != nil {
 		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
 	}
-	return key
+	return key, nil
 }
 
 // StaticNodes returns a list of node enode URLs configured as static nodes.
-func (c *Config) StaticNodes() []*enode.Node {
-	return c.parsePersistentNodes(&c.staticNodesWarning, c.ResolvePath(datadirStaticNodes))
+func (c *Config) StaticNodes() ([]*enode.Node, error) {
+	dbPath, err := c.ResolvePath(datadirStaticNodes)
+	if err != nil {
+		return nil, err
+	}
+	return c.parsePersistentNodes(&c.staticNodesWarning, dbPath), nil
 }
 
 // TrustedNodes returns a list of node enode URLs configured as trusted nodes.
-func (c *Config) TrustedNodes() []*enode.Node {
-	return c.parsePersistentNodes(&c.trustedNodesWarning, c.ResolvePath(datadirTrustedNodes))
+func (c *Config) TrustedNodes() ([]*enode.Node, error) {
+	dbPath, err := c.ResolvePath(datadirTrustedNodes)
+	if err != nil {
+		return nil, err
+	}
+	return c.parsePersistentNodes(&c.trustedNodesWarning, dbPath), nil
 }
 
 // parsePersistentNodes parses a list of discovery node URLs loaded from a .json

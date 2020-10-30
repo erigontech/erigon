@@ -211,7 +211,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	dbtx, err1 := b.kv.Begin(ctx, nil, false)
+	dbtx, err1 := b.kv.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return nil, err1
 	}
@@ -225,7 +225,7 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	dbtx, err1 := b.kv.Begin(ctx, nil, false)
+	dbtx, err1 := b.kv.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return nil, err1
 	}
@@ -239,7 +239,7 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	dbtx, err1 := b.kv.Begin(ctx, nil, false)
+	dbtx, err1 := b.kv.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return 0, err1
 	}
@@ -253,7 +253,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	dbtx, err1 := b.kv.Begin(ctx, nil, false)
+	dbtx, err1 := b.kv.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return nil, err1
 	}
@@ -301,7 +301,10 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash common.Hash) (*
 		return b.pendingBlock, nil
 	}
 
-	block := rawdb.ReadBlockByHash(b.database, hash)
+	block, err := rawdb.ReadBlockByHash(b.database, hash)
+	if err != nil {
+		return nil, err
+	}
 	if block != nil {
 		return block, nil
 	}
@@ -384,7 +387,10 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 		return uint(b.pendingBlock.Transactions().Len()), nil
 	}
 
-	block := rawdb.ReadBlockByHash(b.database, blockHash)
+	block, err := rawdb.ReadBlockByHash(b.database, blockHash)
+	if err != nil {
+		return 0, err
+	}
 	if block == nil {
 		return uint(0), errBlockDoesNotExist
 	}
@@ -406,7 +412,10 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash com
 		return transactions[index], nil
 	}
 
-	block := rawdb.ReadBlockByHash(b.database, blockHash)
+	block, err := rawdb.ReadBlockByHash(b.database, blockHash)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, errBlockDoesNotExist
 	}

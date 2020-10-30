@@ -35,7 +35,7 @@ func (a *KeyItem) Less(b llrb.Item) bool {
 func storageRoot(db ethdb.KV, contract common.Address) (common.Hash, error) {
 	var storageRoot common.Hash
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		enc, err := tx.Get(dbutils.IntermediateTrieHashBucket, crypto.Keccak256(contract[:]))
+		enc, err := tx.GetOne(dbutils.IntermediateTrieHashBucket, crypto.Keccak256(contract[:]))
 		if err != nil {
 			return err
 		}
@@ -316,7 +316,7 @@ func estimate() {
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
-				v, err := tx.Get(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
+				v, err := tx.GetOne(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
 				if err != nil {
 					return err
 				}

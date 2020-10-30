@@ -25,7 +25,7 @@ func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, engine 
 func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, block *types.Block, bc *core.BlockChain) error {
 	num := block.Number().Uint64()
 	// Stage 1
-	if _, _, err := InsertHeaderChain(db, []*types.Header{block.Header()}, config, engine, 1); err != nil {
+	if _, _, err := InsertHeaderChain("logPrefix", db, []*types.Header{block.Header()}, config, engine, 1); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(db, stages.Headers, num, nil); err != nil {
@@ -40,7 +40,7 @@ func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, engine c
 	}
 
 	// Stage 3
-	if _, err := bc.InsertBodyChain(context.TODO(), []*types.Block{block}); err != nil {
+	if _, err := bc.InsertBodyChain("logPrefix", context.TODO(), []*types.Block{block}); err != nil {
 		return err
 	}
 
@@ -56,8 +56,6 @@ func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, engine c
 		BatchSize:       batchSize,
 		BlockSize:       blockSize,
 		BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
-		StartTrace:      false,
-		Prof:            false,
 		NumOfGoroutines: n,
 		ReadChLen:       4,
 		Now:             time.Now(),

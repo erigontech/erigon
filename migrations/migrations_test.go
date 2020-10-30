@@ -17,13 +17,13 @@ func TestApplyWithInit(t *testing.T) {
 	migrations = []Migration{
 		{
 			"one",
-			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 				return OnLoadCommit(db, nil, true)
 			},
 		},
 		{
 			"two",
-			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 				return OnLoadCommit(db, nil, true)
 			},
 		},
@@ -56,14 +56,14 @@ func TestApplyWithoutInit(t *testing.T) {
 	migrations = []Migration{
 		{
 			"one",
-			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
 		},
 		{
 			"two",
-			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 				return OnLoadCommit(db, nil, true)
 			},
 		},
@@ -99,13 +99,13 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	migrations = []Migration{
 		{
 			"one",
-			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 				return OnLoadCommit(db, nil, true)
 			},
 		},
 		{
 			"two",
-			func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
@@ -160,13 +160,13 @@ func TestValidation(t *testing.T) {
 	migrations = []Migration{
 		{
 			Name: "repeated_name",
-			Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+			Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 				return OnLoadCommit(db, nil, true)
 			},
 		},
 		{
 			Name: "repeated_name",
-			Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+			Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 				return OnLoadCommit(db, nil, true)
 			},
 		},
@@ -186,7 +186,7 @@ func TestCommitCallRequired(t *testing.T) {
 	migrations = []Migration{
 		{
 			Name: "one",
-			Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+			Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 				return nil // don't call OnLoadCommit
 			},
 		},

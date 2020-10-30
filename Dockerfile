@@ -1,6 +1,12 @@
 FROM golang:1.15-alpine3.12 as builder
 
-RUN apk add --no-cache make gcc g++ linux-headers git
+ARG git_commit
+ENV GIT_COMMIT=$git_commit
+
+# for linters to avoid warnings. we won't use linters in Docker anyway
+ENV LATEST_COMMIT="undefined"
+
+RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
 
 WORKDIR /app
 

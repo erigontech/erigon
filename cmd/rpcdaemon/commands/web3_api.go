@@ -23,15 +23,13 @@ func NewWeb3APIImpl() *Web3APIImpl {
 	return &Web3APIImpl{}
 }
 
-// ClientVersion returns the node name
+// ClientVersion implements web3_clientVersion. Returns the current client version.
 func (api *Web3APIImpl) ClientVersion(_ context.Context) (string, error) {
-	// https://infura.io/docs/ethereum/json-rpc/web3-clientVersion
 	return common.MakeName("TurboGeth", params.VersionWithCommit(gitCommit, "")), nil
 }
 
-// Sha3 applies the ethereum sha3 implementation on the input.
+// Sha3 implements web3_sha3. Returns Keccak-256 (not the standardized SHA3-256) of the given data.
 func (api *Web3APIImpl) Sha3(_ context.Context, input hexutil.Bytes) hexutil.Bytes {
-	// https://infura.io/docs/ethereum/json-rpc/web3-sha3
 	return crypto.Keccak256(input)
 }
 

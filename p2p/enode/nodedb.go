@@ -203,7 +203,7 @@ func localItemKey(id ID, field string) []byte {
 func (db *DB) fetchInt64(key []byte) int64 {
 	var val int64
 	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		blob, errGet := tx.Get(dbutils.InodesBucket, key)
+		blob, errGet := tx.GetOne(dbutils.InodesBucket, key)
 		if errGet != nil {
 			return errGet
 		}
@@ -233,7 +233,7 @@ func (db *DB) storeInt64(key []byte, n int64) error {
 func (db *DB) fetchUint64(key []byte) uint64 {
 	var val uint64
 	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		blob, errGet := tx.Get(dbutils.InodesBucket, key)
+		blob, errGet := tx.GetOne(dbutils.InodesBucket, key)
 		if errGet != nil {
 			return errGet
 		}
@@ -260,7 +260,7 @@ func (db *DB) storeUint64(key []byte, n uint64) error {
 func (db *DB) Node(id ID) *Node {
 	var blob []byte
 	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		v, errGet := tx.Get(dbutils.InodesBucket, nodeKey(id))
+		v, errGet := tx.GetOne(dbutils.InodesBucket, nodeKey(id))
 		if errGet != nil {
 			return errGet
 		}
@@ -331,7 +331,7 @@ func deleteRange(db ethdb.KV, prefix []byte) {
 			if err != nil {
 				return err
 			}
-			if err := c.Delete(k); err != nil {
+			if err := c.Delete(k, nil); err != nil {
 				return nil
 			}
 		}
@@ -510,7 +510,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 			db.ensureExpirer()
 			pongKey := nodeItemKey(n.ID(), n.IP(), dbNodePong)
 			var lastPongReceived int64
-			blob, errGet := tx.Get(dbutils.InodesBucket, pongKey)
+			blob, errGet := tx.GetOne(dbutils.InodesBucket, pongKey)
 			if errGet != nil {
 				return errGet
 			}

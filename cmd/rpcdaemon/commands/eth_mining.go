@@ -8,9 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
-// Propose changing this file name to eth_mining.go and adding missing mining related commands
-
-// Coinbase is the address that mining rewards will be sent to
+// Coinbase implements eth_coinbase. Returns the current client coinbase address.
 func (api *APIImpl) Coinbase(_ context.Context) (common.Address, error) {
 	var stub common.Address
 	return stub, fmt.Errorf(NotImplemented, "eth_coinbase")
@@ -21,32 +19,28 @@ func (api *APIImpl) Coinbase(_ context.Context) (common.Address, error) {
 	// return api.ethBackend.Etherbase()
 }
 
-// Hashrate returns the number of hashes per second that the node is mining with.
+// Hashrate implements eth_hashrate. Returns the number of hashes per second that the node is mining with.
 func (api *APIImpl) Hashrate(_ context.Context) (uint64, error) {
 	return 0, fmt.Errorf(NotImplemented, "eth_hashRate")
 }
 
-// Mining returns true if client is actively mining new blocks.
+// Mining implements eth_mining. Returns true if client is actively mining new blocks.
 func (api *APIImpl) Mining(_ context.Context) (bool, error) {
 	return false, fmt.Errorf(NotImplemented, "eth_mining")
 }
 
-// GetWork returns the hash of the current block, the seedHash, and the boundary condition to be met.
-// Returns Array - Array with the following properties:
-//		DATA, 32 Bytes - current block header pow-hash
-//		DATA, 32 Bytes - the seed hash used for the DAG.
-//		DATA, 32 Bytes - the boundary condition ("target"), 2^256 / difficulty.
+// GetWork implements eth_getWork. Returns the hash of the current block, the seedHash, and the boundary condition to be met ('target').
 func (api *APIImpl) GetWork(_ context.Context) ([]interface{}, error) {
 	var stub []interface{}
 	return stub, fmt.Errorf(NotImplemented, "eth_getWork")
 }
 
-// SubmitWork used for submitting a proof-of-work solution.
+// SubmitWork implements eth_submitWork. Submits a proof-of-work solution to the blockchain.
 func (api *APIImpl) SubmitWork(_ context.Context, nonce rpc.BlockNumber, powHash, digest common.Hash) (bool, error) {
 	return false, fmt.Errorf(NotImplemented, "eth_submitWork")
 }
 
-// SubmitHashrate used for submitting mining hashrate.
+// SubmitHashrate implements eth_submitHashrate. Submit the mining hashrate to the blockchain.
 func (api *APIImpl) SubmitHashrate(_ context.Context, hashRate common.Hash, id string) (bool, error) {
 	return false, fmt.Errorf(NotImplemented, "eth_sumitHashrate")
 }

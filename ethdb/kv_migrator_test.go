@@ -3,11 +3,11 @@ package ethdb
 import (
 	"context"
 	"errors"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/stretchr/testify/require"
 	"os"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBucketCRUD(t *testing.T) {
@@ -16,7 +16,7 @@ func TestBucketCRUD(t *testing.T) {
 	defer kv.Close()
 
 	ctx := context.Background()
-	tx, err := kv.Begin(ctx, nil, true)
+	tx, err := kv.Begin(ctx, nil, RW)
 	require.NoError(err)
 	defer tx.Rollback()
 
@@ -28,7 +28,7 @@ func TestBucketCRUD(t *testing.T) {
 	}
 
 	// check thad buckets have unique DBI's
-	uniquness := map[lmdb.DBI]bool{}
+	uniquness := map[dbutils.DBI]bool{}
 	castedKv := kv.(*LmdbKV)
 	for _, bucketCfg := range castedKv.buckets {
 		if bucketCfg.DBI == NonExistingDBI {
@@ -54,7 +54,7 @@ func TestBucketCRUD(t *testing.T) {
 
 	err = tx.Cursor(deprecatedBucket).Put([]byte{1}, []byte{1})
 	require.NoError(err)
-	v, err := tx.Get(deprecatedBucket, []byte{1})
+	v, err := tx.GetOne(deprecatedBucket, []byte{1})
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
@@ -63,7 +63,7 @@ func TestBucketCRUD(t *testing.T) {
 	require.True(len(buckets) > 10)
 
 	// check thad buckets have unique DBI's
-	uniquness = map[lmdb.DBI]bool{}
+	uniquness = map[dbutils.DBI]bool{}
 	for _, bucketCfg := range castedKv.buckets {
 		if bucketCfg.DBI == NonExistingDBI {
 			continue
@@ -93,7 +93,7 @@ func TestReadOnlyMode(t *testing.T) {
 		}
 	}).ReadOnly().MustOpen()
 
-	tx, err := db2.Begin(context.Background(), nil, false)
+	tx, err := db2.Begin(context.Background(), nil, RO)
 	if err != nil {
 		t.Fatal(err)
 	}

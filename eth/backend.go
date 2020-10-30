@@ -27,11 +27,13 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"path"
 	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -55,7 +57,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -128,6 +129,8 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		config.TrieDirtyCache = 0
 	}
 
+	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
+
 	// Assemble the Ethereum object
 	var chainDb *ethdb.ObjectDatabase
 	var err error
@@ -137,15 +140,15 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		}
 		chainDb = ethdb.MustOpen("simulator")
 	} else {
+		err = stack.ApplyMigrations("chaindata", tmpdir)
+		if err != nil {
+			return nil, fmt.Errorf("failed stack.ApplyMigrations: %w", err)
+		}
+
 		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", 0, 0, "", "")
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	err = migrations.NewMigrator().Apply(chainDb, stack.Config().DataDir)
-	if err != nil {
-		return nil, err
 	}
 
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
@@ -157,13 +160,18 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	var torrentClient *bittorrent.Client
 	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
-		torrentClient = bittorrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotSeeding)
+		var dbPath string
+		dbPath, err = stack.Config().ResolvePath("snapshots")
+		if err != nil {
+			return nil, err
+		}
+		torrentClient = bittorrent.New(dbPath, config.SnapshotSeeding)
 		err = torrentClient.AddSnapshotsTorrens(chainDb,config.NetworkID, config.SnapshotMode)
 		if err == nil {
 			torrentClient.Download()
 
 			snapshotKV := chainDb.KV()
-			snapshotKV, err = snapshotsync.WrapBySnapshots(snapshotKV, stack.Config().ResolvePath("snapshots"), config.SnapshotMode)
+			snapshotKV, err = snapshotsync.WrapBySnapshots(snapshotKV, dbPath, config.SnapshotMode)
 			if err != nil {
 				return nil, err
 			}
@@ -205,7 +213,9 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			return nil, fmt.Errorf("database version is v%d, Geth %s only supports v%d", *bcVersion, params.VersionWithMeta, core.BlockChainVersion)
 		} else if bcVersion == nil || *bcVersion < core.BlockChainVersion {
 			log.Warn("Upgrade blockchain database version", "from", dbVer, "to", core.BlockChainVersion)
-			rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion)
+			if err2 := rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion); err2 != nil {
+				return nil, err2
+			}
 		}
 	}
 
@@ -242,11 +252,17 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
 		eth.blockchain.SetHead(compat.RewindTo)
-		rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
+		err = rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if config.TxPool.Journal != "" {
-		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
+		config.TxPool.Journal, err = stack.ResolvePath(config.TxPool.Journal)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
@@ -303,8 +319,8 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-	eth.protocolManager.SetDataDir(stack.Config().DataDir)
-	eth.protocolManager.SetHdd(config.Hdd)
+	eth.protocolManager.SetTmpDir(tmpdir)
+	eth.protocolManager.SetBatchSize(int(config.BatchSize))
 
 	if config.SyncMode != downloader.StagedSync {
 		if err = eth.StartTxPool(); err != nil {

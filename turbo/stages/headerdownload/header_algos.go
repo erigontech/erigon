@@ -183,6 +183,15 @@ func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound, tipFou
 		if anchorHeader.Time+hd.newAnchorPastLimit < currentTime {
 			return 0, fmt.Errorf("detached segment too far in the past")
 		}
+		// Check that anchor is not in the middle of known range of headers
+		blockNumber := anchorHeader.Number.Uint64()
+		for _, anchors := range hd.anchors {
+			for _, anchor := range anchors {
+				if blockNumber >= anchor.blockHeight && blockNumber < anchor.maxTipHeight {
+					return 0, fmt.Errorf("detached segment in the middle of known segment")
+				}
+			}
+		}
 	}
 
 	var powDepthSet bool
@@ -359,6 +368,8 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 			return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
+	// If we connect to the hard-coded tip, we remove it. Once there is only one hard-coded tip left, it is clear that everything is connected
+	delete(hd.hardTips, tipHeader.ParentHash)
 	return nil
 }
 
@@ -441,9 +452,19 @@ func (hd *HeaderDownload) AddHeaderToBuffer(header *types.Header) {
 }
 
 func (hd *HeaderDownload) AnchorState() string {
-	var ss = make([]string, len(hd.anchors))
-	var j int
+	//nolint:prealloc
+	var ss []string
 	for anchorParent, anchors := range hd.anchors {
+		var skip = true
+		for _, anchor := range anchors {
+			if anchor.maxTipHeight > anchor.blockHeight {
+				skip = false
+				break
+			}
+		}
+		if skip {
+			continue
+		}
 		var sb strings.Builder
 		for i, anchor := range anchors {
 			if i > 0 {
@@ -491,8 +512,7 @@ func (hd *HeaderDownload) AnchorState() string {
 			}
 		}
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
-		ss[j] = sb.String()
-		j++
+		ss = append(ss, sb.String())
 	}
 	sort.Strings(ss)
 	return strings.Join(ss, "\n")
@@ -578,8 +598,9 @@ func (hd *HeaderDownload) CheckFiles() error {
 	return nil
 }
 
-func (hd *HeaderDownload) InitHardCodedTips(filename string) {
+func InitHardCodedTips(filename string) map[common.Hash]struct{} {
 	// Insert hard-coded headers if present
+	hardTips := make(map[common.Hash]struct{})
 	if _, err := os.Stat(filename); err == nil {
 		if f, err1 := os.Open(filename); err1 == nil {
 			var hBuffer [HeaderSerLength]byte
@@ -593,7 +614,7 @@ func (hd *HeaderDownload) InitHardCodedTips(filename string) {
 					log.Error("Failed to read hard coded header", "error", err2)
 					break
 				}
-				hd.hardTips[h.Hash()] = struct{}{}
+				hardTips[h.Hash()] = struct{}{}
 			}
 		} else {
 			log.Error("Failed to open hard-coded headers", "file", filename, "error", err1)
@@ -601,9 +622,14 @@ func (hd *HeaderDownload) InitHardCodedTips(filename string) {
 	} else {
 		log.Error("Failed to stat hard-coded headers", "file", filename, "error", err)
 	}
+	return hardTips
 }
 
-func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
+func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]struct{}) {
+	hd.hardTips = hardTips
+}
+
+func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]struct{}) (bool, error) {
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
 		return false, err
@@ -757,6 +783,13 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64) (bool, error) {
 			}
 		}
 	}
+	// Based on the last anchors, set the hardTips
+	for _, anchor := range lastAnchors {
+		if _, ok := hardTips[anchor.hash]; ok {
+			hd.hardTips[anchor.hash] = struct{}{}
+			fmt.Printf("Adding %d %x to hard-coded tips\n", anchor.blockHeight, anchor.hash)
+		}
+	}
 	return hd.anchorSequence > 0, nil
 }
 
@@ -857,7 +890,7 @@ func (hd *HeaderDownload) CheckInitiation(segment *ChainSegment, initialHash com
 	if tip.anchor.hash != initialHash {
 		return false
 	}
-	fmt.Printf("Tip %d %x has total difficulty %d, highest %d\n", tip.blockHeight, tipHash, tip.cumulativeDifficulty.ToBig(), hd.highestTotalDifficulty.ToBig())
+	fmt.Printf("Tip %d %x has total difficulty %d, highest %d, len(hd.hardTips) %d\n", tip.blockHeight, tipHash, tip.cumulativeDifficulty.ToBig(), hd.highestTotalDifficulty.ToBig(), len(hd.hardTips))
 	if tip.cumulativeDifficulty.Gt(&hd.highestTotalDifficulty) {
 		hd.highestTotalDifficulty.Set(&tip.cumulativeDifficulty)
 		return true

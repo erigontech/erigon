@@ -5,6 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
+	"os"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -14,8 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"math/big"
-	"os"
 )
 
 var (
@@ -90,7 +91,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 		headNumber := big.NewInt(0).SetBytes(headNumberBytes).Uint64()
 		headHash := common.BytesToHash(headHashBytes)
 
-		innerErr = etl.Transform(db, dbutils.HeaderPrefix, dbutils.HeaderNumberPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+		innerErr = etl.Transform("Torrent post-processing 1", db, dbutils.HeaderPrefix, dbutils.HeaderNumberPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 			if len(k) != 8+common.HashLength {
 				return nil
 			}
@@ -119,7 +120,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 		td := h.Difficulty
 
 		log.Info("Generate TD index & canonical")
-		err = etl.Transform(db, dbutils.HeaderPrefix, dbutils.HeaderPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+		err = etl.Transform("Torrent post-processing 2", db, dbutils.HeaderPrefix, dbutils.HeaderPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 			if len(k) != 8+common.HashLength {
 				return nil
 			}

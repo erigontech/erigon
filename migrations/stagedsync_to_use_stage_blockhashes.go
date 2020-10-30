@@ -8,15 +8,15 @@ import (
 
 var stagedsyncToUseStageBlockhashes = Migration{
 	Name: "stagedsync_to_use_stage_blockhashes",
-	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 
-		var progress uint64
+		var stageProgress uint64
 		var err error
-		if progress, _, err = stages.GetStageProgress(db, stages.Headers); err != nil {
+		if stageProgress, _, err = stages.GetStageProgress(db, stages.Headers); err != nil {
 			return err
 		}
 
-		if err = stages.SaveStageProgress(db, stages.BlockHashes, progress, nil); err != nil {
+		if err = stages.SaveStageProgress(db, stages.BlockHashes, stageProgress, nil); err != nil {
 			return err
 		}
 
@@ -30,15 +30,15 @@ var stagedsyncToUseStageBlockhashes = Migration{
 
 var unwindStagedsyncToUseStageBlockhashes = Migration{
 	Name: "unwind_stagedsync_to_use_stage_blockhashes",
-	Up: func(db ethdb.Database, datadir string, OnLoadCommit etl.LoadCommitHandler) error {
+	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
 
-		var progress uint64
+		var stageProgress uint64
 		var err error
-		if progress, _, err = stages.GetStageUnwind(db, stages.Headers); err != nil {
+		if stageProgress, _, err = stages.GetStageUnwind(db, stages.Headers); err != nil {
 			return err
 		}
 
-		if err = stages.SaveStageUnwind(db, stages.BlockHashes, progress, nil); err != nil {
+		if err = stages.SaveStageUnwind(db, stages.BlockHashes, stageProgress, nil); err != nil {
 			return err
 		}
 

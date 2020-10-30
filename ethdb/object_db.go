@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -37,6 +38,10 @@ var (
 	dbGetTimer = metrics.NewRegisteredTimer("db/get", nil)
 	dbPutTimer = metrics.NewRegisteredTimer("db/put", nil)
 )
+
+type DbCopier interface {
+	NewDbWithTheSameParameters() *ObjectDatabase
+}
 
 // ObjectDatabase - is an object-style interface of DB accessing
 type ObjectDatabase struct {
@@ -56,7 +61,7 @@ func NewObjectDatabase(kv KV) *ObjectDatabase {
 }
 
 func MustOpen(path string) *ObjectDatabase {
-	db, err := Open(path)
+	db, err := Open(path, false)
 	if err != nil {
 		panic(err)
 	}
@@ -65,15 +70,21 @@ func MustOpen(path string) *ObjectDatabase {
 
 // Open - main method to open database. Choosing driver based on path suffix.
 // If env TEST_DB provided - choose driver based on it. Some test using this method to open non-in-memory db
-func Open(path string) (*ObjectDatabase, error) {
+func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 	var kv KV
 	var err error
 	testDB := debug.TestDB()
 	switch true {
 	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
 		kv, err = NewLMDB().Path(path).Open()
+	case testDB == "mdbx" || strings.HasSuffix(path, "_mdbx"):
+		kv, err = NewMDBX().Path(path).Open()
 	default:
-		kv, err = NewLMDB().Path(path).Open()
+		opts := NewLMDB().Path(path)
+		if readOnly {
+			opts = opts.ReadOnly()
+		}
+		kv, err = opts.Open()
 	}
 
 	if err != nil {
@@ -112,7 +123,7 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
 	var has bool
 	err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(bucket, key)
+		v, err := tx.GetOne(bucket, key)
 		if err != nil {
 			return err
 		}
@@ -134,7 +145,7 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
 	var dat []byte
 	if err := db.kv.View(context.Background(), func(tx Tx) error {
-		v, err := tx.Get(bucket, key)
+		v, err := tx.GetOne(bucket, key)
 		if err != nil {
 			return err
 		}
@@ -215,10 +226,10 @@ func (db *ObjectDatabase) MultiWalk(bucket string, startkeys [][]byte, fixedbits
 }
 
 // Delete deletes the key from the queue and database
-func (db *ObjectDatabase) Delete(bucket string, key []byte) error {
+func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
 	// Execute the actual operation
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
-		return tx.Cursor(bucket).Delete(key)
+		return tx.Cursor(bucket).Delete(k, v)
 	})
 	return err
 }
@@ -238,104 +249,7 @@ func (db *ObjectDatabase) BucketExists(name string) (bool, error) {
 	return exists, nil
 }
 
-func (db *ObjectDatabase) ClearBucketsAndCommitEvery(deleteKeysPerTx uint64, buckets ...string) error {
-	for i := range buckets {
-		name := buckets[i]
-		log.Info("Cleaning bucket", "name", name)
-		if err := db.removeBucketContentByMultipleTransactions(name, deleteKeysPerTx); err != nil {
-			return err
-		}
-		if err := db.kv.Update(context.Background(), func(tx Tx) error {
-			migrator, ok := tx.(BucketMigrator)
-			if !ok {
-				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
-			}
-			if err := migrator.ClearBucket(name); err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// removeBucketContentByMultipleTransactions - allows to avoid single large freelist record inside database and
-// avoid "too big transaction" error
-func (db *ObjectDatabase) removeBucketContentByMultipleTransactions(bucket string, deleteKeysPerTx uint64) error {
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	var partialDropDone bool
-	for !partialDropDone {
-		if err := db.kv.Update(context.Background(), func(tx Tx) error {
-			c := tx.Cursor(bucket)
-			cnt, err := c.Count()
-			if err != nil {
-				return err
-			}
-			if cnt < deleteKeysPerTx {
-				partialDropDone = true
-				return nil
-			}
-			var deleted uint64
-			for k, _, err := c.First(); k != nil; k, _, err = c.First() {
-				if err != nil {
-					return err
-				}
-				deleted++
-				if deleted > deleteKeysPerTx {
-					break
-				}
-
-				err = c.DeleteCurrent()
-				if err != nil {
-					return err
-				}
-
-				select {
-				default:
-				case <-logEvery.C:
-					log.Info("ClearBuckets", "bucket", bucket, "records_left", cnt-deleted)
-				}
-			}
-
-			return nil
-		}); err != nil {
-			return fmt.Errorf("partial clean failed. bucket=%s, %w", bucket, err)
-		}
-	}
-
-	return nil
-}
-
-func (db *ObjectDatabase) DropBucketsAndCommitEvery(deleteKeysPerTx uint64, buckets ...string) error {
-	for i := range buckets {
-		name := buckets[i]
-		log.Info("Dropping bucket", "name", name)
-		if err := db.removeBucketContentByMultipleTransactions(name, deleteKeysPerTx); err != nil {
-			return err
-		}
-		if err := db.kv.Update(context.Background(), func(tx Tx) error {
-			migrator, ok := tx.(BucketMigrator)
-			if !ok {
-				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
-			}
-			if err := migrator.DropBucket(name); err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (db *ObjectDatabase) ClearBuckets(buckets ...string) error {
-
 	for i := range buckets {
 		name := buckets[i]
 		if err := db.kv.Update(context.Background(), func(tx Tx) error {
@@ -411,10 +325,11 @@ func (db *ObjectDatabase) SetKV(kv KV) {
 func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	var mem *ObjectDatabase
 	// Open the db and recover any potential corruptions
-	switch db.kv.(type) {
-	case *LmdbKV:
-		opts := db.kv.(*LmdbKV).opts
-		mem = NewObjectDatabase(NewLMDB().Set(opts).MustOpen())
+	switch t := db.kv.(type) {
+	case DbCopier:
+		mem = t.NewDbWithTheSameParameters()
+	default:
+		panic(fmt.Sprintf("MemCopy is not implemented for type %T", t))
 	}
 
 	if err := db.kv.View(context.Background(), func(readTx Tx) error {
@@ -443,14 +358,14 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:   db,
-		puts: newPuts(),
+		puts: btree.New(32),
 	}
 	return m
 }
 
-func (db *ObjectDatabase) Begin(ctx context.Context) (DbWithPendingMutations, error) {
+func (db *ObjectDatabase) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
 	batch := &TxDb{db: db}
-	if err := batch.begin(ctx, nil); err != nil {
+	if err := batch.begin(ctx, nil, flags); err != nil {
 		panic(err)
 	}
 	return batch, nil
@@ -504,7 +419,7 @@ func (t MultiPutTuples) Swap(i, j int) {
 func Get(tx Tx, bucket string, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
-	v, err := tx.Get(bucket, key)
+	v, err := tx.GetOne(bucket, key)
 	if err != nil {
 		return nil, err
 	}

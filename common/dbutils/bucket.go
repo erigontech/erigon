@@ -5,13 +5,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 // Buckets
 var (
-	// "Plain State". The same as CurrentStateBucket, but the keys arent' hashed.
+	// "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
+	// "incarnation" - uint64 number - how much times given account was SelfDestruct'ed.
 
 	/*
 		Logical layout:
@@ -112,8 +112,9 @@ var (
 	HeaderHashSuffix   = []byte("n") // headerPrefix + num (uint64 big endian) + headerHashSuffix -> hash
 	HeaderNumberPrefix = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
 
-	BlockBodyPrefix     = "b" // blockBodyPrefix + num (uint64 big endian) + hash -> block body
-	BlockReceiptsPrefix = "r" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+	BlockBodyPrefix     = "b"   // blockBodyPrefix + num (uint64 big endian) + hash -> block body
+	BlockReceiptsPrefix = "r"   // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+	Log                 = "log" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -238,6 +239,7 @@ var Buckets = []string{
 	SnapshotInfoBucket,
 	CallFromIndex,
 	CallToIndex,
+	Log,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
@@ -270,14 +272,27 @@ func DefaultDupCmpFunc(k1, k2, v1, v2 []byte) int {
 type BucketsCfg map[string]BucketConfigItem
 type Bucket string
 
+type DBI uint
+type BucketFlags uint
+
+const (
+	Default    BucketFlags = 0x00
+	ReverseKey BucketFlags = 0x02
+	DupSort    BucketFlags = 0x04
+	IntegerKey BucketFlags = 0x08
+	DupFixed   BucketFlags = 0x10
+	IntegerDup BucketFlags = 0x20
+	ReverseDup BucketFlags = 0x40
+)
+
 type BucketConfigItem struct {
-	Flags uint
+	Flags BucketFlags
 	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
 	// Use it wisely - it helps to do experiments with DB format faster, but better reduce amount of Magic in app.
 	// If good DB format found, push app code to accept this format and then disable this property.
 	AutoDupSortKeysConversion bool
 	IsDeprecated              bool
-	DBI                       lmdb.DBI
+	DBI                       DBI
 	// DupFromLen - if user provide key of this length, then next transformation applied:
 	// v = append(k[DupToLen:], v...)
 	// k = k[:DupToLen]
@@ -292,19 +307,19 @@ type BucketConfigItem struct {
 
 var BucketsConfigs = BucketsCfg{
 	CurrentStateBucket: {
-		Flags:                     lmdb.DupSort,
+		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                72,
 		DupToLen:                  40,
 	},
 	PlainStateBucket: {
-		Flags:                     lmdb.DupSort,
+		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                60,
 		DupToLen:                  28,
 	},
 	IntermediateTrieHashBucket: {
-		Flags:               lmdb.DupSort,
+		Flags:               DupSort,
 		CustomDupComparator: DupCmpSuffix32,
 	},
 }

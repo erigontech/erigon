@@ -167,35 +167,13 @@ trace_filter
 
 \* net_peerCount currently always returns a count of 25 as work continues on Sentry.
 
-#### REST API Daemon
+#### Grafana dashboard:
 
-Apart from JSON-RPC daemon, Turbo-Geth also contains REST API daemon. It uses
-turbo-geth remote DB functionality. 
-
-<code>🔬 See [REST API docs](./cmd/restapi/README.md)</code>
-
-Run turbo-geth in one terminal window
-
-```
-> ./build/bin/tg --private.api.addr=localhost:9090
-```
-
-Run REST daemon
-```
-> make restapi
-> ./build/bin/restapi --private.api.addr=localhost:9090
-```
-
-This API is very limited at the moment too:
-
-```
-GET /api/v1/accounts/<accountAddress>
-GET /api/v1/storage/?prefix=PREFIX
-```
+`docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
 #### Or run all components by docker-compose
 
-Next command starts: turbo-geth on port 30303, rpcdaemon 8545, restapi 8080, debug-web-ui 3001, prometheus 9090, grafana 3000
+Next command starts: turbo-geth on port 30303, rpcdaemon 8545, prometheus 9090, grafana 3000
 
 ```
 docker-compose build
@@ -222,7 +200,7 @@ Core contributors:
 
 * Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
 
-* Alex Sharov ([AskAlexSharov](https://github.com/AskAlexSharov))
+* Alex Sharov ([AskAlexSharov](https://twitter.com/AskAlexSharov))
 
 * Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
 
@@ -233,6 +211,8 @@ Core contributors:
 * Igor Mandrigin ([@mandrigin](https://twitter.com/mandrigin))
 
 * Giulio Rebuffo
+
+* Thomas Jay Rush ([@tjayrush](https://twitter.com/tjayrush))
 
 Thanks to:
 
@@ -247,7 +227,7 @@ Happy testing! 🥤
 Known issues
 ============
 
-#### `htop` shows incorrect memory usage
+## 1. `htop` shows incorrect memory usage
 
 TurboGeth's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
 ([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html), [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
@@ -270,4 +250,4 @@ TurboGeth uses ~4Gb of RAM during genesis sync and < 1Gb during normal work. OS 
 it impacts performance - one of main TG optimisations: "reduce Disk random access". 
 "Blocks Execution stage" still does much random reads - this is reason why it's slowest stage.
 We do not recommend run multiple genesis syncs on same Disk. 
-If genesis sync passed, then it's fine to run multiple TG on same Disk.  
+If genesis sync passed, then it's fine to run multiple TG on same Disk.

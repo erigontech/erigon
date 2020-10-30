@@ -80,30 +80,36 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 
 	// prepare db so it works with our test
 	rawdb.WriteHeaderNumber(db, origin.Hash(), 0)
-	rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty)
+	if err := rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty); err != nil {
+		panic(err)
+	}
 	rawdb.WriteHeader(context.TODO(), db, origin)
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
-	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
+	err := rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
+	assert.NoError(t, err)
 
-	reorg, _, err := InsertHeaderChain(db, headers1, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	reorg, _, err := InsertHeaderChain("logPrefix", db, headers1, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
 	assert.NoError(t, err)
 	assert.False(t, reorg)
 
-	td := rawdb.ReadTd(db, lastHeader1.Hash(), lastHeader1.Number.Uint64())
+	td, err := rawdb.ReadTd(db, lastHeader1.Hash(), lastHeader1.Number.Uint64())
+	assert.NoError(t, err)
 	assert.Equal(t, expectedTdBlock3, td)
 
-	reorg, _, err = InsertHeaderChain(db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	reorg, _, err = InsertHeaderChain("logPrefix", db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 
-	td = rawdb.ReadTd(db, lastHeader2.Hash(), lastHeader2.Number.Uint64())
+	td, err = rawdb.ReadTd(db, lastHeader2.Hash(), lastHeader2.Number.Uint64())
+	assert.NoError(t, err)
 
 	assert.Equal(t, expectedTdBlock4, td)
 
-	reorg, _, err = InsertHeaderChain(db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	reorg, _, err = InsertHeaderChain("logPrefix", db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 
-	td = rawdb.ReadTd(db, lastHeader2.Hash(), lastHeader2.Number.Uint64())
+	td, err = rawdb.ReadTd(db, lastHeader2.Hash(), lastHeader2.Number.Uint64())
+	assert.NoError(t, err)
 	assert.Equal(t, expectedTdBlock4, td)
 }

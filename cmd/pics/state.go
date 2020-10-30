@@ -116,17 +116,14 @@ func keyTape(t *trie.Trie, number int) error {
 }
 
 var bucketLabels = map[string]string{
-	dbutils.BlockReceiptsPrefix:   "Receipts",
-	dbutils.AccountsHistoryBucket: "History Of Accounts",
-	dbutils.HeaderPrefix:          "Headers",
-	//dbutils.ConfigPrefix:                "Config",
+	dbutils.BlockReceiptsPrefix:         "Receipts",
+	dbutils.Log:                         "Event Logs",
+	dbutils.AccountsHistoryBucket:       "History Of Accounts",
+	dbutils.StorageHistoryBucket:        "History Of Storage",
+	dbutils.HeaderPrefix:                "Headers",
 	dbutils.BlockBodyPrefix:             "Block Bodies",
 	dbutils.HeaderNumberPrefix:          "Header Numbers",
-	dbutils.AccountChangeSetBucket:      "Account Change Sets",
-	dbutils.StorageChangeSetBucket:      "Storage Change Sets",
-	dbutils.CurrentStateBucket:          "Current State",
 	dbutils.TxLookupPrefix:              "Transaction Index",
-	dbutils.StorageHistoryBucket:        "History Of Storage",
 	dbutils.CodeBucket:                  "Code Of Contracts",
 	dbutils.Senders:                     "Senders",
 	dbutils.SyncStageProgress:           "Sync Progress",
@@ -137,6 +134,7 @@ var bucketLabels = map[string]string{
 	dbutils.PlainAccountChangeSetBucket: "Account Changes",
 	dbutils.PlainStorageChangeSetBucket: "Storage Changes",
 	dbutils.IncarnationMapBucket:        "Incarnations",
+	dbutils.Senders:                     "Transaction Senders",
 }
 
 /*dbutils.PlainContractCodeBucket,
@@ -184,7 +182,7 @@ func stateDatabaseComparison(first ethdb.KV, second ethdb.KV, number int) error 
 				bucketName := bucketName
 				c := readTx.Cursor(bucketName)
 				if err2 := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
-					if firstV, _ := firstTx.Get(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
+					if firstV, _ := firstTx.GetOne(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
 						// Skip the record that is the same as in the first Db
 						return true, nil
 					}
@@ -321,7 +319,7 @@ func initialState1() error {
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		theAddr  = common.Address{1}
 		gspec    = &core.Genesis{
-			Config: params.MainnetChainConfig,
+			Config: params.AllEthashProtocolChanges,
 			Alloc: core.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},

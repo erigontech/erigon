@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
@@ -25,7 +24,7 @@ var (
 // }
 //
 // Common pattern for long-living transactions:
-//	tx, err := db.Begin(true)
+//	tx, err := db.Begin(ethdb.RW)
 //	if err != nil {
 //		return err
 //	}
@@ -56,9 +55,19 @@ type KV interface {
 	//	as its parent. Transactions may be nested to any level. A parent
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
-	Begin(ctx context.Context, parent Tx, writable bool) (Tx, error)
+	Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, error)
 	AllBuckets() dbutils.BucketsCfg
 }
+
+type TxFlags uint
+
+const (
+	RW         TxFlags = 0x00 // default
+	RO         TxFlags = 0x02
+	Try        TxFlags = 0x04
+	NoMetaSync TxFlags = 0x08
+	NoSync     TxFlags = 0x10
+)
 
 type Tx interface {
 	// Cursor - creates cursor object on top of given bucket. Type of cursor - depends on bucket configuration.
@@ -71,8 +80,8 @@ type Tx interface {
 	Cursor(bucket string) Cursor
 	CursorDupSort(bucket string) CursorDupSort   // CursorDupSort - can be used if bucket has lmdb.DupSort flag
 	CursorDupFixed(bucket string) CursorDupFixed // CursorDupSort - can be used if bucket has lmdb.DupFixed flag
-	Get(bucket string, key []byte) (val []byte, err error)
-	Has(bucket string, key []byte) (bool, error)
+	GetOne(bucket string, key []byte) (val []byte, err error)
+	HasOne(bucket string, key []byte) (bool, error)
 
 	Commit(ctx context.Context) error // Commit all the operations of a transaction into the database.
 	Rollback()                        // Rollback - abandon all the operations of the transaction instead of saving them.
@@ -119,7 +128,7 @@ type Cursor interface {
 
 	Put(k, v []byte) error           // Put - based on order
 	Append(k []byte, v []byte) error // Append - append the given key/data pair to the end of the database. This option allows fast bulk loading when keys are already known to be in the correct order.
-	Delete(key []byte) error
+	Delete(k, v []byte) error        // Delete - short version of SeekExact+DeleteCurrent or SeekBothExact+DeleteCurrent
 
 	// DeleteCurrent This function deletes the key/data pair to which the cursor refers.
 	// This does not invalidate the cursor, so operations such as MDB_NEXT

@@ -186,7 +186,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 		dsw.storageCache.Set(compositeKey, v)
 	}
 	if len(v) == 0 {
-		return dsw.db.Delete(dbutils.CurrentStateBucket, compositeKey)
+		return dsw.db.Delete(dbutils.CurrentStateBucket, compositeKey, nil)
 	}
 	return dsw.db.Put(dbutils.CurrentStateBucket, compositeKey, v)
 }
@@ -195,7 +195,7 @@ func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 	if err := dsw.csw.CreateContract(address); err != nil {
 		return err
 	}
-	if err := dsw.db.Delete(dbutils.IncarnationMapBucket, address[:]); err != nil {
+	if err := dsw.db.Delete(dbutils.IncarnationMapBucket, address[:], nil); err != nil {
 		return err
 	}
 	return nil

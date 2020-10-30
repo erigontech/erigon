@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -30,7 +31,10 @@ var stateStags = &cobra.Command{
 	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind_every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		if err := syncBySmallSteps(ctx, chaindata); err != nil {
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := syncBySmallSteps(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -52,15 +56,13 @@ func init() {
 	withUnwind(stateStags)
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
-	withHDD(stateStags)
+	withBatchSize(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 }
 
-func syncBySmallSteps(ctx context.Context, chaindata string) error {
+func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
 
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
@@ -93,19 +95,20 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		}
 	}
 
-	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db)
+	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
 	cc, bc, st, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
 	cc.SetDB(tx)
 
-	tx, err = tx.Begin(context.Background())
+	tx, err = tx.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return err
 	}
 
 	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
+	_ = st.SetCurrentStage(stages.Execution)
 
 	senderStageProgress := progress(stages.Senders).BlockNumber
 
@@ -114,6 +117,8 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 		stopAt = block
 	}
 
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 	for progress(stages.Execution).BlockNumber < stopAt || (unwind <= unwindEvery) {
 		select {
 		case <-ctx.Done():
@@ -142,7 +147,7 @@ func syncBySmallSteps(ctx context.Context, chaindata string) error {
 				stagedsync.ExecuteBlockStageParams{
 					ToBlock:       execToBlock, // limit execution to the specified block
 					WriteReceipts: sm.Receipts,
-					Hdd:           hdd,
+					BatchSize:     int(batchSize),
 					ChangeSetHook: changeSetHook,
 				}); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)

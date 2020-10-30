@@ -159,7 +159,7 @@ func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.
 	}
 	//WARNING - this will leak transaction
 	fmt.Printf("LEAK!\n")
-	tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, false)
+	tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		return nil, nil, err1
 	}
@@ -186,7 +186,7 @@ func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockN
 		}
 		//WARNING - this will leak transaction
 		fmt.Printf("LEAK!\n")
-		tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, false)
+		tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, ethdb.RO)
 		if err1 != nil {
 			return nil, nil, err1
 		}
@@ -215,7 +215,7 @@ func (b *EthAPIBackend) GetReceipts(ctx context.Context, hash common.Hash) (type
 func (b *EthAPIBackend) getReceiptsByReApplyingTransactions(block *types.Block, number uint64) (types.Receipts, error) {
 	//WARNING - this will leak transaction
 	fmt.Printf("LEAK!\n")
-	tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, false)
+	tx, err1 := b.eth.chainKV.Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		return nil, err1
 	}

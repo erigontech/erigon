@@ -115,7 +115,7 @@ func storageReadWrites(blockNum uint64) {
 
 	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth-10/geth/chaindata")
 	defer ethDb.Close()
-	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, false)
+	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, ethdb.RO)
 	check(err1)
 	defer ethTx.Rollback()
 	chainConfig := params.MainnetChainConfig

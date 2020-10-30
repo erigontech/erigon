@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -133,7 +134,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 	if sim.blockchain.Config() != params.AllEthashProtocolChanges {
 		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.config)
 	}
-	tx, err1 := sim.KV().Begin(context.Background(), nil, false)
+	tx, err1 := sim.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Errorf("TestNewSimulatedBackend create tx: %v", err1)
 	}

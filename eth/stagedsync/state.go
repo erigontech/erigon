@@ -94,6 +94,13 @@ func (s *State) CurrentStage() (uint, *Stage) {
 	return s.currentStage, s.stages[s.currentStage]
 }
 
+func (s *State) LogPrefix() string {
+	if s == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d/%d %s", s.currentStage+1, s.Len(), s.stages[s.currentStage].ID)
+}
+
 func (s *State) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
 		if bytes.Equal(stage.ID, id) {
@@ -141,10 +148,13 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.Getter) (*StageState
 }
 
 func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
-	timings := map[string]time.Duration{}
+	var timings []interface{}
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
 			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
+				if err := s.SetCurrentStage(unwind.Stage); err != nil {
+					return err
+				}
 				if s.onBeforeUnwind != nil {
 					if err := s.onBeforeUnwind(unwind.Stage); err != nil {
 						return err
@@ -159,14 +169,13 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 				if err := s.UnwindStage(unwind, db, tx); err != nil {
 					return err
 				}
-				timings["Unwind "+string(unwind.Stage)] = time.Since(t)
+				timings = append(timings, "Unwind "+string(unwind.Stage), time.Since(t))
 			}
 			if err := s.SetCurrentStage(stages.Headers); err != nil {
 				return err
 			}
 		}
-
-		index, stage := s.CurrentStage()
+		_, stage := s.CurrentStage()
 
 		if hook, ok := s.beforeStageRun[string(stage.ID)]; ok {
 			if err := hook(); err != nil {
@@ -175,12 +184,10 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 		}
 
 		if stage.Disabled {
+			logPrefix := s.LogPrefix()
 			message := fmt.Sprintf(
-				"Sync stage %d/%d. %v disabled. %s",
-				index+1,
-				s.Len(),
-				stage.Description,
-				stage.DisabledDescription,
+				"[%s] disabled. %s",
+				logPrefix, stage.DisabledDescription,
 			)
 
 			log.Info(message)
@@ -193,16 +200,13 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 		if err := s.runStage(stage, db, tx); err != nil {
 			return err
 		}
-		timings[string(stage.ID)] = time.Since(t)
+		timings = append(timings, string(stage.ID), time.Since(t))
 	}
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Memory", "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
-	logArs := make([]interface{}, 0, len(timings)*2)
-	for name, val := range timings {
-		logArs = append(logArs, name, val)
-	}
-	log.Info("Timings", logArs...)
+	log.Info("Timings", timings...)
 	return nil
 }
 
@@ -214,19 +218,16 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
 	if err != nil {
 		return err
 	}
-	index, stage := s.CurrentStage()
 
 	start := time.Now()
-	message := fmt.Sprintf("Sync stage %d/%d. %v...", index+1, s.Len(), stage.Description)
-	log.Info(message)
-
+	logPrefix := s.LogPrefix()
 	err = stage.ExecFunc(stageState, s)
 	if err != nil {
 		return err
 	}
 
 	if time.Since(start) > 30*time.Second {
-		log.Info(fmt.Sprintf("%s DONE!", message))
+		log.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", time.Since(start))
 	}
 	return nil
 }
@@ -263,7 +264,7 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb
 	}
 
 	if time.Since(start) > 30*time.Second {
-		log.Info("Unwinding... DONE!")
+		log.Info("Unwinding... DONE!", "stage", string(unwind.Stage))
 	}
 	return nil
 }
