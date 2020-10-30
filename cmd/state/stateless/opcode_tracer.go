@@ -107,17 +107,15 @@ func resetOpcodeTracer(ot *opcodeTracer) {
 func min(a int, b int) int {
 	if a < b {
 		return a
-	} else {
-		return b
 	}
+	return b
 }
 
 func max(a int, b int) int {
 	if a > b {
 		return a
-	} else {
-		return b
 	}
+	return b
 }
 
 type segment struct {
@@ -491,7 +489,8 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 				bnStr := strconv.Itoa(int(bn))
 
 				if f != nil && bn%1000 == 0 {
-					fWriter.WriteString("\n}")
+					_, err = fWriter.WriteString("\n}")
+					check(err)
 					fWriter.Flush()
 					f.Close()
 					f = nil
@@ -502,26 +501,26 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 					check(err)
 					fWriter = bufio.NewWriter(f)
 					fwEnc = json.NewEncoder(fWriter)
-					fWriter.WriteString("{\n")
-				} else {
-					fWriter.WriteString(",\n")
 				}
 
-				fWriter.WriteString("\"" + bnStr + "\":[\n")
-
+				_, err = fWriter.WriteString(",\n\"" + bnStr + "\":[\n")
+				check(err)
 				for i := uint(0); i < sp.NumTxs; i++ {
 					if i != 0 {
-						fWriter.WriteString(",")
+						_, err = fWriter.WriteString(",")
+						check(err)
 					}
 					sd := <-chanSegDump
 					err = fwEnc.Encode(sd)
 					check(err)
 				}
-				fWriter.WriteString("]")
+				_, err = fWriter.WriteString("]")
+				check(err)
 			}
 
 			if fWriter != nil {
-				fWriter.WriteString("\n}")
+				_, err = fWriter.WriteString("\n}")
+				check(err)
 				fWriter.Flush()
 				f.Close()
 				f = nil
