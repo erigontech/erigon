@@ -23,6 +23,7 @@ var (
 	mapSizeStr         string
 	freelistReuse      int
 	migration          string
+	dispatcherAddr     string
 )
 
 func must(err error) {
@@ -89,4 +90,8 @@ func withBatchSize(cmd *cobra.Command) {
 
 func withMigration(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&migration, "migration", "", "action to apply to given migration")
+}
+
+func withDispatcher(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&dispatcherAddr, "dispatcherAddr", "", "address of shard dispatcher")
 }

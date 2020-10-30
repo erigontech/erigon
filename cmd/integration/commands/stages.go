@@ -2,28 +2,41 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"path"
 	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/VictoriaMetrics/fastcache"
 	"github.com/c2h5oh/datasize"
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/keepalive"
 )
 
 var cmdStageSenders = &cobra.Command{
@@ -210,6 +223,19 @@ var cmdRunMigrations = &cobra.Command{
 	},
 }
 
+var cmdShardDispatcher = &cobra.Command{
+	Use:   "shard_dispatcher",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		if err := shardDispatcher(ctx); err != nil {
+			log.Error("Starting Shard Dispatcher failed", "err", err)
+			return err
+		}
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(cmdPrintStages)
 	withLmdbFlags(cmdPrintStages)
@@ -275,6 +301,7 @@ func init() {
 	withBlock(cmdCallTraces)
 	withUnwind(cmdCallTraces)
 	withDatadir(cmdCallTraces)
+	withDispatcher(cmdCallTraces)
 
 	rootCmd.AddCommand(cmdCallTraces)
 
@@ -299,6 +326,9 @@ func init() {
 	withLmdbFlags(cmdRunMigrations)
 	withDatadir(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
+
+	withDispatcher(cmdShardDispatcher)
+	rootCmd.AddCommand(cmdShardDispatcher)
 }
 
 func stageSenders(db ethdb.Database, ctx context.Context) error {
@@ -496,8 +526,40 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 		return stagedsync.UnwindCallTraces(u, s, db, bc.Config(), bc, ch)
 	}
 
+	var accessBuilder stagedsync.StateAccessBuilder
+	if dispatcherAddr != "" {
+		// CREATING GRPC CLIENT CONNECTION
+		var dialOpts []grpc.DialOption
+		dialOpts = []grpc.DialOption{
+			grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Timeout: 10 * time.Minute,
+			}),
+		}
+
+		dialOpts = append(dialOpts, grpc.WithInsecure())
+
+		conn, err := grpc.DialContext(ctx, dispatcherAddr, dialOpts...)
+		if err != nil {
+			return fmt.Errorf("creating client connection to shard dispatcher: %w", err)
+		}
+		dispatcherClient := shards.NewDispatcherClient(conn)
+		var client shards.Dispatcher_StartDispatchClient
+		client, err = dispatcherClient.StartDispatch(ctx, &grpc.EmptyCallOption{})
+		if err != nil {
+			return fmt.Errorf("starting shard dispatch: %w", err)
+		}
+		accessBuilder = func(db ethdb.Database, blockNumber uint64, accountCache, storageCache, codeCache, codeSizeCache *fastcache.Cache) (state.StateReader, state.WriterWithChangeSets) {
+			shard := shards.NewShard(db.(ethdb.HasTx).Tx(), blockNumber, client, accountCache, storageCache, codeCache, codeSizeCache)
+			return shard, shard
+		}
+	}
+
 	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, tmpdir, ch,
-		stagedsync.CallTracesStageParams{}); err != nil {
+		stagedsync.CallTracesStageParams{
+			AccessBuilder: accessBuilder,
+		}); err != nil {
 		return err
 	}
 	return nil
@@ -597,6 +659,66 @@ func removeMigration(db rawdb.DatabaseDeleter, _ context.Context) error {
 	if err := db.Delete(dbutils.Migrations, []byte(migration), nil); err != nil {
 		return err
 	}
+	return nil
+}
+
+func shardDispatcher(ctx context.Context) error {
+	// STARTING GRPC SERVER
+	log.Info("Starting Shard Dispatcher", "on", dispatcherAddr)
+	listenConfig := net.ListenConfig{
+		Control: func(network, address string, _ syscall.RawConn) error {
+			log.Info("Shard Dispatcher received connection", "via", network, "from", address)
+			return nil
+		},
+	}
+	lis, err := listenConfig.Listen(ctx, "tcp", dispatcherAddr)
+	if err != nil {
+		return fmt.Errorf("could not create Shard Dispatcher listener: %w, addr=%s", err, dispatcherAddr)
+	}
+	var (
+		streamInterceptors []grpc.StreamServerInterceptor
+		unaryInterceptors  []grpc.UnaryServerInterceptor
+	)
+	if metrics.Enabled {
+		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
+		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
+	}
+	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+	var grpcServer *grpc.Server
+	cpus := uint32(runtime.GOMAXPROCS(-1))
+	opts := []grpc.ServerOption{
+		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
+		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
+		grpc.ReadBufferSize(1024),
+		grpc.MaxConcurrentStreams(100), // to force clients reduce concurrency level
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time: 10 * time.Minute,
+		}),
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+	}
+	grpcServer = grpc.NewServer(opts...)
+	dispatcherServer := &DispatcherServerImpl{}
+	shards.RegisterDispatcherServer(grpcServer, dispatcherServer)
+	if metrics.Enabled {
+		grpc_prometheus.Register(grpcServer)
+	}
+
+	go func() {
+		if err1 := grpcServer.Serve(lis); err1 != nil {
+			log.Error("Shard Dispatcher failed", "err", err1)
+		}
+	}()
+	<-ctx.Done()
+	return nil
+}
+
+type DispatcherServerImpl struct {
+	shards.UnimplementedDispatcherServer
+}
+
+func (ds *DispatcherServerImpl) StartDispatch(server shards.Dispatcher_StartDispatchServer) error {
 	return nil
 }
 

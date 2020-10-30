@@ -16,6 +16,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
+//go:generate protoc --proto_path=. --go_out=.. --go-grpc_out=.. "shards.proto" -I=. -I=./../../build/include/google
+
 var emptyCodeHash = crypto.Keccak256(nil)
 
 // Implements StateReader and StateWriter, for specified shard
@@ -26,13 +28,20 @@ type Shard struct {
 	storageCache  *fastcache.Cache
 	codeCache     *fastcache.Cache
 	codeSizeCache *fastcache.Cache
+	client        Dispatcher_StartDispatchClient
 }
 
-func NewShard(tx ethdb.Tx, blockNr uint64) *Shard {
-	return &Shard{
+func NewShard(tx ethdb.Tx, blockNr uint64, client Dispatcher_StartDispatchClient, accountCache, storageCache, codeCache, codeSizeCache *fastcache.Cache) *Shard {
+	shard := &Shard{
 		tx:      tx,
 		blockNr: blockNr,
+		client:  client,
 	}
+	shard.SetAccountCache(accountCache)
+	shard.SetStorageCache(storageCache)
+	shard.SetCodeCache(codeCache)
+	shard.SetCodeSizeCache(codeSizeCache)
+	return shard
 }
 
 func (s *Shard) SetAccountCache(accountCache *fastcache.Cache) {
