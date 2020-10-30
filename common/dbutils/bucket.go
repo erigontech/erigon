@@ -10,7 +10,8 @@ import (
 
 // Buckets
 var (
-	// "Plain State". The same as CurrentStateBucket, but the keys arent' hashed.
+	// "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
+	// "incarnation" - uint64 number - how much times given account was SelfDestruct'ed.
 
 	/*
 		Logical layout:
