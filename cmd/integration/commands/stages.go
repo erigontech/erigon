@@ -767,7 +767,6 @@ func (ds *DispatcherServerImpl) StartDispatch(connection shards.Dispatcher_Start
 				return fmt.Errorf("could not send broadcas for connection id %d: %w", connID, err)
 			}
 		}
-		log.Info("Broadcasted", "key", stateRead.K, "val", stateRead.V)
 	}
 	return nil
 }
