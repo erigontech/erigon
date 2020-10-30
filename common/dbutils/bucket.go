@@ -285,16 +285,6 @@ const (
 	ReverseDup BucketFlags = 0x40
 )
 
-type TxFlags uint
-
-const (
-	RO         TxFlags = 0x00
-	RW         TxFlags = 0x02
-	Try        TxFlags = 0x04
-	NoMetaSync TxFlags = 0x08
-	NoSync     TxFlags = 0x10
-)
-
 type BucketConfigItem struct {
 	Flags BucketFlags
 	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
