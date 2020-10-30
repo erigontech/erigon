@@ -36,27 +36,27 @@ func testGenCfg() {
 	}
 
 	if *mode == "server" {
-		_ = batchServer()
+		batchServer()
 		return
 	}
 
 	if *mode == "test" {
 		absIntTestSimple00()
-		//absIntTestRequires00()
-		//absIntTestCall01()
-		//absIntTestDiv00()
-		//absIntTestEcrecoverLoop02()
-		//absIntTestStorageVar03()
-		//absIntTestStaticLoop00()
-		//absIntTestPrivateFunction01()
-		//absIntTestPrivateFunction02()
-		//absIntTestStaticLoop01()
-		//absIntTestDepositContract()
-		//absIntTestPanic00()
-		//absIntTestSmallImprecision()
-		//absIntTestSmallInvalidJumpDest()
-		//absIntTestSmallImprecision2()
-		//absIntAndJumpImprecision()
+		absIntTestRequires00()
+		absIntTestCall01()
+		absIntTestDiv00()
+		absIntTestEcrecoverLoop02()
+		absIntTestStorageVar03()
+		absIntTestStaticLoop00()
+		absIntTestPrivateFunction01()
+		absIntTestPrivateFunction02()
+		absIntTestStaticLoop01()
+		absIntTestDepositContract()
+		absIntTestPanic00()
+		absIntTestSmallImprecision()
+		absIntTestSmallInvalidJumpDest()
+		absIntTestSmallImprecision2()
+		absIntAndJumpImprecision()
 		return
 	}
 }
@@ -134,7 +134,7 @@ func bToMb(b uint64) uint64 {
 	return b / 1024 / 1024
 }
 
-func batchServer() error {
+func batchServer() {
 	numWorkers := runtime.NumCPU() - 2
 	fmt.Printf("Number of cores: %v\n", numWorkers)
 
@@ -189,7 +189,7 @@ func batchServer() error {
 						fmt.Printf("Output:\n")
 						fmt.Printf("%v\n", string(out))
 						fmt.Printf("Bytecode:\n")
-						fmt.Printf("%v\n", hex.EncodeToString(job.code))
+						fmt.Printf("%v %v\n", id, hex.EncodeToString(job.code))
 						panic(merr)
 					}
 				} else {
@@ -256,8 +256,6 @@ func batchServer() error {
 			eval.printStats()
 		}
 	}
-
-	return nil
 }
 
 func si64(n int64) string {
