@@ -194,9 +194,9 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 				}
 				if errAcc = cs.Walk(func(k, v []byte) error {
 					if len(v) == 0 {
-						accountCache.Set(k, nil)
+						//accountCache.Set(k, nil)
 					} else {
-						accountCache.Set(k, v)
+						//accountCache.Set(k, v)
 					}
 					accountsPreset++
 					return nil
@@ -215,9 +215,9 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 				}
 				if errSt = cs.Walk(func(k, v []byte) error {
 					if len(v) == 0 {
-						storageCache.Set(k, nil)
+						//storageCache.Set(k, nil)
 					} else {
-						storageCache.Set(k, v)
+						//storageCache.Set(k, v)
 					}
 					storagePreset++
 					return nil
