@@ -90,9 +90,11 @@ func (s *Shard) ReadAccountData(address common.Address) (*accounts.Account, erro
 	if !s.isMyShard(address[0]) {
 		stateRead, err := s.client.Recv()
 		if err != nil {
+			log.Error("reading remote state for ReadAccountData", "address", address, "error", err)
 			return nil, fmt.Errorf("reading remote state for ReadAccountData %x: %w", address, err)
 		}
 		if !bytes.Equal(stateRead.K, address.Bytes()) {
+			log.Error("read mismatched key", "expected", address, "got", stateRead.K)
 			return nil, fmt.Errorf("read mismatched key, expected %x, got %x", address, stateRead.K)
 		}
 		log.Info("ReadAccountData from remote shard", "key", stateRead.K, "val", stateRead.V)
