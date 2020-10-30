@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"os"
 	"runtime/pprof"
-	"sort"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -285,24 +284,8 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 		return nil
 	}
 
-	idxs := make([]int, toVerify)
-	for i := range headers {
-		idxs[i] = i
-	}
-	sort.SliceStable(idxs, func(i, j int) bool {
-		return idxs[i] < idxs[j]
-	})
-	sort.SliceStable(idxs, func(i, j int) bool {
-		return headers[idxs[i]].Number.Cmp(headers[idxs[j]].Number) == -1
-	})
-
 	requests := make(chan consensus.VerifyHeaderRequest, toVerify)
-	go func() {
-		// fixme make batch request also
-		for _, n := range idxs {
-			requests <- consensus.VerifyHeaderRequest{rand.Uint64(), headers[n], seals[n], nil}
-		}
-	}()
+	requests <- consensus.VerifyHeaderRequest{rand.Uint64(), headers, seals, nil}
 
 	var verified int
 	for {
@@ -337,6 +320,7 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 
 				if h == nil {
 					err = ErrUnknownParent
+					fmt.Println("+++ for block", result.ID, i, result.Number, "NOT FOUND")
 					break
 				}
 

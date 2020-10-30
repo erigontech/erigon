@@ -13,8 +13,8 @@ import (
 
 type VerifyHeaderRequest struct {
 	ID       uint64
-	Header   *types.Header
-	Seal     bool
+	Header   []*types.Header
+	Seal     []bool
 	Deadline *time.Time
 }
 
@@ -63,12 +63,15 @@ type Process struct {
 	VerifiedBlocks   *lru.Cache // common.Hash->*types.Header
 	VerifiedBlocksMu sync.RWMutex
 
-	ProcessingRequests   map[uint64]*VerifyRequest // reqID->VerifyRequest
+	ProcessingRequests   map[uint64]map[uint64]*VerifyRequest // reqID->blockNumber->VerifyRequest
 	ProcessingRequestsMu sync.RWMutex
 }
 
 type VerifyRequest struct {
-	VerifyHeaderRequest
+	ID              uint64
+	Header          *types.Header
+	Seal            bool
+	Deadline        *time.Time
 	KnownParents    []*types.Header
 	ParentsExpected int
 	From            uint64
@@ -92,7 +95,7 @@ func NewProcess(chain ChainHeaderReader) *Process {
 		HeadersRequests:       make(chan HeadersRequest, size),
 		HeaderResponses:       make(chan HeaderResponse, size),
 		VerifiedBlocks:        verifiedBlocks,
-		ProcessingRequests:    make(map[uint64]*VerifyRequest, size),
+		ProcessingRequests:    make(map[uint64]map[uint64]*VerifyRequest, size),
 	}
 }
 
