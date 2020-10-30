@@ -293,6 +293,10 @@ func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (Tx, error)
 	if flags&RO != 0 {
 		nativeFlags |= mdbx.Readonly
 	}
+	if flags&NoSync != 0 {
+		nativeFlags |= mdbx.TxNoSync
+	}
+
 	var parentTx *mdbx.Txn
 	if parent != nil {
 		parentTx = parent.(*mdbxTx).tx
