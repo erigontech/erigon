@@ -701,7 +701,7 @@ func shardDispatcher(ctx context.Context) error {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer = grpc.NewServer(opts...)
-	dispatcherServer := &DispatcherServerImpl{}
+	dispatcherServer := NewDispatcherServerImpl()
 	shards.RegisterDispatcherServer(grpcServer, dispatcherServer)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
