@@ -242,7 +242,7 @@ func batchDelete(db ethdb.Database, keys *keysToRemove) error {
 			if !ok {
 				break
 			}
-			err := batch.Delete(bucketKey, key)
+			err := batch.Delete(bucketKey, key, nil)
 			if err != nil {
 				log.Warn("Unable to remove", "bucket", bucketKey, "addr", common.Bytes2Hex(key), "err", err)
 				continue

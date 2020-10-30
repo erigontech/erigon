@@ -625,6 +625,10 @@ func InitHardCodedTips(filename string) map[common.Hash]struct{} {
 	return hardTips
 }
 
+func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]struct{}) {
+	hd.hardTips = hardTips
+}
+
 func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]struct{}) (bool, error) {
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {

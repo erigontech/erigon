@@ -593,7 +593,7 @@ func printAppliedMigrations(db ethdb.Database, _ context.Context) error {
 }
 
 func removeMigration(db rawdb.DatabaseDeleter, _ context.Context) error {
-	if err := db.Delete(dbutils.Migrations, []byte(migration)); err != nil {
+	if err := db.Delete(dbutils.Migrations, []byte(migration), nil); err != nil {
 		return err
 	}
 	return nil

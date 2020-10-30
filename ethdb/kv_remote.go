@@ -338,7 +338,7 @@ func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("n
 func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not supported") }
 func (c *remoteCursor) PutCurrent(key, value []byte) error            { panic("not supported") }
 func (c *remoteCursor) Append(key []byte, value []byte) error         { panic("not supported") }
-func (c *remoteCursor) Delete(key []byte) error                       { panic("not supported") }
+func (c *remoteCursor) Delete(k, v []byte) error                      { panic("not supported") }
 func (c *remoteCursor) DeleteCurrent() error                          { panic("not supported") }
 func (c *remoteCursor) Count() (uint64, error)                        { panic("not supported") }
 func (c *remoteCursor) Reserve(k []byte, n int) ([]byte, error)       { panic("not supported") }

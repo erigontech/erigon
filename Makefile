@@ -7,7 +7,7 @@ ifeq ($(LATEST_COMMIT),)
 LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
 endif
 
-GIT_COMMIT=$(shell git rev-list -1 HEAD)
+GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -22,10 +22,7 @@ endif
 all: tg hack tester rpctest state pics rpcdaemon integration db-tools
 
 docker:
-	docker build -t turbo-geth:latest .
-
-docker-alltools:
-	docker build -t turbo-geth-alltools:latest -f Dockerfile.alltools .
+	docker build -t turbo-geth:latest  --build-arg git_commit='${GIT_COMMIT}' .
 
 docker-compose:
 	docker-compose up
@@ -92,16 +89,16 @@ headers:
 	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
 
 db-tools:
-	$(GOBUILD) -o $(GOBIN)/lmdb_stat  -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
-	$(GOBUILD) -o $(GOBIN)/lmdb_copy  -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
+	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; DESTDIR=$(GOBIN) make clean mdb_stat mdb_copy mdb_dump mdb_load; cd ../../../../..; rm -rf vendor
+	$(GOBUILD) -o $(GOBIN)/lmdbgo_copy -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
+	$(GOBUILD) -o $(GOBIN)/lmdbgo_stat -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
 
 	cd ethdb/mdbx/dist/ && make tools
-	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
+	cp ethdb/mdbx/dist/mdbx_chk $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_copy $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_dump $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_chk $(GOBIN)
-	@echo "Done building."
+	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
 ethdb/mdbx/dist/libmdbx.a:

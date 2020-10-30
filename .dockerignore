@@ -8,4 +8,5 @@ build
 tests/testdata
 debug-web-ui
 cmd/prometheus
-semantics
+
+.git

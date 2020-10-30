@@ -21,7 +21,8 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/ledgerwatch/turbo-geth/cmd/headers/proto"
+	proto_core "github.com/ledgerwatch/turbo-geth/cmd/headers/core"
+	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
@@ -92,7 +93,7 @@ func makeP2PServer(
 	peerTimeMap *sync.Map,
 	peerRwMap *sync.Map,
 	protocols []string,
-	coreClient proto.ControlClient,
+	coreClient proto_core.ControlClient,
 ) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
@@ -175,7 +176,7 @@ func runPeer(
 	genesisHash common.Hash,
 	chainConfig *params.ChainConfig,
 	head uint64,
-	coreClient proto.ControlClient,
+	coreClient proto_core.ControlClient,
 ) error {
 	peerID := peer.ID().String()
 	forkId := forkid.NewID(chainConfig, genesisHash, head)
@@ -273,9 +274,9 @@ func runPeer(
 				}
 			*/
 			log.Info(fmt.Sprintf("[%s] BlockHeadersMsg{%d hashes}", peerID, len(headers)))
-			outreq := proto.InboundMessage{
+			outreq := proto_core.InboundMessage{
 				PeerId: []byte(peerID),
-				Id:     proto.InboundMessageId_BlockHeaders,
+				Id:     proto_core.InboundMessageId_BlockHeaders,
 				Data:   bytes,
 			}
 			if _, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
@@ -335,9 +336,9 @@ func runPeer(
 			}
 			peerHeightMap.Store(peerID, highestBlock)
 			log.Info(fmt.Sprintf("[%s] NewBlockHashesMsg {%s}", peerID, numStr.String()))
-			outreq := proto.InboundMessage{
+			outreq := proto_core.InboundMessage{
 				PeerId: []byte(peerID),
-				Id:     proto.InboundMessageId_NewBlockHashes,
+				Id:     proto_core.InboundMessageId_NewBlockHashes,
 				Data:   bytes,
 			}
 			if _, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
@@ -361,9 +362,9 @@ func runPeer(
 				peerHeightMap.Store(peerID, highestBlock)
 			}
 			log.Info(fmt.Sprintf("[%s] NewBlockMsg{blockNumber: %d}", peerID, blockNum))
-			outreq := proto.InboundMessage{
+			outreq := proto_core.InboundMessage{
 				PeerId: []byte(peerID),
-				Id:     proto.InboundMessageId_NewBlock,
+				Id:     proto_core.InboundMessageId_NewBlock,
 				Data:   bytes,
 			}
 			if _, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
@@ -464,7 +465,7 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string) err
 	}
 	grpcServer = grpc.NewServer(opts...)
 	sentryServer := &SentryServerImpl{}
-	proto.RegisterSentryServer(grpcServer, sentryServer)
+	proto_sentry.RegisterSentryServer(grpcServer, sentryServer)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
 	}
@@ -490,7 +491,7 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string) err
 	if err != nil {
 		return fmt.Errorf("creating client connection to core P2P: %w", err)
 	}
-	coreClient := proto.NewControlClient(conn)
+	coreClient := proto_core.NewControlClient(conn)
 
 	server, err := makeP2PServer(
 		ctx,
@@ -514,13 +515,13 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string) err
 }
 
 type SentryServerImpl struct {
-	proto.UnimplementedSentryServer
+	proto_sentry.UnimplementedSentryServer
 	peerHeightMap sync.Map
 	peerRwMap     sync.Map
 	peerTimeMap   sync.Map
 }
 
-func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto.PenalizePeerRequest) (*empty.Empty, error) {
+func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
 	log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%x", req.GetPeerId()))
 	return nil, nil
 }
@@ -546,46 +547,46 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64, amount uint64) (string, bo
 	return peerID, found
 }
 
-func (ss *SentryServerImpl) getBlockHeaders(inreq *proto.SendMessageByMinBlockRequest) (*proto.SentPeers, error) {
+func (ss *SentryServerImpl) getBlockHeaders(inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	var req eth.GetBlockHeadersData
 	if err := rlp.DecodeBytes(inreq.Data.Data, &req); err != nil {
-		return &proto.SentPeers{}, fmt.Errorf("parse request: %v", err)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("parse request: %v", err)
 	}
 	peerID, found := ss.findPeer(inreq.MinBlock, req.Amount)
 	if !found {
 		log.Debug("Could not find peer for request", "minBlock", inreq.MinBlock)
-		return &proto.SentPeers{}, nil
+		return &proto_sentry.SentPeers{}, nil
 	}
 	log.Info(fmt.Sprintf("Sending req for hash %x, amount %d to peer %s\n", req.Origin.Hash, req.Amount, peerID))
 	rwRaw, _ := ss.peerRwMap.Load(peerID)
 	rw, _ := rwRaw.(p2p.MsgReadWriter)
 	if rw == nil {
-		return &proto.SentPeers{}, fmt.Errorf("find rw for peer %s", peerID)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("find rw for peer %s", peerID)
 	}
 	if err := p2p.Send(rw, eth.GetBlockHeadersMsg, &req); err != nil {
-		return &proto.SentPeers{}, fmt.Errorf("send to peer %s: %v", peerID, err)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("send to peer %s: %v", peerID, err)
 	}
 	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)
-	return &proto.SentPeers{Peers: [][]byte{[]byte(peerID)}}, nil
+	return &proto_sentry.SentPeers{Peers: [][]byte{[]byte(peerID)}}, nil
 }
 
-func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *proto.SendMessageByMinBlockRequest) (*proto.SentPeers, error) {
+func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	switch inreq.Data.Id {
-	case proto.OutboundMessageId_GetBlockHeaders:
+	case proto_sentry.OutboundMessageId_GetBlockHeaders:
 		return ss.getBlockHeaders(inreq)
 	default:
-		return &proto.SentPeers{}, fmt.Errorf("not implemented for message Id: %s", inreq.Data.Id)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("not implemented for message Id: %s", inreq.Data.Id)
 	}
 }
 
-func (ss *SentryServerImpl) SendMessageById(context.Context, *proto.SendMessageByIdRequest) (*proto.SentPeers, error) {
+func (ss *SentryServerImpl) SendMessageById(context.Context, *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
 	return nil, nil
 }
 
-func (ss *SentryServerImpl) SendMessageToRandomPeers(context.Context, *proto.SendMessageToRandomPeersRequest) (*proto.SentPeers, error) {
+func (ss *SentryServerImpl) SendMessageToRandomPeers(context.Context, *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
 	return nil, nil
 }
 
-func (ss *SentryServerImpl) SendMessageToAll(context.Context, *proto.OutboundMessageData) (*proto.SentPeers, error) {
+func (ss *SentryServerImpl) SendMessageToAll(context.Context, *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
 	return nil, nil
 }

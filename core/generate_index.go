@@ -134,7 +134,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 
 	for key, value := range historyEffects {
 		if value == nil {
-			if err := mutation.Delete(vv.IndexBucket, []byte(key)); err != nil {
+			if err := mutation.Delete(vv.IndexBucket, []byte(key), nil); err != nil {
 				return err
 			}
 		} else {

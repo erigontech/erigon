@@ -292,6 +292,10 @@ func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (Tx, error)
 	if flags&RO != 0 {
 		nativeFlags |= mdbx.Readonly
 	}
+	if flags&NoSync != 0 {
+		nativeFlags |= mdbx.TxNoSync
+	}
+
 	var parentTx *mdbx.Txn
 	if parent != nil {
 		parentTx = parent.(*mdbxTx).tx
@@ -1024,7 +1028,7 @@ func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 	return k, v, nil
 }
 
-func (c *MdbxCursor) Delete(key []byte) error {
+func (c *MdbxCursor) Delete(k, v []byte) error {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
 			return err
@@ -1032,10 +1036,21 @@ func (c *MdbxCursor) Delete(key []byte) error {
 	}
 
 	if c.bucketCfg.AutoDupSortKeysConversion {
-		return c.deleteDupSort(key)
+		return c.deleteDupSort(k)
 	}
 
-	_, _, err := c.set(key)
+	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
+		_, _, err := c.getBoth(k, v)
+		if err != nil {
+			if mdbx.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		return c.delCurrent()
+	}
+
+	_, _, err := c.set(k)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil

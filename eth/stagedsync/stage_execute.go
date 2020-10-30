@@ -237,14 +237,14 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 				return err
 			}
 		} else {
-			if err := batch.Delete(stateBucket, []byte(key)[:storageKeyLength]); err != nil {
+			if err := batch.Delete(stateBucket, []byte(key)[:storageKeyLength], nil); err != nil {
 				return err
 			}
 		}
 	}
 
 	if err := stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
-		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket, common.CopyBytes(k)); err1 != nil {
+		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket, common.CopyBytes(k), nil); err1 != nil {
 			return false, fmt.Errorf("%s: delete account changesets: %v", logPrefix, err1)
 		}
 		return true, nil
@@ -252,7 +252,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		return fmt.Errorf("%s: walking account changesets: %v", logPrefix, err)
 	}
 	if err := stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
-		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket, common.CopyBytes(k)); err1 != nil {
+		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket, common.CopyBytes(k), nil); err1 != nil {
 			return false, fmt.Errorf("%s: delete storage changesets: %v", logPrefix, err1)
 		}
 		return true, nil
@@ -321,7 +321,7 @@ func cleanupContractCodeBucket(
 	if got {
 		// clean up all the code incarnations original incarnation and the new one
 		for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-			err = db.Delete(bucket, getKeyForIncarnationFunc(incarnation))
+			err = db.Delete(bucket, getKeyForIncarnationFunc(incarnation), nil)
 			if err != nil {
 				return err
 			}
@@ -354,10 +354,10 @@ func deleteAccountPlain(db rawdb.DatabaseDeleter, key string) error {
 
 func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket string) error {
 	changeSetKey := dbutils.EncodeTimestamp(timestamp)
-	if err := batch.Delete(accountBucket, changeSetKey); err != nil {
+	if err := batch.Delete(accountBucket, changeSetKey, nil); err != nil {
 		return err
 	}
-	if err := batch.Delete(storageBucket, changeSetKey); err != nil {
+	if err := batch.Delete(storageBucket, changeSetKey, nil); err != nil {
 		return err
 	}
 	return nil
