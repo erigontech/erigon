@@ -82,3 +82,47 @@ The function above its used with ETL to extract blockHashes and blockNumber from
 Changes in DB:
 
     * BlockHash => BlockNumber are written in bucket `dbutils.HeaderNumberPrefix`
+
+Stage 3 : Download Block Bodies
+===============================
+
+.. code-block:: go
+
+		{
+			ID: stages.Bodies,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.Bodies,
+					Description: "Download block bodies",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return spawnBodyDownloadStage(s, u, world.d, world.pid, world.prefetchedBlocks)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						return unwindBodyDownloadStage(u, world.db)
+					},
+				}
+			},
+		},
+
+This stage, downloads block bodies and put them into the database. This stage is divided into two processes:
+
+.. code-block:: go
+
+	func (d *Downloader) fetchBodies(from uint64) error
+
+	func (d *Downloader) processBodiesStage(logPrefix string, to uint64) error
+
+`fetchBodies` downloads the bodies from the peer and decode them from RLP format.
+
+`processBodiesStage` takes the bodies downloaded and those the following with them:
+
+	* Verifiy them.
+	* RLP-encode them.
+	* compress the rlp-encoded bodies using `snappy`.
+	* put the commpressed RLP into the database.
+
+in order for turbo-geth to reaccess the block bodies, it decompress the and rlp-decode them. the entries in the db for block bodies are a concatenation of [block number] + [block hash] in order to pre-sort them before inserting them into the database.
+
+Changes in DB:
+
+    * [block number] + [block hash] => Block bodies are written in bucket `dbutils.BlockBodyPrefix`
