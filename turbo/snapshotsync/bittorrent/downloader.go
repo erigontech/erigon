@@ -3,6 +3,7 @@ package bittorrent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
@@ -93,6 +94,7 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotNa
 		}
 
 	case <-ctx.Done():
+		fmt.Println("ctx.done")
 		log.Warn("Init failure", "snapshot", snapshotName, "err", ctx.Err())
 		return errors.New("add torrent timeout")
 	}
@@ -107,16 +109,17 @@ func (cli *Client) AddSnapshotsTorrens(db ethdb.Database, networkId uint64,  mod
 
 	if mode.Headers {
 		eg.Go(func() error {
-			hash,ok:= TorrentHashes[networkId][snapshotsync.HeadersSnapshotName]
+			hash,ok:= TorrentHashes[networkId][snapshotsync.SnapshotType_Headers]
 			if !ok {
 				return ErrInvalidSnapshot
 			}
 			return cli.AddTorrent(ctx, db, snapshotsync.HeadersSnapshotName, hash)
 		})
 	}
+
 	if mode.Bodies {
 		eg.Go(func() error {
-			hash,ok:= TorrentHashes[networkId][snapshotsync.BodiesSnapshotName]
+			hash,ok:= TorrentHashes[networkId][snapshotsync.SnapshotType_Bodies]
 			if !ok {
 				return ErrInvalidSnapshot
 			}
@@ -124,9 +127,10 @@ func (cli *Client) AddSnapshotsTorrens(db ethdb.Database, networkId uint64,  mod
 			return cli.AddTorrent(ctx, db, snapshotsync.BodiesSnapshotName, hash)
 		})
 	}
+
 	if mode.State {
 		eg.Go(func() error {
-			hash,ok:= TorrentHashes[networkId][snapshotsync.StateSnapshotName]
+			hash,ok:= TorrentHashes[networkId][snapshotsync.SnapshotType_State]
 			if !ok {
 				return ErrInvalidSnapshot
 			}
@@ -134,9 +138,10 @@ func (cli *Client) AddSnapshotsTorrens(db ethdb.Database, networkId uint64,  mod
 			return cli.AddTorrent(ctx, db, snapshotsync.StateSnapshotName, hash)
 		})
 	}
+
 	if mode.Receipts {
 		eg.Go(func() error {
-			hash,ok:= TorrentHashes[networkId][snapshotsync.ReceiptsSnapshotName]
+			hash,ok:= TorrentHashes[networkId][snapshotsync.SnapshotType_Receipts]
 			if !ok {
 				return ErrInvalidSnapshot
 			}

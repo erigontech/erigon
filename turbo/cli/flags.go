@@ -61,6 +61,11 @@ var (
 		Usage: `Seed snapshot seeding`,
 	}
 
+	ExternalSnapshotDownloaderAddrFlag = cli.BoolTFlag{
+		Name:  "snapshot.downloader.addr",
+		Usage: `enable external snapshot downloader`,
+	}
+
 	// LMDB flags
 	LMDBMapSizeFlag = cli.StringFlag{
 		Name:  "lmdb.mapSize",
@@ -107,6 +112,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *eth.Config) {
 	}
 	cfg.SnapshotMode = snMode
 	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
+
 
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))

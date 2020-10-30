@@ -133,6 +133,10 @@ type Config struct {
 	SnapshotMode    snapshotsync.SnapshotMode
 	SnapshotSeeding bool
 
+	// Address to connect to external snapshot downloader
+	// empty to use bittorrent
+	ExternalSnapshotDownloaderAddr string
+
 	// DownloadOnly is set when the node does not need to process the blocks, but simply
 	// download them
 	DownloadOnly        bool

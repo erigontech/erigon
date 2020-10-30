@@ -18,6 +18,7 @@
 package eth
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -160,28 +161,47 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	var torrentClient *bittorrent.Client
 	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
-		var dbPath string
-		dbPath, err = stack.Config().ResolvePath("snapshots")
-		if err != nil {
-			return nil, err
-		}
-		torrentClient = bittorrent.New(dbPath, config.SnapshotSeeding)
-		err = torrentClient.AddSnapshotsTorrens(chainDb,config.NetworkID, config.SnapshotMode)
-		if err == nil {
-			torrentClient.Download()
+		if config.ExternalSnapshotDownloaderAddr!="" {
+			opts:=[]grpc.DialOption{
+				grpc.WithInsecure(),
+			}
 
-			snapshotKV := chainDb.KV()
-			snapshotKV, err = snapshotsync.WrapBySnapshots(snapshotKV, dbPath, config.SnapshotMode)
+			conn, err := grpc.Dial(config.ExternalSnapshotDownloaderAddr, opts...)
 			if err != nil {
 				return nil, err
 			}
-			chainDb.SetKV(snapshotKV)
-			err = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
-			if err != nil {
-				return nil, err
-			}
+			defer conn.Close()
+
+			cli:=snapshotsync.NewDownloaderClient(conn)
+			cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
+
+			})
+
+
 		} else {
-			log.Error("There was an error in snapshot init. Swithing to regular sync", "err", err)
+			var dbPath string
+			dbPath, err = stack.Config().ResolvePath("snapshots")
+			if err != nil {
+				return nil, err
+			}
+			torrentClient = bittorrent.New(dbPath, config.SnapshotSeeding)
+			err = torrentClient.AddSnapshotsTorrens(chainDb,config.NetworkID, config.SnapshotMode)
+			if err == nil {
+				torrentClient.Download()
+
+				snapshotKV := chainDb.KV()
+				snapshotKV, err = snapshotsync.WrapBySnapshots(snapshotKV, dbPath, config.SnapshotMode)
+				if err != nil {
+					return nil, err
+				}
+				chainDb.SetKV(snapshotKV)
+				err = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				log.Error("There was an error in snapshot init. Swithing to regular sync", "err", err)
+			}
 		}
 	}
 

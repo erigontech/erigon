@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -34,36 +34,54 @@ func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotsync
 	if !ok {
 		return nil, ErrNotSupportedNetworkID
 	}
-	hash,ok:=m[request.Name]
-	if !ok {
-		return nil, ErrNotSupportedSnapshot
+	var torrents []struct{
+		Type snapshotsync.SnapshotType
+		Hash metainfo.Hash
 	}
-	ctx, cancel:=context.WithTimeout(ctx, 1 * time.Second)
-	defer cancel()
-	err :=  S.t.AddTorrent(ctx, S.db, request.Name, hash)
-	if err!=nil {
-		log.Error("Add torrent failure", "err", err)
-		return nil, err
+	for _,t:=range request.Type {
+		hash,ok:=m[t]
+		if !ok {
+			return nil, ErrNotSupportedSnapshot
+		}
+		torrents = append(torrents, struct {
+			Type snapshotsync.SnapshotType
+			Hash metainfo.Hash
+		}{Type: t, Hash: hash})
 	}
-	//var readiness int32
-	//if t, ok:=S.t.Cli.Torrent(hash); ok && t!=nil {
-	//	readiness = int32(100*(float64(t.BytesCompleted())/float64(t.BytesMissing()+t.BytesCompleted())))
-	//}
+	if len(torrents)==0 {
+		return nil, errors.New("empty snapshot types")
+	}
+	fmt.Println("download")
+	for _,t:=range torrents {
+		ctx, cancel:=context.WithTimeout(context.Background(), 1 * time.Second)
+		defer cancel()
+		err :=  S.t.AddTorrent(ctx, S.db, snapshotsync.SnapshotNames[t.Type], t.Hash)
+		if err!=nil {
+			log.Error("Add torrent failure", "err", err)
+			fmt.Println("download-")
+			return nil, err
+		}
+	}
 	return &empty.Empty{}, nil
 }
 
 func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *empty.Empty) (*snapshotsync.SnapshotsInfoReply, error) {
 	reply:= snapshotsync.SnapshotsInfoReply{}
 	//for _,t:=range S.t.Cli.Torrents() {
-	//	reply.Info=append(reply.Info, &SnapshotsInfoReply_SnapshotsInfo{
+	//	reply.Info=append(reply.Info, &snapshotsync.SnapshotsInfo{
 	//		Name: t.Name(),
 	//		Networkid: 0,
 	//		Downloaded: t.BytesMissing()==0,
 	//		Readiness: int32(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))),
 	//	})
 	//}
-	fmt.Println("---------")
-	spew.Dump(request)
+	//select {
+	//case <-ctx.Done():
+	//	fmt.Println("Snapshots", ctx.Err())
+	//default:
+	//	fmt.Println("Default")
+	//}
+	//
 	return &reply, nil
 }
 

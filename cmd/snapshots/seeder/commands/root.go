@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
@@ -10,6 +11,10 @@ import (
 	"os/signal"
 	"syscall"
 )
+
+func init() {
+	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
+}
 
 func Execute() {
 	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
@@ -48,8 +53,9 @@ var rootCmd = &cobra.Command{
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log.Info("run cmd")
-		return nil
+		return Seed(args[0])
 	},
 }

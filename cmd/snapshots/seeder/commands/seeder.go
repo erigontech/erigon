@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
@@ -13,14 +12,12 @@ import (
 	trnt "github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 )
 
-func Seed(pathes []string) error {
-	if len(pathes) != 1 {
-		return errors.New("you must provide snapshots dir")
-	}
-
+func Seed(datadir string) error {
+	datadir=filepath.Dir(datadir)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	c := make(chan os.Signal, 1)
@@ -36,15 +33,13 @@ func Seed(pathes []string) error {
 	cfg.Seed = true
 	cfg.Debug = false
 	cfg.Logger = cfg.Logger.FilterLevel(lg.Info)
+	cfg.DataDir = datadir
 
-	cfg.DataDir = pathes[0]
-	cfg.DataDir = "/media/b00ris/nvme/snapshots"
-
-	pathes = []string{
+	pathes := []string{
 		cfg.DataDir + "/headers",
 		cfg.DataDir + "/bodies",
-		//cfg.DataDir+"/state/",
-		//cfg.DataDir+"/receipts/",
+		cfg.DataDir+"/state",
+		//cfg.DataDir+"/receipts",
 	}
 
 	//cfg.Logger=cfg.Logger.FilterLevel(trlog.Info)
@@ -82,7 +77,14 @@ func Seed(pathes []string) error {
 		if err != nil {
 			return err
 		}
-
+		f,err:=os.Create(filepath.Join(datadir,info.Name)+".txt")
+		if err != nil {
+			return err
+		}
+		_,err = fmt.Fprint(f, mi.InfoBytes)
+		if err != nil {
+			return err
+		}
 		tt := time.Now()
 		torrents[i], _, err = cl.AddTorrentSpec(&torrent.TorrentSpec{
 			Trackers:  trnt.Trackers,
