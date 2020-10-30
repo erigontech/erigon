@@ -383,7 +383,7 @@ func StringifyAState(st *astate) [][]string {
 		}
 		stacks = append(stacks, stack)
 	}
-
+gbG
 	return stacks
 }
 
