@@ -420,7 +420,7 @@ type CfgMetrics struct {
 	OOM                    bool
 	Timeout                bool
 	MemUsedMBs             uint64
-	Time		           time.Duration
+	Time                   time.Duration
 	Checker                bool
 	CheckerFailed          bool
 	ProofSizeBytes         int
