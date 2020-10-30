@@ -383,7 +383,7 @@ func (proof *CfgProof) getBlock(pc int) *CfgProofBlock {
 }
 
 func StringifyAState(st *astate) [][]string {
-	var stacks [][]string
+	stacks := make([][]string, 0)
 
 	for _, astack := range st.stackset {
 		var stack []string

@@ -351,11 +351,12 @@ func absIntTestSmallInvalidJumpDest() {
 	runCfgAnly("SmallInvalidJumpDest", s)
 }
 
+/*
 func absIntTestSmall00() {
 	const s = "3360601c62c90bc318585733ff"
 	runCfgAnly("Small00", s)
 
-}
+}*/
 
 func absIntTestPanic00() {
 

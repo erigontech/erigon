@@ -776,7 +776,7 @@ func (cfg *Cfg) GenerateProof() *CfgProof {
 		}
 	}
 
-	var entriesList []int
+	entriesList := make([]int, 0)
 	for pc := range entries {
 		entriesList = append(entriesList, pc)
 	}
