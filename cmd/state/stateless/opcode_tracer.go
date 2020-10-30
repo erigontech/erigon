@@ -49,7 +49,7 @@ type tx struct {
 	From        common.Address
 	To          common.Address
 	Input       sliceBytes //ByteSliceAsHex
-	Segments    sliceSegment
+	Bblocks 	sliceBblocks
 	Create      bool
 	Fault       string //a fault set by CaptureEnd
 	OpcodeFault string //a fault set by CaptureState
@@ -62,8 +62,8 @@ type tx struct {
 // types for slices are necessary for easyjson's generated un/marshalers
 type sliceBytes []byte
 type sliceOpcodes []opcode
-type sliceSegment []segment
-type sliceSegmentDump []segmentDump
+type sliceBblocks []bblock
+type sliceBblockDump []bblockDump
 
 //easyjson:json
 type slicePtrTx []*tx
@@ -75,17 +75,17 @@ type opcodeTracer struct {
 	txsInDepth []int16
 
 	saveOpcodes  bool
-	saveSegments bool
+	saveBblocks bool
 	blockNumber  uint64
 }
 
-func NewOpcodeTracer(blockNum uint64, saveOpcodes bool, saveSegments bool) *opcodeTracer {
+func NewOpcodeTracer(blockNum uint64, saveOpcodes bool, saveBblocks bool) *opcodeTracer {
 	res := new(opcodeTracer)
 	res.txsInDepth = make([]int16, 1, 4)
 	res.stack = make([]*tx, 0, 8)
 	res.Txs = make([]*tx, 0, 64)
 	res.saveOpcodes = saveOpcodes
-	res.saveSegments = saveSegments
+	res.saveBblocks = saveBblocks
 	res.blockNumber = blockNum
 	return res
 }
@@ -118,16 +118,16 @@ func max(a int, b int) int {
 	return b
 }
 
-type segment struct {
+type bblock struct {
 	Start uint16
 	End   uint16
 }
 
-type segmentDump struct {
+type bblockDump struct {
 	Tx          *common.Hash
 	TxAddr      *string
 	CodeHash    *common.Hash
-	Segments    *sliceSegment
+	Bblocks     *sliceBblocks
 	OpcodeFault *string
 	Fault       *string
 	Create      bool
@@ -181,16 +181,16 @@ func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t t
 		panic(fmt.Sprintf("End of Tx at d=%d but stack has d=%d and entry has d=%", depth, ls, currentEntry.Depth))
 	}
 
-	// Close the last segment
-	if ot.saveSegments {
-		lseg := len(currentEntry.Segments)
+	// Close the last bblock
+	if ot.saveBblocks {
+		lseg := len(currentEntry.Bblocks)
 		if lseg > 0 {
-			cee := currentEntry.Segments[lseg-1].End
+			cee := currentEntry.Bblocks[lseg-1].End
 			if cee != 0 && cee != currentEntry.lastPc16 {
-				panic(fmt.Sprintf("CaptureEnd wanted to close last segment with %d but already contains %d", currentEntry.lastPc16, cee))
+				panic(fmt.Sprintf("CaptureEnd wanted to close last bblock with %d but already contains %d", currentEntry.lastPc16, cee))
 			}
-			currentEntry.Segments[lseg-1].End = currentEntry.lastPc16
-			//fmt.Fprintf(ot.fsumWriter,"Segment %d ends\n", lseg)
+			currentEntry.Bblocks[lseg-1].End = currentEntry.lastPc16
+			//fmt.Fprintf(ot.fsumWriter,"Bblock %d ends\n", lseg)
 		}
 	}
 
@@ -243,8 +243,8 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 		}
 		//fmt.Fprintf(ot.w, "%sFilled in TxHash\n", strings.Repeat("\t",depth))
 
-		if ot.saveSegments {
-			currentEntry.Segments = make(sliceSegment, 0, 10)
+		if ot.saveBblocks {
+			currentEntry.Bblocks = make(sliceBblocks, 0, 10)
 		}
 	}
 
@@ -308,34 +308,34 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 		}
 	}
 
-	// detect and store segments
-	if ot.saveSegments {
+	// detect and store bblocks
+	if ot.saveBblocks {
 		// PC discontinuities can only happen because of a PUSH (which is followed by the data to be pushed) or a JUMP (which lands into a JUMPDEST)
 		// Therefore, after a PC discontinuity we either have op==JUMPDEST or lastOp==PUSH
-		// Only the JUMPDEST case is a real control flow discontinuity and therefore starts a new segment
+		// Only the JUMPDEST case is a real control flow discontinuity and therefore starts a new bblock
 
-		lseg := len(currentEntry.Segments)
-		isFirstSegment := lseg == 0
+		lseg := len(currentEntry.Bblocks)
+		isFirstBblock := lseg == 0
 		isContinuous := pc16 == currentEntry.lastPc16+1 || currentEntry.lastOp.IsPush()
-		if isFirstSegment || !isContinuous {
-			// Record the end of the past segment, if there is one
-			if !isFirstSegment {
-				//fmt.Fprintf(ot.fsumWriter,"Segment %d ends\n", lseg)
-				currentEntry.Segments[lseg-1].End = currentEntry.lastPc16
+		if isFirstBblock || !isContinuous {
+			// Record the end of the past bblock, if there is one
+			if !isFirstBblock {
+				//fmt.Fprintf(ot.fsumWriter,"Bblock %d ends\n", lseg)
+				currentEntry.Bblocks[lseg-1].End = currentEntry.lastPc16
 				//fmt.Printf("End\t%x\t%s\n", lastPc, lastOp.String())
 			}
-			// Start a new segment
-			// Note that it can happen that a new segment starts with an opcode that triggers an Out Of Gas fault, so it'd be a segment with only 1 opcode (JUMPDEST)
-			// The only case where we want to avoid creating a new segment is if the opcode is repeated, because then it was already in the previous segment
+			// Start a new bblock
+			// Note that it can happen that a new bblock starts with an opcode that triggers an Out Of Gas fault, so it'd be a bblock with only 1 opcode (JUMPDEST)
+			// The only case where we want to avoid creating a new bblock is if the opcode is repeated, because then it was already in the previous bblock
 			if !faultAndRepeated {
-				//fmt.Fprintf(ot.fsumWriter,"Segment %d begins\n", lseg+1)
-				currentEntry.Segments = append(currentEntry.Segments, segment{Start: pc16})
+				//fmt.Fprintf(ot.fsumWriter,"Bblock %d begins\n", lseg+1)
+				currentEntry.Bblocks = append(currentEntry.Bblocks, bblock{Start: pc16})
 				//fmt.Printf("Start\t%x\t%s\n", o.Pc.uint64, o.Op.String())
 
 				//sanity check
-				// we're starting a segment, so either we're in PC=0 or we have OP=JUMPDEST
+				// we're starting a bblock, so either we're in PC=0 or we have OP=JUMPDEST
 				if pc16 != 0 && op.String() != "JUMPDEST" {
-					panic(fmt.Sprintf("Bad segment? lastpc=%x, lastOp=%s; pc=%x, op=%s; bn=%d txaddr=%s tx=%d-%s",
+					panic(fmt.Sprintf("Bad bblock? lastpc=%x, lastOp=%s; pc=%x, op=%s; bn=%d txaddr=%s tx=%d-%s",
 						currentEntry.lastPc16, currentEntry.lastOp.String(), pc, op.String(), ot.blockNumber, currentEntry.TxAddr, currentEntry.Depth, currentEntry.TxHash.String()))
 				}
 			}
@@ -384,7 +384,7 @@ type segPrefix struct {
 // OpcodeTracer re-executes historical transactions in read-only mode
 // and traces them at the opcode level
 func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numBlocks uint64,
-	saveOpcodes bool, saveSegments bool) error {
+	saveOpcodes bool, saveBblocks bool) error {
 	blockNumOrig := blockNum
 
 	startTime := time.Now()
@@ -397,7 +397,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		interruptCh <- true
 	}()
 
-	ot := NewOpcodeTracer(blockNum, saveOpcodes, saveSegments)
+	ot := NewOpcodeTracer(blockNum, saveOpcodes, saveBblocks)
 
 	chainDb := ethdb.MustOpen(chaindata)
 	defer chainDb.Close()
@@ -470,10 +470,10 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		}()
 	}
 
-	var chanSegDump chan segmentDump
+	var chanSegDump chan bblockDump
 	var chanSegPrefix chan segPrefix
-	if saveSegments {
-		chanSegDump = make(chan segmentDump, 1024)
+	if saveBblocks {
+		chanSegDump = make(chan bblockDump, 1024)
 		defer close(chanSegDump)
 		chanSegPrefix = make(chan segPrefix, 1024)
 		defer close(chanSegPrefix)
@@ -497,7 +497,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 				}
 
 				if f == nil {
-					f, err = os.Create("./segments-" + bnStr + ".json")
+					f, err = os.Create("./bblocks-" + bnStr + ".json")
 					check(err)
 					fWriter = bufio.NewWriter(f)
 					fwEnc = json.NewEncoder(fWriter)
@@ -529,7 +529,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			lsp := len(chanSegPrefix)
 			lsd := len(chanSegDump)
 			if lsp > 0 || lsd > 0 {
-				panic(fmt.Sprintf("Segment channels not empty at the end: sp=%d sd=%d", lsp, lsd))
+				panic(fmt.Sprintf("Bblock channels not empty at the end: sp=%d sd=%d", lsp, lsd))
 			}
 		}()
 	}
@@ -565,18 +565,18 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		}
 
 		// go through the traces and act on them
-		if saveSegments {
+		if saveBblocks {
 			sp := segPrefix{blockNum, uint(len(ot.Txs))}
 			chanSegPrefix <- sp
 		}
-		chanSegmentsIsBlocking := false
+		chanBblocksIsBlocking := false
 		for i := range ot.Txs {
 			t := ot.Txs[i]
 
-			if saveSegments {
-				sd := segmentDump{t.TxHash, &t.TxAddr, t.CodeHash, &t.Segments, &t.OpcodeFault, &t.Fault, t.Create, t.CodeSize}
+			if saveBblocks {
+				sd := bblockDump{t.TxHash, &t.TxAddr, t.CodeHash, &t.Bblocks, &t.OpcodeFault, &t.Fault, t.Create, t.CodeSize}
 				//fsegEnc.Encode(sd)
-				chanSegmentsIsBlocking = len(chanSegDump) == cap(chanSegDump)-1
+				chanBblocksIsBlocking = len(chanSegDump) == cap(chanSegDump)-1
 				chanSegDump <- sd
 			}
 
@@ -624,8 +624,8 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			}
 			fmt.Fprintf(ot.fsumWriter, "Tx FAULT\tb=%d opF=%s\tTxF=%s\ttaddr=%s\ttx=%s\n", blockNum, t.OpcodeFault, t.Fault, t.TxAddr, ths)
 		}
-		if chanSegmentsIsBlocking {
-			log.Debug("Channel for segments got full and caused some blocking", "block", blockNum)
+		if chanBblocksIsBlocking {
+			log.Debug("Channel for bblocks got full and caused some blocking", "block", blockNum)
 		}
 
 		if saveOpcodes {
