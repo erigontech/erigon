@@ -49,7 +49,7 @@ type tx struct {
 	From        common.Address
 	To          common.Address
 	Input       sliceBytes //ByteSliceAsHex
-	Bblocks 	sliceBblocks
+	Bblocks     sliceBblocks
 	Create      bool
 	Fault       string //a fault set by CaptureEnd
 	OpcodeFault string //a fault set by CaptureState
@@ -74,9 +74,9 @@ type opcodeTracer struct {
 	stack      slicePtrTx
 	txsInDepth []int16
 
-	saveOpcodes  bool
+	saveOpcodes bool
 	saveBblocks bool
-	blockNumber  uint64
+	blockNumber uint64
 }
 
 func NewOpcodeTracer(blockNum uint64, saveOpcodes bool, saveBblocks bool) *opcodeTracer {
