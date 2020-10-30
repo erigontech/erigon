@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -1036,10 +1035,10 @@ func (c *MdbxCursor) Delete(k, v []byte) error {
 		return c.deleteDupSort(k)
 	}
 
-	if c.bucketCfg.Flags&lmdb.DupSort != 0 {
+	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
 		_, _, err := c.getBoth(k, v)
 		if err != nil {
-			if lmdb.IsNotFound(err) {
+			if mdbx.IsNotFound(err) {
 				return nil
 			}
 			return err
@@ -1049,7 +1048,7 @@ func (c *MdbxCursor) Delete(k, v []byte) error {
 
 	_, _, err := c.set(k)
 	if err != nil {
-		if lmdb.IsNotFound(err) {
+		if mdbx.IsNotFound(err) {
 			return nil
 		}
 		return err
