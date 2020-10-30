@@ -42,28 +42,27 @@ type opcode struct {
 type RetStackTop []uint32
 
 type tx struct {
-	TxHash      *common.Hash
-	Depth       int
-	TxAddr      string
-	CodeHash    *common.Hash
 	From        common.Address
 	To          common.Address
+	TxHash      *common.Hash
+	CodeHash    *common.Hash
+	Opcodes     sliceOpcodes
 	Input       sliceBytes //ByteSliceAsHex
 	Bblocks     sliceBblocks
-	Create      bool
 	Fault       string //a fault set by CaptureEnd
 	OpcodeFault string //a fault set by CaptureState
-	Opcodes     sliceOpcodes
+	TxAddr      string
 	CodeSize    int
+	Depth       int
 	lastPc16    uint16
 	lastOp      vm.OpCode
+	Create      bool
 }
 
 // types for slices are necessary for easyjson's generated un/marshalers
 type sliceBytes []byte
 type sliceOpcodes []opcode
 type sliceBblocks []bblock
-type sliceBblockDump []bblockDump
 
 //easyjson:json
 type slicePtrTx []*tx
@@ -102,20 +101,6 @@ func resetOpcodeTracer(ot *opcodeTracer) {
 	ot.Txs = make([]*tx, 0, 64)
 	// reset the counter of Txs at depth 0
 	ot.txsInDepth[0] = 0
-}
-
-func min(a int, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a int, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 type bblock struct {
@@ -178,7 +163,7 @@ func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t t
 
 	// sanity check: depth of stack == depth reported by system
 	if ls-1 != depth || depth != currentEntry.Depth {
-		panic(fmt.Sprintf("End of Tx at d=%d but stack has d=%d and entry has d=%", depth, ls, currentEntry.Depth))
+		panic(fmt.Sprintf("End of Tx at d=%d but stack has d=%d and entry has d=%d", depth, ls, currentEntry.Depth))
 	}
 
 	// Close the last bblock
@@ -268,7 +253,7 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	if lrs > 0 {
 		fmt.Fprintf(ot.fsumWriter, "RStack used in b=%d, tx=%s, txaddr=%s", ot.blockNumber, currentEntry.TxHash, currentEntry.TxAddr)
 		//fmt.Printf("RStack used in b=%d, tx=%s, txaddr=%s", ot.blockNumber, currentEntry.TxHash, currentEntry.TxAddr)
-		retStackTop = make([]uint32, lrs, lrs)
+		retStackTop = make([]uint32, lrs)
 		copy(retStackTop, retst.Data())
 	}
 
@@ -366,16 +351,6 @@ func (ot *opcodeTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
-func stackAsString(st *stack.Stack) (str string) {
-	if l := st.Len(); l > 0 {
-		str = fmt.Sprintf("%d:", l)
-		for i := 0; i < l; i++ {
-			str += fmt.Sprintf("%x ", st.Back(i))
-		}
-	}
-	return str
-}
-
 type segPrefix struct {
 	BlockNum uint64
 	NumTxs   uint
@@ -432,7 +407,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			var fops *os.File
 			var fopsWriter *bufio.Writer
 			var fopsEnc *gob.Encoder
-			var err error
+			var e error
 
 			for blockTxs := range chanOpcodes {
 				bn := blockTxs.BlockNum
@@ -445,14 +420,14 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 				}
 
 				if fops == nil {
-					fops, err = os.Create("./opcodes-" + bnStr)
-					check(err)
+					fops, e = os.Create("./opcodes-" + bnStr)
+					check(e)
 					fopsWriter = bufio.NewWriter(fops)
 					fopsEnc = gob.NewEncoder(fopsWriter)
 				}
 
-				err = fopsEnc.Encode(blockTxs)
-				check(err)
+				e = fopsEnc.Encode(blockTxs)
+				check(e)
 
 			}
 
@@ -482,45 +457,45 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			var f *os.File
 			var fWriter *bufio.Writer
 			var fwEnc *json.Encoder
-			var err error
+			var e error
 
 			for sp := range chanSegPrefix {
 				bn := sp.BlockNum
 				bnStr := strconv.Itoa(int(bn))
 
 				if f != nil && bn%1000 == 0 {
-					_, err = fWriter.WriteString("\n}")
-					check(err)
+					_, e = fWriter.WriteString("\n}")
+					check(e)
 					fWriter.Flush()
 					f.Close()
 					f = nil
 				}
 
 				if f == nil {
-					f, err = os.Create("./bblocks-" + bnStr + ".json")
-					check(err)
+					f, e = os.Create("./bblocks-" + bnStr + ".json")
+					check(e)
 					fWriter = bufio.NewWriter(f)
 					fwEnc = json.NewEncoder(fWriter)
 				}
 
-				_, err = fWriter.WriteString(",\n\"" + bnStr + "\":[\n")
-				check(err)
+				_, e = fWriter.WriteString(",\n\"" + bnStr + "\":[\n")
+				check(e)
 				for i := uint(0); i < sp.NumTxs; i++ {
 					if i != 0 {
-						_, err = fWriter.WriteString(",")
-						check(err)
+						_, e = fWriter.WriteString(",")
+						check(e)
 					}
 					sd := <-chanSegDump
-					err = fwEnc.Encode(sd)
-					check(err)
+					e = fwEnc.Encode(sd)
+					check(e)
 				}
-				_, err = fWriter.WriteString("]")
-				check(err)
+				_, e = fWriter.WriteString("]")
+				check(e)
 			}
 
 			if fWriter != nil {
-				_, err = fWriter.WriteString("\n}")
-				check(err)
+				_, e = fWriter.WriteString("\n}")
+				check(e)
 				fWriter.Flush()
 				f.Close()
 				f = nil
