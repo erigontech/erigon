@@ -2,15 +2,13 @@ syntax = "proto3";
 
 import "google/protobuf/empty.proto";
 
-package proto;
+package control;
 
-option go_package = "./proto;proto";
-option java_multiple_files = true;
-option java_package = "io.turbo-geth.p2p";
-option java_outer_classname = "P2pControl";
+option go_package = "./core;core";
 
 enum InboundMessageId {
   NewBlockHashes = 0; BlockHeaders = 1; BlockBodies = 2; NewBlock = 3;
+  NodeData = 4;
 }
 
 message InboundMessage {
@@ -21,8 +19,7 @@ message InboundMessage {
 
 message Forks {
   bytes genesis = 1;
-  repeated uint64 passed = 2;
-  uint64 next = 3;
+  repeated uint64 forks = 2;
 }
 
 message StatusData {

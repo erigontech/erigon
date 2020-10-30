@@ -7,7 +7,7 @@ ifeq ($(LATEST_COMMIT),)
 LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
 endif
 
-GIT_COMMIT=$(shell git rev-list -1 HEAD)
+GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -22,10 +22,7 @@ endif
 all: tg hack tester rpctest state pics rpcdaemon integration db-tools
 
 docker:
-	docker build -t turbo-geth:latest .
-
-docker-alltools:
-	docker build -t turbo-geth-alltools:latest -f Dockerfile.alltools .
+	docker build -t turbo-geth:latest  --build-arg git_commit='${GIT_COMMIT}' .
 
 docker-compose:
 	docker-compose up
