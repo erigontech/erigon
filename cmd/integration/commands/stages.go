@@ -764,7 +764,7 @@ func (ds *DispatcherServerImpl) StartDispatch(connection shards.Dispatcher_Start
 		broadcastList := ds.makeBroadcastList(connID)
 		for _, conn := range broadcastList {
 			if err := conn.Send(stateRead); err != nil {
-				return fmt.Errorf("could not send broadcast", "for connection", connID, "error", err)
+				return fmt.Errorf("could not send broadcas for connection id %d: %w", connID, err)
 			}
 		}
 	}

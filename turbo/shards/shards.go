@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/holiman/uint256"
@@ -78,21 +79,39 @@ func (s *Shard) GetBlockNr() uint64 {
 	return s.blockNr
 }
 
+func (s *Shard) isMyShard(firstByte byte) bool {
+	return (firstByte >> (8 - s.shardBits)) == s.shardID
+}
+
 func (s *Shard) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	var enc []byte
 	var ok bool
-	if s.accountCache != nil {
-		enc, ok = s.accountCache.HasGet(nil, address[:])
-	}
-	if !ok {
-		var err error
-		enc, err = state.GetAsOf(s.tx, false /* storage */, address[:], s.blockNr+1)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return nil, err
+	if !s.isMyShard(address[0]) {
+		stateRead, err := s.client.Recv()
+		if err != nil {
+			return nil, fmt.Errorf("reading remote state for ReadAccountData %x: %w", address, err)
 		}
-	}
-	if !ok && s.accountCache != nil {
-		s.accountCache.Set(address[:], enc)
+		if !bytes.Equal(stateRead.K, address.Bytes()) {
+			return nil, fmt.Errorf("read mismatched key, expected %x, got %x", address, stateRead.K)
+		}
+		enc = stateRead.V
+	} else {
+		if s.accountCache != nil {
+			enc, ok = s.accountCache.HasGet(nil, address[:])
+		}
+		if !ok {
+			var err error
+			enc, err = state.GetAsOf(s.tx, false /* storage */, address[:], s.blockNr+1)
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return nil, err
+			}
+		}
+		if !ok && s.accountCache != nil {
+			s.accountCache.Set(address[:], enc)
+		}
+		if err := s.client.Send(&StateRead{K: address.Bytes(), V: enc}); err != nil {
+			return nil, fmt.Errorf("sending remove state for ReadAccountData %x: %w", address, err)
+		}
 	}
 	if len(enc) == 0 {
 		return nil, nil
@@ -116,17 +135,34 @@ func (s *Shard) ReadAccountData(address common.Address) (*accounts.Account, erro
 
 func (s *Shard) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
-	if s.storageCache != nil {
-		if enc, ok := s.storageCache.HasGet(nil, compositeKey); ok {
-			return enc, nil
+	var enc []byte
+	var ok bool
+	if !s.isMyShard(address[0]) {
+		stateRead, err := s.client.Recv()
+		if err != nil {
+			return nil, fmt.Errorf("reading remote state for ReadAccountStorage %d: %w", compositeKey, err)
 		}
-	}
-	enc, err := state.GetAsOf(s.tx, true /* storage */, compositeKey, s.blockNr+1)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		return nil, err
-	}
-	if s.storageCache != nil {
-		s.storageCache.Set(compositeKey, enc)
+		if !bytes.Equal(stateRead.K, compositeKey) {
+			return nil, fmt.Errorf("read mismatched key, expected %x, got %x", compositeKey, stateRead.K)
+		}
+		enc = stateRead.V
+	} else {
+		if s.storageCache != nil {
+			enc, ok = s.storageCache.HasGet(nil, compositeKey)
+		}
+		if !ok {
+			var err error
+			enc, err = state.GetAsOf(s.tx, true /* storage */, compositeKey, s.blockNr+1)
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return nil, err
+			}
+		}
+		if !ok && s.storageCache != nil {
+			s.storageCache.Set(compositeKey, enc)
+		}
+		if err := s.client.Send(&StateRead{K: compositeKey, V: enc}); err != nil {
+			return nil, fmt.Errorf("sending remove state for ReadAccountStorage %x: %w", compositeKey, err)
+		}
 	}
 	if len(enc) == 0 {
 		return nil, nil
@@ -138,42 +174,82 @@ func (s *Shard) ReadAccountCode(address common.Address, codeHash common.Hash) ([
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	if s.codeCache != nil {
-		if code, ok := s.codeCache.HasGet(nil, address[:]); ok {
-			return code, nil
+	var code []byte
+	var ok bool
+	if !s.isMyShard(address[0]) {
+		stateRead, err := s.client.Recv()
+		if err != nil {
+			return nil, fmt.Errorf("reading remote state for ReadAccountCode %x: %w", address, err)
+		}
+		if !bytes.Equal(stateRead.K, address.Bytes()) {
+			return nil, fmt.Errorf("read mismatched key, expected %x, got %x", address, stateRead.K)
+		}
+		code = stateRead.V
+	} else {
+		if s.codeCache != nil {
+			code, ok = s.codeCache.HasGet(nil, address[:])
+		}
+		if !ok {
+			var err error
+			code, err = ethdb.Get(s.tx, dbutils.CodeBucket, codeHash[:])
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return nil, err
+			}
+		}
+		if !ok && s.codeCache != nil && len(code) <= 1024 {
+			s.codeCache.Set(address[:], code)
+		}
+		if !ok && s.codeSizeCache != nil {
+			var b [4]byte
+			binary.BigEndian.PutUint32(b[:], uint32(len(code)))
+			s.codeSizeCache.Set(address[:], b[:])
+		}
+		if err := s.client.Send(&StateRead{K: address.Bytes(), V: code}); err != nil {
+			return nil, fmt.Errorf("sending remove state for ReadAccountCode %x: %w", address, err)
 		}
 	}
-	code, err := ethdb.Get(s.tx, dbutils.CodeBucket, codeHash[:])
-	if s.codeCache != nil && len(code) <= 1024 {
-		s.codeCache.Set(address[:], code)
-	}
-	if s.codeSizeCache != nil {
-		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
-		s.codeSizeCache.Set(address[:], b[:])
-	}
-	return code, err
+	return code, nil
 }
 
 func (s *Shard) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return 0, nil
 	}
-	if s.codeSizeCache != nil {
-		if b, ok := s.codeSizeCache.HasGet(nil, address[:]); ok {
-			return int(binary.BigEndian.Uint32(b)), nil
+	var size int
+	var ok bool
+	if !s.isMyShard(address[0]) {
+		stateRead, err := s.client.Recv()
+		if err != nil {
+			return 0, fmt.Errorf("reading remote state for ReadAccountCodeSize %x: %w", address, err)
+		}
+		if !bytes.Equal(stateRead.K, address.Bytes()) {
+			return 0, fmt.Errorf("read mismatched key, expected %x, got %x", address, stateRead.K)
+		}
+		size = int(binary.BigEndian.Uint32(stateRead.V))
+	} else {
+		if s.codeSizeCache != nil {
+			var b []byte
+			if b, ok = s.codeSizeCache.HasGet(nil, address[:]); ok {
+				size = int(binary.BigEndian.Uint32(b))
+			}
+		}
+		if !ok {
+			code, err := ethdb.Get(s.tx, dbutils.CodeBucket, codeHash[:])
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				return 0, err
+			}
+			size = len(code)
+		}
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], uint32(size))
+		if !ok && s.codeSizeCache != nil {
+			s.codeSizeCache.Set(address[:], b[:])
+		}
+		if err := s.client.Send(&StateRead{K: address.Bytes(), V: b[:]}); err != nil {
+			return 0, fmt.Errorf("sending remove state for ReadAccountCodeSize %x: %w", address, err)
 		}
 	}
-	code, err := ethdb.Get(s.tx, dbutils.CodeBucket, codeHash[:])
-	if err != nil {
-		return 0, err
-	}
-	if s.codeSizeCache != nil {
-		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
-		s.codeSizeCache.Set(address[:], b[:])
-	}
-	return len(code), nil
+	return size, nil
 }
 
 func (s *Shard) ReadAccountIncarnation(address common.Address) (uint64, error) {
@@ -195,15 +271,21 @@ func (s *Shard) ReadAccountIncarnation(address common.Address) (uint64, error) {
 }
 
 func (s *Shard) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	value := make([]byte, account.EncodingLengthForStorage())
-	account.EncodeForStorage(value)
+	if !s.isMyShard(address[0]) {
+		return nil
+	}
 	if s.accountCache != nil {
+		value := make([]byte, account.EncodingLengthForStorage())
+		account.EncodeForStorage(value)
 		s.accountCache.Set(address[:], value)
 	}
 	return nil
 }
 
 func (s *Shard) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	if !s.isMyShard(address[0]) {
+		return nil
+	}
 	if s.codeCache != nil {
 		if len(code) <= 1024 {
 			s.codeCache.Set(address[:], code)
@@ -220,6 +302,9 @@ func (s *Shard) UpdateAccountCode(address common.Address, incarnation uint64, co
 }
 
 func (s *Shard) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
+	if !s.isMyShard(address[0]) {
+		return nil
+	}
 	if s.accountCache != nil {
 		s.accountCache.Set(address[:], nil)
 	}
@@ -238,7 +323,9 @@ func (s *Shard) WriteAccountStorage(ctx context.Context, address common.Address,
 	if *original == *value {
 		return nil
 	}
-
+	if !s.isMyShard(address[0]) {
+		return nil
+	}
 	if s.storageCache != nil {
 		compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 		s.storageCache.Set(compositeKey, value.Bytes())
