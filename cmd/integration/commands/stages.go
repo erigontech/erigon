@@ -562,6 +562,7 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, tmpdir, ch,
 		stagedsync.CallTracesStageParams{
 			AccessBuilder: accessBuilder,
+			PresetChanges: accessBuilder == nil,
 		}); err != nil {
 		return err
 	}

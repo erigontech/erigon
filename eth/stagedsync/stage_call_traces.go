@@ -39,6 +39,7 @@ type StateAccessBuilder func(db ethdb.Database, blockNumber uint64,
 type CallTracesStageParams struct {
 	ToBlock       uint64 // not setting this params means no limit
 	AccessBuilder StateAccessBuilder
+	PresetChanges bool // Whether to use changesets to pre-set values in the cache
 }
 
 func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
@@ -116,16 +117,20 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	}
 
 	prev := startBlock
-	accountCsKey, accountCsVal, errAcc := accountChangesCursor.Seek(dbutils.EncodeTimestamp(startBlock))
-	if errAcc != nil {
-		return fmt.Errorf("%s: seeking in account changeset cursor: %v", logPrefix, errAcc)
+	var accountCsKey, accountCsVal []byte
+	var errAcc error
+	var storageCsKey, storageCsVal []byte
+	var errSt error
+	if params.PresetChanges {
+		accountCsKey, accountCsVal, errAcc = accountChangesCursor.Seek(dbutils.EncodeTimestamp(startBlock))
+		if errAcc != nil {
+			return fmt.Errorf("%s: seeking in account changeset cursor: %v", logPrefix, errAcc)
+		}
+		storageCsKey, storageCsVal, errSt = storageChangesCursor.Seek(dbutils.EncodeTimestamp(startBlock))
+		if errSt != nil {
+			return fmt.Errorf("%s: seeking in storage changeset cursor: %v", logPrefix, errSt)
+		}
 	}
-	accountsPreset := 0
-	storageCsKey, storageCsVal, errSt := storageChangesCursor.Seek(dbutils.EncodeTimestamp(startBlock))
-	if errSt != nil {
-		return fmt.Errorf("%s: seeking in storage changeset cursor: %v", logPrefix, errSt)
-	}
-	storagePreset := 0
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
 			return err
@@ -149,13 +154,9 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, dbutils.CallFromIndex, common.StorageSize(sz), dbutils.CallToIndex, common.StorageSize(sz2),
 				"blk/second", speed,
-				"accounts preset", accountsPreset,
-				"storage preset", storagePreset,
 				"alloc", common.StorageSize(m.Alloc),
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
-			accountsPreset = 0
-			storagePreset = 0
 		case <-checkFlushEvery.C:
 			if needFlush(froms, callIndicesMemLimit) {
 				if err := flushBitmaps(collectorFrom, froms); err != nil {
@@ -184,49 +185,6 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
-		if accountCsKey != nil {
-			accountCsBlockNum, _ := dbutils.DecodeTimestamp(accountCsKey)
-			if accountCsBlockNum == blockNum {
-				cs := changeset.AccountChangeSetPlainBytes(accountCsVal)
-				accountCsKey, accountCsVal, errAcc = accountChangesCursor.Next()
-				if errAcc != nil {
-					return fmt.Errorf("%s: seeking in account changeset cursor: %v", logPrefix, errAcc)
-				}
-				if errAcc = cs.Walk(func(k, v []byte) error {
-					if len(v) == 0 {
-						//accountCache.Set(k, nil)
-					} else {
-						//accountCache.Set(k, v)
-					}
-					accountsPreset++
-					return nil
-				}); errAcc != nil {
-					return fmt.Errorf("%s: walking in account changeset: %v", logPrefix, errAcc)
-				}
-			}
-		}
-		if storageCsKey != nil {
-			storageCsBlockNum, _ := dbutils.DecodeTimestamp(storageCsKey)
-			if storageCsBlockNum == blockNum {
-				cs := changeset.StorageChangeSetPlainBytes(storageCsVal)
-				storageCsKey, storageCsVal, errSt = storageChangesCursor.Next()
-				if errSt != nil {
-					return fmt.Errorf("%s: seeking in storage changeset cursor: %v", logPrefix, errSt)
-				}
-				if errSt = cs.Walk(func(k, v []byte) error {
-					if len(v) == 0 {
-						//storageCache.Set(k, nil)
-					} else {
-						//storageCache.Set(k, v)
-					}
-					storagePreset++
-					return nil
-				}); errSt != nil {
-					return fmt.Errorf("%s: walking in storage changeset: %v", logPrefix, errSt)
-				}
-			}
-		}
-
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
 		if params.AccessBuilder != nil {
@@ -248,6 +206,46 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			}
 			stateReader = reader
 			stateWriter = writer
+		}
+		if params.PresetChanges && accountCsKey != nil {
+			accountCsBlockNum, _ := dbutils.DecodeTimestamp(accountCsKey)
+			if accountCsBlockNum == blockNum {
+				cs := changeset.AccountChangeSetPlainBytes(accountCsVal)
+				accountCsKey, accountCsVal, errAcc = accountChangesCursor.Next()
+				if errAcc != nil {
+					return fmt.Errorf("%s: seeking in account changeset cursor: %v", logPrefix, errAcc)
+				}
+				if errAcc = cs.Walk(func(k, v []byte) error {
+					if len(v) == 0 {
+						accountCache.Set(k, nil)
+					} else {
+						accountCache.Set(k, v)
+					}
+					return nil
+				}); errAcc != nil {
+					return fmt.Errorf("%s: walking in account changeset: %v", logPrefix, errAcc)
+				}
+			}
+		}
+		if params.PresetChanges && storageCsKey != nil {
+			storageCsBlockNum, _ := dbutils.DecodeTimestamp(storageCsKey)
+			if storageCsBlockNum == blockNum {
+				cs := changeset.StorageChangeSetPlainBytes(storageCsVal)
+				storageCsKey, storageCsVal, errSt = storageChangesCursor.Next()
+				if errSt != nil {
+					return fmt.Errorf("%s: seeking in storage changeset cursor: %v", logPrefix, errSt)
+				}
+				if errSt = cs.Walk(func(k, v []byte) error {
+					if len(v) == 0 {
+						storageCache.Set(k, nil)
+					} else {
+						storageCache.Set(k, v)
+					}
+					return nil
+				}); errSt != nil {
+					return fmt.Errorf("%s: walking in storage changeset: %v", logPrefix, errSt)
+				}
+			}
 		}
 
 		tracer := NewCallTracer()
