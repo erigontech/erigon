@@ -982,7 +982,7 @@ func (hd *HeaderDownload) childTipValid(child *types.Header, tipHash common.Hash
 
 func (hd *HeaderDownload) HasTip(tipHash common.Hash) bool {
 	hd.lock.RLock()
-	hd.lock.RUnlock()
+	defer hd.lock.RUnlock()
 	if _, ok := hd.getTip(tipHash); ok {
 		return true
 	}
