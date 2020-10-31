@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -56,6 +57,7 @@ type Anchor struct {
 	powDepth     int
 	tipQueue     *AnchorTipQueue
 	difficulty   uint256.Int
+	parentHash   common.Hash
 	hash         common.Hash
 	blockHeight  uint64
 	timestamp    uint64
@@ -127,9 +129,12 @@ type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
 type HeaderDownload struct {
+	lock                   sync.RWMutex
 	buffer                 []byte
+	anotherBuffer          []byte
 	bufferLimit            int
 	filesDir               string
+	files                  []string
 	anchorSequence         uint32 // Sequence number to be used for recording anchors next time the buffer is flushed
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
@@ -147,6 +152,9 @@ type HeaderDownload struct {
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
 	RequestQueueTimer      *time.Timer
+	initialHash            common.Hash
+	stageReady             bool
+	stageReadyCh           chan struct{}
 }
 
 type TipQueueItem struct {
@@ -187,13 +195,16 @@ func (rq *RequestQueue) Pop() interface{} {
 	return x
 }
 
-func NewHeaderDownload(filesDir string,
+func NewHeaderDownload(
+	initialHash common.Hash,
+	filesDir string,
 	bufferLimit, tipLimit, initPowDepth int,
 	calcDifficultyFunc CalcDifficultyFunc,
 	verifySealFunc VerifySealFunc,
 	newAnchorFutureLimit, newAnchorPastLimit uint64,
 ) *HeaderDownload {
 	hd := &HeaderDownload{
+		initialHash:          initialHash,
 		filesDir:             filesDir,
 		bufferLimit:          bufferLimit,
 		badHeaders:           make(map[common.Hash]struct{}),
@@ -208,6 +219,7 @@ func NewHeaderDownload(filesDir string,
 		newAnchorPastLimit:   newAnchorPastLimit,
 		hardTips:             make(map[common.Hash]struct{}),
 		tips:                 make(map[common.Hash]*Tip),
+		stageReadyCh:         make(chan struct{}),
 	}
 	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd

@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"runtime"
-	"sync"
 	"syscall"
 	"time"
 
@@ -100,9 +99,6 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			} else {
 				hd.AddSegmentToBuffer(segment, start, end)
 				log.Info("Extended Up", "start", start, "end", end)
-			}
-			if start == 0 || end > 0 {
-				hd.CheckInitiation(segment, params.MainnetGenesisHash)
 			}
 		}
 	} else {
@@ -201,7 +197,6 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 
 type ControlServerImpl struct {
 	proto_core.UnimplementedControlServer
-	hdLock        sync.Mutex
 	hd            *headerdownload.HeaderDownload
 	sentryClient  proto_sentry.SentryClient
 	requestWakeUp chan struct{}
@@ -225,6 +220,7 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto_sentry
 		return engine.VerifySeal(cr, header)
 	}
 	hd := headerdownload.NewHeaderDownload(
+		common.Hash{}, /* initialHash */
 		filesDir,
 		bufferSize, /* bufferLimit */
 		16*1024,    /* tipLimit */
@@ -270,8 +266,6 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto_sentry
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
-	cs.hdLock.Lock()
-	defer cs.hdLock.Unlock()
 	var request eth.NewBlockHashesData
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode NewBlockHashes: %v", err)
@@ -305,8 +299,6 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_co
 }
 
 func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
-	cs.hdLock.Lock()
-	defer cs.hdLock.Unlock()
 	var request []*types.Header
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode BlockHeaders: %v", err)
@@ -333,8 +325,6 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_core
 }
 
 func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
-	cs.hdLock.Lock()
-	defer cs.hdLock.Unlock()
 	var request eth.NewBlockData
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode NewBlockMsg: %v", err)
@@ -410,11 +400,7 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 }
 
 func (cs *ControlServerImpl) loop(ctx context.Context) {
-	var timer *time.Timer
-	cs.hdLock.Lock()
-	reqs := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-	timer = cs.hd.RequestQueueTimer
-	cs.hdLock.Unlock()
+	reqs, timer := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
 	cs.sendRequests(ctx, reqs)
 	for {
 		select {
@@ -425,10 +411,7 @@ func (cs *ControlServerImpl) loop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		}
-		cs.hdLock.Lock()
-		reqs := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-		timer = cs.hd.RequestQueueTimer
-		cs.hdLock.Unlock()
+		reqs, timer = cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
 		cs.sendRequests(ctx, reqs)
 	}
 }
