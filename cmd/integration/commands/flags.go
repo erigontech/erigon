@@ -102,6 +102,7 @@ func withDispatcher(cmd *cobra.Command) {
 }
 
 func withShard(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&dispatcherAddr, "dispatcher_addr", "", "address of shard dispatcher")
 	cmd.Flags().IntVar(&shardBits, "shard_bits", 2, "number of bits in the key used to derive shardID")
 	cmd.Flags().IntVar(&shardID, "shard_id", 0, "shard ID")
 }

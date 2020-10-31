@@ -302,7 +302,6 @@ func init() {
 	withBlock(cmdCallTraces)
 	withUnwind(cmdCallTraces)
 	withDatadir(cmdCallTraces)
-	withDispatcher(cmdCallTraces)
 	withShard(cmdCallTraces)
 
 	rootCmd.AddCommand(cmdCallTraces)
