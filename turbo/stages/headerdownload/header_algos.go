@@ -677,47 +677,37 @@ func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]struct{}) {
 	hd.hardTips = hardTips
 }
 
-func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]struct{}) (bool, error) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	fileInfos, err := ioutil.ReadDir(hd.filesDir)
-	if err != nil {
-		return false, err
-	}
-	h := &Heap{}
-	heap.Init(h)
-	var buffer [HeaderSerLength]byte
-	var anchorBuf [AnchorSerLen]byte
+func ReadFilesAndBuffer(files []string, headerBuf []byte, hf func(header *types.Header, blockHeight uint64) error) (map[common.Hash]*Anchor, uint32, error) {
 	//nolint:prealloc
 	var fs []*os.File
 	//nolint:prealloc
 	var rs []io.Reader
+	var anchorBuf [AnchorSerLen]byte
+	var lastAnchors map[common.Hash]*Anchor
+	var lastAnchorSequence uint32
 	// Open all files and only read anchor sequences to decide which one has the latest information about the anchors
-	hd.anchorSequence = 0
-	var lastAnchors = make(map[common.Hash]*Anchor)
-	for _, fileInfo := range fileInfos {
-		f, err1 := os.Open(path.Join(hd.filesDir, fileInfo.Name()))
+	for _, filename := range files {
+		f, err1 := os.Open(filename)
 		if err1 != nil {
-			return false, fmt.Errorf("open file %s: %v", fileInfo.Name(), err1)
+			return nil, 0, fmt.Errorf("open file %s: %v", filename, err1)
 		}
 		r := bufio.NewReader(f)
-		if _, err = io.ReadFull(r, anchorBuf[:8]); err != nil {
+		if _, err := io.ReadFull(r, anchorBuf[:8]); err != nil {
 			fmt.Printf("reading anchor sequence and count from file: %v\n", err)
 			continue
 		}
 		anchorSequence := binary.BigEndian.Uint32(anchorBuf[:])
 		anchorCount := int(binary.BigEndian.Uint32((anchorBuf[4:])))
 		var anchors = make(map[common.Hash]*Anchor)
-		if anchorSequence >= hd.anchorSequence {
+		if anchorSequence >= lastAnchorSequence {
 			fmt.Printf("Reading anchor sequence %d, anchor count: %d\n", anchorSequence, anchorCount)
 		}
 		for i := 0; i < anchorCount; i++ {
-			if _, err = io.ReadFull(r, anchorBuf[:]); err != nil {
+			if _, err := io.ReadFull(r, anchorBuf[:]); err != nil {
 				fmt.Printf("reading anchor %x from file: %v\n", i, err)
 			}
-			if anchorSequence >= hd.anchorSequence { // Don't bother with parsing if we are not going to use this info
-				anchor := &Anchor{tipQueue: &AnchorTipQueue{}, anchorID: hd.nextAnchorID}
-				hd.nextAnchorID++
+			if anchorSequence >= lastAnchorSequence { // Don't bother with parsing if we are not going to use this info
+				anchor := &Anchor{tipQueue: &AnchorTipQueue{}}
 				heap.Init(anchor.tipQueue)
 				pos := 0
 				copy(anchor.hash[:], anchorBuf[pos:])
@@ -729,19 +719,22 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 				fmt.Printf("anchor: %x, powDepth: %d, maxTipHeight %d\n", anchor.hash, anchor.powDepth, anchor.maxTipHeight)
 			}
 		}
-		if anchorSequence >= hd.anchorSequence {
-			hd.anchorSequence = anchorSequence + 1
+		if anchorSequence >= lastAnchorSequence {
+			lastAnchorSequence = anchorSequence + 1
 			lastAnchors = anchors
 		}
 		fs = append(fs, f)
 		rs = append(rs, r)
 	}
+	h := &Heap{}
+	heap.Init(h)
+	var buffer [HeaderSerLength]byte
 	for i, f := range fs {
 		r := rs[i]
 		var header types.Header
-		if _, err = io.ReadFull(r, buffer[:]); err != nil {
+		if _, err := io.ReadFull(r, buffer[:]); err != nil {
 			if !errors.Is(err, io.EOF) {
-				fmt.Printf("reading header from file: %v\n", err)
+				return nil, 0, fmt.Errorf("reading header from file: %w", err)
 			}
 			continue
 		}
@@ -749,76 +742,13 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 		he := HeapElem{file: f, reader: r, blockHeight: header.Number.Uint64(), hash: header.Hash(), header: &header}
 		heap.Push(h, he)
 	}
-	var prevHeight uint64
-	var parentAnchors = make(map[common.Hash]*Anchor)
-	var parentDiffs = make(map[common.Hash]*uint256.Int)
-	var childAnchors = make(map[common.Hash]*Anchor)
-	var childDiffs = make(map[common.Hash]*uint256.Int)
-	var prevHash common.Hash // Hash of previously seen header - to filter out potential duplicates
 	for h.Len() > 0 {
 		he := (heap.Pop(h)).(HeapElem)
-		hash := he.header.Hash()
-		if hash != prevHash {
-			if he.blockHeight > prevHeight {
-				// Clear out parent map and move childMap to its place
-				parentAnchors = childAnchors
-				parentDiffs = childDiffs
-				childAnchors = make(map[common.Hash]*Anchor)
-				childDiffs = make(map[common.Hash]*uint256.Int)
-				if he.blockHeight != prevHeight+1 {
-					// Skipping the level, so no connection between grand-parents and grand-children
-					parentAnchors = make(map[common.Hash]*Anchor)
-					parentDiffs = make(map[common.Hash]*uint256.Int)
-				}
-				prevHeight = he.blockHeight
-			}
-			// Since this header has already been processed, we do not expect overflow
-			cumulativeDiff, overflow := uint256.FromBig(he.header.Difficulty)
-			if overflow {
-				return false, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", he.header.Difficulty)
-			}
-			parentHash := he.header.ParentHash
-			if parentAnchor, found := parentAnchors[parentHash]; found {
-				parentDiff := parentDiffs[parentHash]
-				cumulativeDiff.Add(cumulativeDiff, parentDiff)
-				if err = hd.addHeaderAsTip(he.header, parentAnchor, *cumulativeDiff, currentTime); err != nil {
-					return false, fmt.Errorf("add header as tip: %v", err)
-				}
-				childAnchors[hash] = parentAnchor
-				childDiffs[hash] = cumulativeDiff
-			} else {
-				anchor, anchorExisted := lastAnchors[hash]
-				if !anchorExisted {
-					anchor = &Anchor{powDepth: hd.initPowDepth, hash: hash, tipQueue: &AnchorTipQueue{}, anchorID: hd.nextAnchorID}
-					hd.nextAnchorID++
-					heap.Init(anchor.tipQueue)
-					fmt.Printf("Undeclared anchor for hash %x, inserting as empty\n", hash)
-				}
-				diff, overflow := uint256.FromBig(he.header.Difficulty)
-				if overflow {
-					return false, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", he.header.Difficulty)
-				}
-				anchor.difficulty = *diff
-				anchor.timestamp = he.header.Time
-				anchor.blockHeight = he.header.Number.Uint64()
-				if err = hd.addHeaderAsTip(he.header, anchor, *cumulativeDiff, currentTime); err != nil {
-					return false, fmt.Errorf("add header as tip: %v", err)
-				}
-				if len(hd.anchors[parentHash]) == 0 {
-					if parentHash != (common.Hash{}) {
-						hd.requestQueue.PushFront(RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime})
-					}
-				}
-				hd.anchors[parentHash] = append(hd.anchors[parentHash], anchor)
-				childAnchors[hash] = anchor
-				childDiffs[hash] = cumulativeDiff
-			}
-			prevHash = hash
-		} else {
-			fmt.Printf("Duplicate header: %d %x\n", he.header.Number.Uint64(), hash)
+		if err := hf(he.header, he.blockHeight); err != nil {
+			return nil, 0, err
 		}
 		var header types.Header
-		if _, err = io.ReadFull(he.reader, buffer[:]); err == nil {
+		if _, err := io.ReadFull(he.reader, buffer[:]); err == nil {
 			DeserialiseHeader(&header, buffer[:])
 			he.blockHeight = header.Number.Uint64()
 			he.hash = header.Hash()
@@ -826,15 +756,104 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 			heap.Push(h, he)
 		} else {
 			if !errors.Is(err, io.EOF) {
-				fmt.Printf("reading header from file: %v\n", err)
+				return nil, 0, fmt.Errorf("reading header from file: %w", err)
 			}
 			if err = he.file.Close(); err != nil {
-				fmt.Printf("closing file: %v\n", err)
+				return nil, 0, fmt.Errorf("closing file: %w", err)
 			}
 		}
 	}
+	return lastAnchors, lastAnchorSequence, nil
+}
+
+func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]struct{}) (bool, error) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	fileInfos, err := ioutil.ReadDir(hd.filesDir)
+	if err != nil {
+		return false, err
+	}
+	var lastAnchors map[common.Hash]*Anchor
+	var files = make([]string, len(fileInfos))
+	for i, fileInfo := range fileInfos {
+		files[i] = path.Join(hd.filesDir, fileInfo.Name())
+	}
+	var prevHeight uint64
+	var parentAnchors = make(map[common.Hash]*Anchor)
+	var parentDiffs = make(map[common.Hash]*uint256.Int)
+	var childAnchors = make(map[common.Hash]*Anchor)
+	var childDiffs = make(map[common.Hash]*uint256.Int)
+	var prevHash common.Hash // Hash of previously seen header - to filter out potential duplicates
+	if lastAnchors, hd.anchorSequence, err = ReadFilesAndBuffer(files, nil,
+		func(header *types.Header, blockHeight uint64) error {
+			hash := header.Hash()
+			if hash != prevHash {
+				if blockHeight > prevHeight {
+					// Clear out parent map and move childMap to its place
+					parentAnchors = childAnchors
+					parentDiffs = childDiffs
+					childAnchors = make(map[common.Hash]*Anchor)
+					childDiffs = make(map[common.Hash]*uint256.Int)
+					if blockHeight != prevHeight+1 {
+						// Skipping the level, so no connection between grand-parents and grand-children
+						parentAnchors = make(map[common.Hash]*Anchor)
+						parentDiffs = make(map[common.Hash]*uint256.Int)
+					}
+					prevHeight = blockHeight
+				}
+				// Since this header has already been processed, we do not expect overflow
+				cumulativeDiff, overflow := uint256.FromBig(header.Difficulty)
+				if overflow {
+					return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
+				}
+				parentHash := header.ParentHash
+				if parentAnchor, found := parentAnchors[parentHash]; found {
+					parentDiff := parentDiffs[parentHash]
+					cumulativeDiff.Add(cumulativeDiff, parentDiff)
+					if err = hd.addHeaderAsTip(header, parentAnchor, *cumulativeDiff, currentTime); err != nil {
+						return fmt.Errorf("add header as tip: %v", err)
+					}
+					childAnchors[hash] = parentAnchor
+					childDiffs[hash] = cumulativeDiff
+				} else {
+					anchor, anchorExisted := lastAnchors[hash]
+					if !anchorExisted {
+						anchor = &Anchor{powDepth: hd.initPowDepth, hash: hash, tipQueue: &AnchorTipQueue{}, anchorID: hd.nextAnchorID}
+						hd.nextAnchorID++
+						heap.Init(anchor.tipQueue)
+						fmt.Printf("Undeclared anchor for hash %x, inserting as empty\n", hash)
+					}
+					diff, overflow := uint256.FromBig(header.Difficulty)
+					if overflow {
+						return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
+					}
+					anchor.difficulty = *diff
+					anchor.timestamp = header.Time
+					anchor.blockHeight = header.Number.Uint64()
+					if err = hd.addHeaderAsTip(header, anchor, *cumulativeDiff, currentTime); err != nil {
+						return fmt.Errorf("add header as tip: %v", err)
+					}
+					if len(hd.anchors[parentHash]) == 0 {
+						if parentHash != (common.Hash{}) {
+							hd.requestQueue.PushFront(RequestQueueItem{anchorParent: parentHash, waitUntil: currentTime})
+						}
+					}
+					hd.anchors[parentHash] = append(hd.anchors[parentHash], anchor)
+					childAnchors[hash] = anchor
+					childDiffs[hash] = cumulativeDiff
+				}
+				prevHash = hash
+			} else {
+				fmt.Printf("Duplicate header: %d %x\n", header.Number.Uint64(), hash)
+			}
+			return nil
+		}); err != nil {
+		return false, err
+	}
 	// Based on the last anchors, set the hardTips
 	for _, anchor := range lastAnchors {
+		anchor.anchorID = hd.nextAnchorID
+		hd.nextAnchorID++
 		if _, ok := hardTips[anchor.hash]; ok {
 			hd.hardTips[anchor.hash] = struct{}{}
 			fmt.Printf("Adding %d %x to hard-coded tips\n", anchor.blockHeight, anchor.hash)

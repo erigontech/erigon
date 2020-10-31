@@ -23,10 +23,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -112,7 +114,7 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 	}
 }
 
-func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string) error {
+func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database) error {
 	ctx := rootContext()
 	log.Info("Starting Core P2P server", "on", coreAddr, "connecting to sentry", coreAddr)
 
@@ -191,7 +193,8 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 
 	go controlServer.loop(ctx)
 
-	<-ctx.Done()
+	stages.StageLoop(ctx, db, controlServer.hd)
+
 	return nil
 }
 
