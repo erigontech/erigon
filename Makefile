@@ -184,6 +184,7 @@ grpc:
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	PATH=$(GOBIN):$(PATH) go generate ./ethdb
 	PATH=$(GOBIN):$(PATH) go generate ./cmd/headers
+	PATH=$(GOBIN):$(PATH) go generate ./turbo/shards
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
