@@ -97,7 +97,7 @@ func (s *Shard) ReadAccountData(address common.Address) (*accounts.Account, erro
 			log.Error("read mismatched key", "expected", address, "got", stateRead.K)
 			return nil, fmt.Errorf("read mismatched key, expected %x, got %x", address, stateRead.K)
 		}
-		log.Info("ReadAccountData from remote shard", "key", stateRead.K, "val", stateRead.V)
+		//log.Info("ReadAccountData from remote shard", "key", stateRead.K, "val", stateRead.V)
 		enc = stateRead.V
 	} else {
 		if s.accountCache != nil {
@@ -113,7 +113,7 @@ func (s *Shard) ReadAccountData(address common.Address) (*accounts.Account, erro
 		if !ok && s.accountCache != nil {
 			s.accountCache.Set(address[:], enc)
 		}
-		log.Info("sending ReadAccountData to remote shards", "address", address)
+		//log.Info("sending ReadAccountData to remote shards", "address", address)
 		if err := s.client.Send(&StateRead{K: address.Bytes(), V: enc}); err != nil {
 			return nil, fmt.Errorf("sending remove state for ReadAccountData %x: %w", address, err)
 		}
