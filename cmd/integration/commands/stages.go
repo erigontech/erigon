@@ -330,6 +330,7 @@ func init() {
 	rootCmd.AddCommand(cmdRunMigrations)
 
 	withDispatcher(cmdShardDispatcher)
+	withShard(cmdShardDispatcher)
 	rootCmd.AddCommand(cmdShardDispatcher)
 }
 
@@ -701,7 +702,7 @@ func shardDispatcher(ctx context.Context) error {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer = grpc.NewServer(opts...)
-	dispatcherServer := NewDispatcherServerImpl()
+	dispatcherServer := NewDispatcherServerImpl(1 << shardBits)
 	shards.RegisterDispatcherServer(grpcServer, dispatcherServer)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
@@ -718,14 +719,16 @@ func shardDispatcher(ctx context.Context) error {
 
 type DispatcherServerImpl struct {
 	shards.UnimplementedDispatcherServer
-	connMutex   sync.RWMutex
-	connections map[int]shards.Dispatcher_StartDispatchServer
-	nextConnID  int
+	connMutex           sync.RWMutex
+	expectedConnections int
+	connections         map[int]shards.Dispatcher_StartDispatchServer
+	nextConnID          int
 }
 
-func NewDispatcherServerImpl() *DispatcherServerImpl {
+func NewDispatcherServerImpl(expectedConnections int) *DispatcherServerImpl {
 	return &DispatcherServerImpl{
-		connections: make(map[int]shards.Dispatcher_StartDispatchServer),
+		expectedConnections: expectedConnections,
+		connections:         make(map[int]shards.Dispatcher_StartDispatchServer),
 	}
 }
 
@@ -761,7 +764,11 @@ func (ds *DispatcherServerImpl) StartDispatch(connection shards.Dispatcher_Start
 	defer ds.removeConnection(connID)
 	for stateRead, recvErr := connection.Recv(); recvErr == nil; stateRead, recvErr = connection.Recv() {
 		// Get list of connections to broadcast to
-		broadcastList := ds.makeBroadcastList(connID)
+		var broadcastList []shards.Dispatcher_StartDispatchServer
+		for broadcastList = ds.makeBroadcastList(connID); len(broadcastList) < ds.expectedConnections-1; broadcastList = ds.makeBroadcastList(connID) {
+			log.Info("Waiting for more connections before broadcasting", "connections left", ds.expectedConnections-len(broadcastList)-1)
+			time.Sleep(5 * time.Second)
+		}
 		for _, conn := range broadcastList {
 			if err := conn.Send(stateRead); err != nil {
 				return fmt.Errorf("could not send broadcas for connection id %d: %w", connID, err)
