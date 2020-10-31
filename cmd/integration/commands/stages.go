@@ -330,7 +330,6 @@ func init() {
 	rootCmd.AddCommand(cmdRunMigrations)
 
 	withDispatcher(cmdShardDispatcher)
-	withShard(cmdShardDispatcher)
 	rootCmd.AddCommand(cmdShardDispatcher)
 }
 
@@ -530,6 +529,7 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 	}
 
 	var accessBuilder stagedsync.StateAccessBuilder
+	var toBlock uint64
 	if dispatcherAddr != "" {
 		// CREATING GRPC CLIENT CONNECTION
 		var dialOpts []grpc.DialOption
@@ -557,12 +557,14 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 			shard := shards.NewShard(db.(ethdb.HasTx).Tx(), blockNumber, client, accountCache, storageCache, codeCache, codeSizeCache, shardBits, byte(shardID))
 			return shard, shard
 		}
+		toBlock = block + 10000
 	}
 
 	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, tmpdir, ch,
 		stagedsync.CallTracesStageParams{
 			AccessBuilder: accessBuilder,
 			PresetChanges: accessBuilder == nil,
+			ToBlock:       toBlock,
 		}); err != nil {
 		return err
 	}
@@ -769,6 +771,9 @@ func (ds *DispatcherServerImpl) StartDispatch(connection shards.Dispatcher_Start
 		for broadcastList = ds.makeBroadcastList(connID); len(broadcastList) < ds.expectedConnections-1; broadcastList = ds.makeBroadcastList(connID) {
 			log.Info("Waiting for more connections before broadcasting", "connections left", ds.expectedConnections-len(broadcastList)-1)
 			time.Sleep(5 * time.Second)
+		}
+		if dispatcherLatency > 0 {
+			time.Sleep(time.Duration(dispatcherLatency) * time.Millisecond)
 		}
 		for _, conn := range broadcastList {
 			if err := conn.Send(stateRead); err != nil {

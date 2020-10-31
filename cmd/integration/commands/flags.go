@@ -24,6 +24,7 @@ var (
 	freelistReuse      int
 	migration          string
 	dispatcherAddr     string
+	dispatcherLatency  int
 	shardBits          int
 	shardID            int
 )
@@ -96,6 +97,8 @@ func withMigration(cmd *cobra.Command) {
 
 func withDispatcher(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&dispatcherAddr, "dispatcher_addr", "", "address of shard dispatcher")
+	cmd.Flags().IntVar(&dispatcherLatency, "dispatcher_latency", 0, "artificial latency of dispatcher, in ms")
+	cmd.Flags().IntVar(&shardBits, "shard_bits", 2, "number of bits in the key used to derive shardID")
 }
 
 func withShard(cmd *cobra.Command) {
