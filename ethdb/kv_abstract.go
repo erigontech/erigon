@@ -3,6 +3,7 @@ package ethdb
 import (
 	"context"
 	"errors"
+	"unsafe"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -91,6 +92,8 @@ type Tx interface {
 	Comparator(bucket string) dbutils.CmpFunc
 	Cmp(bucket string, a, b []byte) int
 	DCmp(bucket string, a, b []byte) int
+
+	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
 }
 
 // Interface used for buckets migration, don't use it in usual app code

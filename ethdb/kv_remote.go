@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"net"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -251,6 +252,7 @@ func (db *RemoteKV) Update(ctx context.Context, f func(tx Tx) error) (err error)
 func (tx *remoteTx) Comparator(bucket string) dbutils.CmpFunc { panic("not implemented yet") }
 func (tx *remoteTx) Cmp(bucket string, a, b []byte) int       { panic("not implemented yet") }
 func (tx *remoteTx) DCmp(bucket string, a, b []byte) int      { panic("not implemented yet") }
+func (tx *remoteTx) CHandle() unsafe.Pointer                  { panic("not implemented yet") }
 
 func (tx *remoteTx) Commit(ctx context.Context) error {
 	panic("remote db is read-only")

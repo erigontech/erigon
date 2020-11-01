@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
@@ -739,6 +740,10 @@ func (tx *mdbxTx) CursorDupSort(bucket string) CursorDupSort {
 func (tx *mdbxTx) CursorDupFixed(bucket string) CursorDupFixed {
 	basicCursor := tx.CursorDupSort(bucket).(*MdbxDupSortCursor)
 	return &MdbxDupFixedCursor{MdbxDupSortCursor: basicCursor}
+}
+
+func (tx *mdbxTx) CHandle() unsafe.Pointer {
+	panic("not implemented yet")
 }
 
 // methods here help to see better pprof picture
