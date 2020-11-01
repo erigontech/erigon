@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -45,7 +46,9 @@ func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header           { panic("") }
 func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header          { panic("") }
 
-func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
+func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
+	lock.Lock()
+	defer lock.Unlock()
 	log.Info(hd.AnchorState())
 	log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	foundAnchor, start, anchorParent, invalidAnchors := hd.FindAnchors(segment)
@@ -200,6 +203,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 
 type ControlServerImpl struct {
 	proto_core.UnimplementedControlServer
+	lock          sync.Mutex
 	hd            *headerdownload.HeaderDownload
 	sentryClient  proto_sentry.SentryClient
 	requestWakeUp chan struct{}
@@ -309,7 +313,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_core
 	if segments, penalty, err := cs.hd.SplitIntoSegments(request); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			for _, segment := range segments {
-				processSegment(cs.hd, segment)
+				processSegment(&cs.lock, cs.hd, segment)
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
@@ -334,7 +338,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_core.Inb
 	}
 	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
-			processSegment(cs.hd, segments[0]) // There is only one segment in this case
+			processSegment(&cs.lock, cs.hd, segments[0]) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
