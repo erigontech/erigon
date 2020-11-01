@@ -12,7 +12,7 @@ func StageLoop(ctx context.Context, db ethdb.Database, hd *headerdownload.Header
 	files, buffer := hd.PrepareStageData()
 	for {
 		if len(files) > 0 || len(buffer) > 0 {
-			if err := headerdownload.Forward(db, files, buffer); err != nil {
+			if err := headerdownload.Forward("1/14 Headers", db, files, buffer); err != nil {
 				log.Error("heeader download forward failed", "error", err)
 			}
 		}
