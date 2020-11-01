@@ -46,6 +46,7 @@ func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header           { panic("") }
 func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header          { panic("") }
 
+//nolint:interfacer
 func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
 	lock.Lock()
 	defer lock.Unlock()
