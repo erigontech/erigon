@@ -874,6 +874,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 			fmt.Printf("Adding %d %x to hard-coded tips\n", anchor.blockHeight, anchor.hash)
 		}
 	}
+	hd.files = files
 	return hd.anchorSequence > 0, nil
 }
 
