@@ -960,7 +960,7 @@ func (hd *HeaderDownload) FlushBuffer() error {
 		}
 		hd.buffer = hd.buffer[:0]
 		hd.anchorSequence++
-		hd.files = append(hd.files, path.Join(hd.filesDir, bufferFile.Name()))
+		hd.files = append(hd.files, bufferFile.Name())
 	} else {
 		return err
 	}
