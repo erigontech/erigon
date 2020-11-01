@@ -62,6 +62,7 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte)
 		hash := header.Hash()
 		if hash == prevHash {
 			// Skip duplicates
+			return nil
 		}
 		if ch, err := rawdb.ReadCanonicalHash(tx, blockHeight); err == nil {
 			if ch == hash {
