@@ -18,7 +18,8 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/ledgerwatch/turbo-geth/cmd/headers/proto"
+	proto_core "github.com/ledgerwatch/turbo-geth/cmd/headers/core"
+	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -100,6 +101,9 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 				hd.AddSegmentToBuffer(segment, start, end)
 				log.Info("Extended Up", "start", start, "end", end)
 			}
+			if start == 0 || end > 0 {
+				hd.CheckInitiation(segment, params.MainnetGenesisHash)
+			}
 		}
 	} else {
 		// NewAnchor
@@ -109,9 +113,6 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			hd.AddSegmentToBuffer(segment, start, end)
 			log.Info("NewAnchor", "start", start, "end", end)
 		}
-	}
-	if start == 0 || end > 0 {
-		hd.CheckInitiation(segment, params.MainnetGenesisHash)
 	}
 }
 
@@ -170,7 +171,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	if err != nil {
 		return fmt.Errorf("creating client connection to sentry P2P: %w", err)
 	}
-	sentryClient := proto.NewSentryClient(conn)
+	sentryClient := proto_sentry.NewSentryClient(conn)
 
 	var bufferSize datasize.ByteSize
 	if err = bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
@@ -181,7 +182,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	if controlServer, err = NewControlServer(filesDir, int(bufferSize), sentryClient); err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
-	proto.RegisterControlServer(grpcServer, controlServer)
+	proto_core.RegisterControlServer(grpcServer, controlServer)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
 	}
@@ -199,14 +200,14 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 }
 
 type ControlServerImpl struct {
-	proto.UnimplementedControlServer
+	proto_core.UnimplementedControlServer
 	hdLock        sync.Mutex
 	hd            *headerdownload.HeaderDownload
-	sentryClient  proto.SentryClient
+	sentryClient  proto_sentry.SentryClient
 	requestWakeUp chan struct{}
 }
 
-func NewControlServer(filesDir string, bufferSize int, sentryClient proto.SentryClient) (*ControlServerImpl, error) {
+func NewControlServer(filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient) (*ControlServerImpl, error) {
 	//config := eth.DefaultConfig.Ethash
 	engine := ethash.New(ethash.Config{
 		CachesInMem:      1,
@@ -238,6 +239,7 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto.Sentry
 		if err != nil {
 			log.Error("Recovery from file failed, will start from scratch", "error", err)
 		}
+		hd.SetHardCodedTips(hardTips)
 		// Insert hard-coded headers if present
 		if _, err := os.Stat("hard-coded-headers.dat"); err == nil {
 			if f, err1 := os.Open("hard-coded-headers.dat"); err1 == nil {
@@ -267,7 +269,7 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto.Sentry
 	return &ControlServerImpl{hd: hd, sentryClient: sentryClient, requestWakeUp: make(chan struct{})}, nil
 }
 
-func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
+func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	cs.hdLock.Lock()
 	defer cs.hdLock.Unlock()
 	var request eth.NewBlockHashesData
@@ -286,10 +288,10 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto.In
 			if err != nil {
 				return nil, fmt.Errorf("encode header request: %v", err)
 			}
-			outreq := proto.SendMessageByMinBlockRequest{
+			outreq := proto_sentry.SendMessageByMinBlockRequest{
 				MinBlock: announce.Number,
-				Data: &proto.OutboundMessageData{
-					Id:   proto.OutboundMessageId_GetBlockHeaders,
+				Data: &proto_sentry.OutboundMessageData{
+					Id:   proto_sentry.OutboundMessageId_GetBlockHeaders,
 					Data: bytes,
 				},
 			}
@@ -302,7 +304,7 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto.In
 	return &empty.Empty{}, nil
 }
 
-func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
+func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	cs.hdLock.Lock()
 	defer cs.hdLock.Unlock()
 	var request []*types.Header
@@ -315,9 +317,9 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto.Inbo
 				processSegment(cs.hd, segment)
 			}
 		} else {
-			outreq := proto.PenalizePeerRequest{
+			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
-				Penalty: proto.PenaltyKind_Kick, // TODO: Extend penalty kinds
+				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
 			if _, err1 := cs.sentryClient.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 				log.Error("Could not send penalty", "err", err1)
@@ -330,7 +332,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto.Inbo
 	return &empty.Empty{}, nil
 }
 
-func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
+func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	cs.hdLock.Lock()
 	defer cs.hdLock.Unlock()
 	var request eth.NewBlockData
@@ -341,9 +343,9 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto.InboundM
 		if penalty == headerdownload.NoPenalty {
 			processSegment(cs.hd, segments[0]) // There is only one segment in this case
 		} else {
-			outreq := proto.PenalizePeerRequest{
+			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
-				Penalty: proto.PenaltyKind_Kick, // TODO: Extend penalty kinds
+				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
 			if _, err1 := cs.sentryClient.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 				log.Error("Could not send penalty", "err", err1)
@@ -356,7 +358,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto.InboundM
 	return &empty.Empty{}, nil
 }
 
-func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
+func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	defer func() {
 		select {
 		case cs.requestWakeUp <- struct{}{}:
@@ -364,18 +366,18 @@ func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *p
 		}
 	}()
 	switch inreq.Id {
-	case proto.InboundMessageId_NewBlockHashes:
+	case proto_core.InboundMessageId_NewBlockHashes:
 		return cs.newBlockHashes(ctx, inreq)
-	case proto.InboundMessageId_BlockHeaders:
+	case proto_core.InboundMessageId_BlockHeaders:
 		return cs.blockHeaders(ctx, inreq)
-	case proto.InboundMessageId_NewBlock:
+	case proto_core.InboundMessageId_NewBlock:
 		return cs.newBlock(ctx, inreq)
 	default:
 		return nil, fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}
 }
 
-func (cs *ControlServerImpl) GetStatus(context.Context, *empty.Empty) (*proto.StatusData, error) {
+func (cs *ControlServerImpl) GetStatus(context.Context, *empty.Empty) (*proto_core.StatusData, error) {
 	return nil, nil
 }
 
@@ -392,10 +394,10 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 			log.Error("Could not encode header request", "err", err)
 			continue
 		}
-		outreq := proto.SendMessageByMinBlockRequest{
+		outreq := proto_sentry.SendMessageByMinBlockRequest{
 			MinBlock: req.Number,
-			Data: &proto.OutboundMessageData{
-				Id:   proto.OutboundMessageId_GetBlockHeaders,
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.OutboundMessageId_GetBlockHeaders,
 				Data: bytes,
 			},
 		}
