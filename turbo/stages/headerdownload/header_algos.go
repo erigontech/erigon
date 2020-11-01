@@ -726,6 +726,19 @@ func ReadFilesAndBuffer(files []string, headerBuf []byte, hf func(header *types.
 		fs = append(fs, f)
 		rs = append(rs, r)
 	}
+	if headerBuf != nil {
+		sort.Sort(BufferSorter(headerBuf))
+		fs = append(fs, nil)
+		rs = append(rs, bytes.NewReader(headerBuf))
+	}
+	defer func() {
+		for _, f := range fs {
+			if f != nil {
+				//lint:noerrcheck
+				f.Close()
+			}
+		}
+	}()
 	h := &Heap{}
 	heap.Init(h)
 	var buffer [HeaderSerLength]byte
@@ -758,8 +771,10 @@ func ReadFilesAndBuffer(files []string, headerBuf []byte, hf func(header *types.
 			if !errors.Is(err, io.EOF) {
 				return nil, 0, fmt.Errorf("reading header from file: %w", err)
 			}
-			if err = he.file.Close(); err != nil {
-				return nil, 0, fmt.Errorf("closing file: %w", err)
+			if he.file != nil {
+				if err = he.file.Close(); err != nil {
+					return nil, 0, fmt.Errorf("closing file: %w", err)
+				}
 			}
 		}
 	}
