@@ -1172,15 +1172,14 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	}
 
 	if len(key) != from {
-		_, _, err := c.set(key)
+		err := c.putNoOverwrite(key, value)
 		if err != nil {
-			if lmdb.IsNotFound(err) {
-				return c.put(key, value)
+			if lmdb.IsKeyExists(err) {
+				return c.putCurrent(key, value)
 			}
 			return err
 		}
-
-		return c.putCurrent(key, value)
+		return nil
 	}
 
 	value = append(key[to:], value...)
