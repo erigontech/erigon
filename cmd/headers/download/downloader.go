@@ -418,12 +418,12 @@ func (cs *ControlServerImpl) loop(ctx context.Context) {
 	cs.sendRequests(ctx, reqs)
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-timer.C:
 			log.Info("RequestQueueTimer ticked")
 		case <-cs.requestWakeUp:
 			log.Info("Woken up by the incoming request")
-		case <-ctx.Done():
-			return
 		}
 		cs.hdLock.Lock()
 		reqs := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)

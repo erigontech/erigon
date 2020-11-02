@@ -85,6 +85,9 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotNa
 	}
 
 	select {
+	case <-ctx.Done():
+		log.Warn("Init failure", "snapshot", snapshotName, "err", ctx.Err())
+		return ctx.Err()
 	case <-t.GotInfo():
 		log.Info("Init", "snapshot", snapshotName)
 		if newTorrent {
@@ -98,9 +101,6 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotNa
 			log.Info("Loaded from db", "snapshot", snapshotName)
 		}
 
-	case <-ctx.Done():
-		log.Warn("Init failure", "snapshot", snapshotName, "err", ctx.Err())
-		return ctx.Err()
 	}
 	t.VerifyData()
 	t.DisallowDataDownload()
