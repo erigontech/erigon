@@ -26,7 +26,8 @@ func (api *APIImpl) Hashrate(_ context.Context) (uint64, error) {
 
 // Mining implements eth_mining. Returns true if client is actively mining new blocks.
 func (api *APIImpl) Mining(_ context.Context) (bool, error) {
-	return false, fmt.Errorf(NotImplemented, "eth_mining")
+	//fmt.Errorf(NotImplemented, "eth_mining")
+	return false, nil
 }
 
 // GetWork implements eth_getWork. Returns the hash of the current block, the seedHash, and the boundary condition to be met ('target').
