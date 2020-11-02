@@ -197,7 +197,9 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 
 	go controlServer.loop(ctx)
 
-	stages.StageLoop(ctx, db, controlServer.hd)
+	if err = stages.StageLoop(ctx, db, controlServer.hd); err != nil {
+		log.Error("Stage loop failure", "error", err)
+	}
 
 	return nil
 }
