@@ -18,9 +18,8 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DownloaderClient interface {
-	// Sends a greeting
 	Download(ctx context.Context, in *DownloadSnapshotRequest, opts ...grpc.CallOption) (*empty.Empty, error)
-	Snapshots(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*SnapshotsInfoReply, error)
+	Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsInfoReply, error)
 }
 
 type downloaderClient struct {
@@ -40,7 +39,7 @@ func (c *downloaderClient) Download(ctx context.Context, in *DownloadSnapshotReq
 	return out, nil
 }
 
-func (c *downloaderClient) Snapshots(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*SnapshotsInfoReply, error) {
+func (c *downloaderClient) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsInfoReply, error) {
 	out := new(SnapshotsInfoReply)
 	err := c.cc.Invoke(ctx, "/snapshotsync.Downloader/Snapshots", in, out, opts...)
 	if err != nil {
@@ -53,9 +52,8 @@ func (c *downloaderClient) Snapshots(ctx context.Context, in *empty.Empty, opts 
 // All implementations must embed UnimplementedDownloaderServer
 // for forward compatibility
 type DownloaderServer interface {
-	// Sends a greeting
 	Download(context.Context, *DownloadSnapshotRequest) (*empty.Empty, error)
-	Snapshots(context.Context, *empty.Empty) (*SnapshotsInfoReply, error)
+	Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsInfoReply, error)
 	mustEmbedUnimplementedDownloaderServer()
 }
 
@@ -66,7 +64,7 @@ type UnimplementedDownloaderServer struct {
 func (UnimplementedDownloaderServer) Download(context.Context, *DownloadSnapshotRequest) (*empty.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Download not implemented")
 }
-func (UnimplementedDownloaderServer) Snapshots(context.Context, *empty.Empty) (*SnapshotsInfoReply, error) {
+func (UnimplementedDownloaderServer) Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsInfoReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Snapshots not implemented")
 }
 func (UnimplementedDownloaderServer) mustEmbedUnimplementedDownloaderServer() {}
@@ -101,7 +99,7 @@ func _Downloader_Download_Handler(srv interface{}, ctx context.Context, dec func
 }
 
 func _Downloader_Snapshots_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(empty.Empty)
+	in := new(SnapshotsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -113,7 +111,7 @@ func _Downloader_Snapshots_Handler(srv interface{}, ctx context.Context, dec fun
 		FullMethod: "/snapshotsync.Downloader/Snapshots",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DownloaderServer).Snapshots(ctx, req.(*empty.Empty))
+		return srv.(DownloaderServer).Snapshots(ctx, req.(*SnapshotsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

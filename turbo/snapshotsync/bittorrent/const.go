@@ -21,8 +21,8 @@ const (
 var (
 	TorrentHashes =  map[uint64]map[snapshotsync.SnapshotType]metainfo.Hash{
 		params.MainnetChainConfig.ChainID.Uint64(): {
-			snapshotsync.SnapshotType_Headers: metainfo.NewHashFromHex(HeadersSnapshotHash),
-			snapshotsync.SnapshotType_Bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
+			snapshotsync.SnapshotType_headers: metainfo.NewHashFromHex(HeadersSnapshotHash),
+			snapshotsync.SnapshotType_bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
 		},
 	}
 	ErrInvalidSnapshot = errors.New("this snapshot for this chainID not supported ")

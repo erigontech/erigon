@@ -3,7 +3,6 @@ package snapshotsync
 import (
 	"context"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/golang/protobuf/ptypes/empty"
 	"google.golang.org/grpc"
 	"log"
 	"testing"
@@ -11,6 +10,7 @@ import (
 )
 
 func TestDownloaderCli(t *testing.T) {
+	t.Skip()
 	opts:=[]grpc.DialOption{
 		grpc.WithInsecure(),
 	}
@@ -24,7 +24,9 @@ func TestDownloaderCli(t *testing.T) {
 	cli:=NewDownloaderClient(conn)
 	i:=0
 	for {
-		rep,err:=cli.Snapshots(context.TODO(), &empty.Empty{})
+		rep,err:=cli.Snapshots(context.TODO(), &SnapshotsRequest{
+			NetworkId: 1,
+		})
 		spew.Dump(rep)
 		spew.Dump(err)
 		time.Sleep(time.Second)
@@ -35,16 +37,18 @@ func TestDownloaderCli(t *testing.T) {
 	}
 
 	for {
-		rep,err:=cli.Download(context.TODO(),&DownloadSnapshotRequest{Networkid: 1, Type: []SnapshotType{
-			SnapshotType_Headers,
-			SnapshotType_Bodies,
+		rep,err:=cli.Download(context.TODO(),&DownloadSnapshotRequest{NetworkId: 1, Type: []SnapshotType{
+			SnapshotType_headers,
+			SnapshotType_bodies,
 			//SnapshotType_State,
 			//SnapshotType_Receipts,
 		}})
 		spew.Dump(rep)
 		spew.Dump(err)
 		time.Sleep(time.Second)
-		reply,err:=cli.Snapshots(context.TODO(), &empty.Empty{})
+		reply,err:=cli.Snapshots(context.TODO(), &SnapshotsRequest{
+			NetworkId: 1,
+		})
 		spew.Dump(reply)
 		spew.Dump(err)
 

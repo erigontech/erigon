@@ -9,27 +9,29 @@ package snapshotsync;
 
 
 enum SnapshotType {
-  Headers = 0;
-  Bodies = 1;
-  State = 2;
-  Receipts = 3;
+  headers = 0;
+  bodies = 1;
+  state = 2;
+  receipts = 3;
 }
 
 service Downloader {
-  // Sends a greeting
   rpc Download (DownloadSnapshotRequest) returns (google.protobuf.Empty) {}
-  rpc Snapshots (google.protobuf.Empty) returns (SnapshotsInfoReply) {}
+  rpc Snapshots (SnapshotsRequest) returns (SnapshotsInfoReply) {}
 }
 
-// The request message containing the user's name.
 message DownloadSnapshotRequest {
-  int32 networkid = 1;
+  uint64 network_id = 1;
   repeated SnapshotType type = 2;
+}
+
+message SnapshotsRequest {
+    uint64 network_id = 1;
 }
 
 message SnapshotsInfo {
   SnapshotType type = 1;
-  int32 networkid = 2;
+  bool gotInfoByte = 2;
   int32 readiness = 3;
   uint64 snapshotBlock = 4;
 }

@@ -162,22 +162,18 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	var torrentClient *bittorrent.Client
 	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
 		if config.ExternalSnapshotDownloaderAddr!="" {
-			opts:=[]grpc.DialOption{
-				grpc.WithInsecure(),
-			}
-
-			conn, err := grpc.Dial(config.ExternalSnapshotDownloaderAddr, opts...)
+			cli, cl, err:=snapshotsync.NewClient(config.ExternalSnapshotDownloaderAddr)
 			if err != nil {
 				return nil, err
 			}
-			defer conn.Close()
-
-			cli:=snapshotsync.NewDownloaderClient(conn)
-			cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
-
+			defer cl()
+			_,err=cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
+				NetworkId: config.NetworkID,
+				Type: config.SnapshotMode.ToSnapshotTypes(),
 			})
-
-
+			if err != nil {
+				return nil, err
+			}
 		} else {
 			var dbPath string
 			dbPath, err = stack.Config().ResolvePath("snapshots")
@@ -185,7 +181,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 				return nil, err
 			}
 			torrentClient = bittorrent.New(dbPath, config.SnapshotSeeding)
-			err = torrentClient.AddSnapshotsTorrens(chainDb,config.NetworkID, config.SnapshotMode)
+			err = torrentClient.AddSnapshotsTorrents(chainDb,config.NetworkID, config.SnapshotMode)
 			if err == nil {
 				torrentClient.Download()
 

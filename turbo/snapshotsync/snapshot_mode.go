@@ -28,6 +28,24 @@ func (m SnapshotMode) ToString() string {
 	return mode
 }
 
+func (m SnapshotMode) ToSnapshotTypes() []SnapshotType {
+	var types []SnapshotType
+	if m.Headers {
+		types = append(types, SnapshotType_headers)
+	}
+	if m.Bodies {
+		types = append(types, SnapshotType_bodies)
+	}
+	if m.State {
+		types = append(types, SnapshotType_state)
+	}
+	if m.Receipts {
+		types = append(types, SnapshotType_receipts)
+	}
+	return types
+}
+
+
 func SnapshotModeFromString(flags string) (SnapshotMode, error) {
 	mode := SnapshotMode{}
 	for _, flag := range flags {
