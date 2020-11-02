@@ -83,7 +83,7 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte)
 			// Clear out parent map and move childMap to its place
 			if blockHeight == prevHeight+1 {
 				parentDiffs = childDiffs
-			} else {
+			} else if prevHeight > 0 {
 				return fmt.Errorf("[%s] header chain break, from %d to %d", logPrefix, prevHeight, blockHeight)
 			}
 			childDiffs = make(map[common.Hash]*big.Int)
@@ -161,7 +161,7 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte)
 			return err
 		}
 	}
-	log.Info("Would have processed", "header", count, "highest", highest)
+	log.Info("Processed", "headers", count, "highest", highest)
 	for _, file := range files {
 		if err := os.Remove(file); err != nil {
 			log.Error("Could not remove", "file", file, "error", err)
