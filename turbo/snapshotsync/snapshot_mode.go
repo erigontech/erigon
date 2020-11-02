@@ -45,7 +45,6 @@ func (m SnapshotMode) ToSnapshotTypes() []SnapshotType {
 	return types
 }
 
-
 func SnapshotModeFromString(flags string) (SnapshotMode, error) {
 	mode := SnapshotMode{}
 	for _, flag := range flags {

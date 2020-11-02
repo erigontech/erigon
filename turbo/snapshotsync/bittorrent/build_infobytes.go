@@ -42,4 +42,3 @@ func BuildInfoBytesForLMDBSnapshot(root string) (metainfo.Info, error) {
 	}
 	return info, nil
 }
-

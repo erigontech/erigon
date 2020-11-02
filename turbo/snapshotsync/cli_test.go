@@ -11,7 +11,7 @@ import (
 
 func TestDownloaderCli(t *testing.T) {
 	t.Skip()
-	opts:=[]grpc.DialOption{
+	opts := []grpc.DialOption{
 		grpc.WithInsecure(),
 	}
 
@@ -21,23 +21,23 @@ func TestDownloaderCli(t *testing.T) {
 	}
 	defer conn.Close()
 
-	cli:=NewDownloaderClient(conn)
-	i:=0
+	cli := NewDownloaderClient(conn)
+	i := 0
 	for {
-		rep,err:=cli.Snapshots(context.TODO(), &SnapshotsRequest{
+		rep, err := cli.Snapshots(context.TODO(), &SnapshotsRequest{
 			NetworkId: 1,
 		})
 		spew.Dump(rep)
 		spew.Dump(err)
 		time.Sleep(time.Second)
-		if i>1 {
+		if i > 1 {
 			break
 		}
 		i++
 	}
 
 	for {
-		rep,err:=cli.Download(context.TODO(),&DownloadSnapshotRequest{NetworkId: 1, Type: []SnapshotType{
+		rep, err := cli.Download(context.TODO(), &DownloadSnapshotRequest{NetworkId: 1, Type: []SnapshotType{
 			SnapshotType_headers,
 			SnapshotType_bodies,
 			//SnapshotType_State,
@@ -46,7 +46,7 @@ func TestDownloaderCli(t *testing.T) {
 		spew.Dump(rep)
 		spew.Dump(err)
 		time.Sleep(time.Second)
-		reply,err:=cli.Snapshots(context.TODO(), &SnapshotsRequest{
+		reply, err := cli.Snapshots(context.TODO(), &SnapshotsRequest{
 			NetworkId: 1,
 		})
 		spew.Dump(reply)

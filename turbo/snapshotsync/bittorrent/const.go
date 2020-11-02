@@ -9,7 +9,7 @@ import (
 
 const (
 	DefaultChunkSize = 1024 * 1024
-	SnapshotBlock = 11_000_000
+	SnapshotBlock    = 11_000_000
 	LmdbFilename     = "data.mdb"
 
 	HeadersSnapshotHash  = "7727174de470b7fe0bb3e36d35e85cc48853d470" //11кk block 1mb chunk
@@ -19,7 +19,7 @@ const (
 )
 
 var (
-	TorrentHashes =  map[uint64]map[snapshotsync.SnapshotType]metainfo.Hash{
+	TorrentHashes = map[uint64]map[snapshotsync.SnapshotType]metainfo.Hash{
 		params.MainnetChainConfig.ChainID.Uint64(): {
 			snapshotsync.SnapshotType_headers: metainfo.NewHashFromHex(HeadersSnapshotHash),
 			snapshotsync.SnapshotType_bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
