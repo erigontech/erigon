@@ -786,8 +786,9 @@ func ReadFilesAndBuffer(files []string, headerBuf []byte, hf func(header *types.
 	return lastAnchors, lastAnchorSequence, nil
 }
 
-func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) error {
-	return db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
+func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) (recovered bool, err error) {
+	var anchor *Anchor
+	err = db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.HeaderPrefix)
 		var anchorH types.Header
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
@@ -802,7 +803,6 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) e
 				break
 			}
 		}
-		var anchor *Anchor
 		for k, v, err := c.Last(); k != nil && hd.tipCount < hd.tipLimit; k, v, err = c.Prev() {
 			if err != nil {
 				return err
@@ -833,6 +833,8 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) e
 		}
 		return nil
 	})
+	recovered = anchor != nil && anchor.maxTipHeight > anchor.blockHeight
+	return
 }
 
 func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]struct{}) (bool, error) {
