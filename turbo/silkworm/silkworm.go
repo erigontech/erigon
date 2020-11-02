@@ -60,7 +60,6 @@ func ExecuteBlocks(funcPtr unsafe.Pointer, txn ethdb.Tx, chainID *big.Int, start
 	executedBlock = uint64(cLastExecutedBlock)
 	if status == 0 || status == 1 {
 		return executedBlock, nil
-	} else {
-		return executedBlock, fmt.Errorf("silkworm_execute_blocks error %d, LMDB error %d", status, cLmdbErrorCode)
 	}
+	return executedBlock, fmt.Errorf("silkworm_execute_blocks error %d, LMDB error %d", status, cLmdbErrorCode)
 }
