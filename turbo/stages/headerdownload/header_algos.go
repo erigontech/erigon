@@ -789,21 +789,26 @@ func ReadFilesAndBuffer(files []string, headerBuf []byte, hf func(header *types.
 func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) error {
 	return db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.HeaderPrefix)
-		k, v, err := c.First()
-		if k == nil {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
 		var anchorH types.Header
-		if err = rlp.DecodeBytes(v, &anchorH); err != nil {
-			return err
-		}
-		var anchor *Anchor
-		for k, v, err = c.Last(); k != nil && hd.tipCount < hd.tipLimit; k, v, err = c.Prev() {
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
+			}
+			if len(k) == 40 {
+				// This is header record
+				if err = rlp.DecodeBytes(v, &anchorH); err != nil {
+					return err
+				}
+				break
+			}
+		}
+		var anchor *Anchor
+		for k, v, err := c.Last(); k != nil && hd.tipCount < hd.tipLimit; k, v, err = c.Prev() {
+			if err != nil {
+				return err
+			}
+			if len(k) != 40 {
+				continue
 			}
 			var h types.Header
 			if err = rlp.DecodeBytes(v, &h); err != nil {
