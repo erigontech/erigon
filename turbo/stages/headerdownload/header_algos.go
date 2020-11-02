@@ -869,7 +869,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 	for _, anchor := range lastAnchors {
 		anchor.anchorID = hd.nextAnchorID
 		hd.nextAnchorID++
-		if _, ok := hardTips[anchor.hash]; ok {
+		if _, ok := hardTips[anchor.hash]; ok && anchor.maxTipHeight == anchor.blockHeight {
 			hd.hardTips[anchor.hash] = struct{}{}
 			fmt.Printf("Adding %d %x to hard-coded tips\n", anchor.blockHeight, anchor.hash)
 		}
