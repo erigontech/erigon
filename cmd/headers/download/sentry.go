@@ -471,7 +471,7 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string) err
 	}
 
 	go func() {
-		if err1 := grpcServer.Serve(lis); err != nil {
+		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Sentry P2P server fail", "err", err1)
 		}
 	}()

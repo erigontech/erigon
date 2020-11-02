@@ -7,11 +7,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
@@ -200,6 +202,11 @@ func (m *mutation) doCommit(tx Tx) error {
 	var c Cursor
 	var innerErr error
 	var isEndOfBucket bool
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	count := 0
+	total := float64(m.puts.Len())
+
 	m.puts.Ascend(func(i btree.Item) bool {
 		mi := i.(*MutationItem)
 		if mi.table != prevTable {
@@ -232,6 +239,15 @@ func (m *mutation) doCommit(tx Tx) error {
 				innerErr = err
 				return false
 			}
+		}
+
+		count++
+
+		select {
+		default:
+		case <-logEvery.C:
+			progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
+			log.Info("Write to db", "progress", progress, "current table", mi.table)
 		}
 		return true
 	})
