@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"container/heap"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -18,8 +19,12 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
@@ -779,6 +784,50 @@ func ReadFilesAndBuffer(files []string, headerBuf []byte, hf func(header *types.
 		}
 	}
 	return lastAnchors, lastAnchorSequence, nil
+}
+
+func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) error {
+	return db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.HeaderPrefix)
+		k, v, err := c.First()
+		if k == nil {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var anchorH types.Header
+		if err = rlp.DecodeBytes(v, &anchorH); err != nil {
+			return err
+		}
+		var anchor *Anchor
+		for k, v, err = c.Last(); k != nil && hd.tipCount < hd.tipLimit; k, v, err = c.Prev() {
+			if err != nil {
+				return err
+			}
+			var h types.Header
+			if err = rlp.DecodeBytes(v, &h); err != nil {
+				return err
+			}
+			var td *big.Int
+			if td, err = rawdb.ReadTd(db, h.Hash(), h.Number.Uint64()); err != nil {
+				return err
+			}
+			cumulativeDiff, overflow := uint256.FromBig(td)
+			if overflow {
+				return fmt.Errorf("overflow of difficulty: %d", td)
+			}
+			if anchor == nil {
+				if anchor, err = hd.addHeaderAsAnchor(&anchorH, 0); err != nil {
+					return err
+				}
+			}
+			if err = hd.addHeaderAsTip(&h, anchor, *cumulativeDiff, currentTime); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]struct{}) (bool, error) {

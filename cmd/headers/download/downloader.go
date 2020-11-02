@@ -181,7 +181,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	}
 	var controlServer *ControlServerImpl
 
-	if controlServer, err = NewControlServer(filesDir, int(bufferSize), sentryClient); err != nil {
+	if controlServer, err = NewControlServer(db, filesDir, int(bufferSize), sentryClient); err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
 	proto_core.RegisterControlServer(grpcServer, controlServer)
@@ -212,7 +212,7 @@ type ControlServerImpl struct {
 	requestWakeUp chan struct{}
 }
 
-func NewControlServer(filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient) (*ControlServerImpl, error) {
+func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient) (*ControlServerImpl, error) {
 	//config := eth.DefaultConfig.Ethash
 	engine := ethash.New(ethash.Config{
 		CachesInMem:      1,
@@ -240,6 +240,9 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto_sentry
 		3600, /* newAnchor future limit */
 		3600, /* newAnchor past limit */
 	)
+	if err := hd.RecoverFromDb(db, uint64(time.Now().Unix())); err != nil {
+		log.Error("Recovery from DB failed", "error", err)
+	}
 	hardTips := headerdownload.InitHardCodedTips("hard-coded-headers.dat")
 	if recovered, err := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips); err != nil || !recovered {
 		if err != nil {
