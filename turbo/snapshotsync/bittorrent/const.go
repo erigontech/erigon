@@ -16,6 +16,9 @@ const (
 	BlocksSnapshotHash   = "0546b881c50de9984dd8865d0f18cc5153e4c21b" //11кk block 1mb chunk
 	StateSnapshotHash    = ""
 	ReceiptsSnapshotHash = ""
+
+	SnapshotInfoHashPrefix  = "ih"
+	SnapshotInfoBytesPrefix = "ib"
 )
 
 var (

@@ -41,13 +41,11 @@ func rootContext() context.Context {
 	return ctx
 }
 
-
-
 var (
-	chaindata string
+	chaindata    string
 	snapshotFile string
-	block uint64
-	snapshotDir string
+	block        uint64
+	snapshotDir  string
 	snapshotMode string
 )
 

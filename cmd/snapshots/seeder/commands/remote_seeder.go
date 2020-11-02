@@ -26,7 +26,7 @@ func SeedSnapshots(dir string) error {
 
 	db := ethdb.NewLMDB().Path(dir + "/tmpdb").MustOpen()
 	//todo
-	err:=client.AddSnapshotsTorrents(ethdb.NewObjectDatabase(db), 1, snapshotsync.SnapshotMode{})
+	err := client.AddSnapshotsTorrents(ethdb.NewObjectDatabase(db), 1, snapshotsync.SnapshotMode{})
 	//err := client.Run(ethdb.NewObjectDatabase(db))
 	if err != nil {
 		return err

@@ -34,8 +34,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/turbo-geth/common/etl"
 	ethereum "github.com/ledgerwatch/turbo-geth"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -161,18 +161,18 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	var torrentClient *bittorrent.Client
 	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
-		if config.ExternalSnapshotDownloaderAddr!="" {
-			cli, cl, err:=snapshotsync.NewClient(config.ExternalSnapshotDownloaderAddr)
-			if err != nil {
-				return nil, err
+		if config.ExternalSnapshotDownloaderAddr != "" {
+			cli, cl, innerErr := snapshotsync.NewClient(config.ExternalSnapshotDownloaderAddr)
+			if innerErr != nil {
+				return nil, innerErr
 			}
-			defer cl()
-			_,err=cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
+			defer cl() //nolint
+			_, innerErr = cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
 				NetworkId: config.NetworkID,
-				Type: config.SnapshotMode.ToSnapshotTypes(),
+				Type:      config.SnapshotMode.ToSnapshotTypes(),
 			})
-			if err != nil {
-				return nil, err
+			if innerErr != nil {
+				return nil, innerErr
 			}
 		} else {
 			var dbPath string
@@ -181,7 +181,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 				return nil, err
 			}
 			torrentClient = bittorrent.New(dbPath, config.SnapshotSeeding)
-			err = torrentClient.AddSnapshotsTorrents(chainDb,config.NetworkID, config.SnapshotMode)
+			err = torrentClient.AddSnapshotsTorrents(chainDb, config.NetworkID, config.SnapshotMode)
 			if err == nil {
 				torrentClient.Download()
 

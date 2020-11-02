@@ -17,7 +17,6 @@
 package eth
 
 import (
-
 	"math/big"
 	"os"
 	"os/user"
@@ -33,10 +32,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 // DefaultFullGPOConfig contains default gasprice oracle settings for full node.

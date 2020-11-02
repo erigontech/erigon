@@ -41,7 +41,6 @@ func rootContext() context.Context {
 	return ctx
 }
 
-
 var rootCmd = &cobra.Command{
 	Use:   "seed",
 	Short: "seed snapshot",

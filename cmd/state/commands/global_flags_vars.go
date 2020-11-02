@@ -52,7 +52,3 @@ func withCSBucket(cmd *cobra.Command) {
 func withIndexBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&indexBucket, "index-bucket", string(dbutils.AccountsHistoryBucket), string(dbutils.AccountsHistoryBucket)+" for account and "+string(dbutils.StorageHistoryBucket)+" for storage")
 }
-
-func withSnapshotFile(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&snapshotFile, "snapshot", "", "path where to write the snapshot file")
-}

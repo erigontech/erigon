@@ -13,9 +13,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 func init() {
@@ -24,9 +24,9 @@ func init() {
 }
 
 var generateHeadersSnapshotCmd = &cobra.Command{
-	Use:   "headers",
-	Short: "Generate headers snapshot",
-	Example: "go run cmd/state/main.go headersSnapshot --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\"",
+	Use:       "headers",
+	Short:     "Generate headers snapshot",
+	Example:   "go run cmd/state/main.go headersSnapshot --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\"",
 	ValidArgs: []string{"chaindata", "snapshotdir", "block"},
 	//ArgAliases : []string{"chaindata", "snapshotdir", "block"},
 	Args: cobra.OnlyValidArgs,

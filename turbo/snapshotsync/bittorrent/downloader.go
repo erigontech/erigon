@@ -68,7 +68,7 @@ func (cli *Client) AddTorrentSpec(ctx context.Context, db ethdb.Database, snapsh
 	return nil
 }
 
-func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotType snapshotsync.SnapshotType, networkID uint64) error {
+func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotType snapshotsync.SnapshotType, networkID uint64) error { //nolint: interfacer
 	infoHashBytes, infoBytes, err := getTorrentSpec(db, snapshotType.String(), networkID)
 	if err != nil {
 		return err
@@ -188,16 +188,6 @@ func (cli *Client) Download() {
 	}
 }
 
-type torrentSpec struct {
-	InfoHash  metainfo.Hash
-	InfoBytes []byte
-}
-
-const (
-	SnapshotInfoHashPrefix  = "ih"
-	SnapshotInfoBytesPrefix = "ib"
-)
-
 func getTorrentSpec(db ethdb.Database, snapshotName string, networkID uint64) ([]byte, []byte, error) {
 	var infohash, infobytes []byte
 	var err error
@@ -214,7 +204,7 @@ func getTorrentSpec(db ethdb.Database, snapshotName string, networkID uint64) ([
 
 	return infohash, infobytes, nil
 }
-func saveTorrentSpec(db ethdb.Database, snapshotName string, networkID uint64, hash torrent.InfoHash, infobytes []byte) error {
+func saveTorrentSpec(db ethdb.Putter, snapshotName string, networkID uint64, hash torrent.InfoHash, infobytes []byte) error {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, networkID)
 	err := db.Put(dbutils.SnapshotInfoBucket, MakeInfoHashKey(snapshotName, networkID), hash.Bytes())

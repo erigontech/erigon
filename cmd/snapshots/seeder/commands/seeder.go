@@ -17,7 +17,7 @@ import (
 )
 
 func Seed(datadir string) error {
-	datadir=filepath.Dir(datadir)
+	datadir = filepath.Dir(datadir)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	c := make(chan os.Signal, 1)
@@ -38,7 +38,7 @@ func Seed(datadir string) error {
 	pathes := []string{
 		cfg.DataDir + "/headers",
 		cfg.DataDir + "/bodies",
-		cfg.DataDir+"/state",
+		cfg.DataDir + "/state",
 		//cfg.DataDir+"/receipts",
 	}
 
@@ -77,11 +77,11 @@ func Seed(datadir string) error {
 		if err != nil {
 			return err
 		}
-		f,err:=os.Create(filepath.Join(datadir,info.Name)+".txt")
+		f, err := os.Create(filepath.Join(datadir, info.Name) + ".txt")
 		if err != nil {
 			return err
 		}
-		_,err = fmt.Fprint(f, mi.InfoBytes)
+		_, err = fmt.Fprint(f, mi.InfoBytes)
 		if err != nil {
 			return err
 		}
