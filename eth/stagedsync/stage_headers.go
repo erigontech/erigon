@@ -156,6 +156,7 @@ Error: %v
 		seals[len(seals)-1] = true
 	}
 
+	fmt.Println("_____START", headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64())
 	if err := VerifyHeaders(db, headers, engine, seals); err != nil {
 		return false, 0, err
 	}
@@ -284,30 +285,36 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 		return nil
 	}
 
-	requests := make(chan consensus.VerifyHeaderRequest, toVerify)
+	requests := make(chan consensus.VerifyHeaderRequest, 1)
 	requests <- consensus.VerifyHeaderRequest{rand.Uint64(), headers, seals, nil}
 
-	var verified int
+	reqResponses := make(map[common.Hash]struct{}, len(headers))
+
 	for {
 		select {
-		// fixme change to slices of headers
 		case req := <-requests:
 			engine.HeaderVerification() <- req
 		case result := <-engine.VerifyResults():
-			fmt.Println("!!!!! <-engine.VerifyResults()", result.ID, result.Err)
+			fmt.Println("!!!!! <-engine.VerifyResults()-0", result.ID, result.Hash.String(), result.Err, len(reqResponses))
 			if result.Err != nil {
 				return result.Err
 			}
 
-			verified++
+			reqResponses[result.Hash] = struct{}{}
+			fmt.Println("!!!!! <-engine.VerifyResults()-1", result.ID, result.Hash.String(), result.Err, len(reqResponses), len(reqResponses) == toVerify)
 
-			if verified == toVerify {
+			if len(reqResponses) == toVerify {
+				fmt.Println("!!!!! <-engine.VerifyResults()-XXX-DONE")
 				return nil
 			}
 		case result := <-engine.HeaderRequest():
 			var err error
 
-			headers := make([]*types.Header, result.Number)
+			length := 1
+			if result.Number > 0 {
+				length = int(result.Number)
+			}
+			headers := make([]*types.Header, 0, length)
 
 			parentHash := result.HighestHash
 			parentNumber := result.HighestBlockNumber
@@ -320,14 +327,11 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 
 				if h == nil {
 					err = ErrUnknownParent
-					fmt.Println("+++ for block", result.ID, i, result.Number, "NOT FOUND")
 					break
 				}
 
 				parentHash = h.ParentHash
-				headers[i] = h
-
-				fmt.Println("+++ for block", result.ID, i, result.Number, "added", h.Number.Uint64(), h.Hash().String())
+				headers = append(headers, h)
 			}
 
 			if err != nil {

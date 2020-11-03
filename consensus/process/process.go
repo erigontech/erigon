@@ -52,25 +52,26 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					}
 
 					// Short circuit if the header is known
-					if ok := c.GetVerifiedBlock(header.Number.Uint64(), header.Hash()); ok {
+					if h := c.GetCachedHeader(header.Hash(), header.Number.Uint64()); h != nil {
 						c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, header.Hash(), nil}
 						continue
 					}
 
 					knownParents, parentsToValidate := c.requestParentHeaders(req.ID, header, req.Header)
-					if parentsToValidate == 0 {
-						continue
-					}
 
-					fmt.Println("<-c.VerifyHeaderRequests-2", header.Number, len(knownParents), parentsToValidate)
 					err := c.verifyByRequest(req.ID, header, req.Seal[i], parentsToValidate, knownParents)
-					fmt.Println("<-c.VerifyHeaderRequests-3", header.Number, err)
+					fmt.Println("<-c.VerifyHeaderRequests-3", header.Number, parentsToValidate, len(knownParents), err)
 					if errors.Is(err, errNotAllParents) {
 						c.addVerifyHeaderRequest(req.ID, header, req.Seal[i], req.Deadline, knownParents, parentsToValidate)
 					}
 				}
 			case parentResp := <-c.HeaderResponses:
-				fmt.Println("<-c.HeaderResponses-1", parentResp.Headers == nil, parentResp.Err)
+				if len(parentResp.Headers) == 0 {
+					fmt.Println("<-c.HeaderResponses-1", parentResp.Number, len(parentResp.Headers), parentResp.Headers == nil, parentResp.Err)
+				} else {
+					fmt.Println("<-c.HeaderResponses-0", parentResp.Number, len(parentResp.Headers), parentResp.Headers[0].Number.Uint64(), parentResp.Headers == nil, parentResp.Err)
+				}
+
 				if parentResp.Err != nil {
 					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{parentResp.ID, parentResp.Hash, parentResp.Err}
 
@@ -83,7 +84,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				}
 
 				fmt.Println("<-c.HeaderResponses-2")
-				c.VerifyRequestsCommonAncestor(parentResp.ID, parentResp.Number, parentResp.Headers)
+				c.VerifyRequestsCommonAncestor(parentResp.ID, parentResp.Headers)
 				fmt.Println("<-c.HeaderResponses-3")
 			case <-c.CleanupTicker.C:
 				fmt.Println("<-c.CleanupTicker.C-1")
@@ -113,7 +114,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 	return c
 }
 
-func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, blockNumber uint64, headers []*types.Header) {
+func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.Header) {
 	if len(headers) == 0 {
 		return
 	}
@@ -125,19 +126,28 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, blockNumber uint6
 		return
 	}
 
-	req, ok := reqHeaders[blockNumber]
-	if !ok {
-		c.ProcessingRequestsMu.Unlock()
-		return
+	nums := make([]uint64, 0, len(reqHeaders))
+	for num := range reqHeaders {
+		nums = append(nums, num)
 	}
-
-	appendParents(req, headers...)
 	c.ProcessingRequestsMu.Unlock()
 
-	fmt.Println("%%%%% rec", reqID, req.ParentsExpected, len(req.KnownParents), req.ID, req.Header.Number.Uint64(), req.Header.Number.Uint64())
-	_ = c.verifyByRequest(req.ID, req.Header, req.Seal, req.ParentsExpected, req.KnownParents)
+	sort.Slice(nums, func(i, j int) bool {
+		return nums[i] < nums[j]
+	})
 
-	fmt.Printf("+++++++++++++++++++++++++++++++++++++++++++++++++_verifyRequestsCommonAncestor-END %d %d\n\n\n", reqID, len(req.KnownParents))
+	for _, num := range nums {
+		c.ProcessingRequestsMu.Lock()
+		req := reqHeaders[num]
+		c.ProcessingRequestsMu.Unlock()
+
+		appendParents(req, headers...)
+
+		err := c.verifyByRequest(req.ID, req.Header, req.Seal, req.ParentsExpected, req.KnownParents)
+		if err == nil {
+			headers = append(headers, req.Header)
+		}
+	}
 }
 
 func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal bool, parentsExpected int, knownParents []*types.Header) error {
@@ -146,11 +156,9 @@ func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal boo
 	}
 
 	err := c.Verify(c.Process.Chain, header, knownParents, false, seal)
-	fmt.Println("Verify-1", reqID, header.Number.Uint64(), err)
 	c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, header.Hash(), err}
 	if err == nil {
-		fmt.Println("Verify-2", reqID, header.Number.Uint64(), err)
-		c.AddVerifiedBlocks(header)
+		c.CacheHeader(header)
 	}
 
 	// remove finished request
@@ -167,15 +175,15 @@ func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal boo
 	return nil
 }
 
-func toVerifyRequest(reqID uint64, header *types.Header, seal bool, deadline *time.Time, knownParents []*types.Header, allParents int) *consensus.VerifyRequest {
+func toVerifyRequest(reqID uint64, header *types.Header, seal bool, deadline *time.Time, knownParents []*types.Header, parentsToValidate int) *consensus.VerifyRequest {
 	request := &consensus.VerifyRequest{
 		reqID,
 		header,
 		seal,
 		deadline,
 		knownParents,
-		allParents,
-		header.Number.Uint64() - uint64(allParents),
+		parentsToValidate,
+		header.Number.Uint64() - uint64(parentsToValidate),
 		header.Number.Uint64() - uint64(len(knownParents)) - 1,
 	}
 
@@ -186,9 +194,8 @@ func toVerifyRequest(reqID uint64, header *types.Header, seal bool, deadline *ti
 	return request
 }
 
-func (c *Consensus) addVerifyHeaderRequest(reqID uint64, header *types.Header, seal bool, deadline *time.Time, knownParents []*types.Header, allParents int) {
-	fmt.Println("\n\n================================================ STARTED", reqID, header.Number.Uint64())
-	request := toVerifyRequest(reqID, header, seal, deadline, knownParents, allParents)
+func (c *Consensus) addVerifyHeaderRequest(reqID uint64, header *types.Header, seal bool, deadline *time.Time, knownParents []*types.Header, parentsToValidate int) {
+	request := toVerifyRequest(reqID, header, seal, deadline, knownParents, parentsToValidate)
 
 	appendParents(request, knownParents...)
 
@@ -200,8 +207,6 @@ func (c *Consensus) addVerifyHeaderRequest(reqID uint64, header *types.Header, s
 	blocks[header.Number.Uint64()] = request
 	c.ProcessingRequests[reqID] = blocks
 	c.ProcessingRequestsMu.Unlock()
-
-	fmt.Println("================================================ DONE\n\n", reqID, header.Number.Uint64())
 }
 
 func appendParents(request *consensus.VerifyRequest, parents ...*types.Header) {
@@ -229,7 +234,6 @@ func (c *Consensus) HeaderVerification() chan<- consensus.VerifyHeaderRequest {
 
 func (c *Consensus) requestParentHeaders(reqID uint64, header *types.Header, reqHeaders []*types.Header) ([]*types.Header, int) {
 	parentsToValidate := c.NeededForVerification(header)
-	fmt.Println("requestParentHeaders", header.Number, parentsToValidate)
 	if parentsToValidate == 0 {
 		return nil, 0
 	}
@@ -240,26 +244,28 @@ func (c *Consensus) requestParentHeaders(reqID uint64, header *types.Header, req
 	from := reqHeaders[0].Number.Uint64()
 	to := reqHeaders[len(reqHeaders)-1].Number.Uint64()
 
+	parentsToAsk := parentsToValidate
+
 	// don't ask for already requested for verification blocks
 	if header.Number.Uint64() > from && header.Number.Uint64() <= to {
-		if header.Number.Uint64()-uint64(parentsToValidate) < from {
-			fmt.Printf("----- %d (1) - for block %d\n", reqID, header.Number.Int64())
-			parentsToValidate = int(int64(from) - (header.Number.Int64() - int64(parentsToValidate)))
+		if header.Number.Uint64() >= from+uint64(parentsToValidate) {
+			// we're inside the requested range
+			parentsToAsk = 0
+		} else {
+			parentsToAsk = int(int64(from) - (header.Number.Int64() - int64(parentsToAsk)))
 		}
 	}
 
-	if parentsToValidate > 0 {
-		fmt.Printf("----- %d (2) - for block %d %d\n", reqID, header.Number.Int64(), parentsToValidate)
+	if parentsToAsk > 0 {
 		headerNumber = from - 1
 		headerParentHash = reqHeaders[0].ParentHash
-	} else {
-		return nil, 0
 	}
 
-	fmt.Printf("----- %d - for block %d. req headers are from %d to %d. requesting total %d: back to %d blocks; last one is %d %s\n", reqID, header.Number.Int64(), from, to, c.NeededForVerification(header), headerNumber, parentsToValidate, headerParentHash.String())
-
 	// fixme тут могут быть дубли запросов
-	knownParents := c.requestHeaders(reqID, headerNumber, headerParentHash, uint64(parentsToValidate))
+	knownParents := c.requestHeadersNotFromRange(reqID, headerNumber, headerParentHash, uint64(parentsToAsk))
+	knownParentsFromRange := c.checkHeadersFromRange(header, reqHeaders, uint64(parentsToAsk), uint64(parentsToValidate))
+
+	knownParents = append(knownParents, knownParentsFromRange...)
 
 	sort.SliceStable(knownParents, func(i, j int) bool {
 		return knownParents[i].Number.Cmp(knownParents[j].Number) == -1
@@ -270,19 +276,30 @@ func (c *Consensus) requestParentHeaders(reqID uint64, header *types.Header, req
 
 var errNotAllParents = errors.New("not all parents are gathered")
 
-func (c *Consensus) requestHeaders(reqID uint64, highestBlock uint64, highestKnown common.Hash, parentsToGet uint64) []*types.Header {
+func (c *Consensus) requestHeadersNotFromRange(reqID uint64, highestBlock uint64, highestKnown common.Hash, parentsToGet uint64) []*types.Header {
 	var known []*types.Header
 	highestParent := highestBlock
 
-	for parentBlockNum := highestBlock - 1; parentBlockNum >= highestBlock-parentsToGet; parentBlockNum-- {
-		parentBlock := c.GetVerifiedBlocks(highestKnown, parentBlockNum)
+	var minHeader uint64
+	if highestBlock > parentsToGet {
+		minHeader = highestBlock - parentsToGet + 1
+	}
+
+	for parentBlockNum := highestBlock; parentBlockNum >= minHeader; parentBlockNum-- {
+		parentBlock := c.GetCachedHeader(highestKnown, parentBlockNum)
 		if parentBlock == nil {
 			break
 		}
 
 		highestKnown = parentBlock.ParentHash
 		highestParent = parentBlock.Number.Uint64() - 1
+
 		known = append(known, parentBlock)
+	}
+
+	if len(known) != 0 {
+		highestKnown = known[0].Hash()
+		highestParent = known[0].Number.Uint64()
 	}
 
 	c.HeadersRequests <- consensus.HeadersRequest{
@@ -290,6 +307,41 @@ func (c *Consensus) requestHeaders(reqID uint64, highestBlock uint64, highestKno
 		highestKnown,
 		highestParent,
 		parentsToGet - uint64(len(known)),
+	}
+
+	return known
+}
+
+func (c *Consensus) checkHeadersFromRange(highestHeader *types.Header, requestedHeaders []*types.Header, parentsToGet, parentsToValidate uint64) []*types.Header {
+	var known []*types.Header
+	highestBlock := highestHeader.Number.Uint64() - 1
+
+	parentsToGet = parentsToValidate - parentsToGet
+	if parentsToGet <= 0 {
+		return nil
+	}
+
+	var minHeader uint64
+	if highestBlock > parentsToGet {
+		minHeader = highestBlock - parentsToGet + 1
+	}
+
+	for parentBlockNum := minHeader; parentBlockNum <= highestBlock; parentBlockNum++ {
+		idx := sort.Search(len(requestedHeaders), func(i int) bool {
+			return requestedHeaders[i].Number.Uint64() >= parentBlockNum
+		})
+
+		if idx >= len(requestedHeaders) || requestedHeaders[idx].Number.Uint64() != parentBlockNum {
+			// debug: is it even possible?
+			continue
+		}
+
+		parentBlock := c.GetCachedHeader(requestedHeaders[idx].Hash(), parentBlockNum)
+		if parentBlock == nil {
+			continue
+		}
+
+		known = append(known, parentBlock)
 	}
 
 	return known

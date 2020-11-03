@@ -1,7 +1,6 @@
 package consensus
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -111,7 +110,7 @@ func (p *Process) HeaderResponse() chan<- HeaderResponse {
 	return p.HeaderResponses
 }
 
-func (p *Process) AddVerifiedBlocks(header *types.Header) {
+func (p *Process) CacheHeader(header *types.Header) {
 	p.VerifiedBlocksMu.Lock()
 	defer p.VerifiedBlocksMu.Unlock()
 
@@ -123,13 +122,11 @@ func (p *Process) AddVerifiedBlocks(header *types.Header) {
 	} else {
 		blocks = append(blocks, header)
 		p.VerifiedBlocks.Add(blockNum, blocks)
-		fmt.Println("AddVerifiedBlocks-1-ok", blockNum)
 		return
 	}
 
 	for _, h := range blocks {
 		if h.Hash() == header.Hash() {
-			fmt.Println("AddVerifiedBlocks-2-!ok", blockNum)
 			return
 		}
 	}
@@ -137,23 +134,19 @@ func (p *Process) AddVerifiedBlocks(header *types.Header) {
 	blocks = append(blocks, header)
 
 	p.VerifiedBlocks.Add(blockNum, blocks)
-	fmt.Println("AddVerifiedBlocks-3-ok", blockNum)
 }
 
-// fixme rename
-func (p *Process) GetVerifiedBlocks(parentHash common.Hash, blockNum uint64) *types.Header {
+func (p *Process) GetCachedHeader(parentHash common.Hash, blockNum uint64) *types.Header {
 	p.VerifiedBlocksMu.RLock()
 	defer p.VerifiedBlocksMu.RUnlock()
 
 	h, ok := p.VerifiedBlocks.Get(blockNum)
 	if !ok {
-		fmt.Println("GetVerifiedBlocks-1", blockNum, false)
 		return nil
 	}
 
 	headers, ok := h.([]*types.Header)
 	if !ok {
-		fmt.Println("GetVerifiedBlocks-2", blockNum, false)
 		return nil
 	}
 
@@ -164,21 +157,4 @@ func (p *Process) GetVerifiedBlocks(parentHash common.Hash, blockNum uint64) *ty
 	}
 
 	return nil
-}
-
-func (p *Process) GetVerifiedBlock(blockNum uint64, hash common.Hash) bool {
-	p.VerifiedBlocksMu.RLock()
-	defer p.VerifiedBlocksMu.RUnlock()
-
-	h, ok := p.VerifiedBlocks.Get(blockNum)
-	if !ok {
-		return false
-	}
-
-	headers, ok := h.([]*types.Header)
-	if !ok {
-		return false
-	}
-
-	return types.SearchHeader(headers, hash)
 }

@@ -302,14 +302,10 @@ func CopyHeader(h *Header) *Header {
 }
 
 func SearchHeader(headers []*Header, hash common.Hash) bool { //nolint:interfacer
-	if len(headers) == 0 {
-		return false
-	}
-	n := sort.Search(len(headers), func(i int) bool {
-		return headers[i].Hash().String() >= hash.String()
-	})
-	if n < len(headers) && headers[n].Hash() == hash {
-		return true
+	for _, header := range headers {
+		if header.Hash() == hash {
+			return true
+		}
 	}
 	return false
 }

@@ -11,7 +11,7 @@ func (ethash *Ethash) Verify(chain consensus.ChainHeaderReader, header *types.He
 	if len(parents) == 0 {
 		return errors.New("need a parent to verify the header")
 	}
-	return ethash.verifyHeader(chain, header, parents[0], uncle, seal)
+	return ethash.verifyHeader(chain, header, parents[len(parents)-1], uncle, seal)
 }
 
 func (ethash *Ethash) NeededForVerification(h *types.Header) int {

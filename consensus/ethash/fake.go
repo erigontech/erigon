@@ -179,7 +179,7 @@ func (f *FakeEthash) Verify(chain consensus.ChainHeaderReader, header *types.Hea
 	if len(parents) == 0 {
 		return errors.New("need a parent to verify the header")
 	}
-	err := f.verifyHeader(chain, header, parents[0], false, false)
+	err := f.verifyHeader(chain, header, parents[len(parents)-1], false, false)
 	if err != nil {
 		return err
 	}
