@@ -26,12 +26,13 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 		Process:  consensus.NewProcess(chain),
 	}
 
+	fmt.Println("___start")
+
 	go func() {
 	eventLoop:
 		for {
 			select {
 			case req := <-c.VerifyHeaderRequests:
-				fmt.Println("<-c.VerifyHeaderRequests-1", req.ID, req.Header[0].Number)
 				if req.Deadline == nil {
 					t := time.Now().Add(ttl)
 					req.Deadline = &t
@@ -60,18 +61,11 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					knownParents, parentsToValidate := c.requestParentHeaders(req.ID, header, req.Header)
 
 					err := c.verifyByRequest(req.ID, header, req.Seal[i], parentsToValidate, knownParents)
-					fmt.Println("<-c.VerifyHeaderRequests-3", header.Number, parentsToValidate, len(knownParents), err)
 					if errors.Is(err, errNotAllParents) {
 						c.addVerifyHeaderRequest(req.ID, header, req.Seal[i], req.Deadline, knownParents, parentsToValidate)
 					}
 				}
 			case parentResp := <-c.HeaderResponses:
-				if len(parentResp.Headers) == 0 {
-					fmt.Println("<-c.HeaderResponses-1", parentResp.Number, len(parentResp.Headers), parentResp.Headers == nil, parentResp.Err)
-				} else {
-					fmt.Println("<-c.HeaderResponses-0", parentResp.Number, len(parentResp.Headers), parentResp.Headers[0].Number.Uint64(), parentResp.Headers == nil, parentResp.Err)
-				}
-
 				if parentResp.Err != nil {
 					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{parentResp.ID, parentResp.Hash, parentResp.Err}
 
@@ -79,15 +73,11 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					delete(c.ProcessingRequests, parentResp.ID)
 					c.ProcessingRequestsMu.Unlock()
 
-					fmt.Println("<-c.HeaderResponses-1.1")
 					continue
 				}
 
-				fmt.Println("<-c.HeaderResponses-2")
 				c.VerifyRequestsCommonAncestor(parentResp.ID, parentResp.Headers)
-				fmt.Println("<-c.HeaderResponses-3")
 			case <-c.CleanupTicker.C:
-				fmt.Println("<-c.CleanupTicker.C-1")
 				c.ProcessingRequestsMu.Lock()
 
 				for reqID, reqBlocks := range c.ProcessingRequests {
@@ -103,7 +93,6 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 				}
 
 				c.ProcessingRequestsMu.Unlock()
-				fmt.Println("<-c.CleanupTicker.C-2")
 			case <-exit:
 				fmt.Println("<-exit")
 				return

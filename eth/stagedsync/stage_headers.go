@@ -156,7 +156,6 @@ Error: %v
 		seals[len(seals)-1] = true
 	}
 
-	fmt.Println("_____START", headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64())
 	if err := VerifyHeaders(db, headers, engine, seals); err != nil {
 		return false, 0, err
 	}
@@ -295,16 +294,13 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 		case req := <-requests:
 			engine.HeaderVerification() <- req
 		case result := <-engine.VerifyResults():
-			fmt.Println("!!!!! <-engine.VerifyResults()-0", result.ID, result.Hash.String(), result.Err, len(reqResponses))
 			if result.Err != nil {
 				return result.Err
 			}
 
 			reqResponses[result.Hash] = struct{}{}
-			fmt.Println("!!!!! <-engine.VerifyResults()-1", result.ID, result.Hash.String(), result.Err, len(reqResponses), len(reqResponses) == toVerify)
 
 			if len(reqResponses) == toVerify {
-				fmt.Println("!!!!! <-engine.VerifyResults()-XXX-DONE")
 				return nil
 			}
 		case result := <-engine.HeaderRequest():
@@ -318,8 +314,6 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 
 			parentHash := result.HighestHash
 			parentNumber := result.HighestBlockNumber
-
-			fmt.Println("+++ for block", result.ID, "requested", result.Number, result.HighestBlockNumber, result.HighestHash.String())
 
 			for i := 0; i < int(result.Number); i++ {
 				h := rawdb.ReadHeaderByHash(db, parentHash)
