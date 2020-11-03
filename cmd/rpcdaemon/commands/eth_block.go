@@ -53,10 +53,9 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 // GetBlockByHash implements eth_getBlockByHash. Returns information about a block given the block's hash.
 func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNumberOrHash, fullTx bool) (map[string]interface{}, error) {
 	if numberOrHash.BlockHash == nil {
-		if *numberOrHash.BlockNumber == 0 {
-			return api.GetBlockByNumber(ctx, rpc.LatestBlockNumber, fullTx)
+		if numberOrHash.BlockNumber != nil {
+			return api.GetBlockByNumber(ctx, *numberOrHash.BlockNumber, fullTx)
 		}
-
 		return nil, fmt.Errorf("block not found")
 	}
 
