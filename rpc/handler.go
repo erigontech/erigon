@@ -19,7 +19,6 @@ package rpc
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -103,10 +102,6 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		return
 	}
 
-	b, _ := json.Marshal(msgs)
-
-	fmt.Println("msgs", string(b))
-
 	// Handle non-call messages first:
 	calls := make([]*jsonrpcMessage, 0, len(msgs))
 	for _, msg := range msgs {
@@ -137,8 +132,6 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 
 // handleMsg handles a single message.
 func (h *handler) handleMsg(msg *jsonrpcMessage) {
-	b, _ := json.Marshal(msg)
-	fmt.Println("msg", string(b))
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
