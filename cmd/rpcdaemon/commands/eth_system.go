@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/eth"
@@ -64,7 +63,11 @@ func (api *APIImpl) ProtocolVersion(_ context.Context) (hexutil.Uint, error) {
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
 func (api *APIImpl) GasPrice(_ context.Context) (*hexutil.Big, error) {
-	return nil, fmt.Errorf(NotImplemented, "eth_getPrice")
-	// price, err := eth.SuggestPrice(ctx)
-	// return (*hexutil.Big)(price), err
+	return &hexutil.Big{}, nil
+
+	/*
+		return nil, fmt.Errorf(NotImplemented, "eth_getPrice")
+		// price, err := eth.SuggestPrice(ctx)
+		// return (*hexutil.Big)(price), err
+	*/
 }
