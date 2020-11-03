@@ -11,6 +11,7 @@ import (
 func Check(filesDir string) error {
 	log.Info("Checking", "directory", filesDir)
 	hd := headerdownload.NewHeaderDownload(
+		common.Hash{}, /* initialHash */
 		filesDir,
 		32*1024, /* bufferLimit */
 		16*1024, /* tipLimit */
