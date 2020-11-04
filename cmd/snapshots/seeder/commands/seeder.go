@@ -16,9 +16,9 @@ import (
 	"time"
 )
 
-func Seed(datadir string) error {
+func Seed(ctx context.Context, datadir string) error {
 	datadir = filepath.Dir(datadir)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -38,7 +38,7 @@ func Seed(datadir string) error {
 	pathes := []string{
 		cfg.DataDir + "/headers",
 		cfg.DataDir + "/bodies",
-		cfg.DataDir + "/state",
+		//cfg.DataDir + "/state",
 		//cfg.DataDir+"/receipts",
 	}
 
@@ -64,7 +64,7 @@ func Seed(datadir string) error {
 		} else if err != nil {
 			return err
 		}
-
+		tt := time.Now()
 		if common.IsCanceled(ctx) {
 			return common.ErrStopped
 		}
@@ -85,7 +85,7 @@ func Seed(datadir string) error {
 		if err != nil {
 			return err
 		}
-		tt := time.Now()
+
 		torrents[i], _, err = cl.AddTorrentSpec(&torrent.TorrentSpec{
 			Trackers:  trnt.Trackers,
 			InfoHash:  mi.HashInfoBytes(),

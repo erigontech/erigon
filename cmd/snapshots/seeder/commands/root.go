@@ -54,7 +54,6 @@ var rootCmd = &cobra.Command{
 	},
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log.Info("run cmd")
-		return Seed(args[0])
+		return Seed(cmd.Context(), args[0])
 	},
 }

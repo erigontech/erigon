@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"path/filepath"
+	"time"
 )
 
 var (
@@ -34,26 +36,23 @@ type SNDownloaderServer struct {
 }
 
 func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotsync.DownloadSnapshotRequest) (*empty.Empty, error) {
-	m, ok := TorrentHashes[request.NetworkId]
-	if !ok {
-		return nil, ErrNotSupportedNetworkID
+	fmt.Println("Download")
+	t:=time.Now()
+	err := S.t.AddSnapshotsTorrents(ctx, S.db, request.NetworkId, snapshotsync.FromSnapshotTypes(request.Type))
+	if err!=nil {
+		return nil, err
 	}
-
-	for _, t := range request.Type {
-		hash, ok := m[t]
-		if !ok {
-			return nil, ErrNotSupportedSnapshot
-		}
-		err := S.t.AddTorrentSpec(context.Background(), S.db, t.String(), hash, nil)
-		if err != nil {
-			return nil, err
-		}
-	}
+	fmt.Println("Download took", time.Since(t))
 	return &empty.Empty{}, nil
+}
+func (S *SNDownloaderServer) Load() error {
+	return S.t.Load(S.db)
 }
 
 func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsync.SnapshotsRequest) (*snapshotsync.SnapshotsInfoReply, error) {
+	tt:=time.Now()
 	reply := snapshotsync.SnapshotsInfoReply{}
+
 	err := S.WalkThroughTorrents(request.NetworkId, func(k, v []byte) (bool, error) {
 		var hash metainfo.Hash
 		if len(v) != metainfo.HashSize {
@@ -73,17 +72,22 @@ func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsyn
 		case <-t.GotInfo():
 			gotInfo = true
 			readiness = int32(100 * (float64(t.BytesCompleted()) / float64(t.Info().TotalLength())))
-
+			fmt.Println(t.BytesCompleted(), t.Info().TotalLength())
 		default:
 		}
 
-		tp := snapshotsync.SnapshotType_value[string(k[8+2:])]
+		_, tpStr := ParseInfoHashKey(k)
+		tp,ok:=snapshotsync.SnapshotType_value[tpStr]
+		if !ok {
+			return false, fmt.Errorf("incorrect type: %v", tpStr)
+		}
 
 		val := &snapshotsync.SnapshotsInfo{
-			Type:          snapshotsync.SnapshotType(tp),
+			Type:  snapshotsync.SnapshotType(tp),
 			GotInfoByte:   gotInfo,
 			Readiness:     readiness,
 			SnapshotBlock: SnapshotBlock,
+			Dbpath: filepath.Join(S.t.snapshotsDir, t.Files()[0].Path()),
 		}
 		reply.Info = append(reply.Info, val)
 
@@ -92,21 +96,7 @@ func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsyn
 	if err != nil {
 		return nil, err
 	}
-	//for _,t:=range S.t.Cli.Torrents() {
-	//	reply.Info=append(reply.Info, &snapshotsync.SnapshotsInfo{
-	//		Name: t.Name(),
-	//		Networkid: 0,
-	//		Downloaded: t.BytesMissing()==0,
-	//		Readiness: int32(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))),
-	//	})
-	//}
-	//select {
-	//case <-ctx.Done():
-	//	fmt.Println("Snapshots", ctx.Err())
-	//default:
-	//	fmt.Println("Default")
-	//}
-
+	fmt.Println("Snapshots took", time.Since(tt),  reply.Info)
 	return &reply, nil
 }
 

@@ -1,7 +1,10 @@
 package commands
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"github.com/spf13/cobra"
 	"math/big"
 	"os"
 	"time"
@@ -14,7 +17,25 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
-func BodySnapshot(dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
+func init() {
+	withChaindata(generateBodiesSnapshotCmd)
+	withSnapshotFile(generateBodiesSnapshotCmd)
+	withSnapshotData(generateBodiesSnapshotCmd)
+	withBlock(generateBodiesSnapshotCmd)
+	rootCmd.AddCommand(generateBodiesSnapshotCmd)
+
+}
+
+var generateBodiesSnapshotCmd = &cobra.Command{
+	Use:     "bodies",
+	Short:   "Generate bodies snapshot",
+	Example: "go run cmd/snapshots/generator/main.go bodies --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/bodies_test",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return BodySnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
+	},
+}
+
+func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	kv := ethdb.NewLMDB().Path(dbPath).MustOpen()
 	var err error
 	if snapshotDir != "" {
@@ -44,6 +65,13 @@ func BodySnapshot(dbPath, snapshotPath string, toBlock uint64, snapshotDir strin
 	var hash common.Hash
 
 	for i := uint64(1); i <= toBlock; i++ {
+		select {
+		case <-ctx.Done():
+			return errors.New("interrupted")
+		default:
+
+		}
+
 		hash, err = rawdb.ReadCanonicalHash(db, i)
 		if err != nil {
 			return fmt.Errorf("getting canonical hash for block %d: %v", i, err)

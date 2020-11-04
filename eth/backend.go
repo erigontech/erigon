@@ -181,7 +181,11 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 				return nil, err
 			}
 			torrentClient = bittorrent.New(dbPath, config.SnapshotSeeding)
-			err = torrentClient.AddSnapshotsTorrents(chainDb, config.NetworkID, config.SnapshotMode)
+			err = torrentClient.Load(chainDb)
+			if err!=nil {
+				return nil, err
+			}
+			err = torrentClient.AddSnapshotsTorrents(context.Background(), chainDb, config.NetworkID, config.SnapshotMode)
 			if err == nil {
 				torrentClient.Download()
 

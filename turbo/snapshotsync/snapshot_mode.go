@@ -45,6 +45,22 @@ func (m SnapshotMode) ToSnapshotTypes() []SnapshotType {
 	return types
 }
 
+func FromSnapshotTypes(st []SnapshotType) SnapshotMode  {
+	var mode SnapshotMode
+	for i:=range st {
+		switch st[i] {
+		case SnapshotType_headers:
+			mode.Headers=true
+		case SnapshotType_bodies:
+			mode.Bodies=true
+		case SnapshotType_state:
+			mode.State=true
+		case SnapshotType_receipts:
+			mode.Receipts=true
+		}
+	}
+	return mode
+}
 func SnapshotModeFromString(flags string) (SnapshotMode, error) {
 	mode := SnapshotMode{}
 	for _, flag := range flags {

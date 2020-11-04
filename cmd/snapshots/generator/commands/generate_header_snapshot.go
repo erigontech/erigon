@@ -1,13 +1,13 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/spf13/cobra"
 
 	"math/big"
 	"os"
-	"os/signal"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -19,23 +19,27 @@ import (
 )
 
 func init() {
-	//commands.withSnapshotData(generateHeadersSnapshotCmd)
+	withChaindata(generateHeadersSnapshotCmd)
+	withSnapshotFile(generateHeadersSnapshotCmd)
+	withSnapshotData(generateHeadersSnapshotCmd)
+	withBlock(generateHeadersSnapshotCmd)
+
 	rootCmd.AddCommand(generateHeadersSnapshotCmd)
 }
 
 var generateHeadersSnapshotCmd = &cobra.Command{
 	Use:       "headers",
 	Short:     "Generate headers snapshot",
-	Example:   "go run cmd/state/main.go headersSnapshot --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\"",
+	Example:   "go run cmd/snapshots/generator/main.go headers --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/headers_test",
 	ValidArgs: []string{"chaindata", "snapshotdir", "block"},
 	//ArgAliases : []string{"chaindata", "snapshotdir", "block"},
 	Args: cobra.OnlyValidArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return HeaderSnapshot(chaindata, snapshotFile, block, snapshotDir, snapshotMode)
+		return HeaderSnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
 	},
 }
 
-func HeaderSnapshot(dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
+func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	if snapshotPath == "" {
 		return errors.New("empty snapshot path")
 	}
@@ -67,8 +71,6 @@ func HeaderSnapshot(dbPath, snapshotPath string, toBlock uint64, snapshotDir str
 	db := ethdb.NewObjectDatabase(kv)
 	sndb := ethdb.NewObjectDatabase(snkv)
 
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, os.Interrupt)
 	t := time.Now()
 	chunkFile := 30000
 	tuples := make(ethdb.MultiPutTuples, 0, chunkFile*3)
@@ -76,7 +78,7 @@ func HeaderSnapshot(dbPath, snapshotPath string, toBlock uint64, snapshotDir str
 	var header []byte
 	for i := uint64(1); i <= toBlock; i++ {
 		select {
-		case <-ch:
+		case <-ctx.Done():
 			return errors.New("interrupted")
 		default:
 
