@@ -373,7 +373,7 @@ var accChangeSetDupSort = Migration{
 				if err != nil {
 					panic(err)
 				}
-				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
+				return []interface{}{"key", fmt.Sprintf("%x", k)} // loading is the second stage, from 50..100
 			},
 		}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
@@ -491,7 +491,7 @@ var storageChangeSetDupSort = Migration{
 				if err != nil {
 					panic(err)
 				}
-				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
+				return []interface{}{"key", fmt.Sprintf("%x", k)} // loading is the second stage, from 50..100
 			},
 		}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
