@@ -264,7 +264,7 @@ var receiptsOnePerTx = Migration{
 }
 
 var accChangeSetDupSort = Migration{
-	Name: "acc_change_set_dup_sort_2",
+	Name: "acc_change_set_dup_sort_3",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
