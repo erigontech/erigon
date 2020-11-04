@@ -365,7 +365,7 @@ var accChangeSetDupSort = Migration{
 			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err := collectorR.Load(logPrefix, db, dbutils.PlainAccountChangeSetBucket2, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err := collectorR.Load(logPrefix, db, dbutils.PlainAccountChangeSetBucket2, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: CommitProgress}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
 		return nil
