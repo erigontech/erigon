@@ -79,7 +79,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 	var batch ethdb.DbWithPendingMutations
 	if params.SilkwormExecutionFunc == nil {
-		batch := tx.NewBatch()
+		batch = tx.NewBatch()
 		defer batch.Rollback()
 	}
 
