@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime"
 	"time"
+	"unsafe"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -35,12 +36,13 @@ type StateReaderBuilder func(ethdb.Getter) state.StateReader
 type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) state.WriterWithChangeSets
 
 type ExecuteBlockStageParams struct {
-	ToBlock       uint64 // not setting this params means no limit
-	WriteReceipts bool
-	BatchSize     int
-	ChangeSetHook ChangeSetHook
-	ReaderBuilder StateReaderBuilder
-	WriterBuilder StateWriterBuilder
+	ToBlock               uint64 // not setting this params means no limit
+	WriteReceipts         bool
+	BatchSize             int
+	ChangeSetHook         ChangeSetHook
+	ReaderBuilder         StateReaderBuilder
+	WriterBuilder         StateWriterBuilder
+	SilkwormExecutionFunc unsafe.Pointer
 }
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext *core.TinyChainContext, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {

@@ -1,6 +1,8 @@
 package stagedsync
 
 import (
+	"unsafe"
+
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -27,6 +29,8 @@ type OptionalParameters struct {
 	// StateReaderBuilder is a function that returns state writer for the block execution stage.
 	// It can be used to update bloom or other types of filters between block execution.
 	StateWriterBuilder StateWriterBuilder
+
+	SilkwormExecutionFunc unsafe.Pointer
 }
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
@@ -73,24 +77,25 @@ func (stagedSync *StagedSync) Prepare(
 
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
-			d:                  d,
-			chainConfig:        chainConfig,
-			chainContext:       chainContext,
-			vmConfig:           vmConfig,
-			db:                 db,
-			TX:                 tx,
-			pid:                pid,
-			storageMode:        storageMode,
-			tmpdir:             tmpdir,
-			QuitCh:             quitCh,
-			headersFetchers:    headersFetchers,
-			txPool:             txPool,
-			poolStart:          poolStart,
-			changeSetHook:      changeSetHook,
-			batchSize:          batchSize,
-			prefetchedBlocks:   stagedSync.PrefetchedBlocks,
-			stateReaderBuilder: readerBuilder,
-			stateWriterBuilder: writerBuilder,
+			d:                     d,
+			chainConfig:           chainConfig,
+			chainContext:          chainContext,
+			vmConfig:              vmConfig,
+			db:                    db,
+			TX:                    tx,
+			pid:                   pid,
+			storageMode:           storageMode,
+			tmpdir:                tmpdir,
+			QuitCh:                quitCh,
+			headersFetchers:       headersFetchers,
+			txPool:                txPool,
+			poolStart:             poolStart,
+			changeSetHook:         changeSetHook,
+			batchSize:             batchSize,
+			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
+			stateReaderBuilder:    readerBuilder,
+			stateWriterBuilder:    writerBuilder,
+			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 		},
 	)
 	state := NewState(stages)
