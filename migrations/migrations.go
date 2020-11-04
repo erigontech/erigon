@@ -67,6 +67,7 @@ var migrations = []Migration{
 	receiptsCborEncode,
 	receiptsOnePerTx,
 	accChangeSetDupSort,
+	storageChangeSetDupSort,
 }
 
 type Migration struct {
