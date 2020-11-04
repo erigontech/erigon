@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"time"
 	"unsafe"
@@ -98,9 +99,22 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		if params.SilkwormExecutionFunc != nil {
 			txn := tx.(ethdb.HasTx).Tx()
 			var err error
-			blockNum, err = silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, blockNum, params.BatchSize, params.WriteReceipts)
+			batchSize := uint64(params.BatchSize)
+			if useExternalTx {
+				// Since we cannot periodically commit transactions, we have to execute all blocks in one go
+				batchSize = math.MaxUint64
+			}
+			blockNum, err = silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, blockNum, batchSize, params.WriteReceipts)
 			if err != nil {
 				return err
+			}
+			if err = s.Update(tx, blockNum); err != nil {
+				return err
+			}
+			if !useExternalTx {
+				if err = tx.CommitAndBegin(context.Background()); err != nil {
+					return err
+				}
 			}
 		} else {
 			blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
@@ -173,10 +187,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 	}
 
-	if err := s.Update(tx, stageProgress); err != nil {
-		return err
-	}
 	if batch != nil {
+		if err := s.Update(batch, stageProgress); err != nil {
+			return err
+		}
 		if _, err := batch.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 		}

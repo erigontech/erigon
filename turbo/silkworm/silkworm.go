@@ -49,7 +49,7 @@ func LoadExecutionFunctionPointer(dllPath string) (unsafe.Pointer, error) {
 	return funcPtr, nil
 }
 
-func ExecuteBlocks(funcPtr unsafe.Pointer, txn ethdb.Tx, chainID *big.Int, startBlock uint64, batchSize int, writeReceipts bool) (executedBlock uint64, err error) {
+func ExecuteBlocks(funcPtr unsafe.Pointer, txn ethdb.Tx, chainID *big.Int, startBlock uint64, batchSize uint64, writeReceipts bool) (executedBlock uint64, err error) {
 	cChainId := C.uint64_t(chainID.Uint64())
 	cStartBlock := C.uint64_t(startBlock)
 	cBatchSize := C.size_t(batchSize)
