@@ -444,8 +444,6 @@ var storageChangeSetDupSort = Migration{
 			if err := walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
 				newK := make([]byte, 8)
 				binary.BigEndian.PutUint64(newK, blockNum)
-				fmt.Printf("11: %x %x\n", k, v)
-				panic(1)
 				newV := make([]byte, 60+len(v))
 				copy(newV, k)
 				copy(newV[60:], v)
