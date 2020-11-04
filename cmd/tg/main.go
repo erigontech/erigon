@@ -36,7 +36,7 @@ func runTurboGeth(cliCtx *cli.Context) {
 		var err error
 		silkwormExecutionFunc, err = silkworm.LoadExecutionFunctionPointer(silkwormPath)
 		if err != nil {
-			panic(fmt.Errorf("Failed to load Silkworm dynamic library: %v", err))
+			panic(fmt.Errorf("failed to load Silkworm dynamic library: %v", err))
 		}
 	}
 
