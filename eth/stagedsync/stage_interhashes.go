@@ -147,15 +147,14 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 
 	startkey := dbutils.EncodeTimestamp(from + 1)
 
-	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	mapper := changeset.Mapper[changeSetBucket]
 	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			newK, err := transformPlainStateKey(k)
-			if err != nil {
-				return err
-			}
-			return next(k, newK, nil)
-		})
+		k := changesetBytes[:mapper.KeySize]
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
+		return next(k, newK, nil)
 	}
 
 	var l OldestAppearedLoad
@@ -192,15 +191,14 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 
 	startkey := dbutils.EncodeTimestamp(to + 1)
 
-	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	mapper := changeset.Mapper[changeSetBucket]
 	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			newK, err := transformPlainStateKey(k)
-			if err != nil {
-				return err
-			}
-			return next(k, newK, nil)
-		})
+		k := changesetBytes[:mapper.KeySize]
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
+		return next(k, newK, nil)
 	}
 
 	var l OldestAppearedLoad

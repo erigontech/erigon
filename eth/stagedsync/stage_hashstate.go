@@ -186,133 +186,131 @@ type Promoter struct {
 }
 
 func getExtractFunc(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
-	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	mapper := changeset.Mapper[changeSetBucket]
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
-			value, err := db.Get(dbutils.PlainStateBucket, k)
-			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-				return err
-			}
-			newK, err := transformPlainStateKey(k)
-			if err != nil {
-				return err
-			}
-			return next(k, newK, value)
-		})
+		k := changesetBytes[:mapper.KeySize]
+
+		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
+		value, err := db.Get(dbutils.PlainStateBucket, k)
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return err
+		}
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
+		return next(k, newK, value)
 	}
 }
 
 func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
-	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	mapper := changeset.Mapper[changeSetBucket]
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			value, err := db.Get(dbutils.PlainStateBucket, k)
-			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-				return err
-			}
-			if len(value) == 0 {
-				return nil
-			}
-			var a accounts.Account
-			if err = a.DecodeForStorage(value); err != nil {
-				return err
-			}
-			if a.Incarnation == 0 {
-				return nil
-			}
-			plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
-			var codeHash []byte
-			codeHash, err = db.Get(dbutils.PlainContractCodeBucket, plainKey)
-			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-				return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, a.Incarnation, err)
-			}
-			if codeHash == nil {
-				return nil
-			}
-			newK, err := transformContractCodeKey(plainKey)
-			if err != nil {
-				return err
-			}
-			return next(k, newK, codeHash)
-		})
+		k := changesetBytes[:mapper.KeySize]
+
+		value, err := db.Get(dbutils.PlainStateBucket, k)
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return err
+		}
+		if len(value) == 0 {
+			return nil
+		}
+		var a accounts.Account
+		if err = a.DecodeForStorage(value); err != nil {
+			return err
+		}
+		if a.Incarnation == 0 {
+			return nil
+		}
+		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
+		var codeHash []byte
+		codeHash, err = db.Get(dbutils.PlainContractCodeBucket, plainKey)
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, a.Incarnation, err)
+		}
+		if codeHash == nil {
+			return nil
+		}
+		newK, err := transformContractCodeKey(plainKey)
+		if err != nil {
+			return err
+		}
+		return next(k, newK, codeHash)
 	}
 }
 
 func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
-	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	mapper := changeset.Mapper[changeSetBucket]
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			newK, err := transformPlainStateKey(k)
-			if err != nil {
-				return err
-			}
-			return next(k, newK, v)
-		})
+		k, v := changesetBytes[:mapper.KeySize], changesetBytes[mapper.KeySize:]
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
+		return next(k, newK, v)
 	}
 }
 
 func getUnwindExtractAccounts(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
-	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
+	mapper := changeset.Mapper[changeSetBucket]
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			newK, err := transformPlainStateKey(k)
-			if err != nil {
-				return err
-			}
+		k, v := changesetBytes[:mapper.KeySize], changesetBytes[mapper.KeySize:]
 
-			if len(v) == 0 {
-				return next(k, newK, v)
-			}
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
 
-			var acc accounts.Account
-			if err = acc.DecodeForStorage(v); err != nil {
-				return err
-			}
-			if !(acc.Incarnation > 0 && acc.IsEmptyCodeHash()) {
-				return next(k, newK, v)
-			}
+		if len(v) == 0 {
+			return next(k, newK, v)
+		}
 
-			if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
-				copy(acc.CodeHash[:], codeHash)
-			} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
-				return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", newK, acc.Incarnation, err)
-			}
+		var acc accounts.Account
+		if err = acc.DecodeForStorage(v); err != nil {
+			return err
+		}
+		if !(acc.Incarnation > 0 && acc.IsEmptyCodeHash()) {
+			return next(k, newK, v)
+		}
 
-			value := make([]byte, acc.EncodingLengthForStorage())
-			acc.EncodeForStorage(value)
+		if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
+			copy(acc.CodeHash[:], codeHash)
+		} else if !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", newK, acc.Incarnation, err)
+		}
 
-			return next(k, newK, value)
-		})
+		value := make([]byte, acc.EncodingLengthForStorage())
+		acc.EncodeForStorage(value)
+
+		return next(k, newK, value)
 	}
 }
 
 func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return changeset.AccountChangeSetPlainBytes(changesetBytes).Walk(func(k, v []byte) error {
-			if len(v) == 0 {
-				return nil
-			}
-			var err error
-			var a accounts.Account
-			if err = a.DecodeForStorage(v); err != nil {
-				return err
-			}
-			if a.Incarnation == 0 {
-				return nil
-			}
-			plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
-			var codeHash []byte
-			codeHash, err = db.Get(dbutils.PlainContractCodeBucket, plainKey)
-			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-				return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)
-			}
-			newK, err := transformContractCodeKey(plainKey)
-			if err != nil {
-				return err
-			}
-			return next(k, newK, codeHash)
-		})
+		k, v := changesetBytes[:common.HashLength], changesetBytes[common.HashLength:]
+		if len(v) == 0 {
+			return nil
+		}
+		var err error
+		var a accounts.Account
+		if err = a.DecodeForStorage(v); err != nil {
+			return err
+		}
+		if a.Incarnation == 0 {
+			return nil
+		}
+		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
+		var codeHash []byte
+		codeHash, err = db.Get(dbutils.PlainContractCodeBucket, plainKey)
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)
+		}
+		newK, err := transformContractCodeKey(plainKey)
+		if err != nil {
+			return err
+		}
+		return next(k, newK, codeHash)
 	}
 }
 

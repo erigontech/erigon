@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -264,7 +265,7 @@ var receiptsOnePerTx = Migration{
 }
 
 var accChangeSetDupSort = Migration{
-	Name: "acc_change_set_dup_sort_3",
+	Name: "acc_change_set_dup_sort_4",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -365,7 +366,16 @@ var accChangeSetDupSort = Migration{
 			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err := collectorR.Load(logPrefix, db, dbutils.PlainAccountChangeSetBucket2, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: CommitProgress}); err != nil {
+		if err := collectorR.Load(logPrefix, db, dbutils.PlainAccountChangeSetBucket2, etl.IdentityLoadFunc, etl.TransformArgs{
+			OnLoadCommit: CommitProgress,
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+				err = db.(ethdb.DbWithPendingMutations).CommitAndBegin(context.Background())
+				if err != nil {
+					panic(err)
+				}
+				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
+			},
+		}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
 		return nil
@@ -474,7 +484,16 @@ var storageChangeSetDupSort = Migration{
 			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err := collectorR.Load(logPrefix, db, dbutils.PlainStorageChangeSetBucket2, etl.IdentityLoadFunc, etl.TransformArgs{OnLoadCommit: CommitProgress}); err != nil {
+		if err := collectorR.Load(logPrefix, db, dbutils.PlainStorageChangeSetBucket2, etl.IdentityLoadFunc, etl.TransformArgs{
+			OnLoadCommit: CommitProgress,
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+				err = db.(ethdb.DbWithPendingMutations).CommitAndBegin(context.Background())
+				if err != nil {
+					panic(err)
+				}
+				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
+			},
+		}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the receipts table: %w", err)
 		}
 		return nil

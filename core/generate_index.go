@@ -47,7 +47,7 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 	err := etl.Transform(ig.logPrefix, ig.db, changeSetBucket,
 		v.IndexBucket,
 		tmpdir,
-		getExtractFunc(v.WalkerAdapter),
+		getExtractFunc(v.KeySize),
 		loadFunc,
 		etl.TransformArgs{
 			ExtractStartKey: dbutils.EncodeTimestamp(startBlock),
@@ -76,21 +76,15 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 		return errors.New("unknown bucket type")
 	}
 
-	currentKey := dbutils.EncodeTimestamp(timestampTo)
 	keys := make(map[string]struct{})
-	if err := ig.db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
+	if err := ig.db.Walk(changeSetBucket, dbutils.EncodeTimestamp(timestampTo), 0, func(k, v []byte) (b bool, e error) {
 		if err := common.Stopped(ig.quitCh); err != nil {
 			return false, err
 		}
 
-		currentKey = common.CopyBytes(k)
-		err := vv.WalkerAdapter(v).Walk(func(kk []byte, _ []byte) error {
-			keys[string(common.CopyBytes(kk))] = struct{}{}
-			return nil
-		})
-		if err != nil {
-			return false, err
-		}
+		kk := v[:vv.KeySize]
+
+		keys[string(common.CopyBytes(kk))] = struct{}{}
 		return true, nil
 	}); err != nil {
 		return err
@@ -205,17 +199,16 @@ func loadFunc(k []byte, value []byte, state etl.CurrentTableReader, next etl.Loa
 	return nil
 }
 
-func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc { //nolint
+func getExtractFunc(keySize int) etl.ExtractFunc { //nolint
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		blockNum, _ := dbutils.DecodeTimestamp(dbKey)
-		return bytes2walker(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
-			key := common.CopyBytes(changesetKey)
-			v := make([]byte, 9)
-			binary.BigEndian.PutUint64(v, blockNum)
-			if len(changesetValue) == 0 {
-				v[8] = 1
-			}
-			return next(dbKey, key, v)
-		})
+		changesetKey, changesetValue := dbValue[keySize:], dbValue[:keySize]
+		key := common.CopyBytes(changesetKey)
+		v := make([]byte, 9)
+		binary.BigEndian.PutUint64(v, blockNum)
+		if len(changesetValue) == 0 {
+			v[8] = 1
+		}
+		return next(dbKey, key, v)
 	}
 }
