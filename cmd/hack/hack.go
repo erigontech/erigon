@@ -2107,38 +2107,74 @@ func extracHeaders(chaindata string, block uint64) error {
 	return nil
 }
 
+func drop(db ethdb.KV, bucket string) {
+	logEvery := time.NewTicker(2 * time.Second)
+	defer logEvery.Stop()
+
+	tx, err := db.Begin(context.Background(), nil, ethdb.RW)
+	check(err)
+	defer tx.Rollback()
+	c := tx.Cursor(bucket)
+	i := 0
+	for k, _, _ := c.First(); k != nil; k, _, _ = c.First() {
+		select {
+		default:
+		case <-logEvery.C:
+			fmt.Printf("%x\n", k)
+		}
+
+		i++
+		c.DeleteCurrent()
+		if i > 10_000_000 {
+			break
+		}
+	}
+	_ = tx.Commit(context.Background())
+}
+
 func receiptSizes(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
-	fmt.Printf("bucket: %s\n", dbutils.Log)
-	c := tx.Cursor(dbutils.Log)
-	defer c.Close()
-	sizes := make(map[int]int)
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		sizes[len(v)]++
-	}
-	var lens = make([]int, len(sizes))
-	i := 0
-	for l := range sizes {
-		lens[i] = l
-		i++
-	}
-	sort.Ints(lens)
-	for _, l := range lens {
-		if sizes[l] < 100000 {
-			continue
-		}
-		fmt.Printf("%6d - %d\n", l, sizes[l])
-	}
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "eth_tx")
+	drop(db.KV(), "uncle")
+	drop(db.KV(), "uncles")
+
+	//fmt.Printf("bucket: %s\n", dbutils.Log)
+	//c := tx.Cursor(dbutils.Log)
+	//defer c.Close()
+	//sizes := make(map[int]int)
+	//for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+	//	if err != nil {
+	//		return err
+	//	}
+	//	sizes[len(v)]++
+	//}
+	//var lens = make([]int, len(sizes))
+	//i := 0
+	//for l := range sizes {
+	//	lens[i] = l
+	//	i++
+	//}
+	//sort.Ints(lens)
+	//for _, l := range lens {
+	//	if sizes[l] < 100000 {
+	//		continue
+	//	}
+	//	fmt.Printf("%6d - %d\n", l, sizes[l])
+	//}
 	return nil
 }
 
