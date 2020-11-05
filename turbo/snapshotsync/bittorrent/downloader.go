@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
@@ -28,6 +29,7 @@ func New(snapshotsDir string, seeding bool) *Client {
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.DefaultStorage = storage.NewBoltDB(snapshotsDir)
+	torrentConfig.UpnpID = torrentConfig.UpnpID+"leecher"
 
 	torrentClient, err := torrent.NewClient(torrentConfig)
 	if err != nil {
@@ -43,12 +45,11 @@ func New(snapshotsDir string, seeding bool) *Client {
 func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
 	torrentConfig.ListenPort = 0
-	torrentConfig.NoDHT = false
+	torrentConfig.NoDHT = true
 	torrentConfig.DisableTrackers = false
 	torrentConfig.Debug = true
+	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Debug)
 	//torrentConfig.Logger = NewAdapterLogger()
-	torrentConfig.HandshakesTimeout = time.Second * 20
-	torrentConfig.MinDialTimeout = time.Second * 20
 	return torrentConfig
 }
 
@@ -80,11 +81,14 @@ func (cli *Client) WalkThroughTorrents(db ethdb.Database, networkID uint64, f fu
 }
 
 func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Hash, infoBytes []byte) error {
-	_, _, err := cli.Cli.AddTorrentSpec(&torrent.TorrentSpec{
+	t, _, err := cli.Cli.AddTorrentSpec(&torrent.TorrentSpec{
 		Trackers:    Trackers,
 		InfoHash:    snapshotHash,
 		DisplayName: snapshotName,
 		InfoBytes:   infoBytes,
+	})
+	t.AddPeers([]torrent.Peer{
+
 	})
 	return err
 }

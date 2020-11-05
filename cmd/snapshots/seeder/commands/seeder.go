@@ -27,19 +27,18 @@ func Seed(ctx context.Context, datadir string) error {
 		cancel()
 	}()
 
-	cfg := torrent.NewDefaultClientConfig()
+	cfg := trnt.DefaultTorrentConfig()
 	cfg.NoDHT = false
 	cfg.DisableTrackers = false
 	cfg.Seed = true
 	cfg.Debug = false
 	cfg.Logger = cfg.Logger.FilterLevel(lg.Info)
 	cfg.DataDir = datadir
-	cfg.HandshakesTimeout = time.Second * 20
-	cfg.MinDialTimeout = time.Second * 20
+	cfg.UpnpID+="_seeder"
 
 	pathes := []string{
 		cfg.DataDir + "/headers",
-		cfg.DataDir + "/bodies",
+		//cfg.DataDir + "/bodies",
 		//cfg.DataDir + "/state",
 		//cfg.DataDir+"/receipts",
 	}
