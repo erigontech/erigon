@@ -297,7 +297,14 @@ Then update your `app.json` for ethstats-client like that:
 ]
 ```
 
-and run ethstats-client through pm2 as usual.
+Run ethstats-client through pm2 as usual.
+
+You will see these warnings in the RPC daemon output, but they are expected
+
+```
+WARN [11-05|09:03:47.911] Served                                   conn=127.0.0.1:59753 method=eth_newBlockFilter reqid=5 t="21.194µs" err="the method eth_newBlockFilter does not exist/is not available"
+WARN [11-05|09:03:47.911] Served                                   conn=127.0.0.1:59754 method=eth_newPendingTransactionFilter reqid=6 t="9.053µs"  err="the method eth_newPendingTransactionFilter does not exist/is not available"
+```
 
 ## For Developers
 
