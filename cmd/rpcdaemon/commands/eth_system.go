@@ -74,7 +74,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	return (*hexutil.Big)(price), err
 }
 
-// gasprice.OracleBackend implementation
+// HeaderByNumber is necessary for gasprice.OracleBackend implementation
 func (api *APIImpl) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
 	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
@@ -94,6 +94,7 @@ func (api *APIImpl) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) 
 	return header, nil
 }
 
+// BlockByNumber is necessary for gasprice.OracleBackend implementation
 func (api *APIImpl) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
@@ -116,6 +117,8 @@ func (api *APIImpl) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (
 	return block, nil
 }
 
+// ChainConfig is necessary for gasprice.OracleBackend implementation
 func (api *APIImpl) ChainConfig() *params.ChainConfig {
+	// we just harcode mainnet there for now
 	return params.MainnetChainConfig
 }
