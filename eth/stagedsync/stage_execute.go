@@ -104,7 +104,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				// Since we cannot periodically commit transactions, we have to execute all blocks in one go
 				batchSize = math.MaxUint64
 			}
-			blockNum, err = silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, blockNum, batchSize, params.WriteReceipts)
+			blockNum, err = silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, blockNum, to, batchSize, params.WriteReceipts)
 			if err != nil {
 				return err
 			}
