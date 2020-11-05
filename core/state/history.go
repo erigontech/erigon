@@ -155,6 +155,8 @@ func walkAsOfThinStorage(tx ethdb.Tx, bucket string, hBucket string, startkey []
 		return fmt.Errorf("too high difference between last generated index block(%v) and last executed block(%v)", generatedTo, executedTo)
 	}
 
+	fmt.Printf("4: %d, %d\n", executedTo, generatedTo)
+
 	startkeyNoInc := dbutils.CompositeKeyWithoutIncarnation(startkey)
 	part1End := common.HashLength
 	part2Start := common.HashLength + common.IncarnationLength
@@ -801,21 +803,35 @@ func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 	if from >= to {
 		return nil
 	}
-	fmt.Printf("%s\n", csd.bucketName)
 	c := csd.tx.Cursor(csd.bucketName)
 	defer c.Close()
 
 	mp := make(map[string][]byte)
 	// TODO: use .Prev()
-	ethdb.Walk(c, dbutils.EncodeBlockNumber(from), 0, func(k, v []byte) (bool, error) {
+	_, _, err := c.Seek(dbutils.EncodeBlockNumber(to + 1))
+	if err != nil {
+		return err
+	}
+	for k, v, err := c.Prev(); k != nil; k, v, err = c.Prev() {
+		if err != nil {
+			return err
+		}
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum > to {
-			return false, nil
+		if blockNum < from {
+			break
 		}
 		mp[string(v[:csd.keySize])] = v[csd.keySize:]
+	}
 
-		return true, nil
-	})
+	//ethdb.Walk(c, dbutils.EncodeBlockNumber(from), 0, func(k, v []byte) (bool, error) {
+	//	blockNum := binary.BigEndian.Uint64(k)
+	//	if blockNum > to {
+	//		return false, nil
+	//	}
+	//	mp[string(v[:csd.keySize])] = v[csd.keySize:]
+	//
+	//	return true, nil
+	//})
 
 	//_, _, err := c.Seek(dbutils.EncodeTimestamp(from))
 	//if err != nil {
@@ -868,5 +884,8 @@ func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 		return cmp <= 0
 	})
 	csd.values = res
+	for _, a := range csd.values {
+		fmt.Printf("1: %x, %x\n", a.Key, a.Value)
+	}
 	return nil
 }

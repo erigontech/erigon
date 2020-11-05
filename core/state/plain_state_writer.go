@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"encoding/binary"
+	"sort"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/holiman/uint256"
@@ -151,7 +152,10 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	if err != nil {
 		return err
 	}
+	sort.Sort(accountChanges)
+
 	key := dbutils.EncodeBlockNumber(w.blockNumber)
+
 	for _, cs := range accountChanges.Changes {
 		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
 		newV = append(append(newV, cs.Key...), cs.Value...)
@@ -167,10 +171,11 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	if storageChanges.Len() == 0 {
 		return nil
 	}
+	sort.Sort(storageChanges)
 	for _, cs := range storageChanges.Changes {
 		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
 		newV = append(append(newV, cs.Key...), cs.Value...)
-		if err = db.Append(dbutils.PlainStorageChangeSetBucket2, key, newV); err != nil {
+		if err = db.Append(dbutils.PlainStorageChangeSetBucket2, common.CopyBytes(key), newV); err != nil {
 			return err
 		}
 	}

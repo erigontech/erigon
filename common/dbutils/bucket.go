@@ -328,6 +328,12 @@ var BucketsConfigs = BucketsCfg{
 		//	DupFromLen:                72,
 		//	DupToLen:                  40,
 	},
+	PlainStorageChangeSetBucket2: {
+		Flags: DupSort,
+		//	AutoDupSortKeysConversion: true,
+		//	DupFromLen:                72,
+		//	DupToLen:                  40,
+	},
 	PlainStateBucket: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
