@@ -167,10 +167,10 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 			delete(expectedStorageChanges, blockN)
 		}
 
-		if err := checkHistory(tx, dbutils.AccountChangeSetBucket, execAtBlock); err != nil {
+		if err := checkHistory(tx, dbutils.AccountChangeSetBucket2, execAtBlock); err != nil {
 			return err
 		}
-		if err := checkHistory(tx, dbutils.StorageChangeSetBucket, execAtBlock); err != nil {
+		if err := checkHistory(tx, dbutils.StorageChangeSetBucket2, execAtBlock); err != nil {
 			return err
 		}
 
@@ -282,13 +282,13 @@ func checkHistory(db ethdb.Getter, changeSetBucket string, blockNum uint64) erro
 	currentKey := dbutils.EncodeTimestamp(blockNum)
 
 	var walker func([]byte) changeset.Walker
-	if dbutils.AccountChangeSetBucket == changeSetBucket {
+	if dbutils.AccountChangeSetBucket2 == changeSetBucket {
 		walker = func(cs []byte) changeset.Walker {
 			return changeset.AccountChangeSetBytes(cs)
 		}
 	}
 
-	if dbutils.StorageChangeSetBucket == changeSetBucket {
+	if dbutils.StorageChangeSetBucket2 == changeSetBucket {
 		walker = func(cs []byte) changeset.Walker {
 			return changeset.StorageChangeSetBytes(cs)
 		}

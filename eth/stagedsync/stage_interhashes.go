@@ -145,7 +145,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	}
 	log.Debug(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
-	startkey := dbutils.EncodeTimestamp(from + 1)
+	startkey := dbutils.EncodeBlockNumber(from + 1)
 
 	mapper := changeset.Mapper[changeSetBucket]
 	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
@@ -189,7 +189,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	}
 	log.Info(fmt.Sprintf("[%s] Unwinding of intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
-	startkey := dbutils.EncodeTimestamp(to + 1)
+	startkey := dbutils.EncodeBlockNumber(to + 1)
 
 	mapper := changeset.Mapper[changeSetBucket]
 	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {

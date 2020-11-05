@@ -38,7 +38,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	ts := dbutils.EncodeTimestamp(block)
 	accountCs := 0
 	accountMap := make(map[string]*accounts.Account)
-	if err := db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.AccountChangeSetBucket2, ts, 0, func(k, v []byte) (bool, error) {
 		if changeset.Len(v) > 0 {
 			walker := func(kk, vv []byte) error {
 				if _, ok := accountMap[string(kk)]; !ok {
@@ -66,7 +66,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	}
 	storageCs := 0
 	storageMap := make(map[string][]byte)
-	if err := db.Walk(dbutils.StorageChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.StorageChangeSetBucket2, ts, 0, func(k, v []byte) (bool, error) {
 		if changeset.Len(v) > 0 {
 			walker := func(kk, vv []byte) error {
 				if _, ok := storageMap[string(kk)]; !ok {

@@ -687,7 +687,7 @@ func getStat(db ethdb.Database) (stateStats, error) {
 		AccountSuffixRecordsByTimestamp: make(map[uint64]uint32),
 		StorageSuffixRecordsByTimestamp: make(map[uint64]uint32),
 	}
-	err := db.Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+	err := db.Walk(dbutils.AccountChangeSetBucket2, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(common.CopyBytes(key))
 		if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
 			panic("multiple account suffix records")
@@ -713,7 +713,7 @@ func getStat(db ethdb.Database) (stateStats, error) {
 	if err != nil {
 		return stateStats{}, err
 	}
-	err = db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+	err = db.Walk(dbutils.StorageChangeSetBucket2, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
 		if _, ok := stat.StorageSuffixRecordsByTimestamp[timestamp]; ok {
 			panic("multiple storage suffix records")

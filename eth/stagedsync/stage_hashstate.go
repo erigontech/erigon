@@ -189,7 +189,6 @@ func getExtractFunc(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 	keySize := changeset.Mapper[changeSetBucket].KeySize
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		k := changesetBytes[:keySize]
-		fmt.Printf("4: %x %x\n", k, changesetBytes)
 		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
 		value, err := db.Get(dbutils.PlainStateBucket, k)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -207,7 +206,6 @@ func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 	keySize := changeset.Mapper[changeSetBucket].KeySize
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
 		k := changesetBytes[:keySize]
-
 		value, err := db.Get(dbutils.PlainStateBucket, k)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return err
@@ -315,6 +313,7 @@ func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 }
 
 func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, codes bool) error {
+
 	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket2
@@ -323,7 +322,7 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 	}
 	log.Info(fmt.Sprintf("[%s] Incremental promotion started", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 
-	startkey := dbutils.EncodeTimestamp(from + 1)
+	startkey := dbutils.EncodeBlockNumber(from + 1)
 
 	var l OldestAppearedLoad
 	l.innerLoadFunc = etl.IdentityLoadFunc
@@ -366,7 +365,7 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 
 	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", from, "to", to, "storage", storage, "codes", codes)
 
-	startkey := dbutils.EncodeTimestamp(to + 1)
+	startkey := dbutils.EncodeBlockNumber(to + 1)
 
 	var l OldestAppearedLoad
 	var loadBucket string

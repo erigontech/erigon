@@ -15,13 +15,13 @@ func CheckIndex(chaindata string, changeSetBucket string, indexBucket string) er
 	startTime := time.Now()
 
 	var walker func([]byte) changeset.Walker
-	if dbutils.AccountChangeSetBucket == changeSetBucket {
+	if dbutils.AccountChangeSetBucket2 == changeSetBucket {
 		walker = func(cs []byte) changeset.Walker {
 			return changeset.AccountChangeSetBytes(cs)
 		}
 	}
 
-	if dbutils.StorageChangeSetBucket == changeSetBucket {
+	if dbutils.StorageChangeSetBucket2 == changeSetBucket {
 		walker = func(cs []byte) changeset.Walker {
 			return changeset.StorageChangeSetBytes(cs)
 		}

@@ -122,11 +122,11 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	var storageCsKey, storageCsVal []byte
 	var errSt error
 	if params.PresetChanges {
-		accountCsKey, accountCsVal, errAcc = accountChangesCursor.Seek(dbutils.EncodeTimestamp(startBlock))
+		accountCsKey, accountCsVal, errAcc = accountChangesCursor.Seek(dbutils.EncodeBlockNumber(startBlock))
 		if errAcc != nil {
 			return fmt.Errorf("%s: seeking in account changeset cursor: %v", logPrefix, errAcc)
 		}
-		storageCsKey, storageCsVal, errSt = storageChangesCursor.Seek(dbutils.EncodeTimestamp(startBlock))
+		storageCsKey, storageCsVal, errSt = storageChangesCursor.Seek(dbutils.EncodeBlockNumber(startBlock))
 		if errSt != nil {
 			return fmt.Errorf("%s: seeking in storage changeset cursor: %v", logPrefix, errSt)
 		}

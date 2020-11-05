@@ -92,7 +92,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 
 	historyEffects := make(map[string][]byte)
 	keySize := vv.KeySize
-	if dbutils.StorageChangeSetBucket == changeSetBucket || dbutils.PlainStorageChangeSetBucket == changeSetBucket {
+	if dbutils.StorageChangeSetBucket2 == changeSetBucket || dbutils.PlainStorageChangeSetBucket2 == changeSetBucket {
 		keySize -= 8
 	}
 

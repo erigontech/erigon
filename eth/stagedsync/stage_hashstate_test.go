@@ -65,8 +65,8 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	require.NoError(t, err)
 	defer tx2.Rollback()
 
-	generateBlocks(t, 1, 2, hashedWriterGen(tx1), changeCodeWithIncarnations)
-	generateBlocks(t, 1, 2, plainWriterGen(tx2), changeCodeWithIncarnations)
+	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
+	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
 	err = tx2.CommitAndBegin(context.Background())
 	require.NoError(t, err)
@@ -78,8 +78,8 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	err = tx2.CommitAndBegin(context.Background())
 	require.NoError(t, err)
 
-	generateBlocks(t, 3, 2, hashedWriterGen(tx1), changeCodeWithIncarnations)
-	generateBlocks(t, 3, 2, plainWriterGen(tx2), changeCodeWithIncarnations)
+	generateBlocks(t, 51, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
+	generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
 	err = tx2.CommitAndBegin(context.Background())
 	require.NoError(t, err)

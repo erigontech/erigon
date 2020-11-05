@@ -889,7 +889,7 @@ func relayoutKeys() {
 	defer db.Close()
 	var accountChangeSetCount, storageChangeSetCount int
 	err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.AccountChangeSetBucket)
+		c := tx.Cursor(dbutils.AccountChangeSetBucket2)
 		for k, _, _ := c.First(); k != nil; k, _, _ = c.Next() {
 			accountChangeSetCount++
 		}
@@ -897,7 +897,7 @@ func relayoutKeys() {
 	})
 	check(err)
 	err = db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.StorageChangeSetBucket)
+		c := tx.Cursor(dbutils.StorageChangeSetBucket2)
 		for k, _, _ := c.First(); k != nil; k, _, _ = c.Next() {
 			storageChangeSetCount++
 		}
@@ -1001,7 +1001,7 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 		var printed bool
 		encodedTS := dbutils.EncodeTimestamp(timestamp)
 		var v []byte
-		v, _ = ethDb.Get(dbutils.StorageChangeSetBucket, encodedTS)
+		v, _ = ethDb.Get(dbutils.StorageChangeSetBucket2, encodedTS)
 		if v != nil {
 			err = changeset.StorageChangeSetBytes(v).Walk(func(key, value []byte) error {
 				if bytes.HasPrefix(key, secKey) {
@@ -1315,31 +1315,25 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 
-	ts := dbutils.EncodeTimestamp(block + 1)
+	ts := dbutils.EncodeBlockNumber(block + 1)
 	accountMap := make(map[string]*accounts.Account)
-	if err := db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
-		timestamp, _ := dbutils.DecodeTimestamp(k)
+
+	if err := db.Walk(dbutils.AccountChangeSetBucket2, ts, 0, func(k, v []byte) (bool, error) {
+		timestamp := binary.BigEndian.Uint64(k)
 		if timestamp > *headNumber {
 			return false, nil
 		}
-		if changeset.Len(v) > 0 {
-			walker := func(kk, vv []byte) error {
-				if _, ok := accountMap[string(kk)]; !ok {
-					if len(vv) > 0 {
-						var a accounts.Account
-						if innerErr := a.DecodeForStorage(vv); innerErr != nil {
-							return innerErr
-						}
-						accountMap[string(kk)] = &a
-					} else {
-						accountMap[string(kk)] = nil
-					}
+
+		kk, vv := v[:32], v[32:]
+		if _, ok := accountMap[string(kk)]; !ok {
+			if len(vv) > 0 {
+				var a accounts.Account
+				if innerErr := a.DecodeForStorage(vv); innerErr != nil {
+					return false, innerErr
 				}
-				return nil
-			}
-			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			if innerErr := changeset.AccountChangeSetBytes(v).Walk(walker); innerErr != nil {
-				return false, innerErr
+				accountMap[string(kk)] = &a
+			} else {
+				accountMap[string(kk)] = nil
 			}
 		}
 		return true, nil
@@ -1350,22 +1344,14 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("Constructed account map", "size", len(accountMap),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	storageMap := make(map[string][]byte)
-	if err := db.Walk(dbutils.StorageChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
-		timestamp, _ := dbutils.DecodeTimestamp(k)
+	if err := db.Walk(dbutils.StorageChangeSetBucket2, ts, 0, func(k, v []byte) (bool, error) {
+		timestamp := binary.BigEndian.Uint64(k)
 		if timestamp > *headNumber {
 			return false, nil
 		}
-		if changeset.Len(v) > 0 {
-			walker := func(kk, vv []byte) error {
-				if _, ok := storageMap[string(kk)]; !ok {
-					storageMap[string(kk)] = vv
-				}
-				return nil
-			}
-			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			if innerErr := changeset.StorageChangeSetBytes(v).Walk(walker); innerErr != nil {
-				return false, innerErr
-			}
+		kk, vv := v[:72], v[72:]
+		if _, ok := storageMap[string(kk)]; !ok {
+			storageMap[string(kk)] = vv
 		}
 		return true, nil
 	}); err != nil {

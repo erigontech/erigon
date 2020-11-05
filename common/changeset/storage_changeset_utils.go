@@ -488,7 +488,6 @@ func walkReverse(c ethdb.CursorDupSort, from, to uint64, keyPrefixLen int, f fun
 		if blockNum < from {
 			break
 		}
-		fmt.Printf("8: %d %x %x\n", keyPrefixLen, v[:keyPrefixLen], v[keyPrefixLen:])
 
 		err = f(v[:keyPrefixLen], v[keyPrefixLen:])
 		if err != nil {
@@ -544,7 +543,7 @@ func doSearch2(
 		}
 	}
 
-	find := make([]byte, 0, keyPrefixLen+common.IncarnationLength+len(keyBytesToFind))
+	find := make([]byte, keyPrefixLen+common.IncarnationLength+len(keyBytesToFind))
 	copy(find, addrBytesToFind)
 	binary.BigEndian.PutUint64(find[keyPrefixLen:], incarnation)
 	copy(find[keyPrefixLen+common.IncarnationLength:], keyBytesToFind)

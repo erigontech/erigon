@@ -111,7 +111,7 @@ func CheckEnc(chaindata string) error {
 			close(stop)
 		}()
 
-		return db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		return db.Walk(dbutils.StorageChangeSetBucket2, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 			if i%100_000 == 0 {
 				blockNum, _ := dbutils.DecodeTimestamp(k)
 				fmt.Printf("Processed %dK, block number %d, current %d, new %d, time %s\n",

@@ -78,16 +78,13 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 			return []byte{}, nil
 		}
 		csBucket := dbutils.ChangeSetByIndexBucket(storage)
-		csKey := dbutils.EncodeTimestamp(changeSetBlock)
-		changeSetData, err := tx.GetOne(csBucket, csKey)
-		if err != nil {
-			return nil, err
-		}
-
+		c := tx.CursorDupSort(csBucket)
+		defer c.Close()
+		var err error
 		if storage {
-			data, err = changeset.StorageChangeSetPlainBytes(changeSetData).FindWithIncarnation(key)
+			data, err = changeset.Mapper[csBucket].WalkerAdapter2(c).(changeset.StorageChangeSetPlain).FindWithIncarnation(changeSetBlock, key)
 		} else {
-			data, err = changeset.AccountChangeSetPlainBytes(changeSetData).Find(key)
+			data, err = changeset.Mapper[csBucket].WalkerAdapter2(c).Find(changeSetBlock, key)
 		}
 		if err != nil {
 			if !errors.Is(err, changeset.ErrNotFound) {
@@ -226,7 +223,6 @@ func walkAsOfThinStorage(tx ethdb.Tx, bucket string, hBucket string, startkey []
 	if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
 		return err2
 	}
-
 	goOn := true
 	for goOn {
 		cmp, br := common.KeyCmp(addrHash, hAddrHash)

@@ -1,6 +1,7 @@
 package changeset
 
 import (
+	"encoding/binary"
 	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -138,22 +139,20 @@ func RewindData(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[string]
 	// Collect list of buckets and keys that need to be considered
 	collector := newRewindDataCollector()
 
-	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
-
 	if err := walkAndCollect(
 		collector.AccountWalker,
-		db, dbutils.AccountChangeSetBucket,
-		suffixDst, timestampSrc,
-		bytesToAccountChangeSetWalker,
+		db, dbutils.AccountChangeSetBucket2,
+		timestampDst, timestampSrc,
+		Mapper[dbutils.AccountChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
 	}
 
 	if err := walkAndCollect(
 		collector.StorageWalker,
-		db, dbutils.StorageChangeSetBucket,
-		suffixDst, timestampSrc,
-		bytesToStorageChangeSetWalker,
+		db, dbutils.StorageChangeSetBucket2,
+		timestampDst, timestampSrc,
+		Mapper[dbutils.StorageChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
 	}
@@ -167,22 +166,20 @@ func RewindDataPlain(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[st
 	// Collect list of buckets and keys that need to be considered
 	collector := newRewindDataCollector()
 
-	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
-
 	if err := walkAndCollect(
 		collector.AccountWalker,
-		db, dbutils.PlainAccountChangeSetBucket,
-		suffixDst, timestampSrc,
-		bytesToAccountChangeSetWalkerPlain,
+		db, dbutils.PlainAccountChangeSetBucket2,
+		timestampDst, timestampSrc,
+		Mapper[dbutils.PlainAccountChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
 	}
 
 	if err := walkAndCollect(
 		collector.StorageWalker,
-		db, dbutils.PlainStorageChangeSetBucket,
-		suffixDst, timestampSrc,
-		bytesToStorageChangeSetWalkerPlain,
+		db, dbutils.PlainStorageChangeSetBucket2,
+		timestampDst, timestampSrc,
+		Mapper[dbutils.PlainStorageChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
 	}
@@ -213,35 +210,16 @@ func (c *rewindDataCollector) StorageWalker(k, v []byte) error {
 	return nil
 }
 
-type walker interface {
-	Walk(f func(k, v []byte) error) error
-}
-
-func bytesToAccountChangeSetWalker(b []byte) walker {
-	return AccountChangeSetBytes(b)
-}
-
-func bytesToStorageChangeSetWalker(b []byte) walker {
-	return StorageChangeSetBytes(b)
-}
-
-func bytesToAccountChangeSetWalkerPlain(b []byte) walker {
-	return AccountChangeSetPlainBytes(b)
-}
-
-func bytesToStorageChangeSetWalkerPlain(b []byte) walker {
-	return StorageChangeSetPlainBytes(b)
-}
-
-func walkAndCollect(collectorFunc func([]byte, []byte) error, db ethdb.Getter, bucket string, suffixDst []byte, timestampSrc uint64, bytesToWalker func([]byte) walker) error {
-	return db.Walk(bucket, suffixDst, 0, func(k, v []byte) (bool, error) {
-		timestamp, _ := dbutils.DecodeTimestamp(k)
+func walkAndCollect(collectorFunc func([]byte, []byte) error, db ethdb.Getter, bucket string, timestampDst, timestampSrc uint64, keySize int) error {
+	return db.Walk(bucket, dbutils.EncodeBlockNumber(timestampDst), 0, func(k, v []byte) (bool, error) {
+		timestamp := binary.BigEndian.Uint64(k)
 		if timestamp > timestampSrc {
 			return false, nil
 		}
 		if Len(v) > 0 {
 			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			if innerErr := bytesToWalker(v).Walk(collectorFunc); innerErr != nil {
+
+			if innerErr := collectorFunc(v[:keySize], v[keySize:]); innerErr != nil {
 				return false, innerErr
 			}
 		}

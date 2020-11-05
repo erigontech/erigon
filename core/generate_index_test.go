@@ -161,14 +161,14 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlo
 		t.Fatal("incorrect cs bucket")
 	}
 	var isPlain bool
-	if dbutils.PlainStorageChangeSetBucket == csBucket || dbutils.PlainAccountChangeSetBucket == csBucket {
+	if dbutils.PlainStorageChangeSetBucket2 == csBucket || dbutils.PlainAccountChangeSetBucket2 == csBucket {
 		isPlain = true
 	}
 	addrs, err := generateAddrs(3, isPlain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dbutils.StorageChangeSetBucket == csBucket || dbutils.PlainStorageChangeSetBucket == csBucket {
+	if dbutils.StorageChangeSetBucket2 == csBucket || dbutils.PlainStorageChangeSetBucket2 == csBucket {
 		keys, innerErr := generateAddrs(3, false)
 		if innerErr != nil {
 			t.Fatal(innerErr)
