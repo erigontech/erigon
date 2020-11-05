@@ -77,7 +77,7 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 		if set && !storage {
 			return []byte{}, nil
 		}
-		csBucket := dbutils.ChangeSetByIndexBucket(storage)
+		csBucket, _ := dbutils.ChangeSetByIndexBucket(storage)
 		c := tx.CursorDupSort(csBucket)
 		defer c.Close()
 		var err error

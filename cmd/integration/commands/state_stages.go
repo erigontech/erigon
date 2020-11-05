@@ -71,27 +71,21 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 
 	ch := ctx.Done()
 
-	expectedAccountChanges := make(map[uint64][]byte)
-	expectedStorageChanges := make(map[uint64][]byte)
+	expectedAccountChanges := make(map[uint64]*changeset.ChangeSet)
+	expectedStorageChanges := make(map[uint64]*changeset.ChangeSet)
 	changeSetHook := func(blockNum uint64, csw *state.ChangeSetWriter) {
 		accountChanges, err := csw.GetAccountChanges()
 		if err != nil {
 			panic(err)
 		}
-		expectedAccountChanges[blockNum], err = changeset.EncodeAccountsPlain(accountChanges)
-		if err != nil {
-			panic(err)
-		}
+		expectedAccountChanges[blockNum] = accountChanges
 
 		storageChanges, err := csw.GetStorageChanges()
 		if err != nil {
 			panic(err)
 		}
 		if storageChanges.Len() > 0 {
-			expectedStorageChanges[blockNum], err = changeset.EncodeStoragePlain(storageChanges)
-			if err != nil {
-				panic(err)
-			}
+			expectedStorageChanges[blockNum] = storageChanges
 		}
 	}
 
@@ -190,91 +184,98 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	return nil
 }
 
-func checkChangeSet(db ethdb.Getter, blockNum uint64, expectedAccountChanges []byte, expectedStorageChanges []byte) error {
-	dbAccountChanges, err := ethdb.GetChangeSetByBlock(db, false /* storage */, blockNum)
-	if err != nil {
-		return err
-	}
+func checkChangeSet(db ethdb.Getter, blockNum uint64, expectedAccountChanges *changeset.ChangeSet, expectedStorageChanges *changeset.ChangeSet) error {
+	i := 0
+	err := ethdb.WalkChangeSetByBlock(db, false /* storage */, blockNum, func(kk, k, v []byte) error {
+		c := expectedAccountChanges.Changes[i]
+		i++
+		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
+			return nil
+		}
 
-	if !bytes.Equal(dbAccountChanges, expectedAccountChanges) {
 		fmt.Printf("Unexpected account changes in block %d\nIn the database: ======================\n", blockNum)
-		if err = changeset.AccountChangeSetPlainBytes(dbAccountChanges).Walk(func(k, v []byte) error {
-			fmt.Printf("0x%x: %x\n", k, v)
-			return nil
-		}); err != nil {
-			return err
-		}
+		fmt.Printf("0x%x: %x\n", k, v)
 		fmt.Printf("Expected: ==========================\n")
-		if err = changeset.AccountChangeSetPlainBytes(expectedAccountChanges).Walk(func(k, v []byte) error {
-			fmt.Printf("0x%x %x\n", k, v)
-			return nil
-		}); err != nil {
-			return err
-		}
+		fmt.Printf("0x%x %x\n", c.Key, c.Value)
 		return fmt.Errorf("check change set failed")
-	}
-
-	dbStorageChanges, err := ethdb.GetChangeSetByBlock(db, true /* storage */, blockNum)
+	})
 	if err != nil {
 		return err
 	}
-	equal := true
-	if !bytes.Equal(dbStorageChanges, expectedStorageChanges) {
-		var addrs [][]byte
-		var keys [][]byte
-		var vals [][]byte
-		if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
-			addrs = append(addrs, common.CopyBytes(k[:common.AddressLength]))
-			keys = append(keys, common.CopyBytes(k[common.AddressLength+common.IncarnationLength:]))
-			vals = append(vals, common.CopyBytes(v))
+
+	err = ethdb.WalkChangeSetByBlock(db, true /* storage */, blockNum, func(kk, k, v []byte) error {
+		c := expectedStorageChanges.Changes[i]
+		i++
+		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
 			return nil
-		}); err != nil {
-			return err
 		}
-		i := 0
-		if err = changeset.StorageChangeSetPlainBytes(expectedStorageChanges).Walk(func(k, v []byte) error {
-			if !equal {
-				return nil
-			}
-			if i >= len(addrs) {
-				equal = false
-				return nil
-			}
-			if !bytes.Equal(k[:common.AddressLength], addrs[i]) {
-				equal = false
-				return nil
-			}
-			if !bytes.Equal(k[common.AddressLength+common.IncarnationLength:], keys[i]) {
-				equal = false
-				return nil
-			}
-			if !bytes.Equal(v, vals[i]) {
-				equal = false
-				return nil
-			}
-			i++
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	if !equal {
+
 		fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
-		if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
-			fmt.Printf("0x%x: [%x]\n", k, v)
-			return nil
-		}); err != nil {
-			return err
-		}
+		fmt.Printf("0x%x: %x\n", k, v)
 		fmt.Printf("Expected: ==========================\n")
-		if err = changeset.StorageChangeSetPlainBytes(expectedStorageChanges).Walk(func(k, v []byte) error {
-			fmt.Printf("0x%x: [%x]\n", k, v)
-			return nil
-		}); err != nil {
-			return err
-		}
+		fmt.Printf("0x%x %x\n", c.Key, c.Value)
 		return fmt.Errorf("check change set failed")
+	})
+	if err != nil {
+		return err
 	}
+	//equal := true
+	//if !bytes.Equal(dbStorageChanges, expectedStorageChanges) {
+	//	var addrs [][]byte
+	//	var keys [][]byte
+	//	var vals [][]byte
+	//	if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
+	//		addrs = append(addrs, common.CopyBytes(k[:common.AddressLength]))
+	//		keys = append(keys, common.CopyBytes(k[common.AddressLength+common.IncarnationLength:]))
+	//		vals = append(vals, common.CopyBytes(v))
+	//		return nil
+	//	}); err != nil {
+	//		return err
+	//	}
+	//	i := 0
+	//	if err = changeset.StorageChangeSetPlainBytes(expectedStorageChanges).Walk(func(k, v []byte) error {
+	//		if !equal {
+	//			return nil
+	//		}
+	//		if i >= len(addrs) {
+	//			equal = false
+	//			return nil
+	//		}
+	//		if !bytes.Equal(k[:common.AddressLength], addrs[i]) {
+	//			equal = false
+	//			return nil
+	//		}
+	//		if !bytes.Equal(k[common.AddressLength+common.IncarnationLength:], keys[i]) {
+	//			equal = false
+	//			return nil
+	//		}
+	//		if !bytes.Equal(v, vals[i]) {
+	//			equal = false
+	//			return nil
+	//		}
+	//		i++
+	//		return nil
+	//	}); err != nil {
+	//		return err
+	//	}
+	//}
+	//if !equal {
+	//	fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
+	//	if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
+	//		fmt.Printf("0x%x: [%x]\n", k, v)
+	//		return nil
+	//	}); err != nil {
+	//		return err
+	//	}
+	//	fmt.Printf("Expected: ==========================\n")
+	//	if err = changeset.StorageChangeSetPlainBytes(expectedStorageChanges).Walk(func(k, v []byte) error {
+	//		fmt.Printf("0x%x: [%x]\n", k, v)
+	//		return nil
+	//	}); err != nil {
+	//		return err
+	//	}
+	//	return fmt.Errorf("check change set failed")
+	//}
 	return nil
 }
 
