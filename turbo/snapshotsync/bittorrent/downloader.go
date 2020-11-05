@@ -47,25 +47,27 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.DisableTrackers = false
 	torrentConfig.Debug = true
 	//torrentConfig.Logger = NewAdapterLogger()
+	torrentConfig.HandshakesTimeout = time.Second * 20
+	torrentConfig.MinDialTimeout = time.Second * 20
 	return torrentConfig
 }
 
-func (cli *Client) Load(db ethdb.Database) error  {
+func (cli *Client) Load(db ethdb.Database) error {
 	log.Info("Add added torrents")
 	return db.Walk(dbutils.SnapshotInfoBucket, []byte{}, 0, func(k, infoHashBytes []byte) (bool, error) {
 		if !bytes.HasPrefix(k[8:], []byte(SnapshotInfoHashPrefix)) {
 			return true, nil
 		}
-		networkID, snapshotName:=ParseInfoHashKey(k)
-		infoHash:=metainfo.Hash{}
+		networkID, snapshotName := ParseInfoHashKey(k)
+		infoHash := metainfo.Hash{}
 		copy(infoHash[:], infoHashBytes)
-		infoBytes,err:=db.Get(dbutils.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName,networkID))
-		if err!=nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		infoBytes, err := db.Get(dbutils.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName, networkID))
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return false, err
 		}
 		log.Info("Add", "snapshot", snapshotName, "hash", infoHash.String(), "infobytes", true)
 		err = cli.AddTorrentSpec(snapshotName, infoHash, infoBytes)
-		if err!=nil {
+		if err != nil {
 			return false, err
 		}
 		return true, nil
@@ -76,7 +78,6 @@ func (cli *Client) WalkThroughTorrents(db ethdb.Database, networkID uint64, f fu
 	binary.BigEndian.PutUint64(networkIDBytes, networkID)
 	return db.Walk(dbutils.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), 8*8+16, f)
 }
-
 
 func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Hash, infoBytes []byte) error {
 	_, _, err := cli.Cli.AddTorrentSpec(&torrent.TorrentSpec{
@@ -142,7 +143,7 @@ func (cli *Client) GetInfoBytes(ctx context.Context, snapshotHash metainfo.Hash)
 	return common.CopyBytes(t.Metainfo().InfoBytes), nil
 }
 
-func (cli *Client) AddSnapshotsTorrents(ctx context.Context,db ethdb.Database, networkId uint64, mode snapshotsync.SnapshotMode) error {
+func (cli *Client) AddSnapshotsTorrents(ctx context.Context, db ethdb.Database, networkId uint64, mode snapshotsync.SnapshotMode) error {
 	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(time.Minute*10))
 	defer cancel()
 	eg := errgroup.Group{}
@@ -249,5 +250,5 @@ func MakeInfoBytesKey(snapshotName string, networkID uint64) []byte {
 
 // ParseInfoHashKey returns networkID and snapshot name
 func ParseInfoHashKey(k []byte) (uint64, string) {
-	return binary.BigEndian.Uint64(k), string(bytes.TrimPrefix(k[8:],[]byte(SnapshotInfoHashPrefix)))
+	return binary.BigEndian.Uint64(k), string(bytes.TrimPrefix(k[8:], []byte(SnapshotInfoHashPrefix)))
 }

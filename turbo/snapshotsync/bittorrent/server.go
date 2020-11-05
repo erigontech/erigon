@@ -37,9 +37,9 @@ type SNDownloaderServer struct {
 
 func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotsync.DownloadSnapshotRequest) (*empty.Empty, error) {
 	fmt.Println("Download")
-	t:=time.Now()
+	t := time.Now()
 	err := S.t.AddSnapshotsTorrents(ctx, S.db, request.NetworkId, snapshotsync.FromSnapshotTypes(request.Type))
-	if err!=nil {
+	if err != nil {
 		return nil, err
 	}
 	fmt.Println("Download took", time.Since(t))
@@ -50,7 +50,7 @@ func (S *SNDownloaderServer) Load() error {
 }
 
 func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsync.SnapshotsRequest) (*snapshotsync.SnapshotsInfoReply, error) {
-	tt:=time.Now()
+	tt := time.Now()
 	reply := snapshotsync.SnapshotsInfoReply{}
 
 	err := S.WalkThroughTorrents(request.NetworkId, func(k, v []byte) (bool, error) {
@@ -77,17 +77,17 @@ func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsyn
 		}
 
 		_, tpStr := ParseInfoHashKey(k)
-		tp,ok:=snapshotsync.SnapshotType_value[tpStr]
+		tp, ok := snapshotsync.SnapshotType_value[tpStr]
 		if !ok {
 			return false, fmt.Errorf("incorrect type: %v", tpStr)
 		}
 
 		val := &snapshotsync.SnapshotsInfo{
-			Type:  snapshotsync.SnapshotType(tp),
+			Type:          snapshotsync.SnapshotType(tp),
 			GotInfoByte:   gotInfo,
 			Readiness:     readiness,
 			SnapshotBlock: SnapshotBlock,
-			Dbpath: filepath.Join(S.t.snapshotsDir, t.Files()[0].Path()),
+			Dbpath:        filepath.Join(S.t.snapshotsDir, t.Files()[0].Path()),
 		}
 		reply.Info = append(reply.Info, val)
 
@@ -96,7 +96,7 @@ func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsyn
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Snapshots took", time.Since(tt),  reply.Info)
+	fmt.Println("Snapshots took", time.Since(tt), reply.Info)
 	return &reply, nil
 }
 

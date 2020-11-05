@@ -119,9 +119,9 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer := grpc.NewServer(opts...)
-	bitterrentServer:=bittorrent.NewServer(cfg.Dir, cfg.Seeding)
-	err=bitterrentServer.Load()
-	if err!=nil {
+	bitterrentServer := bittorrent.NewServer(cfg.Dir, cfg.Seeding)
+	err = bitterrentServer.Load()
+	if err != nil {
 		return err
 	}
 	snapshotsync.RegisterDownloaderServer(grpcServer, bitterrentServer)

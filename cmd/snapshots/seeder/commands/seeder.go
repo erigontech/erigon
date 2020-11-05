@@ -34,6 +34,8 @@ func Seed(ctx context.Context, datadir string) error {
 	cfg.Debug = false
 	cfg.Logger = cfg.Logger.FilterLevel(lg.Info)
 	cfg.DataDir = datadir
+	cfg.HandshakesTimeout = time.Second * 20
+	cfg.MinDialTimeout = time.Second * 20
 
 	pathes := []string{
 		cfg.DataDir + "/headers",
@@ -42,7 +44,6 @@ func Seed(ctx context.Context, datadir string) error {
 		//cfg.DataDir+"/receipts",
 	}
 
-	//cfg.Logger=cfg.Logger.FilterLevel(trlog.Info)
 	cl, err := torrent.NewClient(cfg)
 	if err != nil {
 		return err

@@ -41,11 +41,9 @@ func TestDownloaderCli(t *testing.T) {
 		reply, err := cli.Snapshots(context.TODO(), &SnapshotsRequest{
 			NetworkId: 1,
 		})
-		spew.Dump("Snapshots",reply,err)
+		spew.Dump("Snapshots", reply, err)
 
-
-		time.Sleep(time.Second*10)
-
+		time.Sleep(time.Second * 10)
 
 	}
 }
