@@ -43,7 +43,7 @@ func New(snapshotsDir string, seeding bool) *Client {
 func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
 	torrentConfig.ListenPort = 0
-	torrentConfig.NoDHT = true
+	torrentConfig.NoDHT = false
 	torrentConfig.DisableTrackers = false
 	torrentConfig.Debug = true
 	//torrentConfig.Logger = NewAdapterLogger()

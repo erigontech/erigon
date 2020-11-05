@@ -33,6 +33,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -167,12 +168,76 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 				return nil, innerErr
 			}
 			defer cl() //nolint
+
 			_, innerErr = cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
 				NetworkId: config.NetworkID,
 				Type:      config.SnapshotMode.ToSnapshotTypes(),
 			})
 			if innerErr != nil {
 				return nil, innerErr
+			}
+
+			waitDownload := func() (map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, error) {
+				snCheck := func(mp map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, tp snapshotsync.SnapshotType) bool {
+					if mp[tp].Readiness != int32(100) {
+						log.Info("Downloading", "snapshot", tp, "%", mp[tp].Readiness)
+						return false
+					}
+					return true
+				}
+				for {
+					mp := make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
+					snapshots, err := cli.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{NetworkId: config.NetworkID})
+					if err != nil {
+						return nil, err
+					}
+					for i := range snapshots.Info {
+						if mp[snapshots.Info[i].Type].SnapshotBlock < snapshots.Info[i].SnapshotBlock {
+							mp[snapshots.Info[i].Type] = snapshots.Info[i]
+						}
+					}
+
+					downloaded := true
+					if config.SnapshotMode.Headers {
+						if !snCheck(mp, snapshotsync.SnapshotType_headers) {
+							downloaded = false
+						}
+					}
+					if config.SnapshotMode.Bodies {
+						if !snCheck(mp, snapshotsync.SnapshotType_bodies) {
+							downloaded = false
+						}
+					}
+					if config.SnapshotMode.State {
+						if !snCheck(mp, snapshotsync.SnapshotType_state) {
+							downloaded = false
+						}
+					}
+					if config.SnapshotMode.Receipts {
+						if !snCheck(mp, snapshotsync.SnapshotType_receipts) {
+							downloaded = false
+						}
+					}
+					if downloaded {
+						return mp, nil
+					}
+					time.Sleep(time.Second * 10)
+				}
+			}
+			downloadedSnapshots, err := waitDownload()
+			if err != nil {
+				return nil, err
+			}
+			snapshotKV := chainDb.KV()
+
+			snapshotKV, err = snapshotsync.WrapBySnapshots2(snapshotKV, downloadedSnapshots)
+			if err != nil {
+				return nil, err
+			}
+			chainDb.SetKV(snapshotKV)
+			err = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
+			if err != nil {
+				return nil, err
 			}
 		} else {
 			var dbPath string

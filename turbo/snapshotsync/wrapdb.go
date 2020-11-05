@@ -6,14 +6,24 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+var (
+	bucketConfigs = map[SnapshotType]dbutils.BucketsCfg{
+		SnapshotType_bodies: {
+			dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
+			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+		},
+		SnapshotType_headers: {
+			dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
+			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+		},
+	}
+)
+
 func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.KV, error) {
 	log.Info("Wrap db to snapshots", "dir", snapshotDir, "mode", mode.ToString())
 	if mode.Bodies {
 		snapshotKV, err := ethdb.NewLMDB().Path(snapshotDir + "/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
-				dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
-			}
+			return bucketConfigs[SnapshotType_bodies]
 		}).ReadOnly().Open()
 		if err != nil {
 			log.Error("Can't open body snapshot", "err", err)
@@ -28,10 +38,7 @@ func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.
 
 	if mode.Headers {
 		snapshotKV, err := ethdb.NewLMDB().Path(snapshotDir + "/headers").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
-				dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
-			}
+			return bucketConfigs[SnapshotType_headers]
 		}).ReadOnly().Open()
 		if err != nil {
 			log.Error("Can't open headers snapshot", "err", err)
@@ -41,6 +48,27 @@ func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.
 				For(dbutils.HeaderPrefix).
 				For(dbutils.SnapshotInfoBucket).
 				DB(kv).MustOpen()
+		}
+	}
+	return kv, nil
+}
+
+func WrapBySnapshots2(kv ethdb.KV, snapshots map[SnapshotType]*SnapshotsInfo) (ethdb.KV, error) {
+
+	for k, v := range snapshots {
+		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
+		snapshotKV, err := ethdb.NewLMDB().Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return bucketConfigs[k]
+		}).ReadOnly().Open()
+		if err != nil {
+			log.Error("Can't open body snapshot", "err", err)
+			return nil, err
+		} else { //nolint
+			snKV := ethdb.NewSnapshotKV().SnapshotDB(snapshotKV)
+			for i := range bucketConfigs[k] {
+				snKV.For(i)
+			}
+			kv = snKV.DB(kv).MustOpen()
 		}
 	}
 	return kv, nil
