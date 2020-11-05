@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
 const PageSize = 4096
@@ -47,7 +46,7 @@ func generate1(rootDir string) (string, error) {
 	return dir, nil
 }
 
-// Generates a database with single table and a single key-value pair in "b" DBI, and returns the file name
+// Generates a database with single table and two key-value pair in "t" DBI, and returns the file name
 func generate2(rootDir string) (string, error) {
 	dir, err := ioutil.TempDir(rootDir, "lmdb-vis")
 	if err != nil {
@@ -67,7 +66,7 @@ func generate2(rootDir string) (string, error) {
 		}
 		c := tx.Cursor("t")
 		defer c.Close()
-		for i := 0; i < 1; i++ {
+		for i := 0; i < 2; i++ {
 			k := fmt.Sprintf("%05d", i)
 			if err := c.Append([]byte(k), []byte("value")); err != nil {
 				return err
@@ -162,8 +161,7 @@ func defrag() error {
 
 func textInfo(chaindata string, visStream io.Writer) error {
 	log.Info("Text Info", "db", chaindata)
-	visual.StartGraph(visStream, false)
-	fmt.Fprintf(visStream, "compound=true;\n")
+	fmt.Fprintf(visStream, "digraph lmdb {\nrankdir=LR\n")
 	datafile := path.Join(chaindata, "data.mdb")
 	f, err := os.Open(datafile)
 	if err != nil {
@@ -217,6 +215,16 @@ func textInfo(chaindata string, visStream io.Writer) error {
 	log.Info("FREE_DBI", "root page ID", freeRoot, "depth", freeDepth)
 	log.Info("MAIN_DBI", "root page ID", mainRoot, "depth", mainDepth)
 
+	fmt.Fprintf(visStream, "meta [shape=Mrecord label=\"<free_root>FREE_DBI")
+	if freeRoot != 0xffffffffffffffff {
+		fmt.Fprintf(visStream, "=%d", freeRoot)
+	}
+	fmt.Fprintf(visStream, "|<main_root>MAIN_DBI")
+	if mainRoot != 0xffffffffffffffff {
+		fmt.Fprintf(visStream, "=%d", mainRoot)
+	}
+	fmt.Fprintf(visStream, "\"];\n")
+
 	var freelist = make(map[uint64]bool)
 	if freeRoot == 0xffffffffffffffff {
 		log.Info("empty freelist")
@@ -224,8 +232,7 @@ func textInfo(chaindata string, visStream io.Writer) error {
 		if freelist, err = readFreelist(f, freeRoot, freeDepth); err != nil {
 			return err
 		}
-		visual.Circle(visStream, "FREE_DBI", "FREE_DBI", true)
-		fmt.Fprintf(visStream, "FREE_DBI->x_%d[lhead=cluster_%d];\n", freeRoot, freeRoot)
+		fmt.Fprintf(visStream, "meta:free_root -> p_%d;\n", freeRoot)
 	}
 	var maintree = make(map[uint64]struct{})
 	if mainRoot == 0xffffffffffffffff {
@@ -234,8 +241,7 @@ func textInfo(chaindata string, visStream io.Writer) error {
 		if maintree, err = readMainTree(f, mainRoot, mainDepth, visStream); err != nil {
 			return err
 		}
-		visual.Circle(visStream, "MAIN_DBI", "MAIN_DBI", true)
-		fmt.Fprintf(visStream, "MAIN_DBI->x_%d[lhead=cluster_%d];\n", mainRoot, mainRoot)
+		fmt.Fprintf(visStream, "meta:main_root -> p_%d;\n", mainRoot)
 	}
 
 	// Now scan all non meta and non-freelist pages
@@ -247,7 +253,7 @@ func textInfo(chaindata string, visStream io.Writer) error {
 	}
 	count := 0
 	for _, err = f.ReadAt(meta[:], int64(pageID)*PageSize); err == nil; _, err = f.ReadAt(meta[:], int64(pageID)*PageSize) {
-		if err = scanPage(meta[:]); err != nil {
+		if err = scanPage(meta[:], visStream); err != nil {
 			return err
 		}
 		count++
@@ -265,15 +271,33 @@ func textInfo(chaindata string, visStream io.Writer) error {
 		return err
 	}
 	log.Info("Scaned", "pages", count, "page after last", pageID)
-	visual.EndGraph(visStream)
+	fmt.Fprintf(visStream, "}\n")
 	return nil
 }
 
-func scanPage(page []byte) error {
-	pos, _, flags, lowerFree := readPageHeader(page, 0)
+func scanPage(page []byte, visStream io.Writer) error {
+	pos, pageID, flags, lowerFree := readPageHeader(page, 0)
 	if flags&LeafPageFlag != 0 {
 		num := (lowerFree - pos) / 2
-		log.Info("Leaf page", "pos", pos, "lowerFree", lowerFree, "numKeys", num)
+		fmt.Fprintf(visStream, "p_%d [shape=record label=\"", pageID)
+		for i := 0; i < num; i++ {
+			if i > 0 {
+				fmt.Fprintf(visStream, "|")
+			}
+			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
+			dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
+			flags := binary.LittleEndian.Uint16(page[nodePtr+4:])
+			keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
+			if flags&BigDataFlag > 0 {
+				fmt.Errorf("unimplemented overflow pages")
+			} else {
+				key := string(page[nodePtr+8 : nodePtr+8+keySize])
+				val := string(page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize])
+				fmt.Fprintf(visStream, "%s:%s", key, val)
+			}
+		}
+		fmt.Fprintf(visStream, "\"];\n")
+		//log.Info("Leaf page", "pos", pos, "lowerFree", lowerFree, "numKeys", num)
 	} else {
 		return fmt.Errorf("unimplemented processing for page type, flags: %d", flags)
 	}
@@ -297,8 +321,8 @@ func readMainTree(f *os.File, mainRoot uint64, mainDepth uint16, visStream io.Wr
 		i := indices[top]
 		num := numKeys[top]
 		page := &pages[top]
+		pageID = pageIDs[top]
 		if num == 0 {
-			pageID = pageIDs[top]
 			maintree[pageID] = struct{}{}
 			if _, err := f.ReadAt(page[:], int64(pageID*PageSize)); err != nil {
 				return nil, fmt.Errorf("reading FREE_DBI page: %v", err)
@@ -316,19 +340,20 @@ func readMainTree(f *os.File, mainRoot uint64, mainDepth uint16, visStream io.Wr
 			num = (lowerFree - pos) / 2
 			i = 0
 			numKeys[top] = num
-			fmt.Printf("Numkeys for page %d (level %d): %d\n", pageID, top, num)
 			indices[top] = i
 			visbufs[top].Reset()
-			visual.StartCluster(&visbufs[top], int(pageID), fmt.Sprintf("%d", pageID))
-			fmt.Fprintf(&visbufs[top], "x_%d [label=\"\" shape=box margin=0 width=0 height=0 style=invis];\n", pageID)
+			fmt.Fprintf(&visbufs[top], "p_%d [shape=record label=\"", pageID)
 		} else if i < num {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
 			i++
 			indices[top] = i
+			if i > 1 {
+				fmt.Fprintf(&visbufs[top], "|")
+			}
 			if branch {
 				pagePtr := binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
-				visual.Box(&visbufs[top], fmt.Sprintf("p_%d", pagePtr), fmt.Sprintf("%d", pagePtr))
-				fmt.Fprintf(visStream, "p_%d -> x_%d [lhead=cluster_%d];\n", pagePtr, pagePtr, pagePtr)
+				fmt.Fprintf(&visbufs[top], "<n%d>%d", i-1, pagePtr)
+				fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i-1, pagePtr)
 				top++
 				indices[top] = 0
 				numKeys[top] = 0
@@ -347,16 +372,16 @@ func readMainTree(f *os.File, mainRoot uint64, mainDepth uint16, visStream io.Wr
 					tableName := string(page[nodePtr+8 : nodePtr+8+keySize])
 					pagePtr := binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:])
 					if pagePtr != 0xffffffffffffffff {
-						visual.Box(&visbufs[top], fmt.Sprintf("p_%d", pagePtr), fmt.Sprintf("%s", tableName))
-						fmt.Fprintf(visStream, "p_%d -> x_%d [lhead=cluster_%d];\n", pagePtr, pagePtr, pagePtr)
+						fmt.Fprintf(&visbufs[top], "<n%d>%s=%d", i-1, tableName, pagePtr)
+						fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i-1, pagePtr)
 					} else {
-						visual.Box(&visbufs[top], fmt.Sprintf("main_%s", tableName), fmt.Sprintf("%s", tableName))
+						fmt.Fprintf(&visbufs[top], "%s", tableName)
 					}
 					//fmt.Printf("Table: %s, root page: %d\n", page[nodePtr+8:nodePtr+8+keySize], binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:]))
 				}
 			}
 		} else {
-			visual.EndCluster(&visbufs[top])
+			fmt.Fprintf(&visbufs[top], "\"];\n")
 			visStream.Write([]byte(visbufs[top].String()))
 			top--
 		}
