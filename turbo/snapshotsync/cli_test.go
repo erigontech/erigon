@@ -15,7 +15,7 @@ func TestDownloaderCli(t *testing.T) {
 		grpc.WithInsecure(),
 	}
 
-	conn, err := grpc.Dial("127.0.0.1:9191", opts...)
+	conn, err := grpc.Dial("35.223.214.226:9191", opts...)
 	if err != nil {
 		log.Fatalf("fail to dial: %v", err)
 	}

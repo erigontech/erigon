@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -120,6 +121,13 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 	}
 	grpcServer := grpc.NewServer(opts...)
 	bitterrentServer := bittorrent.NewServer(cfg.Dir, cfg.Seeding)
+	rep, err := bitterrentServer.Download(context.TODO(), &snapshotsync.DownloadSnapshotRequest{NetworkId: 1, Type: []snapshotsync.SnapshotType{
+		snapshotsync.SnapshotType_headers,
+		//SnapshotType_bodies,
+		//SnapshotType_State,
+		//SnapshotType_Receipts,
+	}})
+	spew.Dump("Download",rep,err)
 	err = bitterrentServer.Load()
 	if err != nil {
 		return err
