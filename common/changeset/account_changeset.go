@@ -42,8 +42,12 @@ func (b AccountChangeSetBytes) Find(k []byte) ([]byte, error) {
 
 type AccountChangeSet struct{ c ethdb.CursorDupSort }
 
-func (b AccountChangeSet) WalkReverse(from, to uint64, f func(k, v []byte) error) error {
+func (b AccountChangeSet) WalkReverse(from, to uint64, f func(kk, k, v []byte) error) error {
 	return walkReverse(b.c, from, to, common.HashLength, f)
+}
+
+func (b AccountChangeSet) Walk(from, to uint64, f func(kk, k, v []byte) error) error {
+	return walk(b.c, from, to, common.HashLength, f)
 }
 
 func (b AccountChangeSet) Find(blockNumber uint64, k []byte) ([]byte, error) {
@@ -74,8 +78,12 @@ func DecodeAccountsPlain(b []byte) (*ChangeSet, error) {
 
 type AccountChangeSetPlain struct{ c ethdb.CursorDupSort }
 
-func (b AccountChangeSetPlain) WalkReverse(from, to uint64, f func(k, v []byte) error) error {
+func (b AccountChangeSetPlain) WalkReverse(from, to uint64, f func(kk, k, v []byte) error) error {
 	return walkReverse(b.c, from, to, common.AddressLength, f)
+}
+
+func (b AccountChangeSetPlain) Walk(from, to uint64, f func(kk, k, v []byte) error) error {
+	return walk(b.c, from, to, common.AddressLength, f)
 }
 
 func (b AccountChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error) {

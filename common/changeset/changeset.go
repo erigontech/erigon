@@ -17,7 +17,8 @@ type Walker interface {
 }
 
 type Walker2 interface {
-	WalkReverse(from, to uint64, f func(k, v []byte) error) error // from > to
+	Walk(from, to uint64, f func(kk, k, v []byte) error) error
+	WalkReverse(from, to uint64, f func(kk, k, v []byte) error) error
 	Find(blockNumber uint64, k []byte) ([]byte, error)
 }
 

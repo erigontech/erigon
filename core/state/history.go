@@ -762,61 +762,17 @@ func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 	}
 
 	mp := make(map[string][]byte)
-	err := csd.csWalker.WalkReverse(from, to, func(k, v []byte) error {
-		mp[string(k)] = v
+	err := csd.csWalker.WalkReverse(from, to, func(bN, k, v []byte) error {
+		replace := binary.BigEndian.Uint64(bN) >= csd.timestamp
+		if replace {
+			mp[string(k)] = v
+		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
 
-	//ethdb.Walk(c, dbutils.EncodeBlockNumber(from), 0, func(k, v []byte) (bool, error) {
-	//	blockNum := binary.BigEndian.Uint64(k)
-	//	if blockNum > to {
-	//		return false, nil
-	//	}
-	//	mp[string(v[:csd.keySize])] = v[csd.keySize:]
-	//
-	//	return true, nil
-	//})
-
-	//_, _, err := c.Seek(dbutils.EncodeTimestamp(from))
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//err = ethdb.ForEach(c, func(k, v []byte) (bool, error) {
-	//	blockNum, _ := dbutils.DecodeTimestamp(k)
-	//	if blockNum > to {
-	//		return false, nil
-	//	}
-	//
-	//	cs = append(cs, struct {
-	//		Walker   changeset.Walker
-	//		BlockNum uint64
-	//	}{Walker: csd.walkerAdapter(common.CopyBytes(v)), BlockNum: blockNum})
-	//
-	//	return true, nil
-	//})
-	//if err != nil {
-	//	return err
-	//}
-
-	//sort.Slice(cs, func(i, j int) bool {
-	//	return cs[i].BlockNum < cs[j].BlockNum
-	//})
-	//for i := len(cs) - 1; i >= 0; i-- {
-	//	replace := cs[i].BlockNum >= csd.timestamp
-	//	err = cs[i].Walker.Walk(func(k, v []byte) error {
-	//		if replace {
-	//			mp[string(k)] = v
-	//		}
-	//		return nil
-	//	})
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
 	res := make([]changeset.Change, len(mp))
 	i := 0
 	for k := range mp {
@@ -831,8 +787,5 @@ func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 		return cmp <= 0
 	})
 	csd.values = res
-	for _, a := range csd.values {
-		fmt.Printf("1: %x, %x\n", a.Key, a.Value)
-	}
 	return nil
 }

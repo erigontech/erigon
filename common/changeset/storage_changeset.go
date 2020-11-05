@@ -60,8 +60,12 @@ func (b StorageChangeSetBytes) FindWithoutIncarnation(addrHashToFind []byte, key
 
 type StorageChangeSet struct{ c ethdb.CursorDupSort }
 
-func (b StorageChangeSet) WalkReverse(from, to uint64, f func(k, v []byte) error) error {
+func (b StorageChangeSet) WalkReverse(from, to uint64, f func(kk, k, v []byte) error) error {
 	return walkReverse(b.c, from, to, common.HashLength+common.IncarnationLength+common.HashLength, f)
+}
+
+func (b StorageChangeSet) Walk(from, to uint64, f func(kk, k, v []byte) error) error {
+	return walk(b.c, from, to, common.HashLength+common.IncarnationLength+common.HashLength, f)
 }
 
 func (b StorageChangeSet) Find(blockNumber uint64, k []byte) ([]byte, error) {
@@ -99,8 +103,12 @@ func DecodeStoragePlain(b []byte) (*ChangeSet, error) {
 
 type StorageChangeSetPlain struct{ c ethdb.CursorDupSort }
 
-func (b StorageChangeSetPlain) WalkReverse(from, to uint64, f func(k, v []byte) error) error {
+func (b StorageChangeSetPlain) WalkReverse(from, to uint64, f func(kk, k, v []byte) error) error {
 	return walkReverse(b.c, from, to, common.AddressLength+common.IncarnationLength+common.HashLength, f)
+}
+
+func (b StorageChangeSetPlain) Walk(from, to uint64, f func(kk, k, v []byte) error) error {
+	return walk(b.c, from, to, common.AddressLength+common.IncarnationLength+common.HashLength, f)
 }
 
 func (b StorageChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error) {
@@ -216,12 +224,9 @@ func walkAndCollect(collectorFunc func([]byte, []byte) error, db ethdb.Getter, b
 		if timestamp > timestampSrc {
 			return false, nil
 		}
-		if Len(v) > 0 {
-			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-
-			if innerErr := collectorFunc(v[:keySize], v[keySize:]); innerErr != nil {
-				return false, innerErr
-			}
+		v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
+		if innerErr := collectorFunc(v[:keySize], v[keySize:]); innerErr != nil {
+			return false, innerErr
 		}
 		return true, nil
 	})

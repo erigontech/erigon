@@ -475,7 +475,7 @@ type contractKeys struct {
 	Vals        [][]byte
 }
 
-func walkReverse(c ethdb.CursorDupSort, from, to uint64, keyPrefixLen int, f func(k, v []byte) error) error {
+func walkReverse(c ethdb.CursorDupSort, from, to uint64, keyPrefixLen int, f func(kk, k, v []byte) error) error {
 	_, _, err := c.Seek(dbutils.EncodeBlockNumber(to + 1))
 	if err != nil {
 		return err
@@ -489,7 +489,26 @@ func walkReverse(c ethdb.CursorDupSort, from, to uint64, keyPrefixLen int, f fun
 			break
 		}
 
-		err = f(v[:keyPrefixLen], v[keyPrefixLen:])
+		err = f(k, v[:keyPrefixLen], v[keyPrefixLen:])
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func walk(c ethdb.CursorDupSort, from, to uint64, keyPrefixLen int, f func(kk, k, v []byte) error) error {
+	for k, v, err := c.Seek(dbutils.EncodeBlockNumber(from)); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum > to {
+			break
+		}
+
+		err = f(k, v[:keyPrefixLen], v[keyPrefixLen:])
 		if err != nil {
 			return err
 		}
