@@ -8,10 +8,10 @@ package silkworm
 #include <stdint.h>
 
 typedef int (*SilkwormExecuteBlocksFunctionPointer)(void* txn, uint64_t chain_id, uint64_t start_block,
-                                                    size_t batch_size, bool write_receipts,
+                                                    uint64_t batch_size, bool write_receipts,
                                                     uint64_t* last_executed_block, int* lmdb_error_code);
 
-int call_silkworm_execute_blocks(void* func_ptr, void* txn, uint64_t chain_id, uint64_t start_block, size_t batch_size,
+int call_silkworm_execute_blocks(void* func_ptr, void* txn, uint64_t chain_id, uint64_t start_block, uint64_t batch_size,
                                  bool write_receipts, uint64_t* last_executed_block, int* lmdb_error_code) {
     return ((SilkwormExecuteBlocksFunctionPointer)func_ptr)(txn, chain_id, start_block, batch_size, write_receipts,
                                                             last_executed_block, lmdb_error_code);
@@ -52,7 +52,7 @@ func LoadExecutionFunctionPointer(dllPath string) (unsafe.Pointer, error) {
 func ExecuteBlocks(funcPtr unsafe.Pointer, txn ethdb.Tx, chainID *big.Int, startBlock uint64, batchSize uint64, writeReceipts bool) (executedBlock uint64, err error) {
 	cChainId := C.uint64_t(chainID.Uint64())
 	cStartBlock := C.uint64_t(startBlock)
-	cBatchSize := C.size_t(batchSize)
+	cBatchSize := C.uint64_t(batchSize)
 	cWriteReceipts := C._Bool(writeReceipts)
 	cLastExecutedBlock := C.uint64_t(startBlock - 1)
 	cLmdbErrorCode := C.int(0)
