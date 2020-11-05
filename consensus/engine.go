@@ -12,7 +12,7 @@ import (
 
 type VerifyHeaderRequest struct {
 	ID       uint64
-	Header   []*types.Header
+	Headers  []*types.Header
 	Seal     []bool
 	Deadline *time.Time
 }
