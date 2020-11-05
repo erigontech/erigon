@@ -2125,7 +2125,7 @@ func drop(db ethdb.KV, bucket string) {
 
 		i++
 		c.DeleteCurrent()
-		if i > 10_000_000 {
+		if i > 100_000_000 {
 			break
 		}
 	}

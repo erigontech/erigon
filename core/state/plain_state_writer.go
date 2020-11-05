@@ -8,7 +8,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -152,26 +151,26 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	if err != nil {
 		return err
 	}
-	var accountSerialised []byte
-	accountSerialised, err = changeset.EncodeAccountsPlain(accountChanges)
-	if err != nil {
-		return err
+	key := dbutils.EncodeBlockNumber(w.blockNumber)
+	for _, cs := range accountChanges.Changes {
+		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
+		newV = append(append(newV, cs.Key...), cs.Value...)
+		if err = db.Append(dbutils.PlainAccountChangeSetBucket2, key, newV); err != nil {
+			return err
+		}
 	}
-	key := dbutils.EncodeTimestamp(w.blockNumber)
-	if err = db.Append(dbutils.PlainAccountChangeSetBucket, key, accountSerialised); err != nil {
-		return err
-	}
+
 	storageChanges, err := w.csw.GetStorageChanges()
 	if err != nil {
 		return err
 	}
-	var storageSerialized []byte
-	if storageChanges.Len() > 0 {
-		storageSerialized, err = changeset.EncodeStoragePlain(storageChanges)
-		if err != nil {
-			return err
-		}
-		if err = db.Append(dbutils.PlainStorageChangeSetBucket, key, storageSerialized); err != nil {
+	if storageChanges.Len() == 0 {
+		return nil
+	}
+	for _, cs := range storageChanges.Changes {
+		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
+		newV = append(append(newV, cs.Key...), cs.Value...)
+		if err = db.Append(dbutils.PlainStorageChangeSetBucket2, key, newV); err != nil {
 			return err
 		}
 	}

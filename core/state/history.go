@@ -144,7 +144,7 @@ func WalkAsOf(db ethdb.Tx, bucket string, hBucket string, startkey []byte, fixed
 func walkAsOfThinStorage(tx ethdb.Tx, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
 	csBucket := dbutils.StorageChangeSetBucket
 	if bucket == dbutils.PlainStateBucket {
-		csBucket = dbutils.PlainStorageChangeSetBucket
+		csBucket = dbutils.PlainStorageChangeSetBucket2
 	}
 
 	generatedTo, executedTo, innerErr := getIndexGenerationProgress(tx, stages.StorageHistoryIndex)
@@ -207,7 +207,7 @@ func walkAsOfThinStorage(tx ethdb.Tx, bucket string, hBucket string, startkey []
 		part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
 	}
 
-	decorator := NewChangesetSearchDecorator(historyCursor, tx, csBucket, startkey, fixetBitsForHistory, part1End, part2Start, part3Start, timestamp)
+	decorator := NewChangesetSearchDecorator(historyCursor, tx, csBucket, startkey, fixetBitsForHistory, part1End, part2Start, part3Start, timestamp, keySize(bucket, hBucket))
 	err := decorator.buildChangeset(generatedTo, executedTo)
 	if err != nil {
 		return err
@@ -275,7 +275,7 @@ func walkAsOfThinAccounts(tx ethdb.Tx, bucket string, hBucket string, startkey [
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
 	csBucket := dbutils.AccountChangeSetBucket
 	if bucket == dbutils.PlainStateBucket {
-		csBucket = dbutils.PlainAccountChangeSetBucket
+		csBucket = dbutils.PlainAccountChangeSetBucket2
 	}
 
 	generatedTo, executedTo, innerErr := getIndexGenerationProgress(tx, stages.AccountHistoryIndex)
@@ -307,7 +307,7 @@ func walkAsOfThinAccounts(tx ethdb.Tx, bucket string, hBucket string, startkey [
 		part3Start, /* part3start */
 	)
 
-	decorator := NewChangesetSearchDecorator(hCursor, tx, csBucket, startkey, fixedbits, part1End, part2Start, part3Start, timestamp)
+	decorator := NewChangesetSearchDecorator(hCursor, tx, csBucket, startkey, fixedbits, part1End, part2Start, part3Start, timestamp, keySize(bucket, hBucket))
 	innerErr = decorator.buildChangeset(generatedTo, executedTo)
 	if innerErr != nil {
 		return innerErr
@@ -423,6 +423,21 @@ func returnCorrectWalker(bucket, hBucket string) func(v []byte) changeset.Walker
 	}
 }
 
+func keySize(bucket, hBucket string) int {
+	switch {
+	case bucket == dbutils.CurrentStateBucket && hBucket == dbutils.StorageHistoryBucket:
+		return changeset.Mapper[dbutils.StorageChangeSetBucket].KeySize
+	case bucket == dbutils.CurrentStateBucket && hBucket == dbutils.AccountsHistoryBucket:
+		return changeset.Mapper[dbutils.AccountChangeSetBucket].KeySize
+	case bucket == dbutils.PlainStateBucket && hBucket == dbutils.StorageHistoryBucket:
+		return changeset.Mapper[dbutils.PlainStorageChangeSetBucket].KeySize
+	case bucket == dbutils.PlainStateBucket && hBucket == dbutils.AccountsHistoryBucket:
+		return changeset.Mapper[dbutils.PlainAccountChangeSetBucket].KeySize
+	default:
+		panic("not implemented")
+	}
+}
+
 func getIndexGenerationProgress(tx ethdb.Tx, stage stages.SyncStage) (generatedTo uint64, executedTo uint64, err error) {
 	v, err := tx.GetOne(dbutils.SyncStageProgress, stage)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -446,7 +461,7 @@ type historyCursor interface {
 	Next() (key1, key2, key3, val []byte, err error)
 }
 
-func NewChangesetSearchDecorator(historyCursor historyCursor, tx ethdb.Tx, bucketName string, startKey []byte, matchBits, part1End, part2Start, part3Start int, timestamp uint64) *changesetSearchDecorator {
+func NewChangesetSearchDecorator(historyCursor historyCursor, tx ethdb.Tx, bucketName string, startKey []byte, matchBits, part1End, part2Start, part3Start int, timestamp uint64, keySize int) *changesetSearchDecorator {
 	matchBytes, mask := ethdb.Bytesmask(matchBits)
 	return &changesetSearchDecorator{
 		startKey:      startKey,
@@ -460,6 +475,7 @@ func NewChangesetSearchDecorator(historyCursor historyCursor, tx ethdb.Tx, bucke
 		timestamp:  timestamp,
 		matchBytes: matchBytes,
 		byteMask:   mask,
+		keySize:    keySize,
 	}
 }
 
@@ -470,6 +486,7 @@ type changesetSearchDecorator struct {
 	part2Start    int
 	part3Start    int
 	matchBytes    int
+	keySize       int
 	byteMask      byte
 
 	bucketName    string
@@ -560,7 +577,7 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 			if !bytes.HasPrefix(v, toFind) {
 				return nil, false, nil
 			}
-			return v[len(toFind):], true, nil
+			return v[csd.keySize:], true, nil
 		}
 
 		data, found, innerErr := findInHistory(hK, hV, csd.timestamp, find)
@@ -649,7 +666,7 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 				if !bytes.HasPrefix(v, toFind) {
 					return nil, false, nil
 				}
-				return v[len(toFind):], true, nil
+				return v[csd.keySize:], true, nil
 			}
 
 			data, found, innderErr := findInHistory(hK, hV, csd.timestamp, find)
@@ -742,7 +759,7 @@ func (csd *changesetSearchDecorator) Next() ([]byte, []byte, []byte, []byte, err
 				if !bytes.HasPrefix(v, toFind) {
 					return nil, false, nil
 				}
-				return v[len(toFind):], true, nil
+				return v[csd.keySize:], true, nil
 			}
 			data, found, innderErr := findInHistory(hK, hV, csd.timestamp, find)
 			if innderErr != nil {
@@ -784,49 +801,59 @@ func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 	if from >= to {
 		return nil
 	}
-	cs := make([]struct {
-		Walker   changeset.Walker
-		BlockNum uint64
-	}, 0, to-from)
-
+	fmt.Printf("%s\n", csd.bucketName)
 	c := csd.tx.Cursor(csd.bucketName)
 	defer c.Close()
-	_, _, err := c.Seek(dbutils.EncodeTimestamp(from))
-	if err != nil {
-		return err
-	}
-	err = ethdb.ForEach(c, func(k, v []byte) (bool, error) {
-		blockNum, _ := dbutils.DecodeTimestamp(k)
+
+	mp := make(map[string][]byte)
+	// TODO: use .Prev()
+	ethdb.Walk(c, dbutils.EncodeBlockNumber(from), 0, func(k, v []byte) (bool, error) {
+		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum > to {
 			return false, nil
 		}
-		cs = append(cs, struct {
-			Walker   changeset.Walker
-			BlockNum uint64
-		}{Walker: csd.walkerAdapter(common.CopyBytes(v)), BlockNum: blockNum})
+		mp[string(v[:csd.keySize])] = v[csd.keySize:]
 
 		return true, nil
 	})
-	if err != nil {
-		return err
-	}
 
-	sort.Slice(cs, func(i, j int) bool {
-		return cs[i].BlockNum < cs[j].BlockNum
-	})
-	mp := make(map[string][]byte)
-	for i := len(cs) - 1; i >= 0; i-- {
-		replace := cs[i].BlockNum >= csd.timestamp
-		err = cs[i].Walker.Walk(func(k, v []byte) error {
-			if replace {
-				mp[string(k)] = v
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-	}
+	//_, _, err := c.Seek(dbutils.EncodeTimestamp(from))
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//err = ethdb.ForEach(c, func(k, v []byte) (bool, error) {
+	//	blockNum, _ := dbutils.DecodeTimestamp(k)
+	//	if blockNum > to {
+	//		return false, nil
+	//	}
+	//
+	//	cs = append(cs, struct {
+	//		Walker   changeset.Walker
+	//		BlockNum uint64
+	//	}{Walker: csd.walkerAdapter(common.CopyBytes(v)), BlockNum: blockNum})
+	//
+	//	return true, nil
+	//})
+	//if err != nil {
+	//	return err
+	//}
+
+	//sort.Slice(cs, func(i, j int) bool {
+	//	return cs[i].BlockNum < cs[j].BlockNum
+	//})
+	//for i := len(cs) - 1; i >= 0; i-- {
+	//	replace := cs[i].BlockNum >= csd.timestamp
+	//	err = cs[i].Walker.Walk(func(k, v []byte) error {
+	//		if replace {
+	//			mp[string(k)] = v
+	//		}
+	//		return nil
+	//	})
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
 	res := make([]changeset.Change, len(mp))
 	i := 0
 	for k := range mp {
