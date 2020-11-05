@@ -286,10 +286,10 @@ func scanPage(page []byte, visStream io.Writer) error {
 			}
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
 			dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
-			flags := binary.LittleEndian.Uint16(page[nodePtr+4:])
+			nodeFlags := binary.LittleEndian.Uint16(page[nodePtr+4:])
 			keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
-			if flags&BigDataFlag > 0 {
-				fmt.Errorf("unimplemented overflow pages")
+			if nodeFlags&BigDataFlag > 0 {
+				return fmt.Errorf("unimplemented overflow pages")
 			} else {
 				key := string(page[nodePtr+8 : nodePtr+8+keySize])
 				val := string(page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize])
