@@ -150,7 +150,7 @@ func RewindData(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[string]
 	if err := walkAndCollect(
 		collector.AccountWalker,
 		db, dbutils.AccountChangeSetBucket2,
-		timestampDst, timestampSrc,
+		timestampDst+1, timestampSrc,
 		Mapper[dbutils.AccountChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
@@ -159,7 +159,7 @@ func RewindData(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[string]
 	if err := walkAndCollect(
 		collector.StorageWalker,
 		db, dbutils.StorageChangeSetBucket2,
-		timestampDst, timestampSrc,
+		timestampDst+1, timestampSrc,
 		Mapper[dbutils.StorageChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
@@ -177,7 +177,7 @@ func RewindDataPlain(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[st
 	if err := walkAndCollect(
 		collector.AccountWalker,
 		db, dbutils.PlainAccountChangeSetBucket2,
-		timestampDst, timestampSrc,
+		timestampDst+1, timestampSrc,
 		Mapper[dbutils.PlainAccountChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
@@ -186,7 +186,7 @@ func RewindDataPlain(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[st
 	if err := walkAndCollect(
 		collector.StorageWalker,
 		db, dbutils.PlainStorageChangeSetBucket2,
-		timestampDst, timestampSrc,
+		timestampDst+1, timestampSrc,
 		Mapper[dbutils.PlainStorageChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
