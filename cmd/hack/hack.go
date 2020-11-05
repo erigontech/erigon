@@ -2116,6 +2116,7 @@ func receiptSizes(chaindata string) error {
 	}
 	defer tx.Rollback()
 
+	fmt.Printf("bucket: %s\n", dbutils.Log)
 	c := tx.Cursor(dbutils.Log)
 	defer c.Close()
 	sizes := make(map[int]int)
