@@ -1257,7 +1257,7 @@ func (c *LmdbCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
-		_, v, err := c.getBothRange(key[:to], key[to:])
+		k, v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if lmdb.IsNotFound(err) {
 				return nil, nil, nil
@@ -1267,7 +1267,7 @@ func (c *LmdbCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 		if !bytes.Equal(key[to:], v[:from-to]) {
 			return nil, nil, nil
 		}
-		return nil, v[from-to:], nil
+		return k, v[from-to:], nil
 	}
 
 	k, v, err := c.set(key)
