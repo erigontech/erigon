@@ -311,7 +311,7 @@ func (c *Consensus) checkHeadersFromRange(highestHeader *types.Header, requested
 
 	for parentBlockNum := minHeader; parentBlockNum <= highestBlock; parentBlockNum++ {
 		idx := sort.Search(len(requestedHeaders), func(i int) bool {
-			return requestedHeaders[i].Number.Uint64() >= parentBlockNum
+			return requestedHeaders[i].Number.Uint64() >= parentBlockNum //nolint:scopelint
 		})
 
 		if idx >= len(requestedHeaders) || requestedHeaders[idx].Number.Uint64() != parentBlockNum {

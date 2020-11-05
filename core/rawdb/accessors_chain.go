@@ -420,23 +420,6 @@ func HasReceipts(db DatabaseReader, hash common.Hash, number uint64) bool {
 	return true
 }
 
-// ReadReceiptsRLP retrieves all the transaction receipts belonging to a block in RLP encoding.
-func ReadReceiptsRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue {
-	data := []byte{}
-	//data, _ := db.Ancient(freezerReceiptTable, number)
-	if len(data) == 0 {
-		data, _ = db.Get(dbutils.BlockReceiptsPrefix, dbutils.BlockReceiptsKey(number, hash))
-		// In the background freezer is moving data from leveldb to flatten files.
-		// So during the first check for ancient db, the data is not yet in there,
-		// but when we reach into leveldb, the data was already moved. That would
-		// result in a not found error.
-		if len(data) == 0 {
-			//data, _ = db.Ancient(freezerReceiptTable, number)
-		}
-	}
-	return nil // Can't find the data anywhere.
-}
-
 // ReadRawReceipts retrieves all the transaction receipts belonging to a block.
 // The receipt metadata fields are not guaranteed to be populated, so they
 // should not be used. Use ReadReceipts instead if the metadata is needed.

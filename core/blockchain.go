@@ -1860,7 +1860,9 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	// When transactions get deleted from the database, the receipts that were
 	// created in the fork must also be deleted
 	for _, tx := range types.TxDifference(deletedTxs, addedTxs) {
-		rawdb.DeleteTxLookupEntry(bc.db, tx.Hash())
+		if err := rawdb.DeleteTxLookupEntry(bc.db, tx.Hash()); err != nil {
+			log.Error("can't delete", "tx", tx.Hash().String())
+		}
 	}
 	// Delete any canonical number assignments above the new head
 	number := bc.CurrentBlock().NumberU64()

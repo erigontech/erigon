@@ -72,7 +72,7 @@ func unwindHashStateStageImpl(u *UnwindState, s *StageState, stateDB ethdb.Datab
 	return nil
 }
 
-func promoteHashedStateCleanly(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+func promoteHashedStateCleanly(_ *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
 	err := etl.Transform(
 		db,
 		dbutils.PlainStateBucket,

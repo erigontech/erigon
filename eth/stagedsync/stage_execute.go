@@ -123,11 +123,11 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		if warmup {
 			log.Info("Running a warmup...")
-			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.PlainStateBucket, logEvery, quit); err != nil {
+			if err = ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.PlainStateBucket, logEvery, quit); err != nil {
 				return err
 			}
 
-			if err := ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.CodeBucket, logEvery, quit); err != nil {
+			if err = ethdb.WarmUp(tx.(ethdb.HasTx).Tx(), dbutils.CodeBucket, logEvery, quit); err != nil {
 				return err
 			}
 
@@ -332,26 +332,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	return nil
 }
 
-func writeAccountHashed(db ethdb.Database, key string, acc accounts.Account) error {
-	var addrHash common.Hash
-	copy(addrHash[:], []byte(key))
-	if err := cleanupContractCodeBucket(
-		db,
-		dbutils.ContractCodeBucket,
-		acc,
-		func(db ethdb.Getter, out *accounts.Account) (bool, error) {
-			return rawdb.ReadAccount(db, addrHash, out)
-		},
-		func(inc uint64) []byte { return dbutils.GenerateStoragePrefix(addrHash[:], inc) },
-	); err != nil {
-		return err
-	}
-	return rawdb.WriteAccount(db, addrHash, acc)
-}
-
 func writeAccountPlain(db ethdb.Database, key string, acc accounts.Account) error {
 	var address common.Address
-	copy(address[:], []byte(key))
+	copy(address[:], key)
 	if err := cleanupContractCodeBucket(
 		db,
 		dbutils.PlainContractCodeBucket,
