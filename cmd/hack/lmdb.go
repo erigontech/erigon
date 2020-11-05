@@ -304,7 +304,7 @@ func scanPage(page []byte, visStream io.Writer) error {
 	return nil
 }
 
-func readMainTree(f *os.File, mainRoot uint64, mainDepth uint16, visStream io.Writer) (map[uint64]struct{}, error) {
+func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io.Writer) (map[uint64]struct{}, error) {
 	var maintree = make(map[uint64]struct{})
 	var mainEntries int
 	var pages [8][PageSize]byte // Stack of pages
@@ -365,24 +365,25 @@ func readMainTree(f *os.File, mainRoot uint64, mainDepth uint16, visStream io.Wr
 				keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
 				if flags&BigDataFlag > 0 {
 					return nil, fmt.Errorf("unexpected overflow pages")
-				} else {
-					if dataSize != 48 {
-						return nil, fmt.Errorf("expected datasize 48, got: %d", dataSize)
-					}
-					tableName := string(page[nodePtr+8 : nodePtr+8+keySize])
-					pagePtr := binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:])
-					if pagePtr != 0xffffffffffffffff {
-						fmt.Fprintf(&visbufs[top], "<n%d>%s=%d", i-1, tableName, pagePtr)
-						fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i-1, pagePtr)
-					} else {
-						fmt.Fprintf(&visbufs[top], "%s", tableName)
-					}
-					//fmt.Printf("Table: %s, root page: %d\n", page[nodePtr+8:nodePtr+8+keySize], binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:]))
 				}
+				if dataSize != 48 {
+					return nil, fmt.Errorf("expected datasize 48, got: %d", dataSize)
+				}
+				tableName := string(page[nodePtr+8 : nodePtr+8+keySize])
+				pagePtr := binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:])
+				if pagePtr != 0xffffffffffffffff {
+					fmt.Fprintf(&visbufs[top], "<n%d>%s=%d", i-1, tableName, pagePtr)
+					fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i-1, pagePtr)
+				} else {
+					fmt.Fprintf(&visbufs[top], "%s", tableName)
+				}
+				//fmt.Printf("Table: %s, root page: %d\n", page[nodePtr+8:nodePtr+8+keySize], binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:]))
 			}
 		} else {
 			fmt.Fprintf(&visbufs[top], "\"];\n")
-			visStream.Write([]byte(visbufs[top].String()))
+			if _, err := visStream.Write([]byte(visbufs[top].String())); err != nil {
+				return nil, fmt.Errorf("writing buffer into main stream: %w", err)
+			}
 			top--
 		}
 	}
@@ -392,7 +393,7 @@ func readMainTree(f *os.File, mainRoot uint64, mainDepth uint16, visStream io.Wr
 
 // Returns a map of pageIDs to bool. If value is true, this page is free. If value is false,
 // this page is a part of freelist structure itself
-func readFreelist(f *os.File, freeRoot uint64, freeDepth uint16) (map[uint64]bool, error) {
+func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16) (map[uint64]bool, error) {
 	var freelist = make(map[uint64]bool)
 	var freepages int
 	var freeEntries int
