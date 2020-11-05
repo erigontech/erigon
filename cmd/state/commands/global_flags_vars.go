@@ -46,9 +46,9 @@ func withPrivateApi(cmd *cobra.Command) {
 }
 
 func withCSBucket(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&changeSetBucket, "changeset-bucket", string(dbutils.AccountChangeSetBucket2), string(dbutils.AccountChangeSetBucket2)+" for account and "+string(dbutils.StorageChangeSetBucket2)+" for storage")
+	cmd.Flags().StringVar(&changeSetBucket, "changeset-bucket", dbutils.AccountChangeSetBucket2, dbutils.AccountChangeSetBucket2+" for account and "+dbutils.StorageChangeSetBucket2+" for storage")
 }
 
 func withIndexBucket(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&indexBucket, "index-bucket", string(dbutils.AccountsHistoryBucket), string(dbutils.AccountsHistoryBucket)+" for account and "+string(dbutils.StorageHistoryBucket)+" for storage")
+	cmd.Flags().StringVar(&indexBucket, "index-bucket", dbutils.AccountsHistoryBucket, dbutils.AccountsHistoryBucket+" for account and "+dbutils.StorageHistoryBucket+" for storage")
 }

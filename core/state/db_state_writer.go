@@ -215,7 +215,6 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
 		newV = append(append(newV, cs.Key...), cs.Value...)
 		if err = dsw.db.Append(dbutils.AccountChangeSetBucket2, key, newV); err != nil {
-			panic(err)
 			return err
 		}
 	}

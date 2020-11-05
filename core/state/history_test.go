@@ -187,6 +187,9 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	csData, err := changeset.EncodeAccountsPlain(expectedChangeSetInDB)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	expectedChangeSet := changeset.NewAccountChangeSetPlain()
 	for i := range addrs {
@@ -213,8 +216,8 @@ func TestMutationCommitThinHistory(t *testing.T) {
 
 	cs := changeset.NewStorageChangeSetPlain()
 	err = db.Walk(dbutils.PlainStorageChangeSetBucket2, dbutils.EncodeBlockNumber(2), 8*8, func(k, v []byte) (bool, error) {
-		if err := cs.Add(v[:60], v[60:]); err != nil {
-			return false, err
+		if err2 := cs.Add(v[:60], v[60:]); err2 != nil {
+			return false, err2
 		}
 		return true, nil
 	})

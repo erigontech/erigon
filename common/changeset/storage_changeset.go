@@ -180,7 +180,6 @@ func RewindDataPlain(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[st
 		timestampDst+1, timestampSrc,
 		Mapper[dbutils.PlainAccountChangeSetBucket2].KeySize,
 	); err != nil {
-		panic(err)
 		return nil, nil, err
 	}
 
@@ -190,7 +189,6 @@ func RewindDataPlain(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[st
 		timestampDst+1, timestampSrc,
 		Mapper[dbutils.PlainStorageChangeSetBucket2].KeySize,
 	); err != nil {
-		panic(err)
 		return nil, nil, err
 	}
 

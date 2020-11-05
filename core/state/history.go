@@ -427,21 +427,6 @@ func returnCorrectWalker2(bucket, hBucket string, tx ethdb.Tx) (changeset.Walker
 	}
 }
 
-func keySize(bucket, hBucket string) int {
-	switch {
-	case bucket == dbutils.CurrentStateBucket && hBucket == dbutils.StorageHistoryBucket:
-		return changeset.Mapper[dbutils.StorageChangeSetBucket2].KeySize
-	case bucket == dbutils.CurrentStateBucket && hBucket == dbutils.AccountsHistoryBucket:
-		return changeset.Mapper[dbutils.AccountChangeSetBucket2].KeySize
-	case bucket == dbutils.PlainStateBucket && hBucket == dbutils.StorageHistoryBucket:
-		return changeset.Mapper[dbutils.PlainStorageChangeSetBucket2].KeySize
-	case bucket == dbutils.PlainStateBucket && hBucket == dbutils.AccountsHistoryBucket:
-		return changeset.Mapper[dbutils.PlainAccountChangeSetBucket2].KeySize
-	default:
-		panic("not implemented")
-	}
-}
-
 func getIndexGenerationProgress(tx ethdb.Tx, stage stages.SyncStage) (generatedTo uint64, executedTo uint64, err error) {
 	v, err := tx.GetOne(dbutils.SyncStageProgress, stage)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {

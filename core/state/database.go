@@ -942,8 +942,8 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 	}
 
 	err = tds.db.Walk(dbutils.StorageChangeSetBucket2, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
-		if err := tds.db.Delete(dbutils.StorageChangeSetBucket2, k, v); err != nil {
-			return false, err
+		if err2 := tds.db.Delete(dbutils.StorageChangeSetBucket2, k, v); err2 != nil {
+			return false, err2
 		}
 		return true, nil
 	})
