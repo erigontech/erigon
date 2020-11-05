@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
@@ -119,6 +120,17 @@ func (api *APIImpl) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (
 
 // ChainConfig is necessary for gasprice.OracleBackend implementation
 func (api *APIImpl) ChainConfig() *params.ChainConfig {
-	// we just harcode mainnet there for now
-	return params.MainnetChainConfig
+	tx, err := api.dbReader.Begin(context.TODO(), ethdb.RO)
+	if err != nil {
+		log.Warn("Could not read chain config from the db, defaulting to MainnetChainConfig", "err", err)
+		return params.MainnetChainConfig
+	}
+	defer tx.Rollback()
+
+	chainConfig, err := getChainConfig(tx)
+	if err != nil {
+		log.Warn("Could not read chain config from the db, defaulting to MainnetChainConfig", "err", err)
+		return params.MainnetChainConfig
+	}
+	return chainConfig
 }
