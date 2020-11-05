@@ -156,7 +156,7 @@ Error: %v
 		seals[len(seals)-1] = true
 	}
 
-	if err := VerifyHeaders(db, headers, engine, seals); err != nil {
+	if err := VerifyHeaders(db, engine, headers, seals); err != nil {
 		return false, 0, err
 	}
 
@@ -278,7 +278,7 @@ Error: %v
 	return reorg, forkBlockNumber, nil
 }
 
-func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine consensus.EngineProcess, seals []bool) error {
+func VerifyHeaders(db rawdb.DatabaseReader, engine consensus.EngineProcess, headers []*types.Header, seals []bool) error {
 	toVerify := len(headers)
 	if toVerify == 0 {
 		return nil
@@ -328,19 +328,21 @@ func VerifyHeaders(db rawdb.DatabaseReader, headers []*types.Header, engine cons
 				headers = append(headers, h)
 			}
 
-			if err != nil {
-				engine.HeaderResponse() <- consensus.HeaderResponse{
-					result.ID,
-					nil,
-					consensus.BlockError{
-						parentHash,
-						parentNumber,
-						err,
-					},
-				}
-			} else {
-				engine.HeaderResponse() <- consensus.HeaderResponse{result.ID, headers, consensus.BlockError{}}
+			resp := consensus.HeaderResponse{
+				ID:      result.ID,
+				Headers: headers,
 			}
+
+			if err != nil {
+				resp.Headers = nil
+				resp.BlockError = consensus.BlockError{
+					parentHash,
+					parentNumber,
+					err,
+				}
+			}
+
+			engine.HeaderResponse() <- resp
 		}
 	}
 }

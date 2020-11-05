@@ -83,6 +83,7 @@ func TestCreate2Revive(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -260,6 +261,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -486,6 +488,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -524,6 +527,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 
@@ -636,6 +640,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -669,6 +674,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
@@ -794,6 +800,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 
 	var selfDestruct = make([]*contracts.Selfdestruct, numOfContracts)
 
@@ -961,6 +968,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -1103,6 +1111,7 @@ func TestEip2200Gas(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -1194,6 +1203,7 @@ func TestWrongIncarnation(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -1325,6 +1335,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -1363,6 +1374,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {

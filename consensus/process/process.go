@@ -2,7 +2,6 @@ package process
 
 import (
 	"errors"
-	"fmt"
 	"sort"
 	"time"
 
@@ -26,8 +25,6 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 		Process:  consensus.NewProcess(chain),
 	}
 
-	fmt.Println("___start")
-
 	go func() {
 	eventLoop:
 		for {
@@ -42,7 +39,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					continue
 				}
 
-				sort.SliceStable(req.Header, func(i, j int) bool {
+				sort.Slice(req.Header, func(i, j int) bool {
 					return req.Header[i].Number.Cmp(req.Header[j].Number) == -1
 				})
 
@@ -85,16 +82,13 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 						if req.Deadline.Before(time.Now()) {
 							c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), errors.New("timeout")}
 
-							c.ProcessingRequestsMu.Lock()
 							delete(c.ProcessingRequests, reqID)
-							c.ProcessingRequestsMu.Unlock()
 						}
 					}
 				}
 
 				c.ProcessingRequestsMu.Unlock()
 			case <-exit:
-				fmt.Println("<-exit")
 				return
 			}
 		}

@@ -709,6 +709,8 @@ func (d *Downloader) Terminate() {
 
 	// Cancel any pending download requests
 	d.Cancel()
+
+	d.consensusProcess.Close()
 }
 
 // fetchHeight retrieves the head header of the remote peer to aid in estimating

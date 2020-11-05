@@ -168,7 +168,7 @@ func (b *SimulatedBackend) KV() ethdb.KV {
 func (b *SimulatedBackend) Close() error {
 	b.blockchain.Stop()
 	b.database.Close()
-	close(b.exit)
+	common.SafeClose(b.exit)
 	return nil
 }
 
