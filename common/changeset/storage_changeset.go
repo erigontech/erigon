@@ -4,6 +4,8 @@ import (
 	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 const (
@@ -55,6 +57,23 @@ func (b StorageChangeSetBytes) FindWithoutIncarnation(addrHashToFind []byte, key
 	return findWithoutIncarnationInStorageChangeSet(b, common.HashLength, addrHashToFind, keyHashToFind)
 }
 
+type StorageChangeSet struct{ c ethdb.CursorDupSort }
+
+func (b StorageChangeSet) WalkReverse(from, to uint64, f func(k, v []byte) error) error {
+	return walkReverse(b.c, from, to, common.HashLength+common.IncarnationLength+common.HashLength, f)
+}
+
+func (b StorageChangeSet) Find(blockNumber uint64, k []byte) ([]byte, error) {
+	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.HashLength, k[:common.HashLength], k[common.HashLength:])
+}
+func (b StorageChangeSet) FindWithIncarnation(blockNumber uint64, k []byte) ([]byte, error) {
+	return findInStorageChangeSet2(b.c, blockNumber, common.HashLength, k)
+}
+
+func (b StorageChangeSet) FindWithoutIncarnation(blockNumber uint64, addrHashToFind []byte, keyHashToFind []byte) ([]byte, error) {
+	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.HashLength, addrHashToFind, keyHashToFind)
+}
+
 /* Plain changesets (key is a common.Address) */
 
 func NewStorageChangeSetPlain() *ChangeSet {
@@ -77,6 +96,24 @@ func DecodeStoragePlain(b []byte) (*ChangeSet, error) {
 	return cs, nil
 }
 
+type StorageChangeSetPlain struct{ c ethdb.CursorDupSort }
+
+func (b StorageChangeSetPlain) WalkReverse(from, to uint64, f func(k, v []byte) error) error {
+	return walkReverse(b.c, from, to, common.AddressLength+common.IncarnationLength+common.HashLength, f)
+}
+
+func (b StorageChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error) {
+	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.AddressLength, k[:common.AddressLength], k[common.AddressLength:])
+}
+
+func (b StorageChangeSetPlain) FindWithIncarnation(blockNumber uint64, k []byte) ([]byte, error) {
+	return findInStorageChangeSet2(b.c, blockNumber, common.AddressLength, k)
+}
+
+func (b StorageChangeSetPlain) FindWithoutIncarnation(blockNumber uint64, addressToFind []byte, keyToFind []byte) ([]byte, error) {
+	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.AddressLength, addressToFind, keyToFind)
+}
+
 type StorageChangeSetPlainBytes []byte
 
 func (b StorageChangeSetPlainBytes) Walk(f func(k, v []byte) error) error {
@@ -93,4 +130,121 @@ func (b StorageChangeSetPlainBytes) FindWithIncarnation(k []byte) ([]byte, error
 
 func (b StorageChangeSetPlainBytes) FindWithoutIncarnation(addressToFind []byte, keyToFind []byte) ([]byte, error) {
 	return findWithoutIncarnationInStorageChangeSet(b, common.AddressLength, addressToFind, keyToFind)
+}
+
+// RewindData generates rewind data for all buckets between the timestamp
+// timestapSrc is the current timestamp, and timestamp Dst is where we rewind
+func RewindData(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
+	// Collect list of buckets and keys that need to be considered
+	collector := newRewindDataCollector()
+
+	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
+
+	if err := walkAndCollect(
+		collector.AccountWalker,
+		db, dbutils.AccountChangeSetBucket,
+		suffixDst, timestampSrc,
+		bytesToAccountChangeSetWalker,
+	); err != nil {
+		return nil, nil, err
+	}
+
+	if err := walkAndCollect(
+		collector.StorageWalker,
+		db, dbutils.StorageChangeSetBucket,
+		suffixDst, timestampSrc,
+		bytesToStorageChangeSetWalker,
+	); err != nil {
+		return nil, nil, err
+	}
+
+	return collector.AccountData, collector.StorageData, nil
+}
+
+// RewindDataPlain generates rewind data for all plain buckets between the timestamp
+// timestapSrc is the current timestamp, and timestamp Dst is where we rewind
+func RewindDataPlain(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
+	// Collect list of buckets and keys that need to be considered
+	collector := newRewindDataCollector()
+
+	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
+
+	if err := walkAndCollect(
+		collector.AccountWalker,
+		db, dbutils.PlainAccountChangeSetBucket,
+		suffixDst, timestampSrc,
+		bytesToAccountChangeSetWalkerPlain,
+	); err != nil {
+		return nil, nil, err
+	}
+
+	if err := walkAndCollect(
+		collector.StorageWalker,
+		db, dbutils.PlainStorageChangeSetBucket,
+		suffixDst, timestampSrc,
+		bytesToStorageChangeSetWalkerPlain,
+	); err != nil {
+		return nil, nil, err
+	}
+
+	return collector.AccountData, collector.StorageData, nil
+}
+
+type rewindDataCollector struct {
+	AccountData map[string][]byte
+	StorageData map[string][]byte
+}
+
+func newRewindDataCollector() *rewindDataCollector {
+	return &rewindDataCollector{make(map[string][]byte), make(map[string][]byte)}
+}
+
+func (c *rewindDataCollector) AccountWalker(k, v []byte) error {
+	if _, ok := c.AccountData[string(k)]; !ok {
+		c.AccountData[string(k)] = v
+	}
+	return nil
+}
+
+func (c *rewindDataCollector) StorageWalker(k, v []byte) error {
+	if _, ok := c.StorageData[string(k)]; !ok {
+		c.StorageData[string(k)] = v
+	}
+	return nil
+}
+
+type walker interface {
+	Walk(f func(k, v []byte) error) error
+}
+
+func bytesToAccountChangeSetWalker(b []byte) walker {
+	return AccountChangeSetBytes(b)
+}
+
+func bytesToStorageChangeSetWalker(b []byte) walker {
+	return StorageChangeSetBytes(b)
+}
+
+func bytesToAccountChangeSetWalkerPlain(b []byte) walker {
+	return AccountChangeSetPlainBytes(b)
+}
+
+func bytesToStorageChangeSetWalkerPlain(b []byte) walker {
+	return StorageChangeSetPlainBytes(b)
+}
+
+func walkAndCollect(collectorFunc func([]byte, []byte) error, db ethdb.Getter, bucket string, suffixDst []byte, timestampSrc uint64, bytesToWalker func([]byte) walker) error {
+	return db.Walk(bucket, suffixDst, 0, func(k, v []byte) (bool, error) {
+		timestamp, _ := dbutils.DecodeTimestamp(k)
+		if timestamp > timestampSrc {
+			return false, nil
+		}
+		if Len(v) > 0 {
+			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
+			if innerErr := bytesToWalker(v).Walk(collectorFunc); innerErr != nil {
+				return false, innerErr
+			}
+		}
+		return true, nil
+	})
 }

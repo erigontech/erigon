@@ -7,6 +7,8 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 /**
@@ -471,4 +473,89 @@ type contractKeys struct {
 	Incarnation uint64
 	Keys        [][]byte
 	Vals        [][]byte
+}
+
+func walkReverse(c ethdb.CursorDupSort, from, to uint64, keyPrefixLen int, f func(k, v []byte) error) error {
+	_, _, err := c.Seek(dbutils.EncodeBlockNumber(to + 1))
+	if err != nil {
+		return err
+	}
+	for k, v, err := c.Prev(); k != nil; k, v, err = c.Prev() {
+		if err != nil {
+			return err
+		}
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum < from {
+			break
+		}
+		fmt.Printf("8: %d %x %x\n", keyPrefixLen, v[:keyPrefixLen], v[keyPrefixLen:])
+
+		err = f(v[:keyPrefixLen], v[keyPrefixLen:])
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func findInStorageChangeSet2(c ethdb.CursorDupSort, blockNumber uint64, keyPrefixLen int, k []byte) ([]byte, error) {
+	return doSearch2(
+		c, blockNumber,
+		keyPrefixLen,
+		k[0:keyPrefixLen],
+		k[keyPrefixLen+common.IncarnationLength:keyPrefixLen+common.HashLength+common.IncarnationLength],
+		binary.BigEndian.Uint64(k[keyPrefixLen:]), /* incarnation */
+	)
+}
+
+func findWithoutIncarnationInStorageChangeSet2(c ethdb.CursorDupSort, blockNumber uint64, keyPrefixLen int, addrBytesToFind []byte, keyBytesToFind []byte) ([]byte, error) {
+	return doSearch2(
+		c, blockNumber,
+		keyPrefixLen,
+		addrBytesToFind,
+		keyBytesToFind,
+		0, /* incarnation */
+	)
+}
+
+func doSearch2(
+	c ethdb.CursorDupSort,
+	blockNumber uint64,
+	keyPrefixLen int,
+	addrBytesToFind []byte,
+	keyBytesToFind []byte,
+	incarnation uint64,
+) ([]byte, error) {
+	blockBytes := dbutils.EncodeBlockNumber(blockNumber)
+	if incarnation == 0 {
+		for k, v, err := c.SeekBothRange(blockBytes, addrBytesToFind); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return nil, err
+			}
+			if !bytes.HasPrefix(v, addrBytesToFind) {
+				return nil, nil
+			}
+
+			stHash := v[keyPrefixLen+common.IncarnationLength : keyPrefixLen+common.IncarnationLength+common.HashLength]
+			if bytes.Equal(stHash, keyBytesToFind) {
+				return v[keyPrefixLen+common.IncarnationLength+common.HashLength:], nil
+			}
+		}
+	}
+
+	find := make([]byte, 0, keyPrefixLen+common.IncarnationLength+len(keyBytesToFind))
+	copy(find, addrBytesToFind)
+	binary.BigEndian.PutUint64(find[keyPrefixLen:], incarnation)
+	copy(find[keyPrefixLen+common.IncarnationLength:], keyBytesToFind)
+
+	_, v, err := c.SeekBothRange(blockBytes, find)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.HasPrefix(v, find) {
+		return nil, nil
+	}
+
+	return v[keyPrefixLen+common.IncarnationLength:], nil
 }

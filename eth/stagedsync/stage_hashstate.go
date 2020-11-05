@@ -186,10 +186,10 @@ type Promoter struct {
 }
 
 func getExtractFunc(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
-	mapper := changeset.Mapper[changeSetBucket]
+	keySize := changeset.Mapper[changeSetBucket].KeySize
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		k := changesetBytes[:mapper.KeySize]
-
+		k := changesetBytes[:keySize]
+		fmt.Printf("4: %x %x\n", k, changesetBytes)
 		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
 		value, err := db.Get(dbutils.PlainStateBucket, k)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -204,9 +204,9 @@ func getExtractFunc(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 }
 
 func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
-	mapper := changeset.Mapper[changeSetBucket]
+	keySize := changeset.Mapper[changeSetBucket].KeySize
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		k := changesetBytes[:mapper.KeySize]
+		k := changesetBytes[:keySize]
 
 		value, err := db.Get(dbutils.PlainStateBucket, k)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -317,9 +317,9 @@ func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, codes bool) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket
+		changeSetBucket = dbutils.PlainStorageChangeSetBucket2
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket
+		changeSetBucket = dbutils.PlainAccountChangeSetBucket2
 	}
 	log.Info(fmt.Sprintf("[%s] Incremental promotion started", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 
@@ -357,9 +357,9 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, codes bool) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket
+		changeSetBucket = dbutils.PlainStorageChangeSetBucket2
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket
+		changeSetBucket = dbutils.PlainAccountChangeSetBucket2
 	}
 	from := s.BlockNumber
 	to := u.UnwindPoint

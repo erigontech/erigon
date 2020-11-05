@@ -4,14 +4,21 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"reflect"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"reflect"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 type Walker interface {
 	Walk(func(k, v []byte) error) error
 	Find(k []byte) ([]byte, error)
+}
+
+type Walker2 interface {
+	WalkReverse(from, to uint64, f func(k, v []byte) error) error // from > to
+	Find(blockNumber uint64, k []byte) ([]byte, error)
 }
 
 func NewChangeSet() *ChangeSet {
@@ -109,47 +116,60 @@ func Len(b []byte) int {
 }
 
 var Mapper = map[string]struct {
-	IndexBucket   string
-	WalkerAdapter func(v []byte) Walker
-	KeySize       int
-	Template      string
-	New           func() *ChangeSet
-	Encode        func(*ChangeSet) ([]byte, error)
+	IndexBucket    string
+	WalkerAdapter  func(v []byte) Walker
+	WalkerAdapter2 func(cursor ethdb.CursorDupSort) Walker2
+	KeySize        int
+	Template       string
+	New            func() *ChangeSet
+	Encode         func(*ChangeSet) ([]byte, error)
 }{
-	dbutils.AccountChangeSetBucket: {
+	dbutils.AccountChangeSetBucket2: {
 		IndexBucket: dbutils.AccountsHistoryBucket,
 		WalkerAdapter: func(v []byte) Walker {
 			return AccountChangeSetBytes(v)
+		},
+		WalkerAdapter2: func(c ethdb.CursorDupSort) Walker2 {
+			return AccountChangeSet{c: c}
 		},
 		KeySize:  common.HashLength,
 		Template: "acc-ind-",
 		New:      NewAccountChangeSet,
 		Encode:   EncodeAccounts,
 	},
-	dbutils.StorageChangeSetBucket: {
+	dbutils.StorageChangeSetBucket2: {
 		IndexBucket: dbutils.StorageHistoryBucket,
 		WalkerAdapter: func(v []byte) Walker {
 			return StorageChangeSetBytes(v)
+		},
+		WalkerAdapter2: func(c ethdb.CursorDupSort) Walker2 {
+			return StorageChangeSet{c: c}
 		},
 		KeySize:  common.HashLength*2 + common.IncarnationLength,
 		Template: "st-ind-",
 		New:      NewStorageChangeSet,
 		Encode:   EncodeStorage,
 	},
-	dbutils.PlainAccountChangeSetBucket: {
+	dbutils.PlainAccountChangeSetBucket2: {
 		IndexBucket: dbutils.AccountsHistoryBucket,
 		WalkerAdapter: func(v []byte) Walker {
 			return AccountChangeSetPlainBytes(v)
+		},
+		WalkerAdapter2: func(c ethdb.CursorDupSort) Walker2 {
+			return AccountChangeSetPlain{c: c}
 		},
 		KeySize:  common.AddressLength,
 		Template: "acc-ind-",
 		New:      NewAccountChangeSetPlain,
 		Encode:   EncodeAccountsPlain,
 	},
-	dbutils.PlainStorageChangeSetBucket: {
+	dbutils.PlainStorageChangeSetBucket2: {
 		IndexBucket: dbutils.StorageHistoryBucket,
 		WalkerAdapter: func(v []byte) Walker {
 			return StorageChangeSetPlainBytes(v)
+		},
+		WalkerAdapter2: func(c ethdb.CursorDupSort) Walker2 {
+			return StorageChangeSetPlain{c: c}
 		},
 		KeySize:  common.AddressLength + common.IncarnationLength + common.HashLength,
 		Template: "st-ind-",

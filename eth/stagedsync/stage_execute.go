@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -201,7 +202,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	batch := stateDB.NewBatch()
 	defer batch.Rollback()
 
-	rewindFunc := ethdb.RewindDataPlain
+	rewindFunc := changeset.RewindDataPlain
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 	deleteAccountFunc := deleteAccountPlain
@@ -243,16 +244,16 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
-	if err := stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
-		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket, common.CopyBytes(k), nil); err1 != nil {
+	if err := stateDB.Walk(dbutils.PlainAccountChangeSetBucket2, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket2, common.CopyBytes(k), nil); err1 != nil {
 			return false, fmt.Errorf("%s: delete account changesets: %v", logPrefix, err1)
 		}
 		return true, nil
 	}); err != nil {
 		return fmt.Errorf("%s: walking account changesets: %v", logPrefix, err)
 	}
-	if err := stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
-		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket, common.CopyBytes(k), nil); err1 != nil {
+	if err := stateDB.Walk(dbutils.PlainStorageChangeSetBucket2, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
+		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket2, common.CopyBytes(k), nil); err1 != nil {
 			return false, fmt.Errorf("%s: delete storage changesets: %v", logPrefix, err1)
 		}
 		return true, nil

@@ -7,6 +7,8 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 // walkAccountChangeSet iterates the account bytes with the keys of provided size
@@ -96,6 +98,18 @@ func findInAccountChangeSetBytes(b []byte, k []byte, keyLen int) ([]byte, error)
 
 	idx1 := int(binary.BigEndian.Uint32(b[4+n*keyLen+4*id:]))
 	return b[valOffset+idx0 : valOffset+idx1], nil
+}
+
+func findInAccountChangeSet(c ethdb.CursorDupSort, blockNumber uint64, k []byte, keyLen int) ([]byte, error) {
+	blockBytes := dbutils.EncodeBlockNumber(blockNumber)
+	_, v, err := c.SeekBothRange(blockBytes, k)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.HasPrefix(v, k) {
+		return nil, nil
+	}
+	return v[keyLen:], nil
 }
 
 func decodeAccountsWithKeyLen(b []byte, keyLen uint32, h *ChangeSet) error {

@@ -139,9 +139,9 @@ func NewHashPromoter(db ethdb.Database, quitCh <-chan struct{}) *HashPromoter {
 func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, load etl.LoadFunc) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket
+		changeSetBucket = dbutils.PlainStorageChangeSetBucket2
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket
+		changeSetBucket = dbutils.PlainAccountChangeSetBucket2
 	}
 	log.Debug(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
@@ -183,9 +183,9 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	to := u.UnwindPoint
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket
+		changeSetBucket = dbutils.PlainStorageChangeSetBucket2
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket
+		changeSetBucket = dbutils.PlainAccountChangeSetBucket2
 	}
 	log.Info(fmt.Sprintf("[%s] Unwinding of intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 

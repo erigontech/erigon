@@ -155,7 +155,6 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	sort.Sort(accountChanges)
 
 	key := dbutils.EncodeBlockNumber(w.blockNumber)
-
 	for _, cs := range accountChanges.Changes {
 		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
 		newV = append(append(newV, cs.Key...), cs.Value...)
@@ -175,7 +174,7 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	for _, cs := range storageChanges.Changes {
 		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
 		newV = append(append(newV, cs.Key...), cs.Value...)
-		if err = db.Append(dbutils.PlainStorageChangeSetBucket2, common.CopyBytes(key), newV); err != nil {
+		if err = db.Append(dbutils.PlainStorageChangeSetBucket2, key, newV); err != nil {
 			return err
 		}
 	}

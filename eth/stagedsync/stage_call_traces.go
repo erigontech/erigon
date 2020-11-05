@@ -95,9 +95,9 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	collectorFrom := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	collectorTo := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
-	accountChangesCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainAccountChangeSetBucket)
+	accountChangesCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainAccountChangeSetBucket2)
 	defer accountChangesCursor.Close()
-	storageChangesCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStorageChangeSetBucket)
+	storageChangesCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStorageChangeSetBucket2)
 	checkFlushEvery := time.NewTicker(callIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
 	engine := chainContext.Engine()

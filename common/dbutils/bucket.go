@@ -90,12 +90,14 @@ var (
 	//AccountChangeSetBucket keeps changesets of accounts
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - addrHash v - account(encoded).
-	AccountChangeSetBucket = "ACS"
+	AccountChangeSetBucket  = "ACS"
+	AccountChangeSetBucket2 = "ACS2"
 
 	// StorageChangeSetBucket keeps changesets of storage
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - compositeKey(for storage) v - originalValue(common.Hash)}.
-	StorageChangeSetBucket = "SCS"
+	StorageChangeSetBucket  = "SCS"
+	StorageChangeSetBucket2 = "SCS2"
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
 	IntermediateTrieHashBucket     = "iTh2"
@@ -247,6 +249,8 @@ var Buckets = []string{
 	Sequence,
 	PlainAccountChangeSetBucket2,
 	PlainStorageChangeSetBucket2,
+	AccountChangeSetBucket2,
+	StorageChangeSetBucket2,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
@@ -324,15 +328,15 @@ var BucketsConfigs = BucketsCfg{
 	},
 	PlainAccountChangeSetBucket2: {
 		Flags: DupSort,
-		//	AutoDupSortKeysConversion: true,
-		//	DupFromLen:                72,
-		//	DupToLen:                  40,
 	},
 	PlainStorageChangeSetBucket2: {
 		Flags: DupSort,
-		//	AutoDupSortKeysConversion: true,
-		//	DupFromLen:                72,
-		//	DupToLen:                  40,
+	},
+	AccountChangeSetBucket2: {
+		Flags: DupSort,
+	},
+	StorageChangeSetBucket2: {
+		Flags: DupSort,
 	},
 	PlainStateBucket: {
 		Flags:                     DupSort,

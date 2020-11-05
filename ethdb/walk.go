@@ -18,12 +18,6 @@ package ethdb
 
 import (
 	"bytes"
-	"fmt"
-
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
 // splitCursor implements cursor with two keys
@@ -93,44 +87,3 @@ func (sc *splitCursor) Next() (key1, key2, key3, val []byte, err error) {
 }
 
 var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-
-// GetModifiedAccounts returns a list of addresses that were modified in the block range
-func GetModifiedAccounts(tx Tx, startNum, endNum uint64) ([]common.Address, error) {
-
-	changedAddrs := make(map[common.Address]struct{})
-	startCode := dbutils.EncodeTimestamp(startNum)
-
-	c := tx.Cursor(dbutils.PlainAccountChangeSetBucket)
-	defer c.Close()
-
-	for k, v, err := c.Seek(startCode); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return nil, fmt.Errorf("iterating over account changeset for %v: %w", k, err)
-		}
-		currentNum, _ := dbutils.DecodeTimestamp(k)
-		if currentNum > endNum {
-			break
-		}
-
-		walker := func(addr, _ []byte) error {
-			changedAddrs[common.BytesToAddress(addr)] = struct{}{}
-			return nil
-		}
-		if err := changeset.AccountChangeSetPlainBytes(v).Walk(walker); err != nil {
-			return nil, fmt.Errorf("iterating over account changeset for %v: %w", k, err)
-		}
-	}
-
-	if len(changedAddrs) == 0 {
-		return nil, nil
-	}
-
-	idx := 0
-	result := make([]common.Address, len(changedAddrs))
-	for addr := range changedAddrs {
-		copy(result[idx][:], addr[:])
-		idx++
-	}
-
-	return result, nil
-}

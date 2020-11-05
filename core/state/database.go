@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -849,7 +850,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
-	accountMap, storageMap, err := ethdb.RewindData(tds.db, tds.blockNr, blockNr)
+	accountMap, storageMap, err := changeset.RewindData(tds.db, tds.blockNr, blockNr)
 	if err != nil {
 		return err
 	}
