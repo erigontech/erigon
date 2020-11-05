@@ -24,7 +24,7 @@ import (
 const (
 	VersionMajor    = 2020    // Major version component of the current release
 	VersionMinor    = 11      // Minor version component of the current release
-	VersionMicro    = 1       // Patch version component of the current release
+	VersionMicro    = 2       // Patch version component of the current release
 	VersionModifier = "alpha" // Patch version component of the current release
 )
 
