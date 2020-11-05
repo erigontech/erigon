@@ -1247,10 +1247,10 @@ func (c *LmdbCursor) PutCurrent(key []byte, value []byte) error {
 	return c.putCurrent(key, value)
 }
 
-func (c *LmdbCursor) SeekExact(key []byte) ([]byte, error) {
+func (c *LmdbCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
-			return nil, err
+			return []byte{}, nil, err
 		}
 	}
 
@@ -1260,24 +1260,24 @@ func (c *LmdbCursor) SeekExact(key []byte) ([]byte, error) {
 		_, v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if lmdb.IsNotFound(err) {
-				return nil, nil
+				return nil, nil, nil
 			}
-			return nil, err
+			return []byte{}, nil, err
 		}
 		if !bytes.Equal(key[to:], v[:from-to]) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return v[from-to:], nil
+		return nil, v[from-to:], nil
 	}
 
-	_, v, err := c.set(key)
+	k, v, err := c.set(key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return []byte{}, nil, err
 	}
-	return v, nil
+	return k, v, nil
 }
 
 // Append - speedy feature of lmdb which is not part of KV interface.

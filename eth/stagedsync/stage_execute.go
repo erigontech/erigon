@@ -196,11 +196,22 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		s.Done()
 		return nil
 	}
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := stateDB.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = stateDB.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = stateDB.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
 
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
-	batch := stateDB.NewBatch()
-	defer batch.Rollback()
 
 	rewindFunc := changeset.RewindDataPlain
 	stateBucket := dbutils.PlainStateBucket
@@ -209,7 +220,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	writeAccountFunc := writeAccountPlain
 	recoverCodeHashFunc := recoverCodeHashPlain
 
-	accountMap, storageMap, errRewind := rewindFunc(stateDB, s.BlockNumber, u.UnwindPoint)
+	accountMap, storageMap, errRewind := rewindFunc(tx, s.BlockNumber, u.UnwindPoint)
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
@@ -222,57 +233,69 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 			}
 
 			// Fetch the code hash
-			recoverCodeHashFunc(&acc, stateDB, key)
-			if err := writeAccountFunc(logPrefix, batch, key, acc); err != nil {
+			recoverCodeHashFunc(&acc, tx, key)
+			if err := writeAccountFunc(logPrefix, tx, key, acc); err != nil {
+				panic(err)
 				return err
 			}
 		} else {
-			if err := deleteAccountFunc(batch, key); err != nil {
+			if err := deleteAccountFunc(tx, key); err != nil {
+				panic(err)
 				return err
 			}
 		}
 	}
 	for key, value := range storageMap {
 		if len(value) > 0 {
-			if err := batch.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
+			if err := tx.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
 				return err
 			}
 		} else {
-			if err := batch.Delete(stateBucket, []byte(key)[:storageKeyLength], nil); err != nil {
+			if err := tx.Delete(stateBucket, []byte(key)[:storageKeyLength], nil); err != nil {
 				return err
 			}
 		}
 	}
 
-	if err := stateDB.Walk(dbutils.PlainAccountChangeSetBucket2, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
-		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket2, common.CopyBytes(k), nil); err1 != nil {
-			return false, fmt.Errorf("%s: delete account changesets: %v", logPrefix, err1)
+	keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
+	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainAccountChangeSetBucket2)
+	for k, _, err := c.SeekExact(keyStart); k != nil; k, _, err = c.NextNoDup() {
+		if err != nil {
+			return err
 		}
-		return true, nil
-	}); err != nil {
-		return fmt.Errorf("%s: walking account changesets: %v", logPrefix, err)
-	}
-	if err := stateDB.Walk(dbutils.PlainStorageChangeSetBucket2, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
-		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket2, common.CopyBytes(k), nil); err1 != nil {
-			return false, fmt.Errorf("%s: delete storage changesets: %v", logPrefix, err1)
+		err = c.DeleteCurrentDuplicates()
+		if err != nil {
+			return err
 		}
-		return true, nil
-	}); err != nil {
-		return fmt.Errorf("%s: walking storage changesets: %v", logPrefix, err)
 	}
+	c.Close()
+
+	c = tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainStorageChangeSetBucket2)
+	for k, _, err := c.SeekExact(keyStart); k != nil; k, _, err = c.NextNoDup() {
+		if err != nil {
+			return err
+		}
+		err = c.DeleteCurrentDuplicates()
+		if err != nil {
+			return err
+		}
+	}
+	c.Close()
+
 	if writeReceipts {
-		if err := rawdb.DeleteNewerReceipts(stateDB, u.UnwindPoint+1); err != nil {
+		if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
 			return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
 		}
 	}
 
-	if err := u.Done(batch); err != nil {
+	if err := u.Done(tx); err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
 
-	_, err := batch.Commit()
-	if err != nil {
-		return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
