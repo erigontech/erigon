@@ -82,8 +82,8 @@ func dot2png(dotFileName string) string {
 	return strings.TrimSuffix(dotFileName, filepath.Ext(dotFileName)) + ".png"
 }
 
-func defragSteps(rootDir string, filename string, generateF func(ethdb.Tx) error) error {
-	dir, err := ioutil.TempDir(rootDir, "lmdb-vis")
+func defragSteps(filename string, generateF func(ethdb.Tx) error) error {
+	dir, err := ioutil.TempDir(".", "lmdb-vis")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for lmdb visualisation: %w", err)
 	}
@@ -128,19 +128,19 @@ func defragSteps(rootDir string, filename string, generateF func(ethdb.Tx) error
 }
 
 func defrag() error {
-	if err := defragSteps(".", "vis1.dot", generate1); err != nil {
+	if err := defragSteps("vis1.dot", generate1); err != nil {
 		return err
 	}
-	if err := defragSteps(".", "vis2.dot", func(tx ethdb.Tx) error { return generate2(tx, 2) }); err != nil {
+	if err := defragSteps("vis2.dot", func(tx ethdb.Tx) error { return generate2(tx, 2) }); err != nil {
 		return err
 	}
-	if err := defragSteps(".", "vis3.dot", generate3); err != nil {
+	if err := defragSteps("vis3.dot", generate3); err != nil {
 		return err
 	}
-	if err := defragSteps(".", "vis4.dot", func(tx ethdb.Tx) error { return generate2(tx, 200) }); err != nil {
+	if err := defragSteps("vis4.dot", func(tx ethdb.Tx) error { return generate2(tx, 200) }); err != nil {
 		return err
 	}
-	if err := defragSteps(".", "vis5.dot", func(tx ethdb.Tx) error { return generate4(tx) }); err != nil {
+	if err := defragSteps("vis5.dot", func(tx ethdb.Tx) error { return generate4(tx) }); err != nil {
 		return err
 	}
 	return nil
