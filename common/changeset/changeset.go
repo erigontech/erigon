@@ -53,6 +53,9 @@ func (s *ChangeSet) Swap(i, j int) {
 
 func (s *ChangeSet) Less(i, j int) bool {
 	cmp := bytes.Compare(s.Changes[i].Key, s.Changes[j].Key)
+	if cmp == 0 {
+		cmp = bytes.Compare(s.Changes[i].Value, s.Changes[j].Value)
+	}
 	return cmp < 0
 }
 
