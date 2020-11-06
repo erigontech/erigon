@@ -2102,9 +2102,11 @@ func receiptSizes(chaindata string) error {
 	}
 	defer tx.Rollback()
 
-	fmt.Printf("bucket: %s\n", dbutils.PlainStateBucket)
-	c := tx.Cursor(dbutils.PlainStateBucket)
+	fmt.Printf("bucket: %s\n", dbutils.PlainStorageChangeSetBucket)
+	c := tx.Cursor(dbutils.PlainStorageChangeSetBucket)
 	defer c.Close()
+
+	walkerAdapter := changeset.Mapper[dbutils.PlainStorageChangeSetBucket2].WalkerAdapter
 
 	sizes := make(map[string]int)
 	j := 0
@@ -2112,18 +2114,28 @@ func receiptSizes(chaindata string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%x, %x\n", k, v)
-		if len(k) == 20 {
-			continue
+		{
+			blockNum, _ := dbutils.DecodeTimestamp(k)
+			if blockNum%10_000 == 0 {
+				fmt.Printf("%dK\n", len(sizes)/1000)
+			}
+
+			err = walkerAdapter(v).Walk(func(k, v []byte) error {
+				sizes[string(k[20+8:])]++
+				return nil
+			})
+			check(err)
 		}
-		if len(v) < 32 {
-			continue
-		}
-		sizes[string(v[32:])]++
-		j++
-		if j%10_000 == 0 {
-			fmt.Printf("%d\n", len(sizes)/1000)
-		}
+
+		//fmt.Printf("%x, %x\n", k, v)
+		//if len(k) == 20 {
+		//	continue
+		//}
+		//sizes[string(v[32:])]++
+		//j++
+		//if j%10_000 == 0 {
+		//	fmt.Printf("%dK\n", len(sizes)/1000)
+		//}
 	}
 	var lens = make([]string, len(sizes))
 	i := 0
