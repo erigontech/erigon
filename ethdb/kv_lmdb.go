@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"reflect"
 	"runtime"
 	"sync"
 	"time"
@@ -758,7 +757,7 @@ func (tx *lmdbTx) CursorDupFixed(bucket string) CursorDupFixed {
 }
 
 func (tx *lmdbTx) CHandle() unsafe.Pointer {
-	return unsafe.Pointer(reflect.ValueOf(*tx.tx).FieldByName("_txn").Pointer())
+	return tx.tx.CHandle()
 }
 
 // methods here help to see better pprof picture
