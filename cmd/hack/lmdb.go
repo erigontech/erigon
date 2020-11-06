@@ -338,15 +338,14 @@ func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io
 			}
 		} else if i < num {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
-			i++
-			indices[top] = i
-			if i > 1 {
+			indices[top] = i + 1
+			if i > 0 {
 				fmt.Fprintf(&visbufs[top], "|")
 			}
 			if branch {
 				pagePtr := binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
-				fmt.Fprintf(&visbufs[top], "<n%d>%d", i-1, pagePtr)
-				fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i-1, pagePtr)
+				fmt.Fprintf(&visbufs[top], "<n%d>%d", i, pagePtr)
+				fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, pagePtr)
 				top++
 				indices[top] = 0
 				numKeys[top] = 0
@@ -365,13 +364,14 @@ func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io
 				tableName := string(page[nodePtr+8 : nodePtr+8+keySize])
 				pagePtr := binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:])
 				if pagePtr != 0xffffffffffffffff {
-					fmt.Fprintf(&visbufs[top], "<n%d>%s=%d", i-1, tableName, pagePtr)
-					fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i-1, pagePtr)
+					fmt.Fprintf(&visbufs[top], "<n%d>%s=%d", i, tableName, pagePtr)
+					fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, pagePtr)
 				} else {
 					fmt.Fprintf(&visbufs[top], "%s", tableName)
 				}
 				//fmt.Printf("Table: %s, root page: %d\n", page[nodePtr+8:nodePtr+8+keySize], binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:]))
 			}
+			i++
 		} else {
 			fmt.Fprintf(&visbufs[top], "\"];\n")
 			if _, err := visStream.Write([]byte(visbufs[top].String())); err != nil {
