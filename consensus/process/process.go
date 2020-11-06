@@ -78,10 +78,11 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					fmt.Println("XXX-err", req.ID, req.Headers[0].Number.Uint64(), err)
 					continue
 				}
-				fmt.Println("XXX-req-parents", req.ID, req.Headers[0].Number.Uint64(), ancestorsReq.HighestBlockNumber, ancestorsReq.Number)
+				fmt.Println("XXX-req-parents", req.ID, req.Headers[0].Number.Uint64(), ancestorsReq.Number, ancestorsReq.HighestBlockNumber, ancestorsReq.HighestHash.String())
 				c.HeadersRequests <- ancestorsReq
 
 			case parentResp := <-c.HeaderResponses:
+				fmt.Println("parentResp-0", parentResp.ID, len(parentResp.Headers), parentResp.Err)
 				if parentResp.Err != nil {
 					c.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{parentResp.ID, parentResp.Hash, parentResp.Err}
 
@@ -139,6 +140,10 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 	sort.Slice(nums, func(i, j int) bool {
 		return nums[i] < nums[j]
 	})
+
+	for _, header := range headers {
+		c.CacheHeader(header)
+	}
 
 	for _, num := range nums {
 		c.ProcessingRequestsMu.Lock()
@@ -269,8 +274,7 @@ func (c *Consensus) requestParentHeaders(reqID uint64, header *types.Header, req
 	knownParentsFromRange := c.checkHeadersFromRange(header, reqHeaders, uint64(parentsToAsk), uint64(parentsToValidate))
 
 	knownParents = append(knownParents, knownParentsFromRange...)
-
-	sort.SliceStable(knownParents, func(i, j int) bool {
+	sort.Slice(knownParents, func(i, j int) bool {
 		return knownParents[i].Number.Cmp(knownParents[j].Number) == -1
 	})
 
@@ -350,38 +354,27 @@ func sumHeadersRequestsInRange(reqID uint64, from uint64, reqs ...consensus.Head
 }
 
 func (c *Consensus) checkHeadersFromRange(highestHeader *types.Header, requestedHeaders []*types.Header, parentsToGet, parentsToValidate uint64) []*types.Header {
-	var known []*types.Header
-	highestBlock := highestHeader.Number.Uint64() - 1
-
 	parentsToGet = parentsToValidate - parentsToGet
 	if parentsToGet <= 0 {
 		return nil
 	}
 
-	var minHeader uint64
-	if highestBlock > parentsToGet {
-		minHeader = highestBlock - parentsToGet + 1
+	idx := -1
+	for i, h := range requestedHeaders {
+		if h.Number.Uint64() == highestHeader.Number.Uint64() {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil
 	}
 
-	for parentBlockNum := minHeader; parentBlockNum <= highestBlock; parentBlockNum++ {
-		idx := sort.Search(len(requestedHeaders), func(i int) bool {
-			return requestedHeaders[i].Number.Uint64() >= parentBlockNum //nolint:scopelint
-		})
-
-		if idx >= len(requestedHeaders) || requestedHeaders[idx].Number.Uint64() != parentBlockNum {
-			// debug: is it even possible?
-			continue
-		}
-
-		parentBlock := c.GetCachedHeader(requestedHeaders[idx].Hash(), parentBlockNum)
-		if parentBlock == nil {
-			continue
-		}
-
-		known = append(known, parentBlock)
+	if idx-int(parentsToGet) < 0 {
+		return nil
 	}
 
-	return known
+	return requestedHeaders[idx-int(parentsToGet) : idx]
 }
 
 func (c *Consensus) VerifyResults() <-chan consensus.VerifyHeaderResponse {

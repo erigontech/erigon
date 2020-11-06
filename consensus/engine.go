@@ -111,17 +111,17 @@ func (p *Process) HeaderResponse() chan<- HeaderResponse {
 }
 
 func (p *Process) CacheHeader(header *types.Header) {
+	if header == nil {
+		return
+	}
 	p.VerifiedBlocksMu.Lock()
 	defer p.VerifiedBlocksMu.Unlock()
 
 	blockNum := header.Number.Uint64()
 	blocksContainer, ok := p.VerifiedBlocks.Get(blockNum)
-	var blocks []*types.Header
-	if ok {
-		blocks = blocksContainer.([]*types.Header)
-	} else {
-		blocks = append(blocks, header)
-		p.VerifiedBlocks.Add(blockNum, blocks)
+	blocks, blocksOk := blocksContainer.([]*types.Header)
+	if !ok || !blocksOk || len(blocks) == 0 {
+		p.VerifiedBlocks.Add(blockNum, []*types.Header{header})
 		return
 	}
 
@@ -132,7 +132,6 @@ func (p *Process) CacheHeader(header *types.Header) {
 	}
 
 	blocks = append(blocks, header)
-
 	p.VerifiedBlocks.Add(blockNum, blocks)
 }
 
@@ -155,6 +154,5 @@ func (p *Process) GetCachedHeader(parentHash common.Hash, blockNum uint64) *type
 			return h
 		}
 	}
-
 	return nil
 }

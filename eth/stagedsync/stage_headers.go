@@ -292,6 +292,7 @@ func VerifyHeaders(db rawdb.DatabaseReader, engine consensus.EngineProcess, head
 	for {
 		select {
 		case req := <-requests:
+			fmt.Println("requested", req.ID, req.Headers[0].Number.Uint64(), req.Headers[len(req.Headers)-1].Number)
 			engine.HeaderVerification() <- req
 		case result := <-engine.VerifyResults():
 			if result.Err != nil {
@@ -301,6 +302,7 @@ func VerifyHeaders(db rawdb.DatabaseReader, engine consensus.EngineProcess, head
 			reqResponses[result.Hash] = struct{}{}
 
 			if len(reqResponses) == toVerify {
+				fmt.Println("VERIFIED", result.ID, result.Err)
 				return nil
 			}
 		case result := <-engine.HeaderRequest():
@@ -312,15 +314,17 @@ func VerifyHeaders(db rawdb.DatabaseReader, engine consensus.EngineProcess, head
 			}
 			headers := make([]*types.Header, 0, length)
 
+			if result.HighestBlockNumber+1 < result.Number {
+				result.Number = result.HighestBlockNumber + 1
+			}
+
 			parentHash := result.HighestHash
-			parentNumber := result.HighestBlockNumber
 
-			for i := 0; i < int(result.Number); i++ {
-				h := rawdb.ReadHeaderByHash(db, parentHash)
-				parentNumber = result.HighestBlockNumber - uint64(i)
-
+			var parentNumber int
+			for parentNumber = int(result.HighestBlockNumber); parentNumber >= int(result.HighestBlockNumber+1)-int(result.Number); parentNumber-- {
+				h := rawdb.ReadHeader(db, parentHash, uint64(parentNumber))
 				if h == nil {
-					err = ErrUnknownParent
+					err = fmt.Errorf("%w: block %d %s", ErrUnknownParent, parentNumber, parentHash.String())
 					break
 				}
 
@@ -337,7 +341,7 @@ func VerifyHeaders(db rawdb.DatabaseReader, engine consensus.EngineProcess, head
 				resp.Headers = nil
 				resp.BlockError = consensus.BlockError{
 					parentHash,
-					parentNumber,
+					uint64(parentNumber + 1),
 					err,
 				}
 			}
