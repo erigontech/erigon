@@ -19,7 +19,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/blend/go-sdk/db"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -2112,10 +2111,10 @@ func receiptSizes(chaindata string) error {
 		if err != nil {
 			return err
 		}
+		fmt.Printf("%x, %x\n", k, v)
 		if len(k) == 20 {
 			continue
 		}
-		fmt.Printf("%x, %x\n", k, v)
 		sizes[string(v[32:])]++
 	}
 	var lens = make([]string, len(sizes))
