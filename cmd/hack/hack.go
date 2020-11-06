@@ -2110,21 +2110,23 @@ func receiptSizes(chaindata string) error {
 	sizes := make(map[string]int)
 
 	ch := make(chan []byte, 1_000_000)
-	go func() {
-		j := 0
-		for v := range ch {
-			err = walkerAdapter(v).Walk(func(k, v []byte) error {
-				j++
-				if j%100_000 == 0 {
-					fmt.Printf("unique=%dM, total=%dM\n", len(sizes)/1_000_000, j/1_000_000)
-				}
-				sizes[string(k[20+8:])]++
-				return nil
-			})
-			check(err)
+	j := 0
+	for i := 0; i < 16; i++ {
+		go func() {
+			for v := range ch {
+				err = walkerAdapter(v).Walk(func(k, v []byte) error {
+					j++
+					if j%100_000 == 0 {
+						fmt.Printf("unique=%dM, total=%dM\n", len(sizes)/1_000_000, j/1_000_000)
+					}
+					sizes[string(k[20+8:])]++
+					return nil
+				})
+				check(err)
 
-		}
-	}()
+			}
+		}()
+	}
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
