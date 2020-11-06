@@ -90,6 +90,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	defer logEvery.Stop()
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
+	logTime := time.Now()
 
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
@@ -183,7 +184,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock = logProgress(logPrefix, logBlock, blockNum, batch)
+			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, batch)
 		}
 	}
 
@@ -206,8 +207,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	return nil
 }
 
-func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
-	speed := float64(now-prev) / float64(logInterval/time.Second)
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, batch ethdb.DbWithPendingMutations) (uint64, time.Time) {
+	currentTime := time.Now()
+	interval := currentTime.Sub(prevTime)
+	speed := float64(currentBlock-prevBlock) / float64(interval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	batchSize := "N/A"
@@ -215,14 +218,14 @@ func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMu
 		batchSize = common.StorageSize(batch.BatchSize()).String()
 	}
 	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix),
-		"number", now,
+		"number", currentBlock,
 		"blk/second", speed,
 		"batch", batchSize,
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys),
 		"numGC", int(m.NumGC))
 
-	return now
+	return currentBlock, currentTime
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
