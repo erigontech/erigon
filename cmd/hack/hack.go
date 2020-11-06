@@ -2109,17 +2109,17 @@ func receiptSizes(chaindata string) error {
 	walkerAdapter := changeset.Mapper[dbutils.PlainStorageChangeSetBucket2].WalkerAdapter
 
 	sizes := make(map[string]int)
-	//j := 0
+	j := 0
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
+		j++
 		{
 			blockNum, _ := dbutils.DecodeTimestamp(k)
 			if blockNum%10_000 == 0 {
-				fmt.Printf("blk=%dK, unique=%dK\n", blockNum/1000, len(sizes)/1000)
+				fmt.Printf("blk=%dK, unique=%dK, total=%dM\n", blockNum/1000, len(sizes)/1000, j/1_000_000)
 			}
-
 			err = walkerAdapter(v).Walk(func(k, v []byte) error {
 				sizes[string(k[20+8:])]++
 				return nil
