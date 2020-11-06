@@ -282,6 +282,8 @@ var accChangeSetDupSort = Migration{
 		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket2)
 		buf := etl.NewSortableBuffer(etl.BufferOptimalSize * 4 * 4)
 		buf.SetComparator(cmp)
+		newK := make([]byte, 8)
+		newV := make([]byte, 20+4096)
 
 		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir + "1")
 		if err1 != nil {
@@ -336,10 +338,9 @@ var accChangeSetDupSort = Migration{
 				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "blockNum", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 			}
 
+			binary.BigEndian.PutUint64(newK, blockNum)
 			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-				newK := make([]byte, 8)
-				binary.BigEndian.PutUint64(newK, blockNum)
-				newV := make([]byte, 20+len(v))
+				newV = newV[:20+len(v)]
 				copy(newV, k)
 				copy(newV[20:], v)
 				return collectorR.Collect(newK, newV)
