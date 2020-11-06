@@ -3,10 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"net/http"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"

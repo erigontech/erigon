@@ -14,6 +14,8 @@ func init() {
 	downloadCmd.Flags().StringVar(&bufferSizeStr, "bufferSize", "512M", "size o the buffer")
 	downloadCmd.Flags().StringVar(&sentryAddr, "sentryAddr", "localhost:9091", "sentry address <host>:<port>")
 	downloadCmd.Flags().StringVar(&coreAddr, "coreAddr", "localhost:9092", "core address <host>:<port>")
+	withChaindata(downloadCmd)
+	withLmdbFlags(downloadCmd)
 	rootCmd.AddCommand(downloadCmd)
 }
 
@@ -21,6 +23,8 @@ var downloadCmd = &cobra.Command{
 	Use:   "download",
 	Short: "Download headers backwards",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return download.Download(filesDir, bufferSizeStr, sentryAddr, coreAddr)
+		db := openDatabase(chaindata)
+		defer db.Close()
+		return download.Download(filesDir, bufferSizeStr, sentryAddr, coreAddr, db)
 	},
 }

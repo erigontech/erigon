@@ -97,6 +97,9 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 	case "pending":
 		*bn = PendingBlockNumber
 		return nil
+	case "null":
+		*bn = LatestBlockNumber
+		return nil
 	}
 
 	// Try to parse it as a number
