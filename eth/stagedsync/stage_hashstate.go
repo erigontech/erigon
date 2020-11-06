@@ -286,7 +286,7 @@ func getUnwindExtractAccounts(db ethdb.Getter, changeSetBucket string) etl.Extra
 
 func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		k, v := changesetBytes[:common.HashLength], changesetBytes[common.HashLength:]
+		k, v := changesetBytes[:common.AddressLength], changesetBytes[common.AddressLength:]
 		if len(v) == 0 {
 			return nil
 		}

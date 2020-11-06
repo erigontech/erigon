@@ -279,6 +279,9 @@ var accChangeSetDupSort = Migration{
 		changeSetBucket := dbutils.PlainAccountChangeSetBucket
 		walkerAdapter := changeset.Mapper[dbutils.PlainAccountChangeSetBucket2].WalkerAdapter
 		i := 0
+		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket2)
+		buf := etl.NewSortableBuffer(etl.BufferOptimalSize * 2)
+		buf.SetComparator(cmp)
 
 		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir + "1")
 		if err1 != nil {
@@ -309,7 +312,7 @@ var accChangeSetDupSort = Migration{
 			goto LoadStep
 		}
 
-		collectorR = etl.NewCriticalCollector(tmpdir+"1", etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+		collectorR = etl.NewCriticalCollector(tmpdir+"1", buf)
 		defer func() {
 			// don't clean if error or panic happened
 			if err != nil {
@@ -383,7 +386,7 @@ var accChangeSetDupSort = Migration{
 }
 
 var storageChangeSetDupSort = Migration{
-	Name: "storage_change_set_dup_sort_8",
+	Name: "storage_change_set_dup_sort_7",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -393,10 +396,12 @@ var storageChangeSetDupSort = Migration{
 		//reader := bytes.NewReader(nil)
 
 		const loadStep = "load"
-
 		changeSetBucket := dbutils.PlainStorageChangeSetBucket
 		walkerAdapter := changeset.Mapper[dbutils.PlainStorageChangeSetBucket2].WalkerAdapter
 		i := 0
+		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket2)
+		buf := etl.NewSortableBuffer(etl.BufferOptimalSize * 2)
+		buf.SetComparator(cmp)
 
 		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir + "1")
 		if err1 != nil {
@@ -427,7 +432,7 @@ var storageChangeSetDupSort = Migration{
 			goto LoadStep
 		}
 
-		collectorR = etl.NewCriticalCollector(tmpdir+"1", etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+		collectorR = etl.NewCriticalCollector(tmpdir+"1", buf)
 		defer func() {
 			// don't clean if error or panic happened
 			if err != nil {
@@ -452,18 +457,18 @@ var storageChangeSetDupSort = Migration{
 			}
 
 			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-				newK := make([]byte, 8+20+8)
-				binary.BigEndian.PutUint64(newK, blockNum)
-				copy(newK[8:], k[:20+8])
-				newV := make([]byte, 32+len(v))
-				copy(newK[20+8:], k)
-				copy(newV[32:], v)
-
-				//newK := make([]byte, 8)
+				//newK := make([]byte, 8+20+8)
 				//binary.BigEndian.PutUint64(newK, blockNum)
-				//newV := make([]byte, 60+len(v))
-				//copy(newV, k)
-				//copy(newV[60:], v)
+				//copy(newK[8:], k[:20+8])
+				//newV := make([]byte, 32+len(v))
+				//copy(newK[20+8:], k)
+				//copy(newV[32:], v)
+
+				newK := make([]byte, 8)
+				binary.BigEndian.PutUint64(newK, blockNum)
+				newV := make([]byte, 60+len(v))
+				copy(newV, k)
+				copy(newV[60:], v)
 				return collectorR.Collect(newK, newV)
 			}); err != nil {
 				return false, err
@@ -493,6 +498,7 @@ var storageChangeSetDupSort = Migration{
 		// Now transaction would have been re-opened, and we should be re-using the space
 		if err = collectorR.Load(logPrefix, db, dbutils.PlainStorageChangeSetBucket2, etl.IdentityLoadFunc, etl.TransformArgs{
 			OnLoadCommit: CommitProgress,
+			Comparator:   cmp,
 			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 				err = db.(ethdb.DbWithPendingMutations).CommitAndBegin(context.Background())
 				if err != nil {

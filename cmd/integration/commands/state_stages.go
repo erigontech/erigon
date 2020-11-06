@@ -203,6 +203,7 @@ func checkChangeSet(db ethdb.Getter, blockNum uint64, expectedAccountChanges *ch
 		return err
 	}
 
+	i = 0
 	err = ethdb.WalkChangeSetByBlock(db, true /* storage */, blockNum, func(kk, k, v []byte) error {
 		c := expectedStorageChanges.Changes[i]
 		i++
