@@ -64,13 +64,13 @@ func (cli *Client) Load(db ethdb.Database) error {
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return false, err
 		}
-		_ = infoBytes
+
 		log.Info("Add", "snapshot", snapshotName, "hash", infoHash.String(), "infobytes", true)
-		//t, err = cli.AddTorrentSpec(snapshotName, infoHash, infoBytes)
-		//if err != nil {
-		//	return false, err
-		//}
-		//t.d
+		_, err = cli.AddTorrentSpec(snapshotName, infoHash, infoBytes)
+		if err != nil {
+			return false, err
+		}
+
 		return true, nil
 	})
 }
@@ -143,10 +143,10 @@ func (cli *Client) GetInfoBytes(ctx context.Context, snapshotHash metainfo.Hash)
 	}
 	for {
 		select {
-		case <-t.GotInfo():
-			return common.CopyBytes(t.Metainfo().InfoBytes), nil
 		case <-ctx.Done():
 			return nil, fmt.Errorf("add torrent timeout: %w", ctx.Err())
+		case <-t.GotInfo():
+			return common.CopyBytes(t.Metainfo().InfoBytes), nil
 		default:
 			log.Info("Searching infobytes", "seeders", t.Stats().ConnectedSeeders, "active peers", t.Stats().ActivePeers)
 			time.Sleep(time.Second * 60)

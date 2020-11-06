@@ -6,13 +6,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
 
