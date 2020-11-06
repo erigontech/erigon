@@ -3,9 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"

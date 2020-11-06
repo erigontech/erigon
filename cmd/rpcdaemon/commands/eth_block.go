@@ -51,7 +51,18 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 }
 
 // GetBlockByHash implements eth_getBlockByHash. Returns information about a block given the block's hash.
-func (api *APIImpl) GetBlockByHash(ctx context.Context, hash common.Hash, fullTx bool) (map[string]interface{}, error) {
+func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNumberOrHash, fullTx bool) (map[string]interface{}, error) {
+	if numberOrHash.BlockHash == nil {
+		// some web3.js based apps (like ethstats client) for some reason call
+		// eth_getBlockByHash with a block number as a parameter
+		// so no matter how weird that is, we would love to support that.
+		if numberOrHash.BlockNumber != nil {
+			return api.GetBlockByNumber(ctx, *numberOrHash.BlockNumber, fullTx)
+		}
+		return nil, fmt.Errorf("block not found")
+	}
+
+	hash := *numberOrHash.BlockHash
 	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
