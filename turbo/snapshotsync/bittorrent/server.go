@@ -72,7 +72,6 @@ func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsyn
 		case <-t.GotInfo():
 			gotInfo = true
 			readiness = int32(100 * (float64(t.BytesCompleted()) / float64(t.Info().TotalLength())))
-			fmt.Println(t.BytesCompleted(), t.Info().TotalLength())
 		default:
 		}
 

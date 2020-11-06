@@ -34,7 +34,7 @@ func Seed(ctx context.Context, datadir string) error {
 	cfg.Debug = false
 	cfg.Logger = cfg.Logger.FilterLevel(lg.Info)
 	cfg.DataDir = datadir
-	cfg.UpnpID+="_seeder"
+	cfg.UpnpID += "_seeder"
 
 	pathes := []string{
 		cfg.DataDir + "/headers",

@@ -57,11 +57,12 @@ func WrapBySnapshots2(kv ethdb.KV, snapshots map[SnapshotType]*SnapshotsInfo) (e
 
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
+		cfg := bucketConfigs[k]
 		snapshotKV, err := ethdb.NewLMDB().Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return bucketConfigs[k]
+			return cfg
 		}).ReadOnly().Open()
 		if err != nil {
-			log.Error("Can't open body snapshot", "err", err)
+			log.Error("Can't open snapshot", "err", err)
 			return nil, err
 		} else { //nolint
 			snKV := ethdb.NewSnapshotKV().SnapshotDB(snapshotKV)

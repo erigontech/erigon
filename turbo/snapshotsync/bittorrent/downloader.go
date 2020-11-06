@@ -9,7 +9,6 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/storage"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -28,8 +27,8 @@ func New(snapshotsDir string, seeding bool) *Client {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
-	torrentConfig.DefaultStorage = storage.NewBoltDB(snapshotsDir)
-	torrentConfig.UpnpID = torrentConfig.UpnpID+"leecher"
+	//torrentConfig.DefaultStorage = storage.NewBoltDB(snapshotsDir)
+	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
 	torrentClient, err := torrent.NewClient(torrentConfig)
 	if err != nil {
@@ -66,11 +65,13 @@ func (cli *Client) Load(db ethdb.Database) error {
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return false, err
 		}
+		_ = infoBytes
 		log.Info("Add", "snapshot", snapshotName, "hash", infoHash.String(), "infobytes", true)
-		err = cli.AddTorrentSpec(snapshotName, infoHash, infoBytes)
-		if err != nil {
-			return false, err
-		}
+		//t, err = cli.AddTorrentSpec(snapshotName, infoHash, infoBytes)
+		//if err != nil {
+		//	return false, err
+		//}
+		//t.d
 		return true, nil
 	})
 }
@@ -80,17 +81,18 @@ func (cli *Client) WalkThroughTorrents(db ethdb.Database, networkID uint64, f fu
 	return db.Walk(dbutils.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), 8*8+16, f)
 }
 
-func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Hash, infoBytes []byte) error {
+func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Hash, infoBytes []byte) (*torrent.Torrent, error) {
+	t, ok := cli.Cli.Torrent(snapshotHash)
+	if ok {
+		return t, nil
+	}
 	t, _, err := cli.Cli.AddTorrentSpec(&torrent.TorrentSpec{
 		Trackers:    Trackers,
 		InfoHash:    snapshotHash,
 		DisplayName: snapshotName,
 		InfoBytes:   infoBytes,
 	})
-	t.AddPeers([]torrent.Peer{
-
-	})
-	return err
+	return t, err
 }
 
 func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotType snapshotsync.SnapshotType, networkID uint64) error { //nolint: interfacer
@@ -112,7 +114,7 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotTy
 		}
 	}
 	log.Info("Added torrent spec", "snapshot", snapshotType.String(), "hash", infoHash.String())
-	err = cli.AddTorrentSpec(snapshotType.String(), infoHash, infoBytes)
+	t, err := cli.AddTorrentSpec(snapshotType.String(), infoHash, infoBytes)
 	if err != nil {
 		return fmt.Errorf("error on add snapshot: %w", err)
 	}
@@ -121,6 +123,8 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotTy
 		log.Warn("Init failure", "snapshot", snapshotType.String(), "err", ctx.Err())
 		return fmt.Errorf("error on get info bytes: %w", err)
 	}
+	t.AllowDataDownload()
+	t.DownloadAll()
 	log.Info("Init", "snapshot", snapshotType.String())
 
 	if newTorrent {

@@ -15,7 +15,7 @@ func TestDownloaderCli(t *testing.T) {
 		grpc.WithInsecure(),
 	}
 
-	conn, err := grpc.Dial("35.223.214.226:9191", opts...)
+	conn, err := grpc.Dial("127.0.0.1:9191", opts...)
 	if err != nil {
 		log.Fatalf("fail to dial: %v", err)
 	}
@@ -23,19 +23,18 @@ func TestDownloaderCli(t *testing.T) {
 
 	cli := NewDownloaderClient(conn)
 	go func() {
-		for {
-			spew.Dump("Download start")
-			rep, err := cli.Download(context.TODO(), &DownloadSnapshotRequest{NetworkId: 1, Type: []SnapshotType{
-				SnapshotType_headers,
-				//SnapshotType_bodies,
-				//SnapshotType_State,
-				//SnapshotType_Receipts,
-			}})
-			spew.Dump("Download",rep,err)
-			time.Sleep(time.Second*20)
-		}
+		//for {
+		spew.Dump("Download start")
+		rep, err := cli.Download(context.TODO(), &DownloadSnapshotRequest{NetworkId: 1, Type: []SnapshotType{
+			SnapshotType_headers,
+			//SnapshotType_bodies,
+			//SnapshotType_State,
+			//SnapshotType_Receipts,
+		}})
+		spew.Dump("Download", rep, err)
+		time.Sleep(time.Second * 20)
+		//}
 	}()
-	//
 
 	for {
 		reply, err := cli.Snapshots(context.TODO(), &SnapshotsRequest{

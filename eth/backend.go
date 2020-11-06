@@ -163,17 +163,22 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	var torrentClient *bittorrent.Client
 	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
 		if config.ExternalSnapshotDownloaderAddr != "" {
+			fmt.Println("external downloader", config.ExternalSnapshotDownloaderAddr)
 			cli, cl, innerErr := snapshotsync.NewClient(config.ExternalSnapshotDownloaderAddr)
 			if innerErr != nil {
+				fmt.Println("innerErr", err)
 				return nil, innerErr
 			}
 			defer cl() //nolint
 
+			fmt.Println("cli.download+")
 			_, innerErr = cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
 				NetworkId: config.NetworkID,
 				Type:      config.SnapshotMode.ToSnapshotTypes(),
 			})
+			fmt.Println("cli.download-", err)
 			if innerErr != nil {
+				fmt.Println("download err")
 				return nil, innerErr
 			}
 
@@ -187,12 +192,12 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 				}
 				for {
 					mp := make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
-					snapshots, err := cli.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{NetworkId: config.NetworkID})
-					if err != nil {
-						return nil, err
+					snapshots, err1 := cli.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{NetworkId: config.NetworkID})
+					if err1 != nil {
+						return nil, err1
 					}
 					for i := range snapshots.Info {
-						if mp[snapshots.Info[i].Type].SnapshotBlock < snapshots.Info[i].SnapshotBlock {
+						if mp[snapshots.Info[i].Type].SnapshotBlock < snapshots.Info[i].SnapshotBlock && snapshots.Info[i] != nil {
 							mp[snapshots.Info[i].Type] = snapshots.Info[i]
 						}
 					}
@@ -224,20 +229,20 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 					time.Sleep(time.Second * 10)
 				}
 			}
-			downloadedSnapshots, err := waitDownload()
-			if err != nil {
-				return nil, err
+			downloadedSnapshots, innerErr := waitDownload()
+			if innerErr != nil {
+				return nil, innerErr
 			}
 			snapshotKV := chainDb.KV()
 
-			snapshotKV, err = snapshotsync.WrapBySnapshots2(snapshotKV, downloadedSnapshots)
-			if err != nil {
-				return nil, err
+			snapshotKV, innerErr = snapshotsync.WrapBySnapshots2(snapshotKV, downloadedSnapshots)
+			if innerErr != nil {
+				return nil, innerErr
 			}
 			chainDb.SetKV(snapshotKV)
-			err = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
-			if err != nil {
-				return nil, err
+			innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
+			if innerErr != nil {
+				return nil, innerErr
 			}
 		} else {
 			var dbPath string

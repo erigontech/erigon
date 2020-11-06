@@ -47,7 +47,7 @@ var (
 		Value: ethdb.DefaultStorageMode.ToString(),
 	}
 	SnapshotModeFlag = cli.StringFlag{
-		Name: "snapshot-mode",
+		Name: "snapshot.mode",
 		Usage: `Configures the storage mode of the app:
 * h - download headers snapshot
 * b - download bodies snapshot
@@ -57,11 +57,11 @@ var (
 		Value: snapshotsync.DefaultSnapshotMode.ToString(),
 	}
 	SeedSnapshotsFlag = cli.BoolTFlag{
-		Name:  "seed-snapshots",
-		Usage: `Seed snapshot seeding`,
+		Name:  "snapshot.seed",
+		Usage: `Seed snapshot seeding(default: true)`,
 	}
 
-	ExternalSnapshotDownloaderAddrFlag = cli.BoolTFlag{
+	ExternalSnapshotDownloaderAddrFlag = cli.StringFlag{
 		Name:  "snapshot.downloader.addr",
 		Usage: `enable external snapshot downloader`,
 	}
@@ -129,6 +129,8 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *eth.Config) {
 		}
 		etl.BufferOptimalSize = *size
 	}
+
+	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
 }
 
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
