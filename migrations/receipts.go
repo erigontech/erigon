@@ -354,6 +354,8 @@ var accChangeSetDupSort = Migration{
 		}
 
 		newK = make([]byte, 8+20)
+		changeSetBucket = dbutils.PlainStorageChangeSetBucket
+		walkerAdapter = changeset.Mapper[dbutils.PlainStorageChangeSetBucket2].WalkerAdapter
 
 		if err = db.Walk(changeSetBucket, nil, 0, func(kk, changesetBytes []byte) (bool, error) {
 			i += len(kk) + len(changesetBytes)
