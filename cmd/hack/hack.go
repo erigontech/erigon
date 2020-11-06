@@ -2118,7 +2118,7 @@ func receiptSizes(chaindata string) error {
 		{
 			blockNum, _ := dbutils.DecodeTimestamp(k)
 			if blockNum%10_000 == 0 {
-				fmt.Printf("blk=%dK, unique=%dK, total=%dM\n", blockNum/1000, len(sizes)/1000, j/1_000_000)
+				fmt.Printf("blk=%dK, unique=%dM, total=%dM\n", blockNum/1000, len(sizes)/1_000_000, j/1_000_000)
 			}
 			err = walkerAdapter(v).Walk(func(k, v []byte) error {
 				sizes[string(k[20+8:])]++
