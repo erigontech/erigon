@@ -2109,7 +2109,7 @@ func receiptSizes(chaindata string) error {
 	walkerAdapter := changeset.Mapper[dbutils.PlainStorageChangeSetBucket2].WalkerAdapter
 	sizes := make(map[string]int)
 
-	ch := make(chan []byte, 1_000)
+	ch := make(chan []byte, 1_000_000)
 	go func() {
 		j := 0
 		for v := range ch {
