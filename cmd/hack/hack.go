@@ -2115,7 +2115,6 @@ func receiptSizes(chaindata string) error {
 			return err
 		}
 		total += len(v)
-		fmt.Printf("%x, %x\n", k, v)
 		k, _, err := c2.SeekExact(v[:60])
 		check(err)
 		if k == nil {
