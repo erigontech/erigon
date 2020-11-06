@@ -5,9 +5,14 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
@@ -63,8 +68,57 @@ func (api *APIImpl) ProtocolVersion(_ context.Context) (hexutil.Uint, error) {
 }
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
-func (api *APIImpl) GasPrice(_ context.Context) (*hexutil.Big, error) {
-	return nil, fmt.Errorf(NotImplemented, "eth_getPrice")
-	// price, err := eth.SuggestPrice(ctx)
-	// return (*hexutil.Big)(price), err
+func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
+	oracle := gasprice.NewOracle(api, eth.DefaultFullGPOConfig)
+	price, err := oracle.SuggestPrice(ctx)
+	return (*hexutil.Big)(price), err
+}
+
+// HeaderByNumber is necessary for gasprice.OracleBackend implementation
+func (api *APIImpl) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, err := getBlockNumber(number, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	header := rawdb.ReadHeaderByNumber(tx, blockNum)
+	if header == nil {
+		return nil, fmt.Errorf("header not found: %d", blockNum)
+	}
+	return header, nil
+}
+
+// BlockByNumber is necessary for gasprice.OracleBackend implementation
+func (api *APIImpl) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, err := getBlockNumber(number, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, fmt.Errorf("block not found: %d", blockNum)
+	}
+	return block, nil
+}
+
+// ChainConfig is necessary for gasprice.OracleBackend implementation
+func (api *APIImpl) ChainConfig() *params.ChainConfig {
+	// we just harcode mainnet there for now
+	return params.MainnetChainConfig
 }
