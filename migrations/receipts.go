@@ -339,9 +339,6 @@ var accChangeSetDupSort = Migration{
 			binary.BigEndian.PutUint64(newK, blockNum)
 			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
 				copy(newK[8:], k)
-				newV = newV[:len(v)]
-				copy(newV, k)
-				copy(newV[20:], v)
 				return collectorR.Collect(newK, v)
 				//newV = newV[:20+len(v)]
 				//copy(newV, k)
