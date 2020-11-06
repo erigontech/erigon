@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/blend/go-sdk/db"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -2094,9 +2095,9 @@ func extracHeaders(chaindata string, block uint64) error {
 }
 
 func receiptSizes(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	kv := ethdb.NewMDBX().Path(chaindata).MustOpen()
+	defer kv.Close()
+	tx, err := kv.Begin(context.Background(), nil, ethdb.RO)
 	if err != nil {
 		return err
 	}
