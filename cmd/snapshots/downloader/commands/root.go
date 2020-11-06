@@ -8,9 +8,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"github.com/spf13/cobra"
+	"github.com/urfave/cli"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"net"
@@ -22,12 +24,28 @@ import (
 )
 
 func init() {
-	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
-	rootCmd.PersistentFlags().String("addr", "127.0.0.1:9191", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
-	rootCmd.PersistentFlags().String("dir", os.TempDir(), "")
-	rootCmd.PersistentFlags().Bool("seeding", true, "")
+	flags:=append(debug.Flags,utils.MetricFlags...)
+	flags = append(flags, PreDownloadMainnetFlag, Addr, Dir)
+	utils.CobraFlags(rootCmd, flags)
 
+	rootCmd.PersistentFlags().Bool("seeding", true, "Seed snapshots")
 }
+var (
+	Addr = cli.StringFlag{
+		Name:        "addr",
+		Usage:       "external downloader api network address, for example: 127.0.0.1:9191 serves remote downloader interface",
+		Value:       "127.0.0.1:9191",
+	}
+	Dir = cli.StringFlag{
+		Name:        "dir",
+		Usage:       "directory to store snapshots",
+		Value:       os.TempDir(),
+	}
+	PreDownloadMainnetFlag =  cli.BoolFlag{
+		Name:      "predownload.mainnet",
+		Usage:     "add all available mainnet snapshots for seeding",
+	}
+)
 
 type Config struct {
 	Addr    string
@@ -81,11 +99,11 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 	}()
 	cfg := &Config{}
 	var err error
-	cfg.Addr, err = cmd.Flags().GetString("addr")
+	cfg.Addr, err = cmd.Flags().GetString(Addr.Name)
 	if err != nil {
 		return err
 	}
-	cfg.Dir, err = cmd.Flags().GetString("dir")
+	cfg.Dir, err = cmd.Flags().GetString(Dir.Name)
 	if err != nil {
 		return err
 	}
@@ -119,10 +137,31 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer := grpc.NewServer(opts...)
-	bitterrentServer := bittorrent.NewServer(cfg.Dir, cfg.Seeding)
+	bitterrentServer,err := bittorrent.NewServer(cfg.Dir, cfg.Seeding)
+	if err != nil {
+		return err
+	}
 	err = bitterrentServer.Load()
 	if err != nil {
 		return err
+	}
+	fmt.Println("===================")
+	fmt.Println(cmd.Flags().GetBool(PreDownloadMainnetFlag.Name))
+	mainNetPreDownload,err:=cmd.Flags().GetBool(PreDownloadMainnetFlag.Name)
+	if err!=nil {
+		return err
+	}
+	if mainNetPreDownload {
+		log.Info("Predownload mainnet snapshots")
+			go func() {
+				_,err:=bitterrentServer.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
+					NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
+					Type:     bittorrent.GetAvailableSnapshotTypes(params.MainnetChainConfig.ChainID.Uint64()),
+				})
+				if err!=nil {
+					log.Error("Predownload failed","err", err, "networkID",params.MainnetChainConfig.ChainID.Uint64())
+				}
+			}()
 	}
 	snapshotsync.RegisterDownloaderServer(grpcServer, bitterrentServer)
 	go func() {

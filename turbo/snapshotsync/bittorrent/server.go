@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"path/filepath"
-	"time"
 )
 
 var (
@@ -22,11 +21,15 @@ var (
 	_ snapshotsync.DownloaderServer = &SNDownloaderServer{}
 )
 
-func NewServer(dir string, seeding bool) *SNDownloaderServer {
-	return &SNDownloaderServer{
-		t:  New(dir, seeding),
-		db: ethdb.MustOpen(dir + "/db"),
+func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
+	downloader,err:=New(dir, seeding)
+	if err!=nil {
+		return nil, err
 	}
+	return &SNDownloaderServer{
+		t:  downloader,
+		db: ethdb.MustOpen(dir + "/db"),
+	}, nil
 }
 
 type SNDownloaderServer struct {
@@ -36,13 +39,10 @@ type SNDownloaderServer struct {
 }
 
 func (S *SNDownloaderServer) Download(ctx context.Context, request *snapshotsync.DownloadSnapshotRequest) (*empty.Empty, error) {
-	fmt.Println("Download")
-	t := time.Now()
 	err := S.t.AddSnapshotsTorrents(ctx, S.db, request.NetworkId, snapshotsync.FromSnapshotTypes(request.Type))
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Download took", time.Since(t))
 	return &empty.Empty{}, nil
 }
 func (S *SNDownloaderServer) Load() error {
@@ -50,19 +50,15 @@ func (S *SNDownloaderServer) Load() error {
 }
 
 func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsync.SnapshotsRequest) (*snapshotsync.SnapshotsInfoReply, error) {
-	tt := time.Now()
 	reply := snapshotsync.SnapshotsInfoReply{}
-
 	err := S.WalkThroughTorrents(request.NetworkId, func(k, v []byte) (bool, error) {
 		var hash metainfo.Hash
 		if len(v) != metainfo.HashSize {
-			fmt.Println("incorrect length", len(v))
 			return true, nil
 		}
 		copy(hash[:], v)
 		t, ok := S.t.Cli.Torrent(hash)
 		if !ok {
-			fmt.Println("No torrent for hash", string(k), " h= ", hash.String())
 			return true, nil
 		}
 
@@ -95,7 +91,6 @@ func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsyn
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Snapshots took", time.Since(tt), reply.Info)
 	return &reply, nil
 }
 

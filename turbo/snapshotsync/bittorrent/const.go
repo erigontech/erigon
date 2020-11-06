@@ -27,12 +27,19 @@ var (
 	TorrentHashes = map[uint64]map[snapshotsync.SnapshotType]metainfo.Hash{
 		params.MainnetChainConfig.ChainID.Uint64(): {
 			snapshotsync.SnapshotType_headers: metainfo.NewHashFromHex(HeadersSnapshotHash),
-			snapshotsync.SnapshotType_bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
+			//snapshotsync.SnapshotType_bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
 		},
 	}
 	ErrInvalidSnapshot = errors.New("this snapshot for this chainID not supported ")
 )
 
+func GetAvailableSnapshotTypes(networkID uint64) []snapshotsync.SnapshotType {
+	types:=make([]snapshotsync.SnapshotType, 0, len(TorrentHashes[networkID]))
+	for  k:=range TorrentHashes[networkID] {
+		types=append(types,k)
+	}
+	return types
+}
 var Trackers = [][]string{{
 	"udp://tracker.openbittorrent.com:80",
 	"udp://tracker.openbittorrent.com:80",

@@ -23,11 +23,10 @@ type Client struct {
 	snapshotsDir string
 }
 
-func New(snapshotsDir string, seeding bool) *Client {
+func New(snapshotsDir string, seeding bool) (*Client, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
-	//torrentConfig.DefaultStorage = storage.NewBoltDB(snapshotsDir)
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
 	torrentClient, err := torrent.NewClient(torrentConfig)
@@ -38,7 +37,7 @@ func New(snapshotsDir string, seeding bool) *Client {
 	return &Client{
 		Cli:          torrentClient,
 		snapshotsDir: snapshotsDir,
-	}
+	}, nil
 }
 
 func DefaultTorrentConfig() *torrent.ClientConfig {
@@ -46,9 +45,9 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.ListenPort = 0
 	torrentConfig.NoDHT = true
 	torrentConfig.DisableTrackers = false
-	torrentConfig.Debug = true
+	torrentConfig.Debug = false
 	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Debug)
-	//torrentConfig.Logger = NewAdapterLogger()
+	torrentConfig.Logger = NewAdapterLogger()
 	return torrentConfig
 }
 
@@ -142,13 +141,17 @@ func (cli *Client) GetInfoBytes(ctx context.Context, snapshotHash metainfo.Hash)
 	if !ok {
 		return nil, errors.New("torrent not added")
 	}
-
-	select {
-	case <-t.GotInfo():
-	case <-ctx.Done():
-		return nil, fmt.Errorf("add torrent timeout: %w", ctx.Err())
+	for {
+		select {
+		case <-t.GotInfo():
+			return common.CopyBytes(t.Metainfo().InfoBytes), nil
+		case <-ctx.Done():
+			return nil, fmt.Errorf("add torrent timeout: %w", ctx.Err())
+		default:
+			log.Info("Searching infobytes", "seeders",t.Stats().ConnectedSeeders,  "active peers", t.Stats().ActivePeers)
+			time.Sleep(time.Second*60)
+		}
 	}
-	return common.CopyBytes(t.Metainfo().InfoBytes), nil
 }
 
 func (cli *Client) AddSnapshotsTorrents(ctx context.Context, db ethdb.Database, networkId uint64, mode snapshotsync.SnapshotMode) error {

@@ -19,7 +19,7 @@ type adapterLogger struct{}
 func (b adapterLogger) Log(msg lg.Msg) {
 	lvl, ok := msg.GetLevel()
 	if !ok {
-		lvl = lg.Debug
+		lvl = lg.Info
 	}
 
 	switch lvl {
@@ -34,7 +34,6 @@ func (b adapterLogger) Log(msg lg.Msg) {
 	case lg.Critical:
 		log.Error(msg.String())
 	default:
-		log.Warn("unknown log type")
-		log.Warn(msg.String())
+		log.Warn("unknown log type","msg", msg.String())
 	}
 }
