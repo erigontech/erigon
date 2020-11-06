@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/modern-go/concurrent"
 	"github.com/valyala/gozstd"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
@@ -2111,22 +2112,21 @@ func receiptSizes(chaindata string) error {
 
 	ch := make(chan []byte, 1_000_000)
 	j := 0
-	for i := 0; i < 16; i++ {
-		go func() {
-			for v := range ch {
-				err = walkerAdapter(v).Walk(func(k, v []byte) error {
-					j++
-					if j%100_000 == 0 {
-						fmt.Printf("unique=%dM, total=%dM\n", len(sizes)/1_000_000, j/1_000_000)
-					}
-					sizes[string(k[20+8:])]++
-					return nil
-				})
-				check(err)
+	go func() {
+		for v := range ch {
+			err = walkerAdapter(v).Walk(func(k, v []byte) error {
+				j++
+				if j%100_000 == 0 {
+					fmt.Printf("unique=%dM, total=%dM\n", len(sizes)/1_000_000, j/1_000_000)
+				}
+				sizes[string(k[20+8:])]++
+				return nil
+			})
+			check(err)
 
-			}
-		}()
-	}
+		}
+	}()
+
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
