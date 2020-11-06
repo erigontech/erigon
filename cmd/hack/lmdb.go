@@ -25,6 +25,7 @@ const MdbDataVersion uint32 = 1
 
 const BranchPageFlag uint16 = 1
 const LeafPageFlag uint16 = 2
+const OverflowPageFlag uint16 = 4
 
 const BigDataFlag uint16 = 1
 const HeaderSize int = 16
@@ -57,6 +58,22 @@ func generate3(tx ethdb.Tx) error {
 		if err := tx.(ethdb.BucketMigrator).CreateBucket(k); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// Generates a database with one table, containing 1 short and 1 long (more than one page) values
+func generate4(tx ethdb.Tx) error {
+	if err := tx.(ethdb.BucketMigrator).CreateBucket("t"); err != nil {
+		return err
+	}
+	c := tx.Cursor("t")
+	defer c.Close()
+	if err := c.Append([]byte("k1"), []byte("very_short_value")); err != nil {
+		return err
+	}
+	if err := c.Append([]byte("k2"), []byte(strings.Repeat("long_value_", 1000))); err != nil {
+		return err
 	}
 	return nil
 }
@@ -121,6 +138,9 @@ func defrag() error {
 		return err
 	}
 	if err := defragSteps(".", "vis4.dot", func(tx ethdb.Tx) error { return generate2(tx, 200) }); err != nil {
+		return err
+	}
+	if err := defragSteps(".", "vis5.dot", func(tx ethdb.Tx) error { return generate4(tx) }); err != nil {
 		return err
 	}
 	return nil
@@ -220,14 +240,15 @@ func textInfo(chaindata string, visStream io.Writer) error {
 	}
 	count := 0
 	for _, err = f.ReadAt(meta[:], int64(pageID)*PageSize); err == nil; _, err = f.ReadAt(meta[:], int64(pageID)*PageSize) {
-		if err = scanPage(meta[:], visStream); err != nil {
+		var pageNum int
+		if pageNum, err = scanPage(meta[:], visStream); err != nil {
 			return err
 		}
-		count++
+		count += pageNum
 		if count%(1024*256) == 0 {
 			log.Info("Scaned", "Gb", count/(1024*256))
 		}
-		pageID++
+		pageID += uint64(pageNum)
 		_, mainOk = maintree[pageID]
 		for _, ok := freelist[pageID]; ok || mainOk; _, ok = freelist[pageID] {
 			pageID++
@@ -242,34 +263,61 @@ func textInfo(chaindata string, visStream io.Writer) error {
 	return nil
 }
 
-func scanPage(page []byte, visStream io.Writer) error {
+func scanPage(page []byte, visStream io.Writer) (int, error) {
 	pos, pageID, flags, lowerFree := readPageHeader(page, 0)
 	if flags&LeafPageFlag != 0 {
 		num := (lowerFree - pos) / 2
-		fmt.Fprintf(visStream, "p_%d [shape=record style=filled fillcolor=\"#D5F5E3\" label=\"", pageID)
-		reduced := num > 5
+		interesting := make(map[int]struct{}) // Lines that have something interesting in them
+		// First pass - figuring out interesting lines
+		interesting[0] = struct{}{}
+		interesting[1] = struct{}{}
+		interesting[num-1] = struct{}{}
+		interesting[num-2] = struct{}{}
 		for i := 0; i < num; i++ {
+			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
+			nodeFlags := binary.LittleEndian.Uint16(page[nodePtr+4:])
+			keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
+			if nodeFlags&BigDataFlag > 0 {
+				interesting[i-1] = struct{}{}
+				interesting[i] = struct{}{}
+				interesting[i+1] = struct{}{}
+				overflowPageID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
+				fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, overflowPageID)
+			}
+		}
+		fmt.Fprintf(visStream, "p_%d [shape=record style=filled fillcolor=\"#D5F5E3\" label=\"", pageID)
+		for i := 0; i < num; i++ {
+			_, i0 := interesting[i]
+			_, i1 := interesting[i+1]
+			if !i0 && !i1 {
+				continue
+			}
+			if !i0 {
+				count := 0
+				for j := i; !i0; _, i0 = interesting[j] {
+					count++
+					j--
+				}
+				fmt.Fprintf(visStream, "|... %d more records here ...", count)
+				continue
+			}
+			if i > 0 {
+				fmt.Fprintf(visStream, "|")
+			}
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
 			dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
 			nodeFlags := binary.LittleEndian.Uint16(page[nodePtr+4:])
 			keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
+			key := string(page[nodePtr+8 : nodePtr+8+keySize])
 			if nodeFlags&BigDataFlag > 0 {
-				return fmt.Errorf("unimplemented overflow pages")
+				overflowPageID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
+				fmt.Fprintf(visStream, "<n%d>%s:%d", i, key, overflowPageID)
 			} else {
-				if reduced && i == 2 {
-					fmt.Fprintf(visStream, "|... %d more records here ...", num-4)
-				} else if !reduced || i < 2 || i > (num-3) {
-					if i > 0 {
-						fmt.Fprintf(visStream, "|")
-					}
-					key := string(page[nodePtr+8 : nodePtr+8+keySize])
-					val := string(page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize])
-					fmt.Fprintf(visStream, "%s:%s", key, val)
-				}
+				val := string(page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize])
+				fmt.Fprintf(visStream, "%s:%s", key, val)
 			}
 		}
 		fmt.Fprintf(visStream, "\"];\n")
-		//log.Info("Leaf page", "pos", pos, "lowerFree", lowerFree, "numKeys", num)
 	} else if flags&BranchPageFlag != 0 {
 		num := (lowerFree - pos) / 2
 		fmt.Fprintf(visStream, "p_%d [shape=record style=filled fillcolor=\"#F6DDCC\" label=\"", pageID)
@@ -287,10 +335,14 @@ func scanPage(page []byte, visStream io.Writer) error {
 			pagePtr := binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
 			fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, pagePtr)
 		}
+	} else if flags&OverflowPageFlag != 0 {
+		_, _, overflowNum := readOverflowPageHeader(page[:], 0)
+		fmt.Fprintf(visStream, "p_%d [shape=record style=filled fillcolor=\"#D5F5E3\" label=\"Overflow %d pages\"];", pageID, overflowNum)
+		return overflowNum, nil
 	} else {
-		return fmt.Errorf("unimplemented processing for page type, flags: %d", flags)
+		return 0, fmt.Errorf("unimplemented processing for page type, flags: %d", flags)
 	}
-	return nil
+	return 1, nil
 }
 
 func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io.Writer) (map[uint64]struct{}, error) {
@@ -339,10 +391,10 @@ func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io
 		} else if i < num {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
 			indices[top] = i + 1
-			if i > 0 {
-				fmt.Fprintf(&visbufs[top], "|")
-			}
 			if branch {
+				if i > 0 {
+					fmt.Fprintf(&visbufs[top], "|")
+				}
 				pagePtr := binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
 				fmt.Fprintf(&visbufs[top], "<n%d>%d", i, pagePtr)
 				fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, pagePtr)
@@ -351,6 +403,9 @@ func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io
 				numKeys[top] = 0
 				pageIDs[top] = pagePtr
 			} else {
+				if i > 0 {
+					fmt.Fprintf(&visbufs[top], "|")
+				}
 				mainEntries++
 				dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
 				flags := binary.LittleEndian.Uint16(page[nodePtr+4:])
