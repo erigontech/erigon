@@ -2107,6 +2107,7 @@ func receiptSizes(chaindata string) error {
 	defer c.Close()
 
 	sizes := make(map[string]int)
+	j := 0
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -2116,6 +2117,10 @@ func receiptSizes(chaindata string) error {
 			continue
 		}
 		sizes[string(v[32:])]++
+		j++
+		if j%10_000 == 0 {
+			fmt.Printf("%d\n", len(sizes)/1000)
+		}
 	}
 	var lens = make([]string, len(sizes))
 	i := 0
