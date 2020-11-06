@@ -283,7 +283,6 @@ var accChangeSetDupSort = Migration{
 		buf := etl.NewSortableBuffer(etl.BufferOptimalSize * 4 * 4)
 		buf.SetComparator(cmp)
 		newK := make([]byte, 8+20)
-		newV := make([]byte, 4096)
 
 		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir + "1")
 		if err1 != nil {
