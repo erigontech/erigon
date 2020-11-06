@@ -333,9 +333,7 @@ var accChangeSetDupSort = Migration{
 			select {
 			default:
 			case <-logEvery.C:
-				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
-				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "blockNum", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "blockNum", blockNum)
 			}
 
 			binary.BigEndian.PutUint64(newK, blockNum)
