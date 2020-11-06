@@ -97,7 +97,7 @@ func defragSteps(rootDir string, filename string, generateF func(ethdb.Tx) error
 	}
 	defer kv.Close()
 	if err = kv.Update(context.Background(), generateF); err != nil {
-		return fmt.Errorf("generating data in temp db", err)
+		return fmt.Errorf("generating data in temp db: %w", err)
 	}
 	if err != nil {
 		return fmt.Errorf("generate db for %s: %w", filename, err)
