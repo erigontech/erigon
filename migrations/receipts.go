@@ -283,6 +283,7 @@ var accChangeSetDupSort = Migration{
 		buf := etl.NewSortableBuffer(etl.BufferOptimalSize * 4 * 4)
 		buf.SetComparator(cmp)
 		newK := make([]byte, 8+20)
+		newV := make([]byte, 32+4096)
 
 		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir + "1")
 		if err1 != nil {
@@ -343,6 +344,40 @@ var accChangeSetDupSort = Migration{
 				//copy(newV, k)
 				//copy(newV[20:], v)
 				//return collectorR.Collect(newK, newV)
+			}); err != nil {
+				return false, err
+			}
+
+			return true, nil
+		}); err != nil {
+			return err
+		}
+
+		newK = make([]byte, 8+20)
+
+		if err = db.Walk(changeSetBucket, nil, 0, func(kk, changesetBytes []byte) (bool, error) {
+			i += len(kk) + len(changesetBytes)
+			blockNum, _ := dbutils.DecodeTimestamp(kk)
+
+			select {
+			default:
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "blockNum", blockNum)
+			}
+
+			binary.BigEndian.PutUint64(newK, blockNum)
+			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
+				copy(newK[8:], k[:20])
+				newV = newV[:32+8+len(v)]
+				copy(newV[:32], k[20:])
+				copy(newV[32:], v)
+
+				//newK := make([]byte, 8)
+				//binary.BigEndian.PutUint64(newK, blockNum)
+				//newV := make([]byte, 60+len(v))
+				//copy(newV, k)
+				//copy(newV[60:], v)
+				return collectorR.Collect(newK, newV)
 			}); err != nil {
 				return false, err
 			}

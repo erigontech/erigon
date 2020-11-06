@@ -67,7 +67,7 @@ var migrations = []Migration{
 	receiptsCborEncode,
 	receiptsOnePerTx,
 	accChangeSetDupSort,
-	storageChangeSetDupSort,
+	//storageChangeSetDupSort,
 	accChangeSetDupSort2,
 }
 
