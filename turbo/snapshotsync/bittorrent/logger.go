@@ -34,6 +34,6 @@ func (b adapterLogger) Log(msg lg.Msg) {
 	case lg.Critical:
 		log.Error(msg.String())
 	default:
-		log.Warn("unknown log type","msg", msg.String())
+		log.Warn("unknown log type", "msg", msg.String())
 	}
 }

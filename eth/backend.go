@@ -250,9 +250,9 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			torrentClient,innerErr:= bittorrent.New(dbPath, config.SnapshotSeeding)
-			if innerErr != nil {
-				return nil, innerErr
+			torrentClient, err = bittorrent.New(dbPath, config.SnapshotSeeding)
+			if err != nil {
+				return nil, err
 			}
 			err = torrentClient.Load(chainDb)
 			if err != nil {

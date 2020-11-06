@@ -22,8 +22,8 @@ var (
 )
 
 func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
-	downloader,err:=New(dir, seeding)
-	if err!=nil {
+	downloader, err := New(dir, seeding)
+	if err != nil {
 		return nil, err
 	}
 	return &SNDownloaderServer{

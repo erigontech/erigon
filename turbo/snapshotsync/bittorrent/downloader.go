@@ -148,8 +148,8 @@ func (cli *Client) GetInfoBytes(ctx context.Context, snapshotHash metainfo.Hash)
 		case <-ctx.Done():
 			return nil, fmt.Errorf("add torrent timeout: %w", ctx.Err())
 		default:
-			log.Info("Searching infobytes", "seeders",t.Stats().ConnectedSeeders,  "active peers", t.Stats().ActivePeers)
-			time.Sleep(time.Second*60)
+			log.Info("Searching infobytes", "seeders", t.Stats().ConnectedSeeders, "active peers", t.Stats().ActivePeers)
+			time.Sleep(time.Second * 60)
 		}
 	}
 }

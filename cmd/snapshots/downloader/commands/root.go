@@ -24,26 +24,27 @@ import (
 )
 
 func init() {
-	flags:=append(debug.Flags,utils.MetricFlags...)
+	flags := append(debug.Flags, utils.MetricFlags...)
 	flags = append(flags, PreDownloadMainnetFlag, Addr, Dir)
 	utils.CobraFlags(rootCmd, flags)
 
 	rootCmd.PersistentFlags().Bool("seeding", true, "Seed snapshots")
 }
+
 var (
 	Addr = cli.StringFlag{
-		Name:        "addr",
-		Usage:       "external downloader api network address, for example: 127.0.0.1:9191 serves remote downloader interface",
-		Value:       "127.0.0.1:9191",
+		Name:  "addr",
+		Usage: "external downloader api network address, for example: 127.0.0.1:9191 serves remote downloader interface",
+		Value: "127.0.0.1:9191",
 	}
 	Dir = cli.StringFlag{
-		Name:        "dir",
-		Usage:       "directory to store snapshots",
-		Value:       os.TempDir(),
+		Name:  "dir",
+		Usage: "directory to store snapshots",
+		Value: os.TempDir(),
 	}
-	PreDownloadMainnetFlag =  cli.BoolFlag{
-		Name:      "predownload.mainnet",
-		Usage:     "add all available mainnet snapshots for seeding",
+	PreDownloadMainnetFlag = cli.BoolFlag{
+		Name:  "predownload.mainnet",
+		Usage: "add all available mainnet snapshots for seeding",
 	}
 )
 
@@ -137,7 +138,7 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer := grpc.NewServer(opts...)
-	bitterrentServer,err := bittorrent.NewServer(cfg.Dir, cfg.Seeding)
+	bitterrentServer, err := bittorrent.NewServer(cfg.Dir, cfg.Seeding)
 	if err != nil {
 		return err
 	}
@@ -147,21 +148,21 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("===================")
 	fmt.Println(cmd.Flags().GetBool(PreDownloadMainnetFlag.Name))
-	mainNetPreDownload,err:=cmd.Flags().GetBool(PreDownloadMainnetFlag.Name)
-	if err!=nil {
+	mainNetPreDownload, err := cmd.Flags().GetBool(PreDownloadMainnetFlag.Name)
+	if err != nil {
 		return err
 	}
 	if mainNetPreDownload {
 		log.Info("Predownload mainnet snapshots")
-			go func() {
-				_,err:=bitterrentServer.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
-					NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
-					Type:     bittorrent.GetAvailableSnapshotTypes(params.MainnetChainConfig.ChainID.Uint64()),
-				})
-				if err!=nil {
-					log.Error("Predownload failed","err", err, "networkID",params.MainnetChainConfig.ChainID.Uint64())
-				}
-			}()
+		go func() {
+			_, err := bitterrentServer.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
+				NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
+				Type:      bittorrent.GetAvailableSnapshotTypes(params.MainnetChainConfig.ChainID.Uint64()),
+			})
+			if err != nil {
+				log.Error("Predownload failed", "err", err, "networkID", params.MainnetChainConfig.ChainID.Uint64())
+			}
+		}()
 	}
 	snapshotsync.RegisterDownloaderServer(grpcServer, bitterrentServer)
 	go func() {

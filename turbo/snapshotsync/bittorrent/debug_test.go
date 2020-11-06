@@ -19,8 +19,11 @@ func TestTorrentAddTorrent(t *testing.T) {
 	kv := ethdb.NewLMDB().Path(path + "/lmdb").MustOpen()
 	db := ethdb.NewObjectDatabase(kv)
 
-	cli := New(path, true)
-	err := cli.AddTorrent(context.Background(), db, snapshotsync.SnapshotType_headers, params.MainnetChainConfig.ChainID.Uint64())
+	cli, err := New(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = cli.AddTorrent(context.Background(), db, snapshotsync.SnapshotType_headers, params.MainnetChainConfig.ChainID.Uint64())
 	if err != nil {
 		t.Fatal(err)
 	}
