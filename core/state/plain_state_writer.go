@@ -3,7 +3,6 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"sort"
 
 	"github.com/VictoriaMetrics/fastcache"
