@@ -30,93 +30,57 @@ const BigDataFlag uint16 = 1
 const HeaderSize int = 16
 
 // Generates an empty database and returns the file name
-func generate1(rootDir string) (string, error) {
-	dir, err := ioutil.TempDir(rootDir, "lmdb-vis")
-	if err != nil {
-		return "", fmt.Errorf("creating temp dir for lmdb visualisation: %w", err)
-	}
-	var kv ethdb.KV
-	kv, err = ethdb.NewLMDB().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return make(dbutils.BucketsCfg)
-	}).Open()
-	if err != nil {
-		return dir, fmt.Errorf("opening LMDB database: %w", err)
-	}
-	defer kv.Close()
-	return dir, nil
+func generate1(_ ethdb.Tx) error {
+	return nil
 }
 
 // Generates a database with single table and two key-value pair in "t" DBI, and returns the file name
-func generate2(rootDir string) (string, error) {
-	dir, err := ioutil.TempDir(rootDir, "lmdb-vis")
-	if err != nil {
-		return "", fmt.Errorf("creating temp dir for lmdb visualisation: %w", err)
+func generate2(tx ethdb.Tx, entries int) error {
+	if err := tx.(ethdb.BucketMigrator).CreateBucket("t"); err != nil {
+		return err
 	}
-	var kv ethdb.KV
-	kv, err = ethdb.NewLMDB().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return make(dbutils.BucketsCfg)
-	}).Open()
-	if err != nil {
-		return dir, fmt.Errorf("opening LMDB database: %w", err)
-	}
-	defer kv.Close()
-	if err1 := kv.Update(context.Background(), func(tx ethdb.Tx) error {
-		if err := tx.(ethdb.BucketMigrator).CreateBucket("t"); err != nil {
+	c := tx.Cursor("t")
+	defer c.Close()
+	for i := 0; i < entries; i++ {
+		k := fmt.Sprintf("%05d", i)
+		if err := c.Append([]byte(k), []byte("very_short_value")); err != nil {
 			return err
 		}
-		c := tx.Cursor("t")
-		defer c.Close()
-		for i := 0; i < 2; i++ {
-			k := fmt.Sprintf("%05d", i)
-			if err := c.Append([]byte(k), []byte("value")); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err1 != nil {
-		return dir, err1
 	}
-	return dir, nil
+	return nil
 }
 
 // Generates a database with 100 (maximum) of DBIs to produce branches in MAIN_DBI
-func generate3(rootDir string) (string, error) {
-	dir, err := ioutil.TempDir(rootDir, "lmdb-vis")
-	if err != nil {
-		return "", fmt.Errorf("creating temp dir for lmdb visualisation: %w", err)
-	}
-	var kv ethdb.KV
-	kv, err = ethdb.NewLMDB().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return make(dbutils.BucketsCfg)
-	}).Open()
-	if err != nil {
-		return dir, fmt.Errorf("opening LMDB database: %w", err)
-	}
-	defer kv.Close()
-	if err1 := kv.Update(context.Background(), func(tx ethdb.Tx) error {
-		for i := 0; i < 61; i++ {
-			k := fmt.Sprintf("table_%05d", i)
-			if err := tx.(ethdb.BucketMigrator).CreateBucket(k); err != nil {
-				return err
-			}
+func generate3(tx ethdb.Tx) error {
+	for i := 0; i < 61; i++ {
+		k := fmt.Sprintf("table_%05d", i)
+		if err := tx.(ethdb.BucketMigrator).CreateBucket(k); err != nil {
+			return err
 		}
-		return nil
-	}); err1 != nil {
-		return dir, err1
 	}
-	return dir, nil
+	return nil
 }
 
 func dot2png(dotFileName string) string {
 	return strings.TrimSuffix(dotFileName, filepath.Ext(dotFileName)) + ".png"
 }
 
-func defragSteps(filename string, generateF func() (string, error)) error {
-	var dbDir string
-	var err error
-	dbDir, err = generateF()
-	if dbDir != "" {
-		defer os.RemoveAll(dbDir)
+func defragSteps(rootDir string, filename string, generateF func(ethdb.Tx) error) error {
+	dir, err := ioutil.TempDir(rootDir, "lmdb-vis")
+	if err != nil {
+		return fmt.Errorf("creating temp dir for lmdb visualisation: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	var kv ethdb.KV
+	kv, err = ethdb.NewLMDB().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return make(dbutils.BucketsCfg)
+	}).Open()
+	if err != nil {
+		return fmt.Errorf("opening LMDB database: %w", err)
+	}
+	defer kv.Close()
+	if err = kv.Update(context.Background(), generateF); err != nil {
+		return fmt.Errorf("generating data in temp db", err)
 	}
 	if err != nil {
 		return fmt.Errorf("generate db for %s: %w", filename, err)
@@ -128,7 +92,7 @@ func defragSteps(filename string, generateF func() (string, error)) error {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	if err = textInfo(dbDir, w); err != nil {
+	if err = textInfo(dir, w); err != nil {
 		return fmt.Errorf("textInfo for %s: %w", filename, err)
 	}
 	if err = w.Flush(); err != nil {
@@ -147,13 +111,16 @@ func defragSteps(filename string, generateF func() (string, error)) error {
 }
 
 func defrag() error {
-	if err := defragSteps("vis1.dot", func() (string, error) { return generate1(".") }); err != nil {
+	if err := defragSteps(".", "vis1.dot", generate1); err != nil {
 		return err
 	}
-	if err := defragSteps("vis2.dot", func() (string, error) { return generate2(".") }); err != nil {
+	if err := defragSteps(".", "vis2.dot", func(tx ethdb.Tx) error { return generate2(tx, 2) }); err != nil {
 		return err
 	}
-	if err := defragSteps("vis3.dot", func() (string, error) { return generate3(".") }); err != nil {
+	if err := defragSteps(".", "vis3.dot", generate3); err != nil {
+		return err
+	}
+	if err := defragSteps(".", "vis4.dot", func(tx ethdb.Tx) error { return generate2(tx, 200) }); err != nil {
 		return err
 	}
 	return nil
@@ -215,7 +182,7 @@ func textInfo(chaindata string, visStream io.Writer) error {
 	log.Info("FREE_DBI", "root page ID", freeRoot, "depth", freeDepth)
 	log.Info("MAIN_DBI", "root page ID", mainRoot, "depth", mainDepth)
 
-	fmt.Fprintf(visStream, "meta [shape=Mrecord label=\"<free_root>FREE_DBI")
+	fmt.Fprintf(visStream, "meta [shape=Mrecord style=filled fillcolor=\"#AED6F1\" label=\"<free_root>FREE_DBI")
 	if freeRoot != 0xffffffffffffffff {
 		fmt.Fprintf(visStream, "=%d", freeRoot)
 	}
@@ -279,11 +246,9 @@ func scanPage(page []byte, visStream io.Writer) error {
 	pos, pageID, flags, lowerFree := readPageHeader(page, 0)
 	if flags&LeafPageFlag != 0 {
 		num := (lowerFree - pos) / 2
-		fmt.Fprintf(visStream, "p_%d [shape=record label=\"", pageID)
+		fmt.Fprintf(visStream, "p_%d [shape=record style=filled fillcolor=\"#D5F5E3\" label=\"", pageID)
+		reduced := num > 5
 		for i := 0; i < num; i++ {
-			if i > 0 {
-				fmt.Fprintf(visStream, "|")
-			}
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
 			dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
 			nodeFlags := binary.LittleEndian.Uint16(page[nodePtr+4:])
@@ -291,13 +256,37 @@ func scanPage(page []byte, visStream io.Writer) error {
 			if nodeFlags&BigDataFlag > 0 {
 				return fmt.Errorf("unimplemented overflow pages")
 			} else {
-				key := string(page[nodePtr+8 : nodePtr+8+keySize])
-				val := string(page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize])
-				fmt.Fprintf(visStream, "%s:%s", key, val)
+				if reduced && i == 2 {
+					fmt.Fprintf(visStream, "|... %d more records here ...", num-4)
+				} else if !reduced || i < 2 || i > (num-3) {
+					if i > 0 {
+						fmt.Fprintf(visStream, "|")
+					}
+					key := string(page[nodePtr+8 : nodePtr+8+keySize])
+					val := string(page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize])
+					fmt.Fprintf(visStream, "%s:%s", key, val)
+				}
 			}
 		}
 		fmt.Fprintf(visStream, "\"];\n")
 		//log.Info("Leaf page", "pos", pos, "lowerFree", lowerFree, "numKeys", num)
+	} else if flags&BranchPageFlag != 0 {
+		num := (lowerFree - pos) / 2
+		fmt.Fprintf(visStream, "p_%d [shape=record style=filled fillcolor=\"#F6DDCC\" label=\"", pageID)
+		for i := 0; i < num; i++ {
+			if i > 0 {
+				fmt.Fprintf(visStream, "|")
+			}
+			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
+			pagePtr := binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
+			fmt.Fprintf(visStream, "<n%d>%d", i, pagePtr)
+		}
+		fmt.Fprintf(visStream, "\"];\n")
+		for i := 0; i < num; i++ {
+			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
+			pagePtr := binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
+			fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, pagePtr)
+		}
 	} else {
 		return fmt.Errorf("unimplemented processing for page type, flags: %d", flags)
 	}
@@ -342,7 +331,11 @@ func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io
 			numKeys[top] = num
 			indices[top] = i
 			visbufs[top].Reset()
-			fmt.Fprintf(&visbufs[top], "p_%d [shape=record label=\"", pageID)
+			if branch {
+				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#F6DDCC\" label=\"", pageID)
+			} else {
+				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#D5F5E3\" label=\"", pageID)
+			}
 		} else if i < num {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
 			i++
