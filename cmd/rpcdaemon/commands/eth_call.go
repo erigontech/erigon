@@ -23,17 +23,13 @@ import (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
-	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
-	if err1 != nil {
-		return nil, fmt.Errorf("call cannot open tx: %v", err1)
-	}
-	defer tx.Rollback()
-
 	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
 	defer dbtx.Rollback()
+
+	tx := dbtx.(ethdb.HasTx).Tx()
 
 	chainConfig, err := getChainConfig(dbtx)
 	if err != nil {
@@ -62,11 +58,14 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexu
 }
 
 func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, gasCap *big.Int) (hexutil.Uint64, error) {
-	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
-	if err1 != nil {
-		return 0, fmt.Errorf("estimateGas cannot open tx: %v", err1)
+	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return 0, err
 	}
-	defer tx.Rollback()
+	defer dbtx.Rollback()
+
+	tx := dbtx.(ethdb.HasTx).Tx()
+
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
 		lo  uint64 = params.TxGas - 1
@@ -82,12 +81,6 @@ func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blo
 	if err != nil {
 		return 0, err
 	}
-
-	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
-	if err != nil {
-		return 0, err
-	}
-	defer dbtx.Rollback()
 
 	chainConfig, err := getChainConfig(dbtx)
 	if err != nil {
