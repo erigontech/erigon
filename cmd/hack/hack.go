@@ -2102,10 +2102,8 @@ func receiptSizes(chaindata string) error {
 	}
 	defer tx.Rollback()
 
-	fmt.Printf("bucket: %s\n", dbutils.PlainStorageChangeSetBucket2)
-	c := tx.Cursor(dbutils.PlainStorageChangeSetBucket2)
-	defer c.Close()
-	c2 := tx.Cursor(dbutils.PlainStateBucket)
+	fmt.Printf("bucket: %s\n", dbutils.PlainAccountChangeSetBucket2)
+	c := tx.Cursor(dbutils.PlainAccountChangeSetBucket2)
 	defer c.Close()
 
 	total := 0
@@ -2115,11 +2113,7 @@ func receiptSizes(chaindata string) error {
 			return err
 		}
 		total += len(v)
-		k, _, err := c2.SeekExact(v[:60])
-		check(err)
-		if k == nil {
-			panic(fmt.Sprintf("%x, %x\n", k, v))
-		}
+		fmt.Printf("%x, %x\n", k, v)
 		sizes[len(v)]++
 	}
 	var lens = make([]int, len(sizes))
