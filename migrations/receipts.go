@@ -402,6 +402,8 @@ var storageChangeSetDupSort = Migration{
 		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket2)
 		buf := etl.NewSortableBuffer(etl.BufferOptimalSize * 4 * 4)
 		buf.SetComparator(cmp)
+		newK := make([]byte, 8+20+8)
+		newV := make([]byte, 32+4096)
 
 		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir + "1")
 		if err1 != nil {
@@ -451,16 +453,13 @@ var storageChangeSetDupSort = Migration{
 			select {
 			default:
 			case <-logEvery.C:
-				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
-				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "blockNum", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "blockNum", blockNum)
 			}
 
+			binary.BigEndian.PutUint64(newK, blockNum)
 			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-				newK := make([]byte, 8+20+8)
-				binary.BigEndian.PutUint64(newK, blockNum)
 				copy(newK[8:], k[:20+8])
-				newV := make([]byte, 32+len(v))
+				newV = newV[:32+len(v)]
 				copy(newV[:32], k[20+8:])
 				copy(newV[32:], v)
 
