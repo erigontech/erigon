@@ -2110,7 +2110,7 @@ func receiptSizes(chaindata string) error {
 
 	total := 0
 	sizes := make(map[int]int)
-	for k, v, err := c2.First(); k != nil; k, v, err = c2.NextNoDup() {
+	for k, v, err := c2.Seek(dbutils.EncodeBlockNumber(11_000_000)); k != nil; k, v, err = c2.NextNoDup() {
 		check(err)
 		fmt.Printf("%x\n", k)
 		fmt.Printf("\t %x\n", v)
