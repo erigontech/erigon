@@ -2102,11 +2102,9 @@ func receiptSizes(chaindata string) error {
 	}
 	defer tx.Rollback()
 
-	fmt.Printf("bucket: %s\n", dbutils.PlainStorageChangeSetBucket2)
-	c := tx.Cursor(dbutils.PlainStorageChangeSetBucket2)
+	fmt.Printf("bucket: %s\n", dbutils.PlainStateBucket)
+	c := tx.Cursor(dbutils.PlainStateBucket)
 	defer c.Close()
-	c2 := tx.CursorDupSort(dbutils.PlainStateBucket)
-	defer c2.Close()
 
 	sizes := make(map[string]int)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
