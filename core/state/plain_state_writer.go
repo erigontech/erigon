@@ -172,6 +172,12 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	}
 	sort.Sort(storageChanges)
 	for _, cs := range storageChanges.Changes {
+		//newK := make([]byte, 8+20+8)
+		//copy(newK, key)
+		//copy(newK[8:], cs.Key[:20+8])
+		//newV := make([]byte, 0, 32+len(cs.Value))
+		//newV = append(append(newV, cs.Key[28+8:]...), cs.Value...)
+
 		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
 		newV = append(append(newV, cs.Key...), cs.Value...)
 		if err = db.Append(dbutils.PlainStorageChangeSetBucket2, common.CopyBytes(key), newV); err != nil {
