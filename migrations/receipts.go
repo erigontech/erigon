@@ -461,7 +461,7 @@ var storageChangeSetDupSort = Migration{
 				binary.BigEndian.PutUint64(newK, blockNum)
 				copy(newK[8:], k[:20+8])
 				newV := make([]byte, 32+len(v))
-				copy(newK[20+8:], k)
+				copy(newV[:32], k[20+8:])
 				copy(newV[32:], v)
 
 				//newK := make([]byte, 8)
