@@ -154,13 +154,11 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 		return err
 	}
 	sort.Sort(accountChanges)
-	fmt.Printf("----\n")
 
 	key := dbutils.EncodeBlockNumber(w.blockNumber)
 	for _, cs := range accountChanges.Changes {
 		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
 		newV = append(append(newV, cs.Key...), cs.Value...)
-		fmt.Printf("1: %x, %x\n", key, newV)
 		if err = db.Append(dbutils.PlainAccountChangeSetBucket2, common.CopyBytes(key), newV); err != nil {
 			return err
 		}
@@ -177,7 +175,6 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	for _, cs := range storageChanges.Changes {
 		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
 		newV = append(append(newV, cs.Key...), cs.Value...)
-		fmt.Printf("2: %x, %x\n", key, newV)
 		if err = db.Append(dbutils.PlainStorageChangeSetBucket2, common.CopyBytes(key), newV); err != nil {
 			return err
 		}
