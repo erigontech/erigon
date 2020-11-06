@@ -386,7 +386,7 @@ var accChangeSetDupSort = Migration{
 }
 
 var storageChangeSetDupSort = Migration{
-	Name: "storage_change_set_dup_sort_7",
+	Name: "storage_change_set_dup_sort_9",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -457,18 +457,18 @@ var storageChangeSetDupSort = Migration{
 			}
 
 			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-				//newK := make([]byte, 8+20+8)
-				//binary.BigEndian.PutUint64(newK, blockNum)
-				//copy(newK[8:], k[:20+8])
-				//newV := make([]byte, 32+len(v))
-				//copy(newK[20+8:], k)
-				//copy(newV[32:], v)
-
-				newK := make([]byte, 8)
+				newK := make([]byte, 8+20+8)
 				binary.BigEndian.PutUint64(newK, blockNum)
-				newV := make([]byte, 60+len(v))
-				copy(newV, k)
-				copy(newV[60:], v)
+				copy(newK[8:], k[:20+8])
+				newV := make([]byte, 32+len(v))
+				copy(newK[20+8:], k)
+				copy(newV[32:], v)
+
+				//newK := make([]byte, 8)
+				//binary.BigEndian.PutUint64(newK, blockNum)
+				//newV := make([]byte, 60+len(v))
+				//copy(newV, k)
+				//copy(newV[60:], v)
 				return collectorR.Collect(newK, newV)
 			}); err != nil {
 				return false, err
