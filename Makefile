@@ -187,17 +187,6 @@ grpc:
 	PATH=$(GOBIN):$(PATH) go generate ./turbo/shards
 	PATH=$(GOBIN):$(PATH) go generate ./turbo/snapshotsync
 
-grpc2:
-	rm -f ./build/bin/protoc*
-	rm -rf ./build/include*
-
-	$(eval PROTOC_TMP := $(shell mktemp -d))
-	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.13.0/protoc-3.13.0-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
-	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc $(GOBIN) && mv include $(GOBIN)/..
-
-	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
-	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
-	PATH=$(GOBIN):$(PATH) go generate ./turbo/snapshotsync
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
