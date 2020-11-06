@@ -424,9 +424,7 @@ func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io
 				} else {
 					fmt.Fprintf(&visbufs[top], "%s", tableName)
 				}
-				//fmt.Printf("Table: %s, root page: %d\n", page[nodePtr+8:nodePtr+8+keySize], binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:]))
 			}
-			i++
 		} else {
 			fmt.Fprintf(&visbufs[top], "\"];\n")
 			if _, err := visStream.Write([]byte(visbufs[top].String())); err != nil {
