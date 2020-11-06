@@ -282,8 +282,8 @@ var accChangeSetDupSort = Migration{
 		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket2)
 		buf := etl.NewSortableBuffer(etl.BufferOptimalSize * 4 * 4)
 		buf.SetComparator(cmp)
-		newK := make([]byte, 8)
-		newV := make([]byte, 20+4096)
+		newK := make([]byte, 8+20)
+		newV := make([]byte, 4096)
 
 		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir + "1")
 		if err1 != nil {
@@ -338,10 +338,15 @@ var accChangeSetDupSort = Migration{
 
 			binary.BigEndian.PutUint64(newK, blockNum)
 			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-				newV = newV[:20+len(v)]
+				copy(newK[8:], k)
+				newV = newV[:len(v)]
 				copy(newV, k)
 				copy(newV[20:], v)
-				return collectorR.Collect(newK, newV)
+				return collectorR.Collect(newK, v)
+				//newV = newV[:20+len(v)]
+				//copy(newV, k)
+				//copy(newV[20:], v)
+				//return collectorR.Collect(newK, newV)
 			}); err != nil {
 				return false, err
 			}
@@ -401,7 +406,7 @@ var storageChangeSetDupSort = Migration{
 		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket2)
 		buf := etl.NewSortableBuffer(etl.BufferOptimalSize * 4 * 4)
 		buf.SetComparator(cmp)
-		newK := make([]byte, 8+20+8)
+		newK := make([]byte, 8+20)
 		newV := make([]byte, 32+4096)
 
 		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir + "1")
@@ -457,9 +462,9 @@ var storageChangeSetDupSort = Migration{
 
 			binary.BigEndian.PutUint64(newK, blockNum)
 			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-				copy(newK[8:], k[:20+8])
-				newV = newV[:32+len(v)]
-				copy(newV[:32], k[20+8:])
+				copy(newK[8:], k[:20])
+				newV = newV[:32+8+len(v)]
+				copy(newV[:32], k[20:])
 				copy(newV[32:], v)
 
 				//newK := make([]byte, 8)
@@ -479,9 +484,9 @@ var storageChangeSetDupSort = Migration{
 
 		fmt.Printf("sz: %s\n", common.StorageSize(i))
 
-		if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.PlainStorageChangeSetBucket2); err != nil {
-			return fmt.Errorf("clearing the receipt bucket: %w", err)
-		}
+		//if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.PlainStorageChangeSetBucket2); err != nil {
+		//	return fmt.Errorf("clearing the receipt bucket: %w", err)
+		//}
 
 		// Commit clearing of the bucket - freelist should now be written to the database
 		if err = CommitProgress(db, []byte(loadStep), false); err != nil {
@@ -494,7 +499,7 @@ var storageChangeSetDupSort = Migration{
 			return fmt.Errorf("committing the removal of receipt table: %w", err)
 		}
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = collectorR.Load(logPrefix, db, dbutils.PlainStorageChangeSetBucket2, etl.IdentityLoadFunc, etl.TransformArgs{
+		if err = collectorR.Load(logPrefix, db, dbutils.PlainAccountChangeSetBucket2, etl.IdentityLoadFunc, etl.TransformArgs{
 			OnLoadCommit: CommitProgress,
 			Comparator:   cmp,
 			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
