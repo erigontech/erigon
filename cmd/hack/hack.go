@@ -2096,7 +2096,7 @@ func extracHeaders(chaindata string, block uint64) error {
 func receiptSizes(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err != nil {
 		return err
 	}
