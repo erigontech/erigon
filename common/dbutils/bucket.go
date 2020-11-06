@@ -50,6 +50,7 @@ var (
 	// value - encoded ChangeSet{k - address v - account(encoded).
 	PlainAccountChangeSetBucket  = "PLAIN-ACS"
 	PlainAccountChangeSetBucket2 = "PLAIN-ACS2"
+	PlainAccountChangeSetBucket3 = "PLAIN-ACS3"
 
 	// PlainStorageChangeSetBucket keeps changesets of storage ("plain state")
 	// key - encoded timestamp(block number)
@@ -251,6 +252,7 @@ var Buckets = []string{
 	PlainStorageChangeSetBucket2,
 	AccountChangeSetBucket2,
 	StorageChangeSetBucket2,
+	PlainAccountChangeSetBucket3,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
@@ -337,6 +339,9 @@ var BucketsConfigs = BucketsCfg{
 	},
 	StorageChangeSetBucket2: {
 		Flags: DupSort,
+	},
+	PlainAccountChangeSetBucket3: {
+		Flags: DupSort | DupFixed,
 	},
 	PlainStateBucket: {
 		Flags:                     DupSort,
