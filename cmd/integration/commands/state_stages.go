@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -186,6 +187,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 
 func checkChangeSet(db ethdb.Getter, blockNum uint64, expectedAccountChanges *changeset.ChangeSet, expectedStorageChanges *changeset.ChangeSet) error {
 	i := 0
+	sort.Sort(expectedAccountChanges)
 	err := ethdb.WalkChangeSetByBlock(db, false /* storage */, blockNum, func(kk, k, v []byte) error {
 		c := expectedAccountChanges.Changes[i]
 		i++
@@ -203,7 +205,12 @@ func checkChangeSet(db ethdb.Getter, blockNum uint64, expectedAccountChanges *ch
 		return err
 	}
 
+	if expectedStorageChanges == nil {
+		expectedStorageChanges = changeset.NewChangeSet()
+	}
+
 	i = 0
+	sort.Sort(expectedStorageChanges)
 	err = ethdb.WalkChangeSetByBlock(db, true /* storage */, blockNum, func(kk, k, v []byte) error {
 		c := expectedStorageChanges.Changes[i]
 		i++
@@ -220,63 +227,6 @@ func checkChangeSet(db ethdb.Getter, blockNum uint64, expectedAccountChanges *ch
 	if err != nil {
 		return err
 	}
-	//equal := true
-	//if !bytes.Equal(dbStorageChanges, expectedStorageChanges) {
-	//	var addrs [][]byte
-	//	var keys [][]byte
-	//	var vals [][]byte
-	//	if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
-	//		addrs = append(addrs, common.CopyBytes(k[:common.AddressLength]))
-	//		keys = append(keys, common.CopyBytes(k[common.AddressLength+common.IncarnationLength:]))
-	//		vals = append(vals, common.CopyBytes(v))
-	//		return nil
-	//	}); err != nil {
-	//		return err
-	//	}
-	//	i := 0
-	//	if err = changeset.StorageChangeSetPlainBytes(expectedStorageChanges).Walk(func(k, v []byte) error {
-	//		if !equal {
-	//			return nil
-	//		}
-	//		if i >= len(addrs) {
-	//			equal = false
-	//			return nil
-	//		}
-	//		if !bytes.Equal(k[:common.AddressLength], addrs[i]) {
-	//			equal = false
-	//			return nil
-	//		}
-	//		if !bytes.Equal(k[common.AddressLength+common.IncarnationLength:], keys[i]) {
-	//			equal = false
-	//			return nil
-	//		}
-	//		if !bytes.Equal(v, vals[i]) {
-	//			equal = false
-	//			return nil
-	//		}
-	//		i++
-	//		return nil
-	//	}); err != nil {
-	//		return err
-	//	}
-	//}
-	//if !equal {
-	//	fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
-	//	if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
-	//		fmt.Printf("0x%x: [%x]\n", k, v)
-	//		return nil
-	//	}); err != nil {
-	//		return err
-	//	}
-	//	fmt.Printf("Expected: ==========================\n")
-	//	if err = changeset.StorageChangeSetPlainBytes(expectedStorageChanges).Walk(func(k, v []byte) error {
-	//		fmt.Printf("0x%x: [%x]\n", k, v)
-	//		return nil
-	//	}); err != nil {
-	//		return err
-	//	}
-	//	return fmt.Errorf("check change set failed")
-	//}
 	return nil
 }
 
