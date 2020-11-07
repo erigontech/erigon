@@ -2107,11 +2107,12 @@ func receiptSizes(chaindata string) error {
 	defer c.Close()
 
 	sizes := make(map[string]int)
-
+	total := 0
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
+		total += len(v)
 		fmt.Printf("%x, %x\n", k, v)
 		//if len(k) == 20 {
 		//	continue
@@ -2122,6 +2123,7 @@ func receiptSizes(chaindata string) error {
 		//	fmt.Printf("%dK\n", len(sizes)/1000)
 		//}
 	}
+	fmt.Printf("values sz: %s\n", common.StorageSize(total))
 
 	var lens = make([]string, len(sizes))
 	i := 0
