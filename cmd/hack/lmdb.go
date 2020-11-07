@@ -156,6 +156,13 @@ func dropT1(tx ethdb.Tx) error {
 	return nil
 }
 
+func dropT2(tx ethdb.Tx) error {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket("t2"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func dot2png(dotFileName string) string {
 	return strings.TrimSuffix(dotFileName, filepath.Ext(dotFileName)) + ".png"
 }
@@ -241,6 +248,9 @@ func defrag() error {
 		return err
 	}
 	if err := defragSteps("vis10.dot", twoBucketCfg, generate7, dropT1); err != nil {
+		return err
+	}
+	if err := defragSteps("vis11.dot", twoBucketCfg, generate7, dropT1, dropT2); err != nil {
 		return err
 	}
 	return nil
