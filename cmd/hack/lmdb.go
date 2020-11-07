@@ -82,16 +82,31 @@ func generate5(tx ethdb.Tx) error {
 	c := tx.CursorDupSort("t")
 	defer c.Close()
 	/*
-		if err := c.AppendDup([]byte("key1"), common.FromHex("0xaaaaaaaaaaaa")); err != nil {
+		if err := c.AppendDup([]byte("key1"), []byte("value11")); err != nil {
 			return err
 		}
-		if err := c.AppendDup([]byte("key1"), common.FromHex("0xcccccccccccc")); err != nil {
+		if err := c.AppendDup([]byte("key1"), []byte("value12")); err != nil {
 			return err
 		}
-		if err := c.AppendDup([]byte("key1"), common.FromHex("0xdddddddddddd")); err != nil {
+		if err := c.AppendDup([]byte("key1"), []byte("value13")); err != nil {
 			return err
 		}
+			if err := c.AppendDup([]byte("key2"), []byte("value21")); err != nil {
+				return err
+			}
+			if err := c.AppendDup([]byte("key2"), []byte("value22")); err != nil {
+				return err
+			}
+			if err := c.AppendDup([]byte("key3"), []byte("value31")); err != nil {
+				return err
+			}
 	*/
+	return nil
+}
+
+func generate6(tx ethdb.Tx) error {
+	c := tx.CursorDupSort("t")
+	defer c.Close()
 	for i := 0; i < 10000; i++ {
 		v := fmt.Sprintf("dupval_%05d", i)
 		if err := c.AppendDup([]byte("key1"), []byte(v)); err != nil {
@@ -247,7 +262,7 @@ func textInfo(chaindata string, visStream io.Writer) error {
 	if freeRoot == 0xffffffffffffffff {
 		log.Info("empty freelist")
 	} else {
-		if freelist, err = readFreelist(f, freeRoot, freeDepth); err != nil {
+		if freelist, err = readFreelist(f, freeRoot, freeDepth, visStream); err != nil {
 			return err
 		}
 		fmt.Fprintf(visStream, "meta:free_root -> p_%d;\n", freeRoot)
@@ -308,7 +323,6 @@ func scanPage(page []byte, visStream io.Writer) (int, error) {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
 			nodeFlags := binary.LittleEndian.Uint16(page[nodePtr+4:])
 			keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
-			dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
 			if nodeFlags&BigDataNodeFlag > 0 {
 				interesting[i-1] = struct{}{}
 				interesting[i] = struct{}{}
@@ -316,13 +330,15 @@ func scanPage(page []byte, visStream io.Writer) (int, error) {
 				overflowPageID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
 				fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, overflowPageID)
 			} else if nodeFlags&SubDbNodeFlag > 0 {
-				val := page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize]
-				fmt.Printf("keysize: %d, datasize: %d, data: %x\n", keySize, dataSize, val)
-				return 0, fmt.Errorf("support subDb nodes not implemented: %d", pageID)
+				interesting[i-1] = struct{}{}
+				interesting[i] = struct{}{}
+				interesting[i+1] = struct{}{}
+				pagePtr := binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:])
+				fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, pagePtr)
 			} else if nodeFlags&DupDataNodeFlag > 0 {
-				val := page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize]
-				fmt.Printf("keysize: %d, datasize: %d, data: %x\n", keySize, dataSize, val)
-				return 0, fmt.Errorf("support for dupData nodes not implemented: %d", pageID)
+				interesting[i-1] = struct{}{}
+				interesting[i] = struct{}{}
+				interesting[i+1] = struct{}{}
 			}
 		}
 		fmt.Fprintf(visStream, "p_%d [shape=record style=filled fillcolor=\"#D5F5E3\" label=\"", pageID)
@@ -351,7 +367,26 @@ func scanPage(page []byte, visStream io.Writer) (int, error) {
 			key := string(page[nodePtr+8 : nodePtr+8+keySize])
 			if nodeFlags&BigDataNodeFlag > 0 {
 				overflowPageID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
-				fmt.Fprintf(visStream, "<n%d>%s:%d", i, key, overflowPageID)
+				fmt.Fprintf(visStream, "<n%d>%s:OVERFLOW(%d)", i, key, overflowPageID)
+			} else if nodeFlags&SubDbNodeFlag > 0 {
+				pagePtr := binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:])
+				fmt.Fprintf(visStream, "<n%d>%s:SUBDB(%d)", i, key, pagePtr)
+			} else if nodeFlags&DupDataNodeFlag > 0 {
+				val := page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize]
+				// val needs to be treated like a leaf page
+				pos1, _, _, lowerFree1 := readPageHeader(val, 0)
+				num1 := (lowerFree1 - pos1) / 2
+				fmt.Fprintf(visStream, "{%s:|", key)
+				for j := 0; j < num1; j++ {
+					if j > 0 {
+						fmt.Fprintf(visStream, "|")
+					}
+					nodePtr1 := int(binary.LittleEndian.Uint16(val[HeaderSize+j*2:]))
+					keySize1 := int(binary.LittleEndian.Uint16(val[nodePtr1+6:]))
+					key1 := string(val[nodePtr1+8 : nodePtr1+8+keySize1])
+					fmt.Fprintf(visStream, "%s", key1)
+				}
+				fmt.Fprintf(visStream, "}")
 			} else {
 				val := string(page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize])
 				fmt.Fprintf(visStream, "%s:%s", key, val)
@@ -479,7 +514,7 @@ func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io
 
 // Returns a map of pageIDs to bool. If value is true, this page is free. If value is false,
 // this page is a part of freelist structure itself
-func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16) (map[uint64]bool, error) {
+func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16, visStream io.Writer) (map[uint64]bool, error) {
 	var freelist = make(map[uint64]bool)
 	var freepages int
 	var freeEntries int
@@ -488,6 +523,7 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16) (map[uint64]
 	var pageIDs [8]uint64
 	var numKeys [8]int
 	var indices [8]int
+	var visbufs [8]strings.Builder
 	var top int
 	var pos int
 	var pageID uint64
@@ -498,8 +534,8 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16) (map[uint64]
 		i := indices[top]
 		num := numKeys[top]
 		page := &pages[top]
+		pageID = pageIDs[top]
 		if num == 0 {
-			pageID = pageIDs[top]
 			freelist[pageID] = false
 			if _, err := f.ReadAt(page[:], int64(pageID*PageSize)); err != nil {
 				return nil, fmt.Errorf("reading FREE_DBI page: %v", err)
@@ -518,10 +554,15 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16) (map[uint64]
 			i = 0
 			numKeys[top] = num
 			indices[top] = i
+			visbufs[top].Reset()
+			if branch {
+				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#F6DDCC\" label=\"FF", pageID)
+			} else {
+				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#D5F5E3\" label=\"", pageID)
+			}
 		} else if i < num {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
-			i++
-			indices[top] = i
+			indices[top] = i + 1
 			if branch {
 				top++
 				indices[top] = 0
@@ -549,9 +590,9 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16) (map[uint64]
 						freelist[pn] = true
 						left -= 8
 					}
-					for i := 1; i < overflowNum; i++ {
-						freelist[overflowPageID+uint64(i)] = false
-						if _, err := f.ReadAt(overflow[:], int64((overflowPageID+uint64(i))*PageSize)); err != nil {
+					for k := 1; k < overflowNum; k++ {
+						freelist[overflowPageID+uint64(k)] = false
+						if _, err := f.ReadAt(overflow[:], int64((overflowPageID+uint64(k))*PageSize)); err != nil {
 							return nil, fmt.Errorf("reading FREE_DBI overflow page: %v", err)
 						}
 						for j := 0; j < PageSize && left > 0; j += 8 {
@@ -563,14 +604,27 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16) (map[uint64]
 					}
 				} else {
 					// First 8 bytes is the size of the list
+					if i > 0 {
+						fmt.Fprintf(&visbufs[top], "|")
+					}
+					txID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
+					fmt.Fprintf(&visbufs[top], "txid(%d)=", txID)
 					for j := nodePtr + 8 + keySize + 8; j < nodePtr+8+keySize+dataSize; j += 8 {
 						pn := binary.LittleEndian.Uint64(page[j:])
+						if j > nodePtr+8+keySize+8 {
+							fmt.Fprintf(&visbufs[top], ",")
+						}
+						fmt.Fprintf(&visbufs[top], "%d", pn)
 						freepages++
 						freelist[pn] = true
 					}
 				}
 			}
 		} else {
+			fmt.Fprintf(&visbufs[top], "\"];\n")
+			if _, err := visStream.Write([]byte(visbufs[top].String())); err != nil {
+				return nil, fmt.Errorf("writing buffer into main stream: %w", err)
+			}
 			top--
 		}
 	}
