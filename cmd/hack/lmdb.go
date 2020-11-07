@@ -27,8 +27,12 @@ const MdbDataVersion uint32 = 1
 const BranchPageFlag uint16 = 1
 const LeafPageFlag uint16 = 2
 const OverflowPageFlag uint16 = 4
+const DupSortPagePlag uint16 = 8
 
-const BigDataFlag uint16 = 1
+const BigDataNodeFlag uint16 = 1
+const SubDbNodeFlag uint16 = 2
+const DupDataNodeFlag uint16 = 4
+
 const HeaderSize int = 16
 
 // Generates an empty database and returns the file name
@@ -77,11 +81,22 @@ func generate4(tx ethdb.Tx) error {
 func generate5(tx ethdb.Tx) error {
 	c := tx.CursorDupSort("t")
 	defer c.Close()
-	if err := c.AppendDup([]byte("key1"), []byte("value1")); err != nil {
-		return err
-	}
-	if err := c.AppendDup([]byte("key2"), []byte("value2")); err != nil {
-		return err
+	/*
+		if err := c.AppendDup([]byte("key1"), common.FromHex("0xaaaaaaaaaaaa")); err != nil {
+			return err
+		}
+		if err := c.AppendDup([]byte("key1"), common.FromHex("0xcccccccccccc")); err != nil {
+			return err
+		}
+		if err := c.AppendDup([]byte("key1"), common.FromHex("0xdddddddddddd")); err != nil {
+			return err
+		}
+	*/
+	for i := 0; i < 10000; i++ {
+		v := fmt.Sprintf("dupval_%05d", i)
+		if err := c.AppendDup([]byte("key1"), []byte(v)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -293,12 +308,21 @@ func scanPage(page []byte, visStream io.Writer) (int, error) {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
 			nodeFlags := binary.LittleEndian.Uint16(page[nodePtr+4:])
 			keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
-			if nodeFlags&BigDataFlag > 0 {
+			dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
+			if nodeFlags&BigDataNodeFlag > 0 {
 				interesting[i-1] = struct{}{}
 				interesting[i] = struct{}{}
 				interesting[i+1] = struct{}{}
 				overflowPageID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
 				fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, overflowPageID)
+			} else if nodeFlags&SubDbNodeFlag > 0 {
+				val := page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize]
+				fmt.Printf("keysize: %d, datasize: %d, data: %x\n", keySize, dataSize, val)
+				return 0, fmt.Errorf("support subDb nodes not implemented: %d", pageID)
+			} else if nodeFlags&DupDataNodeFlag > 0 {
+				val := page[nodePtr+8+keySize : nodePtr+8+keySize+dataSize]
+				fmt.Printf("keysize: %d, datasize: %d, data: %x\n", keySize, dataSize, val)
+				return 0, fmt.Errorf("support for dupData nodes not implemented: %d", pageID)
 			}
 		}
 		fmt.Fprintf(visStream, "p_%d [shape=record style=filled fillcolor=\"#D5F5E3\" label=\"", pageID)
@@ -325,7 +349,7 @@ func scanPage(page []byte, visStream io.Writer) (int, error) {
 			nodeFlags := binary.LittleEndian.Uint16(page[nodePtr+4:])
 			keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
 			key := string(page[nodePtr+8 : nodePtr+8+keySize])
-			if nodeFlags&BigDataFlag > 0 {
+			if nodeFlags&BigDataNodeFlag > 0 {
 				overflowPageID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
 				fmt.Fprintf(visStream, "<n%d>%s:%d", i, key, overflowPageID)
 			} else {
@@ -426,7 +450,7 @@ func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io
 				dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
 				flags := binary.LittleEndian.Uint16(page[nodePtr+4:])
 				keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
-				if flags&BigDataFlag > 0 {
+				if flags&BigDataNodeFlag > 0 {
 					return nil, fmt.Errorf("unexpected overflow pages")
 				}
 				if dataSize != 48 {
@@ -506,9 +530,9 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16) (map[uint64]
 			} else {
 				freeEntries++
 				dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
-				flags := binary.LittleEndian.Uint16(page[nodePtr+4:])
+				nodeFlags := binary.LittleEndian.Uint16(page[nodePtr+4:])
 				keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
-				if flags&BigDataFlag > 0 {
+				if nodeFlags&BigDataNodeFlag > 0 {
 					overflowPageID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
 					freelist[overflowPageID] = false
 					if _, err := f.ReadAt(overflow[:], int64(overflowPageID*PageSize)); err != nil {
