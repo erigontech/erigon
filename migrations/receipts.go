@@ -358,7 +358,10 @@ var accChangeSetDupSort = Migration{
 			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
 				copy(newK[8:], k)
 				a := accounts.Account{}
-				a.DecodeForStorage(v)
+				err = a.DecodeForStorage(v)
+				if err != nil {
+					panic(err)
+				}
 
 				binary.BigEndian.PutUint64(newK[8+20:], a.Incarnation)
 
