@@ -124,8 +124,32 @@ func generate6(tx ethdb.Tx) error {
 	return nil
 }
 
-func generate7(tx ethdb.Tx) error {
+func dropT(tx ethdb.Tx) error {
 	if err := tx.(ethdb.BucketMigrator).ClearBucket("t"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func generate7(tx ethdb.Tx) error {
+	c1 := tx.Cursor("t1")
+	defer c1.Close()
+	c2 := tx.Cursor("t2")
+	defer c2.Close()
+	for i := 0; i < 1000; i++ {
+		k := fmt.Sprintf("%05d", i)
+		if err := c1.Append([]byte(k), []byte("very_short_value")); err != nil {
+			return err
+		}
+		if err := c2.Append([]byte(k), []byte("very_short_value")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func dropT1(tx ethdb.Tx) error {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket("t1"); err != nil {
 		return err
 	}
 	return nil
@@ -206,7 +230,16 @@ func defrag() error {
 	if err := defragSteps("vis7.dot", oneDupSortCfg, generate6); err != nil {
 		return err
 	}
-	if err := defragSteps("vis8.dot", oneDupSortCfg, func(tx ethdb.Tx) error { return generate2(tx, 1000) }, generate7); err != nil {
+	if err := defragSteps("vis8.dot", oneDupSortCfg, func(tx ethdb.Tx) error { return generate2(tx, 1000) }, dropT); err != nil {
+		return err
+	}
+	twoBucketCfg := make(dbutils.BucketsCfg)
+	twoBucketCfg["t1"] = dbutils.BucketConfigItem{}
+	twoBucketCfg["t2"] = dbutils.BucketConfigItem{}
+	if err := defragSteps("vis9.dot", twoBucketCfg, generate7); err != nil {
+		return err
+	}
+	if err := defragSteps("vis10.dot", twoBucketCfg, generate7, dropT1); err != nil {
 		return err
 	}
 	return nil
@@ -640,7 +673,7 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16, visStream io
 								if runLength > 0 {
 									fmt.Fprintf(&visbufs[top], "-%d(%d),", prevPn, runLength+1)
 								} else {
-									fmt.Fprintf(&visbufs[top], ",", prevPn)
+									fmt.Fprintf(&visbufs[top], ",")
 								}
 							}
 							fmt.Fprintf(&visbufs[top], "%d", pn)
