@@ -81,37 +81,45 @@ func generate4(tx ethdb.Tx) error {
 func generate5(tx ethdb.Tx) error {
 	c := tx.CursorDupSort("t")
 	defer c.Close()
-	/*
-		if err := c.AppendDup([]byte("key1"), []byte("value11")); err != nil {
-			return err
-		}
-		if err := c.AppendDup([]byte("key1"), []byte("value12")); err != nil {
-			return err
-		}
-		if err := c.AppendDup([]byte("key1"), []byte("value13")); err != nil {
-			return err
-		}
-			if err := c.AppendDup([]byte("key2"), []byte("value21")); err != nil {
-				return err
-			}
-			if err := c.AppendDup([]byte("key2"), []byte("value22")); err != nil {
-				return err
-			}
-			if err := c.AppendDup([]byte("key3"), []byte("value31")); err != nil {
-				return err
-			}
-	*/
+	if err := c.AppendDup([]byte("key1"), []byte("value11")); err != nil {
+		return err
+	}
+	if err := c.AppendDup([]byte("key1"), []byte("value12")); err != nil {
+		return err
+	}
+	if err := c.AppendDup([]byte("key1"), []byte("value13")); err != nil {
+		return err
+	}
+	if err := c.AppendDup([]byte("key2"), []byte("value21")); err != nil {
+		return err
+	}
+	if err := c.AppendDup([]byte("key2"), []byte("value22")); err != nil {
+		return err
+	}
+	if err := c.AppendDup([]byte("key3"), []byte("value31")); err != nil {
+		return err
+	}
 	return nil
 }
 
+// Generate a database with one table, containing lots of dupsort values
 func generate6(tx ethdb.Tx) error {
 	c := tx.CursorDupSort("t")
 	defer c.Close()
-	for i := 0; i < 10000; i++ {
+	for i := 0; i < 1000; i++ {
 		v := fmt.Sprintf("dupval_%05d", i)
 		if err := c.AppendDup([]byte("key1"), []byte(v)); err != nil {
 			return err
 		}
+	}
+	if err := c.AppendDup([]byte("key2"), []byte("value21")); err != nil {
+		return err
+	}
+	if err := c.AppendDup([]byte("key2"), []byte("value22")); err != nil {
+		return err
+	}
+	if err := c.AppendDup([]byte("key3"), []byte("value31")); err != nil {
+		return err
 	}
 	return nil
 }
@@ -187,6 +195,9 @@ func defrag() error {
 	oneDupSortCfg := make(dbutils.BucketsCfg)
 	oneDupSortCfg["t"] = dbutils.BucketConfigItem{Flags: lmdb.DupSort}
 	if err := defragSteps("vis6.dot", oneDupSortCfg, generate5); err != nil {
+		return err
+	}
+	if err := defragSteps("vis7.dot", oneDupSortCfg, generate6); err != nil {
 		return err
 	}
 	return nil
