@@ -276,6 +276,15 @@ var accChangeSetDupSort = Migration{
 
 		const loadStep = "load"
 
+		if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.PlainAccountChangeSetBucket2); err != nil {
+			return fmt.Errorf("clearing the receipt bucket: %w", err)
+		}
+
+		// Commit clearing of the bucket - freelist should now be written to the database
+		if err = CommitProgress(db, nil, false); err != nil {
+			return fmt.Errorf("committing the removal of receipt table: %w", err)
+		}
+
 		changeSetBucket := dbutils.PlainAccountChangeSetBucket
 		walkerAdapter := changeset.Mapper[dbutils.PlainAccountChangeSetBucket2].WalkerAdapter
 		i := 0
@@ -327,15 +336,6 @@ var accChangeSetDupSort = Migration{
 			}
 			collectorR.Close(logPrefix)
 		}()
-
-		if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.PlainAccountChangeSetBucket2); err != nil {
-			return fmt.Errorf("clearing the receipt bucket: %w", err)
-		}
-
-		// Commit clearing of the bucket - freelist should now be written to the database
-		if err = CommitProgress(db, nil, false); err != nil {
-			return fmt.Errorf("committing the removal of receipt table: %w", err)
-		}
 
 		if err = db.Walk(changeSetBucket, nil, 0, func(kk, changesetBytes []byte) (bool, error) {
 			i += len(kk) + len(changesetBytes)
