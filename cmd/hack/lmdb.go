@@ -124,11 +124,18 @@ func generate6(tx ethdb.Tx) error {
 	return nil
 }
 
+func generate7(tx ethdb.Tx) error {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket("t"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func dot2png(dotFileName string) string {
 	return strings.TrimSuffix(dotFileName, filepath.Ext(dotFileName)) + ".png"
 }
 
-func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateF func(ethdb.Tx) error) error {
+func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...(func(ethdb.Tx) error)) error {
 	dir, err := ioutil.TempDir(".", "lmdb-vis")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for lmdb visualisation: %w", err)
@@ -142,11 +149,10 @@ func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateF func(
 		return fmt.Errorf("opening LMDB database: %w", err)
 	}
 	defer kv.Close()
-	if err = kv.Update(context.Background(), generateF); err != nil {
-		return fmt.Errorf("generating data in temp db: %w", err)
-	}
-	if err != nil {
-		return fmt.Errorf("generate db for %s: %w", filename, err)
+	for gi, generateF := range generateFs {
+		if err = kv.Update(context.Background(), generateF); err != nil {
+			return fmt.Errorf("generating data in temp db - function %d, file: %s: %w", gi, filename, err)
+		}
 	}
 	var f *os.File
 	if f, err = os.Create(filename); err != nil {
@@ -198,6 +204,9 @@ func defrag() error {
 		return err
 	}
 	if err := defragSteps("vis7.dot", oneDupSortCfg, generate6); err != nil {
+		return err
+	}
+	if err := defragSteps("vis8.dot", oneDupSortCfg, func(tx ethdb.Tx) error { return generate2(tx, 1000) }, generate7); err != nil {
 		return err
 	}
 	return nil
@@ -618,16 +627,31 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16, visStream io
 					if i > 0 {
 						fmt.Fprintf(&visbufs[top], "|")
 					}
-					txID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
+					txID := binary.LittleEndian.Uint64(page[nodePtr+8:])
 					fmt.Fprintf(&visbufs[top], "txid(%d)=", txID)
+					runLength := 0
+					var prevPn uint64
 					for j := nodePtr + 8 + keySize + 8; j < nodePtr+8+keySize+dataSize; j += 8 {
 						pn := binary.LittleEndian.Uint64(page[j:])
-						if j > nodePtr+8+keySize+8 {
-							fmt.Fprintf(&visbufs[top], ",")
+						if pn+1 == prevPn {
+							runLength++
+						} else {
+							if prevPn > 0 {
+								if runLength > 0 {
+									fmt.Fprintf(&visbufs[top], "-%d(%d),", prevPn, runLength+1)
+								} else {
+									fmt.Fprintf(&visbufs[top], ",", prevPn)
+								}
+							}
+							fmt.Fprintf(&visbufs[top], "%d", pn)
+							runLength = 0
 						}
-						fmt.Fprintf(&visbufs[top], "%d", pn)
+						prevPn = pn
 						freepages++
 						freelist[pn] = true
+					}
+					if runLength > 0 {
+						fmt.Fprintf(&visbufs[top], "-%d(%d)", prevPn, runLength+1)
 					}
 				}
 			}
