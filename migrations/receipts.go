@@ -265,7 +265,7 @@ var receiptsOnePerTx = Migration{
 }
 
 var accChangeSetDupSort = Migration{
-	Name: "acc_change_set_dup_sort_6",
+	Name: "acc_change_set_dup_sort_7",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -280,7 +280,7 @@ var accChangeSetDupSort = Migration{
 		walkerAdapter := changeset.Mapper[dbutils.PlainAccountChangeSetBucket2].WalkerAdapter
 		i := 0
 		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket2)
-		buf := etl.NewSortableBuffer(etl.BufferOptimalSize * 4 * 4)
+		buf := etl.NewOldestEntryBuffer(etl.BufferOptimalSize * 4 * 4)
 		buf.SetComparator(cmp)
 		newK := make([]byte, 8+20)
 		newV := make([]byte, 32+4096)
@@ -333,7 +333,7 @@ var accChangeSetDupSort = Migration{
 			select {
 			default:
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "blockNum", blockNum)
+				log.Info(fmt.Sprintf("[%s] Progress2", logPrefix), "blockNum", blockNum)
 			}
 
 			binary.BigEndian.PutUint64(newK, blockNum)
