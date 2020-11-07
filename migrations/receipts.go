@@ -280,6 +280,7 @@ var accChangeSetDupSort = Migration{
 		walkerAdapter := changeset.Mapper[dbutils.PlainAccountChangeSetBucket2].WalkerAdapter
 		i := 0
 		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket2)
+		c := db.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStorageChangeSetBucket2)
 		buf := etl.NewOldestEntryBuffer(etl.BufferOptimalSize * 4 * 4)
 		buf.SetComparator(cmp)
 		newK := make([]byte, 8+20)
@@ -326,6 +327,15 @@ var accChangeSetDupSort = Migration{
 			collectorR.Close(logPrefix)
 		}()
 
+		if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.PlainAccountChangeSetBucket2); err != nil {
+			return fmt.Errorf("clearing the receipt bucket: %w", err)
+		}
+
+		// Commit clearing of the bucket - freelist should now be written to the database
+		if err = CommitProgress(db, nil, false); err != nil {
+			return fmt.Errorf("committing the removal of receipt table: %w", err)
+		}
+
 		if err = db.Walk(changeSetBucket, nil, 0, func(kk, changesetBytes []byte) (bool, error) {
 			i += len(kk) + len(changesetBytes)
 			blockNum, _ := dbutils.DecodeTimestamp(kk)
@@ -339,7 +349,9 @@ var accChangeSetDupSort = Migration{
 			binary.BigEndian.PutUint64(newK, blockNum)
 			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
 				copy(newK[8:], k)
-				return collectorR.Collect(newK, v)
+				return c.Put(common.CopyBytes(newK), common.CopyBytes(v))
+				//return collectorR.Collect(newK, v)
+
 				//newV = newV[:20+len(v)]
 				//copy(newV, k)
 				//copy(newV[20:], v)
@@ -373,13 +385,14 @@ var accChangeSetDupSort = Migration{
 				newV = newV[:32+8+len(v)]
 				copy(newV[:32+8], k[20:])
 				copy(newV[32+8:], v)
+				return c.Put(common.CopyBytes(newK), common.CopyBytes(newV))
 
 				//newK := make([]byte, 8)
 				//binary.BigEndian.PutUint64(newK, blockNum)
 				//newV := make([]byte, 60+len(v))
 				//copy(newV, k)
 				//copy(newV[60:], v)
-				return collectorR.Collect(newK, newV)
+				//return collectorR.Collect(newK, newV)
 			}); err != nil {
 				return false, err
 			}
@@ -391,9 +404,9 @@ var accChangeSetDupSort = Migration{
 
 		fmt.Printf("sz: %s\n", common.StorageSize(i))
 
-		if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.PlainAccountChangeSetBucket2); err != nil {
-			return fmt.Errorf("clearing the receipt bucket: %w", err)
-		}
+		//if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.PlainAccountChangeSetBucket2); err != nil {
+		//	return fmt.Errorf("clearing the receipt bucket: %w", err)
+		//}
 
 		// Commit clearing of the bucket - freelist should now be written to the database
 		if err = CommitProgress(db, []byte(loadStep), false); err != nil {
