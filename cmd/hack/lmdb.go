@@ -27,7 +27,8 @@ const MdbDataVersion uint32 = 1
 const BranchPageFlag uint16 = 1
 const LeafPageFlag uint16 = 2
 const OverflowPageFlag uint16 = 4
-const DupSortPagePlag uint16 = 8
+
+//const DupSortPagePlag uint16 = 8
 
 const BigDataNodeFlag uint16 = 1
 const SubDbNodeFlag uint16 = 2
