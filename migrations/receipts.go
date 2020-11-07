@@ -281,6 +281,7 @@ var accChangeSetDupSort = Migration{
 		i := 0
 		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket2)
 		c := db.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStorageChangeSetBucket2)
+		_, _, _ = c.First()
 		buf := etl.NewOldestEntryBuffer(etl.BufferOptimalSize * 4 * 4)
 		buf.SetComparator(cmp)
 		newK := make([]byte, 8+20)
