@@ -2103,38 +2103,16 @@ func receiptSizes(chaindata string) error {
 	defer tx.Rollback()
 
 	fmt.Printf("bucket: %s\n", dbutils.PlainStorageChangeSetBucket)
-	c := tx.Cursor(dbutils.PlainStorageChangeSetBucket)
+	c := tx.Cursor(dbutils.PlainStorageChangeSetBucket2)
 	defer c.Close()
 
-	walkerAdapter := changeset.Mapper[dbutils.PlainStorageChangeSetBucket2].WalkerAdapter
 	sizes := make(map[string]int)
-
-	ch := make(chan []byte, 1_000_000)
-	j := 0
-	go func() {
-		for v := range ch {
-			err = walkerAdapter(v).Walk(func(k, v []byte) error {
-				j++
-				if j%100_000 == 0 {
-					fmt.Printf("unique=%dM, total=%dM\n", len(sizes)/1_000_000, j/1_000_000)
-				}
-				sizes[string(k[20+8:])]++
-				return nil
-			})
-			check(err)
-
-		}
-	}()
 
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
-		{
-			ch <- v
-		}
-
-		//fmt.Printf("%x, %x\n", k, v)
+		fmt.Printf("%x, %x\n", k, v)
 		//if len(k) == 20 {
 		//	continue
 		//}
@@ -2144,7 +2122,6 @@ func receiptSizes(chaindata string) error {
 		//	fmt.Printf("%dK\n", len(sizes)/1000)
 		//}
 	}
-	close(ch)
 
 	var lens = make([]string, len(sizes))
 	i := 0

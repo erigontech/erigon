@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -293,7 +294,7 @@ var accChangeSetDupSort = Migration{
 		_, _, _ = c.First()
 		buf := etl.NewOldestEntryBuffer(etl.BufferOptimalSize * 4 * 4)
 		buf.SetComparator(cmp)
-		newK := make([]byte, 8+20)
+		newK := make([]byte, 8+20+8)
 		newV := make([]byte, 32+4096)
 
 		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir + "1")
@@ -350,6 +351,11 @@ var accChangeSetDupSort = Migration{
 			binary.BigEndian.PutUint64(newK, blockNum)
 			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
 				copy(newK[8:], k)
+				a := accounts.Account{}
+				a.DecodeForStorage(v)
+
+				binary.BigEndian.PutUint64(newK[8+20:], a.Incarnation)
+
 				return c.Put(common.CopyBytes(newK), common.CopyBytes(v))
 				//return collectorR.Collect(newK, v)
 
@@ -366,7 +372,6 @@ var accChangeSetDupSort = Migration{
 			return err
 		}
 
-		newK = make([]byte, 8+20)
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 		walkerAdapter = changeset.Mapper[dbutils.PlainStorageChangeSetBucket2].WalkerAdapter
 
@@ -382,10 +387,10 @@ var accChangeSetDupSort = Migration{
 
 			binary.BigEndian.PutUint64(newK, blockNum)
 			if err = walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-				copy(newK[8:], k[:20])
-				newV = newV[:32+8+len(v)]
-				copy(newV[:32+8], k[20:])
-				copy(newV[32+8:], v)
+				copy(newK[8:], k[:20+8])
+				newV = newV[:32+len(v)]
+				copy(newV[:32], k[20+8:])
+				copy(newV[32:], v)
 				return c.Put(common.CopyBytes(newK), common.CopyBytes(newV))
 
 				//newK := make([]byte, 8)
