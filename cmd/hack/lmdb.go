@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -37,9 +38,6 @@ func generate1(_ ethdb.Tx) error {
 
 // Generates a database with single table and two key-value pair in "t" DBI, and returns the file name
 func generate2(tx ethdb.Tx, entries int) error {
-	if err := tx.(ethdb.BucketMigrator).CreateBucket("t"); err != nil {
-		return err
-	}
 	c := tx.Cursor("t")
 	defer c.Close()
 	for i := 0; i < entries; i++ {
@@ -64,9 +62,6 @@ func generate3(tx ethdb.Tx) error {
 
 // Generates a database with one table, containing 1 short and 1 long (more than one page) values
 func generate4(tx ethdb.Tx) error {
-	if err := tx.(ethdb.BucketMigrator).CreateBucket("t"); err != nil {
-		return err
-	}
 	c := tx.Cursor("t")
 	defer c.Close()
 	if err := c.Append([]byte("k1"), []byte("very_short_value")); err != nil {
@@ -78,11 +73,24 @@ func generate4(tx ethdb.Tx) error {
 	return nil
 }
 
+// Generates a database with one table, containing some DupSort values
+func generate5(tx ethdb.Tx) error {
+	c := tx.CursorDupSort("t")
+	defer c.Close()
+	if err := c.AppendDup([]byte("key1"), []byte("value1")); err != nil {
+		return err
+	}
+	if err := c.AppendDup([]byte("key2"), []byte("value2")); err != nil {
+		return err
+	}
+	return nil
+}
+
 func dot2png(dotFileName string) string {
 	return strings.TrimSuffix(dotFileName, filepath.Ext(dotFileName)) + ".png"
 }
 
-func defragSteps(filename string, generateF func(ethdb.Tx) error) error {
+func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateF func(ethdb.Tx) error) error {
 	dir, err := ioutil.TempDir(".", "lmdb-vis")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for lmdb visualisation: %w", err)
@@ -90,7 +98,7 @@ func defragSteps(filename string, generateF func(ethdb.Tx) error) error {
 	defer os.RemoveAll(dir)
 	var kv ethdb.KV
 	kv, err = ethdb.NewLMDB().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return make(dbutils.BucketsCfg)
+		return bucketsCfg
 	}).Open()
 	if err != nil {
 		return fmt.Errorf("opening LMDB database: %w", err)
@@ -128,19 +136,27 @@ func defragSteps(filename string, generateF func(ethdb.Tx) error) error {
 }
 
 func defrag() error {
-	if err := defragSteps("vis1.dot", generate1); err != nil {
+	emptyBucketCfg := make(dbutils.BucketsCfg)
+	if err := defragSteps("vis1.dot", emptyBucketCfg, generate1); err != nil {
 		return err
 	}
-	if err := defragSteps("vis2.dot", func(tx ethdb.Tx) error { return generate2(tx, 2) }); err != nil {
+	oneBucketCfg := make(dbutils.BucketsCfg)
+	oneBucketCfg["t"] = dbutils.BucketConfigItem{}
+	if err := defragSteps("vis2.dot", oneBucketCfg, func(tx ethdb.Tx) error { return generate2(tx, 2) }); err != nil {
 		return err
 	}
-	if err := defragSteps("vis3.dot", generate3); err != nil {
+	if err := defragSteps("vis3.dot", emptyBucketCfg, generate3); err != nil {
 		return err
 	}
-	if err := defragSteps("vis4.dot", func(tx ethdb.Tx) error { return generate2(tx, 200) }); err != nil {
+	if err := defragSteps("vis4.dot", oneBucketCfg, func(tx ethdb.Tx) error { return generate2(tx, 200) }); err != nil {
 		return err
 	}
-	if err := defragSteps("vis5.dot", func(tx ethdb.Tx) error { return generate4(tx) }); err != nil {
+	if err := defragSteps("vis5.dot", oneBucketCfg, generate4); err != nil {
+		return err
+	}
+	oneDupSortCfg := make(dbutils.BucketsCfg)
+	oneDupSortCfg["t"] = dbutils.BucketConfigItem{Flags: lmdb.DupSort}
+	if err := defragSteps("vis6.dot", oneDupSortCfg, generate5); err != nil {
 		return err
 	}
 	return nil
