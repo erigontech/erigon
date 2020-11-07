@@ -345,6 +345,12 @@ var accChangeSetDupSort = Migration{
 			select {
 			default:
 			case <-logEvery.C:
+				err = db.(ethdb.DbWithPendingMutations).CommitAndBegin(context.Background())
+				if err != nil {
+					panic(err)
+				}
+				c = db.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStorageChangeSetBucket2)
+
 				log.Info(fmt.Sprintf("[%s] Progress2", logPrefix), "blockNum", blockNum)
 			}
 
@@ -382,6 +388,12 @@ var accChangeSetDupSort = Migration{
 			select {
 			default:
 			case <-logEvery.C:
+				err = db.(ethdb.DbWithPendingMutations).CommitAndBegin(context.Background())
+				if err != nil {
+					panic(err)
+				}
+				c = db.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStorageChangeSetBucket2)
+
 				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "blockNum", blockNum)
 			}
 
