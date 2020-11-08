@@ -18,23 +18,23 @@ import (
 )
 
 type Flags struct {
-	PrivateApiAddr    string
-	Chaindata         string
-	SnapshotDir       string
-	SnapshotMode      string
-	HttpListenAddress string
-	TLSCertfile       string
-	TLSCACert         string
-	TLSKeyFile        string
-	HttpPort          int
-	HttpCORSDomain    []string
-	HttpVirtualHost   []string
-	API               []string
-	Gascap            uint64
-	MaxTraces         uint64
-	TraceType         string
-	WebsocketEnabled  bool
-	RpcAccessFile     string
+	PrivateApiAddr       string
+	Chaindata            string
+	SnapshotDir          string
+	SnapshotMode         string
+	HttpListenAddress    string
+	TLSCertfile          string
+	TLSCACert            string
+	TLSKeyFile           string
+	HttpPort             int
+	HttpCORSDomain       []string
+	HttpVirtualHost      []string
+	API                  []string
+	Gascap               uint64
+	MaxTraces            uint64
+	TraceType            string
+	WebsocketEnabled     bool
+	RpcAllowListFilePath string
 }
 
 var rootCmd = &cobra.Command{
@@ -130,7 +130,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 
 	srv := rpc.NewServer()
-	srv.SetAllowList(nil)
+	srv.SetAllowList(parseAllowListForRPC(cfg.RpcAllowListFilePath))
 	if err := node.RegisterApisFromWhitelist(rpcAPI, cfg.API, srv, false); err != nil {
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
