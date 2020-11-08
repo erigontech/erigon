@@ -130,6 +130,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 
 	srv := rpc.NewServer()
+	srv.SetAllowList(nil)
 	if err := node.RegisterApisFromWhitelist(rpcAPI, cfg.API, srv, false); err != nil {
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
