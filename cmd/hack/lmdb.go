@@ -177,7 +177,7 @@ func generate9(tx ethdb.Tx, entries int) error {
 		cs = append(cs, c)
 	}
 	for i := 0; i < entries; i++ {
-		k := fmt.Sprintf("%05d", i)
+		k := fmt.Sprintf("%08d", i)
 		for _, c := range cs {
 			if err := c.Append([]byte(k), []byte("very_short_value")); err != nil {
 				return err
@@ -190,7 +190,7 @@ func generate9(tx ethdb.Tx, entries int) error {
 func dropAll(tx ethdb.Tx) error {
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.(ethdb.BucketMigrator).ClearBucket(k); err != nil {
+		if err := tx.(ethdb.BucketMigrator).DropBucket(k); err != nil {
 			return err
 		}
 	}
@@ -287,17 +287,32 @@ func defrag() error {
 	if err := defragSteps("vis11.dot", twoBucketCfg, generate7, dropT1, dropT2); err != nil {
 		return err
 	}
+	manyBucketCfg := make(dbutils.BucketsCfg)
+	for i := 0; i < 100; i++ {
+		k := fmt.Sprintf("table_%05d", i)
+		manyBucketCfg[k] = dbutils.BucketConfigItem{IsDeprecated: true}
+	}
 	var funcs = [](func(ethdb.Tx) error){generate8, func(tx ethdb.Tx) error { return generate9(tx, 1000) }}
+	for i := 0; i < 100; i += 2 {
+		k := fmt.Sprintf("table_%05d", i)
+		funcs = append(funcs, func(tx ethdb.Tx) error {
+			return tx.(ethdb.BucketMigrator).DropBucket(k)
+		})
+	}
+	if err := defragSteps("vis12.dot", manyBucketCfg, funcs...); err != nil {
+		return err
+	}
+	if err := defragSteps("vis13.dot", manyBucketCfg, generate8, func(tx ethdb.Tx) error { return generate9(tx, 10000) }, dropAll); err != nil {
+		return err
+	}
+	funcs = [](func(ethdb.Tx) error){generate8, func(tx ethdb.Tx) error { return generate9(tx, 300000) }}
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
 		funcs = append(funcs, func(tx ethdb.Tx) error {
-			return tx.(ethdb.BucketMigrator).ClearBucket(k)
+			return tx.(ethdb.BucketMigrator).DropBucket(k)
 		})
 	}
-	if err := defragSteps("vis12.dot", emptyBucketCfg, funcs...); err != nil {
-		return err
-	}
-	if err := defragSteps("vis13.dot", emptyBucketCfg, generate8, func(tx ethdb.Tx) error { return generate9(tx, 10000) }, dropAll); err != nil {
+	if err := defragSteps("vis14.dot", manyBucketCfg, funcs...); err != nil {
 		return err
 	}
 	return nil
@@ -378,17 +393,19 @@ func textInfo(chaindata string, visStream io.Writer) error {
 		}
 		fmt.Fprintf(visStream, "meta:free_root -> p_%d;\n", freeRoot)
 	}
+	var exclude = make(map[uint64]struct{})
 	var maintree = make(map[uint64]struct{})
 	if mainRoot == 0xffffffffffffffff {
 		log.Info("empty maintree")
 	} else {
-		if maintree, err = readMainTree(f, mainRoot, mainDepth, visStream); err != nil {
+		if maintree, err = readMainTree(f, mainRoot, mainDepth, visStream, exclude); err != nil {
 			return err
 		}
 		fmt.Fprintf(visStream, "meta:main_root -> p_%d;\n", mainRoot)
 	}
 
 	// Now scan all non meta and non-freelist pages
+	// First pass - calculate exclusions
 	pageID = 2
 	_, mainOk := maintree[pageID]
 	for _, ok := freelist[pageID]; ok || mainOk; _, ok = freelist[pageID] {
@@ -396,9 +413,43 @@ func textInfo(chaindata string, visStream io.Writer) error {
 		_, mainOk = maintree[pageID]
 	}
 	count := 0
+	var pagePtrs = make(map[uint64][]uint64)
 	for _, err = f.ReadAt(meta[:], int64(pageID)*PageSize); err == nil; _, err = f.ReadAt(meta[:], int64(pageID)*PageSize) {
 		var pageNum int
-		if pageNum, err = scanPage(meta[:], visStream); err != nil {
+		if pageNum, err = scanPage(meta[:], ioutil.Discard, pagePtrs, exclude); err != nil {
+			return err
+		}
+		count += pageNum
+		if count%(1024*256) == 0 {
+			log.Info("Scaned", "Gb", count/(1024*256))
+		}
+		pageID += uint64(pageNum)
+		_, mainOk = maintree[pageID]
+		for _, ok := freelist[pageID]; ok || mainOk; _, ok = freelist[pageID] {
+			pageID++
+			_, mainOk = maintree[pageID]
+		}
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	// Second pass - generate visualisations
+	pageID = 2
+	_, mainOk = maintree[pageID]
+	for _, ok := freelist[pageID]; ok || mainOk; _, ok = freelist[pageID] {
+		pageID++
+		_, mainOk = maintree[pageID]
+	}
+	count = 0
+	for _, err = f.ReadAt(meta[:], int64(pageID)*PageSize); err == nil; _, err = f.ReadAt(meta[:], int64(pageID)*PageSize) {
+		var pageNum int
+		var w io.Writer
+		if _, ok := exclude[pageID]; ok {
+			w = ioutil.Discard
+		} else {
+			w = visStream
+		}
+		if pageNum, err = scanPage(meta[:], w, pagePtrs, exclude); err != nil {
 			return err
 		}
 		count += pageNum
@@ -420,7 +471,18 @@ func textInfo(chaindata string, visStream io.Writer) error {
 	return nil
 }
 
-func scanPage(page []byte, visStream io.Writer) (int, error) {
+func excludeTree(pageID uint64, exclude map[uint64]struct{}, pagePtrs map[uint64][]uint64) {
+	exclude[pageID] = struct{}{}
+	for _, p := range pagePtrs[pageID] {
+		excludeTree(p, exclude, pagePtrs)
+	}
+}
+
+// scanPage goes over the page, and writes its graphviz representation into the
+// provided visStream. It returns 1 for "regular" pages, and number greater than 1
+// for pages that are overflow pages, where returned value is number of overflow
+// pages in total in this sequence
+func scanPage(page []byte, visStream io.Writer, pagePtrs map[uint64][]uint64, exclude map[uint64]struct{}) (int, error) {
 	pos, pageID, flags, lowerFree := readPageHeader(page, 0)
 	if flags&LeafPageFlag != 0 {
 		num := (lowerFree - pos) / 2
@@ -440,12 +502,14 @@ func scanPage(page []byte, visStream io.Writer) (int, error) {
 				interesting[i+1] = struct{}{}
 				overflowPageID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
 				fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, overflowPageID)
+				pagePtrs[pageID] = append(pagePtrs[pageID], overflowPageID)
 			} else if nodeFlags&SubDbNodeFlag > 0 {
 				interesting[i-1] = struct{}{}
 				interesting[i] = struct{}{}
 				interesting[i+1] = struct{}{}
 				pagePtr := binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:])
 				fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, pagePtr)
+				pagePtrs[pageID] = append(pagePtrs[pageID], pagePtr)
 			} else if nodeFlags&DupDataNodeFlag > 0 {
 				interesting[i-1] = struct{}{}
 				interesting[i] = struct{}{}
@@ -508,17 +572,34 @@ func scanPage(page []byte, visStream io.Writer) (int, error) {
 		num := (lowerFree - pos) / 2
 		fmt.Fprintf(visStream, "p_%d [shape=record style=filled fillcolor=\"#F6DDCC\" label=\"", pageID)
 		for i := 0; i < num; i++ {
+			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
+			pagePtr := binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
+			// Branch page itself is excluded
+			if _, ok := exclude[pageID]; ok {
+				excludeTree(pagePtr, exclude, pagePtrs)
+			}
+			if num > 5 && i > 2 && i < num-2 {
+				excludeTree(pagePtr, exclude, pagePtrs)
+				continue
+			}
+			if num > 5 && i == 2 {
+				fmt.Fprintf(visStream, "|... %d more records here ...", num-4)
+				excludeTree(pagePtr, exclude, pagePtrs)
+				continue
+			}
 			if i > 0 {
 				fmt.Fprintf(visStream, "|")
 			}
-			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
-			pagePtr := binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
 			fmt.Fprintf(visStream, "<n%d>%d", i, pagePtr)
 		}
 		fmt.Fprintf(visStream, "\"];\n")
 		for i := 0; i < num; i++ {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
 			pagePtr := binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
+			pagePtrs[pageID] = append(pagePtrs[pageID], pagePtr)
+			if num > 5 && i >= 2 && i < num-2 {
+				continue
+			}
 			fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, pagePtr)
 		}
 	} else if flags&OverflowPageFlag != 0 {
@@ -531,7 +612,7 @@ func scanPage(page []byte, visStream io.Writer) (int, error) {
 	return 1, nil
 }
 
-func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io.Writer) (map[uint64]struct{}, error) {
+func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io.Writer, exclude map[uint64]struct{}) (map[uint64]struct{}, error) {
 	var maintree = make(map[uint64]struct{})
 	var mainEntries int
 	var pages [8][PageSize]byte // Stack of pages
@@ -572,7 +653,46 @@ func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io
 			if branch {
 				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#E8DAEF\" label=\"", pageID)
 			} else {
+				// Perform the entire loop here
 				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#F9E79F\" label=\"", pageID)
+				for i = 0; i < num; i++ {
+					nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
+					mainEntries++
+					dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
+					flags := binary.LittleEndian.Uint16(page[nodePtr+4:])
+					keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
+					if flags&BigDataNodeFlag > 0 {
+						return nil, fmt.Errorf("unexpected overflow pages")
+					}
+					if dataSize != 48 {
+						return nil, fmt.Errorf("expected datasize 48, got: %d", dataSize)
+					}
+					tableName := string(page[nodePtr+8 : nodePtr+8+keySize])
+					pagePtr := binary.LittleEndian.Uint64(page[nodePtr+8+keySize+40:])
+					if num > 5 && i > 2 && i < num-2 {
+						exclude[pagePtr] = struct{}{}
+						continue
+					}
+					if num > 5 && i == 2 {
+						fmt.Fprintf(&visbufs[top], "|... %d more records here ...", num-4)
+						exclude[pagePtr] = struct{}{}
+						continue
+					}
+					if i > 0 {
+						fmt.Fprintf(&visbufs[top], "|")
+					}
+					if pagePtr != 0xffffffffffffffff {
+						fmt.Fprintf(&visbufs[top], "<n%d>%s=%d", i, tableName, pagePtr)
+						fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, pagePtr)
+					} else {
+						fmt.Fprintf(&visbufs[top], "%s", tableName)
+					}
+				}
+				fmt.Fprintf(&visbufs[top], "\"];\n")
+				if _, err := visStream.Write([]byte(visbufs[top].String())); err != nil {
+					return nil, fmt.Errorf("writing buffer into main stream: %w", err)
+				}
+				top--
 			}
 		} else if i < num {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
@@ -740,7 +860,9 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16, visStream io
 				} else {
 					fmt.Fprintf(&visbufs[top], "txid(%d)=", txID)
 				}
+				var sb strings.Builder
 				runLength := 0
+				maxGap := 0
 				var prevPn uint64
 				for _, pn := range pageList {
 					if pn+1 == prevPn {
@@ -748,18 +870,27 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16, visStream io
 					} else {
 						if prevPn > 0 {
 							if runLength > 0 {
-								fmt.Fprintf(&visbufs[top], "-%d(%d),", prevPn, runLength+1)
+								fmt.Fprintf(&sb, "-%d(%d),", prevPn, runLength+1)
 							} else {
-								fmt.Fprintf(&visbufs[top], ",")
+								fmt.Fprintf(&sb, ",")
 							}
 						}
-						fmt.Fprintf(&visbufs[top], "%d", pn)
+						fmt.Fprintf(&sb, "%d", pn)
 						runLength = 0
 					}
 					prevPn = pn
+					if runLength+1 > maxGap {
+						maxGap = runLength + 1
+					}
 				}
 				if runLength > 0 {
-					fmt.Fprintf(&visbufs[top], "-%d(%d)", prevPn, runLength+1)
+					fmt.Fprintf(&sb, "-%d(%d)", prevPn, runLength+1)
+				}
+				s := sb.String()
+				if len(s) > 40 {
+					fmt.Fprintf(&visbufs[top], "%s ... (max gap %d)", s[:40], maxGap)
+				} else {
+					fmt.Fprintf(&visbufs[top], "%s", s)
 				}
 			}
 		} else {
