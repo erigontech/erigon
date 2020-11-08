@@ -306,6 +306,30 @@ WARN [11-05|09:03:47.911] Served                                   conn=127.0.0.
 WARN [11-05|09:03:47.911] Served                                   conn=127.0.0.1:59754 method=eth_newPendingTransactionFilter reqid=6 t="9.053µs"  err="the method eth_newPendingTransactionFilter does not exist/is not available"
 ```
 
+## Allowing only specific methods (Allowlist)
+
+1. Create a file, say, `rules.json`
+
+2. Add the following content
+
+```json
+{
+    "allow": [
+                "net_version",
+                "web3_eth_getBlockByHash"
+            ]
+}
+```
+
+3. Provide this file to the rpcdaemon using `--rpc.accessList` flag
+
+```
+> rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,debug,net,web3 --rpc.accessList=rules.json
+```
+
+Now only these two methods are available.
+
+
 ## For Developers
 
 ### Code generation
