@@ -150,15 +150,49 @@ func generate7(tx ethdb.Tx) error {
 }
 
 func dropT1(tx ethdb.Tx) error {
-	if err := tx.(ethdb.BucketMigrator).ClearBucket("t1"); err != nil {
-		return err
+	return tx.(ethdb.BucketMigrator).ClearBucket("t1")
+}
+
+func dropT2(tx ethdb.Tx) error {
+	return tx.(ethdb.BucketMigrator).ClearBucket("t2")
+}
+
+// Generates a database with 100 (maximum) of DBIs to produce branches in MAIN_DBI
+func generate8(tx ethdb.Tx) error {
+	for i := 0; i < 100; i++ {
+		k := fmt.Sprintf("table_%05d", i)
+		if err := tx.(ethdb.BucketMigrator).CreateBucket(k); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func dropT2(tx ethdb.Tx) error {
-	if err := tx.(ethdb.BucketMigrator).ClearBucket("t2"); err != nil {
-		return err
+func generate9(tx ethdb.Tx, entries int) error {
+	var cs []ethdb.Cursor
+	for i := 0; i < 100; i++ {
+		k := fmt.Sprintf("table_%05d", i)
+		c := tx.Cursor(k)
+		defer c.Close()
+		cs = append(cs, c)
+	}
+	for i := 0; i < entries; i++ {
+		k := fmt.Sprintf("%05d", i)
+		for _, c := range cs {
+			if err := c.Append([]byte(k), []byte("very_short_value")); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func dropAll(tx ethdb.Tx) error {
+	for i := 0; i < 100; i++ {
+		k := fmt.Sprintf("table_%05d", i)
+		if err := tx.(ethdb.BucketMigrator).ClearBucket(k); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -253,6 +287,19 @@ func defrag() error {
 	if err := defragSteps("vis11.dot", twoBucketCfg, generate7, dropT1, dropT2); err != nil {
 		return err
 	}
+	var funcs = [](func(ethdb.Tx) error){generate8, func(tx ethdb.Tx) error { return generate9(tx, 1000) }}
+	for i := 0; i < 100; i++ {
+		k := fmt.Sprintf("table_%05d", i)
+		funcs = append(funcs, func(tx ethdb.Tx) error {
+			return tx.(ethdb.BucketMigrator).ClearBucket(k)
+		})
+	}
+	if err := defragSteps("vis12.dot", emptyBucketCfg, funcs...); err != nil {
+		return err
+	}
+	if err := defragSteps("vis13.dot", emptyBucketCfg, generate8, func(tx ethdb.Tx) error { return generate9(tx, 10000) }, dropAll); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -312,7 +359,7 @@ func textInfo(chaindata string, visStream io.Writer) error {
 	log.Info("FREE_DBI", "root page ID", freeRoot, "depth", freeDepth)
 	log.Info("MAIN_DBI", "root page ID", mainRoot, "depth", mainDepth)
 
-	fmt.Fprintf(visStream, "meta [shape=Mrecord style=filled fillcolor=\"#AED6F1\" label=\"<free_root>FREE_DBI")
+	fmt.Fprintf(visStream, "meta [shape=Mrecord label=\"<free_root>FREE_DBI")
 	if freeRoot != 0xffffffffffffffff {
 		fmt.Fprintf(visStream, "=%d", freeRoot)
 	}
@@ -523,9 +570,9 @@ func readMainTree(f io.ReaderAt, mainRoot uint64, mainDepth uint16, visStream io
 			indices[top] = i
 			visbufs[top].Reset()
 			if branch {
-				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#F6DDCC\" label=\"", pageID)
+				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#E8DAEF\" label=\"", pageID)
 			} else {
-				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#D5F5E3\" label=\"", pageID)
+				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#F9E79F\" label=\"", pageID)
 			}
 		} else if i < num {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
@@ -620,14 +667,20 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16, visStream io
 			indices[top] = i
 			visbufs[top].Reset()
 			if branch {
-				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#F6DDCC\" label=\"FF", pageID)
+				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#AED6F1\" label=\"", pageID)
 			} else {
-				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#D5F5E3\" label=\"", pageID)
+				fmt.Fprintf(&visbufs[top], "p_%d [shape=record style=filled fillcolor=\"#AED6F1\" label=\"", pageID)
 			}
 		} else if i < num {
 			nodePtr := int(binary.LittleEndian.Uint16(page[HeaderSize+i*2:]))
 			indices[top] = i + 1
 			if branch {
+				if i > 0 {
+					fmt.Fprintf(&visbufs[top], "|")
+				}
+				pagePtr := binary.LittleEndian.Uint64(page[nodePtr:]) & 0xFFFFFFFFFFFF
+				fmt.Fprintf(&visbufs[top], "<n%d>%d", i, pagePtr)
+				fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, pagePtr)
 				top++
 				indices[top] = 0
 				numKeys[top] = 0
@@ -637,13 +690,14 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16, visStream io
 				dataSize := int(binary.LittleEndian.Uint32(page[nodePtr:]))
 				nodeFlags := binary.LittleEndian.Uint16(page[nodePtr+4:])
 				keySize := int(binary.LittleEndian.Uint16(page[nodePtr+6:]))
+				var pageList []uint64
+				var overflowNum int
 				if nodeFlags&BigDataNodeFlag > 0 {
 					overflowPageID := binary.LittleEndian.Uint64(page[nodePtr+8+keySize:])
 					freelist[overflowPageID] = false
 					if _, err := f.ReadAt(overflow[:], int64(overflowPageID*PageSize)); err != nil {
 						return nil, fmt.Errorf("reading FREE_DBI overflow page: %v", err)
 					}
-					var overflowNum int
 					_, _, overflowNum = readOverflowPageHeader(overflow[:], 0)
 					overflows += overflowNum
 					left := dataSize - 8
@@ -652,6 +706,7 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16, visStream io
 						pn := binary.LittleEndian.Uint64(overflow[j:])
 						freepages++
 						freelist[pn] = true
+						pageList = append(pageList, pn)
 						left -= 8
 					}
 					for k := 1; k < overflowNum; k++ {
@@ -663,40 +718,48 @@ func readFreelist(f io.ReaderAt, freeRoot uint64, freeDepth uint16, visStream io
 							pn := binary.LittleEndian.Uint64(overflow[j:])
 							freepages++
 							freelist[pn] = true
+							pageList = append(pageList, pn)
 							left -= 8
 						}
 					}
 				} else {
 					// First 8 bytes is the size of the list
-					if i > 0 {
-						fmt.Fprintf(&visbufs[top], "|")
-					}
-					txID := binary.LittleEndian.Uint64(page[nodePtr+8:])
-					fmt.Fprintf(&visbufs[top], "txid(%d)=", txID)
-					runLength := 0
-					var prevPn uint64
 					for j := nodePtr + 8 + keySize + 8; j < nodePtr+8+keySize+dataSize; j += 8 {
 						pn := binary.LittleEndian.Uint64(page[j:])
-						if pn+1 == prevPn {
-							runLength++
-						} else {
-							if prevPn > 0 {
-								if runLength > 0 {
-									fmt.Fprintf(&visbufs[top], "-%d(%d),", prevPn, runLength+1)
-								} else {
-									fmt.Fprintf(&visbufs[top], ",")
-								}
-							}
-							fmt.Fprintf(&visbufs[top], "%d", pn)
-							runLength = 0
-						}
-						prevPn = pn
+						pageList = append(pageList, pn)
 						freepages++
 						freelist[pn] = true
 					}
-					if runLength > 0 {
-						fmt.Fprintf(&visbufs[top], "-%d(%d)", prevPn, runLength+1)
+				}
+				if i > 0 {
+					fmt.Fprintf(&visbufs[top], "|")
+				}
+				txID := binary.LittleEndian.Uint64(page[nodePtr+8:])
+				if overflowNum > 0 {
+					fmt.Fprintf(&visbufs[top], "txid(%d)(ON %d OVERFLOW PAGES)=", txID, overflowNum)
+				} else {
+					fmt.Fprintf(&visbufs[top], "txid(%d)=", txID)
+				}
+				runLength := 0
+				var prevPn uint64
+				for _, pn := range pageList {
+					if pn+1 == prevPn {
+						runLength++
+					} else {
+						if prevPn > 0 {
+							if runLength > 0 {
+								fmt.Fprintf(&visbufs[top], "-%d(%d),", prevPn, runLength+1)
+							} else {
+								fmt.Fprintf(&visbufs[top], ",")
+							}
+						}
+						fmt.Fprintf(&visbufs[top], "%d", pn)
+						runLength = 0
 					}
+					prevPn = pn
+				}
+				if runLength > 0 {
+					fmt.Fprintf(&visbufs[top], "-%d(%d)", prevPn, runLength+1)
 				}
 			}
 		} else {
