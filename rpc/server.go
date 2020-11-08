@@ -18,6 +18,7 @@ package rpc
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync/atomic"
 
@@ -61,6 +62,7 @@ func NewServer() *Server {
 
 // SetAllowList sets the allow list for methods that are handled by this server
 func (s *Server) SetAllowList(allowList AllowList) {
+	fmt.Println("setAllowList", allowList)
 	s.methodAllowList = allowList
 }
 
@@ -103,6 +105,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 		return
 	}
 
+	fmt.Println("s method allow list, to call new handler", s.methodAllowList)
 	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)

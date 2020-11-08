@@ -19,6 +19,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -76,6 +77,7 @@ type callProc struct {
 }
 
 func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList) *handler {
+	fmt.Println("newHandler", allowList)
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	h := &handler{
 		reg:            reg,
@@ -88,6 +90,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		allowSubscribe: true,
 		serverSubs:     make(map[ID]*Subscription),
 		log:            log.Root(),
+		allowList:      allowList,
 	}
 	if conn.remoteAddr() != "" {
 		h.log = h.log.New("conn", conn.remoteAddr())
@@ -292,6 +295,7 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 
 // handleCallMsg executes a call message and returns the answer.
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage) *jsonrpcMessage {
+	fmt.Println("handleCallMsg", msg.Method, h.allowList)
 	start := time.Now()
 	switch {
 	case msg.isNotification():

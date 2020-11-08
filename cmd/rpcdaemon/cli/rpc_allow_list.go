@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -41,6 +42,8 @@ func parseAllowListForRPC(path string) rpc.AllowList {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	fmt.Printf("bbb %+v\n", allowListFile.Allow)
 
 	return allowListFile.Allow
 }

@@ -79,7 +79,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets")
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, "rpc.access", "", "Specify granular (method-by-method) API allowlist")
 
-	if err := rootCmd.MarkFlagFilename("rpc.access", "json"); err != nil {
+	if err := rootCmd.MarkPersistentFlagFilename("rpc.access", "json"); err != nil {
 		panic(err)
 	}
 
