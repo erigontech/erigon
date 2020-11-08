@@ -2,9 +2,7 @@ package cli
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"strings"
 
@@ -15,35 +13,31 @@ type allowListFile struct {
 	Allow rpc.AllowList `json:"allow"`
 }
 
-func parseAllowListForRPC(path string) rpc.AllowList {
+func parseAllowListForRPC(path string) (rpc.AllowList, error) {
 	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil
+	if path == "" { // no file is provided
+		return nil, nil
 	}
 
 	file, err := os.Open(path)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	defer func() {
-		if err = file.Close(); err != nil {
-			log.Fatal(err)
-		}
+		file.Close() //nolint: errcheck
 	}()
 
 	fileContents, err := ioutil.ReadAll(file)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	var allowListFile allowListFile
 
 	err = json.Unmarshal(fileContents, &allowListFile)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
-	fmt.Printf("bbb %+v\n", allowListFile.Allow)
-
-	return allowListFile.Allow
+	return allowListFile.Allow, nil
 }
