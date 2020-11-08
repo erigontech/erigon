@@ -42,10 +42,11 @@ const (
 
 // Server is an RPC server.
 type Server struct {
-	services serviceRegistry
-	idgen    func() ID
-	run      int32
-	codecs   mapset.Set
+	services        serviceRegistry
+	methodAllowList AllowList
+	idgen           func() ID
+	run             int32
+	codecs          mapset.Set
 }
 
 // NewServer creates a new server instance with no registered handlers.
@@ -56,6 +57,11 @@ func NewServer() *Server {
 	rpcService := &RPCService{server}
 	server.RegisterName(MetadataApi, rpcService)
 	return server
+}
+
+// SetAllowList sets the allow list for methods that are handled by this server
+func (s *Server) SetAllowList(allowList AllowList) {
+	s.methodAllowList = allowList
 }
 
 // RegisterName creates a service for the given receiver type under the given name. When no
@@ -97,7 +103,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 		return
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services)
+	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 
