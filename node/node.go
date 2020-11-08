@@ -53,6 +53,9 @@ type Node struct {
 	lock          sync.Mutex
 	lifecycles    []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
 	rpcAPIs       []rpc.API   // List of APIs currently provided by the node
+	http          *httpServer //
+	ws            *httpServer //
+	ipc           *ipcServer  // Stores information about the ipc http server
 	inprocHandler *rpc.Server // In-process RPC request handler to process the API requests
 
 	rpcAllowList rpc.AllowList // list of RPC methods explicitly allowed for this RPC node
@@ -146,6 +149,11 @@ func New(conf *Config) (*Node, error) {
 			return nil, err
 		}
 	}
+
+	// Configure RPC servers.
+	node.http = newHTTPServer(node.log, conf.HTTPTimeouts)
+	node.ws = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
+	node.ipc = newIPCServer(node.log, conf.IPCEndpoint())
 
 	return node, nil
 }
@@ -267,7 +275,12 @@ func (n *Node) startNetworking() error {
 	if err := n.server.Start(); err != nil {
 		return convertFileLockError(err)
 	}
-	return nil
+	err := n.startRPC()
+	if err != nil {
+		n.stopRPC()
+		n.server.Stop()
+	}
+	return err
 }
 
 // containsLifecycle checks if 'lfs' contains 'l'.
@@ -283,6 +296,8 @@ func containsLifecycle(lfs []Lifecycle, l Lifecycle) bool {
 // stopServices terminates running services, RPC and p2p networking.
 // It is the inverse of Start.
 func (n *Node) stopServices(running []Lifecycle) error {
+	n.stopRPC()
+
 	// Stop running lifecycles in reverse order.
 	failure := &StopError{Services: make(map[reflect.Type]error)}
 	for i := len(running) - 1; i >= 0; i-- {
@@ -332,6 +347,71 @@ func (n *Node) closeDataDir() {
 // SetAllowListForRPC sets granular allow list for exposed RPC methods
 func (n *Node) SetAllowListForRPC(allowList rpc.AllowList) {
 	n.rpcAllowList = allowList
+}
+
+// configureRPC is a helper method to configure all the various RPC endpoints during node
+// startup. It's not meant to be called at any time afterwards as it makes certain
+// assumptions about the state of the node.
+func (n *Node) startRPC() error {
+	if err := n.startInProc(); err != nil {
+		return err
+	}
+
+	// Configure IPC.
+	if n.ipc.endpoint != "" {
+		if err := n.ipc.start(n.rpcAPIs); err != nil {
+			return err
+		}
+	}
+
+	// Configure HTTP.
+	if n.config.HTTPHost != "" {
+		config := httpConfig{
+			CorsAllowedOrigins: n.config.HTTPCors,
+			Vhosts:             n.config.HTTPVirtualHosts,
+			Modules:            n.config.HTTPModules,
+		}
+		if err := n.http.setListenAddr(n.config.HTTPHost, n.config.HTTPPort); err != nil {
+			return err
+		}
+		if err := n.http.enableRPC(n.rpcAPIs, config, n.rpcAllowList); err != nil {
+			return err
+		}
+	}
+
+	// Configure WebSocket.
+	if n.config.WSHost != "" {
+		server := n.wsServerForPort(n.config.WSPort)
+		config := wsConfig{
+			Modules: n.config.WSModules,
+			Origins: n.config.WSOrigins,
+		}
+		if err := server.setListenAddr(n.config.WSHost, n.config.WSPort); err != nil {
+			return err
+		}
+		if err := server.enableWS(n.rpcAPIs, config, n.rpcAllowList); err != nil {
+			return err
+		}
+	}
+
+	if err := n.http.start(); err != nil {
+		return err
+	}
+	return n.ws.start()
+}
+
+func (n *Node) wsServerForPort(port int) *httpServer {
+	if n.config.HTTPHost == "" || n.http.port == port {
+		return n.http
+	}
+	return n.ws
+}
+
+func (n *Node) stopRPC() {
+	n.http.stop()
+	n.ws.stop()
+	n.ipc.stop() //nolint:errcheck
+	n.stopInProc()
 }
 
 // startInProc registers all RPC APIs on the inproc server.
@@ -402,6 +482,8 @@ func (n *Node) RegisterHandler(name, path string, handler http.Handler) {
 	if n.state != initializingState {
 		panic("can't register HTTP handler on running/stopped node")
 	}
+	n.http.mux.Handle(path, handler)
+	n.http.handlerNames[path] = name
 }
 
 // Attach creates an RPC client attached to an in-process API handler.
@@ -449,6 +531,24 @@ func (n *Node) InstanceDir() string {
 // AccountManager retrieves the account manager used by the protocol stack.
 func (n *Node) AccountManager() *accounts.Manager {
 	return n.accman
+}
+
+// IPCEndpoint retrieves the current IPC endpoint used by the protocol stack.
+func (n *Node) IPCEndpoint() string {
+	return n.ipc.endpoint
+}
+
+// HTTPEndpoint returns the URL of the HTTP server.
+func (n *Node) HTTPEndpoint() string {
+	return "http://" + n.http.listenAddr()
+}
+
+// WSEndpoint retrieves the current WS endpoint used by the protocol stack.
+func (n *Node) WSEndpoint() string {
+	if n.http.wsAllowed() {
+		return "ws://" + n.http.listenAddr()
+	}
+	return "ws://" + n.ws.listenAddr()
 }
 
 // EventMux retrieves the event multiplexer used by all the network services in
