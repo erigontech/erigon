@@ -308,6 +308,9 @@ WARN [11-05|09:03:47.911] Served                                   conn=127.0.0.
 
 ## Allowing only specific methods (Allowlist)
 
+In some cases you might want to only allow certain methods in the namespaces
+and hide others. That is possible with `rpc.accessList` flag.
+
 1. Create a file, say, `rules.json`
 
 2. Add the following content
