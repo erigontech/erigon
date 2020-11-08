@@ -62,7 +62,6 @@ func NewServer() *Server {
 
 // SetAllowList sets the allow list for methods that are handled by this server
 func (s *Server) SetAllowList(allowList AllowList) {
-	fmt.Println("setAllowList", allowList)
 	s.methodAllowList = allowList
 }
 

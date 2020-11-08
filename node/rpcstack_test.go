@@ -18,7 +18,10 @@ package node
 
 import (
 	"bytes"
+	"fmt"
+	"io/ioutil"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/internal/testlog"
@@ -89,6 +92,23 @@ func TestIsWebsocket(t *testing.T) {
 	assert.True(t, isWebsocket(r))
 }
 
+func createAndStartServerWithAllowList(t *testing.T, conf httpConfig, ws bool, wsConf wsConfig) *httpServer {
+	t.Helper()
+
+	srv := newHTTPServer(testlog.Logger(t, log.LvlDebug), rpc.DefaultHTTPTimeouts)
+
+	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
+
+	assert.NoError(t, srv.enableRPC(nil, conf, allowList))
+	if ws {
+		assert.NoError(t, srv.enableWS(nil, wsConf, allowList))
+	}
+	assert.NoError(t, srv.setListenAddr("localhost", 0))
+	assert.NoError(t, srv.start())
+
+	return srv
+}
+
 func createAndStartServer(t *testing.T, conf httpConfig, ws bool, wsConf wsConfig) *httpServer {
 	t.Helper()
 
@@ -104,10 +124,33 @@ func createAndStartServer(t *testing.T, conf httpConfig, ws bool, wsConf wsConfi
 	return srv
 }
 
+func TestAllowList(t *testing.T) {
+	srv := createAndStartServerWithAllowList(t, httpConfig{}, false, wsConfig{})
+	defer srv.stop()
+
+	assert.False(t, testCustomRequest(t, srv, "rpc_modules"))
+}
+
+func testCustomRequest(t *testing.T, srv *httpServer, method string) bool {
+	body := bytes.NewReader([]byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"%s"}`, method)))
+	req, _ := http.NewRequest("POST", "http://"+srv.listenAddr(), body)
+	req.Header.Set("content-type", "application/json")
+
+	client := http.DefaultClient
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	respBody, err := ioutil.ReadAll(resp.Body)
+	assert.NoError(t, err)
+
+	return !strings.Contains(string(respBody), "error")
+}
+
 func testRequest(t *testing.T, key, value, host string, srv *httpServer) *http.Response {
 	t.Helper()
 
-	body := bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,method":"rpc_modules"}`))
+	body := bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}`))
 	req, _ := http.NewRequest("POST", "http://"+srv.listenAddr(), body)
 	req.Header.Set("content-type", "application/json")
 	if key != "" && value != "" {
