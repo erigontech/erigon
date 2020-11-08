@@ -108,6 +108,9 @@ func New(conf *Config) (*Node, error) {
 		databases:     make([]ethdb.Closer, 0),
 	}
 
+	// Register built-in APIs.
+	node.rpcAPIs = append(node.rpcAPIs, node.apis()...)
+
 	// Acquire the instance directory lock.
 	if err := node.openDataDir(); err != nil {
 		return nil, err
