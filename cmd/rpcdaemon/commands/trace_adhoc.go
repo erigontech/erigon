@@ -11,15 +11,15 @@ import (
 
 // TraceCallParam (see SendTxArgs -- this allows optional prams plus don't use MixedcaseAddress
 type TraceCallParam struct {
-	from     *common.Address
-	to       *common.Address
-	gas      *hexutil.Uint64
-	gasPrice *hexutil.Big
-	value    *hexutil.Big
-	nonce    *hexutil.Uint64
+	_ *common.Address // from
+	_ *common.Address // to
+	_ *hexutil.Uint64 // gas
+	_ *hexutil.Big    // gasPrice
+	_ *hexutil.Big    // value
+	_ *hexutil.Uint64 // nonce
 	// We accept "data" and "input" for backwards-compatibility reasons.
-	data  *hexutil.Bytes
-	input *hexutil.Bytes
+	_ *hexutil.Bytes // data
+	_ *hexutil.Bytes // input
 }
 
 // TraceCallParams array of callMany structs
