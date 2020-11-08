@@ -50,10 +50,9 @@ type Node struct {
 	startStopLock sync.Mutex        // Start/Stop are protected by an additional lock
 	state         int               // Tracks state of node lifecycle
 
-	lock          sync.Mutex
-	lifecycles    []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
-	rpcAPIs       []rpc.API   // List of APIs currently provided by the node
-	inprocHandler *rpc.Server // In-process RPC request handler to process the API requests
+	lock       sync.Mutex
+	lifecycles []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
+	rpcAPIs    []rpc.API   // List of APIs currently provided by the node
 
 	rpcAllowList rpc.AllowList // list of RPC methods explicitly allowed for this RPC node
 
@@ -96,13 +95,12 @@ func New(conf *Config) (*Node, error) {
 	}
 
 	node := &Node{
-		config:        conf,
-		inprocHandler: rpc.NewServer(),
-		eventmux:      new(event.TypeMux),
-		log:           conf.Logger,
-		stop:          make(chan struct{}),
-		server:        &p2p.Server{Config: conf.P2P},
-		databases:     make([]ethdb.Closer, 0),
+		config:    conf,
+		eventmux:  new(event.TypeMux),
+		log:       conf.Logger,
+		stop:      make(chan struct{}),
+		server:    &p2p.Server{Config: conf.P2P},
+		databases: make([]ethdb.Closer, 0),
 	}
 
 	// Register built-in APIs.
@@ -334,21 +332,6 @@ func (n *Node) SetAllowListForRPC(allowList rpc.AllowList) {
 	n.rpcAllowList = allowList
 }
 
-// startInProc registers all RPC APIs on the inproc server.
-func (n *Node) startInProc() error {
-	for _, api := range n.rpcAPIs {
-		if err := n.inprocHandler.RegisterName(api.Namespace, api.Service); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// stopInProc terminates the in-process RPC endpoint.
-func (n *Node) stopInProc() {
-	n.inprocHandler.Stop()
-}
-
 // Wait blocks until the node is closed.
 func (n *Node) Wait() {
 	<-n.stop
@@ -402,22 +385,6 @@ func (n *Node) RegisterHandler(name, path string, handler http.Handler) {
 	if n.state != initializingState {
 		panic("can't register HTTP handler on running/stopped node")
 	}
-}
-
-// Attach creates an RPC client attached to an in-process API handler.
-func (n *Node) Attach() (*rpc.Client, error) {
-	return rpc.DialInProc(n.inprocHandler), nil
-}
-
-// RPCHandler returns the in-process RPC request handler.
-func (n *Node) RPCHandler() (*rpc.Server, error) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	if n.state == closedState {
-		return nil, ErrNodeStopped
-	}
-	return n.inprocHandler, nil
 }
 
 // Config returns the configuration of node.
