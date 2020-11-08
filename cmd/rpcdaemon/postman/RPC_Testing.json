@@ -1388,73 +1388,6 @@
           "name": "accounts",
           "item": [
             {
-              "name": "accounts (deprecated)",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "id": "641f671a-2b87-4235-a01c-d709fe91974a",
-                    "exec": [
-                      "var expectedNethermind = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"result\": [",
-                      "    \"0x51dcab5854d508a41388fbe012af3e03079676bf\"",
-                      "  ],",
-                      "  \"id\": 1",
-                      "}",
-                      "var expectedParity = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"result\": [],",
-                      "  \"id\": 1",
-                      "}",
-                      "var expectedTurbo = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 1,",
-                      "  \"error\": {",
-                      "    \"code\": -32000,",
-                      "    \"message\": \"the function eth_accounts has been deprecated\"",
-                      "  }",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  var expected = {",
-                      "    '{{NETHERMIND}}': expectedNethermind,",
-                      "    '{{TURBOGETH}}': expectedTurbo,",
-                      "    '{{PARITY}}': expectedParity,",
-                      "  }",
-                      "  const jsonData = pm.response.json();",
-                      "  pm.expect(jsonData).to.deep.equals(expected[pm.environment.get('HOST')]);",
-                      "})",
-                      ""
-                    ],
-                    "type": "text/javascript"
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_accounts\",\n\t\"params\":[],\n\t\"id\":1\n}",
-                  "options": {
-                    "raw": {}
-                  }
-                },
-                "url": {
-                  "raw": "{{HOST}}",
-                  "host": ["{{HOST}}"]
-                },
-                "description": "Returns a list of addresses owned by the client.\r\n\r\n**Deprecated** This function will be removed in the future.\r\n\r\n**Parameters**\r\n\r\nnone\r\n\r\n**Returns**\r\n\r\n`Array of DATA`, 20 Bytes - addresses owned by the client"
-              },
-              "response": []
-            },
-            {
               "name": "getBalance",
               "event": [
                 {
@@ -2017,6 +1950,41 @@
                   "host": ["{{HOST}}"]
                 },
                 "description": "Creates new message call transaction or a contract creation for previously-signed transactions.\r\n\r\n**Note** Use `eth_getTransactionReceipt` to get the contract address, after the transaction was mined, when you created a contract.\r\n\r\n**Parameters**\r\n\r\n`DATA`, The signed transaction data\r\n\r\n```\r\nparams: [\"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"]\r\n```\r\n\r\n**Returns**\r\n\r\n`DATA`, 32 Bytes - The transaction hash, or the zero hash if the transaction is not yet available"
+              },
+              "response": []
+            },
+            {
+              "name": "getProof",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "id": "21a62ff1-f06f-4826-add1-39359216242a",
+                    "exec": ["utils.notImplemented(\"eth_getProof\", pm.response.json())", ""],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"eth_getProof\",\n  \"params\": [\n    \"0x7F0d15C7FAae65896648C8273B6d7E43f58Fa842\",\n    [  \"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\" ],\n    \"latest\"\n  ]\n}",
+                  "options": {
+                    "raw": {}
+                  }
+                },
+                "url": {
+                  "raw": "{{HOST}}",
+                  "host": ["{{HOST}}"]
+                },
+                "description": "EIP: https://github.com/ethereum/EIPs/issues/1186\nPossible implementation: https://github.com/vocdoni/eth-storage-proof"
               },
               "response": []
             }
@@ -3430,6 +3398,41 @@
         {
           "name": "eth",
           "item": [
+            {
+              "name": "accounts (deprecated)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "id": "641f671a-2b87-4235-a01c-d709fe91974a",
+                    "exec": ["utils.isDeprecated(\"eth_accounts\", pm.response.json())", ""],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_accounts\",\n\t\"params\":[],\n\t\"id\":1\n}",
+                  "options": {
+                    "raw": {}
+                  }
+                },
+                "url": {
+                  "raw": "{{HOST}}",
+                  "host": ["{{HOST}}"]
+                },
+                "description": "Returns a list of addresses owned by the client.\r\n\r\n**Deprecated** This function will be removed in the future.\r\n\r\n**Parameters**\r\n\r\nnone\r\n\r\n**Returns**\r\n\r\n`Array of DATA`, 20 Bytes - addresses owned by the client"
+              },
+              "response": []
+            },
             {
               "name": "getCompilers (deprecated)",
               "event": [

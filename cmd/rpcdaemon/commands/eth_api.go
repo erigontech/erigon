@@ -65,6 +65,8 @@ type EthAPI interface {
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
+	SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error)
 
 	// Mining related (see ./eth_mining.go)
 	Coinbase(_ context.Context) (common.Address, error)

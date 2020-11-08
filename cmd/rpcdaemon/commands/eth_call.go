@@ -181,3 +181,9 @@ func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blo
 	}
 	return hexutil.Uint64(hi), nil
 }
+
+// GetProof not implemented
+func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error) {
+	var stub interface{}
+	return &stub, fmt.Errorf(NotImplemented, "eth_getProof")
+}
