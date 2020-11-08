@@ -77,7 +77,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
 	rootCmd.PersistentFlags().StringVar(&cfg.TraceType, "trace.type", "parity", "Specify the type of tracing [geth|parity*] (experimental)")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets")
-	rootCmd.PersistentFlags().StringVar(&cfg.RpcAccessFile, "rpc.access", "", "Specify granular (method-by-method) API allowlist")
+	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, "rpc.access", "", "Specify granular (method-by-method) API allowlist")
 
 	if err := rootCmd.MarkFlagFilename("rpc.access", "json"); err != nil {
 		panic(err)
