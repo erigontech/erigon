@@ -66,6 +66,8 @@ This should return something along the lines of this (depending on how far your 
 }
 ```
 
+Also, there are [extensive instructions for using Postman](https://github.com/ledgerwatch/turbo-geth/wiki/Using-Postman-to-Test-TurboGeth-RPC) to test the RPC.
+
 ## Open / Known Issues
 
 There are still many open issues with the TurboGeth tracing routines. Please see [this issue](https://github.com/ledgerwatch/turbo-geth/issues/1119#issuecomment-699028019) for the current open / known issues related to tracing.
@@ -177,7 +179,6 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | tg_getLogsByHash                        | Yes     | turbo-geth only                            |
 |                                         |         |                                            |
 | tg_forks                                | Yes     | turbo-geth only                            |
-
 
 This table is constantly updated. Please visit again.
 
