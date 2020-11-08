@@ -18,7 +18,6 @@ package rpc
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"sync/atomic"
 
@@ -104,7 +103,6 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 		return
 	}
 
-	fmt.Println("s method allow list, to call new handler", s.methodAllowList)
 	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
