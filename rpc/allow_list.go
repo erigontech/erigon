@@ -28,7 +28,7 @@ func (a *AllowList) MarshalJSON() ([]byte, error) {
 	realA = *a
 	keys := make([]string, len(realA))
 	i := 0
-	for key, _ := range realA {
+	for key := range realA {
 		keys[i] = key
 		i++
 	}
