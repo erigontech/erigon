@@ -260,7 +260,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	if err1 != nil {
 		return nil, fmt.Errorf("traceFilter cannot open tx: %v", err1)
 	}
+
 	defer dbtx.Rollback()
+
 	for i, txOrBlockHash := range filteredHashes {
 		if traceTypes[i] {
 			// In this case, we're processing a block (or uncle) reward trace. The hash is a block hash
@@ -297,7 +299,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 			if err != nil {
 				return nil, err
 			}
-			trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, &eth.TraceConfig{Tracer: &traceType})
+			trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, &eth.TraceConfig{Tracer: &traceType}, chainConfig)
 			if err != nil {
 				return nil, err
 			}
@@ -397,7 +399,7 @@ func (api *TraceAPIImpl) getTransactionTraces(dbtx rawdb.DatabaseReader, ctx con
 	}
 
 	// Time spent 176 out of 205
-	trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, &eth.TraceConfig{Tracer: &traceType})
+	trace, err := transactions.TraceTx(ctx, msg, vmctx, ibs, &eth.TraceConfig{Tracer: &traceType}, chainConfig)
 	if err != nil {
 		return nil, err
 	}

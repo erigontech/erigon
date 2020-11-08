@@ -85,7 +85,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 // TraceTx configures a new tracer according to the provided configuration, and
 // executes the given message in the provided environment. The return value will
 // be tracer dependent.
-func TraceTx(ctx context.Context, message core.Message, vmctx vm.Context, ibs vm.IntraBlockState, config *eth.TraceConfig) (interface{}, error) {
+func TraceTx(ctx context.Context, message core.Message, vmctx vm.Context, ibs vm.IntraBlockState, config *eth.TraceConfig, chainConfig *params.ChainConfig) (interface{}, error) {
 	// Assemble the structured logger or the JavaScript tracer
 	var (
 		tracer vm.Tracer
@@ -119,7 +119,7 @@ func TraceTx(ctx context.Context, message core.Message, vmctx vm.Context, ibs vm
 		tracer = vm.NewStructLogger(config.LogConfig)
 	}
 	// Run the transaction with tracing enabled.
-	vmenv := vm.NewEVM(vmctx, ibs, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer})
+	vmenv := vm.NewEVM(vmctx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
 
 	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()))
 	if err != nil {
