@@ -24,8 +24,7 @@ func (a *AllowList) UnmarshalJSON(data []byte) error {
 
 // MarshalJSON returns *m as the JSON encoding of
 func (a *AllowList) MarshalJSON() ([]byte, error) {
-	var realA map[string]struct{}
-	realA = *a
+	var realA map[string]struct{} = *a
 	keys := make([]string, len(realA))
 	i := 0
 	for key := range realA {

@@ -32,12 +32,12 @@ func parseAllowListForRPC(path string) (rpc.AllowList, error) {
 		return nil, err
 	}
 
-	var allowListFile allowListFile
+	var allowListFileObj allowListFile
 
-	err = json.Unmarshal(fileContents, &allowListFile)
+	err = json.Unmarshal(fileContents, &allowListFileObj)
 	if err != nil {
 		return nil, err
 	}
 
-	return allowListFile.Allow, nil
+	return allowListFileObj.Allow, nil
 }
