@@ -486,18 +486,6 @@ func TestWebsocketHTTPOnSeparatePort_WSRequest(t *testing.T) {
 	}
 }
 
-// checkRPC checks whether JSON-RPC works against the given URL.
-func checkRPC(url string) bool {
-	c, err := rpc.Dial(url)
-	if err != nil {
-		return false
-	}
-	defer c.Close()
-
-	_, err = c.SupportedModules()
-	return err == nil
-}
-
 func createNode(t *testing.T, httpPort, wsPort int) *Node {
 	conf := &Config{
 		HTTPHost: "127.0.0.1",
