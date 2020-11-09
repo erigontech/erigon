@@ -11,6 +11,7 @@ service ETHBACKEND {
   rpc Add(TxRequest) returns (AddReply);
   rpc Etherbase(EtherbaseRequest) returns (EtherbaseReply);
   rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeReply);
 }
 
 message TxRequest {
@@ -34,3 +35,12 @@ message NetVersionRequest {
 message NetVersionReply {
   uint64 id = 1;
 }
+
+message SubscribeRequest {
+  string type = 1;  // could only be "headers"
+}
+
+message SubscribeReply {
+  bytes data = 1; // serialized header
+}
+
