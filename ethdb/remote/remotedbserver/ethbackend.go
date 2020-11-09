@@ -2,6 +2,7 @@ package remotedbserver
 
 import (
 	"context"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -54,4 +55,16 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 		return &remote.NetVersionReply{}, err
 	}
 	return &remote.NetVersionReply{Id: id}, nil
+}
+
+func (s *EthBackendServer) Subscribe(_ *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
+	for i := 0; i < 10; i++ {
+		time.Sleep(1 * time.Second)
+		err := subscribeServer.Send(nil)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

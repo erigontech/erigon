@@ -725,3 +725,22 @@ func (back *RemoteBackend) NetVersion() (uint64, error) {
 
 	return res.Id, nil
 }
+
+func (back *RemoteBackend) Subscribe() error {
+	subscription, err := back.remoteEthBackend.Subscribe(context.Background(), nil)
+	if err != nil {
+		return err
+	}
+	fmt.Println("err", subscription)
+	for {
+		event, err := subscription.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Println("event", event)
+	}
+	return nil
+}
