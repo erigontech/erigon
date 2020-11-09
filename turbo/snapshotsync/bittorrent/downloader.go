@@ -53,7 +53,7 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 }
 
 func (cli *Client) Load(db ethdb.Database) error {
-	log.Info("Add added torrents")
+	log.Info("Load added torrents")
 	return db.Walk(dbutils.SnapshotInfoBucket, []byte{}, 0, func(k, infoHashBytes []byte) (bool, error) {
 		if !bytes.HasPrefix(k[8:], []byte(SnapshotInfoHashPrefix)) {
 			return true, nil
@@ -66,7 +66,7 @@ func (cli *Client) Load(db ethdb.Database) error {
 			return false, err
 		}
 
-		log.Info("Add", "snapshot", snapshotName, "hash", infoHash.String(), "infobytes", true)
+		log.Info("Add torrent", "snapshot", snapshotName, "hash", infoHash.String(), "infobytes", len(infoBytes) > 0)
 		_, err = cli.AddTorrentSpec(snapshotName, infoHash, infoBytes)
 		if err != nil {
 			return false, err
@@ -74,11 +74,6 @@ func (cli *Client) Load(db ethdb.Database) error {
 
 		return true, nil
 	})
-}
-func (cli *Client) WalkThroughTorrents(db ethdb.Database, networkID uint64, f func(k, v []byte) (bool, error)) error {
-	networkIDBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(networkIDBytes, networkID)
-	return db.Walk(dbutils.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), 8*8+16, f)
 }
 
 func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Hash, infoBytes []byte) (*torrent.Torrent, error) {
@@ -118,6 +113,7 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotTy
 	if err != nil {
 		return fmt.Errorf("error on add snapshot: %w", err)
 	}
+	log.Info("Getting infobytes", "snapshot", snapshotType.String())
 	infoBytes, err = cli.GetInfoBytes(context.Background(), infoHash)
 	if err != nil {
 		log.Warn("Init failure", "snapshot", snapshotType.String(), "err", ctx.Err())
@@ -125,7 +121,7 @@ func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotTy
 	}
 	t.AllowDataDownload()
 	t.DownloadAll()
-	log.Info("Init", "snapshot", snapshotType.String())
+	log.Info("Got infobytes", "snapshot", snapshotType.String())
 
 	if newTorrent {
 		log.Info("Save spec", "snapshot", snapshotType.String())

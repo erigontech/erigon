@@ -35,7 +35,6 @@ func Seed(ctx context.Context, datadir string) error {
 	cfg.Debug = false
 	cfg.Logger = cfg.Logger.FilterLevel(lg.Info)
 	cfg.DataDir = datadir
-	cfg.UpnpID += "_seeder"
 
 	pathes := []string{
 		cfg.DataDir + "/headers",
@@ -75,14 +74,6 @@ func Seed(ctx context.Context, datadir string) error {
 		}
 
 		mi.InfoBytes, err = bencode.Marshal(info)
-		if err != nil {
-			return err
-		}
-		f, err := os.Create(filepath.Join(datadir, info.Name) + ".txt")
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprint(f, mi.InfoBytes)
 		if err != nil {
 			return err
 		}

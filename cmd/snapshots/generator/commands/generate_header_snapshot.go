@@ -62,7 +62,7 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 			return err
 		}
 	}
-	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snKV := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
 			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
@@ -70,7 +70,7 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	}).Path(snapshotPath).MustOpen()
 
 	db := ethdb.NewObjectDatabase(kv)
-	sndb := ethdb.NewObjectDatabase(snkv)
+	snDB := ethdb.NewObjectDatabase(snKV)
 
 	t := time.Now()
 	chunkFile := 30000
@@ -78,12 +78,10 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	var hash common.Hash
 	var header []byte
 	for i := uint64(1); i <= toBlock; i++ {
-		select {
-		case <-ctx.Done():
-			return errors.New("interrupted")
-		default:
-
+		if common.IsCanceled(ctx) {
+			return common.ErrStopped
 		}
+
 		hash, err = rawdb.ReadCanonicalHash(db, i)
 		if err != nil {
 			return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
@@ -95,7 +93,7 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 		tuples = append(tuples, []byte(dbutils.HeaderPrefix), dbutils.HeaderKey(i, hash), header)
 		if len(tuples) >= chunkFile {
 			log.Info("Committed", "block", i)
-			_, err = sndb.MultiPut(tuples...)
+			_, err = snDB.MultiPut(tuples...)
 			if err != nil {
 				log.Crit("Multiput error", "err", err)
 				return err
@@ -105,31 +103,31 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	}
 
 	if len(tuples) > 0 {
-		_, err = sndb.MultiPut(tuples...)
+		_, err = snDB.MultiPut(tuples...)
 		if err != nil {
 			log.Crit("Multiput error", "err", err)
 			return err
 		}
 	}
 
-	err = sndb.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
+	err = snDB.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
 	if err != nil {
 		log.Crit("SnapshotHeadersHeadNumber error", "err", err)
 		return err
 	}
-	err = sndb.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash), hash.Bytes())
+	err = snDB.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash), hash.Bytes())
 	if err != nil {
 		log.Crit("SnapshotHeadersHeadHash error", "err", err)
 		return err
 	}
 
-	log.Info("Finished", "duration", time.Since(t))
-	sndb.Close()
+	snDB.Close()
 	err = os.Remove(snapshotPath + "/lock.mdb")
 	if err != nil {
 		log.Warn("Remove lock", "err", err)
 		return err
 	}
+	log.Info("Finished", "duration", time.Since(t))
 
 	return nil
 }

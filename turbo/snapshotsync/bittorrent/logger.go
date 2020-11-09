@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	//lg.Default = NewAdapterLogger()
+	lg.Default = NewAdapterLogger()
 }
 func NewAdapterLogger() lg.Logger {
 	return lg.Logger{

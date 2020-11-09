@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -51,14 +50,16 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 			return err
 		}
 	}
-	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+
+	snKV := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
 			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
+
 	db := ethdb.NewObjectDatabase(kv)
-	sndb := ethdb.NewObjectDatabase(snkv)
+	snDB := ethdb.NewObjectDatabase(snKV)
 
 	t := time.Now()
 	chunkFile := 30000
@@ -66,11 +67,8 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 	var hash common.Hash
 
 	for i := uint64(1); i <= toBlock; i++ {
-		select {
-		case <-ctx.Done():
-			return errors.New("interrupted")
-		default:
-
+		if common.IsCanceled(ctx) {
+			return common.ErrStopped
 		}
 
 		hash, err = rawdb.ReadCanonicalHash(db, i)
@@ -81,7 +79,7 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 		tuples = append(tuples, []byte(dbutils.BlockBodyPrefix), dbutils.BlockBodyKey(i, hash), body)
 		if len(tuples) >= chunkFile {
 			log.Info("Committed", "block", i)
-			if _, err = sndb.MultiPut(tuples...); err != nil {
+			if _, err = snDB.MultiPut(tuples...); err != nil {
 				log.Crit("Multiput error", "err", err)
 				return err
 			}
@@ -90,23 +88,23 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 	}
 
 	if len(tuples) > 0 {
-		if _, err = sndb.MultiPut(tuples...); err != nil {
+		if _, err = snDB.MultiPut(tuples...); err != nil {
 			log.Crit("Multiput error", "err", err)
 			return err
 		}
 	}
 
-	err = sndb.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotBodyHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
+	err = snDB.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotBodyHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
 	if err != nil {
 		log.Crit("SnapshotBodyHeadNumber error", "err", err)
 		return err
 	}
-	err = sndb.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotBodyHeadHash), hash.Bytes())
+	err = snDB.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotBodyHeadHash), hash.Bytes())
 	if err != nil {
 		log.Crit("SnapshotBodyHeadHash error", "err", err)
 		return err
 	}
-	sndb.Close()
+	snDB.Close()
 	err = os.Remove(snapshotPath + "/lock.mdb")
 	if err != nil {
 		log.Warn("Remove lock", "err", err)

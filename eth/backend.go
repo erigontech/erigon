@@ -163,27 +163,22 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	var torrentClient *bittorrent.Client
 	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
 		if config.ExternalSnapshotDownloaderAddr != "" {
-			fmt.Println("external downloader", config.ExternalSnapshotDownloaderAddr)
 			cli, cl, innerErr := snapshotsync.NewClient(config.ExternalSnapshotDownloaderAddr)
 			if innerErr != nil {
-				fmt.Println("innerErr", err)
 				return nil, innerErr
 			}
 			defer cl() //nolint
 
-			fmt.Println("cli.download+")
 			_, innerErr = cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
 				NetworkId: config.NetworkID,
 				Type:      config.SnapshotMode.ToSnapshotTypes(),
 			})
-			fmt.Println("cli.download-", err)
 			if innerErr != nil {
-				fmt.Println("download err")
 				return nil, innerErr
 			}
 
 			waitDownload := func() (map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, error) {
-				snCheck := func(mp map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, tp snapshotsync.SnapshotType) bool {
+				snapshotReadinessCheck := func(mp map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, tp snapshotsync.SnapshotType) bool {
 					if mp[tp].Readiness != int32(100) {
 						log.Info("Downloading", "snapshot", tp, "%", mp[tp].Readiness)
 						return false
@@ -204,22 +199,22 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 					downloaded := true
 					if config.SnapshotMode.Headers {
-						if !snCheck(mp, snapshotsync.SnapshotType_headers) {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_headers) {
 							downloaded = false
 						}
 					}
 					if config.SnapshotMode.Bodies {
-						if !snCheck(mp, snapshotsync.SnapshotType_bodies) {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_bodies) {
 							downloaded = false
 						}
 					}
 					if config.SnapshotMode.State {
-						if !snCheck(mp, snapshotsync.SnapshotType_state) {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_state) {
 							downloaded = false
 						}
 					}
 					if config.SnapshotMode.Receipts {
-						if !snCheck(mp, snapshotsync.SnapshotType_receipts) {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_receipts) {
 							downloaded = false
 						}
 					}

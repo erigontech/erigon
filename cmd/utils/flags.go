@@ -58,7 +58,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 )
@@ -388,28 +387,6 @@ var (
 	TrieCacheGenFlag = cli.IntFlag{
 		Name:  "trie-cache-gens",
 		Usage: "Number of trie node generations to keep in memory",
-	}
-	StorageModeFlag = cli.StringFlag{
-		Name: "storage-mode",
-		Usage: `Configures the storage mode of the app:
-* h - write history to the DB
-* r - write receipts to the DB
-* t - write tx lookup index to the DB`,
-		Value: ethdb.DefaultStorageMode.ToString(),
-	}
-	SnapshotModeFlag = cli.StringFlag{
-		Name: "snapshot-mode",
-		Usage: `Configures the storage mode of the app:
-* h - download headers snapshot
-* b - download bodies snapshot
-* s - download state snapshot
-* r - download receipts snapshot
-`,
-		Value: snapshotsync.DefaultSnapshotMode.ToString(),
-	}
-	SeedSnapshotsFlag = cli.BoolTFlag{
-		Name:  "seed-snapshots",
-		Usage: `Seed snapshot seeding`,
 	}
 	ArchiveSyncInterval = cli.IntFlag{
 		Name:  "archive-sync-interval",
