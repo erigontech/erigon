@@ -148,6 +148,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
 
+	// TODO(tjayrush): remove TraceType
 	if cfg.TraceType != "parity" {
 		log.Info("Tracing output type: ", cfg.TraceType)
 	}
