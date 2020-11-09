@@ -134,21 +134,3 @@ Date:   Mon Nov 9 15:08:12 2020 +0100
     * tests/fuzzers: address review comments for stacktrie fuzzer
     
     * trie: fix docs in stacktrie
-
-commit 7b7b327ff294201fa4f7cf460c4a73a4212c06cf
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Mon Nov 9 16:03:58 2020 +0200
-
-    core/state/snapshot: update generator marker in sync with flushes
-
-commit 81ff7000775b279e9c6ccf2ca3a3ebd6f406a2f0
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Mon Nov 9 11:48:18 2020 +0100
-
-    consensus/ethash: fix the percentage progress report
-
-commit 6cfe494276c097c0e6f5ca31092da747b44943e6
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Nov 5 11:52:35 2020 +0200
-
-    build: stop verbose output to keep travis from overflowing
