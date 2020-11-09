@@ -2,11 +2,12 @@ package bittorrent
 
 import (
 	"fmt"
-	"github.com/anacrolix/torrent/metainfo"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/anacrolix/torrent/metainfo"
 )
 
 func BuildInfoBytesForLMDBSnapshot(root string) (metainfo.Info, error) {

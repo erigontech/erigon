@@ -2,6 +2,7 @@ package bittorrent
 
 import (
 	"errors"
+
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"

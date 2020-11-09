@@ -3,6 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"time"
+
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
@@ -10,10 +15,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
 	trnt "github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"time"
 )
 
 func Seed(ctx context.Context, datadir string) error {
@@ -38,7 +39,7 @@ func Seed(ctx context.Context, datadir string) error {
 
 	pathes := []string{
 		cfg.DataDir + "/headers",
-		//cfg.DataDir + "/bodies",
+		cfg.DataDir + "/bodies",
 		//cfg.DataDir + "/state",
 		//cfg.DataDir+"/receipts",
 	}

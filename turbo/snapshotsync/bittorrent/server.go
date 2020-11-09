@@ -5,12 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"path/filepath"
+
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"path/filepath"
 )
 
 var (

@@ -2,11 +2,12 @@ package snapshotsync
 
 import (
 	"context"
-	"github.com/davecgh/go-spew/spew"
-	"google.golang.org/grpc"
 	"log"
 	"testing"
 	"time"
+
+	"github.com/davecgh/go-spew/spew"
+	"google.golang.org/grpc"
 )
 
 func TestDownloaderCli(t *testing.T) {

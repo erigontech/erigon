@@ -2,12 +2,13 @@ package bittorrent
 
 import (
 	"context"
+	"os"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"os"
-	"testing"
 )
 
 func TestTorrentAddTorrent(t *testing.T) {

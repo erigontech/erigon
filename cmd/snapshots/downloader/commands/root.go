@@ -3,6 +3,13 @@ package commands
 import (
 	"context"
 	"fmt"
+	"net"
+	"os"
+	"os/signal"
+	"runtime"
+	"syscall"
+	"time"
+
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -15,12 +22,6 @@ import (
 	"github.com/urfave/cli"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
-	"net"
-	"os"
-	"os/signal"
-	"runtime"
-	"syscall"
-	"time"
 )
 
 func init() {
@@ -82,6 +83,7 @@ func rootContext() context.Context {
 var rootCmd = &cobra.Command{
 	Use:   "",
 	Short: "run snapshot downloader",
+	Example: "go run ./cmd/snapshots/downloader/main.go --dir /tmp --addr 127.0.0.1:9191",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if err := debug.SetupCobra(cmd); err != nil {
 			panic(err)
@@ -94,10 +96,6 @@ var rootCmd = &cobra.Command{
 }
 
 func runDownloader(cmd *cobra.Command, args []string) error {
-
-	defer func() {
-		log.Info("Stop snapshot downloader")
-	}()
 	cfg := &Config{}
 	var err error
 	cfg.Addr, err = cmd.Flags().GetString(Addr.Name)
@@ -127,10 +125,7 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 
 	cpus := uint32(runtime.GOMAXPROCS(-1))
 	opts = []grpc.ServerOption{
-		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
-		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
-		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(100), // to force clients reduce concurrency level
+		grpc.NumStreamWorkers(cpus),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time: 10 * time.Minute,
 		}),
@@ -138,16 +133,15 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer := grpc.NewServer(opts...)
-	bitterrentServer, err := bittorrent.NewServer(cfg.Dir, cfg.Seeding)
+	bittorrentServer, err := bittorrent.NewServer(cfg.Dir, cfg.Seeding)
 	if err != nil {
 		return err
 	}
-	err = bitterrentServer.Load()
+	err = bittorrentServer.Load()
 	if err != nil {
 		return err
 	}
-	fmt.Println("===================")
-	fmt.Println(cmd.Flags().GetBool(PreDownloadMainnetFlag.Name))
+
 	mainNetPreDownload, err := cmd.Flags().GetBool(PreDownloadMainnetFlag.Name)
 	if err != nil {
 		return err
@@ -155,7 +149,7 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 	if mainNetPreDownload {
 		log.Info("Predownload mainnet snapshots")
 		go func() {
-			_, err := bitterrentServer.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
+			_, err := bittorrentServer.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
 				NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
 				Type:      bittorrent.GetAvailableSnapshotTypes(params.MainnetChainConfig.ChainID.Uint64()),
 			})
@@ -164,12 +158,12 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 			}
 		}()
 	}
-	snapshotsync.RegisterDownloaderServer(grpcServer, bitterrentServer)
+	snapshotsync.RegisterDownloaderServer(grpcServer, bittorrentServer)
 	go func() {
+		log.Info("Starting grpc")
 		err := grpcServer.Serve(lis)
 		if err != nil {
 			log.Error("Stop", "err", err)
-			cmd.Context().Done()
 		}
 	}()
 	<-cmd.Context().Done()
