@@ -66,6 +66,8 @@ This should return something along the lines of this (depending on how far your 
 }
 ```
 
+Also, there are [extensive instructions for using Postman](https://github.com/ledgerwatch/turbo-geth/wiki/Using-Postman-to-Test-TurboGeth-RPC) to test the RPC.
+
 ## Open / Known Issues
 
 There are still many open issues with the TurboGeth tracing routines. Please see [this issue](https://github.com/ledgerwatch/turbo-geth/issues/1119#issuecomment-699028019) for the current open / known issues related to tracing.
@@ -110,25 +112,24 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | eth_getStorageAt                        | Yes     |                                            |
 | eth_call                                | Yes     |                                            |
 |                                         |         |                                            |
-| eth_newFilter                           | -       |                                            |
-| eth_newBlockFilter                      | -       |                                            |
-| eth_newPendingTransactionFilter         | -       |                                            |
-| eth_getFilterChanges                    | -       |                                            |
-| eth_getFilterLogs                       | -       |                                            |
-| eth_uninstallFilter                     | -       |                                            |
+| eth_newFilter                           | -       | not yet implemented                        |
+| eth_newBlockFilter                      | -       | not yet implemented                        |
+| eth_newPendingTransactionFilter         | -       | not yet implemented                        |
+| eth_getFilterChanges                    | -       | not yet implemented                        |
+| eth_uninstallFilter                     | -       | not yet implemented                        |
 | eth_getLogs                             | Yes     |                                            |
 |                                         |         |                                            |
-| eth_accounts                            | -       |                                            |
+| eth_accounts                            | No      | deprecated                                 |
 | eth_sendRawTransaction                  | Yes     | remote only                                |
-| eth_sendTransaction                     | -       |                                            |
-| eth_sign                                | -       |                                            |
-| eth_signTransaction                     | -       |                                            |
-| eth_signTypedData                       | -       |                                            |
+| eth_sendTransaction                     | -       | not yet implemented                        |
+| eth_sign                                | No      | deprecated                                 |
+| eth_signTransaction                     | -       | not yet implemented                        |
+| eth_signTypedData                       | -       | ????                                       |
 |                                         |         |                                            |
-| eth_getProof                            | -       |                                            |
+| eth_getProof                            | -       | not yet implemented                        |
 |                                         |         |                                            |
-| eth_mining                              | -       |                                            |
-| eth_coinbase                            | Yes     |                                            |
+| eth_mining                              | Yes     | mining not yet implemented (always false)  |
+| eth_coinbase                            | -       |                                            |
 | eth_hashrate                            | -       |                                            |
 | eth_submitHashrate                      | -       |                                            |
 | eth_getWork                             | -       |                                            |
@@ -150,34 +151,32 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | trace_get                               | Limited | working - has known issues                 |
 | trace_transaction                       | Limited | working - has known issues                 |
 |                                         |         |                                            |
-| eth_getCompilers                        | No      | depreciated                                |
-| eth_compileLLL                          | No      | depreciated                                |
-| eth_compileSolidity                     | No      | depreciated                                |
-| eth_compileSerpent                      | No      | depreciated                                |
+| eth_getCompilers                        | No      | deprecated                                 |
+| eth_compileLLL                          | No      | deprecated                                 |
+| eth_compileSolidity                     | No      | deprecated                                 |
+| eth_compileSerpent                      | No      | deprecated                                 |
 |                                         |         |                                            |
-| db_putString                            | No      | depreciated                                |
-| db_getString                            | No      | depreciated                                |
-| db_putHex                               | No      | depreciated                                |
-| db_getHex                               | No      | depreciated                                |
+| db_putString                            | No      | deprecated                                 |
+| db_getString                            | No      | deprecated                                 |
+| db_putHex                               | No      | deprecated                                 |
+| db_getHex                               | No      | deprecated                                 |
 |                                         |         |                                            |
-| shh_post                                | No      | depreciated                                |
-| shh_version                             | No      | depreciated                                |
-| shh_newIdentity                         | No      | depreciated                                |
-| shh_hasIdentity                         | No      | depreciated                                |
-| shh_newGroup                            | No      | depreciated                                |
-| shh_addToGroup                          | No      | depreciated                                |
-| shh_newFilter                           | No      | depreciated                                |
-| shh_uninstallFilter                     | No      | depreciated                                |
-| shh_getFilterChanges                    | No      | depreciated                                |
-| shh_getMessages                         | No      | depreciated                                |
+| shh_post                                | No      | deprecated                                 |
+| shh_version                             | No      | deprecated                                 |
+| shh_newIdentity                         | No      | deprecated                                 |
+| shh_hasIdentity                         | No      | deprecated                                 |
+| shh_newGroup                            | No      | deprecated                                 |
+| shh_addToGroup                          | No      | deprecated                                 |
+| shh_newFilter                           | No      | deprecated                                 |
+| shh_uninstallFilter                     | No      | deprecated                                 |
+| shh_getFilterChanges                    | No      | deprecated                                 |
+| shh_getMessages                         | No      | deprecated                                 |
 |                                         |         |                                            |
 | tg_getHeaderByHash                      | Yes     | turbo-geth only                            |
 | tg_getHeaderByNumber                    | Yes     | turbo-geth only                            |
-|                                         |         |                                            |
 | tg_getLogsByHash                        | Yes     | turbo-geth only                            |
-|                                         |         |                                            |
 | tg_forks                                | Yes     | turbo-geth only                            |
-
+| tg_issuance                             | Yes     | turbo-geth only                            |
 
 This table is constantly updated. Please visit again.
 

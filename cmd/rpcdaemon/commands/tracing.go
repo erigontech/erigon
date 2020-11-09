@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
@@ -28,10 +27,16 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	getter := adapter.NewBlockGetter(tx)
 	chainContext := adapter.NewChainContext(tx)
-	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, params.MainnetChainConfig, chainContext, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
+
+	chainConfig, err := getChainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}
 	// Trace the transaction and return
-	return transactions.TraceTx(ctx, msg, vmctx, ibs, config)
+	return transactions.TraceTx(ctx, msg, vmctx, ibs, config, chainConfig)
 }
