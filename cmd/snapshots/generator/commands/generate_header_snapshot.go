@@ -32,9 +32,6 @@ var generateHeadersSnapshotCmd = &cobra.Command{
 	Use:       "headers",
 	Short:     "Generate headers snapshot",
 	Example:   "go run cmd/snapshots/generator/main.go headers --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/headers_test",
-	ValidArgs: []string{"chaindata", "snapshotdir", "block"},
-	//ArgAliases : []string{"chaindata", "snapshotdir", "block"},
-	Args: cobra.OnlyValidArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return HeaderSnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
 	},
