@@ -104,33 +104,3 @@ Author: Péter Szilágyi <peterke@gmail.com>
 Date:   Mon Nov 9 17:43:54 2020 +0200
 
     build: stop building for Ubuntu Eoan, not supported any more
-
-commit eb694ea7067b275058d41061bf175ef2da62491d
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Mon Nov 9 17:39:42 2020 +0200
-
-    travis: drop Go 1.13 builders as it's not supported any more
-
-commit 81678971dbd578751896c71f8724fb61f8f22ad7
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Mon Nov 9 15:08:12 2020 +0100
-
-    trie, tests/fuzzers: implement a stacktrie fuzzer + stacktrie fixes (#21799)
-    
-    * trie: fix error in stacktrie not committing small roots
-    
-    * fuzzers: make trie-fuzzer use correct returnvalues
-    
-    * trie: improved tests
-    
-    * tests/fuzzers: fuzzer for stacktrie vs regular trie
-    
-    * test/fuzzers: make stacktrie fuzzer use 32-byte keys
-    
-    * trie: fix error in stacktrie with small nodes
-    
-    * trie: add (skipped) testcase for stacktrie
-    
-    * tests/fuzzers: address review comments for stacktrie fuzzer
-    
-    * trie: fix docs in stacktrie
