@@ -18,15 +18,18 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/ledgerwatch/turbo-geth/cmd/headers/proto"
+	proto_core "github.com/ledgerwatch/turbo-geth/cmd/headers/core"
+	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -43,7 +46,10 @@ func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header           { panic("") }
 func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header          { panic("") }
 
-func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
+//nolint:interfacer
+func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
+	lock.Lock()
+	defer lock.Unlock()
 	log.Info(hd.AnchorState())
 	log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	foundAnchor, start, anchorParent, invalidAnchors := hd.FindAnchors(segment)
@@ -110,12 +116,9 @@ func processSegment(hd *headerdownload.HeaderDownload, segment *headerdownload.C
 			log.Info("NewAnchor", "start", start, "end", end)
 		}
 	}
-	if start == 0 || end > 0 {
-		hd.CheckInitiation(segment, params.MainnetGenesisHash)
-	}
 }
 
-func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string) error {
+func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database) error {
 	ctx := rootContext()
 	log.Info("Starting Core P2P server", "on", coreAddr, "connecting to sentry", coreAddr)
 
@@ -170,7 +173,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	if err != nil {
 		return fmt.Errorf("creating client connection to sentry P2P: %w", err)
 	}
-	sentryClient := proto.NewSentryClient(conn)
+	sentryClient := proto_sentry.NewSentryClient(conn)
 
 	var bufferSize datasize.ByteSize
 	if err = bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
@@ -178,10 +181,10 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	}
 	var controlServer *ControlServerImpl
 
-	if controlServer, err = NewControlServer(filesDir, int(bufferSize), sentryClient); err != nil {
+	if controlServer, err = NewControlServer(db, filesDir, int(bufferSize), sentryClient); err != nil {
 		return fmt.Errorf("create core P2P server: %w", err)
 	}
-	proto.RegisterControlServer(grpcServer, controlServer)
+	proto_core.RegisterControlServer(grpcServer, controlServer)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
 	}
@@ -194,19 +197,22 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 
 	go controlServer.loop(ctx)
 
-	<-ctx.Done()
+	if err = stages.StageLoop(ctx, db, controlServer.hd); err != nil {
+		log.Error("Stage loop failure", "error", err)
+	}
+
 	return nil
 }
 
 type ControlServerImpl struct {
-	proto.UnimplementedControlServer
-	hdLock        sync.Mutex
+	proto_core.UnimplementedControlServer
+	lock          sync.Mutex
 	hd            *headerdownload.HeaderDownload
-	sentryClient  proto.SentryClient
+	sentryClient  proto_sentry.SentryClient
 	requestWakeUp chan struct{}
 }
 
-func NewControlServer(filesDir string, bufferSize int, sentryClient proto.SentryClient) (*ControlServerImpl, error) {
+func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient) (*ControlServerImpl, error) {
 	//config := eth.DefaultConfig.Ethash
 	engine := ethash.New(ethash.Config{
 		CachesInMem:      1,
@@ -224,6 +230,7 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto.Sentry
 		return engine.VerifySeal(cr, header)
 	}
 	hd := headerdownload.NewHeaderDownload(
+		common.Hash{}, /* initialHash */
 		filesDir,
 		bufferSize, /* bufferLimit */
 		16*1024,    /* tipLimit */
@@ -233,11 +240,16 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto.Sentry
 		3600, /* newAnchor future limit */
 		3600, /* newAnchor past limit */
 	)
+	dbRecovered, err := hd.RecoverFromDb(db, uint64(time.Now().Unix()))
+	if err != nil {
+		log.Error("Recovery from DB failed", "error", err)
+	}
 	hardTips := headerdownload.InitHardCodedTips("hard-coded-headers.dat")
-	if recovered, err := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips); err != nil || !recovered {
-		if err != nil {
-			log.Error("Recovery from file failed, will start from scratch", "error", err)
+	if recovered, err1 := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips); err1 != nil || (!recovered && !dbRecovered) {
+		if err1 != nil {
+			log.Error("Recovery from file failed, will start from scratch", "error", err1)
 		}
+		hd.SetHardCodedTips(hardTips)
 		// Insert hard-coded headers if present
 		if _, err := os.Stat("hard-coded-headers.dat"); err == nil {
 			if f, err1 := os.Open("hard-coded-headers.dat"); err1 == nil {
@@ -267,9 +279,7 @@ func NewControlServer(filesDir string, bufferSize int, sentryClient proto.Sentry
 	return &ControlServerImpl{hd: hd, sentryClient: sentryClient, requestWakeUp: make(chan struct{})}, nil
 }
 
-func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
-	cs.hdLock.Lock()
-	defer cs.hdLock.Unlock()
+func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	var request eth.NewBlockHashesData
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode NewBlockHashes: %v", err)
@@ -286,10 +296,10 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto.In
 			if err != nil {
 				return nil, fmt.Errorf("encode header request: %v", err)
 			}
-			outreq := proto.SendMessageByMinBlockRequest{
+			outreq := proto_sentry.SendMessageByMinBlockRequest{
 				MinBlock: announce.Number,
-				Data: &proto.OutboundMessageData{
-					Id:   proto.OutboundMessageId_GetBlockHeaders,
+				Data: &proto_sentry.OutboundMessageData{
+					Id:   proto_sentry.OutboundMessageId_GetBlockHeaders,
 					Data: bytes,
 				},
 			}
@@ -302,9 +312,7 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto.In
 	return &empty.Empty{}, nil
 }
 
-func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
-	cs.hdLock.Lock()
-	defer cs.hdLock.Unlock()
+func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	var request []*types.Header
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode BlockHeaders: %v", err)
@@ -312,12 +320,12 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto.Inbo
 	if segments, penalty, err := cs.hd.SplitIntoSegments(request); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			for _, segment := range segments {
-				processSegment(cs.hd, segment)
+				processSegment(&cs.lock, cs.hd, segment)
 			}
 		} else {
-			outreq := proto.PenalizePeerRequest{
+			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
-				Penalty: proto.PenaltyKind_Kick, // TODO: Extend penalty kinds
+				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
 			if _, err1 := cs.sentryClient.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 				log.Error("Could not send penalty", "err", err1)
@@ -330,20 +338,18 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto.Inbo
 	return &empty.Empty{}, nil
 }
 
-func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
-	cs.hdLock.Lock()
-	defer cs.hdLock.Unlock()
+func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	var request eth.NewBlockData
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode NewBlockMsg: %v", err)
 	}
 	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
-			processSegment(cs.hd, segments[0]) // There is only one segment in this case
+			processSegment(&cs.lock, cs.hd, segments[0]) // There is only one segment in this case
 		} else {
-			outreq := proto.PenalizePeerRequest{
+			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
-				Penalty: proto.PenaltyKind_Kick, // TODO: Extend penalty kinds
+				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
 			if _, err1 := cs.sentryClient.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 				log.Error("Could not send penalty", "err", err1)
@@ -356,7 +362,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto.InboundM
 	return &empty.Empty{}, nil
 }
 
-func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *proto.InboundMessage) (*empty.Empty, error) {
+func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	defer func() {
 		select {
 		case cs.requestWakeUp <- struct{}{}:
@@ -364,18 +370,18 @@ func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *p
 		}
 	}()
 	switch inreq.Id {
-	case proto.InboundMessageId_NewBlockHashes:
+	case proto_core.InboundMessageId_NewBlockHashes:
 		return cs.newBlockHashes(ctx, inreq)
-	case proto.InboundMessageId_BlockHeaders:
+	case proto_core.InboundMessageId_BlockHeaders:
 		return cs.blockHeaders(ctx, inreq)
-	case proto.InboundMessageId_NewBlock:
+	case proto_core.InboundMessageId_NewBlock:
 		return cs.newBlock(ctx, inreq)
 	default:
 		return nil, fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}
 }
 
-func (cs *ControlServerImpl) GetStatus(context.Context, *empty.Empty) (*proto.StatusData, error) {
+func (cs *ControlServerImpl) GetStatus(context.Context, *empty.Empty) (*proto_core.StatusData, error) {
 	return nil, nil
 }
 
@@ -392,10 +398,10 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 			log.Error("Could not encode header request", "err", err)
 			continue
 		}
-		outreq := proto.SendMessageByMinBlockRequest{
+		outreq := proto_sentry.SendMessageByMinBlockRequest{
 			MinBlock: req.Number,
-			Data: &proto.OutboundMessageData{
-				Id:   proto.OutboundMessageId_GetBlockHeaders,
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.OutboundMessageId_GetBlockHeaders,
 				Data: bytes,
 			},
 		}
@@ -408,25 +414,18 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 }
 
 func (cs *ControlServerImpl) loop(ctx context.Context) {
-	var timer *time.Timer
-	cs.hdLock.Lock()
-	reqs := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-	timer = cs.hd.RequestQueueTimer
-	cs.hdLock.Unlock()
+	reqs, timer := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
 	cs.sendRequests(ctx, reqs)
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-timer.C:
 			log.Info("RequestQueueTimer ticked")
 		case <-cs.requestWakeUp:
 			log.Info("Woken up by the incoming request")
-		case <-ctx.Done():
-			return
 		}
-		cs.hdLock.Lock()
-		reqs := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-		timer = cs.hd.RequestQueueTimer
-		cs.hdLock.Unlock()
+		reqs, timer = cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
 		cs.sendRequests(ctx, reqs)
 	}
 }

@@ -349,11 +349,13 @@ func (db *LmdbKV) Begin(_ context.Context, parent Tx, flags TxFlags) (Tx, error)
 		db:      db,
 		tx:      tx,
 		isSubTx: isSubTx,
+		flags:   flags,
 	}, nil
 }
 
 type lmdbTx struct {
 	isSubTx bool
+	flags   TxFlags
 	tx      *lmdb.Txn
 	db      *LmdbKV
 	cursors []*lmdb.Cursor
@@ -589,7 +591,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		log.Info("Batch", "commit", commitTook)
 	}
 
-	if !tx.isSubTx && !tx.db.opts.readOnly && !tx.db.opts.inMem { // call fsync only after main transaction commit
+	if !tx.isSubTx && !tx.db.opts.readOnly && !tx.db.opts.inMem && tx.flags&NoSync == 0 { // call fsync only after main transaction commit
 		fsyncTimer := time.Now()
 		if err := tx.db.env.Sync(true); err != nil {
 			log.Warn("fsync after commit failed", "err", err)
@@ -1170,15 +1172,14 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	}
 
 	if len(key) != from {
-		_, _, err := c.set(key)
+		err := c.putNoOverwrite(key, value)
 		if err != nil {
-			if lmdb.IsNotFound(err) {
-				return c.put(key, value)
+			if lmdb.IsKeyExists(err) {
+				return c.putCurrent(key, value)
 			}
 			return err
 		}
-
-		return c.putCurrent(key, value)
+		return nil
 	}
 
 	value = append(key[to:], value...)

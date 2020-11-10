@@ -244,6 +244,10 @@ loop:
 		d.logStats()
 
 		select {
+		case <-d.ctx.Done():
+			it.Close()
+			break loop
+
 		case node := <-nodesCh:
 			if err := d.checkDial(node); err != nil {
 				d.log.Trace("Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
@@ -304,9 +308,6 @@ loop:
 		case <-historyExp:
 			d.expireHistory()
 
-		case <-d.ctx.Done():
-			it.Close()
-			break loop
 		}
 	}
 

@@ -10,7 +10,8 @@ import (
 
 // Buckets
 var (
-	// "Plain State". The same as CurrentStateBucket, but the keys arent' hashed.
+	// "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
+	// "incarnation" - uint64 number - how much times given account was SelfDestruct'ed.
 
 	/*
 		Logical layout:
@@ -282,16 +283,6 @@ const (
 	DupFixed   BucketFlags = 0x10
 	IntegerDup BucketFlags = 0x20
 	ReverseDup BucketFlags = 0x40
-)
-
-type TxFlags uint
-
-const (
-	RO         TxFlags = 0x00
-	RW         TxFlags = 0x02
-	Try        TxFlags = 0x04
-	NoMetaSync TxFlags = 0x08
-	NoSync     TxFlags = 0x10
 )
 
 type BucketConfigItem struct {

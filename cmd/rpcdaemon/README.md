@@ -87,7 +87,7 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | eth_chainID                             | Yes     |                                            |
 | eth_protocolVersion                     | Yes     |                                            |
 | eth_syncing                             | Yes     |                                            |
-| eth_gasPrice                            | -       |                                            |
+| eth_gasPrice                            | Yes     |                                            |
 |                                         |         |                                            |
 | eth_getBlockByHash                      | Yes     |                                            |
 | eth_getBlockByNumber                    | Yes     |                                            |
@@ -259,6 +259,52 @@ On the RPC daemon machine, these three files need to be placed: `CA-cert.pem`, `
 **WARNING** Normally, the "client side" (which in our case is RPC daemon), verifies that the host name of the server matches the "Common Name" attribute of the "server" cerificate. At this stage, this verification is turned off, and it will be turned on again once we have updated the instruction above on how to properly generate cerificates with "Common Name".
 
 When running turbo-geth instance in the Google Cloud, for example, you need to specify the **Internal IP** in the `--private.api.addr` option. And, you will need to open the firewall on the port you are using, to that connection to the turbo-geth instances can be made.
+
+## Ethstats
+
+This version of the RPC daemon is compatible with [ethstats-client](https://github.com/goerli/ethstats-client).
+
+To run ethstats, run the RPC daemon remotely and open some of the APIs.
+
+`./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=net,eth,web3`
+
+Then update your `app.json` for ethstats-client like that:
+
+```json
+[
+  {
+    "name"              : "ethstats",
+    "script"            : "app.js",
+    "log_date_format"   : "YYYY-MM-DD HH:mm Z",
+    "merge_logs"        : false,
+    "watch"             : false,
+    "max_restarts"      : 10,
+    "exec_interpreter"  : "node",
+    "exec_mode"         : "fork_mode",
+    "env":
+    {
+      "NODE_ENV"        : "production",
+      "RPC_HOST"        : "localhost",
+      "RPC_PORT"        : "8545",
+      "LISTENING_PORT"  : "30303",
+      "INSTANCE_NAME"   : "turbo-geth node",
+      "CONTACT_DETAILS" : <your twitter handle>,
+      "WS_SERVER"       : "wss://ethstats.net/api",
+      "WS_SECRET"       : <put your secret key there>,
+      "VERBOSITY"       : 2
+    }
+  }
+]
+```
+
+Run ethstats-client through pm2 as usual.
+
+You will see these warnings in the RPC daemon output, but they are expected
+
+```
+WARN [11-05|09:03:47.911] Served                                   conn=127.0.0.1:59753 method=eth_newBlockFilter reqid=5 t="21.194µs" err="the method eth_newBlockFilter does not exist/is not available"
+WARN [11-05|09:03:47.911] Served                                   conn=127.0.0.1:59754 method=eth_newPendingTransactionFilter reqid=6 t="9.053µs"  err="the method eth_newPendingTransactionFilter does not exist/is not available"
+```
 
 ## For Developers
 

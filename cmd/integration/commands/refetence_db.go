@@ -342,6 +342,8 @@ func toMdbx(ctx context.Context, from, to string) error {
 
 			select {
 			default:
+			case <-ctx.Done():
+				return ctx.Err()
 			case <-logEvery.C:
 				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
 			case <-commitEvery.C:
@@ -357,8 +359,6 @@ func toMdbx(ctx context.Context, from, to string) error {
 				if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
 					appendFunc = c.(ethdb.CursorDupSort).AppendDup
 				}
-			case <-ctx.Done():
-				return ctx.Err()
 			}
 		}
 	}

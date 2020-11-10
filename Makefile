@@ -7,7 +7,7 @@ ifeq ($(LATEST_COMMIT),)
 LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
 endif
 
-GIT_COMMIT=$(shell git rev-list -1 HEAD)
+GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -22,10 +22,7 @@ endif
 all: tg hack tester rpctest state pics rpcdaemon integration db-tools
 
 docker:
-	docker build -t turbo-geth:latest .
-
-docker-alltools:
-	docker build -t turbo-geth-alltools:latest -f Dockerfile.alltools .
+	docker build -t turbo-geth:latest  --build-arg git_commit='${GIT_COMMIT}' .
 
 docker-compose:
 	docker-compose up
@@ -92,9 +89,9 @@ headers:
 	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
 
 db-tools:
-	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; DESTDIR=$(GOBIN) make clean mdb_stat mdb_copy mdb_dump mdb_load; cd ../../../../..; rm -rf vendor
-	$(GOBUILD) -o $(GOBIN)/lmdbgo_copy -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
-	$(GOBUILD) -o $(GOBIN)/lmdbgo_stat -tags "mdbx" github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
+	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; make clean mdb_stat mdb_copy mdb_dump mdb_load; cp mdb_stat $(GOBIN); cp mdb_copy $(GOBIN); cp mdb_dump $(GOBIN); cp mdb_load $(GOBIN); cd ../../../../..; rm -rf vendor
+	$(GOBUILD) -o $(GOBIN)/lmdbgo_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
+	$(GOBUILD) -o $(GOBIN)/lmdbgo_stat github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
 
 	cd ethdb/mdbx/dist/ && make tools
 	cp ethdb/mdbx/dist/mdbx_chk $(GOBIN)
@@ -187,6 +184,7 @@ grpc:
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 	PATH=$(GOBIN):$(PATH) go generate ./ethdb
 	PATH=$(GOBIN):$(PATH) go generate ./cmd/headers
+	PATH=$(GOBIN):$(PATH) go generate ./turbo/shards
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json

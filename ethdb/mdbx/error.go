@@ -92,6 +92,10 @@ func IsNotFound(err error) bool {
 	return IsErrno(err, NotFound)
 }
 
+func IsKeyExists(err error) bool {
+	return IsErrno(err, KeyExist)
+}
+
 // IsNotExist returns true the path passed to the Env.Open method does not
 // exist.
 func IsNotExist(err error) bool {

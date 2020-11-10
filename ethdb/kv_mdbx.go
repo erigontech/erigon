@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -293,6 +292,10 @@ func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (Tx, error)
 	if flags&RO != 0 {
 		nativeFlags |= mdbx.Readonly
 	}
+	if flags&NoSync != 0 {
+		nativeFlags |= mdbx.TxNoSync
+	}
+
 	var parentTx *mdbx.Txn
 	if parent != nil {
 		parentTx = parent.(*mdbxTx).tx
@@ -1036,10 +1039,10 @@ func (c *MdbxCursor) Delete(k, v []byte) error {
 		return c.deleteDupSort(k)
 	}
 
-	if c.bucketCfg.Flags&lmdb.DupSort != 0 {
+	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
 		_, _, err := c.getBoth(k, v)
 		if err != nil {
-			if lmdb.IsNotFound(err) {
+			if mdbx.IsNotFound(err) {
 				return nil
 			}
 			return err
@@ -1049,7 +1052,7 @@ func (c *MdbxCursor) Delete(k, v []byte) error {
 
 	_, _, err := c.set(k)
 	if err != nil {
-		if lmdb.IsNotFound(err) {
+		if mdbx.IsNotFound(err) {
 			return nil
 		}
 		return err
@@ -1158,15 +1161,14 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 	}
 
 	if len(key) != from {
-		_, _, err := c.set(key)
+		err := c.putNoOverwrite(key, value)
 		if err != nil {
-			if mdbx.IsNotFound(err) {
-				return c.put(key, value)
+			if mdbx.IsKeyExists(err) {
+				return c.putCurrent(key, value)
 			}
 			return err
 		}
-
-		return c.putCurrent(key, value)
+		return nil
 	}
 
 	value = append(key[to:], value...)
