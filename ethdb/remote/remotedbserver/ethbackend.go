@@ -3,9 +3,7 @@ package remotedbserver
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"sync"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -62,20 +60,9 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 }
 
 func (s *EthBackendServer) Subscribe(_ *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
+	fmt.Println("subscribe called")
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-
-	go func() {
-		fmt.Println("initial sleep")
-		time.Sleep(10 * time.Second)
-		fmt.Println("starting the cycle")
-		i := int64(0)
-		for {
-			s.events.OnNewHeader(&types.Header{Number: big.NewInt(i)})
-			i++
-			time.Sleep(1 * time.Second)
-		}
-	}()
 
 	s.events.AddHeaderSubscription(func(h *types.Header) error {
 		fmt.Println("sending header", h.Number)
@@ -85,7 +72,7 @@ func (s *EthBackendServer) Subscribe(_ *remote.SubscribeRequest, subscribeServer
 		}
 		return err
 	})
-
+	fmt.Println("subscribe: waiting for done")
 	wg.Wait()
 	fmt.Println("done")
 

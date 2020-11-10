@@ -38,7 +38,7 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 
 	kv2Srv := NewKvServer(kv)
 	dbSrv := NewDBServer(kv)
-	ethBackendSrv := NewEthBackendServer(eth, stagedSync)
+	ethBackendSrv := NewEthBackendServer(eth, events)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
