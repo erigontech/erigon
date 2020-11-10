@@ -47,6 +47,10 @@ func (api *NetAPIImpl) Version(_ context.Context) (string, error) {
 		return "", err
 	}
 
+	fmt.Println("net version")
+
+	api.ethBackend.Subscribe()
+
 	return strconv.FormatUint(res, 10), nil
 }
 

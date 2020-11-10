@@ -2,6 +2,7 @@ package remotedbserver
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -60,7 +61,7 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 func (s *EthBackendServer) Subscribe(_ *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
 	for i := 0; i < 10; i++ {
 		time.Sleep(1 * time.Second)
-		err := subscribeServer.Send(nil)
+		err := subscribeServer.Send(&remote.SubscribeReply{Data: []byte(fmt.Sprintf("iteraton %d", i))})
 		if err != nil {
 			return err
 		}
