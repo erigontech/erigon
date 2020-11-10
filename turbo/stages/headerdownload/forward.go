@@ -9,12 +9,10 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -103,7 +101,7 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte)
 			backHash := header.ParentHash
 			backNumber := blockHeight - 1
 			for pHash, pOk := canonicalBacktrack[backHash]; pOk; pHash, pOk = canonicalBacktrack[backHash] {
-				if err := rawdb.WriteCanonicalHash(batch, backHash, backNumber); err != nil {
+				if err := rawdb.WriteCanonicalHeader(batch, rawdb.ReadHeader(batch, backHash, backNumber)); err != nil {
 					return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, backNumber, backHash, err)
 				}
 				backHash = pHash
@@ -114,20 +112,19 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte)
 		if !newCanonical {
 			canonicalBacktrack[hash] = header.ParentHash
 		}
-		if newCanonical {
-			if err := rawdb.WriteCanonicalHash(batch, hash, blockHeight); err != nil {
-				return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, blockHeight, hash, err)
-			}
-		}
-		data, err := rlp.EncodeToBytes(header)
-		if err != nil {
-			return fmt.Errorf("[%s] Failed to RLP encode header: %w", logPrefix, err)
-		}
-		if err = rawdb.WriteTd(batch, hash, blockHeight, cumulativeDiff); err != nil {
+
+		if err := rawdb.WriteTd(batch, hash, blockHeight, cumulativeDiff); err != nil {
 			return fmt.Errorf("[%s] Failed to WriteTd: %w", logPrefix, err)
 		}
-		if err = batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
-			return fmt.Errorf("[%s] Failed to store header: %w", logPrefix, err)
+
+		if newCanonical {
+			if err := rawdb.WriteCanonicalHeader(batch, header); err != nil {
+				return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, blockHeight, hash, err)
+			}
+		} else {
+			if err := rawdb.WriteNonCanonicalHeader(batch, header); err != nil {
+				return fmt.Errorf("[%s] Failed to store header: %w", logPrefix, err)
+			}
 		}
 		prevHash = hash
 		count++
@@ -135,11 +132,11 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte)
 			highest = blockHeight
 		}
 		if batch.BatchSize() >= batch.IdealBatchSize() {
-			if err = batch.CommitAndBegin(context.Background()); err != nil {
+			if err := batch.CommitAndBegin(context.Background()); err != nil {
 				return err
 			}
 			if !useExternalTx {
-				if err = tx.CommitAndBegin(context.Background()); err != nil {
+				if err := tx.CommitAndBegin(context.Background()); err != nil {
 					return err
 				}
 			}
