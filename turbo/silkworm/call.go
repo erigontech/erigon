@@ -1,9 +1,6 @@
 package silkworm
 
 /*
-#cgo LDFLAGS: -ldl
-#include <dlfcn.h>
-#include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -27,28 +24,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
-
-const funcName = "silkworm_execute_blocks"
-
-func LoadExecutionFunctionPointer(dllPath string) (unsafe.Pointer, error) {
-	cPath := C.CString(dllPath)
-	defer C.free(unsafe.Pointer(cPath))
-	dllHandle := C.dlopen(cPath, C.RTLD_LAZY)
-	if dllHandle == nil {
-		err := C.GoString(C.dlerror())
-		return nil, fmt.Errorf("failed to load dynamic library %s: %s", dllPath, err)
-	}
-
-	cName := C.CString(funcName)
-	defer C.free(unsafe.Pointer(cName))
-	funcPtr := C.dlsym(dllHandle, cName)
-	if funcPtr == nil {
-		err := C.GoString(C.dlerror())
-		return nil, fmt.Errorf("failed to find the %s function: %s", funcName, err)
-	}
-
-	return funcPtr, nil
-}
 
 func ExecuteBlocks(funcPtr unsafe.Pointer, txn ethdb.Tx, chainID *big.Int, startBlock uint64, maxBlock uint64, batchSize uint64, writeReceipts bool) (executedBlock uint64, err error) {
 	cChainId := C.uint64_t(chainID.Uint64())
