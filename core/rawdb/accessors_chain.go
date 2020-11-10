@@ -838,9 +838,8 @@ func WriteBlock(ctx context.Context, db ethdb.Database, block *types.Block) erro
 // WriteBlock serializes a block into the database, header and body separately.
 func WriteCanonicalBlock(ctx context.Context, db ethdb.Database, block *types.Block) error {
 	WriteCanonicalBody(ctx, db, block.NumberU64(), block.Body())
-	WriteCanonicalHeader(db, block.Header())
 	WriteHeaderNumber(db, block.Hash(), block.NumberU64())
-	return nil
+	return WriteCanonicalHeader(db, block.Header())
 }
 
 // WriteAncientBlock writes entire block data into ancient store and returns the total written size.
@@ -881,13 +880,12 @@ func DeleteBlock(db ethdb.Database, hash common.Hash, number uint64) error {
 	if err := DeleteReceipts(db, number); err != nil {
 		return err
 	}
-	DeleteCanonicalHeader(db, number)
 	DeleteHeader(db, hash, number)
 	DeleteBody(db, hash, number)
 	if err := DeleteTd(db, hash, number); err != nil {
 		return err
 	}
-	return nil
+	return DeleteCanonicalHeader(db, number)
 }
 
 // DeleteBlockWithoutNumber removes all block data associated with a hash, except
