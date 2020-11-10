@@ -162,15 +162,12 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 				tos = map[string]*roaring.Bitmap{}
 			}
 		}
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-		if err != nil {
-			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err)
-		}
-		block := rawdb.ReadBlock(tx, blockHash, blockNum)
+
+		block := rawdb.ReadCanonicalBlock(tx, blockNum)
 		if block == nil {
 			break
 		}
-		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
+		senders := rawdb.ReadCanonicalSenders(tx, blockNum)
 		block.Body().SendersToTxs(senders)
 
 		if accountCsKey != nil {
@@ -231,7 +228,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
-		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
+		if _, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
 			return err
 		}
 		for addr := range tracer.froms {
@@ -365,15 +362,11 @@ func unwindCallTraces(logPrefix string, db rawdb.DatabaseReader, from, to uint64
 			return err
 		}
 
-		blockHash, err := rawdb.ReadCanonicalHash(db, blockNum)
-		if err != nil {
-			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err)
-		}
-		block := rawdb.ReadBlock(db, blockHash, blockNum)
+		block := rawdb.ReadCanonicalBlock(db, blockNum)
 		if block == nil {
 			break
 		}
-		senders := rawdb.ReadSenders(db, blockHash, blockNum)
+		senders := rawdb.ReadCanonicalSenders(db, blockNum)
 		block.Body().SendersToTxs(senders)
 
 		var stateReader state.StateReader
@@ -382,7 +375,7 @@ func unwindCallTraces(logPrefix string, db rawdb.DatabaseReader, from, to uint64
 		stateReader = state.NewPlainDBState(tx, blockNum-1)
 		stateWriter = state.NewCacheStateWriter()
 
-		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
+		if _, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("exec block: %w", err)
 		}
 	}

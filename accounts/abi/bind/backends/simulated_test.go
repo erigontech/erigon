@@ -42,6 +42,7 @@ import (
 )
 
 func TestSimulatedBackend(t *testing.T) {
+
 	var gasLimit uint64 = 8000029
 	key, _ := crypto.GenerateKey() // nolint: gosec
 	auth := bind.NewKeyedTransactor(key)

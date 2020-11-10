@@ -54,5 +54,4 @@ func TestRemoveCanonical(t *testing.T) {
 			t.Fatalf("Invalid header. headers differs in td. have %d, want %d", haveTd.Int64(), i)
 		}
 	}
-	panic("a")
 }

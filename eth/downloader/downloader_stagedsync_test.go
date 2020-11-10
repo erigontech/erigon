@@ -117,12 +117,7 @@ func (st *stagedSyncTester) GetBlockByHash(hash common.Hash) *types.Block {
 
 // GetBlockByNumber is part of the implementation of BlockChain interface defined in downloader.go
 func (st *stagedSyncTester) GetBlockByNumber(number uint64) *types.Block {
-	hash, err := rawdb.ReadCanonicalHash(st.db, number)
-	if err != nil {
-		log.Error("ReadCanonicalHash failed", "err", err)
-		return nil
-	}
-	return rawdb.ReadBlock(st.db, hash, number)
+	return rawdb.ReadCanonicalBlock(st.db, number)
 }
 
 // GetHeaderByHash is part of the implementation of BlockChain interface defined in downloader.go

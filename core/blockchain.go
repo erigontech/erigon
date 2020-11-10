@@ -508,6 +508,9 @@ func (bc *BlockChain) GasLimit() uint64 {
 func (bc *BlockChain) CurrentBlock() *types.Block {
 	headHash := rawdb.ReadHeadBlockHash(bc.db)
 	headNumber := rawdb.ReadHeaderNumber(bc.db, headHash)
+	if UsePlainStateExecution {
+		return rawdb.ReadCanonicalBlock(bc.db, *headNumber)
+	}
 	return rawdb.ReadBlock(bc.db, headHash, *headNumber)
 }
 
@@ -711,6 +714,10 @@ func (bc *BlockChain) GetBlockByHash(hash common.Hash) *types.Block {
 	if number == nil {
 		return nil
 	}
+
+	if UsePlainStateExecution {
+		return rawdb.ReadCanonicalBlock(bc.db, *number)
+	}
 	return bc.GetBlock(hash, *number)
 }
 
@@ -725,6 +732,9 @@ func (bc *BlockChain) GetBlockByNumber(number uint64) *types.Block {
 
 	if hash == (common.Hash{}) {
 		return nil
+	}
+	if UsePlainStateExecution {
+		return rawdb.ReadCanonicalBlock(bc.db, number)
 	}
 	return bc.GetBlock(hash, number)
 }
@@ -1470,7 +1480,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 		// But we still write the blocks to the database because others might build on top of them
 		td := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)
-		for i, block := range chain {
+		for _, block := range chain {
 			log.Warn("Saving", "block", block.NumberU64(), "hash", block.Hash())
 			td = new(big.Int).Add(block.Difficulty(), td)
 			if err := rawdb.WriteBlock(ctx, bc.db, block); err != nil {
@@ -2255,7 +2265,7 @@ func InsertBodies(
 	var parent *types.Block
 	var parentNumber = chain[0].NumberU64() - 1
 	parentHash := chain[0].ParentHash()
-	parent = rawdb.ReadBlock(batch, parentHash, parentNumber)
+	parent = rawdb.ReadCanonicalBlock(batch, parentNumber)
 	if parent == nil {
 		log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
 		return true, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
@@ -2285,7 +2295,7 @@ func InsertBodies(
 			return true, ctx.Err()
 		}
 
-		rawdb.WriteBody(ctx, batch, block.Hash(), block.NumberU64(), block.Body())
+		rawdb.WriteCanonicalBody(ctx, batch, block.NumberU64(), block.Body())
 
 		ctx = config.WithEIPsFlags(ctx, block.Number())
 		ctx = params.WithNoHistory(ctx, noHistory, isNoHistory)

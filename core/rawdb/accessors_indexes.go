@@ -90,6 +90,34 @@ func ReadTransaction(db DatabaseReader, hash common.Hash) (*types.Transaction, c
 	return nil, common.Hash{}, 0, 0
 }
 
+// ReadTransaction retrieves a specific transaction from the database, along with
+// its added positional metadata.
+func ReadCanonicalTransaction(db DatabaseReader, hash common.Hash) (*types.Transaction, common.Hash, uint64, uint64) {
+	blockNumber := ReadTxLookupEntry(db, hash)
+	if blockNumber == nil {
+		return nil, common.Hash{}, 0, 0
+	}
+
+	blockHash, err := ReadCanonicalHash(db, *blockNumber)
+	if err != nil {
+		log.Error("ReadCanonicalHash failed", "err", err)
+		return nil, common.Hash{}, 0, 0
+	}
+
+	body := ReadCanonicalBody(db, *blockNumber)
+	if body == nil {
+		log.Error("Transaction referenced missing", "number", blockNumber)
+		return nil, common.Hash{}, 0, 0
+	}
+	for txIndex, tx := range body.Transactions {
+		if tx.Hash() == hash {
+			return tx, blockHash, *blockNumber, uint64(txIndex)
+		}
+	}
+	log.Error("Transaction not found", "number", blockNumber, "txhash", hash)
+	return nil, common.Hash{}, 0, 0
+}
+
 // ReadReceipt retrieves a specific transaction receipt from the database, along with
 // its added positional metadata.
 func ReadReceipt(db ethdb.Database, hash common.Hash) (*types.Receipt, common.Hash, uint64, uint64) {
@@ -108,6 +136,33 @@ func ReadReceipt(db ethdb.Database, hash common.Hash) (*types.Receipt, common.Ha
 	}
 	// Read all the receipts from the block and return the one with the matching hash
 	receipts := ReadReceipts(db, blockHash, *blockNumber)
+	for receiptIndex, receipt := range receipts {
+		if receipt.TxHash == hash {
+			return receipt, blockHash, *blockNumber, uint64(receiptIndex)
+		}
+	}
+	log.Error("Receipt not found", "number", blockNumber, "hash", blockHash, "txhash", hash)
+	return nil, common.Hash{}, 0, 0
+}
+
+// ReadReceipt retrieves a specific transaction receipt from the database, along with
+// its added positional metadata.
+func ReadCanonicalReceipt(db ethdb.Database, hash common.Hash) (*types.Receipt, common.Hash, uint64, uint64) {
+	// Retrieve the context of the receipt based on the transaction hash
+	blockNumber := ReadTxLookupEntry(db, hash)
+	if blockNumber == nil {
+		return nil, common.Hash{}, 0, 0
+	}
+	blockHash, err := ReadCanonicalHash(db, *blockNumber)
+	if err != nil {
+		log.Error("ReadCanonicalHash failed", "err", err)
+		return nil, common.Hash{}, 0, 0
+	}
+	if blockHash == (common.Hash{}) {
+		return nil, common.Hash{}, 0, 0
+	}
+	// Read all the receipts from the block and return the one with the matching hash
+	receipts := ReadCanonicalReceipts(db, blockHash, *blockNumber)
 	for receiptIndex, receipt := range receipts {
 		if receipt.TxHash == hash {
 			return receipt, blockHash, *blockNumber, uint64(receiptIndex)

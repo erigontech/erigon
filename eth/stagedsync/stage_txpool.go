@@ -57,28 +57,6 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	headHeader := rawdb.ReadHeader(db, headHash, to)
 	pool.ResetHead(headHeader.GasLimit, to)
 	canonical := make([]common.Hash, to-from)
-	currentHeaderIdx := uint64(0)
-
-	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
-		}
-
-		// Skip non relevant records
-		if !dbutils.CheckCanonicalKey(k) {
-			return true, nil
-		}
-
-		if currentHeaderIdx >= to-from { // if header stage is ahead of body stage
-			return false, nil
-		}
-
-		copy(canonical[currentHeaderIdx][:], v[:common.HashLength])
-		currentHeaderIdx++
-		return true, nil
-	}); err != nil {
-		return err
-	}
 
 	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
 	if err := db.Walk(dbutils.BlockBodyPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
@@ -87,14 +65,8 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 		}
 
 		blockNumber := binary.BigEndian.Uint64(k[:8])
-		blockHash := common.BytesToHash(k[8:])
 		if blockNumber > to {
 			return false, nil
-		}
-
-		if canonical[blockNumber-from-1] != blockHash {
-			// non-canonical case
-			return true, nil
 		}
 
 		bodyRlp, err := rawdb.DecompressBlockBody(v)
@@ -143,29 +115,8 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, db
 	}
 	headHeader := rawdb.ReadHeader(db, headHash, from)
 	pool.ResetHead(headHeader.GasLimit, from)
-	canonical := make([]common.Hash, to-from)
 
-	if err := db.Walk(dbutils.HeaderPrefix, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
-		}
-
-		// Skip non relevant records
-		if !dbutils.CheckCanonicalKey(k) {
-			return true, nil
-		}
-		blockNumber := binary.BigEndian.Uint64(k[:8])
-
-		if blockNumber > to {
-			return false, nil
-		}
-
-		copy(canonical[blockNumber-from-1][:], v[:common.HashLength])
-		return true, nil
-	}); err != nil {
-		return err
-	}
-	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
+	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix))
 	senders := make([][]common.Address, to-from+1)
 	if err := db.Walk(dbutils.Senders, dbutils.EncodeBlockNumber(from+1), 0, func(k, v []byte) (bool, error) {
 		if err := common.Stopped(quitCh); err != nil {
@@ -173,15 +124,10 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, db
 		}
 
 		blockNumber := binary.BigEndian.Uint64(k[:8])
-		blockHash := common.BytesToHash(k[8:])
 		if blockNumber > to {
 			return false, nil
 		}
 
-		if canonical[blockNumber-from-1] != blockHash {
-			// non-canonical case
-			return true, nil
-		}
 		sendersArray := make([]common.Address, len(v)/common.AddressLength)
 		for i := 0; i < len(sendersArray); i++ {
 			copy(sendersArray[i][:], v[i*common.AddressLength:])
@@ -199,14 +145,8 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, db
 		}
 
 		blockNumber := binary.BigEndian.Uint64(k[:8])
-		blockHash := common.BytesToHash(k[8:])
 		if blockNumber > to {
 			return false, nil
-		}
-
-		if canonical[blockNumber-from-1] != blockHash {
-			// non-canonical case
-			return true, nil
 		}
 
 		bodyRlp, err := rawdb.DecompressBlockBody(v)

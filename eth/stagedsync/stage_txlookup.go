@@ -42,8 +42,7 @@ func TxLookupTransform(logPrefix string, db ethdb.Database, startKey, endKey []b
 			return nil
 		}
 		blocknum := binary.BigEndian.Uint64(k)
-		blockHash := common.BytesToHash(v[:common.HashLength])
-		body := rawdb.ReadBody(db, blockHash, blocknum)
+		body := rawdb.ReadCanonicalBody(db, blocknum)
 		if body == nil {
 			return fmt.Errorf("%s: tx lookup generation, empty block body %d, hash %x", logPrefix, blocknum, v)
 		}

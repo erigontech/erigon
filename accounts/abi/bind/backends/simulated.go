@@ -147,6 +147,8 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
 func NewSimulatedBackend(alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
+	core.UsePlainStateExecution = true
+
 	return NewSimulatedBackendWithDatabase(ethdb.NewMemDatabase(), alloc, gasLimit)
 }
 
@@ -269,7 +271,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	receipt, _, _, _ := rawdb.ReadReceipt(b.database, txHash)
+	receipt, _, _, _ := rawdb.ReadCanonicalReceipt(b.database, txHash)
 	return receipt, nil
 }
 
@@ -285,7 +287,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 	if tx != nil {
 		return tx, true, nil
 	}
-	tx, _, _, _ = rawdb.ReadTransaction(b.database, txHash)
+	tx, _, _, _ = rawdb.ReadCanonicalTransaction(b.database, txHash)
 	if tx != nil {
 		return tx, false, nil
 	}
@@ -301,7 +303,7 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash common.Hash) (*
 		return b.pendingBlock, nil
 	}
 
-	block, err := rawdb.ReadBlockByHash(b.database, hash)
+	block, err := rawdb.ReadCanonicalBlockByHash(b.database, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -328,11 +330,7 @@ func (b *SimulatedBackend) blockByNumberNoLock(_ context.Context, number *big.In
 		return b.prependBlock, nil
 	}
 
-	hash, err := rawdb.ReadCanonicalHash(b.database, number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-	block := rawdb.ReadBlock(b.database, hash, number.Uint64())
+	block := rawdb.ReadCanonicalBlock(b.database, number.Uint64())
 	if block == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -387,7 +385,7 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 		return uint(b.pendingBlock.Transactions().Len()), nil
 	}
 
-	block, err := rawdb.ReadBlockByHash(b.database, blockHash)
+	block, err := rawdb.ReadCanonicalBlockByHash(b.database, blockHash)
 	if err != nil {
 		return 0, err
 	}
@@ -412,7 +410,7 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash com
 		return transactions[index], nil
 	}
 
-	block, err := rawdb.ReadBlockByHash(b.database, blockHash)
+	block, err := rawdb.ReadCanonicalBlockByHash(b.database, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -846,7 +844,7 @@ func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (typ
 	if number == nil {
 		return nil, nil
 	}
-	return rawdb.ReadReceipts(fb.db, hash, *number), nil
+	return rawdb.ReadCanonicalReceipts(fb.db, hash, *number), nil
 }
 
 func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
@@ -854,7 +852,7 @@ func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*ty
 	if number == nil {
 		return nil, nil
 	}
-	receipts := rawdb.ReadReceipts(fb.db, hash, *number)
+	receipts := rawdb.ReadCanonicalReceipts(fb.db, hash, *number)
 	if receipts == nil {
 		return nil, nil
 	}

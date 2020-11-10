@@ -66,7 +66,7 @@ func (cr ChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 
 // GetBlock retrieves a block from the database by hash and number.
 func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return rawdb.ReadBlock(cr.db, hash, number)
+	return rawdb.ReadCanonicalBlock(cr.db, number)
 }
 
 func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) (bool, uint64, error) {
