@@ -58,6 +58,8 @@ type Node struct {
 	ipc           *ipcServer  // Stores information about the ipc http server
 	inprocHandler *rpc.Server // In-process RPC request handler to process the API requests
 
+	rpcAllowList rpc.AllowList // list of RPC methods explicitly allowed for this RPC node
+
 	databases []ethdb.Closer
 }
 
@@ -342,6 +344,11 @@ func (n *Node) closeDataDir() {
 	}
 }
 
+// SetAllowListForRPC sets granular allow list for exposed RPC methods
+func (n *Node) SetAllowListForRPC(allowList rpc.AllowList) {
+	n.rpcAllowList = allowList
+}
+
 // configureRPC is a helper method to configure all the various RPC endpoints during node
 // startup. It's not meant to be called at any time afterwards as it makes certain
 // assumptions about the state of the node.
@@ -367,7 +374,7 @@ func (n *Node) startRPC() error {
 		if err := n.http.setListenAddr(n.config.HTTPHost, n.config.HTTPPort); err != nil {
 			return err
 		}
-		if err := n.http.enableRPC(n.rpcAPIs, config); err != nil {
+		if err := n.http.enableRPC(n.rpcAPIs, config, n.rpcAllowList); err != nil {
 			return err
 		}
 	}
@@ -382,7 +389,7 @@ func (n *Node) startRPC() error {
 		if err := server.setListenAddr(n.config.WSHost, n.config.WSPort); err != nil {
 			return err
 		}
-		if err := server.enableWS(n.rpcAPIs, config); err != nil {
+		if err := server.enableWS(n.rpcAPIs, config, n.rpcAllowList); err != nil {
 			return err
 		}
 	}

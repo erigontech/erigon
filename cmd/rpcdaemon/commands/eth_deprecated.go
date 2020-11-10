@@ -43,3 +43,8 @@ func (api *APIImpl) Accounts(ctx context.Context) ([]common.Address, error) {
 func (api *APIImpl) Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error) {
 	return hexutil.Bytes(""), fmt.Errorf(NotAvailableDeprecated, "eth_sign")
 }
+
+// SignTransaction deprecated
+func (api *APIImpl) SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error) {
+	return common.Hash{0}, fmt.Errorf(NotAvailableDeprecated, "eth_signTransaction")
+}

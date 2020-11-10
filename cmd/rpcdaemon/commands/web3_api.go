@@ -36,8 +36,3 @@ func (api *Web3APIImpl) Sha3(_ context.Context, input hexutil.Bytes) hexutil.Byt
 var (
 	gitCommit string
 )
-
-// SetGitStrings very hacky way to get these strings into this package
-func SetGitStrings(commit string) {
-	gitCommit = commit
-}
