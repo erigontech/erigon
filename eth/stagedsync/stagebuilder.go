@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -13,6 +15,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
+
+type ChainEventNotifier interface {
+	OnNewHeader(*types.Header)
+}
 
 // StageParameters contains the stage that stages receives at runtime when initializes.
 // Then the stage can use it to receive different useful functions.
@@ -39,6 +45,7 @@ type StageParameters struct {
 	prefetchedBlocks   *PrefetchedBlocks
 	stateReaderBuilder StateReaderBuilder
 	stateWriterBuilder StateWriterBuilder
+	notifier           ChainEventNotifier
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -328,6 +335,18 @@ func DefaultStages() StageBuilders {
 						}
 						logPrefix := s.state.LogPrefix()
 						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
+						for i := s.BlockNumber; i <= executionAt; i++ {
+							hash, err := rawdb.ReadCanonicalHash(world.TX, i)
+							if err != nil {
+								return err
+							}
+							header := rawdb.ReadHeader(world.TX, hash, i)
+							if header == nil {
+								return fmt.Errorf("could not find canonical header for hash: %x number: %d", hash, i)
+							}
+							fmt.Println("notifying about header", header.Number)
+							world.notifier.OnNewHeader(header)
+						}
 						return s.DoneAndUpdate(world.TX, executionAt)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {

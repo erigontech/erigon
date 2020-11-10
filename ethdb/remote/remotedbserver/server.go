@@ -29,7 +29,7 @@ type KvServer struct {
 	kv ethdb.KV
 }
 
-func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
+func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.TransportCredentials, events *Events) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -38,7 +38,7 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 
 	kv2Srv := NewKvServer(kv)
 	dbSrv := NewDBServer(kv)
-	ethBackendSrv := NewEthBackendServer(eth)
+	ethBackendSrv := NewEthBackendServer(eth, stagedSync)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor

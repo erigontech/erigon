@@ -27,6 +27,9 @@ type OptionalParameters struct {
 	// StateReaderBuilder is a function that returns state writer for the block execution stage.
 	// It can be used to update bloom or other types of filters between block execution.
 	StateWriterBuilder StateWriterBuilder
+
+	// Notifier allows sending some data when new headers or new blocks are added
+	Notifier ChainEventNotifier
 }
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
@@ -91,6 +94,7 @@ func (stagedSync *StagedSync) Prepare(
 			prefetchedBlocks:   stagedSync.PrefetchedBlocks,
 			stateReaderBuilder: readerBuilder,
 			stateWriterBuilder: writerBuilder,
+			notifier:           stagedSync.params.Notifier,
 		},
 	)
 	state := NewState(stages)

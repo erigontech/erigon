@@ -3,6 +3,8 @@ package remotedbserver
 import (
 	"context"
 	"fmt"
+	"math/big"
+	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -15,11 +17,12 @@ import (
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	eth core.Backend
+	eth    core.Backend
+	events *Events
 }
 
-func NewEthBackendServer(eth core.Backend) *EthBackendServer {
-	return &EthBackendServer{eth: eth}
+func NewEthBackendServer(eth core.Backend, events *Events) *EthBackendServer {
+	return &EthBackendServer{eth: eth, events: events}
 }
 
 func (s *EthBackendServer) Add(_ context.Context, in *remote.TxRequest) (*remote.AddReply, error) {
@@ -59,13 +62,32 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 }
 
 func (s *EthBackendServer) Subscribe(_ *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
-	for i := 0; i < 10; i++ {
-		time.Sleep(1 * time.Second)
-		err := subscribeServer.Send(&remote.SubscribeReply{Data: []byte(fmt.Sprintf("iteraton %d", i))})
-		if err != nil {
-			return err
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		fmt.Println("initial sleep")
+		time.Sleep(10 * time.Second)
+		fmt.Println("starting the cycle")
+		i := int64(0)
+		for {
+			s.events.OnNewHeader(&types.Header{Number: big.NewInt(i)})
+			i++
+			time.Sleep(1 * time.Second)
 		}
-	}
+	}()
+
+	s.events.AddHeaderSubscription(func(h *types.Header) error {
+		fmt.Println("sending header", h.Number)
+		err := subscribeServer.Send(&remote.SubscribeReply{Data: []byte(fmt.Sprintf("iteraton %v", h.Number))})
+		if err != nil {
+			wg.Done()
+		}
+		return err
+	})
+
+	wg.Wait()
+	fmt.Println("done")
 
 	return nil
 }
