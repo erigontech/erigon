@@ -74,9 +74,10 @@ type BatchElem struct {
 
 // Client represents a connection to an RPC server.
 type Client struct {
-	idgen    func() ID // for subscriptions
-	isHTTP   bool
-	services *serviceRegistry
+	idgen           func() ID // for subscriptions
+	isHTTP          bool
+	services        *serviceRegistry
+	methodAllowList AllowList
 
 	idCounter uint32
 
@@ -111,7 +112,7 @@ type clientConn struct {
 
 func (c *Client) newClientConn(conn ServerCodec) *clientConn {
 	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
-	handler := newHandler(ctx, conn, c.idgen, c.services)
+	handler := newHandler(ctx, conn, c.idgen, c.services, c.methodAllowList)
 	return &clientConn{conn, handler}
 }
 

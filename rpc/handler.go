@@ -62,6 +62,8 @@ type handler struct {
 	log            log.Logger
 	allowSubscribe bool
 
+	allowList AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
+
 	subLock    sync.Mutex
 	serverSubs map[ID]*Subscription
 }
@@ -71,7 +73,7 @@ type callProc struct {
 	notifiers []*Notifier
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry) *handler {
+func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	h := &handler{
 		reg:            reg,
@@ -84,6 +86,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		allowSubscribe: true,
 		serverSubs:     make(map[ID]*Subscription),
 		log:            log.Root(),
+		allowList:      allowList,
 	}
 	if conn.remoteAddr() != "" {
 		h.log = h.log.New("conn", conn.remoteAddr())
@@ -314,6 +317,14 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage) *jsonrpcMess
 	}
 }
 
+func (h *handler) isMethodAllowedByGranularControl(method string) bool {
+	if len(h.allowList) == 0 {
+		return true
+	}
+	_, ok := h.allowList[method]
+	return ok
+}
+
 // handleCall processes method calls.
 func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage {
 	if msg.isSubscribe() {
@@ -322,7 +333,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage 
 	var callb *callback
 	if msg.isUnsubscribe() {
 		callb = h.unsubscribeCb
-	} else {
+	} else if h.isMethodAllowedByGranularControl(msg.Method) {
 		callb = h.reg.callback(msg.Method)
 	}
 	if callb == nil {

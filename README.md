@@ -127,45 +127,7 @@ Run RPC daemon
 
 Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):
 
-For a more detailed status, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
-
-```
-eth_coinbase
-eth_blockNumber
-eth_call
-eth_estimateGas
-eth_getBlockByNumber
-eth_getBlockByHash
-eth_getBlockTransactionCountByHash
-eth_getBlockTransactionCountByNumber
-eth_getBalance
-eth_getCode
-eth_GetTransactionCount
-eth_GetUncleByBlockNumberAndIndex
-eth_GetUncleByBlockHashAndIndex
-eth_GetUncleCountByBlockNumber
-eth_GetUncleCountByBlockHash
-eth_getLogs
-eth_getStorageAt
-eth_getTransactionReceipt
-eth_getTransactionByHash
-eth_getTransactionByBlockHashAndIndex
-eth_getTransactionByBlockNumberAndIndex
-eth_sendRawTransaction
-eth_syncing
-debug_accountRange
-debug_getModifiedAccountsByNumber
-debug_getModifiedAccountsByHash
-debug_storageRangeAt
-debug_traceTransaction
-net_peerCount*
-net_version
-web3_clientVersion
-web3_sha3
-trace_filter
-```
-
-\* net_peerCount currently always returns a count of 25 as work continues on Sentry.
+For a details on the implementation status of each command, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
 
 #### Grafana dashboard:
 

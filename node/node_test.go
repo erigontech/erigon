@@ -484,7 +484,6 @@ func TestWebsocketHTTPOnSeparatePort_WSRequest(t *testing.T) {
 	if !checkRPC(node.HTTPEndpoint()) {
 		t.Fatalf("http request failed")
 	}
-
 }
 
 func createNode(t *testing.T, httpPort, wsPort int) *Node {

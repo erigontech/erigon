@@ -23,7 +23,7 @@ import (
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, dbReader ethdb.Getter, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, dbReader ethdb.Getter, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64, chainConfig *params.ChainConfig) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -99,7 +99,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, dbReader eth
 
 	evmCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbReader)
 
-	evm := vm.NewEVM(evmCtx, state, params.MainnetChainConfig, vm.Config{})
+	evm := vm.NewEVM(evmCtx, state, chainConfig, vm.Config{})
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
