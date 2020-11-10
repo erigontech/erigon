@@ -434,6 +434,10 @@ func defrag() error {
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx, 1000) },
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx, 1000) },
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx, 1000) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx, 1000) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx, 1000) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx, 1000) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx, 1000) },
 	); err != nil {
 		return err
 	}
