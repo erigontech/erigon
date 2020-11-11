@@ -743,11 +743,6 @@ var (
 		Usage: "External EVM configuration (default = built-in interpreter)",
 		Value: "",
 	}
-	SilkwormFlag = cli.StringFlag{
-		Name:  "silkworm",
-		Usage: "File path of libsilkworm_tg_api dynamic library (default = do not use Silkworm)",
-		Value: "",
-	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}

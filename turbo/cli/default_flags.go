@@ -60,5 +60,5 @@ var DefaultFlags = []cli.Flag{
 	utils.MetricsHTTPFlag,
 	utils.MetricsPortFlag,
 	utils.IdentityFlag,
-	utils.SilkwormFlag,
+	SilkwormFlag,
 }

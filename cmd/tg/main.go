@@ -30,7 +30,7 @@ func main() {
 }
 
 func runTurboGeth(cliCtx *cli.Context) {
-	silkwormPath := cliCtx.String(utils.SilkwormFlag.Name)
+	silkwormPath := cliCtx.String(turbocli.SilkwormFlag.Name)
 	var silkwormExecutionFunc unsafe.Pointer
 	if silkwormPath != "" {
 		var err error
