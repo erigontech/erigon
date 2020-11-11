@@ -229,16 +229,6 @@ func change1(tx ethdb.Tx) (bool, error) {
 	return true, nil
 }
 
-func doubleTap(_ ethdb.KV, tx ethdb.Tx) (bool, error) {
-	c := tx.Cursor("t")
-	defer c.Close()
-	k := fmt.Sprintf("%05d", 0)
-	if err := c.Put([]byte(k), []byte("another_short_value_2")); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 func change2(tx ethdb.Tx) (bool, error) {
 	c := tx.Cursor("t")
 	defer c.Close()
@@ -414,22 +404,7 @@ func defrag() error {
 	if err := defragSteps("vis14", manyBucketCfg, generate8, func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return false, generate9(tx, 300000) }, dropGradually); err != nil {
 		return err
 	}
-	if err := defragSteps("noDoubleTap", oneBucketCfg,
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return true, generate2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx) },
-	); err != nil {
-		return err
-	}
-	if err := defragSteps("doubleTap", oneBucketCfg,
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return true, generate2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx) },
-		doubleTap,
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx) },
-	); err != nil {
-		return err
-	}
-	if err := defragSteps("noReader", oneBucketCfg,
+	if err := defragSteps("vis15", oneBucketCfg,
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return true, generate2(tx, 1000) },
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx) },
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx) },
@@ -443,7 +418,7 @@ func defrag() error {
 	}
 	readerStartCh := make(chan struct{})
 	readerErrorCh := make(chan error)
-	if err := defragSteps("withReader", oneBucketCfg,
+	if err := defragSteps("vis16", oneBucketCfg,
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return true, generate2(tx, 1000) },
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx) },
 		func(kv ethdb.KV, tx ethdb.Tx) (bool, error) {
