@@ -217,10 +217,10 @@ func dropGradually(kv ethdb.KV, tx ethdb.Tx) (bool, error) {
 	return true, nil
 }
 
-func change1(tx ethdb.Tx, entries int) (bool, error) {
+func change1(tx ethdb.Tx) (bool, error) {
 	c := tx.Cursor("t")
 	defer c.Close()
-	for i := 0; i < entries; i++ {
+	for i := 0; i < 1000; i++ {
 		k := fmt.Sprintf("%05d", i)
 		if err := c.Put([]byte(k), []byte("another_short_value_1")); err != nil {
 			return false, err
@@ -239,10 +239,10 @@ func doubleTap(_ ethdb.KV, tx ethdb.Tx) (bool, error) {
 	return true, nil
 }
 
-func change2(tx ethdb.Tx, entries int) (bool, error) {
+func change2(tx ethdb.Tx) (bool, error) {
 	c := tx.Cursor("t")
 	defer c.Close()
-	for i := 0; i < entries; i++ {
+	for i := 0; i < 1000; i++ {
 		k := fmt.Sprintf("%05d", i)
 		if err := c.Put([]byte(k), []byte("another_short_value_2")); err != nil {
 			return false, err
@@ -251,10 +251,10 @@ func change2(tx ethdb.Tx, entries int) (bool, error) {
 	return true, nil
 }
 
-func change3(tx ethdb.Tx, entries int) (bool, error) {
+func change3(tx ethdb.Tx) (bool, error) {
 	c := tx.Cursor("t")
 	defer c.Close()
-	for i := 0; i < entries; i++ {
+	for i := 0; i < 1000; i++ {
 		k := fmt.Sprintf("%05d", i)
 		if err := c.Put([]byte(k), []byte("another_short_value_3")); err != nil {
 			return false, err
@@ -263,7 +263,7 @@ func change3(tx ethdb.Tx, entries int) (bool, error) {
 	return true, nil
 }
 
-func launchReader(kv ethdb.KV, tx ethdb.Tx, entries int, expectVal string, startCh chan struct{}, errorCh chan error) (bool, error) {
+func launchReader(kv ethdb.KV, tx ethdb.Tx, expectVal string, startCh chan struct{}, errorCh chan error) (bool, error) {
 	tx.Rollback()
 	tx1, err := kv.Begin(context.Background(), nil, ethdb.RO)
 	if err != nil {
@@ -275,7 +275,7 @@ func launchReader(kv ethdb.KV, tx ethdb.Tx, entries int, expectVal string, start
 		<-startCh
 		c := tx1.Cursor("t")
 		defer c.Close()
-		for i := 0; i < entries; i++ {
+		for i := 0; i < 1000; i++ {
 			k := fmt.Sprintf("%05d", i)
 			var v []byte
 			if v, err = c.SeekExact([]byte(k)); err != nil {
@@ -288,7 +288,6 @@ func launchReader(kv ethdb.KV, tx ethdb.Tx, entries int, expectVal string, start
 			}
 		}
 		errorCh <- nil
-		return
 	}()
 	return false, nil
 }
@@ -325,6 +324,7 @@ func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...(
 		var display bool
 		if err = kv.Update(context.Background(), func(tx ethdb.Tx) error {
 			var err1 error
+			//nolint:scopelint
 			display, err1 = generateF(kv, tx)
 			return err1
 		}); err != nil {
@@ -416,28 +416,28 @@ func defrag() error {
 	}
 	if err := defragSteps("noDoubleTap", oneBucketCfg,
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return true, generate2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx, 1000) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx) },
 	); err != nil {
 		return err
 	}
 	if err := defragSteps("doubleTap", oneBucketCfg,
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return true, generate2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx, 1000) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx) },
 		doubleTap,
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx, 1000) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx) },
 	); err != nil {
 		return err
 	}
 	if err := defragSteps("noReader", oneBucketCfg,
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return true, generate2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx, 1000) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx) },
 	); err != nil {
 		return err
 	}
@@ -445,16 +445,16 @@ func defrag() error {
 	readerErrorCh := make(chan error)
 	if err := defragSteps("withReader", oneBucketCfg,
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return true, generate2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx, 1000) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change1(tx) },
 		func(kv ethdb.KV, tx ethdb.Tx) (bool, error) {
-			return launchReader(kv, tx, 1000, "another_short_value_1", readerStartCh, readerErrorCh)
+			return launchReader(kv, tx, "another_short_value_1", readerStartCh, readerErrorCh)
 		},
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx, 1000) },
-		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx, 1000) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change2(tx) },
+		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) { return change3(tx) },
 		func(_ ethdb.KV, tx ethdb.Tx) (bool, error) {
 			return startReader(tx, readerStartCh)
 		},
