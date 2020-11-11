@@ -2,6 +2,7 @@ package remotedbserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -60,21 +62,27 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 }
 
 func (s *EthBackendServer) Subscribe(_ *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
-	fmt.Println("subscribe called")
+	fmt.Println("establishing subscription channel with RPC daemon")
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 
 	s.events.AddHeaderSubscription(func(h *types.Header) error {
 		fmt.Println("sending header", h.Number)
-		err := subscribeServer.Send(&remote.SubscribeReply{Data: []byte(fmt.Sprintf("iteraton %v", h.Number))})
+
+		payload, err := json.Marshal(h)
+		if err != nil {
+			log.Warn("error while marshaling a header", "err", err)
+			return err
+		}
+
+		err = subscribeServer.Send(&remote.SubscribeReply{Data: payload})
 		if err != nil {
 			wg.Done()
 		}
 		return err
 	})
-	fmt.Println("subscribe: waiting for done")
+	fmt.Println("subscription channel established with RPC daemon")
 	wg.Wait()
-	fmt.Println("done")
-
+	fmt.Println("subscription channel closed with RPC daemon")
 	return nil
 }

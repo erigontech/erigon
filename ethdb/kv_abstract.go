@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
 var (
@@ -198,7 +199,7 @@ type Backend interface {
 	AddLocal([]byte) ([]byte, error)
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
-	Subscribe() error
+	Subscribe(func(*remote.SubscribeReply)) error
 }
 
 type DbProvider uint8

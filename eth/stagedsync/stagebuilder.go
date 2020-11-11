@@ -336,16 +336,17 @@ func DefaultStages() StageBuilders {
 						logPrefix := s.state.LogPrefix()
 						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
 						for i := s.BlockNumber; i <= executionAt; i++ {
-							hash, err := rawdb.ReadCanonicalHash(world.TX, i)
-							if err != nil {
-								return err
-							}
-							header := rawdb.ReadHeader(world.TX, hash, i)
-							if header == nil {
-								return fmt.Errorf("could not find canonical header for hash: %x number: %d", hash, i)
-							}
-							fmt.Println("notifying about header", header.Number)
+
 							if world.notifier != nil {
+								hash, err := rawdb.ReadCanonicalHash(world.TX, i)
+								if err != nil {
+									return err
+								}
+								header := rawdb.ReadHeader(world.TX, hash, i)
+								if header == nil {
+									return fmt.Errorf("could not find canonical header for hash: %x number: %d", hash, i)
+								}
+								fmt.Println("notifying about header", header.Number)
 								world.notifier.OnNewHeader(header)
 							} else {
 								fmt.Println("IGORM: Warn! no notifier set!!!")

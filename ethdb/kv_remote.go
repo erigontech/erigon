@@ -726,7 +726,7 @@ func (back *RemoteBackend) NetVersion() (uint64, error) {
 	return res.Id, nil
 }
 
-func (back *RemoteBackend) Subscribe() error {
+func (back *RemoteBackend) Subscribe(onNewEvent func(*remote.SubscribeReply)) error {
 	fmt.Println("subscribe!")
 	subscription, err := back.remoteEthBackend.Subscribe(context.Background(), &remote.SubscribeRequest{})
 	if err != nil {
@@ -744,7 +744,8 @@ func (back *RemoteBackend) Subscribe() error {
 			fmt.Println("error reading event", err)
 			return err
 		}
-		fmt.Println("event", string(event.Data))
+
+		onNewEvent(event)
 	}
 	return nil
 }
