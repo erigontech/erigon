@@ -13,7 +13,7 @@ func APIList(db ethdb.KV, eth ethdb.Backend, filters *filters.Filters, cfg cli.F
 
 	dbReader := ethdb.NewObjectDatabase(db)
 
-	ethImpl := NewEthAPI(db, dbReader, eth, cfg.Gascap)
+	ethImpl := NewEthAPI(db, dbReader, eth, cfg.Gascap, filters)
 	tgImpl := NewTgAPI(db, dbReader)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(db, dbReader)

@@ -46,19 +46,17 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 
 	go func() {
 		headers := make(chan *types.Header)
-		/*
-			headersSub := api.events.SubscribeNewHeads(headers)
-		*/
+		id := api.filters.SubscribeNewHeads(headers)
 
 		for {
 			select {
 			case h := <-headers:
 				notifier.Notify(rpcSub.ID, h)
 			case <-rpcSub.Err():
-				//headersSub.Unsubscribe()
+				api.filters.Unsubscribe(id)
 				return
 			case <-notifier.Closed():
-				//headersSub.Unsubscribe()
+				api.filters.Unsubscribe(id)
 				return
 			}
 		}
