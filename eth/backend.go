@@ -361,6 +361,9 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	if stagedSync == nil {
 		fmt.Println("creating default staged sync")
 		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: remoteEvents})
+	} else {
+		fmt.Println("setting notifier to the existing sync instance")
+		stagedSync.Notifier = remoteEvents
 	}
 
 	if stack.Config().PrivateApiAddr != "" {

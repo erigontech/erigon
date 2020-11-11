@@ -22,5 +22,8 @@ func (e *Events) OnNewHeader(newHeader *types.Header) {
 	if e.headerSubscription == nil {
 		return
 	}
-	e.headerSubscription(newHeader)
+	err := e.headerSubscription(newHeader)
+	if err != nil {
+		e.headerSubscription = nil
+	}
 }

@@ -345,7 +345,11 @@ func DefaultStages() StageBuilders {
 								return fmt.Errorf("could not find canonical header for hash: %x number: %d", hash, i)
 							}
 							fmt.Println("notifying about header", header.Number)
-							world.notifier.OnNewHeader(header)
+							if world.notifier != nil {
+								world.notifier.OnNewHeader(header)
+							} else {
+								fmt.Println("IGORM: Warn! no notifier set!!!")
+							}
 						}
 						return s.DoneAndUpdate(world.TX, executionAt)
 					},

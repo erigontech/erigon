@@ -15,6 +15,7 @@ type StagedSync struct {
 	stageBuilders    StageBuilders
 	unwindOrder      UnwindOrder
 	params           OptionalParameters
+	Notifier         ChainEventNotifier
 }
 
 // OptionalParameters contains any non-necessary parateres you can specify to fine-tune
@@ -74,6 +75,10 @@ func (stagedSync *StagedSync) Prepare(
 		}
 	}
 
+	if stagedSync.params.Notifier != nil {
+		stagedSync.Notifier = stagedSync.params.Notifier
+	}
+
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
 			d:                  d,
@@ -94,7 +99,7 @@ func (stagedSync *StagedSync) Prepare(
 			prefetchedBlocks:   stagedSync.PrefetchedBlocks,
 			stateReaderBuilder: readerBuilder,
 			stateWriterBuilder: writerBuilder,
-			notifier:           stagedSync.params.Notifier,
+			notifier:           stagedSync.Notifier,
 		},
 	)
 	state := NewState(stages)
