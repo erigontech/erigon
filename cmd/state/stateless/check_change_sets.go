@@ -143,9 +143,9 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				match = false
 				fmt.Printf("Unexpected account changes in block %d\n", blockNum)
 				fmt.Printf("In the database: ======================\n")
-				fmt.Printf("0x%x: %x\n", k, v)
+				fmt.Printf("%d: 0x%x: %x\n", i, k, v)
 				fmt.Printf("Expected: ==========================\n")
-				fmt.Printf("0x%x %x\n", c.Key, c.Value)
+				fmt.Printf("%d: 0x%x %x\n", i, c.Key, c.Value)
 				return false, nil
 			})
 			if err != nil {
