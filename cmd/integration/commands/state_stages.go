@@ -206,7 +206,8 @@ func checkChangeSet(db ethdb.Database, blockNum uint64, expectedAccountChanges *
 			return true, nil
 		}
 
-		fmt.Printf("Unexpected account changes in block %d\nIn the database: ======================\n", blockNum)
+		fmt.Printf("Unexpected account changes in block %d\n", blockNum)
+		fmt.Printf("In the database: ======================\n")
 		fmt.Printf("0x%x: %x\n", k, v)
 		fmt.Printf("Expected: ==========================\n")
 		fmt.Printf("0x%x %x\n", c.Key, c.Value)
@@ -231,7 +232,8 @@ func checkChangeSet(db ethdb.Database, blockNum uint64, expectedAccountChanges *
 			return true, nil
 		}
 
-		fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
+		fmt.Printf("Unexpected storage changes in block %d\n", blockNum)
+		fmt.Printf("In the database: ======================\n")
 		fmt.Printf("0x%x: %x\n", k, v)
 		fmt.Printf("Expected: ==========================\n")
 		fmt.Printf("0x%x %x\n", c.Key, c.Value)

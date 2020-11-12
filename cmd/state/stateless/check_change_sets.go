@@ -132,6 +132,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			}
 			sort.Sort(accountChanges)
 			i := 0
+			match := true
 			err = changeset.Walk(historyDb, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := accountChanges.Changes[i]
 				i++
@@ -139,14 +140,35 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 					return true, nil
 				}
 
-				fmt.Printf("Unexpected account changes in block %d\nIn the database: ======================\n", blockNum)
+				match = false
+				fmt.Printf("Unexpected account changes in block %d\n", blockNum)
+				fmt.Printf("In the database: ======================\n")
 				fmt.Printf("0x%x: %x\n", k, v)
 				fmt.Printf("Expected: ==========================\n")
 				fmt.Printf("0x%x %x\n", c.Key, c.Value)
-				return false, fmt.Errorf("check change set failed")
+				return false, nil
 			})
 			if err != nil {
 				return err
+			}
+
+			if !match {
+				fmt.Printf("\n\n")
+				fmt.Printf("All in DB: ==========================\n")
+				err = changeset.Walk(historyDb, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+					fmt.Printf("0x%x: %x\n", k, v)
+					return false, nil
+				})
+				fmt.Printf("All Expected: ==========================\n")
+				err = changeset.Walk(historyDb, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+					fmt.Printf("0x%x: %x\n", k, v)
+					return false, nil
+				})
+				for _, c := range accountChanges.Changes {
+					fmt.Printf("0x%x: %x\n", c.Key, c.Value)
+				}
+
+				return fmt.Errorf("check change set failed")
 			}
 
 			i = 0
