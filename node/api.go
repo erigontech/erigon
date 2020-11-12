@@ -207,7 +207,7 @@ func (api *privateAdminAPI) StartRPC(host *string, port *int, cors *string, apis
 	if err := api.node.http.setListenAddr(*host, *port); err != nil {
 		return false, err
 	}
-	if err := api.node.http.enableRPC(api.node.rpcAPIs, config); err != nil {
+	if err := api.node.http.enableRPC(api.node.rpcAPIs, config, nil); err != nil {
 		return false, err
 	}
 	if err := api.node.http.start(); err != nil {
@@ -263,7 +263,7 @@ func (api *privateAdminAPI) StartWS(host *string, port *int, allowedOrigins *str
 	if err := server.setListenAddr(*host, *port); err != nil {
 		return false, err
 	}
-	if err := server.enableWS(api.node.rpcAPIs, config); err != nil {
+	if err := server.enableWS(api.node.rpcAPIs, config, nil); err != nil {
 		return false, err
 	}
 	if err := server.start(); err != nil {
