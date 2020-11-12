@@ -56,8 +56,11 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
 		grpc.ReadBufferSize(1024),
 		grpc.MaxConcurrentStreams(100), // to force clients reduce concurrency level
-		grpc.KeepaliveParams(keepalive.ServerParameters{
-			Time: 10 * time.Minute,
+		// Don't drop the connection, settings accordign to this comment on GitHub
+		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
 		}),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
