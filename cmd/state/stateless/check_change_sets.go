@@ -135,8 +135,8 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			match := true
 			err = changeset.Walk(historyDb, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := accountChanges.Changes[i]
-				i++
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
+					i++
 					return true, nil
 				}
 
