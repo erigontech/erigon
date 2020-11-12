@@ -759,7 +759,7 @@ func (c *MdbxCursor) prev() ([]byte, []byte, error)           { return c.c.Get(n
 func (c *MdbxCursor) prevDup() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.PrevDup) }
 func (c *MdbxCursor) prevNoDup() ([]byte, []byte, error)      { return c.c.Get(nil, nil, mdbx.PrevNoDup) }
 func (c *MdbxCursor) last() ([]byte, []byte, error)           { return c.c.Get(nil, nil, mdbx.Last) }
-func (c *MdbxCursor) delCurrent() error                       { return c.c.Del(0) }
+func (c *MdbxCursor) delCurrent() error                       { return c.c.Del(mdbx.Current) }
 func (c *MdbxCursor) delNoDupData() error                     { return c.c.Del(mdbx.NoDupData) }
 func (c *MdbxCursor) put(k, v []byte) error                   { return c.c.Put(k, v, 0) }
 func (c *MdbxCursor) putCurrent(k, v []byte) error            { return c.c.Put(k, v, mdbx.Current) }

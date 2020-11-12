@@ -13,6 +13,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -111,18 +112,18 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			}
 			sort.Sort(accountChanges)
 			i := 0
-			err = ethdb.WalkChangeSetByBlock(historyDb, false /* storage */, blockNum, func(kk, k, v []byte) error {
+			err = changeset.Walk(historyDb, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := accountChanges.Changes[i]
 				i++
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
-					return nil
+					return true, nil
 				}
 
 				fmt.Printf("Unexpected account changes in block %d\nIn the database: ======================\n", blockNum)
 				fmt.Printf("0x%x: %x\n", k, v)
 				fmt.Printf("Expected: ==========================\n")
 				fmt.Printf("0x%x %x\n", c.Key, c.Value)
-				return fmt.Errorf("check change set failed")
+				return false, fmt.Errorf("check change set failed")
 			})
 			if err != nil {
 				return err
@@ -137,18 +138,18 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				expectedStorageChanges = changeset.NewChangeSet()
 			}
 			sort.Sort(expectedStorageChanges)
-			err = ethdb.WalkChangeSetByBlock(historyDb, true /* storage */, blockNum, func(kk, k, v []byte) error {
+			err = changeset.Walk(historyDb, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := expectedStorageChanges.Changes[i]
 				i++
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
-					return nil
+					return false, nil
 				}
 
 				fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
 				fmt.Printf("0x%x: %x\n", k, v)
 				fmt.Printf("Expected: ==========================\n")
 				fmt.Printf("0x%x %x\n", c.Key, c.Value)
-				return fmt.Errorf("check change set failed")
+				return true, fmt.Errorf("check change set failed")
 			})
 			if err != nil {
 				return err

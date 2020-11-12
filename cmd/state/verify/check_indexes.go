@@ -14,38 +14,19 @@ func CheckIndex(chaindata string, changeSetBucket string, indexBucket string) er
 	db := ethdb.MustOpen(chaindata)
 	startTime := time.Now()
 
-	var walker func([]byte) changeset.Walker
-	if dbutils.AccountChangeSetBucket2 == changeSetBucket {
-		walker = func(cs []byte) changeset.Walker {
-			return changeset.AccountChangeSetBytes(cs)
-		}
-	}
-
-	if dbutils.StorageChangeSetBucket2 == changeSetBucket {
-		walker = func(cs []byte) changeset.Walker {
-			return changeset.StorageChangeSetBytes(cs)
-		}
-	}
-
-	if err := db.Walk(changeSetBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		blockNum, _ := dbutils.DecodeTimestamp(k)
-		if blockNum%100_000 == 0 {
-			fmt.Printf("Processed %dK, %s\n", blockNum/1000, time.Since(startTime))
+	if err := changeset.Walk(db, changeSetBucket, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
+		if blockN%100_000 == 0 {
+			fmt.Printf("Processed %dK, %s\n", blockN/1000, time.Since(startTime))
 		}
 
-		if err := walker(v).Walk(func(key, val []byte) error {
-			indexBytes, innerErr := db.GetIndexChunk(indexBucket, key, blockNum)
-			if innerErr != nil {
-				return innerErr
-			}
+		indexBytes, innerErr := db.GetIndexChunk(indexBucket, k, blockN)
+		if innerErr != nil {
+			return false, innerErr
+		}
 
-			index := dbutils.WrapHistoryIndex(indexBytes)
-			if findVal, _, ok := index.Search(blockNum); !ok {
-				return fmt.Errorf("%v,%v,%v", blockNum, findVal, common.Bytes2Hex(key))
-			}
-			return nil
-		}); err != nil {
-			return false, err
+		index := dbutils.WrapHistoryIndex(indexBytes)
+		if findVal, _, ok := index.Search(blockN); !ok {
+			return false, fmt.Errorf("%v,%v,%v", blockN, findVal, common.Bytes2Hex(k))
 		}
 		return true, nil
 	}); err != nil {

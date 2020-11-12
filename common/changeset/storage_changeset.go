@@ -1,7 +1,6 @@
 package changeset
 
 import (
-	"encoding/binary"
 	"errors"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -28,44 +27,18 @@ func NewStorageChangeSet() *ChangeSet {
 	}
 }
 
-func EncodeStorage(s *ChangeSet) ([]byte, error) {
-	return encodeStorage(s, common.HashLength)
-}
-
-func DecodeStorage(b []byte) (*ChangeSet, error) {
-	cs := NewStorageChangeSet()
-	err := decodeStorage(b, common.HashLength, cs)
-	if err != nil {
-		return nil, err
-	}
-	return cs, nil
-}
-
-type StorageChangeSetBytes []byte
-
-func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
-	return walkStorageChangeSet(b, common.HashLength, f)
-}
-
-func (b StorageChangeSetBytes) Find(k []byte) ([]byte, error) {
-	return findWithoutIncarnationInStorageChangeSet(b, common.HashLength, k[:common.HashLength], k[common.HashLength:])
-}
-func (b StorageChangeSetBytes) FindWithIncarnation(k []byte) ([]byte, error) {
-	return findInStorageChangeSet(b, common.HashLength, k)
-}
-
-func (b StorageChangeSetBytes) FindWithoutIncarnation(addrHashToFind []byte, keyHashToFind []byte) ([]byte, error) {
-	return findWithoutIncarnationInStorageChangeSet(b, common.HashLength, addrHashToFind, keyHashToFind)
+func EncodeStorage(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
+	return encodeStorage2(blockN, s, common.HashLength, f)
 }
 
 type StorageChangeSet struct{ c ethdb.CursorDupSort }
 
-func (b StorageChangeSet) WalkReverse(from, to uint64, f func(kk, k, v []byte) error) error {
-	return walkReverse(b.c, from, to, common.HashLength+common.IncarnationLength+common.HashLength, f)
+func (b StorageChangeSet) WalkReverse(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
+	return walkReverse(b.c, from, to, common.HashLength, f)
 }
 
-func (b StorageChangeSet) Walk(from, to uint64, f func(kk, k, v []byte) error) error {
-	return walk(b.c, from, to, common.HashLength+common.IncarnationLength+common.HashLength, f)
+func (b StorageChangeSet) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
+	return walk(b.c, from, to, common.HashLength, f)
 }
 
 func (b StorageChangeSet) Find(blockNumber uint64, k []byte) ([]byte, error) {
@@ -88,27 +61,18 @@ func NewStorageChangeSetPlain() *ChangeSet {
 	}
 }
 
-func EncodeStoragePlain(s *ChangeSet) ([]byte, error) {
-	return encodeStorage(s, common.AddressLength)
-}
-
-func DecodeStoragePlain(b []byte) (*ChangeSet, error) {
-	cs := NewStorageChangeSetPlain()
-	err := decodeStorage(b, common.AddressLength, cs)
-	if err != nil {
-		return nil, err
-	}
-	return cs, nil
+func EncodeStoragePlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
+	return encodeStorage2(blockN, s, common.AddressLength, f)
 }
 
 type StorageChangeSetPlain struct{ c ethdb.CursorDupSort }
 
-func (b StorageChangeSetPlain) WalkReverse(from, to uint64, f func(kk, k, v []byte) error) error {
-	return walkReverse(b.c, from, to, common.AddressLength+common.IncarnationLength+common.HashLength, f)
+func (b StorageChangeSetPlain) WalkReverse(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
+	return walkReverse(b.c, from, to, common.AddressLength, f)
 }
 
-func (b StorageChangeSetPlain) Walk(from, to uint64, f func(kk, k, v []byte) error) error {
-	return walk(b.c, from, to, common.AddressLength+common.IncarnationLength+common.HashLength, f)
+func (b StorageChangeSetPlain) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
+	return walk(b.c, from, to, common.AddressLength, f)
 }
 
 func (b StorageChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error) {
@@ -123,24 +87,6 @@ func (b StorageChangeSetPlain) FindWithoutIncarnation(blockNumber uint64, addres
 	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.AddressLength, addressToFind, keyToFind)
 }
 
-type StorageChangeSetPlainBytes []byte
-
-func (b StorageChangeSetPlainBytes) Walk(f func(k, v []byte) error) error {
-	return walkStorageChangeSet(b, common.AddressLength, f)
-}
-
-func (b StorageChangeSetPlainBytes) Find(k []byte) ([]byte, error) {
-	return findWithoutIncarnationInStorageChangeSet(b, common.AddressLength, k[:common.AddressLength], k[common.AddressLength:])
-}
-
-func (b StorageChangeSetPlainBytes) FindWithIncarnation(k []byte) ([]byte, error) {
-	return findInStorageChangeSet(b, common.AddressLength, k)
-}
-
-func (b StorageChangeSetPlainBytes) FindWithoutIncarnation(addressToFind []byte, keyToFind []byte) ([]byte, error) {
-	return findWithoutIncarnationInStorageChangeSet(b, common.AddressLength, addressToFind, keyToFind)
-}
-
 // RewindData generates rewind data for all buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
 func RewindData(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
@@ -149,18 +95,16 @@ func RewindData(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[string]
 
 	if err := walkAndCollect(
 		collector.AccountWalker,
-		db, dbutils.AccountChangeSetBucket2,
+		db, dbutils.AccountChangeSetBucket,
 		timestampDst+1, timestampSrc,
-		Mapper[dbutils.AccountChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
 	}
 
 	if err := walkAndCollect(
 		collector.StorageWalker,
-		db, dbutils.StorageChangeSetBucket2,
+		db, dbutils.StorageChangeSetBucket,
 		timestampDst+1, timestampSrc,
-		Mapper[dbutils.StorageChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
 	}
@@ -176,18 +120,16 @@ func RewindDataPlain(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[st
 
 	if err := walkAndCollect(
 		collector.AccountWalker,
-		db, dbutils.PlainAccountChangeSetBucket2,
+		db, dbutils.PlainAccountChangeSetBucket,
 		timestampDst+1, timestampSrc,
-		Mapper[dbutils.PlainAccountChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
 	}
 
 	if err := walkAndCollect(
 		collector.StorageWalker,
-		db, dbutils.PlainStorageChangeSetBucket2,
+		db, dbutils.PlainStorageChangeSetBucket,
 		timestampDst+1, timestampSrc,
-		Mapper[dbutils.PlainStorageChangeSetBucket2].KeySize,
 	); err != nil {
 		return nil, nil, err
 	}
@@ -218,14 +160,14 @@ func (c *rewindDataCollector) StorageWalker(k, v []byte) error {
 	return nil
 }
 
-func walkAndCollect(collectorFunc func([]byte, []byte) error, db ethdb.Getter, bucket string, timestampDst, timestampSrc uint64, keySize int) error {
-	return db.Walk(bucket, dbutils.EncodeBlockNumber(timestampDst), 0, func(k, v []byte) (bool, error) {
-		timestamp := binary.BigEndian.Uint64(k)
+func walkAndCollect(collectorFunc func([]byte, []byte) error, db ethdb.Getter, bucket string, timestampDst, timestampSrc uint64) error {
+	fromDBFormat := FromDBFormat(Mapper[bucket].KeySize)
+	return db.Walk(bucket, dbutils.EncodeBlockNumber(timestampDst), 0, func(dbKey, dbValue []byte) (bool, error) {
+		timestamp, k, v := fromDBFormat(dbKey, dbValue)
 		if timestamp > timestampSrc {
 			return false, nil
 		}
-		v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-		if innerErr := collectorFunc(v[:keySize], v[keySize:]); innerErr != nil {
+		if innerErr := collectorFunc(common.CopyBytes(k), common.CopyBytes(v)); innerErr != nil {
 			return false, innerErr
 		}
 		return true, nil

@@ -931,8 +931,8 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 
 func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 	changeSetKey := dbutils.EncodeBlockNumber(timestamp)
-	err := tds.db.Walk(dbutils.AccountChangeSetBucket2, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
-		if err := tds.db.Delete(dbutils.AccountChangeSetBucket2, k, v); err != nil {
+	err := tds.db.Walk(dbutils.AccountChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
+		if err := tds.db.Delete(dbutils.AccountChangeSetBucket, k, v); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -941,8 +941,8 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 		return err
 	}
 
-	err = tds.db.Walk(dbutils.StorageChangeSetBucket2, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
-		if err2 := tds.db.Delete(dbutils.StorageChangeSetBucket2, k, v); err2 != nil {
+	err = tds.db.Walk(dbutils.StorageChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
+		if err2 := tds.db.Delete(dbutils.StorageChangeSetBucket, k, v); err2 != nil {
 			return false, err2
 		}
 		return true, nil

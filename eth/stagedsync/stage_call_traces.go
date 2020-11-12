@@ -95,9 +95,6 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	collectorFrom := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	collectorTo := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
-	accountChangesCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainAccountChangeSetBucket2)
-	defer accountChangesCursor.Close()
-	storageChangesCursor := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStorageChangeSetBucket2)
 	checkFlushEvery := time.NewTicker(callIndicesCheckSizeEvery)
 	defer checkFlushEvery.Stop()
 	engine := chainContext.Engine()
@@ -117,20 +114,6 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	}
 
 	prev := startBlock
-	var accountCsKey, accountCsVal []byte
-	var errAcc error
-	var storageCsKey, storageCsVal []byte
-	var errSt error
-	if params.PresetChanges {
-		accountCsKey, accountCsVal, errAcc = accountChangesCursor.Seek(dbutils.EncodeBlockNumber(startBlock))
-		if errAcc != nil {
-			return fmt.Errorf("%s: seeking in account changeset cursor: %v", logPrefix, errAcc)
-		}
-		storageCsKey, storageCsVal, errSt = storageChangesCursor.Seek(dbutils.EncodeBlockNumber(startBlock))
-		if errSt != nil {
-			return fmt.Errorf("%s: seeking in storage changeset cursor: %v", logPrefix, errSt)
-		}
-	}
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
 		if err := common.Stopped(quit); err != nil {
 			return err
@@ -160,7 +143,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		case <-checkFlushEvery.C:
 			if needFlush(froms, callIndicesMemLimit) {
 				if err := flushBitmaps(collectorFrom, froms); err != nil {
-					return err
+					return fmt.Errorf("[%s] %w", logPrefix, err)
 				}
 
 				froms = map[string]*roaring.Bitmap{}
@@ -168,15 +151,15 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 
 			if needFlush(tos, callIndicesMemLimit) {
 				if err := flushBitmaps(collectorTo, tos); err != nil {
-					return err
+					return fmt.Errorf("[%s] %w", logPrefix, err)
 				}
 
 				tos = map[string]*roaring.Bitmap{}
 			}
 		}
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-		if err != nil {
-			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err)
+		blockHash, err2 := rawdb.ReadCanonicalHash(tx, blockNum)
+		if err2 != nil {
+			return fmt.Errorf("%s: getting canonical blockhadh for block %d: %v", logPrefix, blockNum, err2)
 		}
 		block := rawdb.ReadBlock(tx, blockHash, blockNum)
 		if block == nil {
@@ -207,51 +190,34 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			stateReader = reader
 			stateWriter = writer
 		}
-		if params.PresetChanges && accountCsKey != nil {
-			accountCsBlockNum, _ := dbutils.DecodeTimestamp(accountCsKey)
-			if accountCsBlockNum == blockNum {
-				cs := changeset.AccountChangeSetPlainBytes(accountCsVal)
-				accountCsKey, accountCsVal, errAcc = accountChangesCursor.Next()
-				if errAcc != nil {
-					return fmt.Errorf("%s: seeking in account changeset cursor: %v", logPrefix, errAcc)
+		if params.PresetChanges {
+			startKey := dbutils.EncodeBlockNumber(blockNum)
+			if err := changeset.Walk(tx, dbutils.PlainAccountChangeSetBucket, startKey, 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+				if len(v) == 0 {
+					accountCache.Set(k, nil)
+				} else {
+					accountCache.Set(k, v)
 				}
-				if errAcc = cs.Walk(func(k, v []byte) error {
-					if len(v) == 0 {
-						accountCache.Set(k, nil)
-					} else {
-						accountCache.Set(k, v)
-					}
-					return nil
-				}); errAcc != nil {
-					return fmt.Errorf("%s: walking in account changeset: %v", logPrefix, errAcc)
-				}
+				return true, nil
+			}); err != nil {
+				return err
 			}
-		}
-		if params.PresetChanges && storageCsKey != nil {
-			storageCsBlockNum, _ := dbutils.DecodeTimestamp(storageCsKey)
-			if storageCsBlockNum == blockNum {
-				cs := changeset.StorageChangeSetPlainBytes(storageCsVal)
-				storageCsKey, storageCsVal, errSt = storageChangesCursor.Next()
-				if errSt != nil {
-					return fmt.Errorf("%s: seeking in storage changeset cursor: %v", logPrefix, errSt)
+			if err := changeset.Walk(tx, dbutils.PlainStorageChangeSetBucket, startKey, 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+				if len(v) == 0 {
+					storageCache.Set(k, nil)
+				} else {
+					storageCache.Set(k, v)
 				}
-				if errSt = cs.Walk(func(k, v []byte) error {
-					if len(v) == 0 {
-						storageCache.Set(k, nil)
-					} else {
-						storageCache.Set(k, v)
-					}
-					return nil
-				}); errSt != nil {
-					return fmt.Errorf("%s: walking in storage changeset: %v", logPrefix, errSt)
-				}
+				return true, nil
+			}); err != nil {
+				return err
 			}
 		}
 
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
-		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
-			return err
+		if _, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
+			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 		for addr := range tracer.froms {
 			m, ok := froms[string(addr[:])]
@@ -274,10 +240,10 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	}
 
 	if err := flushBitmaps(collectorFrom, froms); err != nil {
-		return err
+		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 	if err := flushBitmaps(collectorTo, tos); err != nil {
-		return err
+		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
 	var currentBitmap = roaring.New()
@@ -329,11 +295,11 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	}
 
 	if err := collectorFrom.Load(logPrefix, tx, dbutils.CallFromIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
+		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
 	if err := collectorTo.Load(logPrefix, tx, dbutils.CallToIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
+		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 	return nil
 }
@@ -355,7 +321,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 
 	logPrefix := s.state.LogPrefix()
 	if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, chainConfig, chainContext, quitCh); err != nil {
-		return fmt.Errorf("unwindCallTraces fail: %w", err)
+		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
 	if err := u.Done(tx); err != nil {
@@ -364,7 +330,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
-			return err
+			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	}
 

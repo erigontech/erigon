@@ -139,22 +139,22 @@ func NewHashPromoter(db ethdb.Database, quitCh <-chan struct{}) *HashPromoter {
 func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, load etl.LoadFunc) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket2
+		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket2
+		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
 	log.Debug(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeBlockNumber(from + 1)
 
-	mapper := changeset.Mapper[changeSetBucket]
-	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		k := changesetBytes[:mapper.KeySize]
+	decode := changeset.Mapper[changeSetBucket].Decode
+	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
+		_, k, _ := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
-		return next(k, newK, nil)
+		return next(dbKey, newK, nil)
 	}
 
 	var l OldestAppearedLoad
@@ -183,17 +183,17 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	to := u.UnwindPoint
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket2
+		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket2
+		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
 	log.Info(fmt.Sprintf("[%s] Unwinding of intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeBlockNumber(to + 1)
 
-	mapper := changeset.Mapper[changeSetBucket]
-	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		k := changesetBytes[:mapper.KeySize]
+	decode := changeset.Mapper[changeSetBucket].Decode
+	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
+		_, k, _ := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err

@@ -14,7 +14,6 @@ import (
 	"path"
 	"strings"
 
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -268,7 +267,7 @@ func launchReader(kv ethdb.KV, tx ethdb.Tx, expectVal string, startCh chan struc
 		for i := 0; i < 1000; i++ {
 			k := fmt.Sprintf("%05d", i)
 			var v []byte
-			if v, err = c.SeekExact([]byte(k)); err != nil {
+			if _, v, err = c.SeekExact([]byte(k)); err != nil {
 				errorCh <- err
 				return
 			}
@@ -296,7 +295,7 @@ func checkReader(tx ethdb.Tx, errorCh chan error) (bool, error) {
 	return false, nil
 }
 
-func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...(func(ethdb.KV, ethdb.Tx) (bool, error))) error {
+func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...func(ethdb.KV, ethdb.Tx) (bool, error)) error {
 	dir, err := ioutil.TempDir(".", "lmdb-vis")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for lmdb visualisation: %w", err)
@@ -368,7 +367,7 @@ func defrag() error {
 		return err
 	}
 	oneDupSortCfg := make(dbutils.BucketsCfg)
-	oneDupSortCfg["t"] = dbutils.BucketConfigItem{Flags: lmdb.DupSort}
+	oneDupSortCfg["t"] = dbutils.BucketConfigItem{Flags: dbutils.DupSort}
 	if err := defragSteps("vis6", oneDupSortCfg, generate5); err != nil {
 		return err
 	}

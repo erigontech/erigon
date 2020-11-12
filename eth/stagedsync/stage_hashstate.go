@@ -186,9 +186,9 @@ type Promoter struct {
 }
 
 func getExtractFunc(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
-	keySize := changeset.Mapper[changeSetBucket].KeySize
-	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		k := changesetBytes[:keySize]
+	decode := changeset.Mapper[changeSetBucket].Decode
+	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
+		_, k, _ := decode(dbKey, dbValue)
 		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
 		value, err := db.Get(dbutils.PlainStateBucket, k)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -198,14 +198,14 @@ func getExtractFunc(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 		if err != nil {
 			return err
 		}
-		return next(k, newK, value)
+		return next(dbKey, newK, value)
 	}
 }
 
 func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
-	keySize := changeset.Mapper[changeSetBucket].KeySize
-	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		k := changesetBytes[:keySize]
+	decode := changeset.Mapper[changeSetBucket].Decode
+	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
+		_, k, _ := decode(dbKey, dbValue)
 		value, err := db.Get(dbutils.PlainStateBucket, k)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return err
@@ -233,34 +233,33 @@ func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 		if err != nil {
 			return err
 		}
-		return next(k, newK, codeHash)
+		return next(dbKey, newK, codeHash)
 	}
 }
 
 func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
-	mapper := changeset.Mapper[changeSetBucket]
-	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		k, v := changesetBytes[:mapper.KeySize], changesetBytes[mapper.KeySize:]
+	decode := changeset.Mapper[changeSetBucket].Decode
+	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
+		_, k, v := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
-		return next(k, newK, v)
+		return next(dbKey, newK, v)
 	}
 }
 
 func getUnwindExtractAccounts(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
-	mapper := changeset.Mapper[changeSetBucket]
-	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		k, v := changesetBytes[:mapper.KeySize], changesetBytes[mapper.KeySize:]
-
+	decode := changeset.Mapper[changeSetBucket].Decode
+	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
+		_, k, v := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
 
 		if len(v) == 0 {
-			return next(k, newK, v)
+			return next(dbKey, newK, v)
 		}
 
 		var acc accounts.Account
@@ -268,7 +267,7 @@ func getUnwindExtractAccounts(db ethdb.Getter, changeSetBucket string) etl.Extra
 			return err
 		}
 		if !(acc.Incarnation > 0 && acc.IsEmptyCodeHash()) {
-			return next(k, newK, v)
+			return next(dbKey, newK, v)
 		}
 
 		if codeHash, err := db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
@@ -280,13 +279,14 @@ func getUnwindExtractAccounts(db ethdb.Getter, changeSetBucket string) etl.Extra
 		value := make([]byte, acc.EncodingLengthForStorage())
 		acc.EncodeForStorage(value)
 
-		return next(k, newK, value)
+		return next(dbKey, newK, value)
 	}
 }
 
-func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
-	return func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		k, v := changesetBytes[:common.AddressLength], changesetBytes[common.AddressLength:]
+func getCodeUnwindExtractFunc(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
+	decode := changeset.Mapper[changeSetBucket].Decode
+	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
+		_, k, v := decode(dbKey, dbValue)
 		if len(v) == 0 {
 			return nil
 		}
@@ -308,17 +308,16 @@ func getCodeUnwindExtractFunc(db ethdb.Getter) etl.ExtractFunc {
 		if err != nil {
 			return err
 		}
-		return next(k, newK, codeHash)
+		return next(dbKey, newK, codeHash)
 	}
 }
 
 func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, codes bool) error {
-
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket2
+		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket2
+		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
 	log.Info(fmt.Sprintf("[%s] Incremental promotion started", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 
@@ -356,9 +355,9 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, codes bool) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.PlainStorageChangeSetBucket2
+		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
-		changeSetBucket = dbutils.PlainAccountChangeSetBucket2
+		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
 	from := s.BlockNumber
 	to := u.UnwindPoint
@@ -372,7 +371,7 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	var extractFunc etl.ExtractFunc
 	if codes {
 		loadBucket = dbutils.ContractCodeBucket
-		extractFunc = getCodeUnwindExtractFunc(p.db)
+		extractFunc = getCodeUnwindExtractFunc(p.db, changeSetBucket)
 		l.innerLoadFunc = etl.IdentityLoadFunc
 	} else {
 		l.innerLoadFunc = etl.IdentityLoadFunc

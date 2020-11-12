@@ -224,7 +224,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
-
 	for key, value := range accountMap {
 		if len(value) > 0 {
 			var acc accounts.Account
@@ -235,16 +234,15 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 			// Fetch the code hash
 			recoverCodeHashFunc(&acc, tx, key)
 			if err := writeAccountFunc(logPrefix, tx, key, acc); err != nil {
-				panic(err)
 				return err
 			}
 		} else {
 			if err := deleteAccountFunc(tx, key); err != nil {
-				panic(err)
 				return err
 			}
 		}
 	}
+
 	for key, value := range storageMap {
 		if len(value) > 0 {
 			if err := tx.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
@@ -257,30 +255,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		}
 	}
 
-	keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
-	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainAccountChangeSetBucket2)
-	for k, _, err := c.SeekExact(keyStart); k != nil; k, _, err = c.NextNoDup() {
-		if err != nil {
-			return err
-		}
-		err = c.DeleteCurrentDuplicates()
-		if err != nil {
-			return err
-		}
+	if err := changeset.Truncate(tx.(ethdb.HasTx).Tx(), u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
-	c.Close()
-
-	c = tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainStorageChangeSetBucket2)
-	for k, _, err := c.SeekExact(keyStart); k != nil; k, _, err = c.NextNoDup() {
-		if err != nil {
-			return err
-		}
-		err = c.DeleteCurrentDuplicates()
-		if err != nil {
-			return err
-		}
-	}
-	c.Close()
 
 	if writeReceipts {
 		if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
@@ -370,7 +347,7 @@ func deleteAccountHashed(db rawdb.DatabaseDeleter, key string) error {
 	return rawdb.DeleteAccount(db, addrHash)
 }
 
-func deleteAccountPlain(db rawdb.DatabaseDeleter, key string) error {
+func deleteAccountPlain(db ethdb.Deleter, key string) error {
 	var address common.Address
 	copy(address[:], []byte(key))
 	return rawdb.PlainDeleteAccount(db, address)

@@ -27,7 +27,7 @@ func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	ig := core.NewIndexGenerator(logPrefix, db, quitCh)
 	ig.TempDir = tmpdir
 
-	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket2, tmpdir); err != nil {
+	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket, tmpdir); err != nil {
 		return fmt.Errorf("%s: fail to generate index: %w", logPrefix, err)
 	}
 
@@ -51,7 +51,7 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	}
 	ig := core.NewIndexGenerator(logPrefix, db, quitCh)
 	ig.TempDir = tmpdir
-	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainStorageChangeSetBucket2, tmpdir); err != nil {
+	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainStorageChangeSetBucket, tmpdir); err != nil {
 		return fmt.Errorf("%s: fail to generate index: %w", logPrefix, err)
 	}
 
@@ -61,7 +61,7 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}) error {
 	logPrefix := s.state.LogPrefix()
 	ig := core.NewIndexGenerator(logPrefix, db, quitCh)
-	if err := ig.Truncate(u.UnwindPoint, dbutils.PlainAccountChangeSetBucket2); err != nil {
+	if err := ig.Truncate(u.UnwindPoint, dbutils.PlainAccountChangeSetBucket); err != nil {
 		return fmt.Errorf("%s: fail to truncate index: %w", logPrefix, err)
 	}
 	if err := u.Done(db); err != nil {
@@ -73,7 +73,7 @@ func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database,
 func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, db ethdb.Database, quitCh <-chan struct{}) error {
 	logPrefix := s.state.LogPrefix()
 	ig := core.NewIndexGenerator(logPrefix, db, quitCh)
-	if err := ig.Truncate(u.UnwindPoint, dbutils.PlainStorageChangeSetBucket2); err != nil {
+	if err := ig.Truncate(u.UnwindPoint, dbutils.PlainStorageChangeSetBucket); err != nil {
 		return fmt.Errorf("%s: fail to truncate index: %w", logPrefix, err)
 	}
 	if err := u.Done(db); err != nil {

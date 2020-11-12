@@ -48,15 +48,12 @@ var (
 	// PlainAccountChangeSetBucket keeps changesets of accounts ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - address v - account(encoded).
-	PlainAccountChangeSetBucket  = "PLAIN-ACS"
-	PlainAccountChangeSetBucket2 = "PLAIN-ACS2"
-	PlainAccountChangeSetBucket3 = "PLAIN-ACS3"
+	PlainAccountChangeSetBucket = "PLAIN-ACS"
 
 	// PlainStorageChangeSetBucket keeps changesets of storage ("plain state")
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - plainCompositeKey(for storage) v - originalValue(common.Hash)}.
-	PlainStorageChangeSetBucket  = "PLAIN-SCS"
-	PlainStorageChangeSetBucket2 = "PLAIN-SCS2"
+	PlainStorageChangeSetBucket = "PLAIN-SCS"
 
 	// Contains Accounts:
 	// key - address hash
@@ -91,14 +88,12 @@ var (
 	//AccountChangeSetBucket keeps changesets of accounts
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - addrHash v - account(encoded).
-	AccountChangeSetBucket  = "ACS"
-	AccountChangeSetBucket2 = "ACS2"
+	AccountChangeSetBucket = "ACS"
 
 	// StorageChangeSetBucket keeps changesets of storage
 	// key - encoded timestamp(block number)
 	// value - encoded ChangeSet{k - compositeKey(for storage) v - originalValue(common.Hash)}.
-	StorageChangeSetBucket  = "SCS"
-	StorageChangeSetBucket2 = "SCS2"
+	StorageChangeSetBucket = "SCS"
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
 	IntermediateTrieHashBucket     = "iTh2"
@@ -262,9 +257,6 @@ var DeprecatedBuckets = []string{
 	CurrentStateBucketOld1,
 	PlainStateBucketOld1,
 	IntermediateTrieHashBucketOld1,
-	"uncles",
-	"uncle",
-	"eth_tx",
 }
 
 type CustomComparator string
@@ -328,20 +320,17 @@ var BucketsConfigs = BucketsCfg{
 		DupFromLen:                72,
 		DupToLen:                  40,
 	},
-	PlainAccountChangeSetBucket2: {
+	PlainAccountChangeSetBucket: {
 		Flags: DupSort,
 	},
-	PlainStorageChangeSetBucket2: {
+	PlainStorageChangeSetBucket: {
 		Flags: DupSort,
 	},
-	AccountChangeSetBucket2: {
+	AccountChangeSetBucket: {
 		Flags: DupSort,
 	},
-	StorageChangeSetBucket2: {
+	StorageChangeSetBucket: {
 		Flags: DupSort,
-	},
-	PlainAccountChangeSetBucket3: {
-		Flags: DupSort | DupFixed,
 	},
 	PlainStateBucket: {
 		Flags:                     DupSort,

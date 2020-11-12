@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"sort"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/holiman/uint256"
@@ -209,14 +208,10 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 	if err != nil {
 		return err
 	}
-	sort.Sort(accountChanges)
-	key := dbutils.EncodeBlockNumber(dsw.blockNr)
-	for _, cs := range accountChanges.Changes {
-		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
-		newV = append(append(newV, cs.Key...), cs.Value...)
-		if err = dsw.db.Append(dbutils.AccountChangeSetBucket2, key, newV); err != nil {
-			return err
-		}
+	if err = changeset.Mapper[dbutils.AccountChangeSetBucket].Encode(dsw.blockNr, accountChanges, func(k, v []byte) error {
+		return dsw.db.Append(dbutils.AccountChangeSetBucket, k, v)
+	}); err != nil {
+		return err
 	}
 
 	storageChanges, err := dsw.csw.GetStorageChanges()
@@ -226,13 +221,10 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 	if storageChanges.Len() == 0 {
 		return nil
 	}
-	sort.Sort(storageChanges)
-	for _, cs := range storageChanges.Changes {
-		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
-		newV = append(append(newV, cs.Key...), cs.Value...)
-		if err = dsw.db.Append(dbutils.StorageChangeSetBucket2, key, newV); err != nil {
-			return err
-		}
+	if err = changeset.Mapper[dbutils.StorageChangeSetBucket].Encode(dsw.blockNr, storageChanges, func(k, v []byte) error {
+		return dsw.db.Append(dbutils.StorageChangeSetBucket, k, v)
+	}); err != nil {
+		return err
 	}
 	return nil
 }

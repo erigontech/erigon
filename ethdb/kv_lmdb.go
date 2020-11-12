@@ -98,6 +98,10 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 	if err != nil {
 		return nil, err
 	}
+	err = env.SetMaxReaders(512)
+	if err != nil {
+		return nil, err
+	}
 
 	var logger log.Logger
 	if opts.inMem {
@@ -791,7 +795,7 @@ func (c *LmdbCursor) prev() ([]byte, []byte, error)           { return c.c.Get(n
 func (c *LmdbCursor) prevDup() ([]byte, []byte, error)        { return c.c.Get(nil, nil, lmdb.PrevDup) }
 func (c *LmdbCursor) prevNoDup() ([]byte, []byte, error)      { return c.c.Get(nil, nil, lmdb.PrevNoDup) }
 func (c *LmdbCursor) last() ([]byte, []byte, error)           { return c.c.Get(nil, nil, lmdb.Last) }
-func (c *LmdbCursor) delCurrent() error                       { return c.c.Del(0) }
+func (c *LmdbCursor) delCurrent() error                       { return c.c.Del(lmdb.Current) }
 func (c *LmdbCursor) delNoDupData() error                     { return c.c.Del(lmdb.NoDupData) }
 func (c *LmdbCursor) put(k, v []byte) error                   { return c.c.Put(k, v, 0) }
 func (c *LmdbCursor) putCurrent(k, v []byte) error            { return c.c.Put(k, v, lmdb.Current) }
@@ -929,6 +933,12 @@ func (c *LmdbCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 		}
 		if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
 			k, v = nil, nil
+		}
+		if len(k) == to {
+			k2 := make([]byte, 0, len(k)+from-to)
+			k2 = append(append(k2, k...), v[:from-to]...)
+			v = v[from-to:]
+			k = k2
 		}
 		return k, v, nil
 	}

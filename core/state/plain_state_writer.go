@@ -3,10 +3,10 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"sort"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -152,15 +152,10 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	if err != nil {
 		return err
 	}
-	sort.Sort(accountChanges)
-
-	key := dbutils.EncodeBlockNumber(w.blockNumber)
-	for _, cs := range accountChanges.Changes {
-		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
-		newV = append(append(newV, cs.Key...), cs.Value...)
-		if err = db.Append(dbutils.PlainAccountChangeSetBucket2, common.CopyBytes(key), newV); err != nil {
-			return err
-		}
+	if err = changeset.Mapper[dbutils.PlainAccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
+		return db.Append(dbutils.PlainAccountChangeSetBucket, k, v)
+	}); err != nil {
+		return err
 	}
 
 	storageChanges, err := w.csw.GetStorageChanges()
@@ -170,19 +165,10 @@ func (w *PlainStateWriter) WriteChangeSets() error {
 	if storageChanges.Len() == 0 {
 		return nil
 	}
-	sort.Sort(storageChanges)
-	for _, cs := range storageChanges.Changes {
-		//newK := make([]byte, 8+20+8)
-		//copy(newK, key)
-		//copy(newK[8:], cs.Key[:20+8])
-		//newV := make([]byte, 0, 32+len(cs.Value))
-		//newV = append(append(newV, cs.Key[28+8:]...), cs.Value...)
-
-		newV := make([]byte, 0, len(cs.Key)+len(cs.Value))
-		newV = append(append(newV, cs.Key...), cs.Value...)
-		if err = db.Append(dbutils.PlainStorageChangeSetBucket2, common.CopyBytes(key), newV); err != nil {
-			return err
-		}
+	if err = changeset.Mapper[dbutils.PlainStorageChangeSetBucket].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
+		return db.Append(dbutils.PlainStorageChangeSetBucket, k, v)
+	}); err != nil {
+		return err
 	}
 	return nil
 }

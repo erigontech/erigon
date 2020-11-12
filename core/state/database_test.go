@@ -889,7 +889,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	}
 
 	fmt.Println("==========================CHANGESET===========================")
-	err = blockchain.ChainDb().Walk(dbutils.AccountChangeSetBucket2, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = blockchain.ChainDb().Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		stats.ChangeSetHAT += uint64(len(v))
 		return true, nil
 	})
@@ -897,7 +897,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = blockchain.ChainDb().Walk(dbutils.StorageChangeSetBucket2, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = blockchain.ChainDb().Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		stats.ChangeSetHST += uint64(len(v))
 		return true, nil
 	})

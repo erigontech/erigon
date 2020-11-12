@@ -174,8 +174,9 @@ func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
 
 func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 	keysToRemove := newKeysToRemove()
-	err := db.Walk(dbutils.AccountChangeSetBucket2, []byte{}, 0, func(key, v []byte) (b bool, e error) {
-		timestamp, _ := dbutils.DecodeTimestamp(key)
+	dec := changeset.Mapper[dbutils.AccountChangeSetBucket].Decode
+	err := db.Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+		timestamp, parsedK, _ := dec(key, v)
 		if timestamp < blockNumFrom {
 			return true, nil
 		}
@@ -184,22 +185,17 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 		}
 
 		keysToRemove.AccountChangeSet = append(keysToRemove.AccountChangeSet, common.CopyBytes(key))
-
-		innerErr := changeset.AccountChangeSetBytes(v).Walk(func(cKey, _ []byte) error {
-			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
-			keysToRemove.AccountHistoryKeys = append(keysToRemove.AccountHistoryKeys, compKey)
-			return nil
-		})
-		if innerErr != nil {
-			return false, innerErr
-		}
+		compKey, _ := dbutils.CompositeKeySuffix(parsedK, timestamp)
+		keysToRemove.AccountHistoryKeys = append(keysToRemove.AccountHistoryKeys, compKey)
 		return true, nil
 	})
 	if err != nil {
 		return err
 	}
-	err = db.Walk(dbutils.StorageChangeSetBucket2, []byte{}, 0, func(key, v []byte) (b bool, e error) {
-		timestamp, _ := dbutils.DecodeTimestamp(key)
+
+	dec = changeset.Mapper[dbutils.StorageChangeSetBucket].Decode
+	err = db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+		timestamp, parsedK, _ := dec(key, v)
 		if timestamp < blockNumFrom {
 			return true, nil
 		}
@@ -208,15 +204,8 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 		}
 
 		keysToRemove.StorageChangeSet = append(keysToRemove.StorageChangeSet, common.CopyBytes(key))
-
-		noop := func(cKey, _ []byte) error {
-			//todo implement pruning for thin history
-			return nil
-		}
-
-		if innerErr := changeset.StorageChangeSetBytes(v).Walk(noop); innerErr != nil {
-			return false, innerErr
-		}
+		//todo implement pruning for thin history
+		_ = parsedK
 
 		return true, nil
 	})
@@ -292,8 +281,8 @@ func LimitIterator(k *keysToRemove, limit int) *limitIterator {
 		{bucket: dbutils.AccountsHistoryBucket, keys: i.k.AccountHistoryKeys},
 		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
 		{bucket: dbutils.CurrentStateBucket, keys: i.k.StorageKeys},
-		{bucket: dbutils.AccountChangeSetBucket2, keys: i.k.AccountChangeSet},
-		{bucket: dbutils.StorageChangeSetBucket2, keys: i.k.StorageChangeSet},
+		{bucket: dbutils.AccountChangeSetBucket, keys: i.k.AccountChangeSet},
+		{bucket: dbutils.StorageChangeSetBucket, keys: i.k.StorageChangeSet},
 		{bucket: dbutils.IntermediateTrieHashBucket, keys: i.k.IntermediateTrieHashKeys},
 	}
 

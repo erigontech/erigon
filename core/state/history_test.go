@@ -1,7 +1,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -12,20 +11,18 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMutation_DeleteTimestamp(t *testing.T) {
@@ -51,21 +48,15 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	if err := blockWriter.WriteHistory(); err != nil {
 		t.Fatal(err)
 	}
-	//_, err := mutDB.Commit()
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
 
 	i := 0
-	err := db.Walk(dbutils.AccountChangeSetBucket2, nil, 0, func(k, v []byte) (bool, error) {
-		fmt.Printf("3: %x, %x \n", k, v)
+	err := db.Walk(dbutils.AccountChangeSetBucket, nil, 0, func(k, v []byte) (bool, error) {
 		i++
 		return true, nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("%d \n", i)
 	if i != 10 {
 		t.FailNow()
 	}
@@ -89,13 +80,16 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	//_, err = mutDB.Commit()
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
 
-	_, err = db.Get(dbutils.AccountChangeSetBucket2, dbutils.EncodeTimestamp(1))
-	if err != ethdb.ErrKeyNotFound {
+	count := 0
+	err = changeset.Walk(db, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+		count++
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
 		t.Fatal("changeset must be deleted")
 	}
 
@@ -176,17 +170,13 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 
-	expectedChangeSetInDB := changeset.NewAccountChangeSetPlain()
-	err := db.Walk(dbutils.PlainAccountChangeSetBucket2, dbutils.EncodeBlockNumber(2), 8*8, func(k, v []byte) (bool, error) {
-		if err := expectedChangeSetInDB.Add(v[:20], v[20:]); err != nil {
+	changeSetInDB := changeset.NewAccountChangeSetPlain()
+	err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+		if err := changeSetInDB.Add(k, v); err != nil {
 			return false, err
 		}
 		return true, nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	csData, err := changeset.EncodeAccountsPlain(expectedChangeSetInDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,17 +196,15 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 	sort.Sort(expectedChangeSet)
-	expectedData, err := changeset.EncodeAccountsPlain(expectedChangeSet)
-	assert.NoError(t, err)
-	if !bytes.Equal(csData, expectedData) {
-		spew.Dump("res", csData)
-		spew.Dump("expected", expectedData)
+	if !reflect.DeepEqual(changeSetInDB, expectedChangeSet) {
+		spew.Dump("res", changeSetInDB)
+		spew.Dump("expected", expectedChangeSet)
 		t.Fatal("incorrect changeset")
 	}
 
 	cs := changeset.NewStorageChangeSetPlain()
-	err = db.Walk(dbutils.PlainStorageChangeSetBucket2, dbutils.EncodeBlockNumber(2), 8*8, func(k, v []byte) (bool, error) {
-		if err2 := cs.Add(v[:60], v[60:]); err2 != nil {
+	err = changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+		if err2 := cs.Add(k, v); err2 != nil {
 			return false, err2
 		}
 		return true, nil
@@ -316,6 +304,7 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash
 func TestUnwindTruncateHistory(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
+	mutDB := db.NewBatch()
 	tds := NewTrieDbState(common.Hash{}, db, 1)
 	ctx := context.Background()
 	acc1 := accounts.NewAccount()
@@ -374,7 +363,7 @@ func TestUnwindTruncateHistory(t *testing.T) {
 		acc = newAcc
 	}
 	// Recreate tds not to rely on the trie
-	tds = NewTrieDbState(tds.LastRoot(), db, tds.blockNr)
+	tds = NewTrieDbState(tds.LastRoot(), mutDB, tds.blockNr)
 	a, err := tds.ReadAccountData(addr)
 	if err != nil {
 		t.Fatal(err)
@@ -402,6 +391,9 @@ func TestUnwindTruncateHistory(t *testing.T) {
 	}
 	// New we are goint to unwind 50 blocks back and check the balance
 	if err = tds.UnwindTo(50); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = mutDB.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	a, err = tds.ReadAccountData(addr)
