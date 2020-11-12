@@ -3098,9 +3098,3 @@ Date:   Fri Nov 13 09:27:57 2020 +0100
     * crypto/bn256: improve fuzzer
     
     * crypto/bn256: fix some flaws in fuzzer
-
-commit 919229d63c9c138160816d007866bf3daeb6c6f0
-Author: Felix Lange <fjl@twurst.com>
-Date:   Thu Nov 12 21:21:24 2020 +0100
-
-    params: begin v1.9.25 release cycle
