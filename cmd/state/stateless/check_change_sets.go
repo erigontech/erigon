@@ -169,6 +169,13 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 					fmt.Printf("%d: 0x%x: %x\n", ii, c.Key, c.Value)
 				}
 
+				i = 0
+				changeset.Mapper[dbutils.PlainAccountChangeSetBucket].Encode(blockNum, accountChanges, func(k, v []byte) error {
+					fmt.Printf("Test: %d: 0x%x: %x\n", i, k, v)
+					i++
+					return nil
+				})
+
 				return fmt.Errorf("check change set failed")
 			}
 
