@@ -114,7 +114,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			}
 		}
 		if writeReceipts {
-			if err := rawdb.WriteReceipts(batch, block.NumberU64(), receipts); err != nil {
+			if err := rawdb.AppendReceipts(batch, block.NumberU64(), receipts); err != nil {
 				return err
 			}
 			if batch.BatchSize() >= batch.IdealBatchSize() {
