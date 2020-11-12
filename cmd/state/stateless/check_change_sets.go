@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -67,7 +68,26 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	interrupt := false
 	batch := chainDb.NewBatch()
 	defer batch.Rollback()
+
+	execAt, _, err1 := stages.GetStageProgress(chainDb, stages.Execution)
+	if err1 != nil {
+		return err1
+	}
+	historyAt, _, err1 := stages.GetStageProgress(chainDb, stages.StorageHistoryIndex)
+	if err1 != nil {
+		return err1
+	}
+
 	for !interrupt {
+		if blockNum > execAt {
+			log.Warn(fmt.Sprintf("Force stop: because trying to check blockNumber=%d higher than Exec stage=%d", blockNum, execAt))
+			break
+		}
+		if blockNum > historyAt {
+			log.Warn(fmt.Sprintf("Force stop: because trying to check blockNumber=%d higher than History stage=%d", blockNum, historyAt))
+			break
+		}
+
 		block := bc.GetBlockByNumber(blockNum)
 		if block == nil {
 			break

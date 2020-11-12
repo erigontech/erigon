@@ -97,7 +97,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	defer bc.Stop()
 	cc.SetDB(tx)
 
-	tx, err = tx.Begin(ctx, ethdb.RO)
+	tx, err = tx.Begin(ctx, ethdb.RW)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	for progress(stages.Execution).BlockNumber < stopAt || (unwind <= unwindEvery) {
+	for progress(stages.Execution).BlockNumber < stopAt || ((unwind <= unwindEvery) && unwind != 0) {
 		select {
 		case <-ctx.Done():
 			return nil
@@ -127,7 +127,10 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 
 		// All stages forward to `execStage + unwindEvery` block
 		execAtBlock := progress(stages.Execution).BlockNumber
-		execToBlock := execAtBlock - unwind + unwindEvery
+		execToBlock := block
+		if unwindEvery != 0 || unwind != 0 {
+			execToBlock = execAtBlock - unwind + unwindEvery
+		}
 		if execToBlock > stopAt {
 			execToBlock = stopAt + 1
 			unwind = 0
@@ -169,6 +172,10 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 			return err
 		}
 
+		if err := tx.CommitAndBegin(context.Background()); err != nil {
+			return err
+		}
+
 		// Unwind all stages to `execStage - unwind` block
 		if unwind == 0 {
 			continue
@@ -178,6 +185,10 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		to := execStage.BlockNumber - unwind
 
 		if err := st.UnwindTo(to, tx); err != nil {
+			return err
+		}
+
+		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
 	}
