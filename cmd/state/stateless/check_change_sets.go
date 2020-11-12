@@ -157,13 +157,9 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				fmt.Printf("All in DB: ==========================\n")
 				err = changeset.Walk(historyDb, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 					fmt.Printf("0x%x: %x\n", k, v)
-					return false, nil
+					return true, nil
 				})
 				fmt.Printf("All Expected: ==========================\n")
-				err = changeset.Walk(historyDb, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
-					fmt.Printf("0x%x: %x\n", k, v)
-					return false, nil
-				})
 				for _, c := range accountChanges.Changes {
 					fmt.Printf("0x%x: %x\n", c.Key, c.Value)
 				}
