@@ -1110,7 +1110,9 @@ func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, even
 		for _, set := range events {
 			txs = append(txs, set.Flatten()...)
 		}
-		pool.txFeed.Send(NewTxsEvent{txs})
+		// Commented out because this is where tx pool is hanging
+		// TODO: Make sure the feed is working properly before re-enabling
+		//pool.txFeed.Send(NewTxsEvent{txs})
 	}
 }
 
