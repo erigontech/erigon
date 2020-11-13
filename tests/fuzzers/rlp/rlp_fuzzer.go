@@ -37,16 +37,18 @@ func decodeEncode(input []byte, val interface{}, i int) {
 }
 
 func Fuzz(input []byte) int {
+	if len(input) == 0 {
+		return 0
+	}
+
 	var i int
 	{
-		if len(input) > 0 {
 			if _, _, _, err := rlp.Split(input); err != nil {
 				panic(err)
 			}
 		}
 	}
 	{
-		if len(input) > 0 {
 			if elems, _, err := rlp.SplitList(input); err == nil {
 				if _, err = rlp.CountValues(elems); err != nil {
 					panic(err)
@@ -129,5 +131,5 @@ func Fuzz(input []byte) int {
 		var rs types.Receipts
 		decodeEncode(input, &rs, i)
 	}
-	return 0
+	return 1
 }
