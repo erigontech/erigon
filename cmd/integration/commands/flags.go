@@ -27,6 +27,7 @@ var (
 	dispatcherLatency  int
 	shardBits          int
 	shardID            int
+	silkwormPath       string
 )
 
 func must(err error) {
@@ -105,4 +106,9 @@ func withShard(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&dispatcherAddr, "dispatcher_addr", "", "address of shard dispatcher")
 	cmd.Flags().IntVar(&shardBits, "shard_bits", 2, "number of bits in the key used to derive shardID")
 	cmd.Flags().IntVar(&shardID, "shard_id", 0, "shard ID")
+}
+
+func withSilkworm(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&silkwormPath, "silkworm", "", "file path of libsilkworm_tg_api.so")
+	must(cmd.MarkFlagFilename("silkworm"))
 }
