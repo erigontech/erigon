@@ -466,14 +466,14 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) 
 		return nil, nil
 	}
 	var upper, lower uint64
-	upper = interpreter.evm.BlockNumber.Uint64()
+	upper = interpreter.evm.Context.BlockNumber.Uint64()
 	if upper < 257 {
 		lower = 0
 	} else {
 		lower = upper - 256
 	}
 	if num64 >= lower && num64 < upper {
-		num.SetBytes(interpreter.evm.GetHash(num64).Bytes())
+		num.SetBytes(interpreter.evm.Context.GetHash(num64).Bytes())
 	} else {
 		num.Clear()
 	}
@@ -888,7 +888,7 @@ func makeLog(size int) executionFunc {
 			Data:    d,
 			// This is a non-consensus field, but assigned here because
 			// core/state doesn't know the current block number.
-			BlockNumber: interpreter.evm.BlockNumber.Uint64(),
+			BlockNumber: interpreter.evm.Context.BlockNumber.Uint64(),
 		})
 
 		return nil, nil

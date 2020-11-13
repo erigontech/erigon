@@ -97,6 +97,11 @@ func TestEIP2200(t *testing.T) {
 			s.SetState(address, &common.Hash{}, *uint256.NewInt().SetUint64(uint64(tt.original)))
 
 			_ = s.CommitBlock(context.Background(), tds.DbStateWriter())
+		vmctx := BlockContext{
+			CanTransfer: func(StateDB, common.Address, *big.Int) bool { return true },
+			Transfer:    func(StateDB, common.Address, common.Address, *big.Int) {},
+		}
+		vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}})
 
 			// re-initialize the state
 			state := state.New(state.NewDbStateReader(db))

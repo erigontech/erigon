@@ -130,6 +130,8 @@ func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockSta
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
+	blockContext := NewEVMBlockContext(header, p.bc, nil)
+	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
 	// Iterate over and process the individual transactions
 	tds.StartNewBuffer()
 	for i, tx := range block.Transactions() {
@@ -219,14 +221,15 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	}
 	ctx := config.WithEIPsFlags(context.Background(), header.Number)
 	// Create a new context to be used in the EVM environment
-	context := NewEVMContext(msg, header, bc, author)
+    context := NewEVMBlockContext(msg, header, bc, author)
+	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
 		context.TxHash = tx.Hash()
 	}
-	// Create a new environment which holds all relevant information
+	// Add addresses to access list if applicable
 	// about the transaction and calling mechanisms.
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
-	vmenv := vm.NewEVM(context, statedb, config, cfg)
+	vmenv := vm.NewEVM(context, txContext, statedb, config, cfg)
 
 	if config.IsYoloV2(header.Number) {
 		statedb.AddAddressToAccessList(msg.From())
@@ -234,11 +237,13 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 			statedb.AddAddressToAccessList(*dst)
 			// If it's a create-tx, the destination will be added inside evm.create
 		}
-		for _, addr := range vmenv.ActivePrecompiles() {
+		for _, addr := range evm.ActivePrecompiles() {
 			statedb.AddAddressToAccessList(addr)
 		}
 	}
 
+	// Update the evm with the new transaction context.
+	evm.Reset(txContext, statedb)
 	// Apply the transaction to the current state (included in the env)
 	result, err := ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
@@ -267,4 +272,19 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	}
 	return receipt, err
+}
+
+// ApplyTransaction attempts to apply a transaction to the given state database
+// and uses the input parameters for its environment. It returns the receipt
+// for the transaction, gas used and an error if the transaction failed,
+// indicating the block was invalid.
+func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
+	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
+	if err != nil {
+		return nil, err
+	}
+	// Create a new context to be used in the EVM environment
+	blockContext := NewEVMBlockContext(header, bc, author)
+	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, config, cfg)
+	return applyTransaction(msg, config, bc, author, gp, statedb, header, tx, usedGas, vmenv)
 }

@@ -148,21 +148,24 @@ func (t *VMTest) newEVM(state vm.IntraBlockState, vmconfig vm.Config) *vm.EVM {
 		}
 		return core.CanTransfer(db, address, amount)
 	}
+	transfer := func(db vm.StateDB, sender, recipient common.Address, amount *big.Int) {}
+	txContext := vm.TxContext{
+		Origin:   t.json.Exec.Origin,
+		GasPrice: t.json.Exec.GasPrice,
+	}
 	transfer := func(db vm.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) {}
-	context := vm.Context{
+	context := vm.BlockContext{
 		CanTransfer: canTransfer,
 		Transfer:    transfer,
 		GetHash:     vmTestBlockHash,
-		Origin:      t.json.Exec.Origin,
 		Coinbase:    t.json.Env.Coinbase,
 		BlockNumber: new(big.Int).SetUint64(t.json.Env.Number),
 		Time:        new(big.Int).SetUint64(t.json.Env.Timestamp),
 		GasLimit:    t.json.Env.GasLimit,
 		Difficulty:  t.json.Env.Difficulty,
-		GasPrice:    t.json.Exec.GasPrice,
 	}
 	vmconfig.NoRecursion = true
-	return vm.NewEVM(context, state, params.MainnetChainConfig, vmconfig)
+	return vm.NewEVM(context, txContext, state, params.MainnetChainConfig, vmconfig)
 }
 
 func vmTestBlockHash(n uint64) common.Hash {

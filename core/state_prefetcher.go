@@ -76,9 +76,10 @@ func precacheTransaction(config *params.ChainConfig, bc ChainContext, author *co
 		return err
 	}
 	// Create the EVM and execute the transaction
-	context := NewEVMContext(msg, header, bc, author)
+	context := NewEVMBlockContext(header, bc, author)
+	txContext := NewEVMTxContext(msg)
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
-	vm := vm.NewEVM(context, statedb, config, cfg)
+	vm := vm.NewEVM(context, txContext, statedb, config, cfg)
 
 	_, err = ApplyMessage(vm, msg, gaspool, true /* refunds */, false /* gasBailout */)
 	return err
