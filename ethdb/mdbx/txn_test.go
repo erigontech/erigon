@@ -317,11 +317,13 @@ func TestTxn_PutReserve(t *testing.T) {
 		}
 		val := "v"
 		err = txn.Put(db, []byte("k"), []byte(val), 0)
+		if err != nil {
+			return err
+		}
 		p, err := txn.PutReserve(db, []byte("k"), len(val), 0)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s\n", p)
 		copy(p, val)
 		return nil
 	})
@@ -1061,6 +1063,9 @@ func TestSequence(t *testing.T) {
 	var dbi2 DBI
 	err = env.Update(func(txn *Txn) (err error) {
 		dbi1, err = txn.OpenDBISimple("testdb", Create)
+		if err != nil {
+			return err
+		}
 		dbi2, err = txn.OpenDBISimple("testdb2", Create)
 		return err
 	})
