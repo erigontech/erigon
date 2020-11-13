@@ -54,7 +54,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	defer historyTx.Rollback()
 	chainConfig := genesis.Config
 	engine := ethash.NewFaker()
-	vmConfig := vm.Config{ReadOnly: true}
+	vmConfig := vm.Config{}
 	cc := &core.TinyChainContext{}
 	cc.SetDB(chainDb)
 	cc.SetEngine(engine)
