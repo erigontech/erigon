@@ -77,8 +77,21 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		defer tx.Rollback()
 	}
 
+	useSilkworm := params.SilkwormExecutionFunc != nil
+	if useSilkworm {
+		if params.ReaderBuilder != nil {
+			panic("ReaderBuilder is not supported with Silkworm")
+		}
+		if params.WriterBuilder != nil {
+			panic("WriterBuilder is supported with Silkworm")
+		}
+		if params.ChangeSetHook != nil {
+			panic("ChangeSetHook is not supported with Silkworm")
+		}
+	}
+
 	var batch ethdb.DbWithPendingMutations
-	if params.SilkwormExecutionFunc == nil {
+	if !useSilkworm {
 		batch = tx.NewBatch()
 		defer batch.Rollback()
 	}
@@ -97,7 +110,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			return err
 		}
 
-		if params.SilkwormExecutionFunc != nil {
+		if useSilkworm {
 			txn := tx.(ethdb.HasTx).Tx()
 			var err error
 			batchSize := uint64(params.BatchSize)
