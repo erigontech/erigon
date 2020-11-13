@@ -78,18 +78,12 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 
 	if v == 0 {
 		log.Info("Generate headers hash to number index")
-		headHashBytes, innerErr := db.Get(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash))
-		if innerErr != nil {
-			return innerErr
-		}
-
 		headNumberBytes, innerErr := db.Get(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber))
 		if innerErr != nil {
 			return innerErr
 		}
 
 		headNumber := big.NewInt(0).SetBytes(headNumberBytes).Uint64()
-		headHash := common.BytesToHash(headHashBytes)
 
 		innerErr = etl.Transform("Torrent post-processing 1", db, dbutils.HeaderPrefix, dbutils.HeaderNumberPrefix, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 			if len(k) != 8+common.HashLength {
@@ -104,7 +98,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 				}
 				return stages.SaveStageProgress(db, HeaderNumber, 1, nil)
 			},
-			ExtractEndKey: dbutils.HeaderKey(headNumber, headHash),
+			ExtractEndKey: dbutils.EncodeBlockNumber(headNumber + 1),
 		})
 		if innerErr != nil {
 			return innerErr

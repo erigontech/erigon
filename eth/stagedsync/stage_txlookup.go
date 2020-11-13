@@ -30,7 +30,7 @@ func SpawnTxLookup(s *StageState, db ethdb.Database, tmpdir string, quitCh <-cha
 
 	logPrefix := s.state.LogPrefix()
 	startKey = dbutils.HeaderHashKey(blockNum)
-	if err = TxLookupTransform(logPrefix, db, startKey, dbutils.HeaderHashKey(syncHeadNumber), quitCh, tmpdir); err != nil {
+	if err = TxLookupTransform(logPrefix, db, startKey, dbutils.HeaderHashKey(syncHeadNumber+1), quitCh, tmpdir); err != nil {
 		return err
 	}
 

@@ -1,8 +1,6 @@
 package stagedsync
 
 import (
-	"encoding/binary"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -26,9 +24,8 @@ func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, tmpdir string, q
 		return nil
 	}
 
-	startKey := make([]byte, 8)
-	binary.BigEndian.PutUint64(startKey, s.BlockNumber)
-	endKey := dbutils.HeaderKey(*headNumber, headHash) // Make sure we stop at head
+	startKey := dbutils.EncodeBlockNumber(s.BlockNumber)
+	endKey := dbutils.EncodeBlockNumber(*headNumber + 1)
 
 	logPrefix := s.state.LogPrefix()
 	if err := etl.Transform(
