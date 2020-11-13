@@ -67,7 +67,7 @@ func executeBlocksWithSilkworm(startBlock uint64, maxBlock uint64, tx ethdb.DbWi
 	return silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, startBlock, maxBlock, batchSize, params.WriteReceipts)
 }
 
-func readBlock(blockNum uint64, tx ethdb.DbWithPendingMutations) (*types.Block, error) {
+func readBlock(blockNum uint64, tx rawdb.DatabaseReader) (*types.Block, error) {
 	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -80,8 +80,8 @@ func readBlock(blockNum uint64, tx ethdb.DbWithPendingMutations) (*types.Block, 
 	return block, nil
 }
 
-func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, batch ethdb.DbWithPendingMutations, chainConfig *params.ChainConfig,
-	chainContext *core.TinyChainContext, vmConfig *vm.Config, params ExecuteBlockStageParams) (stateWriter state.WriterWithChangeSets, err error) {
+func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, batch ethdb.Database, chainConfig *params.ChainConfig,
+	chainContext core.ChainContext, vmConfig *vm.Config, params ExecuteBlockStageParams) (stateWriter state.WriterWithChangeSets, err error) {
 
 	var stateReader state.StateReader
 	if params.ReaderBuilder != nil {
