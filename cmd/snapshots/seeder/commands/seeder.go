@@ -1,27 +1,25 @@
-package generate
+package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"time"
+
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
-	trnt "github.com/ledgerwatch/turbo-geth/turbo/torrent"
-	"os"
-	"os/signal"
-	"time"
+	trnt "github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 )
 
-func Seed(pathes []string) error {
-	if len(pathes) != 1 {
-		return errors.New("you must provide snapshots dir")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
+func Seed(ctx context.Context, datadir string) error {
+	datadir = filepath.Dir(datadir)
+	ctx, cancel := context.WithCancel(ctx)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -30,24 +28,21 @@ func Seed(pathes []string) error {
 		cancel()
 	}()
 
-	cfg := torrent.NewDefaultClientConfig()
+	cfg := trnt.DefaultTorrentConfig()
 	cfg.NoDHT = false
 	cfg.DisableTrackers = false
 	cfg.Seed = true
 	cfg.Debug = false
 	cfg.Logger = cfg.Logger.FilterLevel(lg.Info)
+	cfg.DataDir = datadir
 
-	cfg.DataDir = pathes[0]
-	cfg.DataDir = "/media/b00ris/nvme/snapshots"
-
-	pathes = []string{
+	pathes := []string{
 		cfg.DataDir + "/headers",
 		cfg.DataDir + "/bodies",
-		//cfg.DataDir+"/state/",
-		//cfg.DataDir+"/receipts/",
+		//cfg.DataDir + "/state",
+		//cfg.DataDir+"/receipts",
 	}
 
-	//cfg.Logger=cfg.Logger.FilterLevel(trlog.Info)
 	cl, err := torrent.NewClient(cfg)
 	if err != nil {
 		return err
@@ -69,7 +64,7 @@ func Seed(pathes []string) error {
 		} else if err != nil {
 			return err
 		}
-
+		tt := time.Now()
 		if common.IsCanceled(ctx) {
 			return common.ErrStopped
 		}
@@ -83,7 +78,6 @@ func Seed(pathes []string) error {
 			return err
 		}
 
-		tt := time.Now()
 		torrents[i], _, err = cl.AddTorrentSpec(&torrent.TorrentSpec{
 			Trackers:  trnt.Trackers,
 			InfoHash:  mi.HashInfoBytes(),

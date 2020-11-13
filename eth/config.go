@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -36,6 +35,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 )
 
 // DefaultFullGPOConfig contains default gasprice oracle settings for full node.
@@ -129,8 +129,12 @@ type Config struct {
 
 	StorageMode     ethdb.StorageMode
 	BatchSize       datasize.ByteSize // Batch size for execution stage
-	SnapshotMode    torrent.SnapshotMode
+	SnapshotMode    snapshotsync.SnapshotMode
 	SnapshotSeeding bool
+
+	// Address to connect to external snapshot downloader
+	// empty if you want to use internal bittorrent snapshot downloader
+	ExternalSnapshotDownloaderAddr string
 
 	// DownloadOnly is set when the node does not need to process the blocks, but simply
 	// download them
