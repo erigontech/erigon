@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime"
 	"sort"
 	"syscall"
 	"time"
@@ -56,12 +55,9 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	chainConfig := genesis.Config
 	engine := ethash.NewFaker()
 	vmConfig := vm.Config{}
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(chainDb, nil, chainConfig, engine, vmConfig, nil, txCacher)
-	if err != nil {
-		return err
-	}
-	defer bc.Stop()
+	cc := &core.TinyChainContext{}
+	cc.SetDB(chainDb)
+	cc.SetEngine(engine)
 
 	noOpWriter := state.NewNoopWriter()
 
@@ -88,7 +84,11 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			break
 		}
 
-		block := bc.GetBlockByNumber(blockNum)
+		blockHash, err := rawdb.ReadCanonicalHash(chainDb, blockNum)
+		if err != nil {
+			return err
+		}
+		block := rawdb.ReadBlock(chainDb, blockHash, blockNum)
 		if block == nil {
 			break
 		}
@@ -103,17 +103,18 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			blockWriter = csw
 		}
 
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, bc, block, vmConfig)
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, cc, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
-		if chainConfig.IsByzantium(block.Number()) {
-			receiptSha := types.DeriveSha(receipts)
-			if receiptSha != block.Header().ReceiptHash {
-				return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
-			}
-		}
 		if writeReceipts {
+			if chainConfig.IsByzantium(block.Number()) {
+				receiptSha := types.DeriveSha(receipts)
+				if receiptSha != block.Header().ReceiptHash {
+					return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+				}
+			}
+
 			if err := rawdb.AppendReceipts(batch, block.NumberU64(), receipts); err != nil {
 				return err
 			}

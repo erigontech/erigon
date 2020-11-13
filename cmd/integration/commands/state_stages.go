@@ -121,6 +121,10 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		default:
 		}
 
+		if progress(stages.Execution).BlockNumber == stopAt {
+			break
+		}
+
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}

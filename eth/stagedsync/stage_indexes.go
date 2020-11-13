@@ -27,7 +27,7 @@ func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	ig := core.NewIndexGenerator(logPrefix, db, quitCh)
 	ig.TempDir = tmpdir
 
-	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket, tmpdir); err != nil {
+	if err := ig.GenerateIndex(blockNum, endBlock+1, dbutils.PlainAccountChangeSetBucket, tmpdir); err != nil {
 		return fmt.Errorf("%s: fail to generate index: %w", logPrefix, err)
 	}
 
@@ -51,7 +51,7 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	}
 	ig := core.NewIndexGenerator(logPrefix, db, quitCh)
 	ig.TempDir = tmpdir
-	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainStorageChangeSetBucket, tmpdir); err != nil {
+	if err := ig.GenerateIndex(blockNum, endBlock+1, dbutils.PlainStorageChangeSetBucket, tmpdir); err != nil {
 		return fmt.Errorf("%s: fail to generate index: %w", logPrefix, err)
 	}
 
