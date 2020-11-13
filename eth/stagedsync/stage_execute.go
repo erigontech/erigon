@@ -64,11 +64,8 @@ func readBlock(blockNum uint64, tx rawdb.DatabaseReader) (*types.Block, error) {
 func executeBlocksWithSilkworm(startBlock uint64, maxBlock uint64, tx ethdb.DbWithPendingMutations, useExternalTx bool,
 	chainConfig *params.ChainConfig, params ExecuteBlockStageParams) (executedBlock uint64, err error) {
 
-	if params.ReaderBuilder != nil {
-		panic("ReaderBuilder is not supported with Silkworm")
-	}
-	if params.WriterBuilder != nil {
-		panic("WriterBuilder is not supported with Silkworm")
+	if params.ChangeSetHook != nil {
+		panic("ChangeSetHook is not supported with Silkworm")
 	}
 
 	txn := tx.(ethdb.HasTx).Tx()
@@ -81,7 +78,7 @@ func executeBlocksWithSilkworm(startBlock uint64, maxBlock uint64, tx ethdb.DbWi
 }
 
 func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, batch ethdb.Database, chainConfig *params.ChainConfig,
-	chainContext core.ChainContext, vmConfig *vm.Config, params ExecuteBlockStageParams) (stateWriter state.WriterWithChangeSets, err error) {
+	chainContext core.ChainContext, vmConfig *vm.Config, params ExecuteBlockStageParams) error {
 
 	var stateReader state.StateReader
 	if params.ReaderBuilder != nil {
@@ -92,6 +89,7 @@ func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, bat
 
 	blockNum := block.NumberU64()
 
+	var stateWriter state.WriterWithChangeSets
 	if params.WriterBuilder != nil {
 		stateWriter = params.WriterBuilder(batch, tx, blockNum)
 	} else {
@@ -101,16 +99,24 @@ func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, bat
 	engine := chainContext.Engine()
 
 	// where the magic happens
-	var receipts types.Receipts
-	receipts, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
+	receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
 	if err != nil {
-		return stateWriter, err
+		return err
 	}
 
 	if params.WriteReceipts {
-		err = rawdb.AppendReceipts(tx, blockNum, receipts)
+		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
+			return err
+		}
 	}
-	return stateWriter, err
+
+	if params.ChangeSetHook != nil {
+		if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
+			params.ChangeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
+		}
+	}
+
+	return nil
 }
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext *core.TinyChainContext, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
@@ -166,8 +172,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			return err
 		}
 
-		var stateWriter state.WriterWithChangeSets
-
 		if useSilkworm {
 			// Silkworm executes many blocks simultaneously
 			blockNum, err = executeBlocksWithSilkworm(blockNum, to, tx, useExternalTx, chainConfig, params)
@@ -181,7 +185,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 				break
 			}
-			stateWriter, err = executeBlockWithGo(block, tx, batch, chainConfig, chainContext, vmConfig, params)
+			err = executeBlockWithGo(block, tx, batch, chainConfig, chainContext, vmConfig, params)
 		}
 
 		if err != nil {
@@ -205,15 +209,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					return err
 				}
 				chainContext.SetDB(tx)
-			}
-		}
-
-		if params.ChangeSetHook != nil {
-			if useSilkworm {
-				panic("ChangeSetHook is not supported with Silkworm")
-			}
-			if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
-				params.ChangeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
 			}
 		}
 
