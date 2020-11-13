@@ -60,7 +60,7 @@ type LoadCommitHandler func(db ethdb.Putter, key []byte, isDone bool) error
 type AdditionalLogArguments func(k, v []byte) (additionalLogArguments []interface{})
 
 type TransformArgs struct {
-	ExtractStartKey []byte
+	ExtractStartKey []byte // [Start:End)
 	ExtractEndKey   []byte
 	FixedBits       int
 	BufferType      int
