@@ -48,25 +48,6 @@ type ExecuteBlockStageParams struct {
 	SilkwormExecutionFunc unsafe.Pointer
 }
 
-func executeBlocksWithSilkworm(startBlock uint64, maxBlock uint64, tx ethdb.DbWithPendingMutations, useExternalTx bool,
-	chainConfig *params.ChainConfig, params ExecuteBlockStageParams) (executedBlock uint64, err error) {
-
-	if params.ReaderBuilder != nil {
-		panic("ReaderBuilder is not supported with Silkworm")
-	}
-	if params.WriterBuilder != nil {
-		panic("WriterBuilder is supported with Silkworm")
-	}
-
-	txn := tx.(ethdb.HasTx).Tx()
-	batchSize := uint64(params.BatchSize)
-	if useExternalTx {
-		// Since we cannot periodically commit transactions, we have to execute all blocks in one go
-		batchSize = math.MaxUint64
-	}
-	return silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, startBlock, maxBlock, batchSize, params.WriteReceipts)
-}
-
 func readBlock(blockNum uint64, tx rawdb.DatabaseReader) (*types.Block, error) {
 	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
@@ -78,6 +59,25 @@ func readBlock(blockNum uint64, tx rawdb.DatabaseReader) (*types.Block, error) {
 	block.Body().SendersToTxs(senders)
 
 	return block, nil
+}
+
+func executeBlocksWithSilkworm(startBlock uint64, maxBlock uint64, tx ethdb.DbWithPendingMutations, useExternalTx bool,
+	chainConfig *params.ChainConfig, params ExecuteBlockStageParams) (executedBlock uint64, err error) {
+
+	if params.ReaderBuilder != nil {
+		panic("ReaderBuilder is not supported with Silkworm")
+	}
+	if params.WriterBuilder != nil {
+		panic("WriterBuilder is not supported with Silkworm")
+	}
+
+	txn := tx.(ethdb.HasTx).Tx()
+	batchSize := uint64(params.BatchSize)
+	if useExternalTx {
+		// Since we cannot periodically commit transactions, we have to execute all blocks in one go
+		batchSize = math.MaxUint64
+	}
+	return silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, startBlock, maxBlock, batchSize, params.WriteReceipts)
 }
 
 func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, batch ethdb.Database, chainConfig *params.ChainConfig,
@@ -104,13 +104,13 @@ func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, bat
 	var receipts types.Receipts
 	receipts, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
 	if err != nil {
-		return
+		return stateWriter, err
 	}
 
 	if params.WriteReceipts {
 		err = rawdb.AppendReceipts(tx, blockNum, receipts)
 	}
-	return
+	return stateWriter, err
 }
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext *core.TinyChainContext, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
