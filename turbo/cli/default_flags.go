@@ -25,6 +25,8 @@ var DefaultFlags = []cli.Flag{
 	utils.TxLookupLimitFlag,
 	StorageModeFlag,
 	SnapshotModeFlag,
+	SeedSnapshotsFlag,
+	ExternalSnapshotDownloaderAddrFlag,
 	BatchSizeFlag,
 	DatabaseFlag,
 	PrivateApiAddr,

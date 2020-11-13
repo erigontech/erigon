@@ -6,14 +6,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
-
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
 
@@ -99,11 +98,11 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 			err = errOpen
 		}
 		if cfg.SnapshotMode != "" {
-			mode, innerErr := torrent.SnapshotModeFromString(cfg.SnapshotMode)
+			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
 			if innerErr != nil {
 				return nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
 			}
-			kv, innerErr := torrent.WrapBySnapshots(db, cfg.SnapshotDir, mode)
+			kv, innerErr := snapshotsync.WrapBySnapshots(db, cfg.SnapshotDir, mode)
 			if innerErr != nil {
 				return nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
 			}

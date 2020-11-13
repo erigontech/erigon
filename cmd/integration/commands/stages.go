@@ -35,7 +35,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/ledgerwatch/turbo-geth/turbo/silkworm"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -852,13 +852,13 @@ func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, er
 
 func SetSnapshotKV(db ethdb.Database, snapshotDir, snapshotMode string) error {
 	if len(snapshotMode) > 0 && len(snapshotDir) > 0 {
-		mode, err := torrent.SnapshotModeFromString(snapshotMode)
+		mode, err := snapshotsync.SnapshotModeFromString(snapshotMode)
 		if err != nil {
 			panic(err)
 		}
 
 		snapshotKV := db.(ethdb.HasKV).KV()
-		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, snapshotDir, mode)
+		snapshotKV, err = snapshotsync.WrapBySnapshots(snapshotKV, snapshotDir, mode)
 		if err != nil {
 			return err
 		}

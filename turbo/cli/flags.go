@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/urfave/cli"
 )
 
@@ -47,18 +47,23 @@ var (
 		Value: ethdb.DefaultStorageMode.ToString(),
 	}
 	SnapshotModeFlag = cli.StringFlag{
-		Name: "snapshot-mode",
+		Name: "snapshot.mode",
 		Usage: `Configures the storage mode of the app:
 * h - download headers snapshot
 * b - download bodies snapshot
 * s - download state snapshot
 * r - download receipts snapshot
 `,
-		Value: torrent.DefaultSnapshotMode.ToString(),
+		Value: snapshotsync.DefaultSnapshotMode.ToString(),
 	}
 	SeedSnapshotsFlag = cli.BoolTFlag{
-		Name:  "seed-snapshots",
-		Usage: `Seed snapshot seeding`,
+		Name:  "snapshot.seed",
+		Usage: `Seed snapshot seeding(default: true)`,
+	}
+
+	ExternalSnapshotDownloaderAddrFlag = cli.StringFlag{
+		Name:  "snapshot.downloader.addr",
+		Usage: `enable external snapshot downloader`,
 	}
 
 	// LMDB flags
@@ -106,7 +111,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *eth.Config) {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.StorageMode = mode
-	snMode, err := torrent.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
+	snMode, err := snapshotsync.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -129,6 +134,8 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *eth.Config) {
 		}
 		etl.BufferOptimalSize = *size
 	}
+
+	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
 }
 
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {

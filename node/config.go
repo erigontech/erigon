@@ -27,7 +27,6 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/external"
@@ -187,7 +186,6 @@ type Config struct {
 	LMDBMapSize          datasize.ByteSize
 	LMDBMaxFreelistReuse uint
 	MDBX                 bool
-	SnapshotMode         torrent.SnapshotMode
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener
