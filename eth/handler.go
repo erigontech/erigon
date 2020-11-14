@@ -431,7 +431,7 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	// Register the peer locally
 	if err := pm.peers.Register(p, pm.removePeer); err != nil {
 		p.Log().Error("Ethereum peer registration failed", "err", err)
-		p.HandshakeOrderMux.Lock()
+		p.HandshakeOrderMux.Unlock()
 		return err
 	}
 	defer pm.removePeer(p.id)
