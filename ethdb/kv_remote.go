@@ -252,6 +252,10 @@ func (tx *remoteTx) Comparator(bucket string) dbutils.CmpFunc { panic("not imple
 func (tx *remoteTx) Cmp(bucket string, a, b []byte) int       { panic("not implemented yet") }
 func (tx *remoteTx) DCmp(bucket string, a, b []byte) int      { panic("not implemented yet") }
 
+func (tx *remoteTx) Sequence(bucket string, amount uint64) (uint64, error) {
+	panic("not implemented yet")
+}
+
 func (tx *remoteTx) Commit(ctx context.Context) error {
 	panic("remote db is read-only")
 }

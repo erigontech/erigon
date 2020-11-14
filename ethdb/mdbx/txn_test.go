@@ -316,6 +316,10 @@ func TestTxn_PutReserve(t *testing.T) {
 			return err
 		}
 		val := "v"
+		err = txn.Put(db, []byte("k"), []byte(val), 0)
+		if err != nil {
+			return err
+		}
 		p, err := txn.PutReserve(db, []byte("k"), len(val), 0)
 		if err != nil {
 			return err
@@ -1041,6 +1045,84 @@ func TestTxn_Stat(t *testing.T) {
 	}
 	if stat.Entries != 3 {
 		t.Errorf("unexpected entries: %d (expected %d)", stat.Entries, 3)
+	}
+}
+
+func TestSequence(t *testing.T) {
+	env := setup(t)
+	path, err := env.Path()
+	if err != nil {
+		env.Close()
+		t.Error(err)
+		return
+	}
+	defer os.RemoveAll(path)
+	defer env.Close()
+
+	var dbi1 DBI
+	var dbi2 DBI
+	err = env.Update(func(txn *Txn) (err error) {
+		dbi1, err = txn.OpenDBISimple("testdb", Create)
+		if err != nil {
+			return err
+		}
+		dbi2, err = txn.OpenDBISimple("testdb2", Create)
+		return err
+	})
+	if err != nil {
+		t.Errorf("%s", err)
+		return
+	}
+
+	err = env.Update(func(txn *Txn) (err error) {
+		v, err := txn.Sequence(dbi1, 0) // 0 accepted, validate on app level
+		if err != nil {
+			return err
+		}
+		if v != 0 {
+			t.Errorf("unexpected value: %d (expected %d)", v, 0)
+		}
+		v, err = txn.Sequence(dbi2, 2)
+		if err != nil {
+			return err
+		}
+		if v != 0 {
+			t.Errorf("unexpected value: %d (expected %d)", v, 1)
+		}
+
+		v, err = txn.Sequence(dbi1, 3)
+		if err != nil {
+			return err
+		}
+		if v != 0 {
+			t.Errorf("unexpected value: %d (expected %d)", 0, 0)
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Errorf("%s", err)
+	}
+
+	err = env.View(func(txn *Txn) (err error) {
+		v, err := txn.Sequence(dbi1, 0)
+		if err != nil {
+			return err
+		}
+		if v != 3 {
+			t.Errorf("unexpected value: %d (expected %d)", v, 3)
+		}
+
+		_, err = txn.Sequence(dbi1, 3) // error if > 0 in read tx
+		if err == nil {
+			t.Errorf("error expected")
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Errorf("%s", err)
+		return
 	}
 }
 

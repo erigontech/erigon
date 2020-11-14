@@ -91,6 +91,12 @@ type Tx interface {
 	Comparator(bucket string) dbutils.CmpFunc
 	Cmp(bucket string, a, b []byte) int
 	DCmp(bucket string, a, b []byte) int
+
+	// Allows to create a linear sequence of unique positive integers for each table.
+	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
+	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
+	// Starts from 0.
+	Sequence(bucket string, amount uint64) (uint64, error)
 }
 
 // Interface used for buckets migration, don't use it in usual app code

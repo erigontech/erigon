@@ -31,6 +31,10 @@ func (s *snapshotTX) CursorDupSort(bucket string) CursorDupSort {
 	return s.dbTX.CursorDupSort(bucket)
 }
 
+func (s *snapshotTX) Sequence(bucket string, amount uint64) (uint64, error) {
+	return s.dbTX.Sequence(bucket, amount)
+}
+
 func (s *snapshotTX) CursorDupFixed(bucket string) CursorDupFixed {
 	return s.dbTX.CursorDupFixed(bucket)
 }
@@ -52,6 +56,10 @@ func (v *lazyTx) CursorDupSort(bucket string) CursorDupSort {
 }
 
 func (v *lazyTx) CursorDupFixed(bucket string) CursorDupFixed {
+	panic("implement me")
+}
+
+func (v *lazyTx) Sequence(bucket string, amount uint64) (uint64, error) {
 	panic("implement me")
 }
 
