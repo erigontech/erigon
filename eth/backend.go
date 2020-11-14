@@ -18,10 +18,13 @@
 package eth
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"io/ioutil"
 	"math/big"
 	"os"
@@ -30,11 +33,10 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
-
-	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
+	"time"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -100,7 +102,7 @@ type Ethereum struct {
 	p2pServer     *p2p.Server
 	txPoolStarted bool
 
-	torrentClient *torrent.Client
+	torrentClient *bittorrent.Client
 
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 }
@@ -158,29 +160,116 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
-	var torrentClient *torrent.Client
-	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
-		config.SnapshotSeeding = true
-		var dbPath string
-		dbPath, err = stack.Config().ResolvePath("snapshots")
-		if err != nil {
-			return nil, err
-		}
-		torrentClient = torrent.New(dbPath, config.SnapshotMode, config.SnapshotSeeding)
-		err = torrentClient.Run(chainDb)
-		if err != nil {
-			return nil, err
-		}
+	var torrentClient *bittorrent.Client
+	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
+		if config.ExternalSnapshotDownloaderAddr != "" {
+			cli, cl, innerErr := snapshotsync.NewClient(config.ExternalSnapshotDownloaderAddr)
+			if innerErr != nil {
+				return nil, innerErr
+			}
+			defer cl() //nolint
 
-		snapshotKV := chainDb.KV()
-		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, dbPath, config.SnapshotMode)
-		if err != nil {
-			return nil, err
-		}
-		chainDb.SetKV(snapshotKV)
-		err = torrent.PostProcessing(chainDb, config.SnapshotMode)
-		if err != nil {
-			return nil, err
+			_, innerErr = cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
+				NetworkId: config.NetworkID,
+				Type:      config.SnapshotMode.ToSnapshotTypes(),
+			})
+			if innerErr != nil {
+				return nil, innerErr
+			}
+
+			waitDownload := func() (map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, error) {
+				snapshotReadinessCheck := func(mp map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, tp snapshotsync.SnapshotType) bool {
+					if mp[tp].Readiness != int32(100) {
+						log.Info("Downloading", "snapshot", tp, "%", mp[tp].Readiness)
+						return false
+					}
+					return true
+				}
+				for {
+					mp := make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
+					snapshots, err1 := cli.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{NetworkId: config.NetworkID})
+					if err1 != nil {
+						return nil, err1
+					}
+					for i := range snapshots.Info {
+						if mp[snapshots.Info[i].Type].SnapshotBlock < snapshots.Info[i].SnapshotBlock && snapshots.Info[i] != nil {
+							mp[snapshots.Info[i].Type] = snapshots.Info[i]
+						}
+					}
+
+					downloaded := true
+					if config.SnapshotMode.Headers {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_headers) {
+							downloaded = false
+						}
+					}
+					if config.SnapshotMode.Bodies {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_bodies) {
+							downloaded = false
+						}
+					}
+					if config.SnapshotMode.State {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_state) {
+							downloaded = false
+						}
+					}
+					if config.SnapshotMode.Receipts {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_receipts) {
+							downloaded = false
+						}
+					}
+					if downloaded {
+						return mp, nil
+					}
+					time.Sleep(time.Second * 10)
+				}
+			}
+			downloadedSnapshots, innerErr := waitDownload()
+			if innerErr != nil {
+				return nil, innerErr
+			}
+			snapshotKV := chainDb.KV()
+
+			snapshotKV, innerErr = snapshotsync.WrapBySnapshots2(snapshotKV, downloadedSnapshots)
+			if innerErr != nil {
+				return nil, innerErr
+			}
+			chainDb.SetKV(snapshotKV)
+			innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
+			if innerErr != nil {
+				return nil, innerErr
+			}
+		} else {
+			var dbPath string
+			dbPath, err = stack.Config().ResolvePath("snapshots")
+			if err != nil {
+				return nil, err
+			}
+			torrentClient, err = bittorrent.New(dbPath, config.SnapshotSeeding)
+			if err != nil {
+				return nil, err
+			}
+			err = torrentClient.Load(chainDb)
+			if err != nil {
+				return nil, err
+			}
+			err = torrentClient.AddSnapshotsTorrents(context.Background(), chainDb, config.NetworkID, config.SnapshotMode)
+			if err == nil {
+				torrentClient.Download()
+
+				snapshotKV := chainDb.KV()
+				snapshotKV, err = snapshotsync.WrapBySnapshots(snapshotKV, dbPath, config.SnapshotMode)
+				if err != nil {
+					return nil, err
+				}
+				chainDb.SetKV(snapshotKV)
+				err = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				log.Error("There was an error in snapshot init. Swithing to regular sync", "err", err)
+			}
 		}
 	}
 

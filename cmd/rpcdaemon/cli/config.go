@@ -6,34 +6,34 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
-
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
 
 type Flags struct {
-	PrivateApiAddr    string
-	Chaindata         string
-	SnapshotDir       string
-	SnapshotMode      string
-	HttpListenAddress string
-	TLSCertfile       string
-	TLSCACert         string
-	TLSKeyFile        string
-	HttpPort          int
-	HttpCORSDomain    []string
-	HttpVirtualHost   []string
-	API               []string
-	Gascap            uint64
-	MaxTraces         uint64
-	TraceType         string
-	WebsocketEnabled  bool
+	PrivateApiAddr       string
+	Chaindata            string
+	SnapshotDir          string
+	SnapshotMode         string
+	HttpListenAddress    string
+	TLSCertfile          string
+	TLSCACert            string
+	TLSKeyFile           string
+	HttpPort             int
+	HttpCORSDomain       []string
+	HttpVirtualHost      []string
+	API                  []string
+	Gascap               uint64
+	MaxTraces            uint64
+	TraceType            string
+	WebsocketEnabled     bool
+	RpcAllowListFilePath string
 }
 
 var rootCmd = &cobra.Command{
@@ -76,6 +76,11 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
 	rootCmd.PersistentFlags().StringVar(&cfg.TraceType, "trace.type", "parity", "Specify the type of tracing [geth|parity*] (experimental)")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets")
+	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, "rpc.accessList", "", "Specify granular (method-by-method) API allowlist")
+
+	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
+		panic(err)
+	}
 
 	return rootCmd, cfg
 }
@@ -93,11 +98,11 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 			err = errOpen
 		}
 		if cfg.SnapshotMode != "" {
-			mode, innerErr := torrent.SnapshotModeFromString(cfg.SnapshotMode)
+			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
 			if innerErr != nil {
 				return nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
 			}
-			kv, innerErr := torrent.WrapBySnapshots(db, cfg.SnapshotDir, mode)
+			kv, innerErr := snapshotsync.WrapBySnapshots(db, cfg.SnapshotDir, mode)
 			if innerErr != nil {
 				return nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
 			}
@@ -124,11 +129,16 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 
 	srv := rpc.NewServer()
+
+	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
+	if err != nil {
+		return err
+	}
+	srv.SetAllowList(allowListForRPC)
+
 	if err := node.RegisterApisFromWhitelist(rpcAPI, cfg.API, srv, false); err != nil {
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
-
-	var err error
 
 	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost)
 	var wsHandler http.Handler
@@ -148,6 +158,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
 
+	// TODO(tjayrush): remove TraceType
 	if cfg.TraceType != "parity" {
 		log.Info("Tracing output type: ", cfg.TraceType)
 	}

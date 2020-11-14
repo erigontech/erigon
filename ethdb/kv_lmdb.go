@@ -3,6 +3,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -703,6 +704,28 @@ func (tx *lmdbTx) HasOne(bucket string, key []byte) (bool, error) {
 	} else {
 		return false, err
 	}
+}
+
+func (tx *lmdbTx) Sequence(bucket string, amount uint64) (uint64, error) {
+	c := tx.Cursor(dbutils.Sequence)
+	defer c.Close()
+	v, err := c.SeekExact([]byte(bucket))
+	if err != nil && !lmdb.IsNotFound(err) {
+		return 0, err
+	}
+
+	var currentV uint64 = 0
+	if len(v) > 0 {
+		currentV = binary.BigEndian.Uint64(v)
+	}
+
+	newVBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
+	err = c.Put([]byte(bucket), newVBytes)
+	if err != nil {
+		return 0, err
+	}
+	return currentV, nil
 }
 
 func (tx *lmdbTx) BucketSize(name string) (uint64, error) {

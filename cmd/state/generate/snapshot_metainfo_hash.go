@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"time"
 )
 
 func MetaInfoHash(path string) error {
 	t := time.Now()
 	mi := metainfo.MetaInfo{}
-	info, err := torrent.BuildInfoBytesForLMDBSnapshot(path)
+	info, err := bittorrent.BuildInfoBytesForLMDBSnapshot(path)
 	if err != nil {
 		return err
 	}

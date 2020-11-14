@@ -28,7 +28,7 @@ docker-compose:
 	docker-compose up
 
 geth:
-	$(GOBUILD) -o $(GOBIN)/tg -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg 
+	$(GOBUILD) -o $(GOBIN)/tg -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
@@ -74,7 +74,7 @@ pics:
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
 rpcdaemon:
-	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/rpcdaemon
+	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X commands.gitCommit=${GIT_COMMIT}" ./cmd/rpcdaemon
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
@@ -185,6 +185,8 @@ grpc:
 	PATH=$(GOBIN):$(PATH) go generate ./ethdb
 	PATH=$(GOBIN):$(PATH) go generate ./cmd/headers
 	PATH=$(GOBIN):$(PATH) go generate ./turbo/shards
+	PATH=$(GOBIN):$(PATH) go generate ./turbo/snapshotsync
+
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json

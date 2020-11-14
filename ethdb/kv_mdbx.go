@@ -392,6 +392,10 @@ func (tx *mdbxTx) DCmp(bucket string, a, b []byte) int {
 	return tx.tx.DCmp(mdbx.DBI(tx.db.buckets[bucket].DBI), a, b)
 }
 
+func (tx *mdbxTx) Sequence(bucket string, amount uint64) (uint64, error) {
+	return tx.tx.Sequence(mdbx.DBI(tx.db.buckets[bucket].DBI), amount)
+}
+
 // All buckets stored as keys of un-named bucket
 func (tx *mdbxTx) ExistingBuckets() ([]string, error) {
 	var res []string

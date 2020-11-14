@@ -39,11 +39,11 @@ type EthAPI interface {
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
 
 	// Filter related (see ./eth_filters.go)
-	// newPendingTransactionFilter(ctx context.Context) (string, error)
-	// newBlockFilter(ctx context.Context) (string, error)
-	// newFilter(ctx context.Context) (string, error)
-	// uninstallFilter(ctx context.Context) (string, error)
-	// getFilterChanges(ctx context.Context) (string, error)
+	NewPendingTransactionFilter(_ context.Context) (hexutil.Uint64, error)
+	NewBlockFilter(_ context.Context) (hexutil.Uint64, error)
+	NewFilter(_ context.Context, filter interface{}) (hexutil.Uint64, error)
+	UninstallFilter(_ context.Context, index hexutil.Uint64) (bool, error)
+	GetFilterChanges(_ context.Context, index hexutil.Uint64) ([]interface{}, error)
 
 	// Account related (see ./eth_accounts.go)
 	Accounts(ctx context.Context) ([]common.Address, error)
@@ -63,8 +63,10 @@ type EthAPI interface {
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
-	// SendTransaction(ctx context.Context) (string, error)
+	SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
+	SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error)
 
 	// Mining related (see ./eth_mining.go)
 	Coinbase(_ context.Context) (common.Address, error)

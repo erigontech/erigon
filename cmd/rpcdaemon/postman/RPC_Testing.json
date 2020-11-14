@@ -1171,15 +1171,7 @@
                   "listen": "test",
                   "script": {
                     "id": "0df66f96-c63d-4038-b349-bbbf05025c28",
-                    "exec": [
-                      "var isAllTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (isAllTests) {",
-                      "  pm.test('Not tested', function() {",
-                      "    var tested = false;",
-                      "    pm.expect(tested).to.be.true",
-                      "  })",
-                      "}"
-                    ],
+                    "exec": ["utils.notImplemented(\"eth_newPendingTransactionFilter\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -1194,7 +1186,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newPendingTransactionFilter\",\n\t\"params\":[],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newPendingTransactionFilter\",\n\t\"params\":[],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -1214,15 +1206,7 @@
                   "listen": "test",
                   "script": {
                     "id": "cd6ed7e9-907f-4149-a742-b0fad5cf62a4",
-                    "exec": [
-                      "var isAllTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (isAllTests) {",
-                      "  pm.test('Not tested', function() {",
-                      "    var tested = false;",
-                      "    pm.expect(tested).to.be.true",
-                      "  })",
-                      "}"
-                    ],
+                    "exec": ["utils.notImplemented(\"eth_newBlockFilter\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -1237,7 +1221,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newBlockFilter\",\n\t\"params\":[],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newBlockFilter\",\n\t\"params\":[],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -1257,15 +1241,7 @@
                   "listen": "test",
                   "script": {
                     "id": "efdfe67e-baf1-4743-92a9-9eb1f1e4ce1c",
-                    "exec": [
-                      "var isAllTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (isAllTests) {",
-                      "  pm.test('Not tested', function() {",
-                      "    var tested = false;",
-                      "    pm.expect(tested).to.be.true",
-                      "  })",
-                      "}"
-                    ],
+                    "exec": ["utils.notImplemented(\"eth_newFilter\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -1280,7 +1256,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newFilter\",\n\t\"params\":[\n\t\t{\n\t\t\t\"topics\":[\"0x12341234\"]\n\t\t}\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_newFilter\",\n\t\"params\": [\n    {\n      \"fromBlock\": \"0x1\",\n      \"toBlock\": \"0x2\",\n      \"address\": \" 0x8888f1f195afa192cfee860698584c030f4c9db1\",\n      \"topics\": [\n        \"0x000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b\",\n        null,\n        [\"0x000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b\", \"0x0000000000000000000000000aff3454fce5edbc8cca8697c15331677e6ebccc\"]\n      ]\n    }\n  ],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -1300,15 +1276,7 @@
                   "listen": "test",
                   "script": {
                     "id": "6d185276-2be5-4554-b23a-cdf5e8d2de86",
-                    "exec": [
-                      "var isAllTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (isAllTests) {",
-                      "  pm.test('Not tested', function() {",
-                      "    var tested = false;",
-                      "    pm.expect(tested).to.be.true",
-                      "  })",
-                      "}"
-                    ],
+                    "exec": ["utils.notImplemented(\"eth_uninstallFilter\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -1323,7 +1291,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_uninstallFilter\",\n\t\"params\":[\n\t\t\"0xb\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_uninstallFilter\",\n\t\"params\":[\n\t\t\"0xdeadbeef\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -1343,15 +1311,7 @@
                   "listen": "test",
                   "script": {
                     "id": "39926b20-ab98-4d15-849d-a568c8fdaec1",
-                    "exec": [
-                      "var isAllTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (isAllTests) {",
-                      "  pm.test('Not tested', function() {",
-                      "    var tested = false;",
-                      "    pm.expect(tested).to.be.true",
-                      "  })",
-                      "}"
-                    ],
+                    "exec": ["utils.notImplemented(\"eth_getFilterChanges\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -1366,7 +1326,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getFilterChanges\",\n\t\"params\":[\n\t\t\"0x16\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getFilterChanges\",\n\t\"params\":[\n\t\t\"0xdeadbeef\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -1387,13 +1347,11 @@
                   "script": {
                     "id": "f4f1f306-153b-464b-8b1f-6607fc764595",
                     "exec": [
-                      "var isAllTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (isAllTests) {",
-                      "  pm.test('Not tested', function() {",
-                      "    var tested = false;",
-                      "    pm.expect(tested).to.be.true",
-                      "  })",
-                      "}"
+                      "pm.test('Not tested', function() {",
+                      "  var tested = false;",
+                      "  pm.expect(tested).to.be.true",
+                      "})",
+                      ""
                     ],
                     "type": "text/javascript"
                   }
@@ -1429,73 +1387,6 @@
         {
           "name": "accounts",
           "item": [
-            {
-              "name": "accounts (deprecated)",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "id": "641f671a-2b87-4235-a01c-d709fe91974a",
-                    "exec": [
-                      "var expectedNethermind = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"result\": [",
-                      "    \"0x51dcab5854d508a41388fbe012af3e03079676bf\"",
-                      "  ],",
-                      "  \"id\": 1",
-                      "}",
-                      "var expectedParity = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"result\": [],",
-                      "  \"id\": 1",
-                      "}",
-                      "var expectedTurbo = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 1,",
-                      "  \"error\": {",
-                      "    \"code\": -32000,",
-                      "    \"message\": \"the function eth_accounts has been deprecated\"",
-                      "  }",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  var expected = {",
-                      "    '{{NETHERMIND}}': expectedNethermind,",
-                      "    '{{TURBOGETH}}': expectedTurbo,",
-                      "    '{{PARITY}}': expectedParity,",
-                      "  }",
-                      "  const jsonData = pm.response.json();",
-                      "  pm.expect(jsonData).to.deep.equals(expected[pm.environment.get('HOST')]);",
-                      "})",
-                      ""
-                    ],
-                    "type": "text/javascript"
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_accounts\",\n\t\"params\":[],\n\t\"id\":1\n}",
-                  "options": {
-                    "raw": {}
-                  }
-                },
-                "url": {
-                  "raw": "{{HOST}}",
-                  "host": ["{{HOST}}"]
-                },
-                "description": "Returns a list of addresses owned by the client.\r\n\r\n**Deprecated** This function will be removed in the future.\r\n\r\n**Parameters**\r\n\r\nnone\r\n\r\n**Returns**\r\n\r\n`Array of DATA`, 20 Bytes - addresses owned by the client"
-              },
-              "response": []
-            },
             {
               "name": "getBalance",
               "event": [
@@ -1694,13 +1585,7 @@
                   "listen": "test",
                   "script": {
                     "id": "31f37406-7aeb-4bd2-b233-d6098ac51bee",
-                    "exec": [
-                      "// We can't really test this because it changes all the time",
-                      "// We can't really test this because it changes all the time",
-                      "pm.test('Cannot test because the value changes each time', function() {",
-                      "  pm.expect(true).to.be.true;",
-                      "});"
-                    ],
+                    "exec": ["utils.cannotTest(\"eth_blockNumber\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -1715,7 +1600,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_blockNumber\",\n\t\"params\":[],\n\t\"id\":83\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_blockNumber\",\n\t\"params\":[],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -1863,12 +1748,7 @@
                   "listen": "test",
                   "script": {
                     "id": "6596220f-c67c-4e1e-9830-0bd887b54f29",
-                    "exec": [
-                      "// This can't really be tested as it changes all the time",
-                      "pm.test('Cannot test because the value changes each time', function() {",
-                      "  pm.expect(true).to.be.true;",
-                      "});"
-                    ],
+                    "exec": ["utils.cannotTest(\"eth_gasPrice\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -1883,7 +1763,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_gasPrice\",\n\t\"params\":[],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_gasPrice\",\n\t\"params\":[],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -1958,13 +1838,17 @@
                   "script": {
                     "id": "5f401e45-8ee7-421a-b2c1-17b6b8d29a98",
                     "exec": [
-                      "var isAllTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (isAllTests) {",
-                      "  pm.test('Not tested', function() {",
-                      "    var tested = false;",
-                      "    pm.expect(tested).to.be.true",
-                      "  })",
-                      "}"
+                      "var expected = {",
+                      "  \"jsonrpc\": \"2.0\",",
+                      "  \"id\": 1,",
+                      "  \"result\": \"0x5208\"",
+                      "}",
+                      "",
+                      "pm.test('Has correct result', function() {",
+                      "    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+                      "})",
+                      "",
+                      ""
                     ],
                     "type": "text/javascript"
                   }
@@ -2000,15 +1884,7 @@
                   "listen": "test",
                   "script": {
                     "id": "ef82af6e-ebbe-4229-863f-28245c5d3f50",
-                    "exec": [
-                      "var isAllTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (isAllTests) {",
-                      "  pm.test('Not tested', function() {",
-                      "    var tested = false;",
-                      "    pm.expect(tested).to.be.true",
-                      "  })",
-                      "}"
-                    ],
+                    "exec": ["utils.notImplemented(\"eth_sendTransaction\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -2023,7 +1899,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_sendTransaction\",\n\t\"params\":[{\n\t\t\"from\": \"0xb60e8dd61c5d32be8058bb8eb970870f07233155\",\n\t\t\"to\": \"0xd46e8dd67c5d32be8058bb8eb970870f07244567_hangs_parity\",\n\t\t\"gas\": \"0x76c0\",\n\t\t\"gasPrice\": \"0x9184e72a000\",\n\t\t\"value\": \"0x9184e72a\",\n\t\t\"data\": \"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"\n\t}],\n\t\"id\":1\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_sendTransaction\",\n  \"params\": [\n    {\n      \"from\": \" 0xb60e8dd61c5d32be8058bb8eb970870f07233155\",\n      \"to\": \" 0xd46e8dd67c5d32be8058bb8eb970870f07244567\",\n      \"gas\": \"0x76c0\",\n      \"gasPrice\": \"0x9184e72a000\",\n      \"value\": \"0x9184e72a\",\n      \"data\": \"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"\n    }\n  ],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -2044,13 +1920,11 @@
                   "script": {
                     "id": "c461582a-3e07-4951-800d-f9a860873cf2",
                     "exec": [
-                      "var isAllTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (isAllTests) {",
-                      "  pm.test('Not tested', function() {",
-                      "    var tested = false;",
-                      "    pm.expect(tested).to.be.true",
-                      "  })",
-                      "}"
+                      "pm.test('Not tested', function() {",
+                      "  var tested = false;",
+                      "  pm.expect(tested).to.be.true",
+                      "})",
+                      ""
                     ],
                     "type": "text/javascript"
                   }
@@ -2076,6 +1950,41 @@
                   "host": ["{{HOST}}"]
                 },
                 "description": "Creates new message call transaction or a contract creation for previously-signed transactions.\r\n\r\n**Note** Use `eth_getTransactionReceipt` to get the contract address, after the transaction was mined, when you created a contract.\r\n\r\n**Parameters**\r\n\r\n`DATA`, The signed transaction data\r\n\r\n```\r\nparams: [\"0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675\"]\r\n```\r\n\r\n**Returns**\r\n\r\n`DATA`, 32 Bytes - The transaction hash, or the zero hash if the transaction is not yet available"
+              },
+              "response": []
+            },
+            {
+              "name": "getProof",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "id": "21a62ff1-f06f-4826-add1-39359216242a",
+                    "exec": ["utils.notImplemented(\"eth_getProof\", pm.response.json())", ""],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"eth_getProof\",\n  \"params\": [\n    \"0x7F0d15C7FAae65896648C8273B6d7E43f58Fa842\",\n    [  \"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\" ],\n    \"latest\"\n  ]\n}",
+                  "options": {
+                    "raw": {}
+                  }
+                },
+                "url": {
+                  "raw": "{{HOST}}",
+                  "host": ["{{HOST}}"]
+                },
+                "description": "EIP: https://github.com/ethereum/EIPs/issues/1186\nPossible implementation: https://github.com/vocdoni/eth-storage-proof"
               },
               "response": []
             }
@@ -2111,45 +2020,7 @@
                   "listen": "test",
                   "script": {
                     "id": "da8a7787-c409-4552-a9c3-b8ab86630022",
-                    "exec": [
-                      "var allTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "var expectedNethermind = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"result\": \"0x0000000000000000000000000000000000000000\",",
-                      "  \"id\": 64",
-                      "}",
-                      "var expectedParity = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"error\": {",
-                      "    \"code\": -32023,",
-                      "    \"message\": \"No accounts were found\",",
-                      "    \"data\": \"\\\"\\\"\"",
-                      "  },",
-                      "  \"id\": 64",
-                      "}",
-                      "var expectedTurbo = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 64,",
-                      "  \"error\": {",
-                      "    \"code\": -32000,",
-                      "    \"message\": \"the function eth_coinbase is currently not implemented\"",
-                      "  }",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  var expected = {",
-                      "    '{{NETHERMIND}}': expectedNethermind,",
-                      "    '{{TURBOGETH}}': expectedTurbo,",
-                      "    '{{PARITY}}': expectedParity,",
-                      "  }",
-                      "  const jsonData = pm.response.json();",
-                      "  pm.expect(jsonData).to.deep.equals(expected[pm.environment.get('HOST')]);",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.notImplemented(\"eth_coinbase\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -2164,7 +2035,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_coinbase\",\n\t\"params\":[],\n\t\"id\":64\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_coinbase\",\n\t\"params\":[],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -2184,41 +2055,7 @@
                   "listen": "test",
                   "script": {
                     "id": "a95c1f30-19d9-48cb-849d-52611db41f8a",
-                    "exec": [
-                      "var allTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "var expectedNethermind = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"result\": \"0x0\",",
-                      "  \"id\": 71",
-                      "}",
-                      "var expectedParity = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"result\": \"0x0\",",
-                      "  \"id\": 71",
-                      "}",
-                      "var expectedTurbo = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 71,",
-                      "  \"error\": {",
-                      "    \"code\": -32000,",
-                      "    \"message\": \"the function eth_hashRate is currently not implemented\"",
-                      "  }",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  var expected = {",
-                      "    '{{NETHERMIND}}': expectedNethermind,",
-                      "    '{{TURBOGETH}}': expectedTurbo,",
-                      "    '{{PARITY}}': expectedParity,",
-                      "  }",
-                      "  const jsonData = pm.response.json();",
-                      "  pm.expect(jsonData).to.deep.equals(expected[pm.environment.get('HOST')]);",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.notImplemented(\"eth_hashRate\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -2233,7 +2070,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_hashrate\",\n\t\"params\":[],\n\t\"id\":71\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_hashrate\",\n\t\"params\":[],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -2254,37 +2091,14 @@
                   "script": {
                     "id": "80e24f49-29df-4ea6-a358-1827aa04ed5c",
                     "exec": [
-                      "var allTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "var expectedNethermind = {",
+                      "var expected = {",
                       "  \"jsonrpc\": \"2.0\",",
-                      "  \"result\": false,",
-                      "  \"id\": 71",
-                      "}",
-                      "var expectedParity = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"result\": false,",
-                      "  \"id\": 71",
-                      "}",
-                      "var expectedTurbo = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 71,",
-                      "  \"error\": {",
-                      "    \"code\": -32000,",
-                      "    \"message\": \"the function eth_mining is currently not implemented\"",
-                      "  }",
+                      "  \"id\": 1,",
+                      "  \"result\": false",
                       "}",
                       "",
                       "pm.test('Has correct result', function() {",
-                      "  var expected = {",
-                      "    '{{NETHERMIND}}': expectedNethermind,",
-                      "    '{{TURBOGETH}}': expectedTurbo,",
-                      "    '{{PARITY}}': expectedParity,",
-                      "  }",
-                      "  const jsonData = pm.response.json();",
-                      "  pm.expect(jsonData).to.deep.equals(expected[pm.environment.get('HOST')]);",
+                      "  pm.expect(pm.response.json()).to.be.deep.equal(expected);",
                       "})",
                       ""
                     ],
@@ -2302,7 +2116,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_mining\",\n\t\"params\":[],\n\t\"id\":71\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_mining\",\n\t\"params\":[],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -2322,47 +2136,7 @@
                   "listen": "test",
                   "script": {
                     "id": "9b0d4e9d-17ce-4a90-983b-61cae9216b8c",
-                    "exec": [
-                      "var allTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "var expectedNethermind = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"error\": {",
-                      "    \"code\": -32601,",
-                      "    \"message\": \"eth_getWork not supported\"",
-                      "  },",
-                      "  \"id\": 73",
-                      "}",
-                      "var expectedParity = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"error\": {",
-                      "    \"code\": -32002,",
-                      "    \"message\": \"Author not configured. Run Parity with --author to configure.\"",
-                      "  },",
-                      "  \"id\": 73",
-                      "}",
-                      "var expectedTurbo = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 73,",
-                      "  \"error\": {",
-                      "    \"code\": -32000,",
-                      "    \"message\": \"the function eth_getWork is currently not implemented\"",
-                      "  }",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  var expected = {",
-                      "    '{{NETHERMIND}}': expectedNethermind,",
-                      "    '{{TURBOGETH}}': expectedTurbo,",
-                      "    '{{PARITY}}': expectedParity,",
-                      "  }",
-                      "  const jsonData = pm.response.json();",
-                      "  pm.expect(jsonData).to.deep.equals(expected[pm.environment.get('HOST')]);",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.notImplemented(\"eth_getWork\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -2377,7 +2151,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getWork\",\n\t\"params\":[],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_getWork\",\n\t\"params\":[],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -2397,44 +2171,7 @@
                   "listen": "test",
                   "script": {
                     "id": "1d5404fe-404d-4c96-b285-4dbc0ca679e5",
-                    "exec": [
-                      "var allTests = false; //pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "var expectedNethermind = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"error\": {",
-                      "    \"code\": -32601,",
-                      "    \"message\": \"eth_submitWork not supported\"",
-                      "  },",
-                      "  \"id\": 73",
-                      "}",
-                      "var expectedParity = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"result\": false,",
-                      "  \"id\": 73",
-                      "}",
-                      "var expectedTurbo = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 73,",
-                      "  \"error\": {",
-                      "    \"code\": -32000,",
-                      "    \"message\": \"the function eth_submitWork is currently not implemented\"",
-                      "  }",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  var expected = {",
-                      "    '{{NETHERMIND}}': expectedNethermind,",
-                      "    '{{TURBOGETH}}': expectedTurbo,",
-                      "    '{{PARITY}}': expectedParity,",
-                      "  }",
-                      "  const jsonData = pm.response.json();",
-                      "  pm.expect(jsonData).to.deep.equals(expected[pm.environment.get('HOST')]);",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.notImplemented(\"eth_submitWork\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -2449,7 +2186,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\", \n\t\"method\":\"eth_submitWork\", \n\t\"params\":[\n\t\t\"0x1\", \n\t\t\"0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\", \n\t\t\"0xD16E5700000000000000000000000000D16E5700000000000000000000000000\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\", \n\t\"method\":\"eth_submitWork\", \n\t\"params\":[\n\t\t\"0x1\", \n\t\t\"0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\", \n\t\t\"0xD16E5700000000000000000000000000D16E5700000000000000000000000000\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -2469,44 +2206,7 @@
                   "listen": "test",
                   "script": {
                     "id": "531d8dbf-a765-4fab-b169-b8114dab1f0c",
-                    "exec": [
-                      "var allTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "var expectedNethermind = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"error\": {",
-                      "    \"code\": -32601,",
-                      "    \"message\": \"eth_submitHashrate not supported\"",
-                      "  },",
-                      "  \"id\": 73",
-                      "}",
-                      "var expectedParity = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"result\": true,",
-                      "  \"id\": 73",
-                      "}",
-                      "var expectedTurbo = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 73,",
-                      "  \"error\": {",
-                      "    \"code\": -32000,",
-                      "    \"message\": \"the function eth_sumitHashrate is currently not implemented\"",
-                      "  }",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  var expected = {",
-                      "    '{{NETHERMIND}}': expectedNethermind,",
-                      "    '{{TURBOGETH}}': expectedTurbo,",
-                      "    '{{PARITY}}': expectedParity,",
-                      "  }",
-                      "  const jsonData = pm.response.json();",
-                      "  pm.expect(jsonData).to.deep.equals(expected[pm.environment.get('HOST')]);",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.notImplemented(\"eth_sumitHashrate\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -2521,7 +2221,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\", \n\t\"method\":\"eth_submitHashrate\", \n\t\"params\":[\n\t\t\"0x0000000000000000000000000000000000000000000000000000000000500000\", \n\t\t\"0x59daa26581d0acd1fce254fb7e85952f4c09d0915afd33d3886cd914bc7d283c\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\", \n\t\"method\":\"eth_submitHashrate\", \n\t\"params\":[\n\t\t\"0x0000000000000000000000000000000000000000000000000000000000500000\", \n\t\t\"0x59daa26581d0acd1fce254fb7e85952f4c09d0915afd33d3886cd914bc7d283c\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -2551,7 +2251,7 @@
               "listen": "test",
               "script": {
                 "id": "b9ab1301-c8a1-424d-a4ed-805e8ad8580c",
-                "exec": [""],
+                "exec": ["utils.notImplemented(\"trace_call\", pm.response.json())", ""],
                 "type": "text/javascript"
               }
             }
@@ -2566,7 +2266,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_call\",\n\t\"params\":[],\n\t\"id\":1\n}",
+              "raw": "{\n  \"jsonrpc\":\"2.0\",\n  \"method\":\"trace_call\",\n  \"params\":[\n    {\n      \"from\":\"0x407d73d8a49eeb85d32cf465507dd71d507100c1\",\n      \"to\":\"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b\",\n      \"value\":\"0x186a0\"\n    },\n    [\"trace\",\"vmTrace\"],\n    \"latest\"\n  ],\n  \"id\": 1\n}\n",
               "options": {
                 "raw": {}
               }
@@ -2586,7 +2286,7 @@
               "listen": "test",
               "script": {
                 "id": "9444af44-d430-4603-b9a1-16afb0024658",
-                "exec": [""],
+                "exec": ["utils.notImplemented(\"trace_callMany\", pm.response.json())", ""],
                 "type": "text/javascript"
               }
             }
@@ -2601,7 +2301,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_callMany\",\n\t\"params\":[],\n\t\"id\":1\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_callMany\",\n  \"params\": [\n    [\n      [\n        {\n          \"from\":\"0x407d73d8a49eeb85d32cf465507dd71d507100c1\",\n          \"to\":\"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b\",\n          \"value\":\"0x186a0\"\n        },\n        [\"trace\"]\n      ],\n      [\n        {\n          \"from\":\"0x407d73d8a49eeb85d32cf465507dd71d507100c1\",\n          \"to\":\"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b\",\n          \"value\":\"0x186a0\"\n        },\n        [\"trace\"]\n      ]\n    ],\n    \"latest\"\n  ],\n\t\"id\":1\n}\n",
               "options": {
                 "raw": {}
               }
@@ -2621,7 +2321,7 @@
               "listen": "test",
               "script": {
                 "id": "98d5e55c-bbe0-45ec-8d7c-f2bfa0272ea5",
-                "exec": [""],
+                "exec": ["utils.notImplemented(\"trace_rawTransaction\", pm.response.json())", ""],
                 "type": "text/javascript"
               }
             }
@@ -2636,7 +2336,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_rawTransaction\",\n\t\"params\":[],\n\t\"id\":1\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_rawTransaction\",\n\t\"params\":[\"0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3\", [\"vmTrace\"]],\n\t\"id\":1\n}",
               "options": {
                 "raw": {}
               }
@@ -2656,7 +2356,7 @@
               "listen": "test",
               "script": {
                 "id": "c1b84312-0162-4f03-9ba1-791a16310dbd",
-                "exec": [""],
+                "exec": ["utils.notImplemented(\"trace_replayBlockTransactions\", pm.response.json())", ""],
                 "type": "text/javascript"
               }
             }
@@ -2671,7 +2371,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[],\n\t\"id\":1\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[\"0x2\",[\"trace\"]],\n\t\"id\":1\n}",
               "options": {
                 "raw": {}
               }
@@ -2691,7 +2391,7 @@
               "listen": "test",
               "script": {
                 "id": "572c971e-fd19-4b19-8875-9dc47c51131b",
-                "exec": [""],
+                "exec": ["utils.notImplemented(\"trace_replayTransaction\", pm.response.json())", ""],
                 "type": "text/javascript"
               }
             }
@@ -2706,7 +2406,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n\t\"params\":[],\n\t\"id\":1\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n  \"params\": [\n    \"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f\",\n    [\"trace\"]\n  ],\n\t\"id\":1\n}",
               "options": {
                 "raw": {}
               }
@@ -2726,7 +2426,86 @@
               "listen": "test",
               "script": {
                 "id": "f5a740a9-f531-4177-a828-dea603a1d081",
-                "exec": [""],
+                "exec": [
+                  "var expected = {",
+                  "  \"jsonrpc\": \"2.0\",",
+                  "  \"id\": 1,",
+                  "  \"result\": [",
+                  "    {",
+                  "      \"action\": {",
+                  "        \"callType\": \"call\",",
+                  "        \"from\": \"0x83806d539d4ea1c140489a06660319c9a303f874\",",
+                  "        \"gas\": \"0x1a1f8\",",
+                  "        \"input\": \"0x\",",
+                  "        \"to\": \"0x1c39ba39e4735cb65978d4db400ddd70a72dc750\",",
+                  "        \"value\": \"0x7a16c911b4d00000\"",
+                  "      },",
+                  "      \"blockHash\": \"0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add\",",
+                  "      \"blockNumber\": 3068185,",
+                  "      \"result\": {",
+                  "        \"gasUsed\": \"0x2982\",",
+                  "        \"output\": \"0x\"",
+                  "      },",
+                  "      \"subtraces\": 2,",
+                  "      \"traceAddress\": [],",
+                  "      \"transactionHash\": \"0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3\",",
+                  "      \"transactionPosition\": 2,",
+                  "      \"type\": \"call\"",
+                  "    },",
+                  "    {",
+                  "      \"action\": {",
+                  "        \"callType\": \"call\",",
+                  "        \"from\": \"0x1c39ba39e4735cb65978d4db400ddd70a72dc750\",",
+                  "        \"gas\": \"0x13e99\",",
+                  "        \"input\": \"0x16c72721\",",
+                  "        \"to\": \"0x2bd2326c993dfaef84f696526064ff22eba5b362\",",
+                  "        \"value\": \"0x0\"",
+                  "      },",
+                  "      \"blockHash\": \"0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add\",",
+                  "      \"blockNumber\": 3068185,",
+                  "      \"result\": {",
+                  "        \"gasUsed\": \"0x183\",",
+                  "        \"output\": \"0x0000000000000000000000000000000000000000000000000000000000000001\"",
+                  "      },",
+                  "      \"subtraces\": 0,",
+                  "      \"traceAddress\": [",
+                  "        0",
+                  "      ],",
+                  "      \"transactionHash\": \"0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3\",",
+                  "      \"transactionPosition\": 2,",
+                  "      \"type\": \"call\"",
+                  "    },",
+                  "    {",
+                  "      \"action\": {",
+                  "        \"callType\": \"call\",",
+                  "        \"from\": \"0x1c39ba39e4735cb65978d4db400ddd70a72dc750\",",
+                  "        \"gas\": \"0x8fc\",",
+                  "        \"input\": \"0x\",",
+                  "        \"to\": \"0x70faa28a6b8d6829a4b1e649d26ec9a2a39ba413\",",
+                  "        \"value\": \"0x7a16c911b4d00000\"",
+                  "      },",
+                  "      \"blockHash\": \"0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add\",",
+                  "      \"blockNumber\": 3068185,",
+                  "      \"result\": {",
+                  "        \"gasUsed\": \"0x0\",",
+                  "        \"output\": \"0x\"",
+                  "      },",
+                  "      \"subtraces\": 0,",
+                  "      \"traceAddress\": [",
+                  "        1",
+                  "      ],",
+                  "      \"transactionHash\": \"0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3\",",
+                  "      \"transactionPosition\": 2,",
+                  "      \"type\": \"call\"",
+                  "    }",
+                  "  ]",
+                  "}",
+                  "",
+                  "pm.test('Has correct result', function() {",
+                  "    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+                  "})",
+                  ""
+                ],
                 "type": "text/javascript"
               }
             }
@@ -2741,7 +2520,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_transaction\",\n\t\"params\":[],\n\t\"id\":1\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_transaction\",\n  \"params\":[\"0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3\"],\n\t\"id\":1\n}\n",
               "options": {
                 "raw": {}
               }
@@ -2761,7 +2540,40 @@
               "listen": "test",
               "script": {
                 "id": "dabff7df-de11-4286-8c35-683a654f5428",
-                "exec": [""],
+                "exec": [
+                  "var expected = {",
+                  "  \"jsonrpc\": \"2.0\",",
+                  "  \"id\": 1,",
+                  "  \"result\": {",
+                  "    \"action\": {",
+                  "      \"callType\": \"call\",",
+                  "      \"from\": \"0x1c39ba39e4735cb65978d4db400ddd70a72dc750\",",
+                  "      \"gas\": \"0x13e99\",",
+                  "      \"input\": \"0x16c72721\",",
+                  "      \"to\": \"0x2bd2326c993dfaef84f696526064ff22eba5b362\",",
+                  "      \"value\": \"0x0\"",
+                  "    },",
+                  "    \"blockHash\": \"0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add\",",
+                  "    \"blockNumber\": 3068185,",
+                  "    \"result\": {",
+                  "      \"gasUsed\": \"0x183\",",
+                  "      \"output\": \"0x0000000000000000000000000000000000000000000000000000000000000001\"",
+                  "    },",
+                  "    \"subtraces\": 0,",
+                  "    \"traceAddress\": [",
+                  "      0",
+                  "    ],",
+                  "    \"transactionHash\": \"0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3\",",
+                  "    \"transactionPosition\": 2,",
+                  "    \"type\": \"call\"",
+                  "  }",
+                  "}",
+                  "",
+                  "pm.test('Has correct result', function() {",
+                  "    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+                  "})",
+                  ""
+                ],
                 "type": "text/javascript"
               }
             }
@@ -2776,7 +2588,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_get\",\n\t\"params\":[],\n\t\"id\":1\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_get\",\n  \"params\":[\n    \"0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3\",\n    [\"0x0\"]\n  ],\n\t\"id\":1\n}\n",
               "options": {
                 "raw": {}
               }
@@ -2796,7 +2608,48 @@
               "listen": "test",
               "script": {
                 "id": "da2e5968-241f-4d24-a122-c8f15dad0a19",
-                "exec": [""],
+                "exec": [
+                  "var expected = {",
+                  "  \"jsonrpc\": \"2.0\",",
+                  "  \"id\": 1,",
+                  "  \"result\": [",
+                  "    {",
+                  "      \"action\": {",
+                  "        \"author\": \"0x5088d623ba0fcf0131e0897a91734a4d83596aa0\",",
+                  "        \"rewardType\": \"block\",",
+                  "        \"value\": \"0x478eae0e571ba000\"",
+                  "      },",
+                  "      \"blockHash\": \"0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741\",",
+                  "      \"blockNumber\": 3,",
+                  "      \"result\": {},",
+                  "      \"subtraces\": 0,",
+                  "      \"traceAddress\": null,",
+                  "      \"transactionHash\": \"0x0000000000000000000000000000000000000000000000000000000000000000\",",
+                  "      \"transactionPosition\": 0,",
+                  "      \"type\": \"reward\"",
+                  "    },",
+                  "    {",
+                  "      \"action\": {",
+                  "        \"author\": \"0xc8ebccc5f5689fa8659d83713341e5ad19349448\",",
+                  "        \"rewardType\": \"uncle\",",
+                  "        \"value\": \"0x340aad21b3b70000\"",
+                  "      },",
+                  "      \"blockHash\": \"0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741\",",
+                  "      \"blockNumber\": 3,",
+                  "      \"result\": {},",
+                  "      \"subtraces\": 0,",
+                  "      \"traceAddress\": null,",
+                  "      \"transactionHash\": \"0x0000000000000000000000000000000000000000000000000000000000000000\",",
+                  "      \"transactionPosition\": 0,",
+                  "      \"type\": \"reward\"",
+                  "    }",
+                  "  ]",
+                  "}",
+                  "",
+                  "pm.test('Has correct result', function() {",
+                  "    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+                  "})"
+                ],
                 "type": "text/javascript"
               }
             }
@@ -2811,7 +2664,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_block\",\n\t\"params\":[],\n\t\"id\":1\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_block\",\n\t\"params\":[\"0x3\"],\n\t\"id\":1\n}\n",
               "options": {
                 "raw": {}
               }
@@ -2831,7 +2684,48 @@
               "listen": "test",
               "script": {
                 "id": "5a4f4095-0b62-4498-ba3b-6b1f65ed3fa9",
-                "exec": [""],
+                "exec": [
+                  "var expected = {",
+                  "  \"jsonrpc\": \"2.0\",",
+                  "  \"id\": 1,",
+                  "  \"result\": [",
+                  "    {",
+                  "      \"action\": {",
+                  "        \"author\": \"0x5088d623ba0fcf0131e0897a91734a4d83596aa0\",",
+                  "        \"rewardType\": \"block\",",
+                  "        \"value\": \"0x478eae0e571ba000\"",
+                  "      },",
+                  "      \"blockHash\": \"0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741\",",
+                  "      \"blockNumber\": 3,",
+                  "      \"result\": {},",
+                  "      \"subtraces\": 0,",
+                  "      \"traceAddress\": null,",
+                  "      \"transactionHash\": \"0x0000000000000000000000000000000000000000000000000000000000000000\",",
+                  "      \"transactionPosition\": 0,",
+                  "      \"type\": \"reward\"",
+                  "    },",
+                  "    {",
+                  "      \"action\": {",
+                  "        \"author\": \"0xc8ebccc5f5689fa8659d83713341e5ad19349448\",",
+                  "        \"rewardType\": \"uncle\",",
+                  "        \"value\": \"0x340aad21b3b70000\"",
+                  "      },",
+                  "      \"blockHash\": \"0x3d6122660cc824376f11ee842f83addc3525e2dd6756b9bcf0affa6aa88cf741\",",
+                  "      \"blockNumber\": 3,",
+                  "      \"result\": {},",
+                  "      \"subtraces\": 0,",
+                  "      \"traceAddress\": null,",
+                  "      \"transactionHash\": \"0x0000000000000000000000000000000000000000000000000000000000000000\",",
+                  "      \"transactionPosition\": 0,",
+                  "      \"type\": \"reward\"",
+                  "    }",
+                  "  ]",
+                  "}",
+                  "",
+                  "pm.test('Has correct result', function() {",
+                  "    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+                  "})"
+                ],
                 "type": "text/javascript"
               }
             }
@@ -2846,7 +2740,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_filter\",\n\t\"params\":[],\n\t\"id\":1\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_filter\",\n  \"params\":[\n    {\n      \"fromBlock\":\"0x3\",\n      \"toBlock\":\"0x3\"\n    }\n  ],\n\t\"id\":1\n}\n",
               "options": {
                 "raw": {}
               }
@@ -2878,7 +2772,7 @@
                   "  \"id\": 1,",
                   "  \"result\": {",
                   "    \"genesis\": \"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\",",
-                  "    \"passed\": [",
+                  "    \"forks\": [",
                   "      1150000,",
                   "      1920000,",
                   "      2463000,",
@@ -2910,7 +2804,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"tg_forks\",\n\t\"params\":[\"latest\"],\n\t\"id\":1\n}",
+              "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"tg_forks\",\n\t\"params\":[],\n\t\"id\":1\n}",
               "options": {
                 "raw": {}
               }
@@ -3170,278 +3064,6 @@
       "name": "debug",
       "item": [
         {
-          "name": "deep_tests",
-          "item": [
-            {
-              "name": "getModifiedAccountsByNumber (no parameter)",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "id": "0c993696-54e3-455e-a92e-7e4a00432a74",
-                    "exec": [
-                      "var allTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "var expected = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 1,",
-                      "  \"error\": {",
-                      "    \"code\": -32602,",
-                      "    \"message\": \"missing value for required argument 0\"",
-                      "  }",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-                      "})",
-                      ""
-                    ],
-                    "type": "text/javascript"
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByNumber\",\n\t\"params\":[],\n\t\"id\":1\n}",
-                  "options": {
-                    "raw": {}
-                  }
-                },
-                "url": {
-                  "raw": "{{HOST}}",
-                  "host": ["{{HOST}}"]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "getModifiedAccountsByNumber (one parameter)",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "id": "e57a344e-fee9-444f-911d-1339cd4b07ad",
-                    "exec": [
-                      "var allTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "var expected = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 1,",
-                      "  \"result\": [",
-                      "    \"0xdd2f1e6e498202e86d8f5442af596580a4f03c2c\"",
-                      "  ]",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-                      "})",
-                      ""
-                    ],
-                    "type": "text/javascript"
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByNumber\",\n\t\"params\":[\n\t\t\"0x2\"\n\t],\n\t\"id\":1\n}",
-                  "options": {
-                    "raw": {}
-                  }
-                },
-                "url": {
-                  "raw": "{{HOST}}",
-                  "host": ["{{HOST}}"]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "getModifiedAccountsByNumber (two parameters)",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "id": "e3b12940-ba74-4ee0-8208-138e59399f4d",
-                    "exec": [
-                      "var allTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "var expected = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 1,",
-                      "  \"result\": [",
-                      "    \"0xdd2f1e6e498202e86d8f5442af596580a4f03c2c\"",
-                      "  ]",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  var jsonData = pm.response.json();",
-                      "  jsonData.result = jsonData.result.sort();",
-                      "  expected.result = expected.result.sort();",
-                      "  pm.expect(jsonData).to.be.deep.equal(expected);",
-                      "})",
-                      ""
-                    ],
-                    "type": "text/javascript"
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByNumber\",\n\t\"params\":[\n\t\t\"0x2\",\n    \"0x2\"\n\t],\n\t\"id\":1\n}",
-                  "options": {
-                    "raw": {}
-                  }
-                },
-                "url": {
-                  "raw": "{{HOST}}",
-                  "host": ["{{HOST}}"]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "getModifiedAccountsByNumber (two parameter different)",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "id": "de5f1cf5-9ef2-42b9-aae3-b8cd209a39e4",
-                    "exec": [
-                      "var allTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "var expected = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 1,",
-                      "  \"result\": [",
-                      "    \"0x5088d623ba0fcf0131e0897a91734a4d83596aa0\",",
-                      "    \"0xc8ebccc5f5689fa8659d83713341e5ad19349448\",",
-                      "    \"0xdd2f1e6e498202e86d8f5442af596580a4f03c2c\"",
-                      "  ]",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  var jsonData = pm.response.json();",
-                      "  jsonData.result = jsonData.result.sort();",
-                      "  expected.result = expected.result.sort();",
-                      "  pm.expect(jsonData).to.be.deep.equal(expected);",
-                      "})",
-                      ""
-                    ],
-                    "type": "text/javascript"
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByNumber\",\n\t\"params\":[\n\t\t\"0x2\",\n    \"0x3\"\n\t],\n\t\"id\":1\n}",
-                  "options": {
-                    "raw": {}
-                  }
-                },
-                "url": {
-                  "raw": "{{HOST}}",
-                  "host": ["{{HOST}}"]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "getModifiedAccountsByNumber (backwards params)",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "id": "0a14a049-e976-4b8e-af5d-9faccad717fb",
-                    "exec": [
-                      "var allTests = pm.globals.get('TEST_ALL') === 'true';",
-                      "if (!allTests)",
-                      "  return;",
-                      "",
-                      "var expected = {",
-                      "  \"jsonrpc\": \"2.0\",",
-                      "  \"id\": 1,",
-                      "  \"error\": {",
-                      "    \"code\": -32000,",
-                      "    \"message\": \"start block (3) must be less than or equal to end block (2)\"",
-                      "  }",
-                      "}",
-                      "",
-                      "pm.test('Has correct result', function() {",
-                      "  pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-                      "})",
-                      ""
-                    ],
-                    "type": "text/javascript"
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"debug_getModifiedAccountsByNumber\",\n\t\"params\":[\n\t\t\"0x3\",\n    \"0x2\"\n\t],\n\t\"id\":1\n}",
-                  "options": {
-                    "raw": {}
-                  }
-                },
-                "url": {
-                  "raw": "{{HOST}}",
-                  "host": ["{{HOST}}"]
-                }
-              },
-              "response": []
-            }
-          ],
-          "protocolProfileBehavior": {},
-          "_postman_isSubFolder": true
-        },
-        {
           "name": "storageRangeAt",
           "event": [
             {
@@ -3507,8 +3129,8 @@
               "script": {
                 "id": "02a49250-a282-4edd-871c-1d40d673b489",
                 "exec": [
-                  "var allTests = false; //pm.globals.get('TEST_ALL') === 'true';",
-                  "if (!allTests)",
+                  "var doTest = false; // this is really slow",
+                  "if (!doTest)",
                   "  return;",
                   "",
                   "",
@@ -3685,10 +3307,6 @@
               "script": {
                 "id": "90d4fea3-18f1-4f93-aced-4d8a7a68a28d",
                 "exec": [
-                  "var allTests = pm.globals.get('TEST_ALL') === 'true';",
-                  "if (!allTests)",
-                  "  return;",
-                  "",
                   "var expected = [",
                   "  {",
                   "    \"pc\": 0,",
@@ -3781,25 +3399,48 @@
           "name": "eth",
           "item": [
             {
+              "name": "accounts (deprecated)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "id": "641f671a-2b87-4235-a01c-d709fe91974a",
+                    "exec": ["utils.isDeprecated(\"eth_accounts\", pm.response.json())", ""],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"eth_accounts\",\n\t\"params\":[],\n\t\"id\":1\n}",
+                  "options": {
+                    "raw": {}
+                  }
+                },
+                "url": {
+                  "raw": "{{HOST}}",
+                  "host": ["{{HOST}}"]
+                },
+                "description": "Returns a list of addresses owned by the client.\r\n\r\n**Deprecated** This function will be removed in the future.\r\n\r\n**Parameters**\r\n\r\nnone\r\n\r\n**Returns**\r\n\r\n`Array of DATA`, 20 Bytes - addresses owned by the client"
+              },
+              "response": []
+            },
+            {
               "name": "getCompilers (deprecated)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "id": "1e6bac0f-c990-4423-9680-ad79f15fd59c",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'eth_getCompilers';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method deprecated',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"eth_getCompilers\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -3834,19 +3475,7 @@
                   "listen": "test",
                   "script": {
                     "id": "d9c9895f-2558-4c14-bdef-cb2529909686",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'eth_compileLLL';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method deprecated',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"eth_compileLLL\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -3881,19 +3510,7 @@
                   "listen": "test",
                   "script": {
                     "id": "51dbfb88-e828-4ed9-b398-92346b6350cd",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'eth_compileSolidity';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method deprecated',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"eth_compileSolidity\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -3928,19 +3545,7 @@
                   "listen": "test",
                   "script": {
                     "id": "97d7731d-5e44-444a-8257-e4a8087daeaa",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'eth_compileSerpent';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method deprecated',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"eth_compileSerpent\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -3975,20 +3580,7 @@
                   "listen": "test",
                   "script": {
                     "id": "7392f989-8a80-4f65-85ff-053252fd80d7",
-                    "exec": [
-                      "var isParity = pm.environment.get('HOST') == \"{{PARITY}}\";",
-                      "(isParity ? pm.test.skip : pm.test)('Is deprecated', function() {",
-                      "    const jsonData = pm.response.json();",
-                      "    var method = 'eth_sign';",
-                      "    var errorMsgs = {",
-                      "        '{{NETHERMIND}}': 'Can only sign without passphrase when account is unlocked.',",
-                      "        '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "        '{{PARITY}}': 'Method deprecated',",
-                      "    }",
-                      "    pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"eth_sign\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 },
@@ -4043,19 +3635,7 @@
                   "listen": "test",
                   "script": {
                     "id": "a394940d-3171-4f59-a0ff-d6740e8d9094",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'db_getString';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"db_getString\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4070,7 +3650,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_getString\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_getString\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4090,19 +3670,7 @@
                   "listen": "test",
                   "script": {
                     "id": "329a925f-8dd3-4834-ae54-2cba8546f454",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'db_putString';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"db_putString\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 },
@@ -4125,7 +3693,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_putString\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\",\n\t\t\"myString\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_putString\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\",\n\t\t\"myString\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4145,19 +3713,7 @@
                   "listen": "test",
                   "script": {
                     "id": "3ea529ed-5cda-483e-885d-b4ab3cd1a323",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'db_getHex';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"db_getHex\", pm.response.json());"],
                     "type": "text/javascript"
                   }
                 }
@@ -4172,7 +3728,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_getHex\"\n\t,\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_getHex\"\n\t,\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4192,19 +3748,7 @@
                   "listen": "test",
                   "script": {
                     "id": "9592be18-25e6-4d51-9d17-90573695bef9",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'db_putHex';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"db_putHex\", pm.response.json())", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4219,7 +3763,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_putHex\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\",\n\t\t\"0x68656c6c6f20776f726c64\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"db_putHex\",\n\t\"params\":[\n\t\t\"testDB\",\n\t\t\"myKey\",\n\t\t\"0x68656c6c6f20776f726c64\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4246,19 +3790,7 @@
                   "listen": "test",
                   "script": {
                     "id": "d1281bc1-0af2-41cc-960b-3860d301cd58",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'shh_post';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"shh_post\", pm.response.json());", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4273,7 +3805,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_post\",\n\t\"params\":[{\n\t\t\"from\":\"0xc931d93e97ab07fe42d923478ba2465f2..\",\n\t\t\"topics\": [\n\t\t\t\"0x68656c6c6f20776f726c64\"\n\t\t],\n\t\t\"payload\":\"0x68656c6c6f20776f726c64\",\n\t\t\"ttl\":\"0x64\",\n\t\t\"priority\":\"0x64\"\n\t}],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_post\",\n\t\"params\":[{\n\t\t\"from\":\"0xc931d93e97ab07fe42d923478ba2465f2..\",\n\t\t\"topics\": [\n\t\t\t\"0x68656c6c6f20776f726c64\"\n\t\t],\n\t\t\"payload\":\"0x68656c6c6f20776f726c64\",\n\t\t\"ttl\":\"0x64\",\n\t\t\"priority\":\"0x64\"\n\t}],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4293,19 +3825,7 @@
                   "listen": "test",
                   "script": {
                     "id": "8febf31f-7348-414f-a2ec-e1f9db7853f8",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'shh_version';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"shh_version\", pm.response.json());", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4320,7 +3840,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_version\",\n\t\"params\":[],\n\t\"id\":67\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_version\",\n\t\"params\":[],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4340,19 +3860,7 @@
                   "listen": "test",
                   "script": {
                     "id": "fa0cd97b-3dc1-4c62-ad20-c19ed5947ec1",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'shh_newIdentity';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"shh_newIdentity\", pm.response.json());", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4367,7 +3875,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newIdentity\",\n\t\"params\":[],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newIdentity\",\n\t\"params\":[],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4387,19 +3895,7 @@
                   "listen": "test",
                   "script": {
                     "id": "61e6f722-c2e1-42da-aa9c-6902e2ccc12a",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'shh_hasIdentity';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"shh_hasIdentity\", pm.response.json());", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4414,7 +3910,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_hasIdentity\",\n\t\"params\":[\n\t\t\"0x04f96a5e25610293e42a73908e93ccc8c4d4dc0edcfa9fa872f50cb214e08ebf61a03e245533f97284d442460f2998cd41858798ddfd4d661997d3940272b717b1\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_hasIdentity\",\n\t\"params\":[\n\t\t\"0x04f96a5e25610293e42a73908e93ccc8c4d4dc0edcfa9fa872f50cb214e08ebf61a03e245533f97284d442460f2998cd41858798ddfd4d661997d3940272b717b1\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4434,19 +3930,7 @@
                   "listen": "test",
                   "script": {
                     "id": "e1b64a42-2f38-405b-b1bd-ba22d80173ce",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'shh_newGroup';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"shh_newGroup\", pm.response.json());", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4461,7 +3945,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newGroup\",\n\t\"params\":[],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newGroup\",\n\t\"params\":[],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4481,19 +3965,7 @@
                   "listen": "test",
                   "script": {
                     "id": "5427e7c5-fc1b-4070-bdb7-46a335970133",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'shh_addToGroup';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"shh_addToGroup\", pm.response.json());", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4508,7 +3980,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_addToGroup\",\n\t\"params\":[\n\t\t\"0x04f96a5e25610293e42a73908e93ccc8c4d4dc0edcfa9fa872f50cb214e08ebf61a03e245533f97284d442460f2998cd41858798ddfd4d661997d3940272b717b1\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_addToGroup\",\n\t\"params\":[\n\t\t\"0x04f96a5e25610293e42a73908e93ccc8c4d4dc0edcfa9fa872f50cb214e08ebf61a03e245533f97284d442460f2998cd41858798ddfd4d661997d3940272b717b1\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4528,19 +4000,7 @@
                   "listen": "test",
                   "script": {
                     "id": "870cfea3-2a35-4b71-9cc1-41da72b8b6d7",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'shh_newFilter';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"shh_newFilter\", pm.response.json());", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4555,7 +4015,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newFilter\",\n\t\"params\":[{\n\t\t\"topics\": [\n\t\t\t\"0x12341234bf4b564f\"\n\t\t],\n\t\t\"to\": \"0x2341234bf4b2341234bf4b564f...\"\n\t}],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_newFilter\",\n\t\"params\":[{\n\t\t\"topics\": [\n\t\t\t\"0x12341234bf4b564f\"\n\t\t],\n\t\t\"to\": \"0x2341234bf4b2341234bf4b564f...\"\n\t}],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4575,19 +4035,7 @@
                   "listen": "test",
                   "script": {
                     "id": "2884a5c4-bdac-4cc0-80fb-8a0a055562ff",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'shh_uninstallFilter';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"shh_uninstallFilter\", pm.response.json());", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4602,7 +4050,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_uninstallFilter\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_uninstallFilter\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4622,19 +4070,7 @@
                   "listen": "test",
                   "script": {
                     "id": "0814a1b9-1241-494b-a63e-525bb0b4b9fe",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'shh_getFilterChanges';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"shh_getFilterChanges\", pm.response.json());", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4649,7 +4085,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_getFilterChanges\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_getFilterChanges\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4669,19 +4105,7 @@
                   "listen": "test",
                   "script": {
                     "id": "24bccb64-7230-4f35-a004-f86e5bf291d4",
-                    "exec": [
-                      "pm.test('Is deprecated', function() {",
-                      "  const jsonData = pm.response.json();",
-                      "  var method = 'shh_getMessages';",
-                      "  var errorMsgs = {",
-                      "    '{{NETHERMIND}}': 'Method ' + method + ' is not supported',",
-                      "    '{{TURBOGETH}}': 'the function ' + method + ' has been deprecated',",
-                      "    '{{PARITY}}': 'Method not found',",
-                      "  }",
-                      "  pm.expect(jsonData.error.message).to.deep.equal(errorMsgs[pm.environment.get('HOST')])",
-                      "})",
-                      ""
-                    ],
+                    "exec": ["utils.isDeprecated(\"shh_getMessages\", pm.response.json());", ""],
                     "type": "text/javascript"
                   }
                 }
@@ -4696,7 +4120,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_getMessages\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":73\n}",
+                  "raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"shh_getMessages\",\n\t\"params\":[\n\t\t\"0x7\"\n\t],\n\t\"id\":1\n}",
                   "options": {
                     "raw": {}
                   }
@@ -4742,7 +4166,79 @@
       "script": {
         "id": "9b29748b-d3e0-42cb-93ac-ee8385950e6b",
         "type": "text/javascript",
-        "exec": [""]
+        "exec": [
+          "utils = {",
+          "  notImplemented: function(methodName, jsonData) {",
+          "    var isTurbo = pm.environment.get('HOST') == \"{{TURBOGETH}}\";",
+          "    if (!isTurbo) // only test turbo",
+          "      return;",
+          "",
+          "    var testNotImplemented = pm.globals.get('TEST_NOT_IMPLEMENTED') === 'true';",
+          "    if (testNotImplemented) { // defaults to false, therefore don't test",
+          "      pm.test('NOT IMPLEMENTED', function() {",
+          "        pm.expect(false).to.be(true);",
+          "      })",
+          "    } else {",
+          "      // pass unless user has explicitly told us to test not implemented",
+          "      var expected = {",
+          "        \"jsonrpc\": \"2.0\",",
+          "        \"id\": 1,",
+          "        \"error\": {",
+          "          \"code\": -32000,",
+          "          \"message\": \"the function \" + methodName + \" is currently not implemented\"",
+          "        }",
+          "      }",
+          "      pm.test('NOT IMPLEMENTED', function() {",
+          "        pm.expect(jsonData).to.deep.equals(expected);",
+          "      })",
+          "    }",
+          "  },",
+          "",
+          "  isDeprecated: function(methodName, jsonData) {",
+          "    var isTurbo = pm.environment.get('HOST') == \"{{TURBOGETH}}\";",
+          "    if (!isTurbo) // only test turbo",
+          "      return;",
+          "",
+          "    var testDeprecated = pm.globals.get('TEST_DEPRECATED') === 'true';",
+          "    if (testDeprecated) { // defaults to false, therefore don't test",
+          "      console.log(\"testDeprecated: \", testDeprecated)",
+          "      pm.test('DEPRECATED', function() {",
+          "      console.log(\"testDeprecated2: \", testDeprecated)",
+          "        pm.expect(false).to.be(true);",
+          "      })",
+          "    } else {",
+          "      // pass unless user has explicitly told us to fail deprecated",
+          "      var expected = {",
+          "        \"jsonrpc\": \"2.0\",",
+          "        \"id\": 1,",
+          "        \"error\": {",
+          "          \"code\": -32000,",
+          "          \"message\": \"the function \" + methodName + \" has been deprecated\"",
+          "        }",
+          "      }",
+          "      pm.test('DEPRECATED', function() {",
+          "        pm.expect(jsonData).to.deep.equals(expected);",
+          "      })",
+          "    }",
+          "  },",
+          "",
+          "  cannotTest: function(methodName, jsonData) {",
+          "    var isTurbo = pm.environment.get('HOST') == \"{{TURBOGETH}}\";",
+          "    if (!isTurbo) // only test turbo",
+          "      return;",
+          "",
+          "      var expected = {",
+          "        \"jsonrpc\": \"2.0\",",
+          "        \"id\": 1,",
+          "        \"result\": \"Cannot test - value changes\"",
+          "      }",
+          "    pm.test('VALUE CHANGES, CANNOT TEST: ' + methodName, function() {",
+          "        jsonData.result = \"Cannot test - value changes\";",
+          "        pm.expect(jsonData).to.deep.equals(expected);",
+          "    })",
+          "  },",
+          "};"
+        ]
       }
     },
     {

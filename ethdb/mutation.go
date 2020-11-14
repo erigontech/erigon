@@ -64,6 +64,10 @@ func (m *mutation) getMem(table string, key []byte) ([]byte, bool) {
 	return i.(*MutationItem).value, true
 }
 
+func (m *mutation) Sequence(bucket string, amount uint64) (res uint64, err error) {
+	return m.db.Sequence(bucket, amount)
+}
+
 // Can only be called from the worker thread
 func (m *mutation) Get(table string, key []byte) ([]byte, error) {
 	if value, ok := m.getMem(table, key); ok {

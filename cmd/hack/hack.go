@@ -2306,7 +2306,13 @@ func main() {
 		}
 	}
 	if *action == "defrag" {
-		if err := defrag(*chaindata); err != nil {
+		if err := defrag(); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "textInfo" {
+		sb := strings.Builder{}
+		if err := textInfo(*chaindata, &sb); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
