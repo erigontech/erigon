@@ -1,4 +1,4 @@
-package torrent
+package bittorrent
 
 import (
 	lg "github.com/anacrolix/log"
@@ -6,20 +6,20 @@ import (
 )
 
 func init() {
-	lg.Default = NewLogger()
+	lg.Default = NewAdapterLogger()
 }
-func NewLogger() lg.Logger {
+func NewAdapterLogger() lg.Logger {
 	return lg.Logger{
-		lg.LoggerImpl(btLogger{}),
+		lg.LoggerImpl(adapterLogger{}),
 	}
 }
 
-type btLogger struct{}
+type adapterLogger struct{}
 
-func (b btLogger) Log(msg lg.Msg) {
+func (b adapterLogger) Log(msg lg.Msg) {
 	lvl, ok := msg.GetLevel()
 	if !ok {
-		lvl = lg.Debug
+		lvl = lg.Info
 	}
 
 	switch lvl {
@@ -34,7 +34,6 @@ func (b btLogger) Log(msg lg.Msg) {
 	case lg.Critical:
 		log.Error(msg.String())
 	default:
-		log.Warn("unknown log type")
-		log.Warn(msg.String())
+		log.Warn("unknown log type", "msg", msg.String())
 	}
 }
