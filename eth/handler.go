@@ -452,15 +452,15 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		return err
 	}
 
+	// Allow to handle transaction ordering
+	p.HandshakeOrderMux.Unlock()
+
 	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
 		p.Log().Debug("Ethereum message handling failed", "err", err)
 		p.HandshakeOrderMux.Unlock()
 		return err
 	}
-
-	// Allow to handle transaction ordering
-	p.HandshakeOrderMux.Unlock()
 
 	pm.syncTransactions(p)
 
