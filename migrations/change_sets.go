@@ -20,7 +20,7 @@ var accChangeSetDupSort = Migration{
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-		logPrefix := "change_set_dup_sort"
+		logPrefix := "data migration: change_set_dup_sort"
 
 		const loadStep = "load"
 
@@ -125,7 +125,7 @@ var storageChangeSetDupSort = Migration{
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-		logPrefix := "storage_change_set_dup_sort"
+		logPrefix := "data migration: storage_change_set_dup_sort"
 
 		const loadStep = "load"
 		changeSetBucket := dbutils.PlainStorageChangeSetBucket
