@@ -161,7 +161,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		if useSilkworm {
 			txn := tx.(ethdb.HasTx).Tx()
 			// Silkworm executes many blocks simultaneously
-			blockNum, err = silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, blockNum, to, batch.BatchSize(), params.WriteReceipts)
+			blockNum, err = silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, blockNum, to, params.BatchSize, params.WriteReceipts)
 		} else {
 			var block *types.Block
 			block, err = readBlock(blockNum, tx)
