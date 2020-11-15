@@ -243,11 +243,6 @@ var Buckets = []string{
 	CallToIndex,
 	Log,
 	Sequence,
-	PlainAccountChangeSetBucket2,
-	PlainStorageChangeSetBucket2,
-	AccountChangeSetBucket2,
-	StorageChangeSetBucket2,
-	PlainAccountChangeSetBucket3,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

@@ -709,7 +709,7 @@ func (tx *lmdbTx) HasOne(bucket string, key []byte) (bool, error) {
 func (tx *lmdbTx) Sequence(bucket string, amount uint64) (uint64, error) {
 	c := tx.Cursor(dbutils.Sequence)
 	defer c.Close()
-	v, err := c.SeekExact([]byte(bucket))
+	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !lmdb.IsNotFound(err) {
 		return 0, err
 	}
