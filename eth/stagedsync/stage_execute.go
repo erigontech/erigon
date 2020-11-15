@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"runtime"
 	"time"
 	"unsafe"
@@ -59,22 +58,6 @@ func readBlock(blockNum uint64, tx rawdb.DatabaseReader) (*types.Block, error) {
 	block.Body().SendersToTxs(senders)
 
 	return block, nil
-}
-
-func executeBlocksWithSilkworm(startBlock uint64, maxBlock uint64, tx ethdb.DbWithPendingMutations, useExternalTx bool,
-	chainConfig *params.ChainConfig, params ExecuteBlockStageParams) (executedBlock uint64, err error) {
-
-	if params.ChangeSetHook != nil {
-		panic("ChangeSetHook is not supported with Silkworm")
-	}
-
-	txn := tx.(ethdb.HasTx).Tx()
-	batchSize := uint64(params.BatchSize)
-	if useExternalTx {
-		// Since we cannot periodically commit transactions, we have to execute all blocks in one go
-		batchSize = math.MaxUint64
-	}
-	return silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, startBlock, maxBlock, batchSize, params.WriteReceipts)
 }
 
 func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, batch ethdb.Database, chainConfig *params.ChainConfig,
@@ -150,6 +133,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	}
 
 	useSilkworm := params.SilkwormExecutionFunc != nil
+	if useSilkworm && params.ChangeSetHook != nil {
+		panic("ChangeSetHook is not supported with Silkworm")
+	}
 
 	var batch ethdb.DbWithPendingMutations
 	useBatch := !useSilkworm
@@ -173,8 +159,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 
 		if useSilkworm {
+			txn := tx.(ethdb.HasTx).Tx()
 			// Silkworm executes many blocks simultaneously
-			blockNum, err = executeBlocksWithSilkworm(blockNum, to, tx, useExternalTx, chainConfig, params)
+			blockNum, err = silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, blockNum, to, batch.BatchSize(), params.WriteReceipts)
 		} else {
 			var block *types.Block
 			block, err = readBlock(blockNum, tx)
