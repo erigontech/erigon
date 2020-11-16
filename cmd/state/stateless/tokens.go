@@ -305,7 +305,7 @@ func makeTokenBalances() {
 			var preimage []byte
 			if key != nil {
 				if err := pdb.View(context.Background(), func(tx ethdb.Tx) error {
-					preimage, _ = tx.Cursor(bucket).SeekExact(key)
+					_, preimage, _ = tx.Cursor(bucket).SeekExact(key)
 					if preimage != nil {
 						preimage = common.CopyBytes(preimage)
 					}
@@ -550,10 +550,10 @@ func makeTokenAllowances() {
 			if key != nil {
 				if err := pdb.View(context.Background(), func(tx ethdb.Tx) error {
 					c := tx.Cursor(bucket)
-					preimage, _ = c.SeekExact(key)
+					_, preimage, _ = c.SeekExact(key)
 					if preimage != nil && len(preimage) == 64 {
 						copy(index2[:], preimage[:32])
-						preimage, _ = c.SeekExact(preimage[32:])
+						_, preimage, _ = c.SeekExact(preimage[32:])
 					}
 					return nil
 				}); err != nil {

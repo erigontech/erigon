@@ -431,7 +431,7 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	// Register the peer locally
 	if err := pm.peers.Register(p, pm.removePeer); err != nil {
 		p.Log().Error("Ethereum peer registration failed", "err", err)
-		p.HandshakeOrderMux.Lock()
+		p.HandshakeOrderMux.Unlock()
 		return err
 	}
 	defer pm.removePeer(p.id)
@@ -452,15 +452,17 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		return err
 	}
 
+	// Allow to handle transaction ordering
+	// Unlocking needs to happen before we start waiting for the response to the peer head hash
+	// Otherwise, if the peer does not response, it will eventually fill up the tx broadcast
+	// channels and the whole system will block
+	p.HandshakeOrderMux.Unlock()
+
 	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
 		p.Log().Debug("Ethereum message handling failed", "err", err)
-		p.HandshakeOrderMux.Unlock()
 		return err
 	}
-
-	// Allow to handle transaction ordering
-	p.HandshakeOrderMux.Unlock()
 
 	pm.syncTransactions(p)
 

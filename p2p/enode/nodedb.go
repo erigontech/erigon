@@ -111,7 +111,7 @@ func newPersistentDB(path string) (*DB, error) {
 	var blob []byte
 	if err := kv.Update(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.InodesBucket)
-		v, errGet := c.SeekExact([]byte(dbVersionKey))
+		_, v, errGet := c.SeekExact([]byte(dbVersionKey))
 		if errGet != nil {
 			return errGet
 		}

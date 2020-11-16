@@ -123,7 +123,7 @@ func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
 		defer dbGetTimer.UpdateSince(time.Now())
 	}
 
-	v, err := m.cursors[bucket].SeekExact(key)
+	_, v, err := m.cursors[bucket].SeekExact(key)
 	if err != nil {
 		return nil, err
 	}

@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -849,7 +850,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
-	accountMap, storageMap, err := ethdb.RewindData(tds.db, tds.blockNr, blockNr)
+	accountMap, storageMap, err := changeset.RewindData(tds.db, tds.blockNr, blockNr)
 	if err != nil {
 		return err
 	}
@@ -929,24 +930,25 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 }
 
 func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
-	changeSetKey := dbutils.EncodeTimestamp(timestamp)
-	changedAccounts, err := tds.db.Get(dbutils.AccountChangeSetBucket, changeSetKey)
-	if err != nil && err != ethdb.ErrKeyNotFound {
+	changeSetKey := dbutils.EncodeBlockNumber(timestamp)
+	err := tds.db.Walk(dbutils.AccountChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
+		if err := tds.db.Delete(dbutils.AccountChangeSetBucket, k, v); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+	if err != nil {
 		return err
 	}
-	changedStorage, err := tds.db.Get(dbutils.StorageChangeSetBucket, changeSetKey)
-	if err != nil && err != ethdb.ErrKeyNotFound {
+
+	err = tds.db.Walk(dbutils.StorageChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
+		if err2 := tds.db.Delete(dbutils.StorageChangeSetBucket, k, v); err2 != nil {
+			return false, err2
+		}
+		return true, nil
+	})
+	if err != nil {
 		return err
-	}
-	if len(changedAccounts) > 0 {
-		if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey, nil); err != nil {
-			return err
-		}
-	}
-	if len(changedStorage) > 0 {
-		if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey, nil); err != nil {
-			return err
-		}
 	}
 	return nil
 }

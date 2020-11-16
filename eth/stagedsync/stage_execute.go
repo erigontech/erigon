@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -195,24 +196,34 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 		s.Done()
 		return nil
 	}
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := stateDB.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = stateDB.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = stateDB.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
 
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
-	batch := stateDB.NewBatch()
-	defer batch.Rollback()
 
-	rewindFunc := ethdb.RewindDataPlain
+	rewindFunc := changeset.RewindDataPlain
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 	deleteAccountFunc := deleteAccountPlain
 	writeAccountFunc := writeAccountPlain
 	recoverCodeHashFunc := recoverCodeHashPlain
 
-	accountMap, storageMap, errRewind := rewindFunc(stateDB, s.BlockNumber, u.UnwindPoint)
+	accountMap, storageMap, errRewind := rewindFunc(tx, s.BlockNumber, u.UnwindPoint)
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
-
 	for key, value := range accountMap {
 		if len(value) > 0 {
 			var acc accounts.Account
@@ -221,57 +232,47 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 			}
 
 			// Fetch the code hash
-			recoverCodeHashFunc(&acc, stateDB, key)
-			if err := writeAccountFunc(logPrefix, batch, key, acc); err != nil {
+			recoverCodeHashFunc(&acc, tx, key)
+			if err := writeAccountFunc(logPrefix, tx, key, acc); err != nil {
 				return err
 			}
 		} else {
-			if err := deleteAccountFunc(batch, key); err != nil {
-				return err
-			}
-		}
-	}
-	for key, value := range storageMap {
-		if len(value) > 0 {
-			if err := batch.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
-				return err
-			}
-		} else {
-			if err := batch.Delete(stateBucket, []byte(key)[:storageKeyLength], nil); err != nil {
+			if err := deleteAccountFunc(tx, key); err != nil {
 				return err
 			}
 		}
 	}
 
-	if err := stateDB.Walk(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
-		if err1 := batch.Delete(dbutils.PlainAccountChangeSetBucket, common.CopyBytes(k), nil); err1 != nil {
-			return false, fmt.Errorf("%s: delete account changesets: %v", logPrefix, err1)
+	for key, value := range storageMap {
+		if len(value) > 0 {
+			if err := tx.Put(stateBucket, []byte(key)[:storageKeyLength], value); err != nil {
+				return err
+			}
+		} else {
+			if err := tx.Delete(stateBucket, []byte(key)[:storageKeyLength], nil); err != nil {
+				return err
+			}
 		}
-		return true, nil
-	}); err != nil {
-		return fmt.Errorf("%s: walking account changesets: %v", logPrefix, err)
 	}
-	if err := stateDB.Walk(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(u.UnwindPoint+1), 0, func(k, _ []byte) (bool, error) {
-		if err1 := batch.Delete(dbutils.PlainStorageChangeSetBucket, common.CopyBytes(k), nil); err1 != nil {
-			return false, fmt.Errorf("%s: delete storage changesets: %v", logPrefix, err1)
-		}
-		return true, nil
-	}); err != nil {
-		return fmt.Errorf("%s: walking storage changesets: %v", logPrefix, err)
+
+	if err := changeset.Truncate(tx.(ethdb.HasTx).Tx(), u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
+
 	if writeReceipts {
-		if err := rawdb.DeleteNewerReceipts(stateDB, u.UnwindPoint+1); err != nil {
+		if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
 			return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
 		}
 	}
 
-	if err := u.Done(batch); err != nil {
+	if err := u.Done(tx); err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
 
-	_, err := batch.Commit()
-	if err != nil {
-		return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -346,14 +347,14 @@ func deleteAccountHashed(db rawdb.DatabaseDeleter, key string) error {
 	return rawdb.DeleteAccount(db, addrHash)
 }
 
-func deleteAccountPlain(db rawdb.DatabaseDeleter, key string) error {
+func deleteAccountPlain(db ethdb.Deleter, key string) error {
 	var address common.Address
 	copy(address[:], []byte(key))
 	return rawdb.PlainDeleteAccount(db, address)
 }
 
 func deleteChangeSets(batch ethdb.Deleter, timestamp uint64, accountBucket, storageBucket string) error {
-	changeSetKey := dbutils.EncodeTimestamp(timestamp)
+	changeSetKey := dbutils.EncodeBlockNumber(timestamp)
 	if err := batch.Delete(accountBucket, changeSetKey, nil); err != nil {
 		return err
 	}

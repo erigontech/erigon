@@ -18,11 +18,10 @@ package core
 
 import (
 	"bytes"
-	"encoding/json"
-	"os"
-
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"

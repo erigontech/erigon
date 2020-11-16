@@ -2,6 +2,7 @@ package changeset
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -31,21 +33,6 @@ func emptyValueGenerator(j int) []byte {
 	return []byte{}
 }
 
-type csStorageBytes interface {
-	Walk(func([]byte, []byte) error) error
-	Find([]byte) ([]byte, error)
-	FindWithoutIncarnation([]byte, []byte) ([]byte, error)
-	FindWithIncarnation([]byte) ([]byte, error)
-}
-
-func getHashedBytes(b []byte) csStorageBytes {
-	return StorageChangeSetBytes(b)
-}
-
-func getPlainBytes(b []byte) csStorageBytes {
-	return StorageChangeSetPlainBytes(b)
-}
-
 func getTestDataAtIndex(i, j int, inc uint64, generator func(common.Address, uint64, common.Hash) []byte) []byte {
 	address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 	key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
@@ -61,50 +48,48 @@ func plainKeyGenerator(address common.Address, inc uint64, key common.Hash) []by
 	return dbutils.PlainGenerateCompositeStorageKey(address, inc, key)
 }
 
-type encodeFunc func(*ChangeSet) ([]byte, error)
-type decodeFunc func([]byte) (*ChangeSet, error)
-
 func TestEncodingStorageNewWithRandomIncarnationHashed(t *testing.T) {
-	ch := NewStorageChangeSet()
-	doTestEncodingStorageNew(t, ch, hashKeyGenerator, getRandomIncarnation, hashValueGenerator, EncodeStorage, DecodeStorage)
+	m := Mapper[dbutils.StorageChangeSetBucket]
+	doTestEncodingStorageNew(t, hashKeyGenerator, getRandomIncarnation, hashValueGenerator, m.New, m.Encode, m.Decode)
 }
 
 func TestEncodingStorageNewWithRandomIncarnationPlain(t *testing.T) {
-	ch := NewStorageChangeSetPlain()
-	doTestEncodingStorageNew(t, ch, plainKeyGenerator, getRandomIncarnation, hashValueGenerator, EncodeStoragePlain, DecodeStoragePlain)
+	m := Mapper[dbutils.PlainStorageChangeSetBucket]
+	doTestEncodingStorageNew(t, plainKeyGenerator, getRandomIncarnation, hashValueGenerator, m.New, m.Encode, m.Decode)
 }
 
 func TestEncodingStorageNewWithDefaultIncarnationHashed(t *testing.T) {
-	ch := NewStorageChangeSet()
-	doTestEncodingStorageNew(t, ch, hashKeyGenerator, getDefaultIncarnation, hashValueGenerator, EncodeStorage, DecodeStorage)
+	m := Mapper[dbutils.StorageChangeSetBucket]
+	doTestEncodingStorageNew(t, hashKeyGenerator, getDefaultIncarnation, hashValueGenerator, m.New, m.Encode, m.Decode)
 }
 
 func TestEncodingStorageNewWithDefaultIncarnationPlain(t *testing.T) {
-	ch := NewStorageChangeSetPlain()
-	doTestEncodingStorageNew(t, ch, plainKeyGenerator, getDefaultIncarnation, hashValueGenerator, EncodeStoragePlain, DecodeStoragePlain)
+	m := Mapper[dbutils.PlainStorageChangeSetBucket]
+	doTestEncodingStorageNew(t, plainKeyGenerator, getDefaultIncarnation, hashValueGenerator, m.New, m.Encode, m.Decode)
 }
 
 func TestEncodingStorageNewWithDefaultIncarnationAndEmptyValueHashed(t *testing.T) {
-	ch := NewStorageChangeSet()
-	doTestEncodingStorageNew(t, ch, hashKeyGenerator, getDefaultIncarnation, emptyValueGenerator, EncodeStorage, DecodeStorage)
+	m := Mapper[dbutils.StorageChangeSetBucket]
+	doTestEncodingStorageNew(t, hashKeyGenerator, getDefaultIncarnation, emptyValueGenerator, m.New, m.Encode, m.Decode)
 }
 
 func TestEncodingStorageNewWithDefaultIncarnationAndEmptyValuePlain(t *testing.T) {
-	ch := NewStorageChangeSetPlain()
-	doTestEncodingStorageNew(t, ch, plainKeyGenerator, getDefaultIncarnation, emptyValueGenerator, EncodeStoragePlain, DecodeStoragePlain)
+	m := Mapper[dbutils.PlainStorageChangeSetBucket]
+	doTestEncodingStorageNew(t, plainKeyGenerator, getDefaultIncarnation, emptyValueGenerator, m.New, m.Encode, m.Decode)
 }
 
 func doTestEncodingStorageNew(
 	t *testing.T,
-	ch *ChangeSet,
 	keyGen func(common.Address, uint64, common.Hash) []byte,
 	incarnationGenerator func() uint64,
 	valueGenerator func(int) []byte,
-	encodeFunc encodeFunc,
-	decodeFunc decodeFunc,
+	newFunc func() *ChangeSet,
+	encodeFunc Encoder,
+	decodeFunc Decoder,
 ) {
 	f := func(t *testing.T, numOfElements int, numOfKeys int) {
 		var err error
+		ch := newFunc()
 		for i := 0; i < numOfElements; i++ {
 			inc := incarnationGenerator()
 			for j := 0; j < numOfKeys; j++ {
@@ -117,13 +102,11 @@ func doTestEncodingStorageNew(
 
 			}
 		}
-
-		b, err := encodeFunc(ch)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		ch2, err := decodeFunc(b)
+		ch2 := newFunc()
+		err = encodeFunc(0, ch, func(k, v []byte) error {
+			_, k, v = decodeFunc(k, v)
+			return ch2.Add(k, v)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -183,22 +166,23 @@ func doTestEncodingStorageNew(
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationWalkHashed(t *testing.T) {
-	ch := NewStorageChangeSet()
-	doTestWalk(t, ch, hashKeyGenerator, EncodeStorage, getHashedBytes)
+	m := Mapper[dbutils.StorageChangeSetBucket]
+	doTestWalk(t, hashKeyGenerator, m.New, m.Encode, m.Decode)
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationWalkPlain(t *testing.T) {
-	ch := NewStorageChangeSetPlain()
-	doTestWalk(t, ch, plainKeyGenerator, EncodeStoragePlain, getPlainBytes)
+	m := Mapper[dbutils.PlainStorageChangeSetBucket]
+	doTestWalk(t, plainKeyGenerator, m.New, m.Encode, m.Decode)
 }
 
 func doTestWalk(
 	t *testing.T,
-	ch *ChangeSet,
 	generator func(common.Address, uint64, common.Hash) []byte,
-	encodeFunc encodeFunc,
-	csStorageBytes func([]byte) csStorageBytes,
+	newfunc func() *ChangeSet,
+	encodeFunc Encoder,
+	decodeFunc Decoder,
 ) {
+	ch := newfunc()
 	f := func(t *testing.T, numOfElements, numOfKeys int) {
 		for i := 0; i < numOfElements; i++ {
 			for j := 0; j < numOfKeys; j++ {
@@ -211,13 +195,9 @@ func doTestWalk(
 			}
 		}
 
-		b, err := encodeFunc(ch)
-		if err != nil {
-			t.Fatal(err)
-		}
-
 		i := 0
-		err = csStorageBytes(b).Walk(func(k, v []byte) error {
+		err := encodeFunc(0, ch, func(k, v []byte) error {
+			_, k, v = decodeFunc(k, v)
 			if !bytes.Equal(k, ch.Changes[i].Key) {
 				t.Log(common.Bytes2Hex(ch.Changes[i].Key))
 				t.Log(common.Bytes2Hex(k))
@@ -259,55 +239,158 @@ func doTestWalk(
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFindHashed(t *testing.T) {
-	ch := NewStorageChangeSet()
-	doTestFind(t, ch, hashKeyGenerator, EncodeStorage, getHashedBytes, regularFindFunc)
+	bkt := dbutils.StorageChangeSetBucket
+	m := Mapper[bkt]
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	cs := m.WalkerAdapter(tx.CursorDupSort(bkt)).(StorageChangeSet)
+
+	clear := func() {
+		c := tx.Cursor(bkt)
+		defer c.Close()
+		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = c.DeleteCurrent()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	doTestFind(t, tx, bkt, hashKeyGenerator, m.New, m.Encode, m.Decode, cs.FindWithIncarnation, clear)
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFindPlain(t *testing.T) {
-	ch := NewStorageChangeSetPlain()
-	doTestFind(t, ch, plainKeyGenerator, EncodeStoragePlain, getPlainBytes, regularFindFunc)
+	bkt := dbutils.PlainStorageChangeSetBucket
+	m := Mapper[bkt]
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	cs := m.WalkerAdapter(tx.CursorDupSort(bkt)).(StorageChangeSetPlain)
+
+	clear := func() {
+		c := tx.Cursor(bkt)
+		defer c.Close()
+		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = c.DeleteCurrent()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	doTestFind(t, tx, bkt, plainKeyGenerator, m.New, m.Encode, m.Decode, cs.FindWithIncarnation, clear)
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationHashed(t *testing.T) {
-	ch := NewStorageChangeSet()
-	doTestFind(t, ch, hashKeyGenerator, EncodeStorage, getHashedBytes, findWithoutIncarnationFunc)
+	bkt := dbutils.StorageChangeSetBucket
+	m := Mapper[bkt]
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	cs := m.WalkerAdapter(tx.CursorDupSort(bkt)).(StorageChangeSet)
+
+	clear := func() {
+		c := tx.Cursor(bkt)
+		defer c.Close()
+		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = c.DeleteCurrent()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	doTestFind(t, tx, bkt, hashKeyGenerator, m.New, m.Encode, m.Decode, findWithoutIncarnationFunc(cs.FindWithoutIncarnation), clear)
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnationPlain(t *testing.T) {
-	ch := NewStorageChangeSetPlain()
-	doTestFind(t, ch, plainKeyGenerator, EncodeStoragePlain, getPlainBytes, findWithoutIncarnationFunc)
-}
-
-func regularFindFunc(b csStorageBytes, k []byte) ([]byte, error) {
-	return b.FindWithIncarnation(k)
-}
-
-func findWithoutIncarnationFunc(b csStorageBytes, k []byte) ([]byte, error) {
-	isHashed := len(k) == 2*common.HashLength+common.IncarnationLength
-	var addrBytes []byte
-	var keyBytes []byte
-	if isHashed {
-		addrHash, _, key := dbutils.ParseCompositeStorageKey(k)
-		addrBytes = addrHash[:]
-		keyBytes = key[:]
-	} else {
-		addr, _, key := dbutils.PlainParseCompositeStorageKey(k)
-		addrBytes = addr[:]
-		keyBytes = key[:]
+	bkt := dbutils.PlainStorageChangeSetBucket
+	m := Mapper[bkt]
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return b.FindWithoutIncarnation(addrBytes, keyBytes)
+	defer tx.Rollback()
+
+	cs := m.WalkerAdapter(tx.CursorDupSort(bkt)).(StorageChangeSetPlain)
+
+	clear := func() {
+		c := tx.Cursor(bkt)
+		defer c.Close()
+		for k, _, err := c.First(); k != nil; k, _, err = c.First() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = c.DeleteCurrent()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	doTestFind(t, tx, bkt, plainKeyGenerator, m.New, m.Encode, m.Decode, findWithoutIncarnationFunc(cs.FindWithoutIncarnation), clear)
+}
+
+func findWithoutIncarnationFunc(f func(blockNumber uint64, addrHashToFind []byte, keyHashToFind []byte) ([]byte, error)) func(blockN uint64, k []byte) ([]byte, error) {
+	return func(blockN uint64, k []byte) ([]byte, error) {
+		isHashed := len(k) == 2*common.HashLength+common.IncarnationLength
+		var addrBytes []byte
+		var keyBytes []byte
+		if isHashed {
+			addrHash, _, key := dbutils.ParseCompositeStorageKey(k)
+			addrBytes = addrHash[:]
+			keyBytes = key[:]
+		} else {
+			addr, _, key := dbutils.PlainParseCompositeStorageKey(k)
+			addrBytes = addr[:]
+			keyBytes = key[:]
+		}
+		return f(blockN, addrBytes, keyBytes)
+	}
 }
 
 func doTestFind(
 	t *testing.T,
-	ch *ChangeSet,
+	tx ethdb.Tx,
+	bucket string,
 	generator func(common.Address, uint64, common.Hash) []byte,
-	encodeFunc encodeFunc,
-	csStorageBytes func([]byte) csStorageBytes,
-	findFunc func(csStorageBytes, []byte) ([]byte, error),
+	newFunc func() *ChangeSet,
+	encodeFunc Encoder,
+	_ Decoder,
+	findFunc func(uint64, []byte) ([]byte, error),
+	clear func(),
 ) {
 	t.Helper()
 	f := func(t *testing.T, numOfElements, numOfKeys int) {
+		defer clear()
+		ch := newFunc()
 		for i := 0; i < numOfElements; i++ {
 			for j := 0; j < numOfKeys; j++ {
 				val := hashValueGenerator(j)
@@ -319,18 +402,25 @@ func doTestFind(
 			}
 		}
 
-		b, err := encodeFunc(ch)
+		c := tx.Cursor(bucket)
+		defer c.Close()
+		err := encodeFunc(1, ch, func(k, v []byte) error {
+			if err2 := c.Append(common.CopyBytes(k), common.CopyBytes(v)); err2 != nil {
+				return err2
+			}
+			return nil
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		for i, v := range ch.Changes {
-			val, err := findFunc(csStorageBytes(b), v.Key)
+			val, err := findFunc(1, v.Key)
 			if err != nil {
 				t.Error(err, i)
 			}
 			if !bytes.Equal(val, v.Value) {
-				t.Fatal("value not equal for ", v, val)
+				t.Fatal("value not equal for ", v.Value, val)
 			}
 		}
 	}
@@ -373,15 +463,15 @@ func BenchmarkDecodeNewStorage(t *testing.B) {
 		}
 	}
 
-	b, err := EncodeStorage(ch)
-	if err != nil {
-		t.Fatal(err)
-	}
+	dec := FromDBFormat(common.HashLength)
 
 	t.ResetTimer()
 	var ch2 *ChangeSet
 	for i := 0; i < t.N; i++ {
-		ch2, err = DecodeStorage(b)
+		err := EncodeStorage(1, ch, func(k, v []byte) error {
+			_, _, _ = dec(k, v)
+			return nil
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -404,141 +494,34 @@ func BenchmarkEncodeNewStorage(t *testing.B) {
 		}
 	}
 
-	var b []byte
 	t.ResetTimer()
 	for i := 0; i < t.N; i++ {
-		b, err = EncodeStorage(ch)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	_ = b
-}
-
-func BenchmarkFindStorage(t *testing.B) {
-	numOfElements := 1000
-	// empty StorageChangeSet first
-	ch := NewStorageChangeSet()
-	var err error
-	for i := 0; i < numOfElements; i++ {
-		addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
-		key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
-		val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-		err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, rand.Uint64(), key), val.Bytes())
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	var v []byte
-	b, err := EncodeStorage(ch)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	finder := StorageChangeSetBytes(b)
-	t.ResetTimer()
-	for i := 0; i < t.N; i++ {
-		v, err = finder.Find(ch.Changes[10].Key)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	_ = b
-	_ = v
-}
-
-func BenchmarkWalkStorage(t *testing.B) {
-	numOfElements := 10
-	// empty StorageChangeSet first
-	ch := NewStorageChangeSet()
-	var err error
-	for i := 0; i < numOfElements; i++ {
-		addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
-		key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
-		val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-		err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, rand.Uint64(), key), val.Bytes())
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	var v, k []byte
-	b, err := EncodeStorage(ch)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	finder := StorageChangeSetBytes(b)
-	t.ResetTimer()
-	for i := 0; i < t.N; i++ {
-		err = finder.Walk(func(kk, vv []byte) error {
-			v = vv
-			k = kk
+		err := EncodeStorage(1, ch, func(k, v []byte) error {
 			return nil
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	_ = b
-	_ = v
-	_ = k
 }
 
 func formatTestName(elements, keys int) string {
 	return fmt.Sprintf("elements: %d keys: %d", elements, keys)
 }
 
-// TestDefaultIncarnationCompress is a encoding-specific test that may need to be
-// adjusted if the encoding changes. This tests checks that default incarnations are
-// getting compressed
-func TestDefaultIncarnationCompressHashed(t *testing.T) {
-	ch1 := NewStorageChangeSet()
-	ch2 := NewStorageChangeSet()
-	doTestDefaultIncarnationCompress(t, ch1, ch2, hashKeyGenerator, EncodeStorage)
-}
-
-func TestDefaultIncarnationCompressPlain(t *testing.T) {
-	ch1 := NewStorageChangeSetPlain()
-	ch2 := NewStorageChangeSetPlain()
-	doTestDefaultIncarnationCompress(t, ch1, ch2, plainKeyGenerator, EncodeStoragePlain)
-}
-
-func doTestDefaultIncarnationCompress(t *testing.T,
-	ch1 *ChangeSet,
-	ch2 *ChangeSet,
-	generator func(common.Address, uint64, common.Hash) []byte,
-	encodeFunc encodeFunc,
-) {
-	// We create two changsets, with the same data, except for the incarnation
-	// First changeset has incarnation == defaultIncarnation, which should be compressed
-	// Second changeset has incarnation == defautIncarnation+1, which would not be compressed
-	key1 := getTestDataAtIndex(0, 0, defaultIncarnation, generator)
-	key2 := getTestDataAtIndex(0, 0, defaultIncarnation+1, generator)
-	val := hashValueGenerator(0)
-	err := ch1.Add(key1, val)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b1, err1 := encodeFunc(ch1)
-	if err1 != nil {
-		t.Fatal(err1)
-	}
-	err = ch2.Add(key2, val)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b2, err2 := encodeFunc(ch2)
-	if err2 != nil {
-		t.Fatal(err2)
-	}
-	if len(b1) >= len(b2) {
-		t.Errorf("first encoding should be shorter than the second, got %d >= %d", len(b1), len(b2))
-	}
-}
-
 func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
+	bkt := dbutils.PlainStorageChangeSetBucket
+	m := Mapper[bkt]
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	cs := m.WalkerAdapter(tx.CursorDupSort(bkt)).(StorageChangeSetPlain)
+
 	contractA := common.HexToAddress("0x6f0e0cdac6c716a00bd8db4d0eee4f2bfccf8e6a")
 	contractB := common.HexToAddress("0xc5acb79c258108f288288bc26f7820d06f45f08c")
 	contractC := common.HexToAddress("0x1cbdd8336800dc3fe27daf5fb5188f0502ac1fc7")
@@ -559,8 +542,9 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	val5 := common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000")
 	val6 := common.FromHex("0xec89478783348038046b42cc126a3c4e351977b5f4cf5e3c4f4d8385adbf8046")
 
-	ch := NewStorageChangeSetPlain()
+	c := tx.CursorDupSort(bkt)
 
+	ch := NewStorageChangeSetPlain()
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key1), val1))
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key5), val5))
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key6), val6))
@@ -570,26 +554,28 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC, 5, key4), val4))
 
-	encoded, _ := EncodeStoragePlain(ch)
+	assert.NoError(t, EncodeStoragePlain(1, ch, func(k, v []byte) error {
+		return c.Append(k, v)
+	}))
 
-	data1, err1 := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key1))
+	data1, err1 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key1))
 	assert.NoError(t, err1)
 	assert.Equal(t, data1, val1)
 
-	data3, err3 := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key3))
+	data3, err3 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key3))
 	assert.NoError(t, err3)
 	assert.Equal(t, data3, val3)
 
-	data5, err5 := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key5))
+	data5, err5 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key5))
 	assert.NoError(t, err5)
 	assert.Equal(t, data5, val5)
 
-	_, errA := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key1))
+	_, errA := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key1))
 	assert.Error(t, errA)
 
-	_, errB := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractD, 2, key1))
+	_, errB := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractD, 2, key1))
 	assert.Error(t, errB)
 
-	_, errC := StorageChangeSetPlainBytes(encoded).FindWithIncarnation(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key7))
+	_, errC := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key7))
 	assert.Error(t, errC)
 }

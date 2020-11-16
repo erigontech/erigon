@@ -208,28 +208,23 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 	if err != nil {
 		return err
 	}
-	var accountSerialised []byte
-	accountSerialised, err = changeset.EncodeAccounts(accountChanges)
-	if err != nil {
+	if err = changeset.Mapper[dbutils.AccountChangeSetBucket].Encode(dsw.blockNr, accountChanges, func(k, v []byte) error {
+		return dsw.db.Append(dbutils.AccountChangeSetBucket, k, v)
+	}); err != nil {
 		return err
 	}
-	key := dbutils.EncodeTimestamp(dsw.blockNr)
-	if err = dsw.db.Put(dbutils.AccountChangeSetBucket, key, accountSerialised); err != nil {
-		return err
-	}
+
 	storageChanges, err := dsw.csw.GetStorageChanges()
 	if err != nil {
 		return err
 	}
-	var storageSerialized []byte
-	if storageChanges.Len() > 0 {
-		storageSerialized, err = changeset.EncodeStorage(storageChanges)
-		if err != nil {
-			return err
-		}
-		if err = dsw.db.Put(dbutils.StorageChangeSetBucket, key, storageSerialized); err != nil {
-			return err
-		}
+	if storageChanges.Len() == 0 {
+		return nil
+	}
+	if err = changeset.Mapper[dbutils.StorageChangeSetBucket].Encode(dsw.blockNr, storageChanges, func(k, v []byte) error {
+		return dsw.db.Append(dbutils.StorageChangeSetBucket, k, v)
+	}); err != nil {
+		return err
 	}
 	return nil
 }

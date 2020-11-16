@@ -1,7 +1,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -12,31 +11,28 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMutation_DeleteTimestamp(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	mutDB := db.NewBatch()
 
 	acc := make([]*accounts.Account, 10)
 	addr := make([]common.Address, 10)
 	addrHashes := make([]common.Hash, 10)
-	tds := NewTrieDbState(common.Hash{}, mutDB, 1)
+	tds := NewTrieDbState(common.Hash{}, db, 1)
 	blockWriter := tds.DbStateWriter()
 	ctx := context.Background()
 	emptyAccount := accounts.NewAccount()
@@ -52,17 +48,16 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	if err := blockWriter.WriteHistory(); err != nil {
 		t.Fatal(err)
 	}
-	_, err := mutDB.Commit()
+
+	i := 0
+	err := db.Walk(dbutils.AccountChangeSetBucket, nil, 0, func(k, v []byte) (bool, error) {
+		i++
+		return true, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if changeset.Len(csData) != 10 {
+	if i != 10 {
 		t.FailNow()
 	}
 
@@ -85,13 +80,16 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = mutDB.Commit()
+
+	count := 0
+	err = changeset.Walk(db, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+		count++
+		return true, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	_, err = db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
-	if err != ethdb.ErrKeyNotFound {
+	if count != 0 {
 		t.Fatal("changeset must be deleted")
 	}
 
@@ -104,17 +102,11 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 func TestMutationCommitThinHistory(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	mutDB := db.NewBatch()
 
 	numOfAccounts := 5
 	numOfStateKeys := 5
 
-	addrs, accState, accStateStorage, accHistory, accHistoryStateStorage := generateAccountsWithStorageAndHistory(t, mutDB, numOfAccounts, numOfStateKeys)
-
-	_, commitErr := mutDB.Commit()
-	if commitErr != nil {
-		t.Fatal(commitErr)
-	}
+	addrs, accState, accStateStorage, accHistory, accHistoryStateStorage := generateAccountsWithStorageAndHistory(t, db, numOfAccounts, numOfStateKeys)
 
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
@@ -178,7 +170,13 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 
-	csData, err := db.Get(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(2))
+	changeSetInDB := changeset.NewAccountChangeSetPlain()
+	err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+		if err := changeSetInDB.Add(k, v); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,20 +196,23 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 	sort.Sort(expectedChangeSet)
-	expectedData, err := changeset.EncodeAccountsPlain(expectedChangeSet)
-	assert.NoError(t, err)
-	if !bytes.Equal(csData, expectedData) {
-		spew.Dump("res", csData)
-		spew.Dump("expected", expectedData)
+	if !reflect.DeepEqual(changeSetInDB, expectedChangeSet) {
+		spew.Dump("res", changeSetInDB)
+		spew.Dump("expected", expectedChangeSet)
 		t.Fatal("incorrect changeset")
 	}
 
-	csData, err = db.Get(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(2))
+	cs := changeset.NewStorageChangeSetPlain()
+	err = changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+		if err2 := cs.Add(k, v); err2 != nil {
+			return false, err2
+		}
+		return true, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	cs, _ := changeset.DecodeStoragePlain(csData)
 	if cs.Len() != numOfAccounts*numOfStateKeys {
 		t.Errorf("Length does not match, got %d, expected %d", cs.Len(), numOfAccounts*numOfStateKeys)
 	}
@@ -227,13 +228,8 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 	sort.Sort(expectedChangeSet)
-	expectedData, err = changeset.EncodeStoragePlain(expectedChangeSet)
-	assert.NoError(t, err)
-	if !bytes.Equal(csData, expectedData) {
-		spew.Dump("res", csData)
-		spew.Dump("expected", expectedData)
-		t.Fatal("incorrect changeset")
-	}
+
+	assert.Equal(t, cs, expectedChangeSet)
 }
 
 func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numOfAccounts, numOfStateKeys int) ([]common.Address, []*accounts.Account, []map[common.Hash]uint256.Int, []*accounts.Account, []map[common.Hash]uint256.Int) {
@@ -309,7 +305,7 @@ func TestUnwindTruncateHistory(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	mutDB := db.NewBatch()
-	tds := NewTrieDbState(common.Hash{}, mutDB, 1)
+	tds := NewTrieDbState(common.Hash{}, db, 1)
 	ctx := context.Background()
 	acc1 := accounts.NewAccount()
 	acc := &acc1
@@ -362,9 +358,6 @@ func TestUnwindTruncateHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := blockWriter.WriteHistory(); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := mutDB.Commit(); err != nil {
 			t.Fatal(err)
 		}
 		acc = newAcc

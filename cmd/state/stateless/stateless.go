@@ -14,9 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	chart "github.com/wcharczuk/go-chart"
-	"github.com/wcharczuk/go-chart/drawing"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -28,6 +25,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/ledgerwatch/turbo-geth/visual"
+	"github.com/wcharczuk/go-chart"
+	"github.com/wcharczuk/go-chart/drawing"
 )
 
 var chartColors = []drawing.Color{
@@ -58,15 +57,19 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 		}
 		receipts = append(receipts, receipt)
 	}
-	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
-		return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
+
+	if !vmConfig.ReadOnly {
+		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
+			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
+		}
+
+		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+		if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
+			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
+		}
 	}
 
-	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-	if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
-		return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
-	}
 	return receipts, nil
 }
 

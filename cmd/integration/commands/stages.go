@@ -386,7 +386,7 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 	ch := ctx.Done()
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
-		return stagedsync.UnwindExecutionStage(u, stage4, db, false)
+		return stagedsync.UnwindExecutionStage(u, stage4, db, sm.Receipts)
 	}
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))

@@ -69,7 +69,7 @@ func New{{.BucketType}}(b ethdb.Cursor) *{{.BucketType}} {
 }
 
 func (b *{{.BucketType}}) Get(key []byte) ({{.Type}}, bool) {
-	value, _ := b.Cursor.SeekExact(key)
+	_, value, _ := b.Cursor.SeekExact(key)
 	if value == nil {
 		return 0, false
 	}

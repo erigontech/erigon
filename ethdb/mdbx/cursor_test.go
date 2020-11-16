@@ -302,16 +302,22 @@ func TestDupCmpExcludeSuffix32(t *testing.T) {
 	}
 
 	err = env.Update(func(txn *Txn) (err error) {
-		put := func(k, v []byte) {
-			if err == nil {
-				err = txn.Put(dbi, k, v, 0)
-			}
+		err = txn.Put(dbi, []byte{0}, hash32Bytes, Append|AppendDup)
+		if err != nil {
+			panic(err)
 		}
-		put([]byte{1}, hash32Bytes)
-		put([]byte{0}, append([]byte{0, 0}, hash32Bytes...))
-		put([]byte{0}, append([]byte{0}, hash32Bytes...))
-		put([]byte{0}, hash32Bytes)
-
+		err = txn.Put(dbi, []byte{0}, append([]byte{0}, hash32Bytes...), AppendDup)
+		if err != nil {
+			panic(err)
+		}
+		err = txn.Put(dbi, []byte{0}, append([]byte{0, 0}, hash32Bytes...), AppendDup)
+		if err != nil {
+			panic(err)
+		}
+		err = txn.Put(dbi, []byte{1}, hash32Bytes, Append|AppendDup)
+		if err != nil {
+			panic(err)
+		}
 		return err
 	})
 	if err != nil {

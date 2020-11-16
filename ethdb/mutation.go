@@ -185,7 +185,7 @@ func (m *mutation) MultiWalk(table string, startkeys [][]byte, fixedbits []int, 
 
 func (m *mutation) Delete(table string, k, v []byte) error {
 	if v != nil {
-		return fmt.Errorf("mutation doesn't implement dupsort values deletion yet")
+		return m.db.Delete(table, k, v) // TODO: mutation to support DupSort deletes
 	}
 	//m.puts.Delete(table, k)
 	return m.Put(table, k, nil)

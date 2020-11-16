@@ -2,7 +2,12 @@ package changeset
 
 import (
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
+
+type Encoder func(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error
+type Decoder func(dbKey, dbValue []byte) (blockN uint64, k, v []byte)
 
 /* Hashed changesets (key is a hash of common.Address) */
 
@@ -13,27 +18,22 @@ func NewAccountChangeSet() *ChangeSet {
 	}
 }
 
-func EncodeAccounts(s *ChangeSet) ([]byte, error) {
-	return encodeAccounts(s)
+func EncodeAccounts(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
+	return encodeAccounts2(blockN, s, f)
 }
 
-func DecodeAccounts(b []byte) (*ChangeSet, error) {
-	h := NewAccountChangeSet()
-	err := decodeAccountsWithKeyLen(b, common.HashLength, h)
-	if err != nil {
-		return nil, err
-	}
-	return h, nil
+type AccountChangeSet struct{ c ethdb.CursorDupSort }
+
+func (b AccountChangeSet) WalkReverse(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
+	return walkReverse(b.c, from, to, common.HashLength, f)
 }
 
-type AccountChangeSetBytes []byte
-
-func (b AccountChangeSetBytes) Walk(f func(k, v []byte) error) error {
-	return walkAccountChangeSet(b, common.HashLength, f)
+func (b AccountChangeSet) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
+	return walk(b.c, from, to, common.HashLength, f)
 }
 
-func (b AccountChangeSetBytes) Find(k []byte) ([]byte, error) {
-	return findInAccountChangeSetBytes(b, k, common.HashLength)
+func (b AccountChangeSet) Find(blockNumber uint64, k []byte) ([]byte, error) {
+	return findInAccountChangeSet(b.c, blockNumber, k, common.HashLength)
 }
 
 /* Plain changesets (key is a common.Address) */
@@ -45,25 +45,47 @@ func NewAccountChangeSetPlain() *ChangeSet {
 	}
 }
 
-func EncodeAccountsPlain(s *ChangeSet) ([]byte, error) {
-	return encodeAccounts(s)
+func EncodeAccountsPlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
+	return encodeAccounts2(blockN, s, f)
 }
 
-func DecodeAccountsPlain(b []byte) (*ChangeSet, error) {
-	h := NewAccountChangeSetPlain()
-	err := decodeAccountsWithKeyLen(b, common.AddressLength, h)
-	if err != nil {
+type AccountChangeSetPlain struct{ c ethdb.CursorDupSort }
+
+func (b AccountChangeSetPlain) WalkReverse(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
+	return walkReverse(b.c, from, to, common.AddressLength, f)
+}
+
+func (b AccountChangeSetPlain) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
+	return walk(b.c, from, to, common.AddressLength, f)
+}
+
+func (b AccountChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error) {
+	return findInAccountChangeSet(b.c, blockNumber, k, common.AddressLength)
+}
+
+// GetModifiedAccounts returns a list of addresses that were modified in the block range
+func GetModifiedAccounts(db ethdb.Database, startNum, endNum uint64) ([]common.Address, error) {
+	changedAddrs := make(map[common.Address]struct{})
+	if err := Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(startNum), 0, func(blockN uint64, k, v []byte) (bool, error) {
+		if blockN > endNum {
+			return false, nil
+		}
+		changedAddrs[common.BytesToAddress(k)] = struct{}{}
+		return true, nil
+	}); err != nil {
 		return nil, err
 	}
-	return h, nil
-}
 
-type AccountChangeSetPlainBytes []byte
+	if len(changedAddrs) == 0 {
+		return nil, nil
+	}
 
-func (b AccountChangeSetPlainBytes) Walk(f func(k, v []byte) error) error {
-	return walkAccountChangeSet(b, common.AddressLength, f)
-}
+	idx := 0
+	result := make([]common.Address, len(changedAddrs))
+	for addr := range changedAddrs {
+		copy(result[idx][:], addr[:])
+		idx++
+	}
 
-func (b AccountChangeSetPlainBytes) Find(k []byte) ([]byte, error) {
-	return findInAccountChangeSetBytes(b, k, common.AddressLength)
+	return result, nil
 }

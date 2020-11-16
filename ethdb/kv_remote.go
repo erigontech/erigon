@@ -288,7 +288,8 @@ func (tx *remoteTx) BucketSize(name string) (uint64, error) {
 func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {
 	c := tx.Cursor(bucket)
 	defer c.Close()
-	return c.SeekExact(key)
+	_, val, err = c.SeekExact(key)
+	return val, err
 }
 
 func (tx *remoteTx) HasOne(bucket string, key []byte) (bool, error) {
@@ -301,9 +302,9 @@ func (tx *remoteTx) HasOne(bucket string, key []byte) (bool, error) {
 	return bytes.Equal(key, k), nil
 }
 
-func (c *remoteCursor) SeekExact(key []byte) (val []byte, err error) {
+func (c *remoteCursor) SeekExact(key []byte) (k, val []byte, err error) {
 	if err := c.initCursor(); err != nil {
-		return nil, err
+		return []byte{}, nil, err
 	}
 	return c.seekExact(key)
 }
@@ -438,15 +439,15 @@ func (c *remoteCursor) setRange(k []byte) ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remoteCursor) seekExact(k []byte) ([]byte, error) {
+func (c *remoteCursor) seekExact(k []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_EXACT, K: k}); err != nil {
-		return nil, err
+		return []byte{}, nil, err
 	}
 	pair, err := c.stream.Recv()
 	if err != nil {
-		return nil, err
+		return []byte{}, nil, err
 	}
-	return pair.V, nil
+	return pair.K, pair.V, nil
 }
 func (c *remoteCursor) getBothRange(k, v []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_SEEK_BOTH, K: k, V: v}); err != nil {

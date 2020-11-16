@@ -3,13 +3,12 @@ package verify
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
-	"reflect"
 	"runtime"
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -28,13 +27,11 @@ func CheckEnc(chaindata string) error {
 		currentSize uint64
 		newSize     uint64
 	)
+
 	//set test methods
-	chainDataStorageDecoder := changeset.DecodeStorage
+	chainDataStorageDecoder := changeset.Mapper[dbutils.StorageChangeSetBucket].Decode
 	testStorageEncoder := changeset.EncodeStorage
-	testStorageDecoder := changeset.DecodeStorage
-	testWalker := func(b []byte) Walker {
-		return changeset.StorageChangeSetBytes(b)
-	}
+	testStorageDecoder := changeset.Mapper[dbutils.StorageChangeSetBucket].Decode
 
 	startTime := time.Now()
 	ch := make(chan struct {
@@ -49,53 +46,25 @@ func CheckEnc(chaindata string) error {
 			for {
 				select {
 				case v := <-ch:
-					blockNum, _ := dbutils.DecodeTimestamp(v.k)
-					cs, innerErr := chainDataStorageDecoder(v.v)
-					if innerErr != nil {
-						return innerErr
-					}
-
-					data, innerErr := testStorageEncoder(cs)
-					if innerErr != nil {
-						return innerErr
-					}
+					blockNum, kk, vv := chainDataStorageDecoder(v.k, v.v)
+					cs := changeset.NewStorageChangeSet()
+					_ = cs.Add(v.k, v.v)
 					atomic.AddUint64(&currentSize, uint64(len(v.v)))
-					atomic.AddUint64(&newSize, uint64(len(data)))
-
-					cs2, innerErr := testStorageDecoder(data)
-					if innerErr != nil {
-						return innerErr
-					}
-
-					if !reflect.DeepEqual(cs, cs2) {
-						return fmt.Errorf("not identical changesets. block %d", blockNum)
-					}
-
-					walker := testWalker(data)
-					for _, val := range cs.Changes {
-						value, findErr := walker.Find(val.Key)
-						if findErr != nil {
-							return findErr
+					innerErr := testStorageEncoder(blockNum, cs, func(k, v []byte) error {
+						atomic.AddUint64(&newSize, uint64(len(v)))
+						_, a, b := testStorageDecoder(k, v)
+						if !bytes.Equal(kk, a) {
+							return fmt.Errorf("incorrect order. block: %d", blockNum)
 						}
-						if !bytes.Equal(value, val.Value) {
-							return fmt.Errorf("block: %d. incorrect value for %v. Returned:%v", blockNum, common.Bytes2Hex(val.Key), common.Bytes2Hex(value))
+						if !bytes.Equal(vv, b) {
+							return fmt.Errorf("incorrect value. block: %d, key: %x", blockNum, a)
 						}
-					}
-					j := 0
-
-					err := walker.Walk(func(kk, vv []byte) error {
-						if !bytes.Equal(kk, cs2.Changes[j].Key) {
-							return fmt.Errorf("incorrect order. block: %d, element: %v", blockNum, j)
-						}
-						if !bytes.Equal(vv, cs2.Changes[j].Value) {
-							return fmt.Errorf("incorrect value. block: %d, key:%v", blockNum, common.Bytes2Hex(cs.Changes[j].Key))
-						}
-						j++
 						return nil
 					})
-					if err != nil {
-						return err
+					if innerErr != nil {
+						return innerErr
 					}
+
 				case <-ctx.Done():
 					return nil
 				case <-stop:
@@ -113,7 +82,7 @@ func CheckEnc(chaindata string) error {
 
 		return db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 			if i%100_000 == 0 {
-				blockNum, _ := dbutils.DecodeTimestamp(k)
+				blockNum := binary.BigEndian.Uint64(k)
 				fmt.Printf("Processed %dK, block number %d, current %d, new %d, time %s\n",
 					i/1000,
 					blockNum,
