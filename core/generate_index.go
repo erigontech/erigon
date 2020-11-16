@@ -101,18 +101,24 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 		if err := ig.db.Walk(vv.IndexBucket, startKey, 8*keySize, func(k, v []byte) (bool, error) {
 			timestamp := binary.BigEndian.Uint64(k[keySize:]) // the last timestamp in the chunk
 			kStr := string(common.CopyBytes(k))
-			if timestamp > timestampTo {
+			if timestamp <= timestampTo {
+				return true, nil
+			}
+
+			// Truncated chunk becomes "the last chunk" with the timestamp 0xffff....ffff
+			// - "last but one chunk" will become "the last chunk" only if it exists.
+			// - and "the last chunk" need to be deleted only if "last but one chunk" was not converted to "the last"
+			if _, ok := historyEffects[kStr]; !ok {
 				historyEffects[kStr] = nil
-				// truncate the chunk
-				index := dbutils.WrapHistoryIndex(v)
-				index = index.TruncateGreater(timestampTo)
-				if len(index) > 8 { // If the chunk is empty after truncation, it gets simply deleted
-					// Truncated chunk becomes "the last chunk" with the timestamp 0xffff....ffff
-					lastK := make([]byte, len(k))
-					copy(lastK, k[:keySize])
-					binary.BigEndian.PutUint64(lastK[keySize:], ^uint64(0))
-					historyEffects[string(lastK)] = common.CopyBytes(index)
-				}
+			}
+			// truncate the chunk
+			index := dbutils.WrapHistoryIndex(v)
+			index = index.TruncateGreater(timestampTo)
+			if len(index) > 8 { // If the chunk is empty after truncation, it gets simply deleted
+				lastK := make([]byte, len(k))
+				copy(lastK, k[:keySize])
+				binary.BigEndian.PutUint64(lastK[keySize:], ^uint64(0))
+				historyEffects[string(lastK)] = common.CopyBytes(index)
 			}
 			return true, nil
 		}); err != nil {
