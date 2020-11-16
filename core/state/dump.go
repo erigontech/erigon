@@ -228,7 +228,6 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %v", addrHash, err)
 			}
-			fmt.Printf("Got walk storage for : %x\n", storagePrefix)
 			account.Root = t.Hash().String()
 		}
 		c.OnAccount(addrHash, *account)
