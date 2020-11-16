@@ -709,7 +709,7 @@ func (tx *lmdbTx) HasOne(bucket string, key []byte) (bool, error) {
 func (tx *lmdbTx) Sequence(bucket string, amount uint64) (uint64, error) {
 	c := tx.Cursor(dbutils.Sequence)
 	defer c.Close()
-	v, err := c.SeekExact([]byte(bucket))
+	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !lmdb.IsNotFound(err) {
 		return 0, err
 	}
@@ -789,7 +789,7 @@ func (c *LmdbCursor) prev() ([]byte, []byte, error)           { return c.c.Get(n
 func (c *LmdbCursor) prevDup() ([]byte, []byte, error)        { return c.c.Get(nil, nil, lmdb.PrevDup) }
 func (c *LmdbCursor) prevNoDup() ([]byte, []byte, error)      { return c.c.Get(nil, nil, lmdb.PrevNoDup) }
 func (c *LmdbCursor) last() ([]byte, []byte, error)           { return c.c.Get(nil, nil, lmdb.Last) }
-func (c *LmdbCursor) delCurrent() error                       { return c.c.Del(0) }
+func (c *LmdbCursor) delCurrent() error                       { return c.c.Del(lmdb.Current) }
 func (c *LmdbCursor) delNoDupData() error                     { return c.c.Del(lmdb.NoDupData) }
 func (c *LmdbCursor) put(k, v []byte) error                   { return c.c.Put(k, v, 0) }
 func (c *LmdbCursor) putCurrent(k, v []byte) error            { return c.c.Put(k, v, lmdb.Current) }
@@ -927,6 +927,12 @@ func (c *LmdbCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 		}
 		if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
 			k, v = nil, nil
+		}
+		if len(k) == to {
+			k2 := make([]byte, 0, len(k)+from-to)
+			k2 = append(append(k2, k...), v[:from-to]...)
+			v = v[from-to:]
+			k = k2
 		}
 		return k, v, nil
 	}
@@ -1247,37 +1253,37 @@ func (c *LmdbCursor) PutCurrent(key []byte, value []byte) error {
 	return c.putCurrent(key, value)
 }
 
-func (c *LmdbCursor) SeekExact(key []byte) ([]byte, error) {
+func (c *LmdbCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
-			return nil, err
+			return []byte{}, nil, err
 		}
 	}
 
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
-		_, v, err := c.getBothRange(key[:to], key[to:])
+		k, v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if lmdb.IsNotFound(err) {
-				return nil, nil
+				return nil, nil, nil
 			}
-			return nil, err
+			return []byte{}, nil, err
 		}
 		if !bytes.Equal(key[to:], v[:from-to]) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return v[from-to:], nil
+		return k, v[from-to:], nil
 	}
 
-	_, v, err := c.set(key)
+	k, v, err := c.set(key)
 	if err != nil {
 		if lmdb.IsNotFound(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return []byte{}, nil, err
 	}
-	return v, nil
+	return k, v, nil
 }
 
 // Append - speedy feature of lmdb which is not part of KV interface.

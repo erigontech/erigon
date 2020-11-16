@@ -124,13 +124,13 @@ type Cursor interface {
 	Prefix(v []byte) Cursor // Prefix returns only keys with given prefix, useful RemoteKV - because filtering done by server
 	Prefetch(v uint) Cursor // Prefetch enables data streaming - used only by RemoteKV
 
-	First() ([]byte, []byte, error)           // First - position at first key/data item
-	Seek(seek []byte) ([]byte, []byte, error) // Seek - position at first key greater than or equal to specified key
-	SeekExact(key []byte) ([]byte, error)     // SeekExact - position at first key greater than or equal to specified key
-	Next() ([]byte, []byte, error)            // Next - position at next key/value (can iterate over DupSort key/values automatically)
-	Prev() ([]byte, []byte, error)            // Prev - position at previous key
-	Last() ([]byte, []byte, error)            // Last - position at last key and last possible value
-	Current() ([]byte, []byte, error)         // Current - return key/data at current cursor position
+	First() ([]byte, []byte, error)               // First - position at first key/data item
+	Seek(seek []byte) ([]byte, []byte, error)     // Seek - position at first key greater than or equal to specified key
+	SeekExact(key []byte) ([]byte, []byte, error) // SeekExact - position at first key greater than or equal to specified key
+	Next() ([]byte, []byte, error)                // Next - position at next key/value (can iterate over DupSort key/values automatically)
+	Prev() ([]byte, []byte, error)                // Prev - position at previous key
+	Last() ([]byte, []byte, error)                // Last - position at last key and last possible value
+	Current() ([]byte, []byte, error)             // Current - return key/data at current cursor position
 
 	Put(k, v []byte) error           // Put - based on order
 	Append(k []byte, v []byte) error // Append - append the given key/data pair to the end of the database. This option allows fast bulk loading when keys are already known to be in the correct order.

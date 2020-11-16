@@ -47,18 +47,17 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 	err := etl.Transform(ig.logPrefix, ig.db, changeSetBucket,
 		v.IndexBucket,
 		tmpdir,
-		getExtractFunc(v.WalkerAdapter),
+		getExtractFunc(changeSetBucket),
 		loadFunc,
 		etl.TransformArgs{
-			ExtractStartKey: dbutils.EncodeTimestamp(startBlock),
-			ExtractEndKey:   dbutils.EncodeTimestamp(endBlock),
+			ExtractStartKey: dbutils.EncodeBlockNumber(startBlock),
+			ExtractEndKey:   dbutils.EncodeBlockNumber(endBlock),
 			FixedBits:       0,
 			BufferType:      etl.SortableAppendBuffer,
 			BufferSize:      ig.ChangeSetBufSize,
 			Quit:            ig.quitCh,
 			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-				blockNum, _ := dbutils.DecodeTimestamp(k)
-				return []interface{}{"block", blockNum}
+				return []interface{}{"block", binary.BigEndian.Uint64(k)}
 			},
 		},
 	)
@@ -76,21 +75,12 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 		return errors.New("unknown bucket type")
 	}
 
-	currentKey := dbutils.EncodeTimestamp(timestampTo)
 	keys := make(map[string]struct{})
-	if err := ig.db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
+	if err := changeset.Walk(ig.db, changeSetBucket, dbutils.EncodeBlockNumber(timestampTo), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if err := common.Stopped(ig.quitCh); err != nil {
 			return false, err
 		}
-
-		currentKey = common.CopyBytes(k)
-		err := vv.WalkerAdapter(v).Walk(func(kk []byte, _ []byte) error {
-			keys[string(common.CopyBytes(kk))] = struct{}{}
-			return nil
-		})
-		if err != nil {
-			return false, err
-		}
+		keys[string(common.CopyBytes(k))] = struct{}{}
 		return true, nil
 	}); err != nil {
 		return err
@@ -99,7 +89,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 	historyEffects := make(map[string][]byte)
 	keySize := vv.KeySize
 	if dbutils.StorageChangeSetBucket == changeSetBucket || dbutils.PlainStorageChangeSetBucket == changeSetBucket {
-		keySize -= 8
+		keySize += common.HashLength
 	}
 
 	var startKey = make([]byte, keySize+8)
@@ -205,17 +195,16 @@ func loadFunc(k []byte, value []byte, state etl.CurrentTableReader, next etl.Loa
 	return nil
 }
 
-func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc { //nolint
+func getExtractFunc(changeSetBucket string) etl.ExtractFunc { //nolint
+	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		blockNum, _ := dbutils.DecodeTimestamp(dbKey)
-		return bytes2walker(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
-			key := common.CopyBytes(changesetKey)
-			v := make([]byte, 9)
-			binary.BigEndian.PutUint64(v, blockNum)
-			if len(changesetValue) == 0 {
-				v[8] = 1
-			}
-			return next(dbKey, key, v)
-		})
+		blockNum, k, v := decode(dbKey, dbValue)
+
+		newV := make([]byte, 9)
+		binary.BigEndian.PutUint64(newV, blockNum)
+		if len(v) == 0 {
+			newV[8] = 1
+		}
+		return next(dbKey, k, newV)
 	}
 }

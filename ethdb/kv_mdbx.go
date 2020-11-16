@@ -759,7 +759,7 @@ func (c *MdbxCursor) prev() ([]byte, []byte, error)           { return c.c.Get(n
 func (c *MdbxCursor) prevDup() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.PrevDup) }
 func (c *MdbxCursor) prevNoDup() ([]byte, []byte, error)      { return c.c.Get(nil, nil, mdbx.PrevNoDup) }
 func (c *MdbxCursor) last() ([]byte, []byte, error)           { return c.c.Get(nil, nil, mdbx.Last) }
-func (c *MdbxCursor) delCurrent() error                       { return c.c.Del(0) }
+func (c *MdbxCursor) delCurrent() error                       { return c.c.Del(mdbx.Current) }
 func (c *MdbxCursor) delNoDupData() error                     { return c.c.Del(mdbx.NoDupData) }
 func (c *MdbxCursor) put(k, v []byte) error                   { return c.c.Put(k, v, 0) }
 func (c *MdbxCursor) putCurrent(k, v []byte) error            { return c.c.Put(k, v, mdbx.Current) }
@@ -1217,37 +1217,37 @@ func (c *MdbxCursor) PutCurrent(key []byte, value []byte) error {
 	return c.putCurrent(key, value)
 }
 
-func (c *MdbxCursor) SeekExact(key []byte) ([]byte, error) {
+func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
-			return nil, err
+			return []byte{}, nil, err
 		}
 	}
 
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
-		_, v, err := c.getBothRange(key[:to], key[to:])
+		k, v, err := c.getBothRange(key[:to], key[to:])
 		if err != nil {
 			if mdbx.IsNotFound(err) {
-				return nil, nil
+				return nil, nil, nil
 			}
-			return nil, err
+			return []byte{}, nil, err
 		}
 		if !bytes.Equal(key[to:], v[:from-to]) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return v[from-to:], nil
+		return k, v[from-to:], nil
 	}
 
 	_, v, err := c.set(key)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return []byte{}, nil, err
 	}
-	return v, nil
+	return []byte{}, v, nil
 }
 
 // Append - speedy feature of mdbx which is not part of KV interface.

@@ -249,7 +249,7 @@ func handleOp(c ethdb.Cursor, stream remote.KV_TxServer, in *remote.Cursor) erro
 	//		return err
 	//	}
 	case remote.Op_SEEK_EXACT:
-		v, err = c.SeekExact(in.K)
+		k, v, err = c.SeekExact(in.K)
 	case remote.Op_SEEK_BOTH_EXACT:
 		k, v, err = c.(ethdb.CursorDupSort).SeekBothExact(in.K, in.V)
 	default:

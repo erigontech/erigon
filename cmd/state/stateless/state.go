@@ -132,7 +132,7 @@ func commit(k []byte, tx ethdb.Tx, data interface{}) {
 }
 
 func restore(k []byte, tx ethdb.Tx, data interface{}) {
-	v, err := tx.Cursor(ReportsProgressBucket).SeekExact(k)
+	_, v, err := tx.Cursor(ReportsProgressBucket).SeekExact(k)
 	if err != nil {
 		panic(err)
 	}

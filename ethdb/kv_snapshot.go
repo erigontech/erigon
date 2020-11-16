@@ -498,15 +498,15 @@ func (s *snapshotCursor) Append(key []byte, value []byte) error {
 	return s.dbCursor.Append(key, value)
 }
 
-func (s *snapshotCursor) SeekExact(key []byte) ([]byte, error) {
-	v, err := s.dbCursor.SeekExact(key)
+func (s *snapshotCursor) SeekExact(key []byte) ([]byte, []byte, error) {
+	k, v, err := s.dbCursor.SeekExact(key)
 	if err != nil {
-		return nil, err
+		return []byte{}, nil, err
 	}
 	if v == nil {
 		return s.snCursor.SeekExact(key)
 	}
-	return v, err
+	return k, v, err
 }
 
 func (s *snapshotCursor) Last() ([]byte, []byte, error) {

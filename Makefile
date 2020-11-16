@@ -107,6 +107,7 @@ ethdb/mdbx/dist/libmdbx.a:
 
 test: ethdb/mdbx/dist/libmdbx.a
 	$(GOTEST)
+	du -h
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)

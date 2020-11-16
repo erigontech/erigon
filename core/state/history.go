@@ -77,17 +77,14 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 		if set && !storage {
 			return []byte{}, nil
 		}
-		csBucket := dbutils.ChangeSetByIndexBucket(storage)
-		csKey := dbutils.EncodeTimestamp(changeSetBlock)
-		changeSetData, err := tx.GetOne(csBucket, csKey)
-		if err != nil {
-			return nil, err
-		}
-
+		csBucket, _ := dbutils.ChangeSetByIndexBucket(storage)
+		c := tx.CursorDupSort(csBucket)
+		defer c.Close()
+		var err error
 		if storage {
-			data, err = changeset.StorageChangeSetPlainBytes(changeSetData).FindWithIncarnation(key)
+			data, err = changeset.Mapper[csBucket].WalkerAdapter(c).(changeset.StorageChangeSetPlain).FindWithIncarnation(changeSetBlock, key)
 		} else {
-			data, err = changeset.AccountChangeSetPlainBytes(changeSetData).Find(key)
+			data, err = changeset.Mapper[csBucket].WalkerAdapter(c).Find(changeSetBlock, key)
 		}
 		if err != nil {
 			if !errors.Is(err, changeset.ErrNotFound) {
@@ -207,7 +204,10 @@ func walkAsOfThinStorage(tx ethdb.Tx, bucket string, hBucket string, startkey []
 		part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
 	}
 
-	decorator := NewChangesetSearchDecorator(historyCursor, tx, csBucket, startkey, fixetBitsForHistory, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
+	cs, cursor := returnCorrectWalker2(bucket, hBucket, tx)
+	defer cursor.Close()
+
+	decorator := NewChangesetSearchDecorator(historyCursor, tx, csBucket, startkey, fixetBitsForHistory, part1End, part2Start, part3Start, timestamp, cs)
 	err := decorator.buildChangeset(generatedTo, executedTo)
 	if err != nil {
 		return err
@@ -223,7 +223,6 @@ func walkAsOfThinStorage(tx ethdb.Tx, bucket string, hBucket string, startkey []
 	if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
 		return err2
 	}
-
 	goOn := true
 	for goOn {
 		cmp, br := common.KeyCmp(addrHash, hAddrHash)
@@ -306,8 +305,10 @@ func walkAsOfThinAccounts(tx ethdb.Tx, bucket string, hBucket string, startkey [
 		part2Start, /* part2start */
 		part3Start, /* part3start */
 	)
+	cs, cursor := returnCorrectWalker2(bucket, hBucket, tx)
+	defer cursor.Close()
 
-	decorator := NewChangesetSearchDecorator(hCursor, tx, csBucket, startkey, fixedbits, part1End, part2Start, part3Start, timestamp, returnCorrectWalker(bucket, hBucket))
+	decorator := NewChangesetSearchDecorator(hCursor, tx, csBucket, startkey, fixedbits, part1End, part2Start, part3Start, timestamp, cs)
 	innerErr = decorator.buildChangeset(generatedTo, executedTo)
 	if innerErr != nil {
 		return innerErr
@@ -381,30 +382,20 @@ func walkAsOfThinAccounts(tx ethdb.Tx, bucket string, hBucket string, startkey [
 
 }
 
-func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte) ([]byte, error), adapter func(v []byte) changeset.Walker) ([]byte, bool, error) {
+func findInHistory(hK, hV []byte, timestamp uint64, csWalker changeset.Walker2) ([]byte, bool, error) {
 	index := dbutils.WrapHistoryIndex(hV)
 	if changeSetBlock, set, ok := index.Search(timestamp); ok {
 		// set == true if this change was from empty record (non-existent account) to non-empty
 		// In such case, we do not need to examine changeSet and simply skip the record
 		if !set {
 			// Extract value from the changeSet
-			csKey := dbutils.EncodeTimestamp(changeSetBlock)
-			changeSetData, err := csGetter(csKey)
+			data, err := csWalker.Find(changeSetBlock, hK)
 			if err != nil {
-				return nil, false, err
-			}
-			if changeSetData == nil {
-				return nil, false, fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d) key %s, csKey %s", changeSetBlock, timestamp, common.Bytes2Hex(hK), common.Bytes2Hex(csKey))
-			}
-
-			data, err2 := adapter(changeSetData).Find(hK)
-			if err2 != nil {
 				return nil, false, fmt.Errorf("could not find key %x in the ChangeSet record for index entry %d (query timestamp %d): %v",
 					hK,
 					changeSetBlock,
 					timestamp,
-					err2,
-				)
+					err)
 			}
 			return data, true, nil
 		}
@@ -413,16 +404,21 @@ func findInHistory(hK, hV []byte, timestamp uint64, csGetter func([]byte) ([]byt
 	return nil, false, nil
 }
 
-func returnCorrectWalker(bucket, hBucket string) func(v []byte) changeset.Walker {
+// Important! It leaks cursor, please close it outside
+func returnCorrectWalker2(bucket, hBucket string, tx ethdb.Tx) (changeset.Walker2, ethdb.CursorDupSort) {
 	switch {
 	case bucket == dbutils.CurrentStateBucket && hBucket == dbutils.StorageHistoryBucket:
-		return changeset.Mapper[dbutils.StorageChangeSetBucket].WalkerAdapter
+		c := tx.CursorDupSort(dbutils.StorageChangeSetBucket)
+		return changeset.Mapper[dbutils.StorageChangeSetBucket].WalkerAdapter(c), c
 	case bucket == dbutils.CurrentStateBucket && hBucket == dbutils.AccountsHistoryBucket:
-		return changeset.Mapper[dbutils.AccountChangeSetBucket].WalkerAdapter
+		c := tx.CursorDupSort(dbutils.AccountChangeSetBucket)
+		return changeset.Mapper[dbutils.AccountChangeSetBucket].WalkerAdapter(c), c
 	case bucket == dbutils.PlainStateBucket && hBucket == dbutils.StorageHistoryBucket:
-		return changeset.Mapper[dbutils.PlainStorageChangeSetBucket].WalkerAdapter
+		c := tx.CursorDupSort(dbutils.PlainStorageChangeSetBucket)
+		return changeset.Mapper[dbutils.PlainStorageChangeSetBucket].WalkerAdapter(c), c
 	case bucket == dbutils.PlainStateBucket && hBucket == dbutils.AccountsHistoryBucket:
-		return changeset.Mapper[dbutils.PlainAccountChangeSetBucket].WalkerAdapter
+		c := tx.CursorDupSort(dbutils.PlainAccountChangeSetBucket)
+		return changeset.Mapper[dbutils.PlainAccountChangeSetBucket].WalkerAdapter(c), c
 	default:
 		panic("not implemented")
 	}
@@ -451,7 +447,7 @@ type historyCursor interface {
 	Next() (key1, key2, key3, val []byte, err error)
 }
 
-func NewChangesetSearchDecorator(historyCursor historyCursor, tx ethdb.Tx, bucketName string, startKey []byte, matchBits, part1End, part2Start, part3Start int, timestamp uint64, walkerAdapter func(v []byte) changeset.Walker) *changesetSearchDecorator {
+func NewChangesetSearchDecorator(historyCursor historyCursor, tx ethdb.Tx, bucketName string, startKey []byte, matchBits, part1End, part2Start, part3Start int, timestamp uint64, csWalker changeset.Walker2) *changesetSearchDecorator {
 	matchBytes, mask := ethdb.Bytesmask(matchBits)
 	return &changesetSearchDecorator{
 		startKey:      startKey,
@@ -460,12 +456,12 @@ func NewChangesetSearchDecorator(historyCursor historyCursor, tx ethdb.Tx, bucke
 		part2Start:    part2Start,
 		part3Start:    part3Start,
 
-		bucketName:    bucketName,
-		tx:            tx,
-		timestamp:     timestamp,
-		walkerAdapter: walkerAdapter,
-		matchBytes:    matchBytes,
-		byteMask:      mask,
+		bucketName: bucketName,
+		tx:         tx,
+		timestamp:  timestamp,
+		matchBytes: matchBytes,
+		byteMask:   mask,
+		csWalker:   csWalker,
 	}
 }
 
@@ -478,10 +474,10 @@ type changesetSearchDecorator struct {
 	matchBytes    int
 	byteMask      byte
 
-	bucketName    string
-	tx            ethdb.Tx
-	timestamp     uint64
-	walkerAdapter func(v []byte) changeset.Walker
+	bucketName string
+	tx         ethdb.Tx
+	timestamp  uint64
+	csWalker   changeset.Walker2
 
 	pos    int
 	values []changeset.Change
@@ -554,10 +550,7 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 		hK := make([]byte, len(hAddrHash)+len(hKeyHash))
 		copy(hK[:len(hAddrHash)], hAddrHash)
 		copy(hK[len(hAddrHash):], hKeyHash)
-		get := func(k []byte) ([]byte, error) {
-			return csd.tx.GetOne(csd.bucketName, k)
-		}
-		data, found, innerErr := findInHistory(hK, hV, csd.timestamp, get, csd.walkerAdapter)
+		data, found, innerErr := findInHistory(hK, hV, csd.timestamp, csd.csWalker)
 		if innerErr != nil {
 			return nil, nil, nil, nil, innerErr
 		}
@@ -631,10 +624,7 @@ func (csd *changesetSearchDecorator) Seek() ([]byte, []byte, []byte, []byte, err
 			hK := make([]byte, len(hAddrHash)+len(hKeyHash))
 			copy(hK[:len(hAddrHash)], hAddrHash)
 			copy(hK[len(hAddrHash):], hKeyHash)
-			get := func(k []byte) ([]byte, error) {
-				return csd.tx.GetOne(csd.bucketName, k)
-			}
-			data, found, innderErr := findInHistory(hK, hV, csd.timestamp, get, csd.walkerAdapter)
+			data, found, innderErr := findInHistory(hK, hV, csd.timestamp, csd.csWalker)
 			if innderErr != nil {
 				return nil, nil, nil, nil, innderErr
 			}
@@ -712,10 +702,7 @@ func (csd *changesetSearchDecorator) Next() ([]byte, []byte, []byte, []byte, err
 			hK := make([]byte, len(hAddrHash)+len(hKeyHash))
 			copy(hK[:len(hAddrHash)], hAddrHash)
 			copy(hK[len(hAddrHash):], hKeyHash)
-			get := func(k []byte) ([]byte, error) {
-				return csd.tx.GetOne(csd.bucketName, k)
-			}
-			data, found, innderErr := findInHistory(hK, hV, csd.timestamp, get, csd.walkerAdapter)
+			data, found, innderErr := findInHistory(hK, hV, csd.timestamp, csd.csWalker)
 			if innderErr != nil {
 				return nil, nil, nil, nil, innderErr
 			}
@@ -755,49 +742,19 @@ func (csd *changesetSearchDecorator) buildChangeset(from, to uint64) error {
 	if from >= to {
 		return nil
 	}
-	cs := make([]struct {
-		Walker   changeset.Walker
-		BlockNum uint64
-	}, 0, to-from)
 
-	c := csd.tx.Cursor(csd.bucketName)
-	defer c.Close()
-	_, _, err := c.Seek(dbutils.EncodeTimestamp(from))
-	if err != nil {
-		return err
-	}
-	err = ethdb.ForEach(c, func(k, v []byte) (bool, error) {
-		blockNum, _ := dbutils.DecodeTimestamp(k)
-		if blockNum > to {
-			return false, nil
-		}
-		cs = append(cs, struct {
-			Walker   changeset.Walker
-			BlockNum uint64
-		}{Walker: csd.walkerAdapter(common.CopyBytes(v)), BlockNum: blockNum})
-
-		return true, nil
-	})
-	if err != nil {
-		return err
-	}
-
-	sort.Slice(cs, func(i, j int) bool {
-		return cs[i].BlockNum < cs[j].BlockNum
-	})
 	mp := make(map[string][]byte)
-	for i := len(cs) - 1; i >= 0; i-- {
-		replace := cs[i].BlockNum >= csd.timestamp
-		err = cs[i].Walker.Walk(func(k, v []byte) error {
-			if replace {
-				mp[string(k)] = v
-			}
-			return nil
-		})
-		if err != nil {
-			return err
+	err := csd.csWalker.WalkReverse(from, to, func(bN uint64, k, v []byte) error {
+		replace := bN >= csd.timestamp
+		if replace {
+			mp[string(k)] = v
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
+
 	res := make([]changeset.Change, len(mp))
 	i := 0
 	for k := range mp {
