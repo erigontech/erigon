@@ -77,7 +77,13 @@ func (s *EthBackendServer) Subscribe(_ *remote.SubscribeRequest, subscribeServer
 			Data: payload,
 		})
 
+		// we only close the wg on error because if we successfully sent an event,
+		// that means that the channel wasn't closed and is ready to
+		// receive more events.
+		// if rpcdaemon disconnects, we will receive an error here
+		// next time we try to send an event
 		if err != nil {
+			log.Info("event subscription channel was closed", "reason", err)
 			wg.Done()
 		}
 		return err

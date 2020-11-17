@@ -725,21 +725,17 @@ func (back *RemoteBackend) NetVersion() (uint64, error) {
 }
 
 func (back *RemoteBackend) Subscribe(onNewEvent func(*remote.SubscribeReply)) error {
-	fmt.Println("subscribe!")
 	subscription, err := back.remoteEthBackend.Subscribe(context.Background(), &remote.SubscribeRequest{})
 	if err != nil {
-		fmt.Println("subscribe! err=", err)
 		return err
 	}
-	fmt.Println("subscription, no error", subscription)
 	for {
 		event, err := subscription.Recv()
 		if err == io.EOF {
-			fmt.Println("EOF")
+			log.Info("rpcdaemon: the subscription channel was closed")
 			break
 		}
 		if err != nil {
-			fmt.Println("error reading event", err)
 			return err
 		}
 
