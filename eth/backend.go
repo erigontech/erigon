@@ -23,8 +23,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"io/ioutil"
 	"math/big"
 	"os"
@@ -34,6 +32,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -357,13 +358,17 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
 
 	stagedSync := config.StagedSync
+
+	// setting notifier to support streaming events to rpc daemon
 	remoteEvents := remotedbserver.NewEvents()
 	if stagedSync == nil {
-		fmt.Println("creating default staged sync")
+		// if there is not stagedsync, we create one with the custom notifier
 		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: remoteEvents})
 	} else {
-		fmt.Println("setting notifier to the existing sync instance")
-		stagedSync.Notifier = remoteEvents
+		// otherwise we add one if needed
+		if stagedSync.Notifier == nil {
+			stagedSync.Notifier = remoteEvents
+		}
 	}
 
 	if stack.Config().PrivateApiAddr != "" {
