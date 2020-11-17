@@ -120,19 +120,16 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 	return data, nil
 }
 
-func WalkAsOf(db ethdb.Tx, storage bool, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
-	if storage {
-		return walkAsOfThinStorage(db, startkey, fixedbits, timestamp, func(k1, k2, v []byte) (bool, error) {
-			return walker(append(common.CopyBytes(k1), k2...), v)
-		})
-	}
-	return walkAsOfThinAccounts(db, startkey, fixedbits, timestamp, walker)
-}
-
 // startKey is the concatenation of address and incarnation (BigEndian 8 byte)
-func walkAsOfThinStorage(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
-	var err error
-	startkeyNoInc := dbutils.CompositeKeyWithoutIncarnation(startkey)
+func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, startLocation common.Hash, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
+	var startkey = make([]byte, common.AddressLength+common.IncarnationLength+common.HashLength)
+	copy(startkey, address.Bytes())
+	binary.BigEndian.PutUint64(startkey[common.AddressLength:], incarnation)
+	copy(startkey[common.AddressLength+common.IncarnationLength:], startLocation.Bytes())
+
+	var startkeyNoInc = make([]byte, common.AddressLength+common.HashLength)
+	copy(startkeyNoInc, address.Bytes())
+	copy(startkeyNoInc, startLocation.Bytes())
 
 	//for storage
 	mCursor := tx.Cursor(dbutils.PlainStateBucket)
@@ -140,15 +137,11 @@ func walkAsOfThinStorage(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp 
 	mainCursor := ethdb.NewSplitCursor(
 		mCursor,
 		startkey,
-		fixedbits,
-		common.AddressLength, /* part1End */
-		common.AddressLength+common.IncarnationLength,                   /* part2Start */
-		common.AddressLength+common.IncarnationLength+common.HashLength, /* part3Start */
+		8*(common.AddressLength+common.IncarnationLength),
+		common.AddressLength,                                            /* part1end */
+		common.AddressLength+common.IncarnationLength,                   /* part2start */
+		common.AddressLength+common.IncarnationLength+common.HashLength, /* part3start */
 	)
-	fixetBitsForHistory := fixedbits - 8*common.IncarnationLength
-	if fixetBitsForHistory < 0 {
-		fixetBitsForHistory = 0
-	}
 
 	//for historic data
 	shCursor := tx.Cursor(dbutils.StorageHistoryBucket)
@@ -156,7 +149,7 @@ func walkAsOfThinStorage(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp 
 	var hCursor = ethdb.NewSplitCursor(
 		shCursor,
 		startkeyNoInc,
-		fixetBitsForHistory,
+		common.AddressLength,
 		common.AddressLength,                   /* part1end */
 		common.AddressLength,                   /* part2start */
 		common.AddressLength+common.HashLength, /* part3start */
@@ -174,11 +167,11 @@ func walkAsOfThinStorage(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp 
 		return err2
 	}
 	for hLoc != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
-		hAddr, hLoc, tsEnc, hV, err2 = hCursor.Next()
-		if err2 != nil {
+		if hAddr, hLoc, tsEnc, hV, err2 = hCursor.Next(); err2 != nil {
 			return err2
 		}
 	}
+	var err error
 	goOn := true
 	for goOn {
 		cmp, br := common.KeyCmp(addr, hAddr)
@@ -216,47 +209,47 @@ func walkAsOfThinStorage(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp 
 						csKey := make([]byte, 8+common.AddressLength+common.IncarnationLength)
 						copy(csKey[:], dbutils.EncodeBlockNumber(changeSetBlock))
 						copy(csKey[8:], startkey) // address + incarnation
-						_, data, err := csCursor.SeekBothExact(csKey, hLoc)
-						if err != nil {
-							return err
+						_, data, err3 := csCursor.SeekBothExact(csKey, hLoc)
+						if err3 != nil {
+							return err3
 						}
 						if len(data) > 0 { // Skip deleted entries
-							goOn, err = walker(hAddr, hLoc, data)
+							if goOn, err = walker(hAddr, hLoc, data); err != nil {
+								return err
+							}
 						}
 					}
 				} else if cmp == 0 {
-					goOn, err = walker(addr, loc, v)
+					if goOn, err = walker(addr, loc, v); err != nil {
+						return err
+					}
 				}
-				addr, loc, _, v, err1 = mainCursor.Next()
-				if err1 != nil {
+				if addr, loc, _, v, err1 = mainCursor.Next(); err1 != nil {
 					return err1
 				}
 			}
 			if cmp >= 0 {
 				hLoc0 := hLoc
 				for hLoc != nil && (bytes.Equal(hLoc0, hLoc) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
-					hAddr, hLoc, tsEnc, hV, err2 = hCursor.Next()
-					if err2 != nil {
+					if hAddr, hLoc, tsEnc, hV, err2 = hCursor.Next(); err2 != nil {
 						return err2
 					}
 				}
 			}
 		}
 	}
-	return err
+	return nil
 }
 
-func walkAsOfThinAccounts(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
-	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
-
+func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	mainCursor := tx.Cursor(dbutils.PlainStateBucket)
 	defer mainCursor.Close()
 	ahCursor := tx.Cursor(dbutils.AccountsHistoryBucket)
 	defer ahCursor.Close()
 	var hCursor = ethdb.NewSplitCursor(
 		ahCursor,
-		startkey,
-		fixedbits,
+		startAddress.Bytes(),
+		0,                      /* fixedBits */
 		common.AddressLength,   /* part1end */
 		common.AddressLength,   /* part2start */
 		common.AddressLength+8, /* part3start */
@@ -264,7 +257,7 @@ func walkAsOfThinAccounts(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp
 	csCursor := tx.CursorDupSort(dbutils.PlainAccountChangeSetBucket)
 	defer csCursor.Close()
 
-	k, v, err1 := mainCursor.Seek(startkey)
+	k, v, err1 := mainCursor.Seek(startAddress.Bytes())
 	if err1 != nil {
 		return err1
 	}
@@ -289,12 +282,6 @@ func walkAsOfThinAccounts(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp
 	var err error
 	for goOn {
 		//exit or next conditions
-		if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
-			k = nil
-		}
-		if k != nil && fixedbits > 0 && (k[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
-			k = nil
-		}
 		cmp, br := common.KeyCmp(k, hK)
 		if br {
 			break

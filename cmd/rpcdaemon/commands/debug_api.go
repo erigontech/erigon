@@ -109,7 +109,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	}
 
 	dumper := state.NewDumper(tx.(ethdb.HasTx).Tx(), blockNumber)
-	res, err := dumper.IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages, startKey, maxResults)
+	res, err := dumper.IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages, common.BytesToAddress(startKey), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}

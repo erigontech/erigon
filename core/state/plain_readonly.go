@@ -21,17 +21,14 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"math/big"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -88,7 +85,7 @@ func (dbs *PlainDBState) GetBlockNr() uint64 {
 	return dbs.blockNr
 }
 
-func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
+func (dbs *PlainDBState) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
 	st := llrb.New()
 	var s [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addr[:])
@@ -99,10 +96,10 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 		return err
 	}
 	binary.BigEndian.PutUint64(s[common.AddressLength:], acc.Incarnation)
-	copy(s[common.AddressLength+common.IncarnationLength:], start)
+	copy(s[common.AddressLength+common.IncarnationLength:], startLocation[:])
 	var lastKey common.Hash
 	overrideCounter := 0
-	min := &storageItem{key: common.BytesToHash(start)}
+	min := &storageItem{key: startLocation}
 	if t, ok := dbs.storage[addr]; ok {
 		t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 			item := i.(*storageItem)
@@ -116,33 +113,28 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	if err := WalkAsOf(dbs.tx, true /* storage */, s[:], 8*(common.AddressLength+common.IncarnationLength), dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
-		if !bytes.HasPrefix(ks, addr[:]) {
+	if err := WalkAsOfStorage(dbs.tx, addr, acc.Incarnation, startLocation, dbs.blockNr+1, func(kAddr, kLoc, vs []byte) (bool, error) {
+		if !bytes.Equal(kAddr, addr[:]) {
 			return false, nil
 		}
 		if len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
 		}
-		if len(ks) < common.AddressLength+common.IncarnationLength+common.HashLength {
-			// Skip non storage items
-			return true, nil
-		}
-		key := ks[common.AddressLength+common.IncarnationLength:]
-		keyHash, err1 := common.HashData(key)
+		keyHash, err1 := common.HashData(kLoc)
 		if err1 != nil {
 			return false, err1
 		}
 		//fmt.Printf("seckey: %x\n", seckey)
 		si := storageItem{}
-		copy(si.key[:], key)
+		copy(si.key[:], kLoc)
 		copy(si.seckey[:], keyHash[:])
 		if st.Has(&si) {
 			return true, nil
 		}
 		si.value.SetBytes(vs)
 		st.InsertNoReplace(&si)
-		if bytes.Compare(key[:], lastKey[:]) > 0 {
+		if bytes.Compare(kLoc[:], lastKey[:]) > 0 {
 			// Beyond overrides
 			return st.Len() < maxResults+numDeletes, nil
 		}
@@ -165,9 +157,9 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 	return innerErr
 }
 
-func (dbs *PlainDBState) ForEachAccount(start []byte, cb func(address *common.Address, addrHash common.Hash), maxResults int) {
+func (dbs *PlainDBState) ForEachAccount(start common.Address, cb func(address *common.Address, addrHash common.Hash), maxResults int) {
 	results := 0
-	err := WalkAsOf(dbs.tx, false /* storage */, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+	err := WalkAsOfAccounts(dbs.tx, start, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
@@ -344,72 +336,4 @@ func (dbs *PlainDBState) WriteAccountStorage(_ context.Context, address common.A
 func (dbs *PlainDBState) CreateContract(address common.Address) error {
 	delete(dbs.storage, address)
 	return nil
-}
-
-// WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
-// for no more than maxItems.
-// Returns whether all matching storage items were traversed (provided there was no error).
-func (dbs *PlainDBState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
-	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	copy(startkey, addrHash[:])
-
-	binary.BigEndian.PutUint64(startkey[common.HashLength:], changeset.DefaultIncarnation)
-	copy(startkey[common.HashLength+common.IncarnationLength:], prefix.Data)
-
-	fixedbits := (common.HashLength + common.IncarnationLength + len(prefix.Data)) * 8
-	if prefix.Odd {
-		fixedbits -= 4
-	}
-
-	i := 0
-
-	err := WalkAsOf(dbs.tx, true /* storage */, startkey, fixedbits, dbs.blockNr+1,
-		func(key []byte, value []byte) (bool, error) {
-			val := new(big.Int).SetBytes(value)
-
-			if i < maxItems {
-				walker(common.BytesToHash(key), *val)
-			}
-			i++
-			return i <= maxItems, nil
-		},
-	)
-
-	return i <= maxItems, err
-}
-
-// WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix,
-// for no more than maxItems.
-// Returns whether all matching accounts were traversed (provided there was no error).
-func (dbs *PlainDBState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, walker func(common.Hash, *accounts.Account)) (bool, error) {
-	startkey := make([]byte, common.HashLength)
-	copy(startkey, prefix.Data)
-
-	fixedbits := len(prefix.Data) * 8
-	if prefix.Odd {
-		fixedbits -= 4
-	}
-
-	i := 0
-
-	var acc accounts.Account
-	err := WalkAsOf(dbs.tx, false /* storage */, startkey, fixedbits, dbs.blockNr+1,
-		func(key []byte, value []byte) (bool, error) {
-			if len(key) > 32 {
-				return true, nil
-			}
-			if len(value) > 0 {
-				if err := acc.DecodeForStorage(value); err != nil {
-					return false, err
-				}
-				if i < maxItems {
-					walker(common.BytesToHash(key), &acc)
-				}
-				i++
-			}
-			return i <= maxItems, nil
-		},
-	)
-
-	return i <= maxItems, err
 }
