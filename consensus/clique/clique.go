@@ -432,7 +432,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
-func (c *Clique) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
+func (c *Clique) VerifyUncles(_ consensus.ChainReader, block *types.Block) error {
 	if len(block.Uncles()) > 0 {
 		return errors.New("uncles not allowed")
 	}

@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -181,8 +180,8 @@ func TestForkIDSplit(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	engNoFork := process.NewRemoteEngine(engine, stagedsync.NewChainReader(configNoFork, dbNoFork))
-	engProFork := process.NewRemoteEngine(engine, stagedsync.NewChainReader(configProFork, dbProFork))
+	engNoFork := process.NewRemoteEngine(engine, configNoFork)
+	engProFork := process.NewRemoteEngine(engine, configProFork)
 
 	var (
 		gspecNoFork  = &core.Genesis{Config: configNoFork}

@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -177,6 +176,6 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux) {
 	backend := NewMockBackend(bc, pool)
 	// Create Miner
 
-	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(chainConfig, db))
+	eng := process.NewRemoteEngine(engine, chainConfig)
 	return New(backend, &config, chainConfig, mux, eng, isLocalBlock), mux
 }

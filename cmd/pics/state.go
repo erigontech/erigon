@@ -503,7 +503,7 @@ func initialState1() error {
 	// BLOCK 1
 	snapshotDB = db.MemCopy()
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, stagedsync.NewChainReader(gspec.Config, db), exit)
+	eng := process.NewConsensusProcess(engine, gspec.Config, exit)
 	defer close(exit)
 	if err = stagedsync.InsertBlockInStages(db, gspec.Config, eng, blocks[0], blockchain); err != nil {
 		return err

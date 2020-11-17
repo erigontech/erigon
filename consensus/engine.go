@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 type VerifyHeaderRequest struct {
@@ -78,16 +79,15 @@ type VerifyRequest struct {
 }
 
 const (
-	// fixme reduce numbers
-	size        = 65536
+	size        = 1000
 	storageSize = 60000
 	retry       = 100 * time.Millisecond
 )
 
-func NewProcess(chain ChainHeaderReader) *Process {
+func NewProcess(config *params.ChainConfig) *Process {
 	verifiedBlocks, _ := lru.New(storageSize)
 	return &Process{
-		Chain:                 chain,
+		Chain:                 configGetter{config},
 		VerifyHeaderRequests:  make(chan VerifyHeaderRequest, size),
 		VerifyHeaderResponses: make(chan VerifyHeaderResponse, size),
 		CleanupTicker:         time.NewTicker(retry),
@@ -155,4 +155,28 @@ func (p *Process) GetCachedHeader(parentHash common.Hash, blockNum uint64) *type
 		}
 	}
 	return nil
+}
+
+type configGetter struct {
+	config *params.ChainConfig
+}
+
+func (c configGetter) Config() *params.ChainConfig {
+	return c.config
+}
+
+func (c configGetter) CurrentHeader() *types.Header {
+	panic("should not be used")
+}
+
+func (c configGetter) GetHeader(_ common.Hash, _ uint64) *types.Header {
+	panic("should not be used")
+}
+
+func (c configGetter) GetHeaderByNumber(_ uint64) *types.Header {
+	panic("should not be used")
+}
+
+func (c configGetter) GetHeaderByHash(_ common.Hash) *types.Header {
+	panic("should not be used")
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 type Consensus struct {
@@ -23,10 +24,10 @@ var (
 	errNothingToAsk = errors.New("nothing to ask")
 )
 
-func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader, exit chan struct{}) *Consensus {
+func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit chan struct{}) *Consensus {
 	c := &Consensus{
 		Verifier: v,
-		Process:  consensus.NewProcess(chain),
+		Process:  consensus.NewProcess(config),
 	}
 
 	go func() {
@@ -78,7 +79,7 @@ func NewConsensusProcess(v consensus.Verifier, chain consensus.ChainHeaderReader
 					fmt.Println("XXX-err", req.ID, req.Headers[0].Number.Uint64(), err)
 					continue
 				}
-				fmt.Println("XXX-req-parents", req.ID, req.Headers[0].Number.Uint64(), ancestorsReq.Number, ancestorsReq.HighestBlockNumber, ancestorsReq.HighestHash.String())
+				fmt.Println("XXX-req-parents", req.ID, req.Headers[0].Number.Uint64(), len(ancestorsReqs), ancestorsReq.Number, ancestorsReq.HighestBlockNumber, ancestorsReq.HighestHash.String())
 				c.HeadersRequests <- ancestorsReq
 
 			case parentResp := <-c.HeaderResponses:
@@ -288,7 +289,7 @@ func (c *Consensus) requestHeadersNotFromRange(reqID uint64, highestBlock uint64
 	highestParent := highestBlock
 
 	var minHeader uint64
-	if highestBlock > parentsToGet {
+	if highestBlock > parentsToGet-1 {
 		minHeader = highestBlock - parentsToGet + 1
 	}
 

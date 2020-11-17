@@ -43,7 +43,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
 	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
 
-	eng := process.NewRemoteEngine(ethash.NewFaker(), stagedsync.NewChainReader(params.TestChainConfig, tester.db))
+	eng := process.NewRemoteEngine(ethash.NewFaker(), params.TestChainConfig)
 
 	tester.downloader = New(uint64(StagedSync), tester.db, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode, eng)
 	tester.downloader.SetStagedSync(

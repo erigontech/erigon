@@ -32,12 +32,11 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
 
-	ethereum "github.com/ledgerwatch/turbo-geth"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+
+	ethereum "github.com/ledgerwatch/turbo-geth"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -398,7 +397,7 @@ func makeExtraData(extra []byte) []byte {
 }
 
 // CreateConsensusEngine creates the required type of consensus engine instance for an Ethereum service
-func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) *process.RemoteEngine {
+func CreateConsensusEngine(_ *node.Node, chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) *process.RemoteEngine {
 	var eng consensus.Engine
 	// Otherwise assume proof-of-work
 	switch config.PowMode {
@@ -428,7 +427,7 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 		}
 	}
 
-	return process.NewRemoteEngine(eng, stagedsync.NewChainReader(chainConfig, db))
+	return process.NewRemoteEngine(eng, chainConfig)
 }
 
 // APIs return the collection of RPC services the ethereum package offers.

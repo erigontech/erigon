@@ -40,7 +40,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -72,7 +71,7 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	// Fresh database
 	db := ethdb.NewMemDatabase()
 
-	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(params.TestChainConfig, db))
+	eng := process.NewRemoteEngine(engine, params.TestChainConfig)
 	defer eng.Close()
 
 	// Regenerate genesis block in the fresh database

@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -474,7 +473,7 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 	}
 	defer blockchain.Stop()
 
-	eng := process.NewRemoteEngine(ethash.NewFaker(), stagedsync.NewChainReader(params.TestChainConfig, db))
+	eng := process.NewRemoteEngine(ethash.NewFaker(), params.TestChainConfig)
 	defer eng.Close()
 
 	pm, err := NewProtocolManager(config, cht, syncmode, DefaultConfig.NetworkID, new(event.TypeMux), &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, eng, blockchain, db, nil, nil)
@@ -563,7 +562,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 		gspec   = &core.Genesis{Config: config}
 		genesis = gspec.MustCommit(db)
 	)
-	eng := process.NewRemoteEngine(pow, stagedsync.NewChainReader(config, db))
+	eng := process.NewRemoteEngine(pow, config)
 	defer eng.Close()
 
 	blockchain, err := core.NewBlockChain(db, nil, config, pow, vm.Config{}, nil, nil)
@@ -1359,7 +1358,7 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 	}
 	defer blockchain.Stop()
 
-	eng := process.NewRemoteEngine(engine, stagedsync.NewChainReader(config, db))
+	eng := process.NewRemoteEngine(engine, config)
 	defer eng.Close()
 
 	pm, err := NewProtocolManager(config, nil, downloader.StagedSync, DefaultConfig.NetworkID, new(event.TypeMux), new(testTxPool), eng, blockchain, db, nil, nil)

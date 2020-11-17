@@ -88,7 +88,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
 
 	exit1 := make(chan struct{})
-	eng1 := process.NewConsensusProcess(ethash.NewFaker(), NewChainReader(params.AllEthashProtocolChanges, db), exit1)
+	eng1 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit1)
 	defer common.SafeClose(exit1)
 	reorg, _, err := InsertHeaderChain(db, headers1, eng1, 0)
 	assert.NoError(t, err)
@@ -98,7 +98,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	assert.Equal(t, expectedTdBlock3, td)
 
 	exit2 := make(chan struct{})
-	eng2 := process.NewConsensusProcess(ethash.NewFaker(), NewChainReader(params.AllEthashProtocolChanges, db), exit2)
+	eng2 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit2)
 	defer common.SafeClose(exit2)
 	reorg, _, err = InsertHeaderChain(db, headers2, eng2, 0)
 	assert.False(t, reorg)
@@ -109,7 +109,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	assert.Equal(t, expectedTdBlock4, td)
 
 	exit3 := make(chan struct{})
-	eng3 := process.NewConsensusProcess(ethash.NewFaker(), NewChainReader(params.AllEthashProtocolChanges, db), exit3)
+	eng3 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit3)
 	defer common.SafeClose(exit3)
 	reorg, _, err = InsertHeaderChain(db, headers2, eng3, 0)
 	assert.False(t, reorg)

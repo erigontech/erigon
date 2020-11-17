@@ -285,7 +285,10 @@ func VerifyHeaders(db rawdb.DatabaseReader, engine consensus.EngineProcess, head
 	}
 
 	requests := make(chan consensus.VerifyHeaderRequest, 1)
-	requests <- consensus.VerifyHeaderRequest{rand.Uint64(), headers, seals, nil}
+	id := rand.Uint64()
+	requests <- consensus.VerifyHeaderRequest{id, headers, seals, nil}
+
+	fmt.Printf("\n\n\n===================== %d - %d(%d)\n", id, len(headers), len(seals))
 
 	reqResponses := make(map[common.Hash]struct{}, len(headers))
 
@@ -311,6 +314,9 @@ func VerifyHeaders(db rawdb.DatabaseReader, engine consensus.EngineProcess, head
 			length := 1
 			if result.Number > 0 {
 				length = int(result.Number)
+			}
+			if result.Number > 10000 {
+				fmt.Println("!!!!!!!!!!!!!!!", result.ID, result.Number, result.HighestHash.String(), result.HighestBlockNumber)
 			}
 			headers := make([]*types.Header, 0, length)
 

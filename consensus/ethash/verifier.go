@@ -15,7 +15,7 @@ func (ethash *Ethash) Verify(chain consensus.ChainHeaderReader, header *types.He
 }
 
 func (ethash *Ethash) NeededForVerification(h *types.Header) int {
-	const prev = 10
+	const prev = 1
 	if h.Number.Uint64() < prev {
 		return int(h.Number.Uint64())
 	}

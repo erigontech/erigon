@@ -398,7 +398,7 @@ func (s *remoteSealer) submitWork(ctx consensus.Cancel, nonce types.BlockNonce, 
 
 	start := time.Now()
 	if !s.noverify {
-		if err := s.ethash.verifySeal(nil, header, true); err != nil {
+		if err := s.ethash.verifySeal(header, true); err != nil {
 			s.ethash.config.Log.Warn("Invalid proof-of-work submitted", "sealhash", sealhash, "elapsed", common.PrettyDuration(time.Since(start)), "err", err)
 			return false
 		}

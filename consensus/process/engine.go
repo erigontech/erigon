@@ -3,6 +3,7 @@ package process
 import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 type RemoteEngine struct {
@@ -12,12 +13,12 @@ type RemoteEngine struct {
 	exit chan struct{}
 }
 
-func NewRemoteEngine(e consensus.Engine, chain consensus.ChainHeaderReader) *RemoteEngine {
+func NewRemoteEngine(e consensus.Engine, config *params.ChainConfig) *RemoteEngine {
 	exit := make(chan struct{})
 
 	return &RemoteEngine{
 		e,
-		NewConsensusProcess(e, chain, exit),
+		NewConsensusProcess(e, config, exit),
 		exit,
 	}
 }

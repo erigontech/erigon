@@ -299,7 +299,7 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	}
 	// Verify the engine specific seal securing the block
 	if seal {
-		if err := ethash.VerifySeal(chain, header); err != nil {
+		if err := ethash.VerifySeal(nil, header); err != nil {
 			return err
 		}
 	}
@@ -496,17 +496,17 @@ func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty, parentNum
 
 // VerifySeal implements consensus.Engine, checking whether the given block satisfies
 // the PoW difficulty requirements.
-func (ethash *Ethash) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
-	return ethash.verifySeal(chain, header, false)
+func (ethash *Ethash) VerifySeal(_ consensus.ChainHeaderReader, header *types.Header) error {
+	return ethash.verifySeal(header, false)
 }
 
 // verifySeal checks whether a block satisfies the PoW difficulty requirements,
 // either using the usual ethash cache for it, or alternatively using a full DAG
 // to make remote mining fast.
-func (ethash *Ethash) verifySeal(chain consensus.ChainHeaderReader, header *types.Header, fulldag bool) error { //nolint:unparam
+func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //nolint:unparam
 	// If we're running a shared PoW, delegate verification to it
 	if ethash.shared != nil {
-		return ethash.shared.verifySeal(chain, header, fulldag)
+		return ethash.shared.verifySeal(header, fulldag)
 	}
 	// Ensure that we have a valid difficulty for the block
 	if header.Difficulty.Sign() <= 0 {
