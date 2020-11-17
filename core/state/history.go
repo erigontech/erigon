@@ -295,9 +295,9 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 				// In such case, we do not need to examine changeSet and simply skip the record
 				if !set {
 					// Extract value from the changeSet
-					_, data, err := csCursor.SeekBothExact(dbutils.EncodeBlockNumber(changeSetBlock), hK)
-					if err != nil {
-						return err
+					_, data, err3 := csCursor.SeekBothExact(dbutils.EncodeBlockNumber(changeSetBlock), hK)
+					if err3 != nil {
+						return err3
 					}
 					if len(data) > 0 { // Skip accounts did not exist
 						goOn, err = walker(hK, data)
@@ -306,6 +306,9 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 			} else if cmp == 0 {
 				goOn, err = walker(k, v)
 			}
+		}
+		if err != nil {
+			return err
 		}
 		if goOn {
 			if cmp <= 0 {
