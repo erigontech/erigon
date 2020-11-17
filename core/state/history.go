@@ -125,9 +125,8 @@ func WalkAsOf(db ethdb.Tx, storage bool, startkey []byte, fixedbits int, timesta
 		return walkAsOfThinStorage(db, startkey, fixedbits, timestamp, func(k1, k2, v []byte) (bool, error) {
 			return walker(append(common.CopyBytes(k1), k2...), v)
 		})
-	} else {
-		return walkAsOfThinAccounts(db, startkey, fixedbits, timestamp, walker)
 	}
+	return walkAsOfThinAccounts(db, startkey, fixedbits, timestamp, walker)
 }
 
 // startKey is the concatenation of address and incarnation (BigEndian 8 byte)
