@@ -130,12 +130,10 @@ func WalkAsOf(db ethdb.Tx, storage bool, startkey []byte, fixedbits int, timesta
 	}
 }
 
+// startKey is the concatenation of address and incarnation (BigEndian 8 byte)
 func walkAsOfThinStorage(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
 	var err error
 	startkeyNoInc := dbutils.CompositeKeyWithoutIncarnation(startkey)
-	part1End = common.AddressLength
-	part2Start = common.AddressLength + common.IncarnationLength
-	part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
 
 	//for storage
 	mCursor := tx.Cursor(dbutils.PlainStateBucket)
@@ -144,7 +142,7 @@ func walkAsOfThinStorage(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp 
 		mCursor,
 		startkey,
 		fixedbits,
-		common.AddressLength, /* part1End` */
+		common.AddressLength, /* part1End */
 		common.AddressLength+common.IncarnationLength,                   /* part2Start */
 		common.AddressLength+common.IncarnationLength+common.HashLength, /* part3Start */
 	)
@@ -218,42 +216,27 @@ func walkAsOfThinStorage(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp 
 						// Extract value from the changeSet
 						csKey := make([]byte, 8+common.AddressLength+common.IncarnationLength)
 						copy(csKey[:], dbutils.EncodeBlockNumber(changeSetBlock))
-						copy(csKey[8:], hAddr)
-						copy(csKey[8+common.AddressLength:], hLoc)
-						_, data, err := csCursor.SeekBothExact(dbutils.EncodeBlockNumber(changeSetBlock), hK)
+						copy(csKey[8:], startkey) // address + incarnation
+						_, data, err := csCursor.SeekBothExact(csKey, hLoc)
 						if err != nil {
 							return err
 						}
-						csKey := dbutils.EncodeTimestamp(changeSetBlock)
-						changeSetData, _ := csB.Get(csKey)
-						if changeSetData == nil {
-							return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
-						}
-						data, err3 := changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(hAddrHash, hKeyHash)
-						if err3 != nil {
-							return fmt.Errorf("could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d): %v",
-								hAddrHash, hKeyHash,
-								changeSetBlock,
-								timestamp,
-								err3,
-							)
-						}
 						if len(data) > 0 { // Skip deleted entries
-							goOn, err = walker(hAddrHash, hKeyHash, data)
+							goOn, err = walker(hAddr, hLoc, data)
 						}
 					}
 				} else if cmp == 0 {
-					goOn, err = walker(addrHash, keyHash, v)
+					goOn, err = walker(addr, loc, v)
 				}
-				addrHash, keyHash, _, v, err1 = mainCursor.Next()
+				addr, loc, _, v, err1 = mainCursor.Next()
 				if err1 != nil {
 					return err1
 				}
 			}
 			if cmp >= 0 {
-				hKeyHash0 := hKeyHash
-				for hKeyHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
-					hAddrHash, hKeyHash, tsEnc, hV, err2 = hCursor.Next()
+				hLoc0 := hLoc
+				for hLoc != nil && (bytes.Equal(hLoc0, hLoc) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
+					hAddr, hLoc, tsEnc, hV, err2 = hCursor.Next()
 					if err2 != nil {
 						return err2
 					}

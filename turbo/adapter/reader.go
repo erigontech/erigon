@@ -179,7 +179,7 @@ func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	if err := state.WalkAsOf(r.tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.AddressLength+common.IncarnationLength), r.blockNr+1, func(ks, vs []byte) (bool, error) {
+	if err := state.WalkAsOf(r.tx, true /* storage */, s[:], 8*(common.AddressLength+common.IncarnationLength), r.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if !bytes.HasPrefix(ks, addr[:]) {
 			return false, nil
 		}
