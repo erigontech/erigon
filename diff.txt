@@ -2987,26 +2987,3 @@ Date:   Wed Nov 18 17:51:33 2020 +0800
     
     Co-authored-by: Péter Szilágyi <peterke@gmail.com>
 
-commit 6b9858085f8e10d50df3bf09d0a5dfd59b683d05
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Tue Nov 17 12:01:19 2020 +0100
-
-    cmd/geth: improve les test on windows (#21860)
-
-commit db87223269ca0986af312df78b84257ed9836dcf
-Author: Abd ar-Rahman Hamidi <bakhtiyor.h@gmail.com>
-Date:   Tue Nov 17 15:47:17 2020 +0500
-
-    crypto/secp256k1: add checking z sign in affineFromJacobian (#18419)
-    
-    The z == 0 check is hit whenever we Add two points with the same x1/x2
-    coordinate. crypto/elliptic uses the same check in their affineFromJacobian
-    function. This change does not affect block processing or tx signature verification
-    in any way, because it does not use the Add or Double methods.
-
-commit d513584e5280096efb096a92d512f6dc8771a658
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Tue Nov 17 11:44:38 2020 +0100
-
-    cmd/geth: remove retesteth
-
