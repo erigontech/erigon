@@ -540,34 +540,34 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 
 	//walk and collect walkAsOf result
 	var err error
-	var startKey [72]byte
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err = WalkAsOf(tx, true /* storage */, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
 
-	err = WalkAsOf(tx, true /* storage */, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	block4Expected.Changes = []changeset.Change{
@@ -587,16 +587,17 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 
 	assertChangesEquals(t, block4, block4Expected)
 
-	err = WalkAsOf(tx, true /* storage */, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	block6Expected.Changes = []changeset.Change{
@@ -704,36 +705,37 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 
 	//walk and collect walkAsOf result
 	var err error
-	var startKey [60]byte
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err = WalkAsOf(tx, true /* storage */, startKey[:28], 8*28, 2, func(k []byte, v []byte) (b bool, e error) {
-		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
 
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(tx, true /* storage */, startKey[:28], 8*28, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	block4Expected.Changes = []changeset.Change{
@@ -755,15 +757,16 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(tx, true /* storage */, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	block6Expected.Changes = []changeset.Change{
@@ -894,14 +897,14 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err = WalkAsOf(tx, true /* storage */, startKey, 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
+
+	if err = WalkAsOfStorage(tx, addr1, 0, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		err = block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
@@ -909,14 +912,13 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(tx, true /* storage */, startKey, common.AddressLength*8, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
+	if err = WalkAsOfStorage(tx, addr1, 0, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -937,15 +939,16 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	assertChangesEquals(t, block4, block4Expected)
 
 	block4.Changes = block4.Changes[:0]
-	err = WalkAsOf(tx, true /* storage */, make([]byte, 60), 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range []common.Address{addr1, addr2} {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	block4Expected.Changes = append(block4Expected.Changes, changeset.Change{
@@ -957,14 +960,13 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(tx, true /* storage */, startKey, common.AddressLength*8, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+	if err = WalkAsOfStorage(tx, addr1, 0, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -981,15 +983,16 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	assertChangesEquals(t, block6, block6Expected)
 
 	block6.Changes = block6.Changes[:0]
-	err = WalkAsOf(tx, true /* storage */, make([]byte, 60), 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range []common.Address{addr1, addr2} {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	block6Expected.Changes = append(block6Expected.Changes, changeset.Change{
 		Key:   withoutInc(addr2, key3),
@@ -1070,20 +1073,18 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	var startKey [32]byte
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err := WalkAsOf(tx, false /* storage */, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, common.Address{}, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
@@ -1107,14 +1108,13 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 			},
 		},
 	}
-	err = WalkAsOf(tx, false /* storage */, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, common.Address{}, 4, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1141,14 +1141,13 @@ func TestWalkAsOfAccountHashed(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(tx, false /* storage */, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, common.Address{}, 6, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1229,20 +1228,18 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	}, true)
 
-	var startKey [20]byte
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err := WalkAsOf(tx, false /* storage */, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, common.Address{}, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
@@ -1268,14 +1265,13 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(tx, false /* storage */, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, common.Address{}, 4, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	assertChangesEquals(t, block4, block4Expected)
@@ -1301,14 +1297,13 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(tx, false /* storage */, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, common.Address{}, 6, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	assertChangesEquals(t, block6, block6Expected)
@@ -1417,22 +1412,21 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 	}
 
 	//walk and collect walkAsOf result
-	var startKey [72]byte
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err = WalkAsOf(tx, true /* storage */, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
 
@@ -1444,15 +1438,16 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	err = WalkAsOf(tx, true /* storage */, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	block4Expected.Changes = []changeset.Change{
@@ -1472,16 +1467,16 @@ func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
 
 	assertChangesEquals(t, block4, block4Expected)
 
-	err = WalkAsOf(tx, true /* storage */, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	block6Expected.Changes = []changeset.Change{
 		{
@@ -1577,22 +1572,21 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var startKey [60]byte
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err = WalkAsOf(tx, true /* storage */, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
 
@@ -1600,15 +1594,16 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	err = WalkAsOf(tx, true /* storage */, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	block4Expected.Changes = []changeset.Change{
 		{
@@ -1629,16 +1624,16 @@ func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(tx, true /* storage */, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, 0, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	block6Expected.Changes = []changeset.Change{
@@ -1738,20 +1733,18 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var startKey [32]byte
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err = WalkAsOf(tx, false /* storage */, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	if err = WalkAsOfAccounts(tx, common.Address{}, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
@@ -1777,14 +1770,13 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(tx, false /* storage */, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	if err = WalkAsOfAccounts(tx, common.Address{}, 4, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1810,14 +1802,13 @@ func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(tx, false /* storage */, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	if err = WalkAsOfAccounts(tx, common.Address{}, 6, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1907,20 +1898,18 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var startKey [32]byte
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err = WalkAsOf(tx, false /* storage */, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	if err = WalkAsOfAccounts(tx, common.Address{}, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
@@ -1929,14 +1918,13 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	err = WalkAsOf(tx, false /* storage */, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	if err = WalkAsOfAccounts(tx, common.Address{}, 4, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1961,14 +1949,13 @@ func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(tx, false /* storage */, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	if err = WalkAsOfAccounts(tx, common.Address{}, 6, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	block6Expected := &changeset.ChangeSet{
@@ -2114,15 +2101,13 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 			Changes: make([]changeset.Change, 0),
 		}
 
-		var startKey [20]byte
-		err := WalkAsOf(tx, false /* storage */, startKey[:], 0, blockNum, func(k []byte, v []byte) (b bool, e error) {
+		if err := WalkAsOfAccounts(tx, common.Address{}, blockNum, func(k []byte, v []byte) (b bool, e error) {
 			innerErr := obtained.Add(common.CopyBytes(k), common.CopyBytes(v))
 			if innerErr != nil {
 				t.Fatal(innerErr)
 			}
 			return true, nil
-		})
-		if err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -2257,16 +2242,15 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 			Changes: make([]changeset.Change, 0),
 		}
 
-		var startKey [20]byte
-		err := WalkAsOf(tx, true /* storage */, startKey[:], 0, blockNum, func(k []byte, v []byte) (b bool, e error) {
-			innerErr := obtained.Add(common.CopyBytes(k), common.CopyBytes(v))
-			if innerErr != nil {
-				t.Fatal(innerErr)
+		for _, addr := range addrs {
+			if err := WalkAsOfStorage(tx, addr, 0, common.Hash{}, blockNum, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+				if innerErr := obtained.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v)); innerErr != nil {
+					t.Fatal(innerErr)
+				}
+				return true, nil
+			}); err != nil {
+				t.Fatal(err)
 			}
-			return true, nil
-		})
-		if err != nil {
-			t.Fatal(err)
 		}
 		valBytes := uint256.NewInt().SetBytes([]byte("block " + strconv.FormatUint(blockNum-1, 10))).Bytes()
 		expected := &changeset.ChangeSet{
