@@ -35,7 +35,7 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = promoteHashedStateCleanly("logPrefix", tx2, getTmpDir(), nil)
+	err = PromoteHashedStateCleanly("logPrefix", tx2, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	err = tx2.CommitAndBegin(context.Background())
 	require.NoError(t, err)
 
-	err = promoteHashedStateCleanly("logPrefix", tx2, getTmpDir(), nil)
+	err = PromoteHashedStateCleanly("logPrefix", tx2, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestUnwindHashed(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = promoteHashedStateCleanly("logPrefix", tx2, getTmpDir(), nil)
+	err = PromoteHashedStateCleanly("logPrefix", tx2, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}

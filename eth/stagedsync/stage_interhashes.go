@@ -56,7 +56,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, tmpdir strin
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 {
-		if err := regenerateIntermediateHashes(logPrefix, tx, tmpdir, expectedRootHash, quit); err != nil {
+		if err := RegenerateIntermediateHashes(logPrefix, tx, tmpdir, expectedRootHash, quit); err != nil {
 			return err
 		}
 	} else {
@@ -78,7 +78,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, tmpdir strin
 	return nil
 }
 
-func regenerateIntermediateHashes(logPrefix string, db ethdb.Database, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	log.Info(fmt.Sprintf("[%s] Regeneration intermediate hashes started", logPrefix))
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
