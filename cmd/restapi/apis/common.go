@@ -10,7 +10,7 @@ var ErrEntityNotFound = errors.New("entity not found")
 
 type Env struct {
 	KV              ethdb.KV
-	DB              ethdb.Getter
+	DB              ethdb.Database
 	Back            ethdb.Backend
 	Chaindata       string
 	RemoteDBAddress string

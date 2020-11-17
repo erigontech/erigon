@@ -90,14 +90,14 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		}
 	}
 
-	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW|ethdb.NoSync)
 	defer tx.Rollback()
 
 	cc, bc, st, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
 	cc.SetDB(tx)
 
-	tx, err = tx.Begin(ctx, ethdb.RW)
+	tx, err = tx.Begin(ctx, ethdb.RW|ethdb.NoSync)
 	if err != nil {
 		return err
 	}
@@ -121,10 +121,6 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		default:
 		}
 
-		if progress(stages.Execution).BlockNumber == stopAt {
-			break
-		}
-
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
@@ -133,7 +129,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		execAtBlock := progress(stages.Execution).BlockNumber
 		execToBlock := block
 		if unwindEvery != 0 || unwind != 0 {
-			execToBlock = execAtBlock - unwind + unwindEvery
+			execToBlock = execAtBlock + unwindEvery
 		}
 		if execToBlock > stopAt {
 			execToBlock = stopAt + 1

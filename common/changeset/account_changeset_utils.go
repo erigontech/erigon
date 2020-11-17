@@ -14,6 +14,9 @@ func findInAccountChangeSet(c ethdb.CursorDupSort, blockNumber uint64, key []byt
 	if err != nil {
 		return nil, err
 	}
+	if k == nil {
+		return nil, nil
+	}
 	_, k, v = fromDBFormat(k, v)
 	if !bytes.HasPrefix(k, key) {
 		return nil, nil

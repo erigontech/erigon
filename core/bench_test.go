@@ -256,7 +256,9 @@ func makeChainForBench(db ethdb.Database, full bool, count uint64) {
 
 		if full || n == 0 {
 			block := types.NewBlockWithHeader(header)
-			rawdb.WriteBody(ctx, db, hash, n, block.Body())
+			if err := rawdb.WriteBody(db, hash, n, block.Body()); err != nil {
+				panic(err)
+			}
 			if err := rawdb.WriteReceipts(db, n, nil); err != nil {
 				panic(err)
 			}
@@ -273,7 +275,7 @@ func benchWriteChain(b *testing.B, full bool, count uint64) {
 		db := ethdb.MustOpen(dir)
 		makeChainForBench(db, full, count)
 		db.Close()
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 	}
 }
 

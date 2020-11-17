@@ -8,15 +8,16 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
 type chainContext struct {
-	db rawdb.DatabaseReader
+	db ethdb.Database
 }
 
-func NewChainContext(db rawdb.DatabaseReader) *chainContext {
+func NewChainContext(db ethdb.Database) *chainContext {
 	return &chainContext{
 		db: db,
 	}
