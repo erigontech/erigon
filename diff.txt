@@ -3010,38 +3010,3 @@ Date:   Tue Nov 17 11:44:38 2020 +0100
 
     cmd/geth: remove retesteth
 
-commit 844485ec6aa2da15f203dda43b919f842c866750
-Author: Preston Van Loon <preston@prysmaticlabs.com>
-Date:   Tue Nov 17 01:35:58 2020 -0800
-
-    consensus/ethash: fix usage of *reflect.SliceHeader (#21372)
-    
-    * consensus/ethash: only use *reflect.SliceHeader, not reflect.SliceHeader. See comment here: https://github.com/golang/go/issues/40397\#issuecomment-663748689
-    
-    * consensus/ethash: pr feedback from @mdempsky, makes a copy of dest such that is not mutated
-    
-    * consensus/ethash: remove noop assign
-    
-    * consensus/ethash: apply same fix to another location
-    
-    Co-authored-by: Péter Szilágyi <peterke@gmail.com>
-    Co-authored-by: Martin Holst Swende <martin@swende.se>
-
-commit 1ea7537997d1c5444f78ec87f8b309b2f908c76e
-Author: Sad Pencil <sadpencil@outlook.com>
-Date:   Tue Nov 17 16:51:36 2020 +0800
-
-    crypto/bn256: refine comments according to #19577, #21595, and #21836 (#21847)
-
-commit 92c56eb820eff839e062947cd6231cc8593823e5
-Author: Pascal Dierich <pascal@pascaldierich.com>
-Date:   Mon Nov 16 14:08:13 2020 +0100
-
-    common: fix documentation of Address.SetBytes (#21814)
-
-commit cf856ea1ad96ac39ea477087822479b63417036a
-Author: Nicolas Feignon <nfeignon@gmail.com>
-Date:   Fri Nov 13 13:43:15 2020 +0100
-
-    accounts/abi: template: set events Raw field in Parse methods (#21807)
-
