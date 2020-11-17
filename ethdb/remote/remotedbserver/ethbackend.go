@@ -3,7 +3,6 @@ package remotedbserver
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -62,27 +61,29 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 }
 
 func (s *EthBackendServer) Subscribe(_ *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
-	fmt.Println("establishing subscription channel with RPC daemon")
+	log.Debug("establishing event subscription channel with the RPC daemon")
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 
 	s.events.AddHeaderSubscription(func(h *types.Header) error {
-		fmt.Println("sending header", h.Number)
-
 		payload, err := json.Marshal(h)
 		if err != nil {
 			log.Warn("error while marshaling a header", "err", err)
 			return err
 		}
 
-		err = subscribeServer.Send(&remote.SubscribeReply{Data: payload})
+		err = subscribeServer.Send(&remote.SubscribeReply{
+			Type: uint64(EventTypeHeader),
+			Data: payload,
+		})
+
 		if err != nil {
 			wg.Done()
 		}
 		return err
 	})
-	fmt.Println("subscription channel established with RPC daemon")
+	log.Info("event subscription channel established with the RPC daemon")
 	wg.Wait()
-	fmt.Println("subscription channel closed with RPC daemon")
+	log.Info("event subscription channel closed with the RPC daemon")
 	return nil
 }
