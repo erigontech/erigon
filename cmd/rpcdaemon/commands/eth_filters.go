@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
@@ -51,7 +52,10 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 		for {
 			select {
 			case h := <-headers:
-				notifier.Notify(rpcSub.ID, h)
+				err := notifier.Notify(rpcSub.ID, h)
+				if err != nil {
+					log.Warn("error while notifying subscription", "err", err)
+				}
 			case <-rpcSub.Err():
 				api.filters.Unsubscribe(id)
 				return
