@@ -335,7 +335,7 @@ func DefaultStages() StageBuilders {
 						logPrefix := s.state.LogPrefix()
 						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
 
-						err = NotifyRpcDaemon(s.BlockNumber, executionAt, world.notifier, world.TX)
+						err = NotifyRpcDaemon(s.BlockNumber+1, executionAt, world.notifier, world.TX)
 						if err != nil {
 							return err
 						}
