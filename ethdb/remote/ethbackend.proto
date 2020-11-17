@@ -37,10 +37,10 @@ message NetVersionReply {
 }
 
 message SubscribeRequest {
-  string type = 1;  // could only be "headers"
 }
 
 message SubscribeReply {
-  bytes data = 1; // serialized header
+  uint64 type = 1; // type (only header at that moment)
+  bytes data = 2; //  serialized data
 }
 
