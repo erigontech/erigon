@@ -2,6 +2,7 @@ package state
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -119,93 +120,76 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 	return data, nil
 }
 
-func WalkAsOf(db ethdb.Tx, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
-	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", bucket, hBucket, startkey, fixedbits, timestamp)
-	if !(bucket == dbutils.PlainStateBucket || bucket == dbutils.CurrentStateBucket) {
-		return fmt.Errorf("unsupported state bucket: %s", string(bucket))
-	}
-	if hBucket == dbutils.AccountsHistoryBucket {
-		return walkAsOfThinAccounts(db, bucket, hBucket, startkey, fixedbits, timestamp, walker)
-	} else if hBucket == dbutils.StorageHistoryBucket {
-		return walkAsOfThinStorage(db, bucket, hBucket, startkey, fixedbits, timestamp, func(k1, k2, v []byte) (bool, error) {
+func WalkAsOf(db ethdb.Tx, storage bool, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+	if storage {
+		return walkAsOfThinStorage(db, startkey, fixedbits, timestamp, func(k1, k2, v []byte) (bool, error) {
 			return walker(append(common.CopyBytes(k1), k2...), v)
 		})
+	} else {
+		return walkAsOfThinAccounts(db, startkey, fixedbits, timestamp, walker)
 	}
-
-	panic(fmt.Sprintf("Not implemented for arbitrary buckets: %s, %s", string(bucket), string(hBucket)))
 }
 
-func walkAsOfThinStorage(tx ethdb.Tx, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
+func walkAsOfThinStorage(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
 	var err error
 	startkeyNoInc := dbutils.CompositeKeyWithoutIncarnation(startkey)
-	part1End := common.HashLength
-	part2Start := common.HashLength + common.IncarnationLength
-	part3Start := common.HashLength + common.IncarnationLength + common.HashLength
-	if bucket == dbutils.PlainStateBucket {
-		part1End = common.AddressLength
-		part2Start = common.AddressLength + common.IncarnationLength
-		part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
-	}
+	part1End = common.AddressLength
+	part2Start = common.AddressLength + common.IncarnationLength
+	part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
 
 	//for storage
+	mCursor := tx.Cursor(dbutils.PlainStateBucket)
+	defer mCursor.Close()
 	mainCursor := ethdb.NewSplitCursor(
-		tx.Cursor(bucket),
+		mCursor,
 		startkey,
 		fixedbits,
-		part1End,
-		part2Start,
-		part3Start,
+		common.AddressLength, /* part1End` */
+		common.AddressLength+common.IncarnationLength,                   /* part2Start */
+		common.AddressLength+common.IncarnationLength+common.HashLength, /* part3Start */
 	)
 	fixetBitsForHistory := fixedbits - 8*common.IncarnationLength
 	if fixetBitsForHistory < 0 {
 		fixetBitsForHistory = 0
 	}
 
-	part1End = common.HashLength
-	part2Start = common.HashLength
-	part3Start = common.HashLength * 2
-	if bucket == dbutils.PlainStateBucket {
-		part1End = common.AddressLength
-		part2Start = common.AddressLength
-		part3Start = common.AddressLength + common.HashLength
-	}
-
 	//for historic data
-	var historyCursor historyCursor = ethdb.NewSplitCursor(
-		tx.Cursor(dbutils.StorageHistoryBucket),
+	shCursor := tx.Cursor(dbutils.StorageHistoryBucket)
+	defer shCursor.Close()
+	var hCursor = ethdb.NewSplitCursor(
+		shCursor,
 		startkeyNoInc,
 		fixetBitsForHistory,
-		part1End,   /* part1end */
-		part2Start, /* part2start */
-		part3Start, /* part3start */
+		common.AddressLength,                   /* part1end */
+		common.AddressLength,                   /* part2start */
+		common.AddressLength+common.HashLength, /* part3start */
 	)
+	csCursor := tx.CursorDupSort(dbutils.PlainStorageChangeSetBucket)
+	defer csCursor.Close()
 
-	part1End = common.HashLength
-	part2Start = common.HashLength + common.IncarnationLength
-	part3Start = common.HashLength + common.IncarnationLength + common.HashLength
-	if bucket == dbutils.PlainStateBucket {
-		part1End = common.AddressLength
-		part2Start = common.AddressLength + common.IncarnationLength
-		part3Start = common.AddressLength + common.IncarnationLength + common.HashLength
-	}
-
-	addrHash, keyHash, _, v, err1 := mainCursor.Seek()
+	addr, loc, _, v, err1 := mainCursor.Seek()
 	if err1 != nil {
 		return err1
 	}
 
-	hAddrHash, hKeyHash, _, hV, err2 := historyCursor.Seek()
-	if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
+	hAddr, hLoc, tsEnc, hV, err2 := hCursor.Seek()
+	if err2 != nil {
 		return err2
+	}
+	for hLoc != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
+		hAddr, hLoc, tsEnc, hV, err2 = hCursor.Next()
+		if err2 != nil {
+			return err2
+		}
 	}
 	goOn := true
 	for goOn {
-		cmp, br := common.KeyCmp(addrHash, hAddrHash)
+		cmp, br := common.KeyCmp(addr, hAddr)
 		if br {
 			break
 		}
 		if cmp == 0 {
-			cmp, br = common.KeyCmp(keyHash, hKeyHash)
+			cmp, br = common.KeyCmp(loc, hLoc)
 		}
 		if br {
 			break
@@ -213,15 +197,12 @@ func walkAsOfThinStorage(tx ethdb.Tx, bucket string, hBucket string, startkey []
 
 		//next key in state
 		if cmp < 0 {
-			goOn, err = walker(addrHash, keyHash, v)
+			goOn, err = walker(addr, loc, v)
 		} else {
-			if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
-				return err2
-			}
-			if len(hV) > 0 && err2 == nil { // Skip accounts did not exist
-				goOn, err = walker(hAddrHash, hKeyHash, hV)
-			} else if errors.Is(err2, ErrNotInHistory) && cmp == 0 {
-				goOn, err = walker(addrHash, keyHash, v)
+			if len(hV) > 0 { // Skip accounts did not exist
+				goOn, err = walker(hAddr, hLoc, hV)
+			} else if cmp == 0 {
+				goOn, err = walker(addr, loc, v)
 			}
 		}
 		if err != nil {
@@ -229,15 +210,53 @@ func walkAsOfThinStorage(tx ethdb.Tx, bucket string, hBucket string, startkey []
 		}
 		if goOn {
 			if cmp <= 0 {
+				index := dbutils.WrapHistoryIndex(hV)
+				if changeSetBlock, set, ok := index.Search(timestamp); ok {
+					// set == true if this change was from empty record (non-existent storage item) to non-empty
+					// In such case, we do not need to examine changeSet and simply skip the record
+					if !set {
+						// Extract value from the changeSet
+						csKey := make([]byte, 8+common.AddressLength+common.IncarnationLength)
+						copy(csKey[:], dbutils.EncodeBlockNumber(changeSetBlock))
+						copy(csKey[8:], hAddr)
+						copy(csKey[8+common.AddressLength:], hLoc)
+						_, data, err := csCursor.SeekBothExact(dbutils.EncodeBlockNumber(changeSetBlock), hK)
+						if err != nil {
+							return err
+						}
+						csKey := dbutils.EncodeTimestamp(changeSetBlock)
+						changeSetData, _ := csB.Get(csKey)
+						if changeSetData == nil {
+							return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
+						}
+						data, err3 := changeset.StorageChangeSetBytes(changeSetData).FindWithoutIncarnation(hAddrHash, hKeyHash)
+						if err3 != nil {
+							return fmt.Errorf("could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d): %v",
+								hAddrHash, hKeyHash,
+								changeSetBlock,
+								timestamp,
+								err3,
+							)
+						}
+						if len(data) > 0 { // Skip deleted entries
+							goOn, err = walker(hAddrHash, hKeyHash, data)
+						}
+					}
+				} else if cmp == 0 {
+					goOn, err = walker(addrHash, keyHash, v)
+				}
 				addrHash, keyHash, _, v, err1 = mainCursor.Next()
 				if err1 != nil {
 					return err1
 				}
 			}
 			if cmp >= 0 {
-				hAddrHash, hKeyHash, _, hV, err2 = historyCursor.Next()
-				if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
-					return err2
+				hKeyHash0 := hKeyHash
+				for hKeyHash != nil && (bytes.Equal(hKeyHash0, hKeyHash) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
+					hAddrHash, hKeyHash, tsEnc, hV, err2 = hCursor.Next()
+					if err2 != nil {
+						return err2
+					}
 				}
 			}
 		}
@@ -245,43 +264,43 @@ func walkAsOfThinStorage(tx ethdb.Tx, bucket string, hBucket string, startkey []
 	return err
 }
 
-func walkAsOfThinAccounts(tx ethdb.Tx, bucket string, hBucket string, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+func walkAsOfThinAccounts(tx ethdb.Tx, startkey []byte, fixedbits int, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
 
-	mainCursor := tx.Cursor(bucket)
-	part1End := common.HashLength
-	part2Start := common.HashLength
-	part3Start := common.HashLength
-	maxKeyLen := common.HashLength
-	if bucket == dbutils.PlainStateBucket {
-		part1End = common.AddressLength
-		part2Start = common.AddressLength
-		part3Start = common.AddressLength
-		maxKeyLen = common.AddressLength
-	}
-
-	var hCursor historyCursor = ethdb.NewSplitCursor(
-		tx.Cursor(dbutils.AccountsHistoryBucket),
+	mainCursor := tx.Cursor(dbutils.PlainStateBucket)
+	defer mainCursor.Close()
+	ahCursor := tx.Cursor(dbutils.AccountsHistoryBucket)
+	defer ahCursor.Close()
+	var hCursor = ethdb.NewSplitCursor(
+		ahCursor,
 		startkey,
 		fixedbits,
-		part1End,   /* part1end */
-		part2Start, /* part2start */
-		part3Start, /* part3start */
+		common.AddressLength,   /* part1end */
+		common.AddressLength,   /* part2start */
+		common.AddressLength+8, /* part3start */
 	)
+	csCursor := tx.CursorDupSort(dbutils.PlainAccountChangeSetBucket)
+	defer csCursor.Close()
 
 	k, v, err1 := mainCursor.Seek(startkey)
 	if err1 != nil {
 		return err1
 	}
-	for k != nil && len(k) > maxKeyLen {
+	for k != nil && len(k) > common.AddressLength {
 		k, v, err1 = mainCursor.Next()
 		if err1 != nil {
 			return err1
 		}
 	}
-	hK, _, _, hV, err2 := hCursor.Seek()
-	if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
+	hK, tsEnc, _, hV, err2 := hCursor.Seek()
+	if err2 != nil {
 		return err2
+	}
+	for hK != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
+		hK, tsEnc, _, hV, err2 = hCursor.Next()
+		if err2 != nil {
+			return err2
+		}
 	}
 
 	goOn := true
@@ -294,7 +313,6 @@ func walkAsOfThinAccounts(tx ethdb.Tx, bucket string, hBucket string, startkey [
 		if k != nil && fixedbits > 0 && (k[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
 			k = nil
 		}
-		var cmp int
 		cmp, br := common.KeyCmp(k, hK)
 		if br {
 			break
@@ -302,12 +320,21 @@ func walkAsOfThinAccounts(tx ethdb.Tx, bucket string, hBucket string, startkey [
 		if cmp < 0 {
 			goOn, err = walker(k, v)
 		} else {
-			if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
-				return err2
-			}
-			if len(hV) > 0 && err2 == nil { // Skip accounts did not exist
-				goOn, err = walker(hK, hV)
-			} else if errors.Is(err2, ErrNotInHistory) && cmp == 0 {
+			index := dbutils.WrapHistoryIndex(hV)
+			if changeSetBlock, set, ok := index.Search(timestamp); ok {
+				// set == true if this change was from empty record (non-existent account) to non-empty
+				// In such case, we do not need to examine changeSet and simply skip the record
+				if !set {
+					// Extract value from the changeSet
+					_, data, err := csCursor.SeekBothExact(dbutils.EncodeBlockNumber(changeSetBlock), hK)
+					if err != nil {
+						return err
+					}
+					if len(data) > 0 { // Skip accounts did not exist
+						goOn, err = walker(hK, data)
+					}
+				}
+			} else if cmp == 0 {
 				goOn, err = walker(k, v)
 			}
 		}
@@ -317,7 +344,7 @@ func walkAsOfThinAccounts(tx ethdb.Tx, bucket string, hBucket string, startkey [
 				if err1 != nil {
 					return err1
 				}
-				for k != nil && len(k) > maxKeyLen {
+				for k != nil && len(k) > common.AddressLength {
 					k, v, err1 = mainCursor.Next()
 					if err1 != nil {
 						return err1
@@ -325,9 +352,12 @@ func walkAsOfThinAccounts(tx ethdb.Tx, bucket string, hBucket string, startkey [
 				}
 			}
 			if cmp >= 0 {
-				hK, _, _, hV, err2 = hCursor.Next()
-				if err2 != nil && !errors.Is(err2, ErrNotInHistory) {
-					return err2
+				hK0 := hK
+				for hK != nil && (bytes.Equal(hK0, hK) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
+					hK, tsEnc, _, hV, err1 = hCursor.Next()
+					if err1 != nil {
+						return err1
+					}
 				}
 			}
 		}
