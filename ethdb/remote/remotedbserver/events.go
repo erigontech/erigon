@@ -4,6 +4,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
+type RpcEventType uint64
+
+const (
+	EventTypeHeader = RpcEventType(iota)
+)
+
 type HeaderSubscription func(*types.Header) error
 
 type Events struct {
