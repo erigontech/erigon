@@ -385,7 +385,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{})
 	var filter = func(k []byte) bool {
 		return !l.rd.Retain(k)
 	}
-	ih := IH(filter, tx.CursorDupSort(l.intermediateHashesBucket))
+	ih := IH(filter, tx.CursorDupSort(l.intermediateHashesBucket), tx.CursorDupSort(l.intermediateHashesBucket))
 	if err := l.iteration(c, ih, true /* first */); err != nil {
 		return EmptyRoot, err
 	}
@@ -733,12 +733,13 @@ const IHDupKeyLen = 2 * (common.HashLength + common.IncarnationLength)
 
 // IHCursor - holds logic related to iteration over IH bucket
 type IHCursor struct {
-	c      ethdb.CursorDupSort
-	filter Filter
+	c          ethdb.CursorDupSort
+	cForDelete ethdb.CursorDupSort
+	filter     Filter
 }
 
-func IH(f Filter, c ethdb.CursorDupSort) *IHCursor {
-	return &IHCursor{c: c, filter: f}
+func IH(f Filter, c ethdb.CursorDupSort, cForDelete ethdb.CursorDupSort) *IHCursor {
+	return &IHCursor{c: c, filter: f, cForDelete: cForDelete}
 }
 
 func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
@@ -763,6 +764,7 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 		return nil, nil, nil
 	}
 
+	kCopy, vCopy := common.CopyBytes(k), common.CopyBytes(v)
 	if len(v) > common.HashLength {
 		keyPart := len(v) - common.HashLength
 		k = append(k, v[:keyPart]...)
@@ -772,7 +774,7 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 		return k, v, nil
 	}
 
-	err = c.c.Delete(k, v)
+	err = c.cForDelete.Delete(kCopy, vCopy)
 	if err != nil {
 		return []byte{}, nil, err
 	}
@@ -790,6 +792,7 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return nil, nil, nil
 		}
 
+		kCopy, vCopy := common.CopyBytes(k), common.CopyBytes(v)
 		if len(v) > common.HashLength {
 			keyPart := len(v) - common.HashLength
 			k = append(k, v[:keyPart]...)
@@ -800,7 +803,7 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return k, v, nil
 		}
 
-		err = c.c.Delete(k, v)
+		err = c.cForDelete.Delete(kCopy, vCopy)
 		if err != nil {
 			return []byte{}, nil, err
 		}
