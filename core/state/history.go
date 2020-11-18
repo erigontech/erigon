@@ -91,7 +91,6 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 			return nil, ethdb.ErrKeyNotFound
 		}
 	} else {
-		//fmt.Printf("Not Found changeSetBlock in [%s]\n", index)
 		return nil, ethdb.ErrKeyNotFound
 	}
 
@@ -129,7 +128,7 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 
 	var startkeyNoInc = make([]byte, common.AddressLength+common.HashLength)
 	copy(startkeyNoInc, address.Bytes())
-	copy(startkeyNoInc, startLocation.Bytes())
+	copy(startkeyNoInc[common.AddressLength:], startLocation.Bytes())
 
 	//for storage
 	mCursor := tx.Cursor(dbutils.PlainStateBucket)
@@ -189,8 +188,28 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 		if cmp < 0 {
 			goOn, err = walker(addr, loc, v)
 		} else {
-			if len(hV) > 0 { // Skip accounts did not exist
-				goOn, err = walker(hAddr, hLoc, hV)
+			index := dbutils.WrapHistoryIndex(hV)
+			if changeSetBlock, set, ok := index.Search(timestamp); ok {
+				// set == true if this change was from empty record (non-existent storage item) to non-empty
+				// In such case, we do not need to examine changeSet and simply skip the record
+				if !set {
+					// Extract value from the changeSet
+					csKey := make([]byte, 8+common.AddressLength+common.IncarnationLength)
+					copy(csKey[:], dbutils.EncodeBlockNumber(changeSetBlock))
+					copy(csKey[8:], address[:]) // address + incarnation
+					binary.BigEndian.PutUint64(csKey[8+common.AddressLength:], incarnation)
+					kData, data, err3 := csCursor.SeekBothRange(csKey, hLoc)
+					if err3 != nil {
+						return err3
+					}
+					if !bytes.Equal(kData, csKey) || !bytes.HasPrefix(data, hLoc) {
+						return fmt.Errorf("inconsistent storage changeset and history kData %x, csKey %x, data %x, hLoc %x", kData, csKey, data, hLoc)
+					}
+					data = data[common.HashLength:]
+					if len(data) > 0 { // Skip deleted entries
+						goOn, err = walker(hAddr, hLoc, data)
+					}
+				}
 			} else if cmp == 0 {
 				goOn, err = walker(addr, loc, v)
 			}
@@ -200,30 +219,6 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 		}
 		if goOn {
 			if cmp <= 0 {
-				index := dbutils.WrapHistoryIndex(hV)
-				if changeSetBlock, set, ok := index.Search(timestamp); ok {
-					// set == true if this change was from empty record (non-existent storage item) to non-empty
-					// In such case, we do not need to examine changeSet and simply skip the record
-					if !set {
-						// Extract value from the changeSet
-						csKey := make([]byte, 8+common.AddressLength+common.IncarnationLength)
-						copy(csKey[:], dbutils.EncodeBlockNumber(changeSetBlock))
-						copy(csKey[8:], startkey) // address + incarnation
-						_, data, err3 := csCursor.SeekBothExact(csKey, hLoc)
-						if err3 != nil {
-							return err3
-						}
-						if len(data) > 0 { // Skip deleted entries
-							if goOn, err = walker(hAddr, hLoc, data); err != nil {
-								return err
-							}
-						}
-					}
-				} else if cmp == 0 {
-					if goOn, err = walker(addr, loc, v); err != nil {
-						return err
-					}
-				}
 				if addr, loc, _, v, err1 = mainCursor.Next(); err1 != nil {
 					return err1
 				}
@@ -295,10 +290,15 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 				// In such case, we do not need to examine changeSet and simply skip the record
 				if !set {
 					// Extract value from the changeSet
-					_, data, err3 := csCursor.SeekBothExact(dbutils.EncodeBlockNumber(changeSetBlock), hK)
+					csKey := dbutils.EncodeBlockNumber(changeSetBlock)
+					kData, data, err3 := csCursor.SeekBothRange(dbutils.EncodeBlockNumber(changeSetBlock), hK)
 					if err3 != nil {
 						return err3
 					}
+					if !bytes.Equal(kData, csKey) || !bytes.HasPrefix(data, hK) {
+						return fmt.Errorf("inconsistent account history and changesets, kData %x, csKey %x, data %x, hK %x", kData, csKey, data, hK)
+					}
+					data = data[common.AddressLength:]
 					if len(data) > 0 { // Skip accounts did not exist
 						goOn, err = walker(hK, data)
 					}
