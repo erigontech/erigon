@@ -391,7 +391,7 @@ func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account)
 		// Remove from the reads heap
 		heap.Remove(&sc.readQueue, existing.queuePos)
 		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, &existing)
+		heap.Push(&sc.writeQueue, existing)
 		return
 	}
 	if sc.writeQueue.Len() >= sc.limitWrites {
@@ -409,6 +409,8 @@ func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account)
 	// Push new element on the write queue
 	aci.queuePos = sc.writeQueue.Len()
 	heap.Push(&sc.writeQueue, &aci)
+	sc.readWrites.ReplaceOrInsert(&aci)
+	sc.writes.ReplaceOrInsert(&aci)
 }
 
 // SetAccountDelete is very similar to SetAccountWrite with the difference that there no set value
@@ -437,7 +439,7 @@ func (sc *StateCache) SetAccountDelete(address []byte) {
 		// Remove from the reads heap
 		heap.Remove(&sc.readQueue, existing.queuePos)
 		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, &existing)
+		heap.Push(&sc.writeQueue, existing)
 		return
 	}
 	if sc.writeQueue.Len() >= sc.limitWrites {
@@ -454,6 +456,8 @@ func (sc *StateCache) SetAccountDelete(address []byte) {
 	// Push new element on the write queue
 	aci.queuePos = sc.writeQueue.Len()
 	heap.Push(&sc.writeQueue, &aci)
+	sc.readWrites.ReplaceOrInsert(&aci)
+	sc.writes.ReplaceOrInsert(&aci)
 }
 
 func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, location []byte, value []byte) {
@@ -532,7 +536,7 @@ func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, locati
 		// Remove from the reads heap
 		heap.Remove(&sc.readQueue, existing.queuePos)
 		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, &existing)
+		heap.Push(&sc.writeQueue, existing)
 		return
 	}
 	if sc.writeQueue.Len() >= sc.limitWrites {
@@ -579,7 +583,7 @@ func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, locat
 		// Remove from the reads heap
 		heap.Remove(&sc.readQueue, existing.queuePos)
 		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, &existing)
+		heap.Push(&sc.writeQueue, existing)
 		return
 	}
 	if sc.writeQueue.Len() >= sc.limitWrites {
@@ -673,7 +677,7 @@ func (sc StateCache) SetCodeWrite(address []byte, code []byte) {
 		// Remove from the reads heap
 		heap.Remove(&sc.readQueue, existing.queuePos)
 		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, &existing)
+		heap.Push(&sc.writeQueue, existing)
 		return
 	}
 	if sc.writeQueue.Len() >= sc.limitWrites {
@@ -719,7 +723,7 @@ func (sc StateCache) SetCodeDelete(address []byte) {
 		// Remove from the reads heap
 		heap.Remove(&sc.readQueue, existing.queuePos)
 		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, &existing)
+		heap.Push(&sc.writeQueue, existing)
 		return
 	}
 	if sc.writeQueue.Len() >= sc.limitWrites {

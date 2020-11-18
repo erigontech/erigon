@@ -148,3 +148,74 @@ func TestAccountReads(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountReadWrites(t *testing.T) {
+	sc := NewStateCache(32, 4, 4)
+	var account1 accounts.Account
+	account1.Balance.SetUint64(1)
+	var addr1 common.Address
+	addr1[0] = 1
+	sc.SetAccountWrite(addr1.Bytes(), &account1)
+	if _, ok := sc.GetAccount(addr1.Bytes()); !ok {
+		t.Fatalf("Expected to find account with addr1")
+	}
+	// Replace the existing value
+	var account11 accounts.Account
+	account11.Balance.SetUint64(11)
+	sc.SetAccountWrite(addr1.Bytes(), &account11)
+	if a, ok := sc.GetAccount(addr1.Bytes()); !ok {
+		t.Fatalf("Expected to find account with addr1")
+	} else {
+		if a.Balance.Uint64() != 11 {
+			t.Fatalf("Expected account balance 11, got %d", a.Balance.Uint64())
+		}
+	}
+	// Add read and then replace it with the write
+	var account2 accounts.Account
+	account2.Balance.SetUint64(2)
+	var addr2 common.Address
+	addr2[0] = 2
+	sc.SetAccountRead(addr2.Bytes(), &account2)
+	// Check that readQueue is empty
+	if sc.readQueue.Len() != 1 {
+		t.Fatalf("Read queue is expected to be 1 element")
+	}
+	var account22 accounts.Account
+	account22.Balance.SetUint64(22)
+	sc.SetAccountWrite(addr2.Bytes(), &account22)
+	if a, ok := sc.GetAccount(addr2.Bytes()); !ok {
+		t.Fatalf("Expected to find account with addr2")
+	} else {
+		if a.Balance.Uint64() != 22 {
+			t.Fatalf("Expected account balance 22, got %d", a.Balance.Uint64())
+		}
+	}
+	// Check that readQueue is empty
+	if sc.readQueue.Len() != 0 {
+		t.Fatalf("Read queue is expected to be empty")
+	}
+	// Deleting written account
+	var account3 accounts.Account
+	account3.Balance.SetUint64(3)
+	var addr3 common.Address
+	addr3[0] = 3
+	sc.SetAccountWrite(addr3.Bytes(), &account3)
+	sc.SetAccountDelete(addr3.Bytes())
+	if _, ok := sc.GetAccount(addr3.Bytes()); ok {
+		t.Fatalf("Expected account addr3 to be deleted")
+	}
+	// Deleting read account
+	var account4 accounts.Account
+	account4.Balance.SetUint64(4)
+	var addr4 common.Address
+	addr4[0] = 4
+	sc.SetAccountRead(addr4.Bytes(), &account4)
+	sc.SetAccountDelete(addr4.Bytes())
+	if _, ok := sc.GetAccount(addr4.Bytes()); ok {
+		t.Fatalf("Expected account addr4 to be deleted")
+	}
+	// Check that readQueue is empty
+	if sc.readQueue.Len() != 0 {
+		t.Fatalf("Read queue is expected to be empty")
+	}
+}
