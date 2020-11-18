@@ -168,8 +168,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 						}
 					}
 				case ethdb.Cursor:
-					_, _, err := c.c.Seek(c.k)
-					if err != nil {
+					if _, _, err := c.c.Seek(c.k); err != nil {
 						return fmt.Errorf("server-side error: %w", err)
 					}
 				}
@@ -189,7 +188,8 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 		case remote.Op_OPEN:
 			CursorID++
 			cursors[CursorID] = &CursorInfo{
-				c: tx.Cursor(in.BucketName),
+				bucket: in.BucketName,
+				c:      tx.Cursor(in.BucketName),
 			}
 			if err := stream.Send(&remote.Pair{CursorID: CursorID}); err != nil {
 				return fmt.Errorf("server-side error: %w", err)
