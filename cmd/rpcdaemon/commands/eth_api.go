@@ -4,12 +4,12 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/eth/filters"
-
+	rpcfilters "github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -90,15 +90,17 @@ type APIImpl struct {
 	dbReader     ethdb.Database
 	chainContext core.ChainContext
 	GasCap       uint64
+	filters      *rpcfilters.Filters
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64) *APIImpl {
+func NewEthAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64, filters *rpcfilters.Filters) *APIImpl {
 	return &APIImpl{
 		db:         db,
 		dbReader:   dbReader,
 		ethBackend: eth,
 		GasCap:     gascap,
+		filters:    filters,
 	}
 }
 

@@ -2074,6 +2074,32 @@ func dupSz(chaindata string) error {
 	return nil
 }
 
+func indexKeySizes(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	keySizes := make(map[int]int)
+	count := 0
+	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.AccountsHistoryBucket)
+		// This is a mapping of contractAddress + incarnation => CodeHash
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			keySizes[len(k)]++
+			count++
+			if count%1000000 == 0 {
+				log.Info("Processed", "records", count)
+			}
+		}
+		return nil
+	}); err1 != nil {
+		return err1
+	}
+	fmt.Printf("Key sizes: %v\n", keySizes)
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -2250,6 +2276,11 @@ func main() {
 	if *action == "textInfo" {
 		sb := strings.Builder{}
 		if err := textInfo(*chaindata, &sb); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "indexKeySizes" {
+		if err := indexKeySizes(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

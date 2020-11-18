@@ -174,6 +174,7 @@ bindings:
 
 grpc:
 	# See also: ./cmd/hack/binary-deps/main.go
+	mkdir -p ./build/bin/
 	rm -f ./build/bin/protoc*
 	rm -rf ./build/include*
 
