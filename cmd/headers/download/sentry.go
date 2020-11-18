@@ -509,9 +509,9 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, sta
 		return err
 	}
 
-	var enodes []*enode.Node
-	for _, e := range staticPeers {
-		enodes = append(enodes, enode.MustParse(e))
+	enodes := make([]*enode.Node, len(staticPeers))
+	for i, e := range staticPeers {
+		enodes[i] = enode.MustParse(e)
 	}
 
 	server.StaticNodes = enodes
