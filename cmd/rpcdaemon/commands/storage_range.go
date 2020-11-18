@@ -24,17 +24,10 @@ type StorageEntry struct {
 }
 
 func StorageRangeAt(stateReader *adapter.StateReader, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
-	//account, err := stateReader.ReadAccountData(contractAddress)
-	//if err != nil {
-	//	return StorageRangeResult{}, fmt.Errorf("error reading account %x: %v", contractAddress, err)
-	//}
-	//if account == nil {
-	//	return StorageRangeResult{}, fmt.Errorf("account %x doesn't exist", contractAddress)
-	//}
 	result := StorageRangeResult{Storage: StorageMap{}}
 	resultCount := 0
 
-	if err := stateReader.ForEachStorage(contractAddress, start, func(key, seckey common.Hash, value uint256.Int) bool {
+	if err := stateReader.ForEachStorage(contractAddress, common.BytesToHash(start), func(key, seckey common.Hash, value uint256.Int) bool {
 		if resultCount < maxResult {
 			result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
 		} else {
