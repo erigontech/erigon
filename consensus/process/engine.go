@@ -9,7 +9,7 @@ import (
 type RemoteEngine struct {
 	consensus.Engine
 
-	consensus.EngineProcess
+	consensus.EngineAPI
 	exit chan struct{}
 }
 

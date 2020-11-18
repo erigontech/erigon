@@ -44,7 +44,7 @@ type BlockError struct {
 	Err    error
 }
 
-type EngineProcess interface {
+type EngineAPI interface {
 	HeaderVerification() chan<- VerifyHeaderRequest
 	VerifyResults() <-chan VerifyHeaderResponse
 
@@ -52,7 +52,7 @@ type EngineProcess interface {
 	HeaderResponse() chan<- HeaderResponse
 }
 
-type Process struct {
+type API struct {
 	Chain                 ChainHeaderReader
 	VerifyHeaderRequests  chan VerifyHeaderRequest
 	VerifyHeaderResponses chan VerifyHeaderResponse
@@ -84,9 +84,9 @@ const (
 	retry       = 100 * time.Millisecond
 )
 
-func NewProcess(config *params.ChainConfig) *Process {
+func NewAPI(config *params.ChainConfig) *API {
 	verifiedBlocks, _ := lru.New(storageSize)
-	return &Process{
+	return &API{
 		Chain:                 configGetter{config},
 		VerifyHeaderRequests:  make(chan VerifyHeaderRequest, size),
 		VerifyHeaderResponses: make(chan VerifyHeaderResponse, size),
@@ -98,19 +98,19 @@ func NewProcess(config *params.ChainConfig) *Process {
 	}
 }
 
-func (p *Process) GetVerifyHeader() <-chan VerifyHeaderResponse {
+func (p *API) GetVerifyHeader() <-chan VerifyHeaderResponse {
 	return p.VerifyHeaderResponses
 }
 
-func (p *Process) HeaderRequest() <-chan HeadersRequest {
+func (p *API) HeaderRequest() <-chan HeadersRequest {
 	return p.HeadersRequests
 }
 
-func (p *Process) HeaderResponse() chan<- HeaderResponse {
+func (p *API) HeaderResponse() chan<- HeaderResponse {
 	return p.HeaderResponses
 }
 
-func (p *Process) CacheHeader(header *types.Header) {
+func (p *API) CacheHeader(header *types.Header) {
 	if header == nil {
 		return
 	}
@@ -135,7 +135,7 @@ func (p *Process) CacheHeader(header *types.Header) {
 	p.VerifiedBlocks.Add(blockNum, blocks)
 }
 
-func (p *Process) GetCachedHeader(parentHash common.Hash, blockNum uint64) *types.Header {
+func (p *API) GetCachedHeader(parentHash common.Hash, blockNum uint64) *types.Header {
 	p.VerifiedBlocksMu.RLock()
 	defer p.VerifiedBlocksMu.RUnlock()
 

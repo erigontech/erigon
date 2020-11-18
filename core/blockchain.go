@@ -1585,7 +1585,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		var logs []*types.Log
 		if !bc.cacheConfig.DownloadOnly {
 			stateDB = state.New(bc.trieDbState)
-			// Process block using the parent state as reference point.
+			// API block using the parent state as reference point.
 			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig)
 			reuseTrieDbState := true
 			if err != nil {
