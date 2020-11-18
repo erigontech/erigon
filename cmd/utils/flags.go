@@ -1488,9 +1488,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	cfg.BlocksToPrune = ctx.GlobalUint64(GCModeBlockToPruneFlag.Name)
 	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
 
+	// Read the value from the flag no matter if it's set or not.
 	cfg.DownloadOnly = ctx.GlobalBoolT(DownloadOnlyFlag.Name)
 
 	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
+		log.Info("Enabling recording of key preimages since archive mode is used")
 
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 
