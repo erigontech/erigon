@@ -617,7 +617,6 @@ func TestWalkAsOfStateHashed(t *testing.T) {
 }
 
 func TestWalkAsOfStatePlain(t *testing.T) {
-	t.Skip("Test needs more work")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	tds := NewTrieDbState(common.Hash{}, db, 1)
@@ -898,7 +897,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	if err = WalkAsOfStorage(tx, addr1, 0, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+	if err = WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 		err = block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -912,7 +911,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	if err = WalkAsOfStorage(tx, addr1, 0, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+	if err = WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 		err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)

@@ -149,7 +149,7 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 	var hCursor = ethdb.NewSplitCursor(
 		shCursor,
 		startkeyNoInc,
-		common.AddressLength,
+		8*common.AddressLength,
 		common.AddressLength,                   /* part1end */
 		common.AddressLength,                   /* part2start */
 		common.AddressLength+common.HashLength, /* part3start */
