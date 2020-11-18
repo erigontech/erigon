@@ -179,7 +179,18 @@ func CurrentChunkKey(key []byte) []byte {
 func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 	var blockNumBytes []byte // make([]byte, len(key)+8)
 	switch len(key) {
-	//plain state, accounts
+	//hashed state, accounts
+	case common.HashLength:
+		blockNumBytes = make([]byte, common.HashLength+8)
+		copy(blockNumBytes, key)
+		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength:], blockNumber)
+	//hashed state storage
+	case common.HashLength*2 + common.IncarnationLength:
+		//remove incarnation and add block number
+		blockNumBytes = make([]byte, common.HashLength*2+8)
+		copy(blockNumBytes, key[:common.HashLength])
+		copy(blockNumBytes[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength*2:], blockNumber) //plain state, accounts
 	case common.AddressLength:
 		blockNumBytes = make([]byte, common.AddressLength+8)
 		copy(blockNumBytes, key)
