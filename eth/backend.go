@@ -412,7 +412,7 @@ func CreateConsensusEngine(_ *node.Node, chainConfig *params.ChainConfig, config
 		eng = ethash.NewShared()
 	default:
 		if chainConfig.Clique != nil {
-			eng = clique.New(chainConfig.Clique, db)
+			eng = clique.NewCliqueVerifier(clique.New(chainConfig.Clique, db))
 		} else {
 			engine := ethash.New(ethash.Config{
 				CachesInMem:      config.CachesInMem,
