@@ -18,6 +18,7 @@ const (
 	DeletedFlag  uint16 = 2
 )
 
+//nolint:maligned
 type AccountCacheItem struct {
 	address  common.Address
 	account  accounts.Account
@@ -26,6 +27,7 @@ type AccountCacheItem struct {
 	flags    uint16
 }
 
+//nolint:maligned
 type StorageCacheItem struct {
 	address     common.Address
 	incarnation uint64
@@ -36,6 +38,7 @@ type StorageCacheItem struct {
 	flags       uint16
 }
 
+//nolint:maligned
 type CodeCacheItem struct {
 	address  common.Address
 	code     []byte

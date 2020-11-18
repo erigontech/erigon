@@ -108,7 +108,7 @@ func TestCacheBtreeAll(t *testing.T) {
 func TestAccountReads(t *testing.T) {
 	sc := NewStateCache(32, 4, 4)
 	var account1 accounts.Account
-	account1.Balance.SetUint64(2)
+	account1.Balance.SetUint64(1)
 	var addr1 common.Address
 	addr1[0] = 1
 	sc.SetAccountRead(addr1.Bytes(), &account1)
@@ -116,12 +116,35 @@ func TestAccountReads(t *testing.T) {
 		t.Fatalf("Expected to find account with addr1")
 	}
 	var addr2 common.Address
+	addr2[0] = 2
 	if _, ok := sc.GetAccount(addr2.Bytes()); ok {
 		t.Fatalf("Did not expect account with addr2")
 	}
 	var addr3 common.Address
+	addr3[0] = 3
 	sc.SetAccountAbsent(addr3.Bytes())
 	if _, ok := sc.GetAccount(addr3.Bytes()); ok {
 		t.Fatalf("Expected account with addr3 to be absent")
+	}
+	for i := 4; i <= 6; i++ {
+		var account accounts.Account
+		account.Balance.SetUint64(uint64(i))
+		var addr common.Address
+		addr[0] = byte(i)
+		sc.SetAccountRead(addr.Bytes(), &account)
+	}
+	// Out of 6 addresses, one was not associated with an account or absence record. So 5 records would be in the cache
+	// But since the reads limit is 4, the first addr will be evicted
+	if _, ok := sc.GetAccount(addr1.Bytes()); ok {
+		t.Fatalf("Expected addr1 to be evicted")
+	}
+	for i := 4; i <= 6; i++ {
+		var account accounts.Account
+		account.Balance.SetUint64(uint64(i))
+		var addr common.Address
+		addr[0] = byte(i)
+		if _, ok := sc.GetAccount(addr.Bytes()); !ok {
+			t.Fatalf("Expected to find account with addr %x", addr)
+		}
 	}
 }
