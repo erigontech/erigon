@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -13,6 +14,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
+
+type ChainEventNotifier interface {
+	OnNewHeader(*types.Header)
+}
 
 // StageParameters contains the stage that stages receives at runtime when initializes.
 // Then the stage can use it to receive different useful functions.
@@ -39,6 +44,7 @@ type StageParameters struct {
 	prefetchedBlocks   *PrefetchedBlocks
 	stateReaderBuilder StateReaderBuilder
 	stateWriterBuilder StateWriterBuilder
+	notifier           ChainEventNotifier
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -328,6 +334,12 @@ func DefaultStages() StageBuilders {
 						}
 						logPrefix := s.state.LogPrefix()
 						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
+
+						err = NotifyRpcDaemon(s.BlockNumber+1, executionAt, world.notifier, world.TX)
+						if err != nil {
+							return err
+						}
+
 						return s.DoneAndUpdate(world.TX, executionAt)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {

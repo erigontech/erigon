@@ -3,6 +3,7 @@ package core
 import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -27,4 +28,9 @@ func (back *EthBackend) AddLocal(signedtx []byte) ([]byte, error) {
 	}
 
 	return tx.Hash().Bytes(), back.TxPool().AddLocal(tx)
+}
+
+func (back *EthBackend) Subscribe(func(*remote.SubscribeReply)) error {
+	// do nothing
+	return nil
 }

@@ -87,7 +87,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 
 func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 	var db ethdb.KV
-	var txPool ethdb.Backend
+	var ethBackend ethdb.Backend
 	var err error
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
@@ -109,7 +109,7 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 			db = kv
 		}
 	} else if cfg.PrivateApiAddr != "" {
-		db, txPool, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+		db, ethBackend, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
 		if err != nil {
 			return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
 		}
@@ -121,7 +121,7 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 		return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
 	}
 
-	return db, txPool, err
+	return db, ethBackend, err
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
