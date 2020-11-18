@@ -495,7 +495,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 			emptyVal,
 			block3Val,
 		},
-	}, true)
+	})
 
 	writeStorageBlockData(t, tds, 5, []storageData{
 		{
@@ -519,7 +519,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 			block3Val,
 			emptyVal,
 		},
-	}, true)
+	})
 
 	block2 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -672,7 +672,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 			emptyVal,
 			block3Val,
 		},
-	}, true)
+	})
 
 	writeStorageBlockData(t, tds, 5, []storageData{
 		{
@@ -703,7 +703,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 			block3Val,
 			stateVal,
 		},
-	}, true)
+	})
 
 	block2 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -875,7 +875,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 			&emptyValAcc,
 			block3ValAcc,
 		},
-	}, true)
+	})
 
 	writeBlockData(t, tds, 5, []accData{
 		{
@@ -893,7 +893,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 			block3ValAcc,
 			nil,
 		},
-	}, true)
+	})
 
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
@@ -1033,7 +1033,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 			&emptyValAcc,
 			addr1Old,
 		},
-	}, true)
+	})
 
 	for i := 2; i < 1100; i++ {
 		addr1New = addr1Old.SelfCopy()
@@ -1058,7 +1058,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 				addr3Old,
 				addr3New,
 			},
-		}, true)
+		})
 		addr1Old = addr1New.SelfCopy()
 		addr2Old = addr2New.SelfCopy()
 		addr3Old = addr3New.SelfCopy()
@@ -1087,7 +1087,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 			addr1Old,
 			addr1New,
 		},
-	}, true)
+	})
 
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
@@ -1172,7 +1172,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 			emptyVal,
 			val,
 		},
-	}, true)
+	})
 
 	prev := val
 	for i := 2; i < 1100; i++ {
@@ -1199,7 +1199,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 				prev,
 				val,
 			},
-		}, true)
+		})
 		prev = val
 	}
 
@@ -1227,7 +1227,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 			prev,
 			val,
 		},
-	}, true)
+	})
 
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
@@ -1276,7 +1276,7 @@ type accData struct {
 	newVal *accounts.Account
 }
 
-func writeBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []accData, writeHistory bool) {
+func writeBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []accData) {
 	tds.SetBlockNr(blockNum)
 	var blockWriter = tds.PlainStateWriter()
 
@@ -1295,10 +1295,8 @@ func writeBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []accD
 	if err := blockWriter.WriteChangeSets(); err != nil {
 		t.Fatal(err)
 	}
-	if writeHistory {
-		if err := blockWriter.WriteHistory(); err != nil {
-			t.Fatal(err)
-		}
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1310,7 +1308,7 @@ type storageData struct {
 	newVal *uint256.Int
 }
 
-func writeStorageBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []storageData, writeHistory bool) {
+func writeStorageBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []storageData) {
 	tds.SetBlockNr(blockNum)
 	var blockWriter = tds.PlainStateWriter()
 
@@ -1328,10 +1326,8 @@ func writeStorageBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data
 	if err := blockWriter.WriteChangeSets(); err != nil {
 		t.Fatal(err)
 	}
-	if writeHistory {
-		if err := blockWriter.WriteHistory(); err != nil {
-			t.Fatal(err)
-		}
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
 	}
 }
 func assertChangesEquals(t *testing.T, changesObtained, changesExpected *changeset.ChangeSet) {
