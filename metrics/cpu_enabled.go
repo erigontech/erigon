@@ -28,5 +28,8 @@ func ReadCPUStats(p *process.Process, stats *CPUStats) {
 		// requesting all cpu times will always return an array with only one time stats entry
 		stats.GlobalTime = int64((m.User + m.Nice + m.System) * cpu.ClocksPerSec)
 		stats.GlobalWait = int64((m.Iowait) * cpu.ClocksPerSec)
+	if len(timeStats) == 0 {
+		log.Error("Empty cpu stats")
+		return
 	}
 }
