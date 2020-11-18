@@ -359,10 +359,3 @@ func findInHistory(hK, hV []byte, timestamp uint64, csWalker changeset.Walker2) 
 	}
 	return nil, false, nil
 }
-
-type historyCursor interface {
-	Seek() (key1, key2, key3, val []byte, err error)
-	Next() (key1, key2, key3, val []byte, err error)
-}
-
-var ErrNotInHistory = errors.New("not in history")
