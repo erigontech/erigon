@@ -585,7 +585,16 @@ type SnapshotKV2 struct {
 }
 
 func (s *SnapshotKV2) View(ctx context.Context, f func(tx Tx) error) error {
-	panic("implement me")
+	dbTx,err:=s.db.Begin(ctx, nil, RO)
+	if err!=nil {
+		return err
+	}
+	defer dbTx.Rollback()
+	return f(&sn2TX{
+		dbTX: dbTx,
+		snapshots: s.snapshots,
+		snTX: map[string]Tx{},
+	})
 }
 
 func (s *SnapshotKV2) Update(ctx context.Context, f func(tx Tx) error) error {
@@ -667,11 +676,32 @@ func (s *sn2TX) getTX(bucket string) (Tx,error)  {
 	if !ok {
 		return nil, fmt.Errorf("%s  %w",bucket, ErrUnavailableSnapshot)
 	}
-	return sn.snapshot.Begin(context.TODO(), nil, RO)
+	var err error
+	tx,err= sn.snapshot.Begin(context.TODO(), nil, RO)
+	if err!=nil {
+		return nil, err
+	}
+
+	s.snTX[bucket]=tx
+	return tx, nil
 }
 
 func (s *sn2TX) HasOne(bucket string, key []byte) (bool, error) {
-	panic("implement me")
+	v,err:=s.dbTX.HasOne(bucket, key)
+	if err!=nil {
+		return false, err
+	}
+	if !v {
+		snTx,err:=s.getTX(bucket)
+		if err!=nil && !errors.Is(err, ErrUnavailableSnapshot) {
+			return false, err
+		}
+		if snTx!=nil {
+			s.snTX[bucket]=snTx
+			return s.snTX[bucket].HasOne(bucket, key)
+		}
+	}
+	return v, nil
 }
 
 func (s *sn2TX) Commit(ctx context.Context) error {
@@ -713,12 +743,8 @@ type snCursor2 struct {
 	dbCursor Cursor
 	snCursor Cursor
 
-	lastDBKey   []byte
-	lastSNDBKey []byte
-	lastDBVal   []byte
-	lastSNDBVal []byte
-	keyCmp      int
-
+	cDBEmpty bool
+	lastKey []byte
 }
 
 func (s *snCursor2) Prefix(v []byte) Cursor {
@@ -731,26 +757,29 @@ func (s *snCursor2) Prefetch(v uint) Cursor {
 
 func (s *snCursor2) First() ([]byte, []byte, error) {
 	var err error
-	s.lastSNDBKey, s.lastSNDBVal, err = s.snCursor.First()
+	lastDBKey, lastDBVal, err := s.dbCursor.First()
 	if err != nil {
 		return nil, nil, err
 	}
-	s.lastDBKey, s.lastDBVal, err = s.dbCursor.First()
+	//current returns error on empty bucket
+	if lastDBKey==nil && lastDBVal==nil {
+		s.cDBEmpty=true
+	}
+
+	lastSNDBKey, lastSNDBVal, err := s.snCursor.First()
 	if err != nil {
 		return nil, nil, err
 	}
-	cmp, br := common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
+	cmp, br := common.KeyCmp(lastDBKey, lastSNDBKey)
 	if br {
 		return nil, nil, nil
 	}
 
-	s.keyCmp = cmp
 	if cmp <= 0 {
-		return s.lastDBKey, s.lastDBVal, nil
+		return lastDBKey, lastDBVal, nil
 	}
 
-	return s.lastSNDBKey, s.lastSNDBVal, nil
-
+	return lastSNDBKey, lastSNDBVal, nil
 }
 
 func (s *snCursor2) Seek(seek []byte) ([]byte, []byte, error) {
@@ -763,30 +792,48 @@ func (s *snCursor2) SeekExact(key []byte) ([]byte, []byte, error) {
 
 func (s *snCursor2) Next() ([]byte, []byte, error) {
 	var err error
-	if s.keyCmp >= 0 {
-		s.lastSNDBKey, s.lastSNDBVal, err = s.snCursor.Next()
-	}
-	if err != nil {
+	//current returns error on empty bucket
+	lastDBKey, lastDBVal, err := s.dbCursor.Current()
+	if err != nil && s.cDBEmpty==false{
 		return nil, nil, err
 	}
-	if s.keyCmp <= 0 {
-		s.lastDBKey, s.lastDBVal, err = s.dbCursor.Next()
-	}
+
+	lastSNDBKey, lastSNDBVal, err :=s.snCursor.Current()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	cmp, br := common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
+	cmp, br:=common.KeyCmp(lastDBKey, lastSNDBKey)
 	if br {
 		return nil, nil, nil
 	}
 
-	s.keyCmp = cmp
-	if cmp <= 0 {
-		return s.lastDBKey, s.lastDBVal, nil
+	if cmp >= 0 {
+		lastSNDBKey, lastSNDBVal, err = s.snCursor.Next()
+	}
+	if err != nil {
+		return nil, nil, err
 	}
 
-	return s.lastSNDBKey, s.lastSNDBVal, nil}
+	//current receives last acceptable key. If it is empty
+	if cmp <= 0 || lastSNDBKey==nil {
+		lastDBKey, lastDBVal, err = s.dbCursor.Next()
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cmp,br=common.KeyCmp(lastDBKey, lastSNDBKey)
+	if br {
+		return nil, nil, nil
+	}
+	if cmp <=0 {
+		s.lastKey=common.CopyBytes(lastDBKey)
+		return lastDBKey, lastDBVal, nil
+	}
+	s.lastKey=common.CopyBytes(lastSNDBKey)
+	return lastSNDBKey, lastSNDBVal, nil
+}
 
 func (s *snCursor2) Prev() ([]byte, []byte, error) {
 	panic("implement me")
@@ -794,25 +841,25 @@ func (s *snCursor2) Prev() ([]byte, []byte, error) {
 
 func (s *snCursor2) Last() ([]byte, []byte, error) {
 	var err error
-	s.lastSNDBKey, s.lastSNDBVal, err = s.snCursor.Last()
+	lastSNDBKey, lastSNDBVal, err := s.snCursor.Last()
 	if err != nil {
 		return nil, nil, err
 	}
-	s.lastDBKey, s.lastDBVal, err = s.dbCursor.Last()
+	lastDBKey, lastDBVal, err := s.dbCursor.Last()
 	if err != nil {
 		return nil, nil, err
 	}
-	cmp, br := common.KeyCmp(s.lastDBKey, s.lastSNDBKey)
+	cmp, br := common.KeyCmp(lastDBKey, lastSNDBKey)
 	if br {
 		return nil, nil, nil
 	}
 
-	s.keyCmp = cmp
+
 	if cmp >= 0 {
-		return s.lastDBKey, s.lastDBVal, nil
+		return lastDBKey, lastDBVal, nil
 	}
 
-	return s.lastSNDBKey, s.lastSNDBVal, nil
+	return lastSNDBKey, lastSNDBVal, nil
 }
 
 func (s *snCursor2) Current() ([]byte, []byte, error) {
