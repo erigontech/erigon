@@ -534,22 +534,17 @@ func (s *snapshotCursor) Last() ([]byte, []byte, error) {
 	return s.lastSNDBKey, s.lastSNDBVal, nil
 }
 
-
-
 func NewSnapshot2KV() snapshotOpts2 {
-	return snapshotOpts2{
-	}
+	return snapshotOpts2{}
 }
 
-
-
 type snapshotData struct {
-	buckets []string
+	buckets  []string
 	snapshot KV
 }
 type snapshotOpts2 struct {
-	db         KV
-	snapshots   []snapshotData
+	db        KV
+	snapshots []snapshotData
 }
 
 func (opts snapshotOpts2) SnapshotDB(buckets []string, db KV) snapshotOpts2 {
@@ -565,36 +560,34 @@ func (opts snapshotOpts2) DB(db KV) snapshotOpts2 {
 	return opts
 }
 
-
 func (opts snapshotOpts2) MustOpen() KV {
-	snapshots:=make(map[string]snapshotData)
-	for i,v:=range opts.snapshots {
-		for _, bucket:=range v.buckets {
-			snapshots[bucket]=opts.snapshots[i]
+	snapshots := make(map[string]snapshotData)
+	for i, v := range opts.snapshots {
+		for _, bucket := range v.buckets {
+			snapshots[bucket] = opts.snapshots[i]
 		}
 	}
 	return &SnapshotKV2{
 		snapshots: snapshots,
-		db:         opts.db,
+		db:        opts.db,
 	}
 }
 
 type SnapshotKV2 struct {
-	db         KV
-	snapshots   map[string]snapshotData
-
+	db        KV
+	snapshots map[string]snapshotData
 }
 
 func (s *SnapshotKV2) View(ctx context.Context, f func(tx Tx) error) error {
-	dbTx,err:=s.db.Begin(ctx, nil, RO)
-	if err!=nil {
+	dbTx, err := s.db.Begin(ctx, nil, RO)
+	if err != nil {
 		return err
 	}
 	defer dbTx.Rollback()
 	return f(&sn2TX{
-		dbTX: dbTx,
+		dbTX:      dbTx,
 		snapshots: s.snapshots,
-		snTX: map[string]Tx{},
+		snTX:      map[string]Tx{},
 	})
 }
 
@@ -604,20 +597,20 @@ func (s *SnapshotKV2) Update(ctx context.Context, f func(tx Tx) error) error {
 
 func (s *SnapshotKV2) Close() {
 	s.db.Close()
-	for i:=range s.snapshots {
+	for i := range s.snapshots {
 		s.snapshots[i].snapshot.Close()
 	}
 }
 
 func (s *SnapshotKV2) Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, error) {
-	dbTx,err:=s.db.Begin(ctx, parent, flags)
-	if err!=nil {
+	dbTx, err := s.db.Begin(ctx, parent, flags)
+	if err != nil {
 		return nil, err
 	}
 	return &sn2TX{
-		dbTX: dbTx,
+		dbTX:      dbTx,
 		snapshots: s.snapshots,
-		snTX: map[string]Tx{},
+		snTX:      map[string]Tx{},
 	}, nil
 }
 
@@ -626,15 +619,16 @@ func (s *SnapshotKV2) AllBuckets() dbutils.BucketsCfg {
 }
 
 var ErrUnavailableSnapshot = errors.New("unavailable snapshot")
+
 type sn2TX struct {
-	dbTX Tx
+	dbTX      Tx
 	snapshots map[string]snapshotData
-	snTX map[string]Tx
+	snTX      map[string]Tx
 }
 
 func (s *sn2TX) Cursor(bucket string) Cursor {
-	tx,err:=s.getTX(bucket)
-	if err!=nil {
+	tx, err := s.getTX(bucket)
+	if err != nil {
 		panic(err.Error())
 	}
 	return &snCursor2{
@@ -652,53 +646,53 @@ func (s *sn2TX) CursorDupFixed(bucket string) CursorDupFixed {
 }
 
 func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {
-	v,err:=s.dbTX.GetOne(bucket, key)
-	if err!=nil {
+	v, err := s.dbTX.GetOne(bucket, key)
+	if err != nil {
 		return nil, err
 	}
-	if len(v)==0 {
-		snTx,err:=s.getTX(bucket)
-		if err!=nil && !errors.Is(err, ErrUnavailableSnapshot) {
+	if len(v) == 0 {
+		snTx, err := s.getTX(bucket)
+		if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 			return nil, err
 		}
-		if snTx!=nil {
-			s.snTX[bucket]=snTx
+		if snTx != nil {
+			s.snTX[bucket] = snTx
 			return s.snTX[bucket].GetOne(bucket, key)
 		}
 	}
 	return v, nil
 }
-func (s *sn2TX) getTX(bucket string) (Tx,error)  {
-	tx,ok:= s.snTX[bucket]
+func (s *sn2TX) getTX(bucket string) (Tx, error) {
+	tx, ok := s.snTX[bucket]
 	if ok {
 		return tx, nil
 	}
-	sn,ok:= s.snapshots[bucket]
+	sn, ok := s.snapshots[bucket]
 	if !ok {
-		return nil, fmt.Errorf("%s  %w",bucket, ErrUnavailableSnapshot)
+		return nil, fmt.Errorf("%s  %w", bucket, ErrUnavailableSnapshot)
 	}
 	var err error
-	tx,err= sn.snapshot.Begin(context.TODO(), nil, RO)
-	if err!=nil {
+	tx, err = sn.snapshot.Begin(context.TODO(), nil, RO)
+	if err != nil {
 		return nil, err
 	}
 
-	s.snTX[bucket]=tx
+	s.snTX[bucket] = tx
 	return tx, nil
 }
 
 func (s *sn2TX) HasOne(bucket string, key []byte) (bool, error) {
-	v,err:=s.dbTX.HasOne(bucket, key)
-	if err!=nil {
+	v, err := s.dbTX.HasOne(bucket, key)
+	if err != nil {
 		return false, err
 	}
 	if !v {
-		snTx,err:=s.getTX(bucket)
-		if err!=nil && !errors.Is(err, ErrUnavailableSnapshot) {
+		snTx, err := s.getTX(bucket)
+		if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 			return false, err
 		}
-		if snTx!=nil {
-			s.snTX[bucket]=snTx
+		if snTx != nil {
+			s.snTX[bucket] = snTx
 			return s.snTX[bucket].HasOne(bucket, key)
 		}
 	}
@@ -706,14 +700,14 @@ func (s *sn2TX) HasOne(bucket string, key []byte) (bool, error) {
 }
 
 func (s *sn2TX) Commit(ctx context.Context) error {
-	for i:=range s.snTX {
+	for i := range s.snTX {
 		defer s.snTX[i].Rollback()
 	}
 	return s.dbTX.Commit(ctx)
 }
 
 func (s *sn2TX) Rollback() {
-	for i:=range s.snTX {
+	for i := range s.snTX {
 		defer s.snTX[i].Rollback()
 	}
 	s.dbTX.Rollback()
@@ -741,12 +735,13 @@ func (s *sn2TX) Sequence(bucket string, amount uint64) (uint64, error) {
 }
 
 var DeletedValue = []byte("del")
+
 type snCursor2 struct {
 	dbCursor Cursor
 	snCursor Cursor
 
 	cDBEmpty bool
-	lastKey []byte
+	lastKey  []byte
 }
 
 func (s *snCursor2) Prefix(v []byte) Cursor {
@@ -767,8 +762,8 @@ func (s *snCursor2) First() ([]byte, []byte, error) {
 	}
 
 	//current returns error on empty bucket
-	if lastDBKey==nil && lastDBVal==nil {
-		s.cDBEmpty=true
+	if lastDBKey == nil && lastDBVal == nil {
+		s.cDBEmpty = true
 	}
 
 	lastSNDBKey, lastSNDBVal, err := s.snCursor.First()
@@ -781,10 +776,10 @@ func (s *snCursor2) First() ([]byte, []byte, error) {
 	}
 
 	if cmp <= 0 {
-		s.lastKey=common.CopyBytes(lastDBKey)
+		s.lastKey = common.CopyBytes(lastDBKey)
 		return lastDBKey, lastDBVal, nil
 	}
-	s.lastKey=common.CopyBytes(lastSNDBKey)
+	s.lastKey = common.CopyBytes(lastSNDBKey)
 	return lastSNDBKey, lastSNDBVal, nil
 }
 
@@ -807,39 +802,39 @@ func (s *snCursor2) Next() ([]byte, []byte, error) {
 	var err error
 	//current returns error on empty bucket
 	lastDBKey, lastDBVal, err := s.dbCursor.Current()
-	if err != nil && s.cDBEmpty==false {
+	if err != nil && s.cDBEmpty == false {
 		return nil, nil, err
 	}
 	//check that it's not empty bucket cursor
-	if len(lastDBKey)==0 && lastDBVal==nil && s.cDBEmpty {
+	if len(lastDBKey) == 0 && lastDBVal == nil && s.cDBEmpty {
 		lastDBKey, lastDBVal, err = s.dbCursor.Next()
 	}
 
-	if cmp,_:= common.KeyCmp(s.lastKey, lastDBKey); cmp > 0 && len(s.lastKey)>0 {
+	if cmp, _ := common.KeyCmp(s.lastKey, lastDBKey); cmp > 0 && len(s.lastKey) > 0 {
 		lastDBKey, lastDBVal, err = s.dbCursor.Next()
-		if err != nil && s.cDBEmpty==false{
+		if err != nil && s.cDBEmpty == false {
 			return nil, nil, err
 		}
 	}
 
-	lastSNDBKey, lastSNDBVal, err :=s.snCursor.Current()
+	lastSNDBKey, lastSNDBVal, err := s.snCursor.Current()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if cmp,_:= common.KeyCmp(s.lastKey, lastSNDBKey); cmp > 0 && len(s.lastKey)>0{
-		lastSNDBKey, lastSNDBVal, err =s.snCursor.Next()
+	if cmp, _ := common.KeyCmp(s.lastKey, lastSNDBKey); cmp > 0 && len(s.lastKey) > 0 {
+		lastSNDBKey, lastSNDBVal, err = s.snCursor.Next()
 		if err != nil {
 			return nil, nil, err
 		}
 	}
 
-	cmp, br:=common.KeyCmp(lastDBKey, lastSNDBKey)
+	cmp, br := common.KeyCmp(lastDBKey, lastSNDBKey)
 	if br {
 		return nil, nil, nil
 	}
 
-	if cmp >= 0  {
+	if cmp >= 0 {
 		lastSNDBKey, lastSNDBVal, err = s.snCursor.Next()
 	}
 	if err != nil {
@@ -854,19 +849,19 @@ func (s *snCursor2) Next() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	cmp,br=common.KeyCmp(lastDBKey, lastSNDBKey)
+	cmp, br = common.KeyCmp(lastDBKey, lastSNDBKey)
 	if br {
 		return nil, nil, nil
 	}
-	if cmp ==0 && bytes.Equal(lastDBVal, DeletedValue) {
+	if cmp == 0 && bytes.Equal(lastDBVal, DeletedValue) {
 		//@todo think about better solution
 		return s.Next()
 	}
-	if cmp <=0 {
-		s.lastKey=common.CopyBytes(lastDBKey)
+	if cmp <= 0 {
+		s.lastKey = common.CopyBytes(lastDBKey)
 		return lastDBKey, lastDBVal, nil
 	}
-	s.lastKey=common.CopyBytes(lastSNDBKey)
+	s.lastKey = common.CopyBytes(lastSNDBKey)
 	return lastSNDBKey, lastSNDBVal, nil
 }
 
@@ -889,7 +884,6 @@ func (s *snCursor2) Last() ([]byte, []byte, error) {
 		return nil, nil, nil
 	}
 
-
 	if cmp >= 0 {
 		return lastDBKey, lastDBVal, nil
 	}
@@ -898,9 +892,9 @@ func (s *snCursor2) Last() ([]byte, []byte, error) {
 }
 
 func (s *snCursor2) Current() ([]byte, []byte, error) {
-	k,v,err:=s.dbCursor.Current()
+	k, v, err := s.dbCursor.Current()
 	if bytes.Equal(k, s.lastKey) {
-		return k,v,err
+		return k, v, err
 	}
 	return s.snCursor.Current()
 }
@@ -910,7 +904,7 @@ func (s *snCursor2) Put(k, v []byte) error {
 }
 
 func (s *snCursor2) Append(k []byte, v []byte) error {
-	return s.Append(k,v)
+	return s.Append(k, v)
 }
 
 func (s *snCursor2) Delete(k, v []byte) error {

@@ -270,66 +270,63 @@ func TestSnapshotWritableTxAndGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := tx.Cursor(dbutils.HeaderPrefix)
-	k, v, err:=c.First()
-	if err!=nil {
+	k, v, err := c.First()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.HeaderKey(1, common.Hash{1})) {
+	if !bytes.Equal(k, dbutils.HeaderKey(1, common.Hash{1})) {
 		t.Fatal(k, v)
 	}
 
 	k, v, err = c.Next()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.HeaderKey(2, common.Hash{2})) {
+	if !bytes.Equal(k, dbutils.HeaderKey(2, common.Hash{2})) {
 		t.Fatal()
 	}
 
 	k, v, err = c.Next()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.HeaderKey(4, common.Hash{4})) {
+	if !bytes.Equal(k, dbutils.HeaderKey(4, common.Hash{4})) {
 		t.Fatal()
 	}
 	k, v, err = c.Next()
-	if k!=nil||v!=nil || err!=nil {
+	if k != nil || v != nil || err != nil {
 		t.Fatal(k, v, err)
 	}
 
 	c = tx.Cursor(dbutils.BlockBodyPrefix)
 	k, v, err = c.First()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.BlockBodyKey(1, common.Hash{1})) {
+	if !bytes.Equal(k, dbutils.BlockBodyKey(1, common.Hash{1})) {
 		t.Fatal(k, v)
 	}
 
 	k, v, err = c.Next()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.BlockBodyKey(2, common.Hash{2})) {
+	if !bytes.Equal(k, dbutils.BlockBodyKey(2, common.Hash{2})) {
 		t.Fatal()
 	}
 
 	k, v, err = c.Next()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.BlockBodyKey(4, common.Hash{4})) {
+	if !bytes.Equal(k, dbutils.BlockBodyKey(4, common.Hash{4})) {
 		t.Fatal()
 	}
 	k, v, err = c.Next()
-	if k!=nil || v!=nil || err!=nil {
+	if k != nil || v != nil || err != nil {
 		t.Fatal(k, v, err)
 	}
 }
-
-
-
 
 func TestSnapshot2Get(t *testing.T) {
 	sn1 := NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
@@ -404,7 +401,7 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	kv:=NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.HeaderPrefix}, sn1).
+	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.HeaderPrefix}, sn1).
 		SnapshotDB([]string{dbutils.BlockBodyPrefix}, sn2).MustOpen()
 
 	tx, err := kv.Begin(context.Background(), nil, RO)
@@ -551,7 +548,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 
 	mainDB := NewLMDB().InMem().MustOpen()
 
-	kv:=NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.HeaderPrefix}, sn1).
+	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.HeaderPrefix}, sn1).
 		SnapshotDB([]string{dbutils.BlockBodyPrefix}, sn2).MustOpen()
 	tx, err := kv.Begin(context.Background(), nil, RW)
 	if err != nil {
@@ -591,60 +588,60 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := tx.Cursor(dbutils.HeaderPrefix)
-	k, v, err:=c.First()
-	if err!=nil {
+	k, v, err := c.First()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.HeaderKey(1, common.Hash{1})) {
+	if !bytes.Equal(k, dbutils.HeaderKey(1, common.Hash{1})) {
 		t.Fatal(k, v)
 	}
 
 	k, v, err = c.Next()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.HeaderKey(2, common.Hash{2})) {
+	if !bytes.Equal(k, dbutils.HeaderKey(2, common.Hash{2})) {
 		t.Fatal(common.Bytes2Hex(k))
 	}
 
 	k, v, err = c.Next()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.HeaderKey(4, common.Hash{4})) {
+	if !bytes.Equal(k, dbutils.HeaderKey(4, common.Hash{4})) {
 		t.Fatal("invalid key", common.Bytes2Hex(k))
 	}
 	k, v, err = c.Next()
-	if k!=nil || v!=nil || err!=nil {
+	if k != nil || v != nil || err != nil {
 		t.Fatal(k, v, err)
 	}
 
 	c = tx.Cursor(dbutils.BlockBodyPrefix)
 	k, v, err = c.First()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.BlockBodyKey(1, common.Hash{1})) {
+	if !bytes.Equal(k, dbutils.BlockBodyKey(1, common.Hash{1})) {
 		t.Fatal(k, v)
 	}
 
 	k, v, err = c.Next()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.BlockBodyKey(2, common.Hash{2})) {
+	if !bytes.Equal(k, dbutils.BlockBodyKey(2, common.Hash{2})) {
 		t.Fatal()
 	}
 
 	k, v, err = c.Next()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(k,dbutils.BlockBodyKey(4, common.Hash{4})) {
+	if !bytes.Equal(k, dbutils.BlockBodyKey(4, common.Hash{4})) {
 		t.Fatal()
 	}
 	k, v, err = c.Next()
-	if k!=nil || v!=nil || err!=nil {
+	if k != nil || v != nil || err != nil {
 		t.Fatal(k, v, err)
 	}
 }
@@ -656,17 +653,17 @@ func genStateData(data []kvData) (KV, error) {
 		}
 	}).InMem().MustOpen()
 
-	err:=snapshot.Update(context.Background(), func(tx Tx) error {
-		c:=tx.Cursor(dbutils.PlainStateBucket)
-		for i:=range data {
-			innerErr:=c.Put(data[i].K, data[i].V)
-			if innerErr!=nil {
+	err := snapshot.Update(context.Background(), func(tx Tx) error {
+		c := tx.Cursor(dbutils.PlainStateBucket)
+		for i := range data {
+			innerErr := c.Put(data[i].K, data[i].V)
+			if innerErr != nil {
 				return innerErr
 			}
 		}
 		return nil
 	})
-	if err!=nil {
+	if err != nil {
 		return nil, err
 	}
 	return snapshot, nil
@@ -678,22 +675,22 @@ type kvData struct {
 }
 
 func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
-		data:=[]kvData{}
-		for i:=1;i<3;i++ {
-			for j:=1; j<3; j++ {
-				data = append(data, kvData{
-					K:   dbutils.PlainGenerateCompositeStorageKey(common.Address{uint8(i)*2}, 1, common.Hash{uint8(j)*2}),
-					V: []byte{uint8(i)*2, uint8(j)*2},
-				})
-			}
+	data := []kvData{}
+	for i := 1; i < 3; i++ {
+		for j := 1; j < 3; j++ {
+			data = append(data, kvData{
+				K: dbutils.PlainGenerateCompositeStorageKey(common.Address{uint8(i) * 2}, 1, common.Hash{uint8(j) * 2}),
+				V: []byte{uint8(i) * 2, uint8(j) * 2},
+			})
 		}
-	snapshotDB, err:=genStateData(data)
-	if err!=nil {
+	}
+	snapshotDB, err := genStateData(data)
+	if err != nil {
 		t.Fatal(err)
 	}
 	mainDB := NewLMDB().InMem().MustOpen()
 
-	kv:=NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		MustOpen()
 
 	tx, err := kv.Begin(context.Background(), nil, RW)
@@ -701,68 +698,67 @@ func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-
-	c:=tx.Cursor(dbutils.PlainStateBucket)
-	replaceKey:=dbutils.PlainGenerateCompositeStorageKey(common.Address{2}, 1, common.Hash{4})
-	replaceValue:=[]byte{2,4,4}
-	newKey:=dbutils.PlainGenerateCompositeStorageKey(common.Address{2}, 1, common.Hash{5})
-	newValue:=[]byte{2,5}
+	c := tx.Cursor(dbutils.PlainStateBucket)
+	replaceKey := dbutils.PlainGenerateCompositeStorageKey(common.Address{2}, 1, common.Hash{4})
+	replaceValue := []byte{2, 4, 4}
+	newKey := dbutils.PlainGenerateCompositeStorageKey(common.Address{2}, 1, common.Hash{5})
+	newValue := []byte{2, 5}
 
 	//get first correct k&v
-	k,v,err:=c.First()
-	if err!=nil {
+	k, v, err := c.First()
+	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k,v, data[0].K, data[0].V)
+	checkKV(t, k, v, data[0].K, data[0].V)
 	if !(bytes.Equal(k, data[0].K) || bytes.Equal(v, data[0].V)) {
-		t.Fatal(k,data[0].K, v, data[0].V)
+		t.Fatal(k, data[0].K, v, data[0].V)
 	}
-	err=c.Put(replaceKey, replaceValue)
-	if err!=nil {
+	err = c.Put(replaceKey, replaceValue)
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	// check the key that we've replaced value
-	k,v,err=c.Next()
-	if err!=nil {
+	k, v, err = c.Next()
+	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k,v, replaceKey, replaceValue)
+	checkKV(t, k, v, replaceKey, replaceValue)
 
-	err=c.Put(newKey,newValue)
-	if err!=nil {
+	err = c.Put(newKey, newValue)
+	if err != nil {
 		t.Fatal(err)
 	}
 	// check the key that we've inserted
-	k,v,err=c.Next()
-	if err!=nil {
+	k, v, err = c.Next()
+	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k,v, newKey, newValue)
+	checkKV(t, k, v, newKey, newValue)
 
 	//check the rest keys
-	k,v,err=c.Next()
-	if err!=nil {
+	k, v, err = c.Next()
+	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k,v, data[2].K, data[2].V)
+	checkKV(t, k, v, data[2].K, data[2].V)
 }
 
 func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
-	data:=[]kvData{
-		{K:[]byte{1}, V:[]byte{1}},
-		{K:[]byte{2}, V:[]byte{2}},
-		{K:[]byte{3}, V:[]byte{3}},
-		{K:[]byte{4}, V:[]byte{4}},
-		{K:[]byte{5}, V:[]byte{5}},
+	data := []kvData{
+		{K: []byte{1}, V: []byte{1}},
+		{K: []byte{2}, V: []byte{2}},
+		{K: []byte{3}, V: []byte{3}},
+		{K: []byte{4}, V: []byte{4}},
+		{K: []byte{5}, V: []byte{5}},
 	}
-	snapshotDB, err:=genStateData(data)
-	if err!=nil {
+	snapshotDB, err := genStateData(data)
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	mainDB := NewLMDB().InMem().MustOpen()
-	kv:=NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		MustOpen()
 
 	tx, err := kv.Begin(context.Background(), nil, RW)
@@ -770,149 +766,147 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-
-	c:=tx.Cursor(dbutils.PlainStateBucket)
-	deleteCursor:=tx.Cursor(dbutils.PlainStateBucket)
+	c := tx.Cursor(dbutils.PlainStateBucket)
+	deleteCursor := tx.Cursor(dbutils.PlainStateBucket)
 
 	//get first correct k&v
-	k,v,err:=c.First()
-	if err!=nil {
+	k, v, err := c.First()
+	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k,v, data[0].K, data[0].V)
+	checkKV(t, k, v, data[0].K, data[0].V)
 
 	//remove value
-	err=deleteCursor.Delete(data[1].K, nil)
-	if err!=nil {
+	err = deleteCursor.Delete(data[1].K, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	err=deleteCursor.Delete(data[2].K, nil)
-	if err!=nil {
+	err = deleteCursor.Delete(data[2].K, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	err=deleteCursor.Delete(data[4].K, nil)
-	if err!=nil {
+	err = deleteCursor.Delete(data[4].K, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	// check the key that we've replaced value
-	k,v,err=c.Next()
-	if err!=nil {
+	k, v, err = c.Next()
+	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k,v, data[3].K, data[3].V)
+	checkKV(t, k, v, data[3].K, data[3].V)
 
-	k,v,err=c.Next()
-	if err!=nil {
+	k, v, err = c.Next()
+	if err != nil {
 		t.Fatal(err)
 	}
 	checkKV(t, k, v, nil, nil)
 }
 
 func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
-	snapshotData:=[]kvData{
+	snapshotData := []kvData{
 		{
-			K: []byte{0,1},
+			K: []byte{0, 1},
 			V: []byte{1},
 		},
 		{
-			K: []byte{0,4},
+			K: []byte{0, 4},
 			V: []byte{4},
 		},
 	}
-	replacedValue:=[]byte{1,1}
-	mainData:=[]kvData{
+	replacedValue := []byte{1, 1}
+	mainData := []kvData{
 		{
-			K: []byte{0,1},
+			K: []byte{0, 1},
 			V: replacedValue,
 		},
 		{
-			K: []byte{0,2},
+			K: []byte{0, 2},
 			V: []byte{2},
 		},
 		{
-			K: []byte{0,3},
+			K: []byte{0, 3},
 			V: []byte{3},
 		},
 	}
-	snapshotDB, err:=genStateData(snapshotData)
-	if err!=nil {
+	snapshotDB, err := genStateData(snapshotData)
+	if err != nil {
 		t.Fatal(err)
 	}
-	mainDB, err:=genStateData(mainData)
+	mainDB, err := genStateData(mainData)
 
-	kv:=NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		MustOpen()
-
 
 	tx, err := kv.Begin(context.Background(), nil, RW)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	c:=tx.Cursor(dbutils.PlainStateBucket)
+	c := tx.Cursor(dbutils.PlainStateBucket)
 	//get first correct k&v
-	k,v,err:=c.First()
-	if err!=nil {
+	k, v, err := c.First()
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	checkKV(t, k,v, mainData[0].K, mainData[0].V)
+	checkKV(t, k, v, mainData[0].K, mainData[0].V)
 
-	k,v,err=c.Next()
-	if err!=nil {
+	k, v, err = c.Next()
+	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k,v, mainData[1].K,  mainData[1].V)
+	checkKV(t, k, v, mainData[1].K, mainData[1].V)
 
-	k,v,err=c.Next()
-	if err!=nil {
+	k, v, err = c.Next()
+	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k,v, mainData[2].K,  mainData[2].V)
+	checkKV(t, k, v, mainData[2].K, mainData[2].V)
 
-	k,v,err=c.Next()
-	if err!=nil {
+	k, v, err = c.Next()
+	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k,v, snapshotData[1].K,  snapshotData[1].V)
+	checkKV(t, k, v, snapshotData[1].K, snapshotData[1].V)
 
-	k, v, err =c.Next()
+	k, v, err = c.Next()
 	checkKV(t, k, v, nil, nil)
 }
 
-func printBucket(kv KV, bucket string)   {
+func printBucket(kv KV, bucket string) {
 	fmt.Println("+Print bucket", bucket)
 	defer func() {
 		fmt.Println("-Print bucket", bucket)
 	}()
 	kv.View(context.Background(), func(tx Tx) error {
-		c:=tx.Cursor(bucket)
-		k,v,err:=c.First()
-		if err!=nil {
-			panic(fmt.Errorf("First err: %w",err))
+		c := tx.Cursor(bucket)
+		k, v, err := c.First()
+		if err != nil {
+			panic(fmt.Errorf("First err: %w", err))
 		}
-		for k!=nil&&v!=nil {
-			fmt.Println("k:=",common.Bytes2Hex(k), "v:=",common.Bytes2Hex(v))
-			k,v,err = c.Next()
-			if err!=nil {
-				panic(fmt.Errorf("Next err: %w",err))
+		for k != nil && v != nil {
+			fmt.Println("k:=", common.Bytes2Hex(k), "v:=", common.Bytes2Hex(v))
+			k, v, err = c.Next()
+			if err != nil {
+				panic(fmt.Errorf("Next err: %w", err))
 			}
 		}
 		return nil
 	})
 }
 
-func checkKV(t *testing.T,key, val, expectedKey, expectedVal []byte) {
+func checkKV(t *testing.T, key, val, expectedKey, expectedVal []byte) {
 	t.Helper()
 	if !bytes.Equal(key, expectedKey) {
-		t.Log("+",common.Bytes2Hex(expectedKey))
-		t.Log("-",common.Bytes2Hex(key))
+		t.Log("+", common.Bytes2Hex(expectedKey))
+		t.Log("-", common.Bytes2Hex(key))
 		t.Fatal("wrong key")
 	}
 	if !bytes.Equal(val, expectedVal) {
-		t.Log("+",common.Bytes2Hex(expectedVal))
-		t.Log("-",common.Bytes2Hex(val))
+		t.Log("+", common.Bytes2Hex(expectedVal))
+		t.Log("-", common.Bytes2Hex(val))
 		t.Fatal("wrong value for key", common.Bytes2Hex(key))
 	}
 }
