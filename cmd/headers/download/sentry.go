@@ -33,7 +33,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
+	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
@@ -426,7 +428,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func Sentry(natSetting string, port int, sentryAddr string, coreAddr string) error {
+func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, staticPeers []string, discovery bool, netRestrict string) error {
 	ctx := rootContext()
 	// STARTING GRPC SERVER
 	log.Info("Starting Sentry P2P server", "on", sentryAddr, "connecting to core", coreAddr)
@@ -506,10 +508,25 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string) err
 	if err != nil {
 		return err
 	}
+
+	enodes := make([]*enode.Node, len(staticPeers))
+	for i, e := range staticPeers {
+		enodes[i] = enode.MustParse(e)
+	}
+
+	server.StaticNodes = enodes
+	server.NoDiscovery = discovery
+
+	if netRestrict != "" {
+		server.NetRestrict = new(netutil.Netlist)
+		server.NetRestrict.Add(netRestrict)
+	}
+
 	// Add protocol
 	if err = server.Start(); err != nil {
 		return fmt.Errorf("could not start server: %w", err)
 	}
+
 	<-ctx.Done()
 	return nil
 }
