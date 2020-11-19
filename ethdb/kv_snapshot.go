@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -739,6 +740,7 @@ func (s *sn2TX) Sequence(bucket string, amount uint64) (uint64, error) {
 	panic("implement me")
 }
 
+var DeletedValue = []byte("del")
 type snCursor2 struct {
 	dbCursor Cursor
 	snCursor Cursor
@@ -748,7 +750,9 @@ type snCursor2 struct {
 }
 
 func (s *snCursor2) Prefix(v []byte) Cursor {
-	panic("implement me")
+	s.dbCursor.Prefix(v)
+	s.snCursor.Prefix(v)
+	return s
 }
 
 func (s *snCursor2) Prefetch(v uint) Cursor {
@@ -761,6 +765,7 @@ func (s *snCursor2) First() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+
 	//current returns error on empty bucket
 	if lastDBKey==nil && lastDBVal==nil {
 		s.cDBEmpty=true
@@ -776,9 +781,10 @@ func (s *snCursor2) First() ([]byte, []byte, error) {
 	}
 
 	if cmp <= 0 {
+		s.lastKey=common.CopyBytes(lastDBKey)
 		return lastDBKey, lastDBVal, nil
 	}
-
+	s.lastKey=common.CopyBytes(lastSNDBKey)
 	return lastSNDBKey, lastSNDBVal, nil
 }
 
@@ -787,15 +793,33 @@ func (s *snCursor2) Seek(seek []byte) ([]byte, []byte, error) {
 }
 
 func (s *snCursor2) SeekExact(key []byte) ([]byte, []byte, error) {
-	panic("implement me")
+	k, v, err := s.dbCursor.SeekExact(key)
+	if err != nil {
+		return nil, nil, err
+	}
+	if v == nil {
+		return s.snCursor.SeekExact(key)
+	}
+	return k, v, err
 }
 
 func (s *snCursor2) Next() ([]byte, []byte, error) {
 	var err error
 	//current returns error on empty bucket
 	lastDBKey, lastDBVal, err := s.dbCursor.Current()
-	if err != nil && s.cDBEmpty==false{
+	if err != nil && s.cDBEmpty==false {
 		return nil, nil, err
+	}
+	//check that it's not empty bucket cursor
+	if len(lastDBKey)==0 && lastDBVal==nil && s.cDBEmpty {
+		lastDBKey, lastDBVal, err = s.dbCursor.Next()
+	}
+
+	if cmp,_:= common.KeyCmp(s.lastKey, lastDBKey); cmp > 0 && len(s.lastKey)>0 {
+		lastDBKey, lastDBVal, err = s.dbCursor.Next()
+		if err != nil && s.cDBEmpty==false{
+			return nil, nil, err
+		}
 	}
 
 	lastSNDBKey, lastSNDBVal, err :=s.snCursor.Current()
@@ -803,12 +827,19 @@ func (s *snCursor2) Next() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
+	if cmp,_:= common.KeyCmp(s.lastKey, lastSNDBKey); cmp > 0 && len(s.lastKey)>0{
+		lastSNDBKey, lastSNDBVal, err =s.snCursor.Next()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	cmp, br:=common.KeyCmp(lastDBKey, lastSNDBKey)
 	if br {
 		return nil, nil, nil
 	}
 
-	if cmp >= 0 {
+	if cmp >= 0  {
 		lastSNDBKey, lastSNDBVal, err = s.snCursor.Next()
 	}
 	if err != nil {
@@ -816,7 +847,7 @@ func (s *snCursor2) Next() ([]byte, []byte, error) {
 	}
 
 	//current receives last acceptable key. If it is empty
-	if cmp <= 0 || lastSNDBKey==nil {
+	if cmp <= 0 {
 		lastDBKey, lastDBVal, err = s.dbCursor.Next()
 	}
 	if err != nil {
@@ -826,6 +857,10 @@ func (s *snCursor2) Next() ([]byte, []byte, error) {
 	cmp,br=common.KeyCmp(lastDBKey, lastSNDBKey)
 	if br {
 		return nil, nil, nil
+	}
+	if cmp ==0 && bytes.Equal(lastDBVal, DeletedValue) {
+		//@todo think about better solution
+		return s.Next()
 	}
 	if cmp <=0 {
 		s.lastKey=common.CopyBytes(lastDBKey)
@@ -863,7 +898,11 @@ func (s *snCursor2) Last() ([]byte, []byte, error) {
 }
 
 func (s *snCursor2) Current() ([]byte, []byte, error) {
-	panic("implement me")
+	k,v,err:=s.dbCursor.Current()
+	if bytes.Equal(k, s.lastKey) {
+		return k,v,err
+	}
+	return s.snCursor.Current()
 }
 
 func (s *snCursor2) Put(k, v []byte) error {
@@ -871,11 +910,11 @@ func (s *snCursor2) Put(k, v []byte) error {
 }
 
 func (s *snCursor2) Append(k []byte, v []byte) error {
-	panic("implement me")
+	return s.Append(k,v)
 }
 
 func (s *snCursor2) Delete(k, v []byte) error {
-	panic("implement me")
+	return s.dbCursor.Put(k, DeletedValue)
 }
 
 func (s *snCursor2) DeleteCurrent() error {
@@ -895,5 +934,6 @@ func (s snCursor2) Count() (uint64, error) {
 }
 
 func (s snCursor2) Close() {
-	panic("implement me")
+	s.dbCursor.Close()
+	s.snCursor.Close()
 }
