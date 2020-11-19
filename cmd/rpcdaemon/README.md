@@ -135,6 +135,9 @@ The following table shows the current implementation status of turbo-geth's RPC 
 | eth_getWork                             | -       |                                            |
 | eth_submitWork                          | -       |                                            |
 |                                         |         |                                            |
+| eth_subscribe                           | Limited | Websock Only - newHeads                    |
+| eth_unsubscribe                         | Yes     | Websock Only                               |
+|                                         |         |                                            |
 | debug_accountRange                      | Yes     | Private turbo-geth debug module            |
 | debug_getModifiedAccountsByNumber       | Yes     |                                            |
 | debug_getModifiedAccountsByHash         | Yes     |                                            |
