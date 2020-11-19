@@ -238,7 +238,7 @@ func (rh *ReadHeap) Push(x interface{}) {
 
 func (rh *ReadHeap) Pop() interface{} {
 	rh.end--
-	return rh.items[0]
+	return rh.items[rh.end]
 }
 
 func (wh WriteHeap) Len() int {
@@ -269,7 +269,7 @@ func (wh *WriteHeap) Push(x interface{}) {
 
 func (wh *WriteHeap) Pop() interface{} {
 	wh.start++
-	return wh.items[len(wh.items)-1]
+	return wh.items[wh.start-1]
 }
 
 type StateCache struct {
@@ -770,7 +770,10 @@ func (sc *StateCache) SetCodeDelete(address []byte) {
 }
 
 func (sc *StateCache) TurnWritesToReads() {
+	writeLen := sc.writeQueue.Len() - 1
 	sc.writes.Ascend(func(i btree.Item) bool {
+		cacheItem := i.(CacheItem)
+		cacheItem.SetQueuePos(sc.readQueue.end + writeLen - cacheItem.GetQueuePos())
 		i.(CacheItem).ClearFlags(ModifiedFlag)
 		return true
 	})
