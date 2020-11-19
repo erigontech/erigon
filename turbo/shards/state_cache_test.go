@@ -150,7 +150,7 @@ func TestAccountReads(t *testing.T) {
 }
 
 func TestAccountReadWrites(t *testing.T) {
-	sc := NewStateCache(32, 4, 4)
+	sc := NewStateCache(32, 4, 5)
 	var account1 accounts.Account
 	account1.Balance.SetUint64(1)
 	var addr1 common.Address
@@ -158,6 +158,9 @@ func TestAccountReadWrites(t *testing.T) {
 	sc.SetAccountWrite(addr1.Bytes(), &account1)
 	if _, ok := sc.GetAccount(addr1.Bytes()); !ok {
 		t.Fatalf("Expected to find account with addr1")
+	}
+	if sc.writeQueue.Len() != 1 {
+		t.Fatalf("Write queue is expected to have 1 elements, got: %d", sc.writeQueue.Len())
 	}
 	// Replace the existing value
 	var account11 accounts.Account
@@ -169,6 +172,9 @@ func TestAccountReadWrites(t *testing.T) {
 		if a.Balance.Uint64() != 11 {
 			t.Fatalf("Expected account balance 11, got %d", a.Balance.Uint64())
 		}
+	}
+	if sc.writeQueue.Len() != 1 {
+		t.Fatalf("Write queue is expected to have 1 elements, got: %d", sc.writeQueue.Len())
 	}
 	// Add read and then replace it with the write
 	var account2 accounts.Account
@@ -190,6 +196,9 @@ func TestAccountReadWrites(t *testing.T) {
 			t.Fatalf("Expected account balance 22, got %d", a.Balance.Uint64())
 		}
 	}
+	if sc.writeQueue.Len() != 2 {
+		t.Fatalf("Write queue is expected to have 2 elements, got: %d", sc.writeQueue.Len())
+	}
 	// Check that readQueue is empty
 	if sc.readQueue.Len() != 0 {
 		t.Fatalf("Read queue is expected to be empty")
@@ -204,6 +213,9 @@ func TestAccountReadWrites(t *testing.T) {
 	if _, ok := sc.GetAccount(addr3.Bytes()); ok {
 		t.Fatalf("Expected account addr3 to be deleted")
 	}
+	if sc.writeQueue.Len() != 3 {
+		t.Fatalf("Write queue is expected to have 3 elements, got: %d", sc.writeQueue.Len())
+	}
 	// Deleting read account
 	var account4 accounts.Account
 	account4.Balance.SetUint64(4)
@@ -214,8 +226,67 @@ func TestAccountReadWrites(t *testing.T) {
 	if _, ok := sc.GetAccount(addr4.Bytes()); ok {
 		t.Fatalf("Expected account addr4 to be deleted")
 	}
+	if sc.writeQueue.Len() != 4 {
+		t.Fatalf("Write queue is expected to have 4 elements, got: %d", sc.writeQueue.Len())
+	}
 	// Check that readQueue is empty
 	if sc.readQueue.Len() != 0 {
 		t.Fatalf("Read queue is expected to be empty")
+	}
+	// Deleting account not seen before
+	var addr5 common.Address
+	addr5[0] = 5
+	sc.SetAccountDelete(addr5.Bytes())
+	if _, ok := sc.GetAccount(addr5.Bytes()); ok {
+		t.Fatalf("Expected account addr5 to be deleted")
+	}
+	if sc.writeQueue.Len() != 5 {
+		t.Fatalf("Write queue is expected to have 5 elements, got: %d", sc.writeQueue.Len())
+	}
+}
+
+func TestReplaceAccountReadsWithWrites(t *testing.T) {
+	sc := NewStateCache(32, 2, 4)
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var account accounts.Account
+		account.Balance.SetUint64(uint64(i))
+		sc.SetAccountWrite(addr.Bytes(), &account)
+	}
+	sc.TurnWritesToReads()
+	if sc.writeQueue.Len() != 0 {
+		t.Fatalf("Write queue is expected to be empty, got: %d", sc.writeQueue.Len())
+	}
+	if sc.readQueue.Len() != 4 {
+		t.Fatalf("Read queue is expected to have 4 elements, got: %d", sc.readQueue.Len())
+	}
+	// Do 4 more delets
+	for i := 5; i <= 8; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		sc.SetAccountDelete(addr.Bytes())
+	}
+	if sc.writeQueue.Len() != 4 {
+		t.Fatalf("Write queue is expected to have 4 elements, got: %d", sc.writeQueue.Len())
+	}
+	if sc.readQueue.Len() != 2 {
+		t.Fatalf("Read queue is expected to have 2 elements, got: %d", sc.readQueue.Len())
+	}
+	// Check that the first two address are evicted
+	for i := 1; i <= 2; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		if _, ok := sc.GetAccount(addr.Bytes()); ok {
+			t.Fatalf("Expected not to find address %d", i)
+		}
+	}
+	// Check that the other 6 addresses are there
+	for i := 3; i <= 8; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		if _, ok := sc.GetAccount(addr.Bytes()); !ok {
+			t.Errorf("Expected to find address %d", i)
+		}
 	}
 }

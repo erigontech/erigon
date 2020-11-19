@@ -52,6 +52,8 @@ type CacheItem interface {
 	GetSize() int
 	GetQueuePos() int
 	SetQueuePos(pos int)
+	SetFlags(flags uint16)   // Set specified flags, but leaves other flags alone
+	ClearFlags(flags uint16) // Clear specified flags, but laves other flags alone
 }
 
 func (aci *AccountCacheItem) Less(than btree.Item) bool {
@@ -91,6 +93,14 @@ func (aci *AccountCacheItem) GetQueuePos() int {
 
 func (aci *AccountCacheItem) SetQueuePos(pos int) {
 	aci.queuePos = pos
+}
+
+func (aci *AccountCacheItem) SetFlags(flags uint16) {
+	aci.flags |= flags
+}
+
+func (aci *AccountCacheItem) ClearFlags(flags uint16) {
+	aci.flags &^= flags
 }
 
 func (sci *StorageCacheItem) Less(than btree.Item) bool {
@@ -139,6 +149,14 @@ func (sci *StorageCacheItem) SetQueuePos(pos int) {
 	sci.queuePos = pos
 }
 
+func (sci *StorageCacheItem) SetFlags(flags uint16) {
+	sci.flags |= flags
+}
+
+func (sci *StorageCacheItem) ClearFlags(flags uint16) {
+	sci.flags &^= flags
+}
+
 func (cci *CodeCacheItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
 	case *AccountCacheItem:
@@ -176,6 +194,14 @@ func (cci *CodeCacheItem) GetQueuePos() int {
 
 func (cci *CodeCacheItem) SetQueuePos(pos int) {
 	cci.queuePos = pos
+}
+
+func (cci *CodeCacheItem) SetFlags(flags uint16) {
+	cci.flags |= flags
+}
+
+func (cci *CodeCacheItem) ClearFlags(flags uint16) {
+	cci.flags &^= flags
 }
 
 // Heaps for reads and writes grow in the opposite direction, while residing in the same space
@@ -650,7 +676,7 @@ func (sc *StateCache) SetCodeAbsent(address []byte) {
 	}
 }
 
-func (sc StateCache) SetCodeWrite(address []byte, code []byte) {
+func (sc *StateCache) SetCodeWrite(address []byte, code []byte) {
 	// Check if this is going to be modification of the existing entry
 	var cci CodeCacheItem
 	copy(cci.address[:], address)
@@ -698,7 +724,7 @@ func (sc StateCache) SetCodeWrite(address []byte, code []byte) {
 	heap.Push(&sc.writeQueue, &cci)
 }
 
-func (sc StateCache) SetCodeDelete(address []byte) {
+func (sc *StateCache) SetCodeDelete(address []byte) {
 	// Check if this is going to be modification of the existing entry
 	var cci CodeCacheItem
 	copy(cci.address[:], address)
@@ -741,4 +767,16 @@ func (sc StateCache) SetCodeDelete(address []byte) {
 	// Push new element on the write queue
 	cci.queuePos = sc.writeQueue.Len()
 	heap.Push(&sc.writeQueue, &cci)
+}
+
+func (sc *StateCache) TurnWritesToReads() {
+	sc.writes.Ascend(func(i btree.Item) bool {
+		i.(CacheItem).ClearFlags(ModifiedFlag)
+		return true
+	})
+	// Merge write queue into the read queue
+	copy(sc.readQueue.items[sc.readQueue.end:], sc.writeQueue.items[sc.writeQueue.start:])
+	sc.readQueue.end += len(sc.writeQueue.items) - sc.writeQueue.start
+	sc.writeQueue.start = len(sc.writeQueue.items)
+	heap.Init(&sc.readQueue)
 }
