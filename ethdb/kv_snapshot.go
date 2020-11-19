@@ -32,6 +32,10 @@ func (s *snapshotTX) CursorDupSort(bucket string) CursorDupSort {
 	return s.dbTX.CursorDupSort(bucket)
 }
 
+func (s *snapshotTX) Sequence(bucket string, amount uint64) (uint64, error) {
+	return s.dbTX.Sequence(bucket, amount)
+}
+
 func (s *snapshotTX) CursorDupFixed(bucket string) CursorDupFixed {
 	return s.dbTX.CursorDupFixed(bucket)
 }
@@ -57,6 +61,10 @@ func (v *lazyTx) CursorDupSort(bucket string) CursorDupSort {
 }
 
 func (v *lazyTx) CursorDupFixed(bucket string) CursorDupFixed {
+	panic("implement me")
+}
+
+func (v *lazyTx) Sequence(bucket string, amount uint64) (uint64, error) {
 	panic("implement me")
 }
 
@@ -499,15 +507,15 @@ func (s *snapshotCursor) Append(key []byte, value []byte) error {
 	return s.dbCursor.Append(key, value)
 }
 
-func (s *snapshotCursor) SeekExact(key []byte) ([]byte, error) {
-	v, err := s.dbCursor.SeekExact(key)
+func (s *snapshotCursor) SeekExact(key []byte) ([]byte, []byte, error) {
+	k, v, err := s.dbCursor.SeekExact(key)
 	if err != nil {
-		return nil, err
+		return []byte{}, nil, err
 	}
 	if v == nil {
 		return s.snCursor.SeekExact(key)
 	}
-	return v, err
+	return k, v, err
 }
 
 func (s *snapshotCursor) Last() ([]byte, []byte, error) {

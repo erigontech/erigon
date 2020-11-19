@@ -134,24 +134,19 @@ func NewDumper(db ethdb.Tx, blockNumber uint64) *Dumper {
 	}
 }
 
-func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _ bool, start []byte, maxResults int) (nextKey []byte, err error) {
+func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _ bool, startAddress common.Address, maxResults int) (nextKey []byte, err error) {
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = common.Hash{}
 	var accountList []*DumpAccount
 	var incarnationList []uint64
-	var addrHashList []common.Address
+	var addrList []common.Address
 
 	c.OnRoot(emptyHash) // We do not calculate the root
 
 	var acc accounts.Account
 	numberOfResults := 0
 
-	stateBucket := dbutils.PlainStateBucket
-	if d.hashedState {
-		stateBucket = dbutils.CurrentStateBucket
-	}
-
-	err = WalkAsOf(d.db, stateBucket, dbutils.AccountsHistoryBucket, start, 0, d.blockNumber+1, func(k, v []byte) (bool, error) {
+	if err = WalkAsOfAccounts(d.db, startAddress, d.blockNumber+1, func(k, v []byte) (bool, error) {
 		if maxResults > 0 && numberOfResults >= maxResults {
 			if nextKey == nil {
 				nextKey = make([]byte, len(k))
@@ -176,25 +171,24 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 			Storage:  make(map[string]string),
 		}
 		accountList = append(accountList, &account)
-		addrHashList = append(addrHashList, common.BytesToAddress(k))
+		addrList = append(addrList, common.BytesToAddress(k))
 		incarnationList = append(incarnationList, acc.Incarnation)
 
 		numberOfResults++
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, err
 	}
 
-	for i, addrHash := range addrHashList {
+	for i, addr := range addrList {
 		account := accountList[i]
 		incarnation := incarnationList[i]
-		storagePrefix := dbutils.PlainGenerateStoragePrefix(addrHash[:], incarnation)
+		storagePrefix := dbutils.PlainGenerateStoragePrefix(addr[:], incarnation)
 		if incarnation > 0 {
 			var codeHash []byte
 			codeHash, err = ethdb.Get(d.db, dbutils.PlainContractCodeBucket, storagePrefix)
 			if err != nil && err != ethdb.ErrKeyNotFound {
-				return nil, fmt.Errorf("getting code hash for %x: %v", addrHash, err)
+				return nil, fmt.Errorf("getting code hash for %x: %v", addr, err)
 			}
 			if codeHash != nil {
 				account.CodeHash = common.Bytes2Hex(codeHash)
@@ -213,25 +207,23 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 
 		if !excludeStorage {
 			t := trie.New(common.Hash{})
-			err = WalkAsOf(d.db,
-				stateBucket,
-				dbutils.StorageHistoryBucket,
-				storagePrefix,
-				8*(common.AddressLength+common.IncarnationLength),
+			err = WalkAsOfStorage(d.db,
+				addr,
+				incarnation,
+				common.Hash{}, /* startLocation */
 				d.blockNumber,
-				func(ks, vs []byte) (bool, error) {
-					account.Storage[common.BytesToHash(ks[common.AddressLength:]).String()] = common.Bytes2Hex(vs)
-					h, _ := common.HashData(ks[common.AddressLength:])
+				func(_, loc, vs []byte) (bool, error) {
+					account.Storage[common.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
+					h, _ := common.HashData(loc)
 					t.Update(h.Bytes(), common.CopyBytes(vs))
 					return true, nil
 				})
 			if err != nil {
-				return nil, fmt.Errorf("walking over storage for %x: %v", addrHash, err)
+				return nil, fmt.Errorf("walking over storage for %x: %v", addr, err)
 			}
-			fmt.Printf("Got walk storage for : %x\n", storagePrefix)
 			account.Root = t.Hash().String()
 		}
-		c.OnAccount(addrHash, *account)
+		c.OnAccount(addr, *account)
 	}
 
 	return nextKey, nil
@@ -243,7 +235,7 @@ func (d *Dumper) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bo
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	//nolint:errcheck
-	d.DumpToCollector(dump, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
+	d.DumpToCollector(dump, excludeCode, excludeStorage, excludeMissingPreimages, common.Address{}, 0)
 	return *dump
 }
 
@@ -260,11 +252,11 @@ func (d *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool)
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
 func (d *Dumper) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
 	//nolint:errcheck
-	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, nil, 0)
+	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, common.Address{}, 0)
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key
-func (d *Dumper) IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages bool, start []byte, maxResults int) (IteratorDump, error) {
+func (d *Dumper) IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages bool, start common.Address, maxResults int) (IteratorDump, error) {
 	iterator := &IteratorDump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}

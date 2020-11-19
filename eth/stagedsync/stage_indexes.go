@@ -9,29 +9,28 @@ import (
 )
 
 func SpawnAccountHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
-	endBlock, err := s.ExecutionAt(db)
+	executionAt, err := s.ExecutionAt(db)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
-	if endBlock == s.BlockNumber {
+	if executionAt == s.BlockNumber {
 		s.Done()
 		return nil
 	}
-	var blockNum uint64
-	lastProcessedBlockNumber := s.BlockNumber
-	if lastProcessedBlockNumber > 0 {
-		blockNum = lastProcessedBlockNumber + 1
+	var startChangeSetsLookupAt uint64
+	if s.BlockNumber > 0 {
+		startChangeSetsLookupAt = s.BlockNumber + 1
 	}
+	stopChangeSetsLookupAt := executionAt + 1
 
 	ig := core.NewIndexGenerator(logPrefix, db, quitCh)
 	ig.TempDir = tmpdir
-
-	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainAccountChangeSetBucket, tmpdir); err != nil {
+	if err := ig.GenerateIndex(startChangeSetsLookupAt, stopChangeSetsLookupAt, dbutils.PlainAccountChangeSetBucket, tmpdir); err != nil {
 		return fmt.Errorf("%s: fail to generate index: %w", logPrefix, err)
 	}
 
-	return s.DoneAndUpdate(db, endBlock)
+	return s.DoneAndUpdate(db, executionAt)
 }
 
 func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, quitCh <-chan struct{}) error {
@@ -51,7 +50,7 @@ func SpawnStorageHistoryIndex(s *StageState, db ethdb.Database, tmpdir string, q
 	}
 	ig := core.NewIndexGenerator(logPrefix, db, quitCh)
 	ig.TempDir = tmpdir
-	if err := ig.GenerateIndex(blockNum, endBlock, dbutils.PlainStorageChangeSetBucket, tmpdir); err != nil {
+	if err := ig.GenerateIndex(blockNum, endBlock+1, dbutils.PlainStorageChangeSetBucket, tmpdir); err != nil {
 		return fmt.Errorf("%s: fail to generate index: %w", logPrefix, err)
 	}
 

@@ -7,27 +7,28 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/stretchr/testify/assert"
 )
 
-type csAccountBytes interface {
-	Walk(func([]byte, []byte) error) error
-	Find([]byte) ([]byte, error)
-}
-
 func TestEncodingAccountHashed(t *testing.T) {
-	ch := NewAccountChangeSet()
-	runTestAccountEncoding(t, ch, true /*isHashed*/)
+	bkt := dbutils.AccountChangeSetBucket
+	m := Mapper[bkt]
+	runTestAccountEncoding(t, true /*isHashed*/, m.New, m.Encode, m.Decode)
 }
 
 func TestEncodingAccountPlain(t *testing.T) {
-	ch := NewAccountChangeSetPlain()
-	runTestAccountEncoding(t, ch, false /*isHashed*/)
+	bkt := dbutils.PlainAccountChangeSetBucket
+	m := Mapper[bkt]
+	runTestAccountEncoding(t, false /*isHashed*/, m.New, m.Encode, m.Decode)
 }
 
-func runTestAccountEncoding(t *testing.T, ch *ChangeSet, isHashed bool) {
+func runTestAccountEncoding(t *testing.T, isHashed bool, New func() *ChangeSet, enc Encoder, dec Decoder) {
+	ch := New()
 	// empty StorageChangeSset first
-	_, err := EncodeAccounts(ch)
+	err := enc(1, ch, func(k, v []byte) error {
+		return fmt.Errorf("must never call")
+	})
 	assert.NoError(t, err)
 
 	vals := [][]byte{
@@ -44,28 +45,16 @@ func runTestAccountEncoding(t *testing.T, ch *ChangeSet, isHashed bool) {
 		} else {
 			err = ch.Add(address[:], vals[i])
 		}
-
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	encFunc := EncodeAccountsPlain
-	if isHashed {
-		encFunc = EncodeAccounts
-	}
-
-	b, err := encFunc(ch)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	decFunc := DecodeAccountsPlain
-	if isHashed {
-		decFunc = DecodeAccounts
-	}
-
-	ch2, err := decFunc(b)
+	ch2 := New()
+	err = enc(1, ch, func(k, v []byte) error {
+		_, k, v = dec(k, v)
+		return ch2.Add(k, v)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,38 +74,5 @@ func runTestAccountEncoding(t *testing.T, ch *ChangeSet, isHashed bool) {
 		}
 		fmt.Printf("%+v %+v\n", ch, ch2)
 		t.Fatal("not equal")
-	}
-
-	var csBytes csAccountBytes
-	if isHashed {
-		csBytes = AccountChangeSetBytes(b)
-	} else {
-		csBytes = AccountChangeSetPlainBytes(b)
-	}
-	i := 0
-	err = csBytes.Walk(func(k, v []byte) error {
-		if !bytes.Equal(k, ch2.Changes[i].Key) || !bytes.Equal(v, ch2.Changes[i].Value) {
-			fmt.Println("Diff ", i)
-			fmt.Println("k1", common.Bytes2Hex(k), len(k))
-			fmt.Println("k2", common.Bytes2Hex(ch2.Changes[i].Key))
-			fmt.Println("v1", common.Bytes2Hex(v))
-			fmt.Println("v2", common.Bytes2Hex(ch2.Changes[i].Value))
-			t.Fatal("not equal line")
-		}
-		i++
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, v := range ch.Changes {
-		val, err := csBytes.Find(v.Key)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(v.Value, val) {
-			t.Fatal("not equal")
-		}
 	}
 }

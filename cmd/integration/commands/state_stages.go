@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -71,27 +72,21 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 
 	ch := ctx.Done()
 
-	expectedAccountChanges := make(map[uint64][]byte)
-	expectedStorageChanges := make(map[uint64][]byte)
+	expectedAccountChanges := make(map[uint64]*changeset.ChangeSet)
+	expectedStorageChanges := make(map[uint64]*changeset.ChangeSet)
 	changeSetHook := func(blockNum uint64, csw *state.ChangeSetWriter) {
 		accountChanges, err := csw.GetAccountChanges()
 		if err != nil {
 			panic(err)
 		}
-		expectedAccountChanges[blockNum], err = changeset.EncodeAccountsPlain(accountChanges)
-		if err != nil {
-			panic(err)
-		}
+		expectedAccountChanges[blockNum] = accountChanges
 
 		storageChanges, err := csw.GetStorageChanges()
 		if err != nil {
 			panic(err)
 		}
 		if storageChanges.Len() > 0 {
-			expectedStorageChanges[blockNum], err = changeset.EncodeStoragePlain(storageChanges)
-			if err != nil {
-				panic(err)
-			}
+			expectedStorageChanges[blockNum] = storageChanges
 		}
 	}
 
@@ -102,7 +97,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	defer bc.Stop()
 	cc.SetDB(tx)
 
-	tx, err = tx.Begin(ctx, ethdb.RO)
+	tx, err = tx.Begin(ctx, ethdb.RW)
 	if err != nil {
 		return err
 	}
@@ -119,11 +114,15 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	for progress(stages.Execution).BlockNumber < stopAt || (unwind <= unwindEvery) {
+	for progress(stages.Execution).BlockNumber < stopAt || ((unwind <= unwindEvery) && unwind != 0) {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
+		}
+
+		if progress(stages.Execution).BlockNumber == stopAt {
+			break
 		}
 
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
@@ -132,7 +131,10 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 
 		// All stages forward to `execStage + unwindEvery` block
 		execAtBlock := progress(stages.Execution).BlockNumber
-		execToBlock := execAtBlock - unwind + unwindEvery
+		execToBlock := block
+		if unwindEvery != 0 || unwind != 0 {
+			execToBlock = execAtBlock - unwind + unwindEvery
+		}
 		if execToBlock > stopAt {
 			execToBlock = stopAt + 1
 			unwind = 0
@@ -174,6 +176,10 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 			return err
 		}
 
+		if err := tx.CommitAndBegin(context.Background()); err != nil {
+			return err
+		}
+
 		// Unwind all stages to `execStage - unwind` block
 		if unwind == 0 {
 			continue
@@ -185,139 +191,90 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		if err := st.UnwindTo(to, tx); err != nil {
 			return err
 		}
+
+		if err := tx.CommitAndBegin(context.Background()); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func checkChangeSet(db ethdb.Getter, blockNum uint64, expectedAccountChanges []byte, expectedStorageChanges []byte) error {
-	dbAccountChanges, err := ethdb.GetChangeSetByBlock(db, false /* storage */, blockNum)
+func checkChangeSet(db ethdb.Database, blockNum uint64, expectedAccountChanges *changeset.ChangeSet, expectedStorageChanges *changeset.ChangeSet) error {
+	i := 0
+	sort.Sort(expectedAccountChanges)
+	err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+		c := expectedAccountChanges.Changes[i]
+		i++
+		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
+			return true, nil
+		}
+
+		fmt.Printf("Unexpected account changes in block %d\n", blockNum)
+		fmt.Printf("In the database: ======================\n")
+		fmt.Printf("0x%x: %x\n", k, v)
+		fmt.Printf("Expected: ==========================\n")
+		fmt.Printf("0x%x %x\n", c.Key, c.Value)
+		return false, fmt.Errorf("check change set failed")
+	})
 	if err != nil {
 		return err
 	}
-
-	if !bytes.Equal(dbAccountChanges, expectedAccountChanges) {
-		fmt.Printf("Unexpected account changes in block %d\nIn the database: ======================\n", blockNum)
-		if err = changeset.AccountChangeSetPlainBytes(dbAccountChanges).Walk(func(k, v []byte) error {
-			fmt.Printf("0x%x: %x\n", k, v)
-			return nil
-		}); err != nil {
-			return err
-		}
-		fmt.Printf("Expected: ==========================\n")
-		if err = changeset.AccountChangeSetPlainBytes(expectedAccountChanges).Walk(func(k, v []byte) error {
-			fmt.Printf("0x%x %x\n", k, v)
-			return nil
-		}); err != nil {
-			return err
-		}
-		return fmt.Errorf("check change set failed")
+	if expectedAccountChanges.Len() != i {
+		return fmt.Errorf("db has less changets")
+	}
+	if expectedStorageChanges == nil {
+		expectedStorageChanges = changeset.NewChangeSet()
 	}
 
-	dbStorageChanges, err := ethdb.GetChangeSetByBlock(db, true /* storage */, blockNum)
+	i = 0
+	sort.Sort(expectedStorageChanges)
+	err = changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+		c := expectedStorageChanges.Changes[i]
+		i++
+		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
+			return true, nil
+		}
+
+		fmt.Printf("Unexpected storage changes in block %d\n", blockNum)
+		fmt.Printf("In the database: ======================\n")
+		fmt.Printf("0x%x: %x\n", k, v)
+		fmt.Printf("Expected: ==========================\n")
+		fmt.Printf("0x%x %x\n", c.Key, c.Value)
+		return false, fmt.Errorf("check change set failed")
+	})
 	if err != nil {
 		return err
 	}
-	equal := true
-	if !bytes.Equal(dbStorageChanges, expectedStorageChanges) {
-		var addrs [][]byte
-		var keys [][]byte
-		var vals [][]byte
-		if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
-			addrs = append(addrs, common.CopyBytes(k[:common.AddressLength]))
-			keys = append(keys, common.CopyBytes(k[common.AddressLength+common.IncarnationLength:]))
-			vals = append(vals, common.CopyBytes(v))
-			return nil
-		}); err != nil {
-			return err
-		}
-		i := 0
-		if err = changeset.StorageChangeSetPlainBytes(expectedStorageChanges).Walk(func(k, v []byte) error {
-			if !equal {
-				return nil
-			}
-			if i >= len(addrs) {
-				equal = false
-				return nil
-			}
-			if !bytes.Equal(k[:common.AddressLength], addrs[i]) {
-				equal = false
-				return nil
-			}
-			if !bytes.Equal(k[common.AddressLength+common.IncarnationLength:], keys[i]) {
-				equal = false
-				return nil
-			}
-			if !bytes.Equal(v, vals[i]) {
-				equal = false
-				return nil
-			}
-			i++
-			return nil
-		}); err != nil {
-			return err
-		}
+	if expectedStorageChanges.Len() != i {
+		return fmt.Errorf("db has less changets")
 	}
-	if !equal {
-		fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
-		if err = changeset.StorageChangeSetPlainBytes(dbStorageChanges).Walk(func(k, v []byte) error {
-			fmt.Printf("0x%x: [%x]\n", k, v)
-			return nil
-		}); err != nil {
-			return err
-		}
-		fmt.Printf("Expected: ==========================\n")
-		if err = changeset.StorageChangeSetPlainBytes(expectedStorageChanges).Walk(func(k, v []byte) error {
-			fmt.Printf("0x%x: [%x]\n", k, v)
-			return nil
-		}); err != nil {
-			return err
-		}
-		return fmt.Errorf("check change set failed")
-	}
+
 	return nil
 }
 
-func checkHistory(db ethdb.Getter, changeSetBucket string, blockNum uint64) error {
-	currentKey := dbutils.EncodeTimestamp(blockNum)
-
-	var walker func([]byte) changeset.Walker
-	if dbutils.AccountChangeSetBucket == changeSetBucket {
-		walker = func(cs []byte) changeset.Walker {
-			return changeset.AccountChangeSetBytes(cs)
-		}
-	}
-
-	if dbutils.StorageChangeSetBucket == changeSetBucket {
-		walker = func(cs []byte) changeset.Walker {
-			return changeset.StorageChangeSetBytes(cs)
-		}
-	}
+func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) error {
+	currentKey := dbutils.EncodeBlockNumber(blockNum)
 
 	vv, ok := changeset.Mapper[changeSetBucket]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
 
-	if err := db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
-		blockNum, _ := dbutils.DecodeTimestamp(k)
-		if err := walker(v).Walk(func(key, val []byte) error {
-			indexBytes, innerErr := db.GetIndexChunk(vv.IndexBucket, key, blockNum)
-			if innerErr != nil {
-				return innerErr
-			}
+	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, k, v []byte) (bool, error) {
+		indexBytes, innerErr := db.GetIndexChunk(vv.IndexBucket, k, blockN)
+		if innerErr != nil {
+			return false, innerErr
+		}
 
-			index := dbutils.WrapHistoryIndex(indexBytes)
-			if findVal, _, ok := index.Search(blockNum); !ok {
-				return fmt.Errorf("%v,%v,%v", blockNum, findVal, common.Bytes2Hex(key))
-			}
-			return nil
-		}); err != nil {
-			return false, err
+		index := dbutils.WrapHistoryIndex(indexBytes)
+		if findVal, _, ok := index.Search(blockN); !ok {
+			return false, fmt.Errorf("%v,%v,%v", blockN, findVal, common.Bytes2Hex(k))
 		}
 		return true, nil
 	}); err != nil {
 		return err
 	}
+
 	return nil
 }

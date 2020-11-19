@@ -50,6 +50,10 @@ func (m *TxDb) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations
 	return batch, nil
 }
 
+func (m *TxDb) Sequence(bucket string, amount uint64) (res uint64, err error) {
+	return m.tx.Sequence(bucket, amount)
+}
+
 func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
 	if metrics.Enabled {
 		if bucket == dbutils.PlainStateBucket {
@@ -119,7 +123,7 @@ func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
 		defer dbGetTimer.UpdateSince(time.Now())
 	}
 
-	v, err := m.cursors[bucket].SeekExact(key)
+	_, v, err := m.cursors[bucket].SeekExact(key)
 	if err != nil {
 		return nil, err
 	}

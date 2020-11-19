@@ -18,6 +18,47 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
+func TestSequence(t *testing.T) {
+	writeDBs, _, closeAll := setupDatabases(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return defaultBuckets
+	})
+	defer closeAll()
+	ctx := context.Background()
+
+	for _, db := range writeDBs {
+		db := db
+		tx, err := db.Begin(ctx, nil, ethdb.RW)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		i, err := tx.Sequence(dbutils.Buckets[0], 0)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), i)
+		i, err = tx.Sequence(dbutils.Buckets[0], 1)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), i)
+		i, err = tx.Sequence(dbutils.Buckets[0], 6)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), i)
+		i, err = tx.Sequence(dbutils.Buckets[0], 1)
+		require.NoError(t, err)
+		require.Equal(t, uint64(7), i)
+
+		i, err = tx.Sequence(dbutils.Buckets[1], 0)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), i)
+		i, err = tx.Sequence(dbutils.Buckets[1], 1)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), i)
+		i, err = tx.Sequence(dbutils.Buckets[1], 6)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), i)
+		i, err = tx.Sequence(dbutils.Buckets[1], 1)
+		require.NoError(t, err)
+		require.Equal(t, uint64(7), i)
+	}
+}
+
 func TestManagedTx(t *testing.T) {
 	defaultConfig := dbutils.BucketsConfigs
 	defer func() {

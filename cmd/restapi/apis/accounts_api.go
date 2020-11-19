@@ -52,7 +52,7 @@ func findAccountByID(accountID string, remoteDB ethdb.KV) (*accounts.Account, er
 		c := tx.Cursor(dbutils.CurrentStateBucket)
 
 		for _, key := range possibleKeys {
-			accountRlp, err := c.SeekExact(key)
+			_, accountRlp, err := c.SeekExact(key)
 			if len(accountRlp) == 0 {
 				continue
 			}

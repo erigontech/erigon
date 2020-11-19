@@ -1,9 +1,7 @@
 package state
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -12,12 +10,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -26,17 +20,17 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMutation_DeleteTimestamp(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	mutDB := db.NewBatch()
 
 	acc := make([]*accounts.Account, 10)
 	addr := make([]common.Address, 10)
 	addrHashes := make([]common.Hash, 10)
-	tds := NewTrieDbState(common.Hash{}, mutDB, 1)
+	tds := NewTrieDbState(common.Hash{}, db, 1)
 	blockWriter := tds.DbStateWriter()
 	ctx := context.Background()
 	emptyAccount := accounts.NewAccount()
@@ -52,17 +46,16 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	if err := blockWriter.WriteHistory(); err != nil {
 		t.Fatal(err)
 	}
-	_, err := mutDB.Commit()
+
+	i := 0
+	err := db.Walk(dbutils.AccountChangeSetBucket, nil, 0, func(k, v []byte) (bool, error) {
+		i++
+		return true, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if changeset.Len(csData) != 10 {
+	if i != 10 {
 		t.FailNow()
 	}
 
@@ -85,13 +78,16 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = mutDB.Commit()
+
+	count := 0
+	err = changeset.Walk(db, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+		count++
+		return true, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	_, err = db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
-	if err != ethdb.ErrKeyNotFound {
+	if count != 0 {
 		t.Fatal("changeset must be deleted")
 	}
 
@@ -104,17 +100,11 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 func TestMutationCommitThinHistory(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	mutDB := db.NewBatch()
 
 	numOfAccounts := 5
 	numOfStateKeys := 5
 
-	addrs, accState, accStateStorage, accHistory, accHistoryStateStorage := generateAccountsWithStorageAndHistory(t, mutDB, numOfAccounts, numOfStateKeys)
-
-	_, commitErr := mutDB.Commit()
-	if commitErr != nil {
-		t.Fatal(commitErr)
-	}
+	addrs, accState, accStateStorage, accHistory, accHistoryStateStorage := generateAccountsWithStorageAndHistory(t, db, numOfAccounts, numOfStateKeys)
 
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
@@ -178,7 +168,13 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 
-	csData, err := db.Get(dbutils.PlainAccountChangeSetBucket, dbutils.EncodeTimestamp(2))
+	changeSetInDB := changeset.NewAccountChangeSetPlain()
+	err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+		if err := changeSetInDB.Add(k, v); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,20 +194,23 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 	sort.Sort(expectedChangeSet)
-	expectedData, err := changeset.EncodeAccountsPlain(expectedChangeSet)
-	assert.NoError(t, err)
-	if !bytes.Equal(csData, expectedData) {
-		spew.Dump("res", csData)
-		spew.Dump("expected", expectedData)
+	if !reflect.DeepEqual(changeSetInDB, expectedChangeSet) {
+		spew.Dump("res", changeSetInDB)
+		spew.Dump("expected", expectedChangeSet)
 		t.Fatal("incorrect changeset")
 	}
 
-	csData, err = db.Get(dbutils.PlainStorageChangeSetBucket, dbutils.EncodeTimestamp(2))
+	cs := changeset.NewStorageChangeSetPlain()
+	err = changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+		if err2 := cs.Add(k, v); err2 != nil {
+			return false, err2
+		}
+		return true, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	cs, _ := changeset.DecodeStoragePlain(csData)
 	if cs.Len() != numOfAccounts*numOfStateKeys {
 		t.Errorf("Length does not match, got %d, expected %d", cs.Len(), numOfAccounts*numOfStateKeys)
 	}
@@ -227,13 +226,8 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 	sort.Sort(expectedChangeSet)
-	expectedData, err = changeset.EncodeStoragePlain(expectedChangeSet)
-	assert.NoError(t, err)
-	if !bytes.Equal(csData, expectedData) {
-		spew.Dump("res", csData)
-		spew.Dump("expected", expectedData)
-		t.Fatal("incorrect changeset")
-	}
+
+	assert.Equal(t, cs, expectedChangeSet)
 }
 
 func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numOfAccounts, numOfStateKeys int) ([]common.Address, []*accounts.Account, []map[common.Hash]uint256.Int, []*accounts.Account, []map[common.Hash]uint256.Int) {
@@ -309,7 +303,7 @@ func TestUnwindTruncateHistory(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	mutDB := db.NewBatch()
-	tds := NewTrieDbState(common.Hash{}, mutDB, 1)
+	tds := NewTrieDbState(common.Hash{}, db, 1)
 	ctx := context.Background()
 	acc1 := accounts.NewAccount()
 	acc := &acc1
@@ -362,9 +356,6 @@ func TestUnwindTruncateHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := blockWriter.WriteHistory(); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := mutDB.Commit(); err != nil {
 			t.Fatal(err)
 		}
 		acc = newAcc
@@ -448,179 +439,6 @@ func TestUnwindTruncateHistory(t *testing.T) {
 	addr4(d12e):""
 */
 
-func TestWalkAsOfStateHashed(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
-	emptyVal := uint256.NewInt()
-	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
-	stateVal := uint256.NewInt().SetBytes([]byte("state"))
-	numOfAccounts := uint8(4)
-	addrs := make([]common.Address, numOfAccounts)
-	addrHashes := make([]common.Hash, numOfAccounts)
-	key := common.Hash{123}
-	keyHash, _ := common.HashData(key.Bytes())
-	for i := uint8(0); i < numOfAccounts; i++ {
-		addrs[i] = common.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
-		addrHashes[i] = addrHash
-	}
-
-	block2Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block4Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block6Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	withoutInc := func(addrHash, keyHash common.Hash) []byte {
-		expectedKey := make([]byte, common.HashLength*2)
-		copy(expectedKey[:common.HashLength], addrHash.Bytes())
-		copy(expectedKey[common.HashLength:], keyHash.Bytes())
-		return expectedKey
-	}
-	block2 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	writeStorageBlockData(t, tds, 3, []storageData{
-		{
-			addrs[0],
-			1,
-			key,
-			emptyVal,
-			block3Val,
-		},
-		{
-			addrs[2],
-			1,
-			key,
-			emptyVal,
-			stateVal,
-		},
-		{
-			addrs[3],
-			1,
-			key,
-			emptyVal,
-			block3Val,
-		},
-	}, false, true)
-
-	writeStorageBlockData(t, tds, 5, []storageData{
-		{
-			addrs[0],
-			1,
-			key,
-			block3Val,
-			stateVal,
-		},
-		{
-			addrs[1],
-			1,
-			key,
-			emptyVal,
-			stateVal,
-		},
-		{
-			addrs[3],
-			1,
-			key,
-			block3Val,
-			emptyVal,
-		},
-	}, false, true)
-
-	block4 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block6 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	//walk and collect walkAsOf result
-	var err error
-	var startKey [72]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
-	if err1 != nil {
-		t.Fatalf("create tx: %v", err1)
-	}
-	defer tx.Rollback()
-	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertChangesEquals(t, block2, block2Expected)
-
-	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	block4Expected.Changes = []changeset.Change{
-		{
-			withoutInc(addrHashes[0], keyHash),
-			block3Val.Bytes(),
-		},
-		{
-			withoutInc(addrHashes[2], keyHash),
-			stateVal.Bytes(),
-		},
-		{
-			withoutInc(addrHashes[3], keyHash),
-			block3Val.Bytes(),
-		},
-	}
-
-	assertChangesEquals(t, block4, block4Expected)
-
-	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	block6Expected.Changes = []changeset.Change{
-		{
-			withoutInc(addrHashes[0], keyHash),
-			stateVal.Bytes(),
-		},
-		{
-			withoutInc(addrHashes[1], keyHash), stateVal.Bytes(),
-		},
-		{
-			withoutInc(addrHashes[2], keyHash), stateVal.Bytes(),
-		},
-	}
-
-	assertChangesEquals(t, block6, block6Expected)
-}
-
 func TestWalkAsOfStatePlain(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -677,7 +495,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 			emptyVal,
 			block3Val,
 		},
-	}, true, true)
+	})
 
 	writeStorageBlockData(t, tds, 5, []storageData{
 		{
@@ -701,7 +519,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 			block3Val,
 			emptyVal,
 		},
-	}, true, true)
+	})
 
 	block2 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -709,36 +527,37 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 
 	//walk and collect walkAsOf result
 	var err error
-	var startKey [60]byte
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
 
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	block4Expected.Changes = []changeset.Change{
@@ -760,15 +579,16 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range addrs {
+		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	block6Expected.Changes = []changeset.Change{
@@ -852,7 +672,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 			emptyVal,
 			block3Val,
 		},
-	}, true, true)
+	})
 
 	writeStorageBlockData(t, tds, 5, []storageData{
 		{
@@ -883,7 +703,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 			block3Val,
 			stateVal,
 		},
-	}, true, true)
+	})
 
 	block2 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -898,14 +718,14 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
+
+	if err = WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		err = block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
@@ -913,14 +733,13 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block4 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, common.AddressLength*8, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
+	if err = WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -941,15 +760,16 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	assertChangesEquals(t, block4, block4Expected)
 
 	block4.Changes = block4.Changes[:0]
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, make([]byte, 60), 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range []common.Address{addr1, addr2} {
+		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	block4Expected.Changes = append(block4Expected.Changes, changeset.Change{
@@ -961,14 +781,13 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block6 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey, common.AddressLength*8, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+	if err = WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -985,176 +804,21 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	assertChangesEquals(t, block6, block6Expected)
 
 	block6.Changes = block6.Changes[:0]
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, make([]byte, 60), 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
+	for _, addr := range []common.Address{addr1, addr2} {
+		if err = WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			err = block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return true, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	block6Expected.Changes = append(block6Expected.Changes, changeset.Change{
 		Key:   withoutInc(addr2, key3),
 		Value: stateVal.Bytes(),
 	})
-	assertChangesEquals(t, block6, block6Expected)
-}
-
-func TestWalkAsOfAccountHashed(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
-	emptyValAcc := accounts.NewAccount()
-	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
-	emptyValAcc.EncodeForStorage(emptyVal)
-
-	block3ValAcc := emptyValAcc.SelfCopy()
-	block3ValAcc.Nonce = 3
-	block3ValAcc.Initialised = true
-	block3Val := make([]byte, block3ValAcc.EncodingLengthForStorage())
-	block3ValAcc.EncodeForStorage(block3Val)
-
-	stateValAcc := emptyValAcc.SelfCopy()
-	stateValAcc.Nonce = 5
-	stateValAcc.Initialised = true
-	stateVal := make([]byte, stateValAcc.EncodingLengthForStorage())
-	stateValAcc.EncodeForStorage(stateVal)
-
-	numOfAccounts := uint8(4)
-	addrs := make([]common.Address, numOfAccounts)
-	addrHashes := make([]common.Hash, numOfAccounts)
-	for i := uint8(0); i < numOfAccounts; i++ {
-		addrs[i] = common.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
-		addrHashes[i] = addrHash
-	}
-
-	writeBlockData(t, tds, 3, []accData{
-		{
-			addrs[0],
-			&emptyValAcc,
-			block3ValAcc,
-		},
-		{
-			addrs[2],
-			&emptyValAcc,
-			block3ValAcc,
-		},
-		{
-			addrs[3],
-			&emptyValAcc,
-			block3ValAcc,
-		},
-	}, false, true)
-
-	writeBlockData(t, tds, 5, []accData{
-		{
-			addrs[0], block3ValAcc, stateValAcc,
-		},
-		{
-			addrs[1],
-			&emptyValAcc,
-			stateValAcc,
-		},
-		{
-			addrs[3],
-			block3ValAcc,
-			nil,
-		},
-	}, false, true)
-
-	block2 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block2Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	var startKey [32]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
-	if err1 != nil {
-		t.Fatalf("create tx: %v", err1)
-	}
-	defer tx.Rollback()
-	err := WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertChangesEquals(t, block2, block2Expected)
-
-	block4 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-	block4Expected := &changeset.ChangeSet{
-		Changes: []changeset.Change{
-			{
-				addrHashes[0].Bytes(),
-				block3Val,
-			},
-			{
-				addrHashes[2].Bytes(),
-				block3Val,
-			},
-			{
-				addrHashes[3].Bytes(),
-				block3Val,
-			},
-		},
-	}
-	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	assertChangesEquals(t, block4, block4Expected)
-
-	block6 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block6Expected := &changeset.ChangeSet{
-		Changes: []changeset.Change{
-			{
-				addrHashes[0].Bytes(),
-				stateVal,
-			},
-			{
-				addrHashes[1].Bytes(),
-				stateVal,
-			},
-			{
-				addrHashes[2].Bytes(),
-				block3Val,
-			},
-		},
-	}
-
-	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	assertChangesEquals(t, block6, block6Expected)
 }
 
@@ -1211,7 +875,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 			&emptyValAcc,
 			block3ValAcc,
 		},
-	}, true, true)
+	})
 
 	writeBlockData(t, tds, 5, []accData{
 		{
@@ -1229,22 +893,20 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 			block3ValAcc,
 			nil,
 		},
-	}, true, true)
+	})
 
-	var startKey [20]byte
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
 		t.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	err := WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, common.Address{}, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	assertChangesEquals(t, block2, block2Expected)
@@ -1270,14 +932,13 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, common.Address{}, 4, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	assertChangesEquals(t, block4, block4Expected)
@@ -1303,687 +964,14 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	}
 
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, common.Address{}, 6, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
 		return true, nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
-	}
-	assertChangesEquals(t, block6, block6Expected)
-}
-
-func TestWalkAsOfStateHashed_WithoutIndex(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
-
-	emptyVal := uint256.NewInt()
-	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
-	stateVal := uint256.NewInt().SetBytes([]byte("state"))
-	numOfAccounts := uint8(4)
-	addrs := make([]common.Address, numOfAccounts)
-	addrHashes := make([]common.Hash, numOfAccounts)
-	key := common.Hash{123}
-	keyHash, _ := common.HashData(key.Bytes())
-	for i := uint8(0); i < numOfAccounts; i++ {
-		addrs[i] = common.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
-		addrHashes[i] = addrHash
-	}
-
-	block2Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block4Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block6Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	withoutInc := func(addrHash, keyHash common.Hash) []byte {
-		expectedKey := make([]byte, common.HashLength*2)
-		copy(expectedKey[:common.HashLength], addrHash.Bytes())
-		copy(expectedKey[common.HashLength:], keyHash.Bytes())
-		return expectedKey
-	}
-	block2 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	writeStorageBlockData(t, tds, 3, []storageData{
-		{
-			addrs[0],
-			1,
-			key,
-			emptyVal,
-			block3Val,
-		},
-		{
-			addrs[2],
-			1,
-			key,
-			emptyVal,
-			stateVal,
-		},
-		{
-			addrs[3],
-			1,
-			key,
-			emptyVal,
-			block3Val,
-		},
-	}, false, false)
-
-	writeStorageBlockData(t, tds, 5, []storageData{
-		{
-			addrs[0],
-			1,
-			key,
-			block3Val,
-			stateVal,
-		},
-		{
-			addrs[1],
-			1,
-			key,
-			emptyVal,
-			stateVal,
-		},
-		{
-			addrs[3],
-			1,
-			key,
-			block3Val,
-			emptyVal,
-		},
-	}, false, false)
-
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, 0)
-	err := db.Put(dbutils.SyncStageProgress, stages.StorageHistoryIndex, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	binary.BigEndian.PutUint64(b, 7)
-	err = db.Put(dbutils.SyncStageProgress, stages.Execution, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	//walk and collect walkAsOf result
-	var startKey [72]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
-	if err1 != nil {
-		t.Fatalf("create tx: %v", err1)
-	}
-	defer tx.Rollback()
-	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertChangesEquals(t, block2, block2Expected)
-
-	block4 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block6 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	block4Expected.Changes = []changeset.Change{
-		{
-			withoutInc(addrHashes[0], keyHash),
-			block3Val.Bytes(),
-		},
-		{
-			withoutInc(addrHashes[2], keyHash),
-			stateVal.Bytes(),
-		},
-		{
-			withoutInc(addrHashes[3], keyHash),
-			block3Val.Bytes(),
-		},
-	}
-
-	assertChangesEquals(t, block4, block4Expected)
-
-	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	block6Expected.Changes = []changeset.Change{
-		{
-			withoutInc(addrHashes[0], keyHash),
-			stateVal.Bytes(),
-		},
-		{
-			withoutInc(addrHashes[1], keyHash),
-			stateVal.Bytes(),
-		},
-		{
-			withoutInc(addrHashes[2], keyHash),
-			stateVal.Bytes(),
-		},
-	}
-	assertChangesEquals(t, block6, block6Expected)
-}
-
-func TestWalkAsOfStatePlain_WithoutIndex(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
-
-	emptyVal := uint256.NewInt()
-	block3Val := uint256.NewInt().SetBytes([]byte("block 3"))
-	stateVal := uint256.NewInt().SetBytes([]byte("state"))
-	numOfAccounts := uint8(4)
-	addrs := make([]common.Address, numOfAccounts)
-	addrHashes := make([]common.Hash, numOfAccounts)
-	key := common.Hash{123}
-	for i := uint8(0); i < numOfAccounts; i++ {
-		addrs[i] = common.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
-		addrHashes[i] = addrHash
-	}
-
-	block2Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block4Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block6Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	withoutInc := func(addrHash common.Address, keyHash common.Hash) []byte {
-		expectedKey := make([]byte, common.AddressLength+common.HashLength)
-		copy(expectedKey[:common.AddressLength], addrHash.Bytes())
-		copy(expectedKey[common.AddressLength:], keyHash.Bytes())
-		return expectedKey
-	}
-	block2 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	writeStorageBlockData(t, tds, 3, []storageData{
-		{
-			addrs[0], 1, key, emptyVal, block3Val,
-		},
-		{
-			addrs[2], 1, key, emptyVal, stateVal,
-		},
-		{
-			addrs[3], 1, key, emptyVal, block3Val,
-		},
-	}, true, false)
-
-	writeStorageBlockData(t, tds, 5, []storageData{
-		{
-			addrs[0], 1, key, block3Val, stateVal,
-		},
-		{
-			addrs[1], 1, key, emptyVal, stateVal,
-		},
-		{
-			addrs[3], 1, key, block3Val, emptyVal,
-		},
-	}, true, false)
-
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, 0)
-	err := db.Put(dbutils.SyncStageProgress, stages.StorageHistoryIndex, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	binary.BigEndian.PutUint64(b, 7)
-	err = db.Put(dbutils.SyncStageProgress, stages.Execution, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var startKey [60]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
-	if err1 != nil {
-		t.Fatalf("create tx: %v", err1)
-	}
-	defer tx.Rollback()
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertChangesEquals(t, block2, block2Expected)
-
-	block4 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	block4Expected.Changes = []changeset.Change{
-		{
-			withoutInc(addrs[0], key),
-			block3Val.Bytes(),
-		},
-		{
-			withoutInc(addrs[2], key),
-			stateVal.Bytes(),
-		},
-		{
-			withoutInc(addrs[3], key),
-			block3Val.Bytes(),
-		},
-	}
-	assertChangesEquals(t, block4, block4Expected)
-
-	block6 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	block6Expected.Changes = []changeset.Change{
-		{
-			withoutInc(addrs[0], key),
-			stateVal.Bytes(),
-		},
-		{
-			withoutInc(addrs[1], key),
-			stateVal.Bytes(),
-		},
-		{
-			withoutInc(addrs[2], key),
-			stateVal.Bytes(),
-		},
-	}
-	assertChangesEquals(t, block6, block6Expected)
-}
-
-func TestWalkAsOfAccountHashed_WithoutIndex(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
-	emptyValAcc := accounts.NewAccount()
-	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
-	emptyValAcc.EncodeForStorage(emptyVal)
-
-	block3ValAcc := emptyValAcc.SelfCopy()
-	block3ValAcc.Nonce = 3
-	block3ValAcc.Initialised = true
-	block3Val := make([]byte, block3ValAcc.EncodingLengthForStorage())
-	block3ValAcc.EncodeForStorage(block3Val)
-
-	stateValAcc := emptyValAcc.SelfCopy()
-	stateValAcc.Nonce = 5
-	stateValAcc.Initialised = true
-	stateVal := make([]byte, stateValAcc.EncodingLengthForStorage())
-	stateValAcc.EncodeForStorage(stateVal)
-
-	numOfAccounts := uint8(4)
-	addrs := make([]common.Address, numOfAccounts)
-	addrHashes := make([]common.Hash, numOfAccounts)
-	for i := uint8(0); i < numOfAccounts; i++ {
-		addrs[i] = common.Address{i + 1}
-		addrHash, _ := common.HashData(addrs[i].Bytes())
-		addrHashes[i] = addrHash
-	}
-
-	block2 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block2Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	writeBlockData(t, tds, 3, []accData{
-		{
-			addrs[0],
-			&emptyValAcc,
-			block3ValAcc,
-		},
-		{
-			addrs[2],
-			&emptyValAcc,
-			block3ValAcc,
-		},
-		{
-			addrs[3],
-			&emptyValAcc,
-			block3ValAcc,
-		},
-	}, false, false)
-
-	writeBlockData(t, tds, 5, []accData{
-		{
-			addrs[0], block3ValAcc, stateValAcc,
-		},
-		{
-			addrs[1], &emptyValAcc, stateValAcc,
-		},
-		{
-			addrs[3], block3ValAcc, nil,
-		},
-	}, false, false)
-
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, 0)
-	err := db.Put(dbutils.SyncStageProgress, stages.AccountHistoryIndex, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	binary.BigEndian.PutUint64(b, 7)
-	err = db.Put(dbutils.SyncStageProgress, stages.Execution, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var startKey [32]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
-	if err1 != nil {
-		t.Fatalf("create tx: %v", err1)
-	}
-	defer tx.Rollback()
-	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertChangesEquals(t, block2, block2Expected)
-
-	block4 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block4Expected := &changeset.ChangeSet{
-		Changes: []changeset.Change{
-			{
-				addrHashes[0].Bytes(),
-				block3Val,
-			},
-			{
-				addrHashes[2].Bytes(),
-				block3Val,
-			},
-			{
-				addrHashes[3].Bytes(),
-				block3Val,
-			},
-		},
-	}
-
-	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	assertChangesEquals(t, block4, block4Expected)
-	block6 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block6Expected := &changeset.ChangeSet{
-		Changes: []changeset.Change{
-			{
-				addrHashes[0].Bytes(),
-				stateVal,
-			},
-			{
-				addrHashes[1].Bytes(),
-				stateVal,
-			},
-			{
-				addrHashes[2].Bytes(),
-				block3Val,
-			},
-		},
-	}
-
-	err = WalkAsOf(tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	assertChangesEquals(t, block6, block6Expected)
-}
-
-func TestWalkAsOfAccountPlain_WithoutIndex(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tds := NewTrieDbState(common.Hash{}, db, 1)
-	emptyValAcc := accounts.NewAccount()
-	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
-	emptyValAcc.EncodeForStorage(emptyVal)
-
-	block3ValAcc := emptyValAcc.SelfCopy()
-	block3ValAcc.Nonce = 3
-	block3ValAcc.Initialised = true
-	block3Val := make([]byte, block3ValAcc.EncodingLengthForStorage())
-	block3ValAcc.EncodeForStorage(block3Val)
-
-	stateValAcc := emptyValAcc.SelfCopy()
-	stateValAcc.Nonce = 5
-	stateValAcc.Initialised = true
-	stateVal := make([]byte, stateValAcc.EncodingLengthForStorage())
-	stateValAcc.EncodeForStorage(stateVal)
-
-	numOfAccounts := uint8(4)
-	addrs := make([]common.Address, numOfAccounts)
-	for i := uint8(0); i < numOfAccounts; i++ {
-		addrs[i] = common.Address{i + 1}
-	}
-
-	block2 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block2Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	writeBlockData(t, tds, 3, []accData{
-		{
-			addrs[0],
-			&emptyValAcc,
-			block3ValAcc,
-		},
-		{
-			addrs[2],
-			&emptyValAcc,
-			block3ValAcc,
-		},
-		{
-			addrs[3],
-			&emptyValAcc,
-			block3ValAcc,
-		},
-	}, true, false)
-
-	writeBlockData(t, tds, 5, []accData{
-		{
-			addrs[0],
-			block3ValAcc,
-			stateValAcc,
-		},
-		{
-			addrs[1],
-			&emptyValAcc,
-			stateValAcc,
-		},
-		{
-			addrs[3],
-			block3ValAcc,
-			nil,
-		},
-	}, true, false)
-
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, 0)
-	err := db.Put(dbutils.SyncStageProgress, stages.AccountHistoryIndex, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	binary.BigEndian.PutUint64(b, 7)
-	err = db.Put(dbutils.SyncStageProgress, stages.Execution, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var startKey [32]byte
-	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
-	if err1 != nil {
-		t.Fatalf("create tx: %v", err1)
-	}
-	defer tx.Rollback()
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertChangesEquals(t, block2, block2Expected)
-
-	block4 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	block4Expected := &changeset.ChangeSet{
-		Changes: []changeset.Change{
-			{
-				addrs[0].Bytes(),
-				block3Val,
-			},
-			{
-				addrs[2].Bytes(),
-				block3Val,
-			},
-			{
-				addrs[3].Bytes(),
-				block3Val,
-			},
-		},
-	}
-	assertChangesEquals(t, block4, block4Expected)
-
-	block6 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-	err = WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	block6Expected := &changeset.ChangeSet{
-		Changes: []changeset.Change{
-			{
-				addrs[0].Bytes(),
-				stateVal,
-			},
-			{
-				addrs[1].Bytes(),
-				stateVal,
-			},
-			{
-				addrs[2].Bytes(),
-				block3Val,
-			},
-		},
 	}
 	assertChangesEquals(t, block6, block6Expected)
 }
@@ -2045,7 +1033,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 			&emptyValAcc,
 			addr1Old,
 		},
-	}, true, true)
+	})
 
 	for i := 2; i < 1100; i++ {
 		addr1New = addr1Old.SelfCopy()
@@ -2070,7 +1058,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 				addr3Old,
 				addr3New,
 			},
-		}, true, true)
+		})
 		addr1Old = addr1New.SelfCopy()
 		addr2Old = addr2New.SelfCopy()
 		addr3Old = addr3New.SelfCopy()
@@ -2099,7 +1087,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 			addr1Old,
 			addr1New,
 		},
-	}, true, true)
+	})
 
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
@@ -2111,15 +1099,13 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 			Changes: make([]changeset.Change, 0),
 		}
 
-		var startKey [20]byte
-		err := WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, blockNum, func(k []byte, v []byte) (b bool, e error) {
+		if err := WalkAsOfAccounts(tx, common.Address{}, blockNum, func(k []byte, v []byte) (b bool, e error) {
 			innerErr := obtained.Add(common.CopyBytes(k), common.CopyBytes(v))
 			if innerErr != nil {
 				t.Fatal(innerErr)
 			}
 			return true, nil
-		})
-		if err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -2186,7 +1172,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 			emptyVal,
 			val,
 		},
-	}, true, true)
+	})
 
 	prev := val
 	for i := 2; i < 1100; i++ {
@@ -2213,7 +1199,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 				prev,
 				val,
 			},
-		}, true, true)
+		})
 		prev = val
 	}
 
@@ -2241,7 +1227,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 			prev,
 			val,
 		},
-	}, true, true)
+	})
 
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err1 != nil {
@@ -2253,16 +1239,15 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 			Changes: make([]changeset.Change, 0),
 		}
 
-		var startKey [20]byte
-		err := WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, startKey[:], 0, blockNum, func(k []byte, v []byte) (b bool, e error) {
-			innerErr := obtained.Add(common.CopyBytes(k), common.CopyBytes(v))
-			if innerErr != nil {
-				t.Fatal(innerErr)
+		for _, addr := range addrs {
+			if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, blockNum, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+				if innerErr := obtained.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v)); innerErr != nil {
+					t.Fatal(innerErr)
+				}
+				return true, nil
+			}); err != nil {
+				t.Fatal(err)
 			}
-			return true, nil
-		})
-		if err != nil {
-			t.Fatal(err)
 		}
 		valBytes := uint256.NewInt().SetBytes([]byte("block " + strconv.FormatUint(blockNum-1, 10))).Bytes()
 		expected := &changeset.ChangeSet{
@@ -2291,14 +1276,9 @@ type accData struct {
 	newVal *accounts.Account
 }
 
-func writeBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []accData, plain, writeHistory bool) {
+func writeBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []accData) {
 	tds.SetBlockNr(blockNum)
-	var blockWriter WriterWithChangeSets
-	if plain {
-		blockWriter = tds.PlainStateWriter()
-	} else {
-		blockWriter = tds.DbStateWriter()
-	}
+	var blockWriter = tds.PlainStateWriter()
 
 	for i := range data {
 		if data[i].newVal != nil {
@@ -2315,10 +1295,8 @@ func writeBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []accD
 	if err := blockWriter.WriteChangeSets(); err != nil {
 		t.Fatal(err)
 	}
-	if writeHistory {
-		if err := blockWriter.WriteHistory(); err != nil {
-			t.Fatal(err)
-		}
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -2330,14 +1308,9 @@ type storageData struct {
 	newVal *uint256.Int
 }
 
-func writeStorageBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []storageData, plain, writeHistory bool) {
+func writeStorageBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data []storageData) {
 	tds.SetBlockNr(blockNum)
-	var blockWriter WriterWithChangeSets
-	if plain {
-		blockWriter = tds.PlainStateWriter()
-	} else {
-		blockWriter = tds.DbStateWriter()
-	}
+	var blockWriter = tds.PlainStateWriter()
 
 	for i := range data {
 		if err := blockWriter.WriteAccountStorage(context.Background(),
@@ -2353,10 +1326,8 @@ func writeStorageBlockData(t *testing.T, tds *TrieDbState, blockNum uint64, data
 	if err := blockWriter.WriteChangeSets(); err != nil {
 		t.Fatal(err)
 	}
-	if writeHistory {
-		if err := blockWriter.WriteHistory(); err != nil {
-			t.Fatal(err)
-		}
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
 	}
 }
 func assertChangesEquals(t *testing.T, changesObtained, changesExpected *changeset.ChangeSet) {

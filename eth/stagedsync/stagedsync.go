@@ -17,6 +17,7 @@ type StagedSync struct {
 	stageBuilders    StageBuilders
 	unwindOrder      UnwindOrder
 	params           OptionalParameters
+	Notifier         ChainEventNotifier
 }
 
 // OptionalParameters contains any non-necessary parateres you can specify to fine-tune
@@ -29,6 +30,9 @@ type OptionalParameters struct {
 	// StateReaderBuilder is a function that returns state writer for the block execution stage.
 	// It can be used to update bloom or other types of filters between block execution.
 	StateWriterBuilder StateWriterBuilder
+
+	// Notifier allows sending some data when new headers or new blocks are added
+	Notifier ChainEventNotifier
 
 	SilkwormExecutionFunc unsafe.Pointer
 }
@@ -75,6 +79,10 @@ func (stagedSync *StagedSync) Prepare(
 		}
 	}
 
+	if stagedSync.params.Notifier != nil {
+		stagedSync.Notifier = stagedSync.params.Notifier
+	}
+
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
 			d:                     d,
@@ -95,6 +103,7 @@ func (stagedSync *StagedSync) Prepare(
 			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
 			stateReaderBuilder:    readerBuilder,
 			stateWriterBuilder:    writerBuilder,
+			notifier:              stagedSync.Notifier,
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 		},
 	)

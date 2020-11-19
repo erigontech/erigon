@@ -35,51 +35,32 @@ type StorageResult struct {
 func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*AccountResult, error) {
 	block := uint64(blockNr.Int64()) + 1
 	db := s.b.ChainDb()
-	ts := dbutils.EncodeTimestamp(block)
-	accountCs := 0
+	ts := dbutils.EncodeBlockNumber(block)
 	accountMap := make(map[string]*accounts.Account)
-	if err := db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
-		if changeset.Len(v) > 0 {
-			walker := func(kk, vv []byte) error {
-				if _, ok := accountMap[string(kk)]; !ok {
-					if len(vv) > 0 {
-						var a accounts.Account
-						if innerErr := a.DecodeForStorage(vv); innerErr != nil {
-							return innerErr
-						}
-						accountMap[string(kk)] = &a
-					} else {
-						accountMap[string(kk)] = nil
-					}
+	if err := changeset.Walk(db, dbutils.AccountChangeSetBucket, ts, 0, func(blockN uint64, k, v []byte) (bool, error) {
+		k, v = common.CopyBytes(k), common.CopyBytes(v)
+		if _, ok := accountMap[string(k)]; !ok {
+			if len(v) > 0 {
+				var a accounts.Account
+				if innerErr := a.DecodeForStorage(v); innerErr != nil {
+					return false, innerErr
 				}
-				return nil
-			}
-			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			if innerErr := changeset.AccountChangeSetBytes(v).Walk(walker); innerErr != nil {
-				return false, innerErr
+				accountMap[string(k)] = &a
+			} else {
+				accountMap[string(k)] = nil
 			}
 		}
-		accountCs++
 		return true, nil
 	}); err != nil {
 		return nil, err
 	}
-	storageCs := 0
+
 	storageMap := make(map[string][]byte)
-	if err := db.Walk(dbutils.StorageChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
-		if changeset.Len(v) > 0 {
-			walker := func(kk, vv []byte) error {
-				if _, ok := storageMap[string(kk)]; !ok {
-					storageMap[string(kk)] = vv
-				}
-				return nil
-			}
-			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			if innerErr := changeset.StorageChangeSetBytes(v).Walk(walker); innerErr != nil {
-				return false, innerErr
-			}
+	if err := changeset.Walk(db, dbutils.AccountChangeSetBucket, ts, 0, func(blockN uint64, k, v []byte) (bool, error) {
+		k, v = common.CopyBytes(k), common.CopyBytes(v)
+		if _, ok := storageMap[string(k)]; !ok {
+			storageMap[string(k)] = v
 		}
-		storageCs++
 		return true, nil
 	}); err != nil {
 		return nil, err

@@ -107,6 +107,7 @@ ethdb/mdbx/dist/libmdbx.a:
 
 test: ethdb/mdbx/dist/libmdbx.a
 	$(GOTEST)
+	du -h
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
@@ -173,6 +174,7 @@ bindings:
 
 grpc:
 	# See also: ./cmd/hack/binary-deps/main.go
+	mkdir -p ./build/bin/
 	rm -f ./build/bin/protoc*
 	rm -rf ./build/include*
 

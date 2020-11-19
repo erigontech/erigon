@@ -167,6 +167,8 @@ var (
 	// it stores stages progress to understand in which context was executed migration
 	// in case of bug-report developer can ask content of this bucket
 	Migrations = "migrations"
+
+	Sequence = "sequence" // tbl_name -> seq_u64
 )
 
 // Keys
@@ -240,6 +242,7 @@ var Buckets = []string{
 	CallFromIndex,
 	CallToIndex,
 	Log,
+	Sequence,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
@@ -311,6 +314,18 @@ var BucketsConfigs = BucketsCfg{
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                72,
 		DupToLen:                  40,
+	},
+	PlainAccountChangeSetBucket: {
+		Flags: DupSort,
+	},
+	PlainStorageChangeSetBucket: {
+		Flags: DupSort,
+	},
+	AccountChangeSetBucket: {
+		Flags: DupSort,
+	},
+	StorageChangeSetBucket: {
+		Flags: DupSort,
 	},
 	PlainStateBucket: {
 		Flags:                     DupSort,

@@ -26,7 +26,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			db := ethdb.NewMemDatabase()
 			defer db.Close()
 			ig := NewIndexGenerator("logPrefix", db, make(chan struct{}))
-			csInfo, ok := changeset.Mapper[string(csBucket)]
+			csInfo, ok := changeset.Mapper[csBucket]
 			if !ok {
 				t.Fatal("incorrect cs bucket")
 			}
@@ -66,7 +66,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		csbucket := buckets[i]
 		db := ethdb.NewMemDatabase()
 		hashes, expected := generateTestData(t, db, csbucket, 2100)
-		mp := changeset.Mapper[string(csbucket)]
+		mp := changeset.Mapper[csbucket]
 		indexBucket := mp.IndexBucket
 		ig := NewIndexGenerator("logPrefix", db, make(chan struct{}))
 		err := ig.GenerateIndex(0, uint64(2100), csbucket, "")
@@ -81,7 +81,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 			return arr[:pos]
 		}
 
-		t.Run("truncate to 2050 "+string(csbucket), func(t *testing.T) {
+		t.Run("truncate to 2050 "+csbucket, func(t *testing.T) {
 			expected[string(hashes[0])][2] = reduceSlice(expected[string(hashes[0])][2], 2050)
 			expected[string(hashes[1])][1] = reduceSlice(expected[string(hashes[1])][1], 2050)
 			expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 2050)
@@ -156,7 +156,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 }
 
 func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlocks int) ([][]byte, map[string][][]uint64) { //nolint
-	csInfo, ok := changeset.Mapper[string(csBucket)]
+	csInfo, ok := changeset.Mapper[csBucket]
 	if !ok {
 		t.Fatal("incorrect cs bucket")
 	}
@@ -221,11 +221,9 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlo
 			}
 			expected3[len(expected3)-1] = expected3[len(expected3)-1].Append(uint64(i), false)
 		}
-		v, err := csInfo.Encode(cs)
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = db.Put(csBucket, dbutils.EncodeTimestamp(uint64(i)), v)
+		err = csInfo.Encode(uint64(i), cs, func(k, v []byte) error {
+			return db.Append(csBucket, k, v)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

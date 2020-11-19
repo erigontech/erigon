@@ -20,7 +20,6 @@ package ethdb
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -141,6 +140,14 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 	return casted.DiskSize(ctx)
 }
 
+func (db *ObjectDatabase) Sequence(bucket string, amount uint64) (res uint64, err error) {
+	err = db.kv.Update(context.Background(), func(tx Tx) error {
+		res, err = tx.Sequence(bucket, amount)
+		return err
+	})
+	return res, err
+}
+
 // Get returns the value for a given key if it's present.
 func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
 	var dat []byte
@@ -203,13 +210,15 @@ func (db *ObjectDatabase) GetIndexChunk(bucket string, key []byte, timestamp uin
 	return dat, err
 }
 
-func GetChangeSetByBlock(db Getter, storage bool, timestamp uint64) ([]byte, error) {
-	key := dbutils.EncodeTimestamp(timestamp)
-	v, err := db.Get(dbutils.ChangeSetByIndexBucket(storage), key)
-	if err != nil && !errors.Is(ErrKeyNotFound, err) {
-		return nil, err
-	}
-	return v, nil
+func WalkChangeSetByBlock(db Getter, storage bool, timestamp uint64, f func(kk, k, v []byte) error) error {
+	bucket, keySize := dbutils.ChangeSetByIndexBucket(storage)
+	return db.Walk(bucket, dbutils.EncodeBlockNumber(timestamp), 8*8, func(k, v []byte) (bool, error) {
+		err := f(k, v[:keySize], v[keySize:])
+		if err != nil {
+			return false, nil
+		}
+		return true, nil
+	})
 }
 
 func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {

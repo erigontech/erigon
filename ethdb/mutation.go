@@ -64,6 +64,10 @@ func (m *mutation) getMem(table string, key []byte) ([]byte, bool) {
 	return i.(*MutationItem).value, true
 }
 
+func (m *mutation) Sequence(bucket string, amount uint64) (res uint64, err error) {
+	return m.db.Sequence(bucket, amount)
+}
+
 // Can only be called from the worker thread
 func (m *mutation) Get(table string, key []byte) ([]byte, error) {
 	if value, ok := m.getMem(table, key); ok {
@@ -181,7 +185,7 @@ func (m *mutation) MultiWalk(table string, startkeys [][]byte, fixedbits []int, 
 
 func (m *mutation) Delete(table string, k, v []byte) error {
 	if v != nil {
-		return fmt.Errorf("mutation doesn't implement dupsort values deletion yet")
+		return m.db.Delete(table, k, v) // TODO: mutation to support DupSort deletes
 	}
 	//m.puts.Delete(table, k)
 	return m.Put(table, k, nil)

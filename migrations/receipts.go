@@ -100,7 +100,7 @@ var receiptsOnePerTx = Migration{
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-		logPrefix := "receipts_store_logs_separately"
+		logPrefix := "data migration: receipts_store_logs_separately"
 
 		// Recently was introduced receipts serialization problem
 		// Code was not generated well for types.Log type
