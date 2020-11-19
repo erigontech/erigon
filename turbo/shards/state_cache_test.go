@@ -265,7 +265,9 @@ func TestReplaceAccountReadsWithWrites(t *testing.T) {
 	for i := 5; i <= 8; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		sc.SetAccountDelete(addr.Bytes())
+		var account accounts.Account
+		account.Balance.SetUint64(uint64(i))
+		sc.SetAccountWrite(addr.Bytes(), &account)
 	}
 	if sc.writeQueue.Len() != 4 {
 		t.Fatalf("Write queue is expected to have 4 elements, got: %d", sc.writeQueue.Len())
