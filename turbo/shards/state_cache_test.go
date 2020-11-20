@@ -335,6 +335,7 @@ func TestReadAccountExisting(t *testing.T) {
 	var addr1 common.Address
 	sc.SetAccountRead(addr1.Bytes(), &account1)
 	defer func() {
+		//nolint:staticcheck
 		if r := recover(); r != nil {
 		}
 	}()
@@ -345,6 +346,7 @@ func TestReadAccountExisting(t *testing.T) {
 func TestWriteAccountExceedLimit(t *testing.T) {
 	sc := NewStateCache(32, 2)
 	defer func() {
+		//nolint:staticcheck
 		if r := recover(); r != nil {
 		}
 	}()
@@ -466,6 +468,7 @@ func TestReadStorageExisting(t *testing.T) {
 	val1[2] = 1
 	sc.SetStorageRead(addr1.Bytes(), 1, loc1.Bytes(), val1.Bytes())
 	defer func() {
+		//nolint:staticcheck
 		if r := recover(); r != nil {
 		}
 	}()
@@ -476,6 +479,7 @@ func TestReadStorageExisting(t *testing.T) {
 func TestWriteStorageExceedLimit(t *testing.T) {
 	sc := NewStateCache(32, 2)
 	defer func() {
+		//nolint:staticcheck
 		if r := recover(); r != nil {
 		}
 	}()
@@ -577,6 +581,7 @@ func TestReadCodeExisting(t *testing.T) {
 	code1 := []byte{1, 2, 3}
 	sc.SetCodeRead(addr1.Bytes(), 1, code1)
 	defer func() {
+		//nolint:staticcheck
 		if r := recover(); r != nil {
 		}
 	}()
@@ -587,6 +592,7 @@ func TestReadCodeExisting(t *testing.T) {
 func TestWriteCodeExceedLimit(t *testing.T) {
 	sc := NewStateCache(32, 2)
 	defer func() {
+		//nolint:staticcheck
 		if r := recover(); r != nil {
 		}
 	}()
