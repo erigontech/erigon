@@ -48,12 +48,16 @@ type CodeCacheItem struct {
 }
 
 type CacheItem interface {
+	btree.Item
 	GetSequence() int
+	SetSequence(sequence int)
 	GetSize() int
 	GetQueuePos() int
 	SetQueuePos(pos int)
-	SetFlags(flags uint16)   // Set specified flags, but leaves other flags alone
-	ClearFlags(flags uint16) // Clear specified flags, but laves other flags alone
+	HasFlag(flag uint16) bool     // Check if specified flag is set
+	SetFlags(flags uint16)        // Set specified flags, but leaves other flags alone
+	ClearFlags(flags uint16)      // Clear specified flags, but laves other flags alone
+	CopyValueFrom(item CacheItem) // Copy value (not key) from given item
 }
 
 func (aci *AccountCacheItem) Less(than btree.Item) bool {
@@ -83,6 +87,10 @@ func (aci *AccountCacheItem) GetSequence() int {
 	return aci.sequence
 }
 
+func (aci *AccountCacheItem) SetSequence(sequence int) {
+	aci.sequence = sequence
+}
+
 func (aci *AccountCacheItem) GetSize() int {
 	return 1
 }
@@ -95,12 +103,28 @@ func (aci *AccountCacheItem) SetQueuePos(pos int) {
 	aci.queuePos = pos
 }
 
+func (aci *AccountCacheItem) HasFlag(flag uint16) bool {
+	return aci.flags&flag != 0
+}
+
 func (aci *AccountCacheItem) SetFlags(flags uint16) {
 	aci.flags |= flags
 }
 
 func (aci *AccountCacheItem) ClearFlags(flags uint16) {
 	aci.flags &^= flags
+}
+
+func (aci *AccountCacheItem) String() string {
+	return fmt.Sprintf("AccountItem(address=%x)", aci.address)
+}
+
+func (aci *AccountCacheItem) CopyValueFrom(item CacheItem) {
+	otherAci, ok := item.(*AccountCacheItem)
+	if !ok {
+		panic(fmt.Sprintf("expected AccountCacheItem, got %T", item))
+	}
+	aci.account.Copy(&otherAci.account)
 }
 
 func (sci *StorageCacheItem) Less(than btree.Item) bool {
@@ -137,6 +161,10 @@ func (sci *StorageCacheItem) GetSequence() int {
 	return sci.sequence
 }
 
+func (sci *StorageCacheItem) SetSequence(sequence int) {
+	sci.sequence = sequence
+}
+
 func (sci *StorageCacheItem) GetSize() int {
 	return 1
 }
@@ -149,12 +177,20 @@ func (sci *StorageCacheItem) SetQueuePos(pos int) {
 	sci.queuePos = pos
 }
 
+func (sci *StorageCacheItem) HasFlag(flag uint16) bool {
+	return sci.flags&flag != 0
+}
+
 func (sci *StorageCacheItem) SetFlags(flags uint16) {
 	sci.flags |= flags
 }
 
 func (sci *StorageCacheItem) ClearFlags(flags uint16) {
 	sci.flags &^= flags
+}
+
+func (sci *StorageCacheItem) String() string {
+	return fmt.Sprintf("StorageItem(address=%x,incarnation=%d,location=%x)", sci.address, sci.incarnation, sci.location)
 }
 
 func (cci *CodeCacheItem) Less(than btree.Item) bool {
@@ -184,6 +220,10 @@ func (cci *CodeCacheItem) GetSequence() int {
 	return cci.sequence
 }
 
+func (cci *CodeCacheItem) SetSequence(sequence int) {
+	cci.sequence = sequence
+}
+
 func (cci *CodeCacheItem) GetSize() int {
 	return 1
 }
@@ -196,12 +236,20 @@ func (cci *CodeCacheItem) SetQueuePos(pos int) {
 	cci.queuePos = pos
 }
 
+func (cci *CodeCacheItem) HasFlag(flag uint16) bool {
+	return cci.flags&flag != 0
+}
+
 func (cci *CodeCacheItem) SetFlags(flags uint16) {
 	cci.flags |= flags
 }
 
 func (cci *CodeCacheItem) ClearFlags(flags uint16) {
 	cci.flags &^= flags
+}
+
+func (cci *CodeCacheItem) String() string {
+	return fmt.Sprintf("CodeItem(address=%x)", cci.address)
 }
 
 // Heaps for reads and writes grow in the opposite direction, while residing in the same space
@@ -297,19 +345,27 @@ func NewStateCache(degree int, limitReads, limitWrites int) *StateCache {
 	return &sc
 }
 
+func (sc *StateCache) get(key CacheItem) (CacheItem, bool) {
+	item := sc.readWrites.Get(key)
+	if item == nil {
+		return nil, false
+	}
+	cacheItem := item.(CacheItem)
+	if cacheItem.HasFlag(DeletedFlag) {
+		return nil, false
+	}
+	return cacheItem, true
+}
+
 // GetAccount searches and account with given address, without modifying any structures
 // Second return value is true if such account is found
 func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 	var key AccountCacheItem
 	copy(key.address[:], address)
-	item := sc.readWrites.Get(&key)
-	if item == nil {
-		return nil, false
+	if item, ok := sc.get(&key); ok {
+		return &item.(*AccountCacheItem).account, true
 	}
-	if item.(*AccountCacheItem).flags&DeletedFlag != 0 {
-		return nil, false
-	}
-	return &item.(*AccountCacheItem).account, true
+	return nil, false
 }
 
 // GetStorage searches storage item with given address, incarnation, and location, without modifying any structures
@@ -319,14 +375,10 @@ func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []
 	copy(key.address[:], address)
 	key.incarnation = incarnation
 	copy(key.location[:], location)
-	item := sc.readWrites.Get(&key)
-	if item == nil {
-		return nil, false
+	if item, ok := sc.get(&key); ok {
+		return item.(*StorageCacheItem).value.Bytes(), true
 	}
-	if item.(*StorageCacheItem).flags&DeletedFlag != 0 {
-		return nil, false
-	}
-	return item.(*StorageCacheItem).value.Bytes(), true
+	return nil, false
 }
 
 // GetCode searches contract code with given address, without modifying any structures
@@ -334,60 +386,51 @@ func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []
 func (sc *StateCache) GetCode(address []byte) ([]byte, bool) {
 	var key CodeCacheItem
 	copy(key.address[:], address)
-	item := sc.readWrites.Get(&key)
-	if item == nil {
-		return nil, false
+	if item, ok := sc.get(&key); ok {
+		return item.(*CodeCacheItem).code, true
 	}
-	if item.(*CodeCacheItem).flags&DeletedFlag != 0 {
-		return nil, false
+	return nil, true
+}
+
+func (sc *StateCache) setRead(item CacheItem) {
+	if sc.readWrites.Get(item) != nil {
+		panic(fmt.Sprintf("item must not be present in the cache before doing setRead: %s", item))
 	}
-	return item.(*CodeCacheItem).code, true
+	item.SetQueuePos(0)
+	item.SetSequence(sc.sequence)
+	sc.readWrites.ReplaceOrInsert(item)
+	if sc.readQueue.Len() >= sc.limitReads {
+		// Read queue cannot grow anymore, need to evict one element
+		sc.readWrites.Delete(sc.readQueue.items[0])
+		sc.readQueue.items[0] = item
+		heap.Fix(&sc.readQueue, 0)
+	} else {
+		// Push new element on the read queue
+		heap.Push(&sc.readQueue, item)
+	}
 }
 
 // SetAccountRead adds given account to the cache, marking it as a read (not written)
 func (sc *StateCache) SetAccountRead(address []byte, account *accounts.Account) {
 	var aci AccountCacheItem
 	copy(aci.address[:], address)
-	if sc.readWrites.Get(&aci) != nil {
-		panic(fmt.Sprintf("account must not be present in the cache before doing SetAccountRead for %x", address))
-	}
 	aci.account.Copy(account)
-	aci.queuePos = 0
-	aci.sequence = sc.sequence
-	sc.sequence++
 	aci.flags = 0
-	sc.readWrites.ReplaceOrInsert(&aci)
-	if sc.readQueue.Len() >= sc.limitReads {
-		// Read queue cannot grow anymore, need to evict one element
-		sc.readWrites.Delete(sc.readQueue.items[0].(btree.Item))
-		sc.readQueue.items[0] = &aci
-		heap.Fix(&sc.readQueue, 0)
-	} else {
-		// Push new element on the read queue
-		heap.Push(&sc.readQueue, &aci)
-	}
+	sc.setRead(&aci)
 }
 
 // SetAccountRead adds given account address to the cache, marking it as a absent
 func (sc *StateCache) SetAccountAbsent(address []byte) {
 	var aci AccountCacheItem
 	copy(aci.address[:], address)
-	if sc.readWrites.Get(&aci) != nil {
-		panic(fmt.Sprintf("account must not be present in the cache before doing SetAccountAbsent for %x", address))
-	}
-	aci.queuePos = 0
-	aci.sequence = sc.sequence
-	sc.sequence++
 	aci.flags = DeletedFlag
-	sc.readWrites.ReplaceOrInsert(&aci)
-	if sc.readQueue.Len() >= sc.limitReads {
-		// Read queue cannot grow anymore, need to evict one element
-		sc.readWrites.Delete(sc.readQueue.items[0].(btree.Item))
-		sc.readQueue.items[0] = &aci
-		heap.Fix(&sc.readQueue, 0)
-	} else {
-		// Push new element on the read queue
-		heap.Push(&sc.readQueue, &aci)
+	sc.setRead(&aci)
+}
+
+func (sc *StateCache) setWrite(item CacheItem) {
+	// Check if this is going to be modification of the existing entry
+	if existing := sc.writes.Get(item); existing != nil {
+
 	}
 }
 
@@ -491,24 +534,9 @@ func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, locatio
 	copy(sci.address[:], address)
 	sci.incarnation = incarnation
 	copy(sci.location[:], location)
-	if sc.readWrites.Get(&sci) != nil {
-		panic(fmt.Sprintf("storage item must not be present in the cache before doing SetStorageRead for %x %d %x", address, incarnation, location))
-	}
 	copy(sci.value[:], value)
-	sci.queuePos = 0
-	sci.sequence = sc.sequence
-	sc.sequence++
 	sci.flags = 0
-	sc.readWrites.ReplaceOrInsert(&sci)
-	if sc.readQueue.Len() >= sc.limitReads {
-		// Read queue cannot grow anymore, need to evict one element
-		sc.readWrites.Delete(sc.readQueue.items[0].(btree.Item))
-		sc.readQueue.items[0] = &sci
-		heap.Fix(&sc.readQueue, 0)
-	} else {
-		// Push new element on the read queue
-		heap.Push(&sc.readQueue, &sci)
-	}
+	sc.setRead(&sci)
 }
 
 func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, location []byte) {
@@ -516,23 +544,8 @@ func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, locat
 	copy(sci.address[:], address)
 	sci.incarnation = incarnation
 	copy(sci.location[:], location)
-	if sc.readWrites.Get(&sci) != nil {
-		panic(fmt.Sprintf("storage item must not be present in the cache before doing SetStorageAbsent for %x %d %x", address, incarnation, location))
-	}
-	sci.queuePos = 0
-	sci.sequence = sc.sequence
-	sc.sequence++
 	sci.flags = DeletedFlag
-	sc.readWrites.ReplaceOrInsert(&sci)
-	if sc.readQueue.Len() >= sc.limitReads {
-		// Read queue cannot grow anymore, need to evict one element
-		sc.readWrites.Delete(sc.readQueue.items[0].(btree.Item))
-		sc.readQueue.items[0] = &sci
-		heap.Fix(&sc.readQueue, 0)
-	} else {
-		// Push new element on the read queue
-		heap.Push(&sc.readQueue, &sci)
-	}
+	sc.setRead(&sci)
 }
 
 func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, location []byte, value []byte) {
@@ -633,47 +646,17 @@ func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, locat
 func (sc *StateCache) SetCodeRead(address []byte, code []byte) {
 	var cci CodeCacheItem
 	copy(cci.address[:], address)
-	if sc.readWrites.Get(&cci) != nil {
-		panic(fmt.Sprintf("account must not be present in the cache before doing SetCodeRead for %x", address))
-	}
 	cci.code = make([]byte, len(code))
 	copy(cci.code, code)
-	cci.queuePos = 0
-	cci.sequence = sc.sequence
-	sc.sequence++
 	cci.flags = 0
-	sc.readWrites.ReplaceOrInsert(&cci)
-	if sc.readQueue.Len() >= sc.limitReads {
-		// Read queue cannot grow anymore, need to evict one element
-		sc.readWrites.Delete(sc.readQueue.items[0].(btree.Item))
-		sc.readQueue.items[0] = &cci
-		heap.Fix(&sc.readQueue, 0)
-	} else {
-		// Push new element on the read queue
-		heap.Push(&sc.readQueue, &cci)
-	}
+	sc.setRead(&cci)
 }
 
 func (sc *StateCache) SetCodeAbsent(address []byte) {
 	var cci CodeCacheItem
 	copy(cci.address[:], address)
-	if sc.readWrites.Get(&cci) != nil {
-		panic(fmt.Sprintf("account must not be present in the cache before doing SetCodeAbsent for %x", address))
-	}
-	cci.queuePos = 0
-	cci.sequence = sc.sequence
-	sc.sequence++
 	cci.flags = DeletedFlag
-	sc.readWrites.ReplaceOrInsert(&cci)
-	if sc.readQueue.Len() >= sc.limitReads {
-		// Read queue cannot grow anymore, need to evict one element
-		sc.readWrites.Delete(sc.readQueue.items[0].(btree.Item))
-		sc.readQueue.items[0] = &cci
-		heap.Fix(&sc.readQueue, 0)
-	} else {
-		// Push new element on the read queue
-		heap.Push(&sc.readQueue, &cci)
-	}
+	sc.setRead(&cci)
 }
 
 func (sc *StateCache) SetCodeWrite(address []byte, code []byte) {
