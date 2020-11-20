@@ -193,6 +193,14 @@ func (sci *StorageCacheItem) String() string {
 	return fmt.Sprintf("StorageItem(address=%x,incarnation=%d,location=%x)", sci.address, sci.incarnation, sci.location)
 }
 
+func (sci *StorageCacheItem) CopyValueFrom(item CacheItem) {
+	otherSci, ok := item.(*StorageCacheItem)
+	if !ok {
+		panic(fmt.Sprintf("expected StorageCacheItem, got %T", item))
+	}
+	copy(sci.value[:], otherSci.value.Bytes())
+}
+
 func (cci *CodeCacheItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
 	case *AccountCacheItem:
@@ -252,6 +260,15 @@ func (cci *CodeCacheItem) String() string {
 	return fmt.Sprintf("CodeItem(address=%x)", cci.address)
 }
 
+func (cci *CodeCacheItem) CopyValueFrom(item CacheItem) {
+	otherCci, ok := item.(*CodeCacheItem)
+	if !ok {
+		panic(fmt.Sprintf("expected CodeCacheItem, got %T", item))
+	}
+	cci.code = make([]byte, len(otherCci.code))
+	copy(cci.code, otherCci.code)
+}
+
 // Heaps for reads and writes grow in the opposite direction, while residing in the same space
 type ReadHeap struct {
 	items []CacheItem
@@ -281,6 +298,7 @@ func (rh *ReadHeap) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	rh.items[rh.end] = x.(CacheItem)
+	rh.items[rh.end].SetQueuePos(rh.end)
 	rh.end++
 }
 
@@ -321,27 +339,22 @@ func (wh *WriteHeap) Pop() interface{} {
 }
 
 type StateCache struct {
-	readWrites  *btree.BTree // Mixed reads and writes
-	writes      *btree.BTree // Only writes for the effective iteration
-	readQueue   ReadHeap
-	writeQueue  WriteHeap
-	limitReads  int
-	limitWrites int
-	sequence    int
+	readWrites *btree.BTree // Mixed reads and writes
+	writes     *btree.BTree // Only writes for the effective iteration
+	readQueue  ReadHeap
+	limit      int // Max number of elements in the cache
+	sequence   int
 }
 
 // NewStateCache create a new state cache based on the B-trees of specific degree. The second and the third parameters are the limit on the number of reads and writes to cache, respectively
-func NewStateCache(degree int, limitReads, limitWrites int) *StateCache {
+func NewStateCache(degree int, limit int) *StateCache {
 	var sc StateCache
 	sc.readWrites = btree.New(degree)
 	sc.writes = btree.New(degree)
-	heapItems := make([]CacheItem, limitReads+limitWrites) // This will be shares between readQueue and writeQueue
+	heapItems := make([]CacheItem, limit) // This will be shares between readQueue and writeQueue
 	sc.readQueue.items = heapItems
 	sc.readQueue.end = 0 // Empty read queue
-	sc.writeQueue.items = heapItems
-	sc.writeQueue.start = len(heapItems) // Empty write queue
-	sc.limitReads = limitReads
-	sc.limitWrites = limitWrites
+	sc.limit = limit
 	return &sc
 }
 
@@ -392,17 +405,23 @@ func (sc *StateCache) GetCode(address []byte) ([]byte, bool) {
 	return nil, true
 }
 
-func (sc *StateCache) setRead(item CacheItem) {
+func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	if sc.readWrites.Get(item) != nil {
 		panic(fmt.Sprintf("item must not be present in the cache before doing setRead: %s", item))
 	}
-	item.SetQueuePos(0)
 	item.SetSequence(sc.sequence)
+	item.ClearFlags(ModifiedFlag)
+	if absent {
+		item.SetFlags(DeletedFlag)
+	} else {
+		item.ClearFlags(DeletedFlag)
+	}
 	sc.readWrites.ReplaceOrInsert(item)
-	if sc.readQueue.Len() >= sc.limitReads {
+	if sc.readQueue.Len() >= sc.limit {
 		// Read queue cannot grow anymore, need to evict one element
 		sc.readWrites.Delete(sc.readQueue.items[0])
 		sc.readQueue.items[0] = item
+		item.SetQueuePos(0)
 		heap.Fix(&sc.readQueue, 0)
 	} else {
 		// Push new element on the read queue
@@ -415,118 +434,76 @@ func (sc *StateCache) SetAccountRead(address []byte, account *accounts.Account) 
 	var aci AccountCacheItem
 	copy(aci.address[:], address)
 	aci.account.Copy(account)
-	aci.flags = 0
-	sc.setRead(&aci)
+	sc.setRead(&aci, false /* absent */)
 }
 
 // SetAccountRead adds given account address to the cache, marking it as a absent
 func (sc *StateCache) SetAccountAbsent(address []byte) {
 	var aci AccountCacheItem
 	copy(aci.address[:], address)
-	aci.flags = DeletedFlag
-	sc.setRead(&aci)
+	sc.setRead(&aci, true /* absent */)
 }
 
-func (sc *StateCache) setWrite(item CacheItem) {
+func (sc *StateCache) setWrite(item CacheItem, delete bool) {
 	// Check if this is going to be modification of the existing entry
 	if existing := sc.writes.Get(item); existing != nil {
-
+		cacheItem := existing.(CacheItem)
+		cacheItem.CopyValueFrom(item)
+		if delete {
+			cacheItem.SetFlags(DeletedFlag)
+		} else {
+			cacheItem.ClearFlags(DeletedFlag)
+		}
+		return
 	}
+	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
+	if existing := sc.readWrites.Get(item); existing != nil {
+		cacheItem := existing.(CacheItem)
+		cacheItem.CopyValueFrom(item)
+		cacheItem.SetSequence(sc.sequence)
+		sc.sequence++
+		cacheItem.SetFlags(ModifiedFlag)
+		if delete {
+			cacheItem.SetFlags(DeletedFlag)
+		} else {
+			cacheItem.ClearFlags(DeletedFlag)
+		}
+		// Remove from the reads queue
+		heap.Remove(&sc.readQueue, cacheItem.GetQueuePos())
+		return
+	}
+	if sc.writes.Len() >= sc.limit {
+		panic(fmt.Sprintf("number of writes (%d) must not go over limit (%d). Commit writes before proceeding", sc.writes.Len(), sc.limit))
+	}
+	if sc.readWrites.Len() >= sc.limit {
+		// There is no space available, need to evict one read element
+		sc.readWrites.Delete(heap.Pop(&sc.readQueue).(btree.Item))
+	}
+	item.SetSequence(sc.sequence)
+	sc.sequence++
+	item.SetFlags(ModifiedFlag)
+	if delete {
+		item.SetFlags(DeletedFlag)
+	} else {
+		item.ClearFlags(DeletedFlag)
+	}
+	sc.readWrites.ReplaceOrInsert(item)
+	sc.writes.ReplaceOrInsert(item)
 }
 
 // SetAccountWrite adds given account to the cache, marking it as written (cannot be evicted)
 func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account) {
-	// Check if this is going to be modification of the existing entry
 	var aci AccountCacheItem
 	copy(aci.address[:], address)
-	item := sc.writes.Get(&aci)
-	if item != nil {
-		existing := item.(*AccountCacheItem)
-		existing.account.Copy(account)
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag
-		heap.Fix(&sc.writeQueue, existing.queuePos)
-		return
-	}
-	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
-	item = sc.readWrites.Get(&aci)
-	if item != nil {
-		existing := item.(*AccountCacheItem)
-		existing.account.Copy(account)
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag
-		// Remove from the reads heap
-		heap.Remove(&sc.readQueue, existing.queuePos)
-		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, existing)
-		return
-	}
-	if sc.writeQueue.Len() >= sc.limitWrites {
-		panic(fmt.Sprintf("writes queue size (%d) must not go over limit (%d). Commit writes before proceeding", sc.writeQueue.Len(), sc.limitWrites))
-	}
-	if sc.readQueue.Len()+sc.writeQueue.Len() >= sc.limitReads+sc.limitWrites {
-		// There is no space available in the queues, need to evict one read element
-		sc.readWrites.Delete(heap.Pop(&sc.readQueue).(btree.Item))
-	}
-	copy(aci.address[:], address)
 	aci.account.Copy(account)
-	aci.sequence = sc.sequence
-	sc.sequence++
-	aci.flags = ModifiedFlag
-	// Push new element on the write queue
-	aci.queuePos = sc.writeQueue.Len()
-	heap.Push(&sc.writeQueue, &aci)
-	sc.readWrites.ReplaceOrInsert(&aci)
-	sc.writes.ReplaceOrInsert(&aci)
+	sc.setWrite(&aci, false /* delete */)
 }
 
 // SetAccountDelete is very similar to SetAccountWrite with the difference that there no set value
 func (sc *StateCache) SetAccountDelete(address []byte) {
-	// Check if this is going to be modification of the existing entry
 	var aci AccountCacheItem
 	copy(aci.address[:], address)
-	item := sc.writes.Get(&aci)
-	if item != nil {
-		existing := item.(*AccountCacheItem)
-		existing.account.Reset()
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag | DeletedFlag
-		heap.Fix(&sc.writeQueue, existing.queuePos)
-		return
-	}
-	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
-	item = sc.readWrites.Get(&aci)
-	if item != nil {
-		existing := item.(*AccountCacheItem)
-		existing.account.Reset()
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag | DeletedFlag
-		// Remove from the reads heap
-		heap.Remove(&sc.readQueue, existing.queuePos)
-		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, existing)
-		return
-	}
-	if sc.writeQueue.Len() >= sc.limitWrites {
-		panic(fmt.Sprintf("writes queue size (%d) must not go over limit (%d). Commit writes before proceeding", sc.writeQueue.Len(), sc.limitWrites))
-	}
-	if sc.readQueue.Len()+sc.writeQueue.Len() >= sc.limitReads+sc.limitWrites {
-		// There is no space available in the queues, need to evict one read element
-		sc.readWrites.Delete(heap.Pop(&sc.readQueue).(btree.Item))
-	}
-	copy(aci.address[:], address)
-	aci.sequence = sc.sequence
-	sc.sequence++
-	aci.flags = DeletedFlag
-	// Push new element on the write queue
-	aci.queuePos = sc.writeQueue.Len()
-	heap.Push(&sc.writeQueue, &aci)
-	sc.readWrites.ReplaceOrInsert(&aci)
-	sc.writes.ReplaceOrInsert(&aci)
+	sc.setWrite(&aci, true /* delete */)
 }
 
 func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, location []byte, value []byte) {
@@ -534,9 +511,8 @@ func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, locatio
 	copy(sci.address[:], address)
 	sci.incarnation = incarnation
 	copy(sci.location[:], location)
-	copy(sci.value[:], value)
-	sci.flags = 0
-	sc.setRead(&sci)
+	sci.value.SetBytes(value)
+	sc.setRead(&sci, false /* absent */)
 }
 
 func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, location []byte) {
@@ -544,103 +520,24 @@ func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, locat
 	copy(sci.address[:], address)
 	sci.incarnation = incarnation
 	copy(sci.location[:], location)
-	sci.flags = DeletedFlag
-	sc.setRead(&sci)
+	sc.setRead(&sci, true /* absent */)
 }
 
 func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, location []byte, value []byte) {
-	// Check if this is going to be modification of the existing entry
 	var sci StorageCacheItem
 	copy(sci.address[:], address)
 	sci.incarnation = incarnation
 	copy(sci.location[:], location)
-	item := sc.writes.Get(&sci)
-	if item != nil {
-		existing := item.(*StorageCacheItem)
-		copy(existing.value[:], value)
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag
-		heap.Fix(&sc.writeQueue, existing.queuePos)
-		return
-	}
-	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
-	item = sc.readWrites.Get(&sci)
-	if item != nil {
-		existing := item.(*StorageCacheItem)
-		copy(existing.value[:], value)
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag
-		// Remove from the reads heap
-		heap.Remove(&sc.readQueue, existing.queuePos)
-		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, existing)
-		return
-	}
-	if sc.writeQueue.Len() >= sc.limitWrites {
-		panic(fmt.Sprintf("writes queue size (%d) must not go over limit (%d). Commit writes before proceeding", sc.writeQueue.Len(), sc.limitWrites))
-	}
-	if sc.readQueue.Len()+sc.writeQueue.Len() >= sc.limitReads+sc.limitWrites {
-		// There is no space available in the queues, need to evict one read element
-		sc.readWrites.Delete(heap.Pop(&sc.readQueue).(btree.Item))
-	}
-	copy(sci.address[:], address)
-	sci.incarnation = incarnation
-	copy(sci.location[:], location)
-	copy(sci.value[:], value)
-	sci.sequence = sc.sequence
-	sc.sequence++
-	sci.flags = ModifiedFlag
-	// Push new element on the write queue
-	sci.queuePos = sc.writeQueue.Len()
-	heap.Push(&sc.writeQueue, &sci)
+	sci.value.SetBytes(value)
+	sc.setWrite(&sci, false /* delete */)
 }
 
 func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, location []byte) {
-	// Check if this is going to be modification of the existing entry
 	var sci StorageCacheItem
 	copy(sci.address[:], address)
 	sci.incarnation = incarnation
 	copy(sci.location[:], location)
-	item := sc.writes.Get(&sci)
-	if item != nil {
-		existing := item.(*StorageCacheItem)
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag | DeletedFlag
-		heap.Fix(&sc.writeQueue, existing.queuePos)
-		return
-	}
-	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
-	item = sc.readWrites.Get(&sci)
-	if item != nil {
-		existing := item.(*StorageCacheItem)
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag | DeletedFlag
-		// Remove from the reads heap
-		heap.Remove(&sc.readQueue, existing.queuePos)
-		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, existing)
-		return
-	}
-	if sc.writeQueue.Len() >= sc.limitWrites {
-		panic(fmt.Sprintf("writes queue size (%d) must not go over limit (%d). Commit writes before proceeding", sc.writeQueue.Len(), sc.limitWrites))
-	}
-	if sc.readQueue.Len()+sc.writeQueue.Len() >= sc.limitReads+sc.limitWrites {
-		// There is no space available in the queues, need to evict one read element
-		sc.readWrites.Delete(heap.Pop(&sc.readQueue).(btree.Item))
-	}
-	copy(sci.address[:], address)
-	sci.incarnation = incarnation
-	copy(sci.location[:], location)
-	sci.sequence = sc.sequence
-	sc.sequence++
-	sci.flags = DeletedFlag
-	// Push new element on the write queue
-	sci.queuePos = sc.writeQueue.Len()
-	heap.Push(&sc.writeQueue, &sci)
+	sc.setWrite(&sci, true /* delete */)
 }
 
 func (sc *StateCache) SetCodeRead(address []byte, code []byte) {
@@ -648,121 +545,43 @@ func (sc *StateCache) SetCodeRead(address []byte, code []byte) {
 	copy(cci.address[:], address)
 	cci.code = make([]byte, len(code))
 	copy(cci.code, code)
-	cci.flags = 0
-	sc.setRead(&cci)
+	sc.setRead(&cci, false /* absent */)
 }
 
 func (sc *StateCache) SetCodeAbsent(address []byte) {
 	var cci CodeCacheItem
 	copy(cci.address[:], address)
-	cci.flags = DeletedFlag
-	sc.setRead(&cci)
+	sc.setRead(&cci, true /* absent */)
 }
 
 func (sc *StateCache) SetCodeWrite(address []byte, code []byte) {
 	// Check if this is going to be modification of the existing entry
 	var cci CodeCacheItem
 	copy(cci.address[:], address)
-	item := sc.writes.Get(&cci)
-	if item != nil {
-		existing := item.(*CodeCacheItem)
-		existing.code = make([]byte, len(code))
-		copy(existing.code, code)
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag
-		heap.Fix(&sc.writeQueue, existing.queuePos)
-		return
-	}
-	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
-	item = sc.readWrites.Get(&cci)
-	if item != nil {
-		existing := item.(*CodeCacheItem)
-		existing.code = make([]byte, len(code))
-		copy(existing.code, code)
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag
-		// Remove from the reads heap
-		heap.Remove(&sc.readQueue, existing.queuePos)
-		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, existing)
-		return
-	}
-	if sc.writeQueue.Len() >= sc.limitWrites {
-		panic(fmt.Sprintf("writes queue size (%d) must not go over limit (%d). Commit writes before proceeding", sc.writeQueue.Len(), sc.limitWrites))
-	}
-	if sc.readQueue.Len()+sc.writeQueue.Len() >= sc.limitReads+sc.limitWrites {
-		// There is no space available in the queues, need to evict one read element
-		sc.readWrites.Delete(heap.Pop(&sc.readQueue).(btree.Item))
-	}
-	copy(cci.address[:], address)
 	cci.code = make([]byte, len(code))
 	copy(cci.code, code)
-	cci.sequence = sc.sequence
-	sc.sequence++
-	cci.flags = ModifiedFlag
-	// Push new element on the write queue
-	cci.queuePos = sc.writeQueue.Len()
-	heap.Push(&sc.writeQueue, &cci)
+	sc.setWrite(&cci, false /* delete */)
 }
 
 func (sc *StateCache) SetCodeDelete(address []byte) {
 	// Check if this is going to be modification of the existing entry
 	var cci CodeCacheItem
 	copy(cci.address[:], address)
-	item := sc.writes.Get(&cci)
-	if item != nil {
-		existing := item.(*CodeCacheItem)
-		existing.code = nil
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag
-		heap.Fix(&sc.writeQueue, existing.queuePos)
-		return
-	}
-	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
-	item = sc.readWrites.Get(&cci)
-	if item != nil {
-		existing := item.(*CodeCacheItem)
-		existing.code = nil
-		existing.sequence = sc.sequence
-		sc.sequence++
-		existing.flags = ModifiedFlag | DeletedFlag
-		// Remove from the reads heap
-		heap.Remove(&sc.readQueue, existing.queuePos)
-		existing.queuePos = sc.writeQueue.Len()
-		heap.Push(&sc.writeQueue, existing)
-		return
-	}
-	if sc.writeQueue.Len() >= sc.limitWrites {
-		panic(fmt.Sprintf("writes queue size (%d) must not go over limit (%d). Commit writes before proceeding", sc.writeQueue.Len(), sc.limitWrites))
-	}
-	if sc.readQueue.Len()+sc.writeQueue.Len() >= sc.limitReads+sc.limitWrites {
-		// There is no space available in the queues, need to evict one read element
-		sc.readWrites.Delete(heap.Pop(&sc.readQueue).(btree.Item))
-	}
-	copy(cci.address[:], address)
 	cci.code = nil
-	cci.sequence = sc.sequence
-	sc.sequence++
-	cci.flags = ModifiedFlag | DeletedFlag
-	// Push new element on the write queue
-	cci.queuePos = sc.writeQueue.Len()
-	heap.Push(&sc.writeQueue, &cci)
+	sc.setWrite(&cci, true /* delete */)
 }
 
 func (sc *StateCache) TurnWritesToReads() {
-	writeLen := sc.writeQueue.Len() - 1
+	idx := sc.readQueue.end
 	sc.writes.Ascend(func(i btree.Item) bool {
 		cacheItem := i.(CacheItem)
-		cacheItem.SetQueuePos(sc.readQueue.end + writeLen - cacheItem.GetQueuePos())
-		i.(CacheItem).ClearFlags(ModifiedFlag)
+		cacheItem.ClearFlags(ModifiedFlag)
+		cacheItem.SetQueuePos(idx)
+		sc.readQueue.items[idx] = cacheItem
+		idx++
 		return true
 	})
-	// Merge write queue into the read queue
-	copy(sc.readQueue.items[sc.readQueue.end:], sc.writeQueue.items[sc.writeQueue.start:])
-	sc.readQueue.end += len(sc.writeQueue.items) - sc.writeQueue.start
-	sc.writeQueue.start = len(sc.writeQueue.items)
-	heap.Init(&sc.readQueue)
+	sc.readQueue.end = idx
+	heap.Init(&sc.readQueue) // This might be more efficient than pushing items to the queue one by one
+	sc.writes.Clear(true /* addNodesToFreeList */)
 }
