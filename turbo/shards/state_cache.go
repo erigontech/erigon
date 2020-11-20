@@ -334,7 +334,7 @@ func NewStateCache(degree int, limit int) *StateCache {
 	return &sc
 }
 
-func (sc *StateCache) get(key CacheItem) (CacheItem, bool) {
+func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
 	item := sc.readWrites.Get(key)
 	if item == nil {
 		return nil, false
