@@ -112,11 +112,10 @@ var (
 	HeaderHashSuffix   = []byte("n") // block_num_u64 + headerHashSuffix -> hash
 	HeaderNumberPrefix = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
 
-	BlockBodyPrefix     = "b"                // block_num_u64 + hash -> block body
-	EthTx               = "eth_tx"           // tbl_sequence_u64 -> rlp(tx)
-	CanonicalBlocks     = "canonical_blocks" // block_num_u64 -> rlp(block_with_tx_ids)
-	BlockReceiptsPrefix = "r"                // block_num_u64 + hash -> block receipts
-	Log                 = "log"              // block_num_u64 + hash -> block receipts
+	BlockBodyPrefix     = "b"      // block_num_u64 + hash -> block body
+	EthTx               = "eth_tx" // tbl_sequence_u64 -> rlp(tx)
+	BlockReceiptsPrefix = "r"      // block_num_u64 + hash -> block receipts
+	Log                 = "log"    // block_num_u64 + hash -> block receipts
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -245,7 +244,6 @@ var Buckets = []string{
 	CallToIndex,
 	Log,
 	Sequence,
-	CanonicalBlocks,
 	EthTx,
 }
 
