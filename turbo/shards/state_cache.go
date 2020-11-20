@@ -470,6 +470,7 @@ func (sc *StateCache) setWrite(item CacheItem, delete bool) {
 		}
 		// Remove from the reads queue
 		heap.Remove(&sc.readQueue, cacheItem.GetQueuePos())
+		sc.writes.ReplaceOrInsert(cacheItem)
 		return
 	}
 	if sc.writes.Len() >= sc.limit {

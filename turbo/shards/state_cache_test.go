@@ -106,7 +106,7 @@ func TestCacheBtreeAll(t *testing.T) {
 }
 
 func TestAccountReads(t *testing.T) {
-	sc := NewStateCache(32, 8)
+	sc := NewStateCache(32, 4)
 	var account1 accounts.Account
 	account1.Balance.SetUint64(1)
 	var addr1 common.Address
@@ -134,7 +134,7 @@ func TestAccountReads(t *testing.T) {
 		sc.SetAccountRead(addr.Bytes(), &account)
 	}
 	// Out of 6 addresses, one was not associated with an account or absence record. So 5 records would be in the cache
-	// But since the reads limit is 4, the first addr will be evicted
+	// But since the limit is 4, the first addr will be evicted
 	if _, ok := sc.GetAccount(addr1.Bytes()); ok {
 		t.Fatalf("Expected addr1 to be evicted")
 	}
