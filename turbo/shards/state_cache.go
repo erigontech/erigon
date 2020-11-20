@@ -40,11 +40,12 @@ type StorageCacheItem struct {
 
 //nolint:maligned
 type CodeCacheItem struct {
-	address  common.Address
-	code     []byte
-	sequence int
-	queuePos int
-	flags    uint16
+	address     common.Address
+	incarnation uint64
+	code        []byte
+	sequence    int
+	queuePos    int
+	flags       uint16
 }
 
 type CacheItem interface {
@@ -148,8 +149,11 @@ func (sci *StorageCacheItem) Less(than btree.Item) bool {
 	case *CodeCacheItem:
 		c := bytes.Compare(sci.address.Bytes(), i.address.Bytes())
 		if c == 0 {
-			// Code comes before storage items
-			return false
+			if sci.incarnation == i.incarnation {
+				// Code comes before storage items
+				return false
+			}
+			return sci.incarnation < i.incarnation
 		}
 		return c < 0
 	default:
@@ -214,11 +218,18 @@ func (cci *CodeCacheItem) Less(than btree.Item) bool {
 		c := bytes.Compare(cci.address.Bytes(), i.address.Bytes())
 		if c == 0 {
 			// Code comes before storage items
-			return true
+			if cci.incarnation == i.incarnation {
+				return true
+			}
+			return cci.incarnation < i.incarnation
 		}
 		return c < 0
 	case *CodeCacheItem:
-		return bytes.Compare(cci.address.Bytes(), i.address.Bytes()) < 0
+		c := bytes.Compare(cci.address.Bytes(), i.address.Bytes())
+		if c == 0 {
+			return cci.incarnation < i.incarnation
+		}
+		return c < 0
 	default:
 		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
 	}
@@ -257,7 +268,7 @@ func (cci *CodeCacheItem) ClearFlags(flags uint16) {
 }
 
 func (cci *CodeCacheItem) String() string {
-	return fmt.Sprintf("CodeItem(address=%x)", cci.address)
+	return fmt.Sprintf("CodeItem(address=%x,incarnation=%d)", cci.address, cci.incarnation)
 }
 
 func (cci *CodeCacheItem) CopyValueFrom(item CacheItem) {
@@ -269,14 +280,10 @@ func (cci *CodeCacheItem) CopyValueFrom(item CacheItem) {
 	copy(cci.code, otherCci.code)
 }
 
-// Heaps for reads and writes grow in the opposite direction, while residing in the same space
+// Heap for reads
 type ReadHeap struct {
 	items []CacheItem
 	end   int
-}
-type WriteHeap struct {
-	items []CacheItem
-	start int
 }
 
 func (rh ReadHeap) Len() int {
@@ -305,37 +312,6 @@ func (rh *ReadHeap) Push(x interface{}) {
 func (rh *ReadHeap) Pop() interface{} {
 	rh.end--
 	return rh.items[rh.end]
-}
-
-func (wh WriteHeap) Len() int {
-	return len(wh.items) - wh.start
-}
-
-func (wh WriteHeap) Less(i, j int) bool {
-	l := len(wh.items) - 1
-	return wh.items[l-i].GetSequence() < wh.items[l-j].GetSequence()
-}
-
-func (wh WriteHeap) Swap(i, j int) {
-	// Swap queue positions in the B-tree leaves too
-	wh.items[i].SetQueuePos(j)
-	wh.items[j].SetQueuePos(i)
-	l := len(wh.items) - 1
-	i = l - i
-	j = l - j
-	wh.items[i], wh.items[j] = wh.items[j], wh.items[i]
-}
-
-func (wh *WriteHeap) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	wh.start--
-	wh.items[wh.start] = x.(CacheItem)
-}
-
-func (wh *WriteHeap) Pop() interface{} {
-	wh.start++
-	return wh.items[wh.start-1]
 }
 
 type StateCache struct {
@@ -396,13 +372,14 @@ func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []
 
 // GetCode searches contract code with given address, without modifying any structures
 // Second return value is true if such item is found
-func (sc *StateCache) GetCode(address []byte) ([]byte, bool) {
+func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool) {
 	var key CodeCacheItem
 	copy(key.address[:], address)
+	key.incarnation = incarnation
 	if item, ok := sc.get(&key); ok {
 		return item.(*CodeCacheItem).code, true
 	}
-	return nil, true
+	return nil, false
 }
 
 func (sc *StateCache) setRead(item CacheItem, absent bool) {
@@ -410,13 +387,13 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 		panic(fmt.Sprintf("item must not be present in the cache before doing setRead: %s", item))
 	}
 	item.SetSequence(sc.sequence)
+	sc.sequence++
 	item.ClearFlags(ModifiedFlag)
 	if absent {
 		item.SetFlags(DeletedFlag)
 	} else {
 		item.ClearFlags(DeletedFlag)
 	}
-	sc.readWrites.ReplaceOrInsert(item)
 	if sc.readQueue.Len() >= sc.limit {
 		// Read queue cannot grow anymore, need to evict one element
 		sc.readWrites.Delete(sc.readQueue.items[0])
@@ -427,6 +404,7 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 		// Push new element on the read queue
 		heap.Push(&sc.readQueue, item)
 	}
+	sc.readWrites.ReplaceOrInsert(item)
 }
 
 // SetAccountRead adds given account to the cache, marking it as a read (not written)
@@ -541,33 +519,37 @@ func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, locat
 	sc.setWrite(&sci, true /* delete */)
 }
 
-func (sc *StateCache) SetCodeRead(address []byte, code []byte) {
+func (sc *StateCache) SetCodeRead(address []byte, incarnation uint64, code []byte) {
 	var cci CodeCacheItem
 	copy(cci.address[:], address)
+	cci.incarnation = incarnation
 	cci.code = make([]byte, len(code))
 	copy(cci.code, code)
 	sc.setRead(&cci, false /* absent */)
 }
 
-func (sc *StateCache) SetCodeAbsent(address []byte) {
+func (sc *StateCache) SetCodeAbsent(address []byte, incarnation uint64) {
 	var cci CodeCacheItem
 	copy(cci.address[:], address)
+	cci.incarnation = incarnation
 	sc.setRead(&cci, true /* absent */)
 }
 
-func (sc *StateCache) SetCodeWrite(address []byte, code []byte) {
+func (sc *StateCache) SetCodeWrite(address []byte, incarnation uint64, code []byte) {
 	// Check if this is going to be modification of the existing entry
 	var cci CodeCacheItem
 	copy(cci.address[:], address)
+	cci.incarnation = incarnation
 	cci.code = make([]byte, len(code))
 	copy(cci.code, code)
 	sc.setWrite(&cci, false /* delete */)
 }
 
-func (sc *StateCache) SetCodeDelete(address []byte) {
+func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	// Check if this is going to be modification of the existing entry
 	var cci CodeCacheItem
 	copy(cci.address[:], address)
+	cci.incarnation = incarnation
 	cci.code = nil
 	sc.setWrite(&cci, true /* delete */)
 }

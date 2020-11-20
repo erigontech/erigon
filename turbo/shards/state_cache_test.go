@@ -35,24 +35,55 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 	aci2.address[0] = 2
 	bt.ReplaceOrInsert(&aci1)
 	bt.ReplaceOrInsert(&aci2)
-	var sci1, sci2, sci3 StorageCacheItem
+	var sci1, sci2, sci3, sci4 StorageCacheItem
 	sci1.address[0] = 1
 	sci1.location[0] = 1
 	sci2.address[0] = 1
 	sci2.location[0] = 2
 	sci3.address[0] = 3
 	sci3.location[0] = 42
+	sci4.address[0] = 1
+	sci4.incarnation = 1
 	bt.ReplaceOrInsert(&aci1)
 	bt.ReplaceOrInsert(&aci2)
 	bt.ReplaceOrInsert(&sci1)
 	bt.ReplaceOrInsert(&sci2)
 	bt.ReplaceOrInsert(&sci3)
+	bt.ReplaceOrInsert(&sci4)
 	// Specify the expected ordering
 	aci1.sequence = 0
 	sci1.sequence = 1
 	sci2.sequence = 2
-	aci2.sequence = 3
-	sci3.sequence = 4
+	sci4.sequence = 3
+	aci2.sequence = 4
+	sci3.sequence = 5
+	sequence := 0
+	bt.Ascend(func(item btree.Item) bool {
+		if item.(CacheItem).GetSequence() != sequence {
+			t.Errorf("wrong ordering: expected sequence %d, got %d", sequence, item.(CacheItem).GetSequence())
+		}
+		sequence++
+		return true
+	})
+}
+
+func TestCacheBtreeOrderAccountsCode(t *testing.T) {
+	bt := btree.New(32)
+	var aci1, aci2 AccountCacheItem
+	aci1.address[0] = 1
+	aci2.address[0] = 2
+	bt.ReplaceOrInsert(&aci1)
+	bt.ReplaceOrInsert(&aci2)
+	var cci1, cci2 CodeCacheItem
+	cci1.address[0] = 1
+	cci2.address[0] = 2
+	bt.ReplaceOrInsert(&cci1)
+	bt.ReplaceOrInsert(&cci2)
+	// Specify the expected ordering
+	aci1.sequence = 0
+	cci1.sequence = 1
+	aci2.sequence = 2
+	cci2.sequence = 3
 	sequence := 0
 	bt.Ascend(func(item btree.Item) bool {
 		if item.(CacheItem).GetSequence() != sequence {
@@ -77,15 +108,18 @@ func TestCacheBtreeAll(t *testing.T) {
 	sci2.location[0] = 2
 	sci3.address[0] = 3
 	sci3.location[0] = 42
-	var cci1, cci2 CodeCacheItem
+	var cci1, cci2, cci3 CodeCacheItem
 	cci1.address[0] = 1
 	cci2.address[0] = 3
+	cci3.address[0] = 4
+	bt.ReplaceOrInsert(&cci3)
 	bt.ReplaceOrInsert(&aci1)
 	bt.ReplaceOrInsert(&aci2)
 	bt.ReplaceOrInsert(&sci1)
 	bt.ReplaceOrInsert(&sci2)
-	bt.ReplaceOrInsert(&sci3)
 	bt.ReplaceOrInsert(&cci1)
+	bt.ReplaceOrInsert(&cci2)
+	bt.ReplaceOrInsert(&sci3)
 	bt.ReplaceOrInsert(&cci2)
 	// Specify the expected ordering
 	aci1.sequence = 0
@@ -95,6 +129,7 @@ func TestCacheBtreeAll(t *testing.T) {
 	aci2.sequence = 4
 	cci2.sequence = 5
 	sci3.sequence = 6
+	cci3.sequence = 7
 	sequence := 0
 	bt.Ascend(func(item btree.Item) bool {
 		if item.(CacheItem).GetSequence() != sequence {
@@ -291,4 +326,275 @@ func TestReplaceAccountReadsWithWrites(t *testing.T) {
 			t.Errorf("Expected to find address %d", i)
 		}
 	}
+}
+
+func TestReadAccountExisting(t *testing.T) {
+	sc := NewStateCache(32, 2)
+	var account1 accounts.Account
+	account1.Balance.SetUint64(1)
+	var addr1 common.Address
+	sc.SetAccountRead(addr1.Bytes(), &account1)
+	defer func() {
+		if r := recover(); r != nil {
+		}
+	}()
+	sc.SetAccountRead(addr1.Bytes(), &account1)
+	t.Fatalf("Expected to panic")
+}
+
+func TestWriteAccountExceedLimit(t *testing.T) {
+	sc := NewStateCache(32, 2)
+	defer func() {
+		if r := recover(); r != nil {
+		}
+	}()
+	for i := 1; i <= 3; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var account accounts.Account
+		account.Balance.SetUint64(uint64(i))
+		sc.SetAccountWrite(addr.Bytes(), &account)
+	}
+	t.Fatalf("Expected to panic")
+}
+
+func TestReadWriteAbsentDeleteStorage(t *testing.T) {
+	sc := NewStateCache(32, 4)
+	// Add absents
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var loc common.Hash
+		loc[1] = byte(i)
+		sc.SetStorageAbsent(addr.Bytes(), 1, loc.Bytes())
+	}
+	if sc.readQueue.Len() != 4 {
+		t.Fatalf("expected 4 reads got: %d", sc.readQueue.Len())
+	}
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var loc common.Hash
+		loc[1] = byte(i)
+		if _, ok := sc.GetStorage(addr.Bytes(), 1, loc.Bytes()); ok {
+			t.Fatalf("expected entry with %x,1,%x not to exist", addr, loc)
+		}
+	}
+	// Add reads for incarnation 2 (instead of 1), 6 records instead of 4, so only last 4 will stay
+	for i := 1; i <= 6; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var loc common.Hash
+		loc[1] = byte(i)
+		var val common.Hash
+		val[2] = byte(i)
+		sc.SetStorageRead(addr.Bytes(), 2, loc.Bytes(), val.Bytes())
+	}
+	if sc.readQueue.Len() != 4 {
+		t.Fatalf("expected 4 reads got: %d", sc.readQueue.Len())
+	}
+	// Check that first two records were evicted
+	for i := 1; i <= 2; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var loc common.Hash
+		loc[1] = byte(i)
+		if _, ok := sc.GetStorage(addr.Bytes(), 2, loc.Bytes()); ok {
+			t.Fatalf("expected entry with %x,2,%x to be evicted", addr, loc)
+		}
+	}
+	// Check that last 4 records stayed
+	for i := 3; i <= 6; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var loc common.Hash
+		loc[1] = byte(i)
+		if _, ok := sc.GetStorage(addr.Bytes(), 2, loc.Bytes()); !ok {
+			t.Errorf("expected entry with %x,2,%x to exist", addr, loc)
+		}
+	}
+	// Replace all 4 entries with deletes
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var loc common.Hash
+		loc[1] = byte(i)
+		sc.SetStorageDelete(addr.Bytes(), 1, loc.Bytes())
+	}
+	if sc.readQueue.Len() != 0 {
+		t.Fatalf("expected 0 reads got: %d", sc.readQueue.Len())
+	}
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var loc common.Hash
+		loc[1] = byte(i)
+		if _, ok := sc.GetStorage(addr.Bytes(), 1, loc.Bytes()); ok {
+			t.Fatalf("expected entry with %x,1,%x not to exist", addr, loc)
+		}
+	}
+	// Replace all 4 deletes with writes
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var loc common.Hash
+		loc[1] = byte(i)
+		var val common.Hash
+		val[2] = byte(i)
+		sc.SetStorageWrite(addr.Bytes(), 1, loc.Bytes(), val.Bytes())
+	}
+	if sc.writes.Len() != 4 {
+		t.Fatalf("expected 4 writes, got %d", sc.writes.Len())
+	}
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var loc common.Hash
+		loc[1] = byte(i)
+		if _, ok := sc.GetStorage(addr.Bytes(), 1, loc.Bytes()); !ok {
+			t.Fatalf("expected entry with %x,1,%x to exist", addr, loc)
+		}
+	}
+}
+
+func TestReadStorageExisting(t *testing.T) {
+	sc := NewStateCache(32, 2)
+	var addr1 common.Address
+	addr1[0] = 1
+	var loc1 common.Hash
+	var val1 common.Hash
+	val1[2] = 1
+	sc.SetStorageRead(addr1.Bytes(), 1, loc1.Bytes(), val1.Bytes())
+	defer func() {
+		if r := recover(); r != nil {
+		}
+	}()
+	sc.SetStorageRead(addr1.Bytes(), 1, loc1.Bytes(), val1.Bytes())
+	t.Fatalf("Expected to panic")
+}
+
+func TestWriteStorageExceedLimit(t *testing.T) {
+	sc := NewStateCache(32, 2)
+	defer func() {
+		if r := recover(); r != nil {
+		}
+	}()
+	for i := 1; i <= 3; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var loc common.Hash
+		loc[1] = byte(i)
+		var val common.Hash
+		val[2] = byte(i)
+		sc.SetStorageWrite(addr.Bytes(), 1, loc.Bytes(), val.Bytes())
+	}
+	t.Fatalf("Expected to panic")
+}
+
+func TestCodeReadWriteAbsentDeleteStorage(t *testing.T) {
+	sc := NewStateCache(32, 4)
+	// Add absents
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		sc.SetCodeAbsent(addr.Bytes(), 1)
+	}
+	if sc.readQueue.Len() != 4 {
+		t.Fatalf("expected 4 reads got: %d", sc.readQueue.Len())
+	}
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		if c, ok := sc.GetCode(addr.Bytes(), 1); ok {
+			t.Fatalf("expected entry with %x,1 not to exist, found: %s", addr, c)
+		}
+	}
+	// Add reads for incarnation 2 (instead of 1), 6 records instead of 4, so only last 4 will stay
+	for i := 1; i <= 6; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var code = []byte{byte(i), 2, 3}
+		sc.SetCodeRead(addr.Bytes(), 2, code)
+	}
+	if sc.readQueue.Len() != 4 {
+		t.Fatalf("expected 4 reads got: %d", sc.readQueue.Len())
+	}
+	// Check that first two records were evicted
+	for i := 1; i <= 2; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		if _, ok := sc.GetCode(addr.Bytes(), 2); ok {
+			t.Fatalf("expected entry with %x,2 to be evicted", addr)
+		}
+	}
+	// Check that last 4 records stayed
+	for i := 3; i <= 6; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		if _, ok := sc.GetCode(addr.Bytes(), 2); !ok {
+			t.Errorf("expected entry with %x,2 to exist", addr)
+		}
+	}
+	// Replace all 4 entries with deletes
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		sc.SetCodeDelete(addr.Bytes(), 1)
+	}
+	if sc.readQueue.Len() != 0 {
+		t.Fatalf("expected 0 reads got: %d", sc.readQueue.Len())
+	}
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		if _, ok := sc.GetCode(addr.Bytes(), 1); ok {
+			t.Fatalf("expected entry with %x,1 not to exist", addr)
+		}
+	}
+	// Replace all 4 deletes with writes
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		var code = []byte{byte(i), 2, 3}
+		sc.SetCodeWrite(addr.Bytes(), 1, code)
+	}
+	if sc.writes.Len() != 4 {
+		t.Fatalf("expected 4 writes, got %d", sc.writes.Len())
+	}
+	for i := 1; i <= 4; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		if _, ok := sc.GetCode(addr.Bytes(), 1); !ok {
+			t.Fatalf("expected entry with %x,1 to exist", addr)
+		}
+	}
+}
+
+func TestReadCodeExisting(t *testing.T) {
+	sc := NewStateCache(32, 2)
+	var addr1 common.Address
+	addr1[0] = 1
+	code1 := []byte{1, 2, 3}
+	sc.SetCodeRead(addr1.Bytes(), 1, code1)
+	defer func() {
+		if r := recover(); r != nil {
+		}
+	}()
+	sc.SetCodeRead(addr1.Bytes(), 1, code1)
+	t.Fatalf("Expected to panic")
+}
+
+func TestWriteCodeExceedLimit(t *testing.T) {
+	sc := NewStateCache(32, 2)
+	defer func() {
+		if r := recover(); r != nil {
+		}
+	}()
+	for i := 1; i <= 3; i++ {
+		var addr common.Address
+		addr[0] = byte(i)
+		code := []byte{byte(i), 2, 3}
+		sc.SetCodeWrite(addr.Bytes(), 1, code)
+	}
+	t.Fatalf("Expected to panic")
 }
