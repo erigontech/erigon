@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/btree"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
@@ -32,7 +33,7 @@ type StorageCacheItem struct {
 	address     common.Address
 	incarnation uint64
 	location    common.Hash
-	value       common.Hash
+	value       uint256.Int
 	sequence    int
 	queuePos    int
 	flags       uint16
@@ -202,7 +203,7 @@ func (sci *StorageCacheItem) CopyValueFrom(item CacheItem) {
 	if !ok {
 		panic(fmt.Sprintf("expected StorageCacheItem, got %T", item))
 	}
-	copy(sci.value[:], otherSci.value.Bytes())
+	sci.value.Set(&otherSci.value)
 }
 
 func (cci *CodeCacheItem) Less(than btree.Item) bool {
@@ -341,7 +342,7 @@ func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
 	}
 	cacheItem := item.(CacheItem)
 	if cacheItem.HasFlag(DeletedFlag) {
-		return nil, false
+		return nil, true
 	}
 	return cacheItem, true
 }
@@ -352,7 +353,10 @@ func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 	var key AccountCacheItem
 	copy(key.address[:], address)
 	if item, ok := sc.get(&key); ok {
-		return &item.(*AccountCacheItem).account, true
+		if item != nil {
+			return &item.(*AccountCacheItem).account, true
+		}
+		return nil, true
 	}
 	return nil, false
 }
@@ -365,7 +369,10 @@ func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []
 	key.incarnation = incarnation
 	copy(key.location[:], location)
 	if item, ok := sc.get(&key); ok {
-		return item.(*StorageCacheItem).value.Bytes(), true
+		if item != nil {
+			return item.(*StorageCacheItem).value.Bytes(), true
+		}
+		return nil, true
 	}
 	return nil, false
 }
@@ -377,7 +384,10 @@ func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool)
 	copy(key.address[:], address)
 	key.incarnation = incarnation
 	if item, ok := sc.get(&key); ok {
-		return item.(*CodeCacheItem).code, true
+		if item != nil {
+			return item.(*CodeCacheItem).code, true
+		}
+		return nil, true
 	}
 	return nil, false
 }
@@ -394,7 +404,7 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	} else {
 		item.ClearFlags(DeletedFlag)
 	}
-	if sc.readQueue.Len() >= sc.limit {
+	if sc.readWrites.Len() >= sc.limit {
 		// Read queue cannot grow anymore, need to evict one element
 		sc.readWrites.Delete(sc.readQueue.items[0])
 		sc.readQueue.items[0] = item
@@ -554,6 +564,53 @@ func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	sc.setWrite(&cci, true /* delete */)
 }
 
+func (sc *StateCache) WalkWrites(
+	accountWrite func(address []byte, account *accounts.Account) error,
+	accountDelete func(address []byte) error,
+	storageWrite func(address []byte, incarnation uint64, location []byte, value []byte) error,
+	storageDelete func(address []byte, incarnation uint64, location []byte) error,
+	codeWrite func(address []byte, incarnation uint64, code []byte) error,
+	codeDelete func(address []byte, incarnation uint64) error,
+) error {
+	var err error
+	sc.writes.Ascend(func(i btree.Item) bool {
+		switch it := i.(type) {
+		case *AccountCacheItem:
+			if it.flags&DeletedFlag != 0 {
+				if err = accountDelete(it.address.Bytes()); err != nil {
+					return false
+				}
+			} else {
+				if err = accountWrite(it.address.Bytes(), &it.account); err != nil {
+					return false
+				}
+			}
+		case *StorageCacheItem:
+			if it.flags&DeletedFlag != 0 {
+				if err = storageDelete(it.address.Bytes(), it.incarnation, it.location.Bytes()); err != nil {
+					return false
+				}
+			} else {
+				if err = storageWrite(it.address.Bytes(), it.incarnation, it.location.Bytes(), it.value.Bytes()); err != nil {
+					return false
+				}
+			}
+		case *CodeCacheItem:
+			if it.flags&DeletedFlag != 0 {
+				if err = codeDelete(it.address.Bytes(), it.incarnation); err != nil {
+					return false
+				}
+			} else {
+				if err = codeWrite(it.address.Bytes(), it.incarnation, it.code); err != nil {
+					return false
+				}
+			}
+		}
+		return true
+	})
+	return err
+}
+
 func (sc *StateCache) TurnWritesToReads() {
 	idx := sc.readQueue.end
 	sc.writes.Ascend(func(i btree.Item) bool {
@@ -567,4 +624,12 @@ func (sc *StateCache) TurnWritesToReads() {
 	sc.readQueue.end = idx
 	heap.Init(&sc.readQueue) // This might be more efficient than pushing items to the queue one by one
 	sc.writes.Clear(true /* addNodesToFreeList */)
+}
+
+func (sc *StateCache) TotalCount() int {
+	return sc.readWrites.Len()
+}
+
+func (sc *StateCache) WriteCount() int {
+	return sc.writes.Len()
 }

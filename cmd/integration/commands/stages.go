@@ -496,14 +496,11 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 		return stagedsync.UnwindCallTraces(u, s, db, bc.Config(), bc, ch)
 	}
 
-	var accessBuilder stagedsync.StateAccessBuilder
 	var toBlock uint64
 
 	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, tmpdir, ch,
 		stagedsync.CallTracesStageParams{
-			AccessBuilder: accessBuilder,
-			PresetChanges: accessBuilder == nil,
-			ToBlock:       toBlock,
+			ToBlock: toBlock,
 		}); err != nil {
 		return err
 	}

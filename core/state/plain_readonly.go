@@ -22,13 +22,13 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/VictoriaMetrics/fastcache"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -44,13 +44,10 @@ func (a *storageItem) Less(b llrb.Item) bool {
 
 // Implements StateReader by wrapping database only, without trie
 type PlainDBState struct {
-	tx            ethdb.Tx
-	blockNr       uint64
-	storage       map[common.Address]*llrb.LLRB
-	accountCache  *fastcache.Cache
-	storageCache  *fastcache.Cache
-	codeCache     *fastcache.Cache
-	codeSizeCache *fastcache.Cache
+	tx      ethdb.Tx
+	blockNr uint64
+	storage map[common.Address]*llrb.LLRB
+	cache   *shards.StateCache
 }
 
 func NewPlainDBState(tx ethdb.Tx, blockNr uint64) *PlainDBState {
@@ -61,20 +58,8 @@ func NewPlainDBState(tx ethdb.Tx, blockNr uint64) *PlainDBState {
 	}
 }
 
-func (dbs *PlainDBState) SetAccountCache(accountCache *fastcache.Cache) {
-	dbs.accountCache = accountCache
-}
-
-func (dbs *PlainDBState) SetStorageCache(storageCache *fastcache.Cache) {
-	dbs.storageCache = storageCache
-}
-
-func (dbs *PlainDBState) SetCodeCache(codeCache *fastcache.Cache) {
-	dbs.codeCache = codeCache
-}
-
-func (dbs *PlainDBState) SetCodeSizeCache(codeSizeCache *fastcache.Cache) {
-	dbs.codeSizeCache = codeSizeCache
+func (dbs *PlainDBState) SetCache(cache *shards.StateCache) {
+	dbs.cache = cache
 }
 
 func (dbs *PlainDBState) SetBlockNr(blockNr uint64) {
@@ -183,57 +168,60 @@ func (dbs *PlainDBState) ForEachAccount(start common.Address, cb func(address *c
 }
 
 func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	var enc []byte
-	var ok bool
-	if dbs.accountCache != nil {
-		enc, ok = dbs.accountCache.HasGet(nil, address[:])
-	}
-	if !ok {
-		var err error
-		enc, err = GetAsOf(dbs.tx, false /* storage */, address[:], dbs.blockNr+1)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return nil, err
+	if dbs.cache != nil {
+		if a, ok := dbs.cache.GetAccount(address.Bytes()); ok {
+			return a, nil
 		}
 	}
-	if !ok && dbs.accountCache != nil {
-		dbs.accountCache.Set(address[:], enc)
+	enc, err := GetAsOf(dbs.tx, false /* storage */, address[:], dbs.blockNr+1)
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return nil, err
 	}
 	if len(enc) == 0 {
+		if dbs.cache != nil {
+			dbs.cache.SetAccountAbsent(address.Bytes())
+		}
 		return nil, nil
 	}
-	var acc accounts.Account
-	if err := acc.DecodeForStorage(enc); err != nil {
+	var a accounts.Account
+	if err = a.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
 	//restore codehash
-	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		codeHash, err := dbs.tx.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation))
-		if err != nil {
-			return nil, err
-		}
-		if len(codeHash) > 0 {
-			acc.CodeHash = common.BytesToHash(codeHash)
+	if a.Incarnation > 0 && a.IsEmptyCodeHash() {
+		if codeHash, err1 := dbs.tx.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
+			if len(codeHash) > 0 {
+				a.CodeHash = common.BytesToHash(codeHash)
+			}
+		} else {
+			return nil, err1
 		}
 	}
-	return &acc, nil
+	if dbs.cache != nil {
+		dbs.cache.SetAccountRead(address.Bytes(), &a)
+	}
+	return &a, nil
 }
 
 func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
-	if dbs.storageCache != nil {
-		if enc, ok := dbs.storageCache.HasGet(nil, compositeKey); ok {
-			return enc, nil
+	if dbs.cache != nil {
+		if s, ok := dbs.cache.GetStorage(address.Bytes(), incarnation, key.Bytes()); ok {
+			return s, nil
 		}
 	}
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
 	enc, err := GetAsOf(dbs.tx, true /* storage */, compositeKey, dbs.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
-	if dbs.storageCache != nil {
-		dbs.storageCache.Set(compositeKey, enc)
-	}
 	if len(enc) == 0 {
+		if dbs.cache != nil {
+			dbs.cache.SetStorageAbsent(address.Bytes(), incarnation, key.Bytes())
+		}
 		return nil, nil
+	}
+	if dbs.cache != nil {
+		dbs.cache.SetStorageRead(address.Bytes(), incarnation, key.Bytes(), enc)
 	}
 	return enc, nil
 }
@@ -242,42 +230,27 @@ func (dbs *PlainDBState) ReadAccountCode(address common.Address, incarnation uin
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	if dbs.codeCache != nil {
-		if code, ok := dbs.codeCache.HasGet(nil, address[:]); ok {
-			return code, nil
+	if dbs.cache != nil {
+		if c, ok := dbs.cache.GetCode(address.Bytes(), incarnation); ok {
+			return c, nil
 		}
 	}
 	code, err := ethdb.Get(dbs.tx, dbutils.CodeBucket, codeHash[:])
-	if dbs.codeCache != nil && len(code) <= 1024 {
-		dbs.codeCache.Set(address[:], code)
+	if len(code) == 0 {
+		if dbs.cache != nil {
+			dbs.cache.SetCodeAbsent(address.Bytes(), incarnation)
+		}
+		return nil, nil
 	}
-	if dbs.codeSizeCache != nil {
-		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
-		dbs.codeSizeCache.Set(address[:], b[:])
+	if dbs.cache != nil {
+		dbs.cache.SetCodeRead(address.Bytes(), incarnation, code)
 	}
 	return code, err
 }
 
-func (dbs *PlainDBState) ReadAccountCodeSize(address common.Address, incarnaion uint64, codeHash common.Hash) (int, error) {
-	if bytes.Equal(codeHash[:], emptyCodeHash) {
-		return 0, nil
-	}
-	if dbs.codeSizeCache != nil {
-		if b, ok := dbs.codeSizeCache.HasGet(nil, address[:]); ok {
-			return int(binary.BigEndian.Uint32(b)), nil
-		}
-	}
-	code, err := ethdb.Get(dbs.tx, dbutils.CodeBucket, codeHash[:])
-	if err != nil {
-		return 0, err
-	}
-	if dbs.codeSizeCache != nil {
-		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
-		dbs.codeSizeCache.Set(address[:], b[:])
-	}
-	return len(code), nil
+func (dbs *PlainDBState) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	code, err := dbs.ReadAccountCode(address, incarnation, codeHash)
+	return len(code), err
 }
 
 func (dbs *PlainDBState) ReadAccountIncarnation(address common.Address) (uint64, error) {

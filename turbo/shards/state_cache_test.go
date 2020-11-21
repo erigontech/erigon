@@ -158,7 +158,7 @@ func TestAccountReads(t *testing.T) {
 	var addr3 common.Address
 	addr3[0] = 3
 	sc.SetAccountAbsent(addr3.Bytes())
-	if _, ok := sc.GetAccount(addr3.Bytes()); ok {
+	if a, ok := sc.GetAccount(addr3.Bytes()); !ok || a != nil {
 		t.Fatalf("Expected account with addr3 to be absent")
 	}
 	for i := 4; i <= 6; i++ {
@@ -245,7 +245,7 @@ func TestAccountReadWrites(t *testing.T) {
 	addr3[0] = 3
 	sc.SetAccountWrite(addr3.Bytes(), &account3)
 	sc.SetAccountDelete(addr3.Bytes())
-	if _, ok := sc.GetAccount(addr3.Bytes()); ok {
+	if a, ok := sc.GetAccount(addr3.Bytes()); !ok || a != nil {
 		t.Fatalf("Expected account addr3 to be deleted")
 	}
 	if sc.writes.Len() != 3 {
@@ -258,7 +258,7 @@ func TestAccountReadWrites(t *testing.T) {
 	addr4[0] = 4
 	sc.SetAccountRead(addr4.Bytes(), &account4)
 	sc.SetAccountDelete(addr4.Bytes())
-	if _, ok := sc.GetAccount(addr4.Bytes()); ok {
+	if a, ok := sc.GetAccount(addr4.Bytes()); !ok || a != nil {
 		t.Fatalf("Expected account addr4 to be deleted")
 	}
 	if sc.writes.Len() != 4 {
@@ -272,7 +272,7 @@ func TestAccountReadWrites(t *testing.T) {
 	var addr5 common.Address
 	addr5[0] = 5
 	sc.SetAccountDelete(addr5.Bytes())
-	if _, ok := sc.GetAccount(addr5.Bytes()); ok {
+	if a, ok := sc.GetAccount(addr5.Bytes()); !ok || a != nil {
 		t.Fatalf("Expected account addr5 to be deleted")
 	}
 	if sc.writes.Len() != 5 {
@@ -378,7 +378,7 @@ func TestReadWriteAbsentDeleteStorage(t *testing.T) {
 		addr[0] = byte(i)
 		var loc common.Hash
 		loc[1] = byte(i)
-		if _, ok := sc.GetStorage(addr.Bytes(), 1, loc.Bytes()); ok {
+		if s, ok := sc.GetStorage(addr.Bytes(), 1, loc.Bytes()); !ok || s != nil {
 			t.Fatalf("expected entry with %x,1,%x not to exist", addr, loc)
 		}
 	}
@@ -431,7 +431,7 @@ func TestReadWriteAbsentDeleteStorage(t *testing.T) {
 		addr[0] = byte(i)
 		var loc common.Hash
 		loc[1] = byte(i)
-		if _, ok := sc.GetStorage(addr.Bytes(), 1, loc.Bytes()); ok {
+		if s, ok := sc.GetStorage(addr.Bytes(), 1, loc.Bytes()); !ok || s != nil {
 			t.Fatalf("expected entry with %x,1,%x not to exist", addr, loc)
 		}
 	}
@@ -509,8 +509,8 @@ func TestCodeReadWriteAbsentDeleteStorage(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		if c, ok := sc.GetCode(addr.Bytes(), 1); ok {
-			t.Fatalf("expected entry with %x,1 not to exist, found: %s", addr, c)
+		if c, ok := sc.GetCode(addr.Bytes(), 1); !ok || c != nil {
+			t.Fatalf("expected entry with %x,1 not to exist", addr)
 		}
 	}
 	// Add reads for incarnation 2 (instead of 1), 6 records instead of 4, so only last 4 will stay
@@ -551,7 +551,7 @@ func TestCodeReadWriteAbsentDeleteStorage(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		if _, ok := sc.GetCode(addr.Bytes(), 1); ok {
+		if c, ok := sc.GetCode(addr.Bytes(), 1); !ok || c != nil {
 			t.Fatalf("expected entry with %x,1 not to exist", addr)
 		}
 	}

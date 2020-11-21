@@ -11,10 +11,8 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/VictoriaMetrics/fastcache"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -26,20 +24,18 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
 const (
 	callIndicesMemLimit       = 256 * datasize.MB
 	callIndicesCheckSizeEvery = 30 * time.Second
+	cacheLimit                = 4000000
+	cacheWatermark            = 2000000
 )
 
-type StateAccessBuilder func(db ethdb.Database, blockNumber uint64,
-	accountCache, storageCache, codeCache, codeSizeCache *fastcache.Cache) (state.StateReader, state.WriterWithChangeSets)
-
 type CallTracesStageParams struct {
-	ToBlock       uint64 // not setting this params means no limit
-	AccessBuilder StateAccessBuilder
-	PresetChanges bool // Whether to use changesets to pre-set values in the cache
+	ToBlock uint64 // not setting this params means no limit
 }
 
 func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
@@ -99,19 +95,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	defer checkFlushEvery.Stop()
 	engine := chainContext.Engine()
 
-	var caching = endBlock-startBlock > 100
-	var accountCache *fastcache.Cache
-	var storageCache *fastcache.Cache
-	var codeCache *fastcache.Cache
-	var codeSizeCache *fastcache.Cache
-	// Caching is not worth it for small runs of blocks
-	if caching {
-		// Caching is not worth it for small runs of blocks
-		accountCache = fastcache.New(2 * 1024 * 1024 * 1024) // 2 Gb
-		storageCache = fastcache.New(2 * 1024 * 1024 * 1024) // 2 Gb
-		codeCache = fastcache.New(512 * 1024 * 1024)         // 512 Mb
-		codeSizeCache = fastcache.New(32 * 1024 * 1024)      // 32 Mb (the minimum)
-	}
+	var cache = shards.NewStateCache(32, cacheLimit)
 
 	prev := startBlock
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
@@ -136,7 +120,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			prev = blockNum
 
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, dbutils.CallFromIndex, common.StorageSize(sz), dbutils.CallToIndex, common.StorageSize(sz2),
-				"blk/second", speed,
+				"blk/second", speed, "cache writes", cache.WriteCount(), "cache total", cache.TotalCount(),
 				"alloc", common.StorageSize(m.Alloc),
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
@@ -170,50 +154,11 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
-		if params.AccessBuilder != nil {
-			reader, writer := params.AccessBuilder(tx, blockNum-1, accountCache, storageCache, codeCache, codeSizeCache)
-			stateReader = reader
-			stateWriter = writer
-		} else {
-			reader := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
-			writer := state.NewCacheStateWriter()
-			if caching {
-				reader.SetAccountCache(accountCache)
-				reader.SetStorageCache(storageCache)
-				reader.SetCodeCache(codeCache)
-				reader.SetCodeSizeCache(codeSizeCache)
-				writer.SetAccountCache(accountCache)
-				writer.SetStorageCache(storageCache)
-				writer.SetCodeCache(codeCache)
-				writer.SetCodeSizeCache(codeSizeCache)
-			}
-			stateReader = reader
-			stateWriter = writer
-		}
-		if params.PresetChanges {
-			startKey := dbutils.EncodeBlockNumber(blockNum)
-			if err := changeset.Walk(tx, dbutils.PlainAccountChangeSetBucket, startKey, 8*8, func(blockN uint64, k, v []byte) (bool, error) {
-				if len(v) == 0 {
-					accountCache.Set(k, nil)
-				} else {
-					accountCache.Set(k, v)
-				}
-				return true, nil
-			}); err != nil {
-				return err
-			}
-			if err := changeset.Walk(tx, dbutils.PlainStorageChangeSetBucket, startKey, 8*8, func(blockN uint64, k, v []byte) (bool, error) {
-				if len(v) == 0 {
-					storageCache.Set(k, nil)
-				} else {
-					storageCache.Set(k, v)
-				}
-				return true, nil
-			}); err != nil {
-				return err
-			}
-		}
-
+		reader := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
+		writer := state.NewCacheStateWriter(cache)
+		reader.SetCache(cache)
+		stateReader = reader
+		stateWriter = writer
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
 		if _, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
@@ -236,6 +181,9 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 				tos[string(a[:])] = m
 			}
 			m.Add(uint32(blockNum))
+		}
+		if cache.WriteCount() >= cacheWatermark {
+			cache.TurnWritesToReads()
 		}
 	}
 
@@ -345,6 +293,7 @@ func unwindCallTraces(logPrefix string, db rawdb.DatabaseReader, from, to uint64
 
 	tracer := NewCallTracer()
 	vmConfig := &vm.Config{Debug: true, NoReceipts: true, Tracer: tracer}
+	var cache = shards.NewStateCache(32, cacheLimit)
 	for blockNum := to + 1; blockNum <= from; blockNum++ {
 		if err := common.Stopped(quitCh); err != nil {
 			return err
@@ -361,14 +310,15 @@ func unwindCallTraces(logPrefix string, db rawdb.DatabaseReader, from, to uint64
 		senders := rawdb.ReadSenders(db, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
-		var stateReader state.StateReader
-		var stateWriter state.WriterWithChangeSets
-
-		stateReader = state.NewPlainDBState(tx, blockNum-1)
-		stateWriter = state.NewCacheStateWriter()
+		stateReader := state.NewPlainDBState(tx, blockNum-1)
+		stateReader.SetCache(cache)
+		stateWriter := state.NewCacheStateWriter(cache)
 
 		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("exec block: %w", err)
+		}
+		if cache.WriteCount() >= cacheWatermark {
+			cache.TurnWritesToReads()
 		}
 	}
 	for addr := range tracer.froms {

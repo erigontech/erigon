@@ -7,35 +7,24 @@ import (
 	"encoding/binary"
 	"encoding/csv"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"math/big"
 	"os"
-	"os/signal"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"github.com/ledgerwatch/turbo-geth/ethdb/typedcursor"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
@@ -1065,100 +1054,6 @@ func stateGrowthChart5() {
 	check(err)
 	err = ioutil.WriteFile("top_2_acc_creators.png", buffer.Bytes(), 0644)
 	check(err)
-}
-
-type CreationTracer struct {
-	w io.Writer
-}
-
-func NewCreationTracer(w io.Writer) CreationTracer {
-	return CreationTracer{w: w}
-}
-
-func (ct CreationTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
-	return nil
-}
-func (ct CreationTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
-	return nil
-}
-func (ct CreationTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
-	return nil
-}
-func (ct CreationTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
-	return nil
-}
-func (ct CreationTracer) CaptureCreate(creator common.Address, creation common.Address) error {
-	_, err := fmt.Fprintf(ct.w, "%x,%x\n", creation, creator)
-	return err
-}
-func (ct CreationTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-func (ct CreationTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}
-
-//nolint:deadcode,unused
-func makeCreators(blockNum uint64) {
-	sigs := make(chan os.Signal, 1)
-	interruptCh := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigs
-		interruptCh <- true
-	}()
-
-	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
-	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	defer ethDb.Close()
-	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, ethdb.RO)
-	check(err1)
-	defer ethTx.Rollback()
-	f, err := os.OpenFile("/Volumes/tb41/turbo-geth/creators.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	check(err)
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	defer w.Flush()
-	ct := NewCreationTracer(w)
-	chainConfig := params.MainnetChainConfig
-	vmConfig := vm.Config{Tracer: ct, Debug: true}
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, txCacher)
-	check(err)
-	defer bc.Stop()
-	interrupt := false
-	for !interrupt {
-		block := bc.GetBlockByNumber(blockNum)
-		if block == nil {
-			break
-		}
-		dbstate := state.NewPlainDBState(ethTx, block.NumberU64()-1)
-		statedb := state.New(dbstate)
-		signer := types.MakeSigner(chainConfig, block.Number())
-		for _, tx := range block.Transactions() {
-			// Assemble the transaction call message and return if the requested offset
-			msg, _ := tx.AsMessage(signer)
-			context := core.NewEVMContext(msg, block.Header(), bc, nil)
-			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
-				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
-			}
-		}
-		blockNum++
-		if blockNum%1000 == 0 {
-			fmt.Printf("Processed %dK blocks\n", blockNum/1000)
-		}
-		// Check for interrupts
-		select {
-		case interrupt = <-interruptCh:
-			fmt.Println("interrupted, please wait for cleanup...")
-		default:
-		}
-	}
-	fmt.Printf("Next time specify -block %d\n", blockNum)
 }
 
 func storageUsage() {
