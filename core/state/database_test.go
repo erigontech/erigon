@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -985,7 +986,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -994,11 +995,11 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[0], blockchain); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -1007,7 +1008,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	var check0 uint256.Int
 	st.GetState(contractAddress, &key0, &check0)
 	if !check0.IsZero() {
-		t.Errorf("expected 0x00 in position 0, got: %x", check0)
+		t.Errorf("expected 0x00 in position 0, got: %x", check0.Bytes())
 	}
 }
 
