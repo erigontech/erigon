@@ -92,7 +92,7 @@ func (r *StateReader) ReadAccountStorage(address common.Address, incarnation uin
 	return enc, nil
 }
 
-func (r *StateReader) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
+func (r *StateReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	r.codeReads[address] = struct{}{}
 	if bytes.Equal(codeHash[:], crypto.Keccak256(nil)) {
 		return nil, nil
@@ -106,8 +106,8 @@ func (r *StateReader) ReadAccountCode(address common.Address, codeHash common.Ha
 	return val, nil
 }
 
-func (r *StateReader) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
-	code, err := r.ReadAccountCode(address, codeHash)
+func (r *StateReader) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	code, err := r.ReadAccountCode(address, incarnation, codeHash)
 	if err != nil {
 		return 0, err
 	}

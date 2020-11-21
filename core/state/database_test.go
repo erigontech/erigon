@@ -1460,7 +1460,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 	oldCodeHash := common.BytesToHash(crypto.Keccak256(oldCode))
 
-	trieCode, err := tds.ReadAccountCode(contract, oldCodeHash)
+	trieCode, err := tds.ReadAccountCode(contract, 1, oldCodeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
@@ -1476,7 +1476,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	tds.ComputeTrieRoots()
 
 	newCodeHash := common.BytesToHash(crypto.Keccak256(newCode))
-	trieCode, err = tds.ReadAccountCode(contract, newCodeHash)
+	trieCode, err = tds.ReadAccountCode(contract, 1, newCodeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 }
@@ -1515,7 +1515,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	tds.StartNewBuffer()
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := tds.ReadAccountCodeSize(contract, codeHash)
+	codeSize, err := tds.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, len(code), codeSize, "new code should be received")
 
@@ -1528,7 +1528,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 	tds.StartNewBuffer()
 
-	code2, err := tds.ReadAccountCode(contract, codeHash)
+	code2, err := tds.ReadAccountCode(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, code, code2, "new code should be received")
 
@@ -1571,7 +1571,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	tds.StartNewBuffer()
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := tds.ReadAccountCodeSize(contract, codeHash)
+	codeSize, err := tds.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
@@ -1581,7 +1581,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 
 	assert.NoError(t, db.Delete(dbutils.CodeBucket, codeHash[:], nil), nil)
 
-	codeSize2, err := tds.ReadAccountCodeSize(contract, codeHash)
+	codeSize2, err := tds.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 }

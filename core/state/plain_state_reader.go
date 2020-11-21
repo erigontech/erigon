@@ -90,7 +90,7 @@ func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnatio
 	return enc, nil
 }
 
-func (r *PlainStateReader) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
+func (r *PlainStateReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	if r.codeCache != nil {
 		if code, ok := r.codeCache.HasGet(nil, address[:]); ok {
 			return code, nil
@@ -108,7 +108,7 @@ func (r *PlainStateReader) ReadAccountCode(address common.Address, codeHash comm
 	return code, err
 }
 
-func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
+func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return 0, nil
 	}

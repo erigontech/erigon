@@ -238,7 +238,7 @@ func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation 
 	return enc, nil
 }
 
-func (dbs *PlainDBState) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
+func (dbs *PlainDBState) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
@@ -259,7 +259,7 @@ func (dbs *PlainDBState) ReadAccountCode(address common.Address, codeHash common
 	return code, err
 }
 
-func (dbs *PlainDBState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
+func (dbs *PlainDBState) ReadAccountCodeSize(address common.Address, incarnaion uint64, codeHash common.Hash) (int, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return 0, nil
 	}
