@@ -495,7 +495,7 @@ func TestWriteStorageExceedLimit(t *testing.T) {
 	t.Fatalf("Expected to panic")
 }
 
-func TestCodeReadWriteAbsentDeleteStorage(t *testing.T) {
+func TestCodeReadWriteAbsentDelete(t *testing.T) {
 	sc := NewStateCache(32, 4)
 	// Add absents
 	for i := 1; i <= 4; i++ {

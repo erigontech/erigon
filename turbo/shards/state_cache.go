@@ -52,7 +52,7 @@ type StorageWriteItem struct {
 
 //nolint:maligned
 type CodeItem struct {
-	addrHash    common.Address
+	addrHash    common.Hash
 	incarnation uint64
 	code        []byte
 	sequence    int
@@ -648,6 +648,7 @@ func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account)
 	ai.account.Copy(account)
 	var awi AccountWriteItem
 	copy(awi.address[:], address)
+	awi.ai = &ai
 	sc.setWrite(&ai, &awi, false /* delete */)
 }
 
@@ -661,6 +662,7 @@ func (sc *StateCache) SetAccountDelete(address []byte) {
 	h.Sha.Read(ai.addrHash[:])
 	var awi AccountWriteItem
 	copy(awi.address[:], address)
+	awi.ai = &ai
 	sc.setWrite(&ai, &awi, true /* delete */)
 }
 
@@ -708,6 +710,7 @@ func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, locati
 	var swi StorageWriteItem
 	copy(swi.address[:], address)
 	copy(swi.location[:], location)
+	swi.si = &si
 	sc.setWrite(&si, &swi, false /* delete */)
 }
 
@@ -725,6 +728,7 @@ func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, locat
 	var swi StorageWriteItem
 	copy(swi.address[:], address)
 	copy(swi.location[:], location)
+	swi.si = &si
 	sc.setWrite(&si, &swi, true /* delete */)
 }
 
@@ -765,6 +769,7 @@ func (sc *StateCache) SetCodeWrite(address []byte, incarnation uint64, code []by
 	copy(ci.code, code)
 	var cwi CodeWriteItem
 	copy(cwi.address[:], address)
+	cwi.ci = &ci
 	sc.setWrite(&ci, &cwi, false /* delete */)
 }
 
@@ -780,6 +785,7 @@ func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	ci.code = nil
 	var cwi CodeWriteItem
 	copy(cwi.address[:], address)
+	cwi.ci = &ci
 	sc.setWrite(&ci, &cwi, true /* delete */)
 }
 
