@@ -158,8 +158,8 @@ func (ai *AccountItem) SetQueuePos(pos int) {
 	ai.queuePos = pos
 }
 
-func (aci *AccountItem) HasFlag(flag uint16) bool {
-	return aci.flags&flag != 0
+func (ai *AccountItem) HasFlag(flag uint16) bool {
+	return ai.flags&flag != 0
 }
 
 func (ai *AccountItem) SetFlags(flags uint16) {
@@ -376,7 +376,7 @@ func (ci *CodeItem) SetSequence(sequence int) {
 	ci.sequence = sequence
 }
 
-func (i *CodeItem) GetSize() int {
+func (ci *CodeItem) GetSize() int {
 	return 1
 }
 
