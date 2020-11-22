@@ -183,8 +183,12 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			m.Add(uint32(blockNum))
 		}
 		if cache.WriteSize() >= cacheWatermark {
+			start := time.Now()
 			writes := cache.PrepareWrites()
+			log.Info("PrepareWrites", "in", time.Since(start))
+			start = time.Now()
 			cache.TurnWritesToReads(writes)
+			log.Info("TurnWritesToReads", "in", time.Since(start))
 		}
 	}
 
@@ -319,8 +323,12 @@ func unwindCallTraces(logPrefix string, db rawdb.DatabaseReader, from, to uint64
 			return fmt.Errorf("exec block: %w", err)
 		}
 		if cache.WriteSize() >= cacheWatermark {
+			start := time.Now()
 			writes := cache.PrepareWrites()
+			log.Info("PrepareWrites", "in", time.Since(start))
+			start = time.Now()
 			cache.TurnWritesToReads(writes)
+			log.Info("TurnWritesToReads", "in", time.Since(start))
 		}
 	}
 	for addr := range tracer.froms {

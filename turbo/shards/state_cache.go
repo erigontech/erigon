@@ -934,11 +934,10 @@ func (sc *StateCache) TurnWritesToReads(writes *btree.BTree) {
 			// Cannot touch items that have been modified since we have taken away the writes
 			cacheItem.ClearFlags(ModifiedFlag)
 			cacheItem.SetQueuePos(len(sc.readQueue.items))
-			sc.readQueue.items = append(sc.readQueue.items, cacheItem)
+			heap.Push(&sc.readQueue, cacheItem)
 		}
 		return true
 	})
-	heap.Init(&sc.readQueue) // This might be more efficient than pushing items to the queue one by one
 }
 
 func (sc *StateCache) TotalCount() int {
