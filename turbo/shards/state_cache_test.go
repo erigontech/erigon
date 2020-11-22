@@ -10,9 +10,9 @@ import (
 
 func TestCacheBtreeOrderAccounts(t *testing.T) {
 	bt := btree.New(32)
-	var aci1, aci2 AccountCacheItem
-	aci1.address[0] = 1
-	aci2.address[0] = 2
+	var aci1, aci2 AccountItem
+	aci1.addrHash[0] = 1
+	aci2.addrHash[0] = 2
 	bt.ReplaceOrInsert(&aci1)
 	bt.ReplaceOrInsert(&aci2)
 	// Specify the expected ordering
@@ -30,19 +30,19 @@ func TestCacheBtreeOrderAccounts(t *testing.T) {
 
 func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 	bt := btree.New(32)
-	var aci1, aci2 AccountCacheItem
-	aci1.address[0] = 1
-	aci2.address[0] = 2
+	var aci1, aci2 AccountItem
+	aci1.addrHash[0] = 1
+	aci2.addrHash[0] = 2
 	bt.ReplaceOrInsert(&aci1)
 	bt.ReplaceOrInsert(&aci2)
-	var sci1, sci2, sci3, sci4 StorageCacheItem
-	sci1.address[0] = 1
-	sci1.location[0] = 1
-	sci2.address[0] = 1
-	sci2.location[0] = 2
-	sci3.address[0] = 3
-	sci3.location[0] = 42
-	sci4.address[0] = 1
+	var sci1, sci2, sci3, sci4 StorageItem
+	sci1.addrHash[0] = 1
+	sci1.locHash[0] = 1
+	sci2.addrHash[0] = 1
+	sci2.locHash[0] = 2
+	sci3.addrHash[0] = 3
+	sci3.locHash[0] = 42
+	sci4.addrHash[0] = 1
 	sci4.incarnation = 1
 	bt.ReplaceOrInsert(&aci1)
 	bt.ReplaceOrInsert(&aci2)
@@ -69,14 +69,14 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 
 func TestCacheBtreeOrderAccountsCode(t *testing.T) {
 	bt := btree.New(32)
-	var aci1, aci2 AccountCacheItem
-	aci1.address[0] = 1
-	aci2.address[0] = 2
+	var aci1, aci2 AccountItem
+	aci1.addrHash[0] = 1
+	aci2.addrHash[0] = 2
 	bt.ReplaceOrInsert(&aci1)
 	bt.ReplaceOrInsert(&aci2)
-	var cci1, cci2 CodeCacheItem
-	cci1.address[0] = 1
-	cci2.address[0] = 2
+	var cci1, cci2 CodeItem
+	cci1.addrHash[0] = 1
+	cci2.addrHash[0] = 2
 	bt.ReplaceOrInsert(&cci1)
 	bt.ReplaceOrInsert(&cci2)
 	// Specify the expected ordering
@@ -96,22 +96,22 @@ func TestCacheBtreeOrderAccountsCode(t *testing.T) {
 
 func TestCacheBtreeAll(t *testing.T) {
 	bt := btree.New(32)
-	var aci1, aci2 AccountCacheItem
-	aci1.address[0] = 1
-	aci2.address[0] = 2
+	var aci1, aci2 AccountItem
+	aci1.addrHash[0] = 1
+	aci2.addrHash[0] = 2
 	bt.ReplaceOrInsert(&aci1)
 	bt.ReplaceOrInsert(&aci2)
-	var sci1, sci2, sci3 StorageCacheItem
-	sci1.address[0] = 1
-	sci1.location[0] = 1
-	sci2.address[0] = 1
-	sci2.location[0] = 2
-	sci3.address[0] = 3
-	sci3.location[0] = 42
-	var cci1, cci2, cci3 CodeCacheItem
-	cci1.address[0] = 1
-	cci2.address[0] = 3
-	cci3.address[0] = 4
+	var sci1, sci2, sci3 StorageItem
+	sci1.addrHash[0] = 1
+	sci1.locHash[0] = 1
+	sci2.addrHash[0] = 1
+	sci2.locHash[0] = 2
+	sci3.addrHash[0] = 3
+	sci3.locHash[0] = 42
+	var cci1, cci2, cci3 CodeItem
+	cci1.addrHash[0] = 1
+	cci2.addrHash[0] = 3
+	cci3.addrHash[0] = 4
 	bt.ReplaceOrInsert(&cci3)
 	bt.ReplaceOrInsert(&aci1)
 	bt.ReplaceOrInsert(&aci2)

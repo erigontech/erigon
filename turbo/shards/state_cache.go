@@ -20,33 +20,49 @@ const (
 )
 
 //nolint:maligned
-type AccountCacheItem struct {
-	address  common.Address
+type AccountItem struct {
+	addrHash common.Hash
 	account  accounts.Account
 	sequence int
 	queuePos int
 	flags    uint16
 }
 
+type AccountWriteItem struct {
+	address common.Address
+	ai      *AccountItem
+}
+
 //nolint:maligned
-type StorageCacheItem struct {
-	address     common.Address
+type StorageItem struct {
+	addrHash    common.Hash
 	incarnation uint64
-	location    common.Hash
+	locHash     common.Hash
 	value       uint256.Int
 	sequence    int
 	queuePos    int
 	flags       uint16
 }
 
+type StorageWriteItem struct {
+	address  common.Address
+	location common.Hash
+	si       *StorageItem
+}
+
 //nolint:maligned
-type CodeCacheItem struct {
-	address     common.Address
+type CodeItem struct {
+	addrHash    common.Address
 	incarnation uint64
 	code        []byte
 	sequence    int
 	queuePos    int
 	flags       uint16
+}
+
+type CodeWriteItem struct {
+	address common.Address
+	ci      *CodeItem
 }
 
 type CacheItem interface {
@@ -62,19 +78,25 @@ type CacheItem interface {
 	CopyValueFrom(item CacheItem) // Copy value (not key) from given item
 }
 
-func (aci *AccountCacheItem) Less(than btree.Item) bool {
+type CacheWriteItem interface {
+	btree.Item
+	GetCacheItem() CacheItem
+	SetCacheItem(item CacheItem)
+}
+
+func (ai *AccountItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
-	case *AccountCacheItem:
-		return bytes.Compare(aci.address.Bytes(), i.address.Bytes()) < 0
-	case *StorageCacheItem:
-		c := bytes.Compare(aci.address.Bytes(), i.address.Bytes())
+	case *AccountItem:
+		return bytes.Compare(ai.addrHash.Bytes(), i.addrHash.Bytes()) < 0
+	case *StorageItem:
+		c := bytes.Compare(ai.addrHash.Bytes(), i.addrHash.Bytes())
 		if c == 0 {
 			// Account comes before its storage items
 			return true
 		}
 		return c < 0
-	case *CodeCacheItem:
-		c := bytes.Compare(aci.address.Bytes(), i.address.Bytes())
+	case *CodeItem:
+		c := bytes.Compare(ai.addrHash.Bytes(), i.addrHash.Bytes())
 		if c == 0 {
 			// Account comes before its code
 			return true
@@ -85,76 +107,107 @@ func (aci *AccountCacheItem) Less(than btree.Item) bool {
 	}
 }
 
-func (aci *AccountCacheItem) GetSequence() int {
-	return aci.sequence
+func (awi *AccountWriteItem) Less(than btree.Item) bool {
+	switch i := than.(type) {
+	case *AccountWriteItem:
+		return bytes.Compare(awi.address.Bytes(), i.address.Bytes()) < 0
+	case *StorageWriteItem:
+		c := bytes.Compare(awi.address.Bytes(), i.address.Bytes())
+		if c == 0 {
+			// Account comes before its storage items
+			return true
+		}
+		return c < 0
+	case *CodeWriteItem:
+		c := bytes.Compare(awi.address.Bytes(), i.address.Bytes())
+		if c == 0 {
+			// Account comes before its code
+			return true
+		}
+		return c < 0
+	default:
+		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
+	}
 }
 
-func (aci *AccountCacheItem) SetSequence(sequence int) {
-	aci.sequence = sequence
+func (awi *AccountWriteItem) GetCacheItem() CacheItem {
+	return awi.ai
 }
 
-func (aci *AccountCacheItem) GetSize() int {
+func (awi *AccountWriteItem) SetCacheItem(item CacheItem) {
+	awi.ai = item.(*AccountItem)
+}
+
+func (ai *AccountItem) GetSequence() int {
+	return ai.sequence
+}
+
+func (ai *AccountItem) SetSequence(sequence int) {
+	ai.sequence = sequence
+}
+
+func (ai *AccountItem) GetSize() int {
 	return 1
 }
 
-func (aci *AccountCacheItem) GetQueuePos() int {
-	return aci.queuePos
+func (ai *AccountItem) GetQueuePos() int {
+	return ai.queuePos
 }
 
-func (aci *AccountCacheItem) SetQueuePos(pos int) {
-	aci.queuePos = pos
+func (ai *AccountItem) SetQueuePos(pos int) {
+	ai.queuePos = pos
 }
 
-func (aci *AccountCacheItem) HasFlag(flag uint16) bool {
+func (aci *AccountItem) HasFlag(flag uint16) bool {
 	return aci.flags&flag != 0
 }
 
-func (aci *AccountCacheItem) SetFlags(flags uint16) {
-	aci.flags |= flags
+func (ai *AccountItem) SetFlags(flags uint16) {
+	ai.flags |= flags
 }
 
-func (aci *AccountCacheItem) ClearFlags(flags uint16) {
-	aci.flags &^= flags
+func (ai *AccountItem) ClearFlags(flags uint16) {
+	ai.flags &^= flags
 }
 
-func (aci *AccountCacheItem) String() string {
-	return fmt.Sprintf("AccountItem(address=%x)", aci.address)
+func (ai *AccountItem) String() string {
+	return fmt.Sprintf("AccountItem(addrHash=%x)", ai.addrHash)
 }
 
-func (aci *AccountCacheItem) CopyValueFrom(item CacheItem) {
-	otherAci, ok := item.(*AccountCacheItem)
+func (ai *AccountItem) CopyValueFrom(item CacheItem) {
+	otherAi, ok := item.(*AccountItem)
 	if !ok {
-		panic(fmt.Sprintf("expected AccountCacheItem, got %T", item))
+		panic(fmt.Sprintf("expected AccountItem, got %T", item))
 	}
-	aci.account.Copy(&otherAci.account)
+	ai.account.Copy(&otherAi.account)
 }
 
-func (sci *StorageCacheItem) Less(than btree.Item) bool {
+func (si *StorageItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
-	case *AccountCacheItem:
-		c := bytes.Compare(sci.address.Bytes(), i.address.Bytes())
+	case *AccountItem:
+		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
 		if c == 0 {
 			// Account comes before its storage items
 			return false
 		}
 		return c < 0
-	case *StorageCacheItem:
-		c := bytes.Compare(sci.address.Bytes(), i.address.Bytes())
+	case *StorageItem:
+		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
 		if c == 0 {
-			if sci.incarnation == i.incarnation {
-				return bytes.Compare(sci.location.Bytes(), i.location.Bytes()) < 0
+			if si.incarnation == i.incarnation {
+				return bytes.Compare(si.locHash.Bytes(), i.locHash.Bytes()) < 0
 			}
-			return sci.incarnation < i.incarnation
+			return si.incarnation < i.incarnation
 		}
 		return c < 0
-	case *CodeCacheItem:
-		c := bytes.Compare(sci.address.Bytes(), i.address.Bytes())
+	case *CodeItem:
+		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
 		if c == 0 {
-			if sci.incarnation == i.incarnation {
+			if si.incarnation == i.incarnation {
 				// Code comes before storage items
 				return false
 			}
-			return sci.incarnation < i.incarnation
+			return si.incarnation < i.incarnation
 		}
 		return c < 0
 	default:
@@ -162,73 +215,114 @@ func (sci *StorageCacheItem) Less(than btree.Item) bool {
 	}
 }
 
-func (sci *StorageCacheItem) GetSequence() int {
-	return sci.sequence
+func (swi *StorageWriteItem) Less(than btree.Item) bool {
+	switch i := than.(type) {
+	case *AccountWriteItem:
+		c := bytes.Compare(swi.address.Bytes(), i.address.Bytes())
+		if c == 0 {
+			// Account comes before its storage items
+			return false
+		}
+		return c < 0
+	case *StorageWriteItem:
+		c := bytes.Compare(swi.address.Bytes(), i.address.Bytes())
+		if c == 0 {
+			if swi.si.incarnation == i.si.incarnation {
+				return bytes.Compare(swi.location.Bytes(), i.location.Bytes()) < 0
+			}
+			return swi.si.incarnation < i.si.incarnation
+		}
+		return c < 0
+	case *CodeWriteItem:
+		c := bytes.Compare(swi.address.Bytes(), i.address.Bytes())
+		if c == 0 {
+			if swi.si.incarnation == i.ci.incarnation {
+				// Code comes before storage items
+				return false
+			}
+			return swi.si.incarnation < i.ci.incarnation
+		}
+		return c < 0
+	default:
+		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
+	}
 }
 
-func (sci *StorageCacheItem) SetSequence(sequence int) {
-	sci.sequence = sequence
+func (swi *StorageWriteItem) GetCacheItem() CacheItem {
+	return swi.si
 }
 
-func (sci *StorageCacheItem) GetSize() int {
+func (swi *StorageWriteItem) SetCacheItem(item CacheItem) {
+	swi.si = item.(*StorageItem)
+}
+
+func (si *StorageItem) GetSequence() int {
+	return si.sequence
+}
+
+func (si *StorageItem) SetSequence(sequence int) {
+	si.sequence = sequence
+}
+
+func (si *StorageItem) GetSize() int {
 	return 1
 }
 
-func (sci *StorageCacheItem) GetQueuePos() int {
-	return sci.queuePos
+func (si *StorageItem) GetQueuePos() int {
+	return si.queuePos
 }
 
-func (sci *StorageCacheItem) SetQueuePos(pos int) {
-	sci.queuePos = pos
+func (si *StorageItem) SetQueuePos(pos int) {
+	si.queuePos = pos
 }
 
-func (sci *StorageCacheItem) HasFlag(flag uint16) bool {
-	return sci.flags&flag != 0
+func (si *StorageItem) HasFlag(flag uint16) bool {
+	return si.flags&flag != 0
 }
 
-func (sci *StorageCacheItem) SetFlags(flags uint16) {
-	sci.flags |= flags
+func (si *StorageItem) SetFlags(flags uint16) {
+	si.flags |= flags
 }
 
-func (sci *StorageCacheItem) ClearFlags(flags uint16) {
-	sci.flags &^= flags
+func (si *StorageItem) ClearFlags(flags uint16) {
+	si.flags &^= flags
 }
 
-func (sci *StorageCacheItem) String() string {
-	return fmt.Sprintf("StorageItem(address=%x,incarnation=%d,location=%x)", sci.address, sci.incarnation, sci.location)
+func (si *StorageItem) String() string {
+	return fmt.Sprintf("StorageItem(addrHash=%x,incarnation=%d,locHash=%x)", si.addrHash, si.incarnation, si.locHash)
 }
 
-func (sci *StorageCacheItem) CopyValueFrom(item CacheItem) {
-	otherSci, ok := item.(*StorageCacheItem)
+func (si *StorageItem) CopyValueFrom(item CacheItem) {
+	otherSi, ok := item.(*StorageItem)
 	if !ok {
 		panic(fmt.Sprintf("expected StorageCacheItem, got %T", item))
 	}
-	sci.value.Set(&otherSci.value)
+	si.value.Set(&otherSi.value)
 }
 
-func (cci *CodeCacheItem) Less(than btree.Item) bool {
+func (ci *CodeItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
-	case *AccountCacheItem:
-		c := bytes.Compare(cci.address.Bytes(), i.address.Bytes())
+	case *AccountItem:
+		c := bytes.Compare(ci.addrHash.Bytes(), i.addrHash.Bytes())
 		if c == 0 {
 			// Account before its code
 			return false
 		}
 		return c < 0
-	case *StorageCacheItem:
-		c := bytes.Compare(cci.address.Bytes(), i.address.Bytes())
+	case *StorageItem:
+		c := bytes.Compare(ci.addrHash.Bytes(), i.addrHash.Bytes())
 		if c == 0 {
 			// Code comes before storage items
-			if cci.incarnation == i.incarnation {
+			if ci.incarnation == i.incarnation {
 				return true
 			}
-			return cci.incarnation < i.incarnation
+			return ci.incarnation < i.incarnation
 		}
 		return c < 0
-	case *CodeCacheItem:
-		c := bytes.Compare(cci.address.Bytes(), i.address.Bytes())
+	case *CodeItem:
+		c := bytes.Compare(ci.addrHash.Bytes(), i.addrHash.Bytes())
 		if c == 0 {
-			return cci.incarnation < i.incarnation
+			return ci.incarnation < i.incarnation
 		}
 		return c < 0
 	default:
@@ -236,49 +330,87 @@ func (cci *CodeCacheItem) Less(than btree.Item) bool {
 	}
 }
 
-func (cci *CodeCacheItem) GetSequence() int {
-	return cci.sequence
+func (cwi *CodeWriteItem) Less(than btree.Item) bool {
+	switch i := than.(type) {
+	case *AccountWriteItem:
+		c := bytes.Compare(cwi.address.Bytes(), i.address.Bytes())
+		if c == 0 {
+			// Account before its code
+			return false
+		}
+		return c < 0
+	case *StorageWriteItem:
+		c := bytes.Compare(cwi.address.Bytes(), i.address.Bytes())
+		if c == 0 {
+			// Code comes before storage items
+			if cwi.ci.incarnation == i.si.incarnation {
+				return true
+			}
+			return cwi.ci.incarnation < i.si.incarnation
+		}
+		return c < 0
+	case *CodeWriteItem:
+		c := bytes.Compare(cwi.address.Bytes(), i.address.Bytes())
+		if c == 0 {
+			return cwi.ci.incarnation < i.ci.incarnation
+		}
+		return c < 0
+	default:
+		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
+	}
 }
 
-func (cci *CodeCacheItem) SetSequence(sequence int) {
-	cci.sequence = sequence
+func (cwi *CodeWriteItem) GetCacheItem() CacheItem {
+	return cwi.ci
 }
 
-func (cci *CodeCacheItem) GetSize() int {
+func (cwi *CodeWriteItem) SetCacheItem(item CacheItem) {
+	cwi.ci = item.(*CodeItem)
+}
+
+func (ci *CodeItem) GetSequence() int {
+	return ci.sequence
+}
+
+func (ci *CodeItem) SetSequence(sequence int) {
+	ci.sequence = sequence
+}
+
+func (i *CodeItem) GetSize() int {
 	return 1
 }
 
-func (cci *CodeCacheItem) GetQueuePos() int {
-	return cci.queuePos
+func (ci *CodeItem) GetQueuePos() int {
+	return ci.queuePos
 }
 
-func (cci *CodeCacheItem) SetQueuePos(pos int) {
-	cci.queuePos = pos
+func (ci *CodeItem) SetQueuePos(pos int) {
+	ci.queuePos = pos
 }
 
-func (cci *CodeCacheItem) HasFlag(flag uint16) bool {
-	return cci.flags&flag != 0
+func (ci *CodeItem) HasFlag(flag uint16) bool {
+	return ci.flags&flag != 0
 }
 
-func (cci *CodeCacheItem) SetFlags(flags uint16) {
-	cci.flags |= flags
+func (ci *CodeItem) SetFlags(flags uint16) {
+	ci.flags |= flags
 }
 
-func (cci *CodeCacheItem) ClearFlags(flags uint16) {
-	cci.flags &^= flags
+func (ci *CodeItem) ClearFlags(flags uint16) {
+	ci.flags &^= flags
 }
 
-func (cci *CodeCacheItem) String() string {
-	return fmt.Sprintf("CodeItem(address=%x,incarnation=%d)", cci.address, cci.incarnation)
+func (ci *CodeItem) String() string {
+	return fmt.Sprintf("CodeItem(addrHash=%x,incarnation=%d)", ci.addrHash, ci.incarnation)
 }
 
-func (cci *CodeCacheItem) CopyValueFrom(item CacheItem) {
-	otherCci, ok := item.(*CodeCacheItem)
+func (ci *CodeItem) CopyValueFrom(item CacheItem) {
+	otherCi, ok := item.(*CodeItem)
 	if !ok {
 		panic(fmt.Sprintf("expected CodeCacheItem, got %T", item))
 	}
-	cci.code = make([]byte, len(otherCci.code))
-	copy(cci.code, otherCci.code)
+	ci.code = make([]byte, len(otherCi.code))
+	copy(ci.code, otherCi.code)
 }
 
 // Heap for reads
@@ -350,11 +482,15 @@ func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
 // GetAccount searches and account with given address, without modifying any structures
 // Second return value is true if such account is found
 func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
-	var key AccountCacheItem
-	copy(key.address[:], address)
+	var key AccountItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(key.addrHash[:])
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
-			return &item.(*AccountCacheItem).account, true
+			return &item.(*AccountItem).account, true
 		}
 		return nil, true
 	}
@@ -364,13 +500,19 @@ func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 // GetStorage searches storage item with given address, incarnation, and location, without modifying any structures
 // Second return value is true if such item is found
 func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []byte) ([]byte, bool) {
-	var key StorageCacheItem
-	copy(key.address[:], address)
+	var key StorageItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(key.addrHash[:])
 	key.incarnation = incarnation
-	copy(key.location[:], location)
+	h.Sha.Reset()
+	h.Sha.Write(location)
+	h.Sha.Read(key.locHash[:])
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
-			return item.(*StorageCacheItem).value.Bytes(), true
+			return item.(*StorageItem).value.Bytes(), true
 		}
 		return nil, true
 	}
@@ -380,12 +522,16 @@ func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []
 // GetCode searches contract code with given address, without modifying any structures
 // Second return value is true if such item is found
 func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool) {
-	var key CodeCacheItem
-	copy(key.address[:], address)
+	var key CodeItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(key.addrHash[:])
 	key.incarnation = incarnation
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
-			return item.(*CodeCacheItem).code, true
+			return item.(*CodeItem).code, true
 		}
 		return nil, true
 	}
@@ -419,23 +565,32 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 
 // SetAccountRead adds given account to the cache, marking it as a read (not written)
 func (sc *StateCache) SetAccountRead(address []byte, account *accounts.Account) {
-	var aci AccountCacheItem
-	copy(aci.address[:], address)
-	aci.account.Copy(account)
-	sc.setRead(&aci, false /* absent */)
+	var ai AccountItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(ai.addrHash[:])
+	ai.account.Copy(account)
+	sc.setRead(&ai, false /* absent */)
 }
 
 // SetAccountRead adds given account address to the cache, marking it as a absent
 func (sc *StateCache) SetAccountAbsent(address []byte) {
-	var aci AccountCacheItem
-	copy(aci.address[:], address)
-	sc.setRead(&aci, true /* absent */)
+	var ai AccountItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(ai.addrHash[:])
+	sc.setRead(&ai, true /* absent */)
 }
 
-func (sc *StateCache) setWrite(item CacheItem, delete bool) {
+func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete bool) {
 	// Check if this is going to be modification of the existing entry
-	if existing := sc.writes.Get(item); existing != nil {
-		cacheItem := existing.(CacheItem)
+	if existing := sc.writes.Get(writeItem); existing != nil {
+		cacheWriteItem := existing.(CacheWriteItem)
+		cacheItem := cacheWriteItem.GetCacheItem()
 		cacheItem.CopyValueFrom(item)
 		if delete {
 			cacheItem.SetFlags(DeletedFlag)
@@ -458,7 +613,8 @@ func (sc *StateCache) setWrite(item CacheItem, delete bool) {
 		}
 		// Remove from the reads queue
 		heap.Remove(&sc.readQueue, cacheItem.GetQueuePos())
-		sc.writes.ReplaceOrInsert(cacheItem)
+		writeItem.SetCacheItem(cacheItem)
+		sc.writes.ReplaceOrInsert(writeItem)
 		return
 	}
 	if sc.writes.Len() >= sc.limit {
@@ -477,91 +633,154 @@ func (sc *StateCache) setWrite(item CacheItem, delete bool) {
 		item.ClearFlags(DeletedFlag)
 	}
 	sc.readWrites.ReplaceOrInsert(item)
-	sc.writes.ReplaceOrInsert(item)
+	writeItem.SetCacheItem(item)
+	sc.writes.ReplaceOrInsert(writeItem)
 }
 
 // SetAccountWrite adds given account to the cache, marking it as written (cannot be evicted)
 func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account) {
-	var aci AccountCacheItem
-	copy(aci.address[:], address)
-	aci.account.Copy(account)
-	sc.setWrite(&aci, false /* delete */)
+	var ai AccountItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(ai.addrHash[:])
+	ai.account.Copy(account)
+	var awi AccountWriteItem
+	copy(awi.address[:], address)
+	sc.setWrite(&ai, &awi, false /* delete */)
 }
 
 // SetAccountDelete is very similar to SetAccountWrite with the difference that there no set value
 func (sc *StateCache) SetAccountDelete(address []byte) {
-	var aci AccountCacheItem
-	copy(aci.address[:], address)
-	sc.setWrite(&aci, true /* delete */)
+	var ai AccountItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(ai.addrHash[:])
+	var awi AccountWriteItem
+	copy(awi.address[:], address)
+	sc.setWrite(&ai, &awi, true /* delete */)
 }
 
 func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, location []byte, value []byte) {
-	var sci StorageCacheItem
-	copy(sci.address[:], address)
-	sci.incarnation = incarnation
-	copy(sci.location[:], location)
-	sci.value.SetBytes(value)
-	sc.setRead(&sci, false /* absent */)
+	var si StorageItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(si.addrHash[:])
+	si.incarnation = incarnation
+	h.Sha.Reset()
+	h.Sha.Write(location)
+	h.Sha.Read(si.locHash[:])
+	si.value.SetBytes(value)
+	sc.setRead(&si, false /* absent */)
 }
 
 func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, location []byte) {
-	var sci StorageCacheItem
-	copy(sci.address[:], address)
-	sci.incarnation = incarnation
-	copy(sci.location[:], location)
-	sc.setRead(&sci, true /* absent */)
+	var si StorageItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(si.addrHash[:])
+	si.incarnation = incarnation
+	h.Sha.Reset()
+	h.Sha.Write(location)
+	h.Sha.Read(si.locHash[:])
+	sc.setRead(&si, true /* absent */)
 }
 
 func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, location []byte, value []byte) {
-	var sci StorageCacheItem
-	copy(sci.address[:], address)
-	sci.incarnation = incarnation
-	copy(sci.location[:], location)
-	sci.value.SetBytes(value)
-	sc.setWrite(&sci, false /* delete */)
+	var si StorageItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(si.addrHash[:])
+	si.incarnation = incarnation
+	h.Sha.Reset()
+	h.Sha.Write(location)
+	h.Sha.Read(si.locHash[:])
+	si.value.SetBytes(value)
+	var swi StorageWriteItem
+	copy(swi.address[:], address)
+	copy(swi.location[:], location)
+	sc.setWrite(&si, &swi, false /* delete */)
 }
 
 func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, location []byte) {
-	var sci StorageCacheItem
-	copy(sci.address[:], address)
-	sci.incarnation = incarnation
-	copy(sci.location[:], location)
-	sc.setWrite(&sci, true /* delete */)
+	var si StorageItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(si.addrHash[:])
+	si.incarnation = incarnation
+	h.Sha.Reset()
+	h.Sha.Write(location)
+	h.Sha.Read(si.locHash[:])
+	var swi StorageWriteItem
+	copy(swi.address[:], address)
+	copy(swi.location[:], location)
+	sc.setWrite(&si, &swi, true /* delete */)
 }
 
 func (sc *StateCache) SetCodeRead(address []byte, incarnation uint64, code []byte) {
-	var cci CodeCacheItem
-	copy(cci.address[:], address)
-	cci.incarnation = incarnation
-	cci.code = make([]byte, len(code))
-	copy(cci.code, code)
-	sc.setRead(&cci, false /* absent */)
+	var ci CodeItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(ci.addrHash[:])
+	ci.incarnation = incarnation
+	ci.code = make([]byte, len(code))
+	copy(ci.code, code)
+	sc.setRead(&ci, false /* absent */)
 }
 
 func (sc *StateCache) SetCodeAbsent(address []byte, incarnation uint64) {
-	var cci CodeCacheItem
-	copy(cci.address[:], address)
-	cci.incarnation = incarnation
-	sc.setRead(&cci, true /* absent */)
+	var ci CodeItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(ci.addrHash[:])
+	ci.incarnation = incarnation
+	sc.setRead(&ci, true /* absent */)
 }
 
 func (sc *StateCache) SetCodeWrite(address []byte, incarnation uint64, code []byte) {
 	// Check if this is going to be modification of the existing entry
-	var cci CodeCacheItem
-	copy(cci.address[:], address)
-	cci.incarnation = incarnation
-	cci.code = make([]byte, len(code))
-	copy(cci.code, code)
-	sc.setWrite(&cci, false /* delete */)
+	var ci CodeItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(ci.addrHash[:])
+	ci.incarnation = incarnation
+	ci.code = make([]byte, len(code))
+	copy(ci.code, code)
+	var cwi CodeWriteItem
+	copy(cwi.address[:], address)
+	sc.setWrite(&ci, &cwi, false /* delete */)
 }
 
 func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	// Check if this is going to be modification of the existing entry
-	var cci CodeCacheItem
-	copy(cci.address[:], address)
-	cci.incarnation = incarnation
-	cci.code = nil
-	sc.setWrite(&cci, true /* delete */)
+	var ci CodeItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	h.Sha.Write(address)
+	h.Sha.Read(ci.addrHash[:])
+	ci.incarnation = incarnation
+	ci.code = nil
+	var cwi CodeWriteItem
+	copy(cwi.address[:], address)
+	sc.setWrite(&ci, &cwi, true /* delete */)
 }
 
 func (sc *StateCache) WalkWrites(
@@ -575,33 +794,33 @@ func (sc *StateCache) WalkWrites(
 	var err error
 	sc.writes.Ascend(func(i btree.Item) bool {
 		switch it := i.(type) {
-		case *AccountCacheItem:
-			if it.flags&DeletedFlag != 0 {
+		case *AccountWriteItem:
+			if it.ai.flags&DeletedFlag != 0 {
 				if err = accountDelete(it.address.Bytes()); err != nil {
 					return false
 				}
 			} else {
-				if err = accountWrite(it.address.Bytes(), &it.account); err != nil {
+				if err = accountWrite(it.address.Bytes(), &it.ai.account); err != nil {
 					return false
 				}
 			}
-		case *StorageCacheItem:
-			if it.flags&DeletedFlag != 0 {
-				if err = storageDelete(it.address.Bytes(), it.incarnation, it.location.Bytes()); err != nil {
+		case *StorageWriteItem:
+			if it.si.flags&DeletedFlag != 0 {
+				if err = storageDelete(it.address.Bytes(), it.si.incarnation, it.location.Bytes()); err != nil {
 					return false
 				}
 			} else {
-				if err = storageWrite(it.address.Bytes(), it.incarnation, it.location.Bytes(), it.value.Bytes()); err != nil {
+				if err = storageWrite(it.address.Bytes(), it.si.incarnation, it.location.Bytes(), it.si.value.Bytes()); err != nil {
 					return false
 				}
 			}
-		case *CodeCacheItem:
-			if it.flags&DeletedFlag != 0 {
-				if err = codeDelete(it.address.Bytes(), it.incarnation); err != nil {
+		case *CodeWriteItem:
+			if it.ci.flags&DeletedFlag != 0 {
+				if err = codeDelete(it.address.Bytes(), it.ci.incarnation); err != nil {
 					return false
 				}
 			} else {
-				if err = codeWrite(it.address.Bytes(), it.incarnation, it.code); err != nil {
+				if err = codeWrite(it.address.Bytes(), it.ci.incarnation, it.ci.code); err != nil {
 					return false
 				}
 			}
@@ -614,7 +833,8 @@ func (sc *StateCache) WalkWrites(
 func (sc *StateCache) TurnWritesToReads() {
 	idx := sc.readQueue.end
 	sc.writes.Ascend(func(i btree.Item) bool {
-		cacheItem := i.(CacheItem)
+		cacheWriteItem := i.(CacheWriteItem)
+		cacheItem := cacheWriteItem.GetCacheItem()
 		cacheItem.ClearFlags(ModifiedFlag)
 		cacheItem.SetQueuePos(idx)
 		sc.readQueue.items[idx] = cacheItem
