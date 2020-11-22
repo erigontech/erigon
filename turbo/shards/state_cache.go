@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"container/heap"
 	"fmt"
+	"unsafe"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -17,6 +18,15 @@ import (
 const (
 	ModifiedFlag uint16 = 1
 	DeletedFlag  uint16 = 2
+)
+
+const (
+	accountItemSize      = int(unsafe.Sizeof(AccountItem{}))
+	accountWriteItemSize = int(unsafe.Sizeof(AccountWriteItem{})) + accountItemSize
+	storageItemSize      = int(unsafe.Sizeof(StorageItem{}))
+	storageWriteItemSize = int(unsafe.Sizeof(StorageWriteItem{})) + storageItemSize
+	codeItemSize         = int(unsafe.Sizeof(CodeItem{}))
+	codeWriteItemSize    = int(unsafe.Sizeof(CodeWriteItem{})) + codeItemSize
 )
 
 //nolint:maligned
@@ -82,6 +92,7 @@ type CacheWriteItem interface {
 	btree.Item
 	GetCacheItem() CacheItem
 	SetCacheItem(item CacheItem)
+	GetSize() int
 }
 
 func (ai *AccountItem) Less(than btree.Item) bool {
@@ -138,6 +149,10 @@ func (awi *AccountWriteItem) SetCacheItem(item CacheItem) {
 	awi.ai = item.(*AccountItem)
 }
 
+func (awi *AccountWriteItem) GetSize() int {
+	return accountWriteItemSize
+}
+
 func (ai *AccountItem) GetSequence() int {
 	return ai.sequence
 }
@@ -147,7 +162,7 @@ func (ai *AccountItem) SetSequence(sequence int) {
 }
 
 func (ai *AccountItem) GetSize() int {
-	return 1
+	return accountItemSize
 }
 
 func (ai *AccountItem) GetQueuePos() int {
@@ -256,6 +271,10 @@ func (swi *StorageWriteItem) SetCacheItem(item CacheItem) {
 	swi.si = item.(*StorageItem)
 }
 
+func (swi *StorageWriteItem) GetSize() int {
+	return storageWriteItemSize
+}
+
 func (si *StorageItem) GetSequence() int {
 	return si.sequence
 }
@@ -265,7 +284,7 @@ func (si *StorageItem) SetSequence(sequence int) {
 }
 
 func (si *StorageItem) GetSize() int {
-	return 1
+	return storageItemSize
 }
 
 func (si *StorageItem) GetQueuePos() int {
@@ -368,6 +387,10 @@ func (cwi *CodeWriteItem) SetCacheItem(item CacheItem) {
 	cwi.ci = item.(*CodeItem)
 }
 
+func (cwi *CodeWriteItem) GetSize() int {
+	return codeWriteItemSize + len(cwi.ci.code)
+}
+
 func (ci *CodeItem) GetSequence() int {
 	return ci.sequence
 }
@@ -377,7 +400,7 @@ func (ci *CodeItem) SetSequence(sequence int) {
 }
 
 func (ci *CodeItem) GetSize() int {
-	return 1
+	return codeItemSize + len(ci.code)
 }
 
 func (ci *CodeItem) GetQueuePos() int {
@@ -416,11 +439,10 @@ func (ci *CodeItem) CopyValueFrom(item CacheItem) {
 // Heap for reads
 type ReadHeap struct {
 	items []CacheItem
-	end   int
 }
 
 func (rh ReadHeap) Len() int {
-	return rh.end
+	return len(rh.items)
 }
 
 func (rh ReadHeap) Less(i, j int) bool {
@@ -437,21 +459,24 @@ func (rh ReadHeap) Swap(i, j int) {
 func (rh *ReadHeap) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
-	rh.items[rh.end] = x.(CacheItem)
-	rh.items[rh.end].SetQueuePos(rh.end)
-	rh.end++
+	cacheItem := x.(CacheItem)
+	cacheItem.SetQueuePos(len(rh.items))
+	rh.items = append(rh.items, cacheItem)
 }
 
 func (rh *ReadHeap) Pop() interface{} {
-	rh.end--
-	return rh.items[rh.end]
+	cacheItem := rh.items[len(rh.items)-1]
+	rh.items = rh.items[:len(rh.items)-1]
+	return cacheItem
 }
 
 type StateCache struct {
 	readWrites *btree.BTree // Mixed reads and writes
 	writes     *btree.BTree // Only writes for the effective iteration
 	readQueue  ReadHeap
-	limit      int // Max number of elements in the cache
+	limit      int //  Total sizr of reads that triggers eviction
+	readSize   int
+	writeSize  int
 	sequence   int
 }
 
@@ -460,9 +485,6 @@ func NewStateCache(degree int, limit int) *StateCache {
 	var sc StateCache
 	sc.readWrites = btree.New(degree)
 	sc.writes = btree.New(degree)
-	heapItems := make([]CacheItem, limit) // This will be shares between readQueue and writeQueue
-	sc.readQueue.items = heapItems
-	sc.readQueue.end = 0 // Empty read queue
 	sc.limit = limit
 	return &sc
 }
@@ -558,17 +580,22 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	} else {
 		item.ClearFlags(DeletedFlag)
 	}
-	if sc.readWrites.Len() >= sc.limit {
-		// Read queue cannot grow anymore, need to evict one element
-		sc.readWrites.Delete(sc.readQueue.items[0])
-		sc.readQueue.items[0] = item
-		item.SetQueuePos(0)
-		heap.Fix(&sc.readQueue, 0)
+	if sc.readSize+item.GetSize() > sc.limit {
+		for sc.readQueue.Len() > 0 && sc.readSize+item.GetSize() > sc.limit {
+			// Read queue cannot grow anymore, need to evict one element
+			cacheItem := sc.readQueue.items[0].(CacheItem)
+			sc.readSize -= cacheItem.GetSize()
+			sc.readWrites.Delete(cacheItem)
+			sc.readQueue.items[0] = item
+			item.SetQueuePos(0)
+			heap.Fix(&sc.readQueue, 0)
+		}
 	} else {
 		// Push new element on the read queue
 		heap.Push(&sc.readQueue, item)
 	}
 	sc.readWrites.ReplaceOrInsert(item)
+	sc.readSize += item.GetSize()
 }
 
 // SetAccountRead adds given account to the cache, marking it as a read (not written)
@@ -603,6 +630,10 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 	if existing := sc.writes.Get(writeItem); existing != nil {
 		cacheWriteItem := existing.(CacheWriteItem)
 		cacheItem := cacheWriteItem.GetCacheItem()
+		sc.readSize += item.GetSize()
+		sc.readSize -= cacheItem.GetSize()
+		sc.writeSize += writeItem.GetSize()
+		sc.writeSize -= cacheWriteItem.GetSize()
 		cacheItem.CopyValueFrom(item)
 		if delete {
 			cacheItem.SetFlags(DeletedFlag)
@@ -614,6 +645,8 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
 	if existing := sc.readWrites.Get(item); existing != nil {
 		cacheItem := existing.(CacheItem)
+		sc.readSize += item.GetSize()
+		sc.readSize -= cacheItem.GetSize()
 		cacheItem.CopyValueFrom(item)
 		cacheItem.SetSequence(sc.sequence)
 		sc.sequence++
@@ -627,14 +660,16 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		heap.Remove(&sc.readQueue, cacheItem.GetQueuePos())
 		writeItem.SetCacheItem(cacheItem)
 		sc.writes.ReplaceOrInsert(writeItem)
+		sc.writeSize += writeItem.GetSize()
 		return
 	}
-	if sc.writes.Len() >= sc.limit {
-		panic(fmt.Sprintf("number of writes (%d) must not go over limit (%d). Commit writes before proceeding", sc.writes.Len(), sc.limit))
-	}
-	if sc.readWrites.Len() >= sc.limit {
-		// There is no space available, need to evict one read element
-		sc.readWrites.Delete(heap.Pop(&sc.readQueue).(btree.Item))
+	if sc.readSize+item.GetSize() > sc.limit {
+		for sc.readQueue.Len() > 0 && sc.readSize+item.GetSize() > sc.limit {
+			// There is no space available, need to evict one read element
+			cacheItem := heap.Pop(&sc.readQueue).(CacheItem)
+			sc.readWrites.Delete(cacheItem)
+			sc.readSize -= cacheItem.GetSize()
+		}
 	}
 	item.SetSequence(sc.sequence)
 	sc.sequence++
@@ -645,8 +680,10 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		item.ClearFlags(DeletedFlag)
 	}
 	sc.readWrites.ReplaceOrInsert(item)
+	sc.readSize += item.GetSize()
 	writeItem.SetCacheItem(item)
 	sc.writes.ReplaceOrInsert(writeItem)
+	sc.writeSize += writeItem.GetSize()
 }
 
 // SetAccountWrite adds given account to the cache, marking it as written (cannot be evicted)
@@ -829,7 +866,20 @@ func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	sc.setWrite(&ci, &cwi, true /* delete */)
 }
 
-func (sc *StateCache) WalkWrites(
+func (sc *StateCache) PrepareWrites() *btree.BTree {
+	sc.writes.Ascend(func(i btree.Item) bool {
+		cacheItem := i.(CacheWriteItem)
+		cacheItem.GetCacheItem().ClearFlags(ModifiedFlag)
+		return true
+	})
+	writes := sc.writes.Clone()
+	sc.writes.Clear(true /* addNodesToFreeList */)
+	sc.writeSize = 0
+	return writes
+}
+
+func WalkWrites(
+	writes *btree.BTree,
 	accountWrite func(address []byte, account *accounts.Account) error,
 	accountDelete func(address []byte) error,
 	storageWrite func(address []byte, incarnation uint64, location []byte, value []byte) error,
@@ -838,7 +888,7 @@ func (sc *StateCache) WalkWrites(
 	codeDelete func(address []byte, incarnation uint64) error,
 ) error {
 	var err error
-	sc.writes.Ascend(func(i btree.Item) bool {
+	writes.Ascend(func(i btree.Item) bool {
 		switch it := i.(type) {
 		case *AccountWriteItem:
 			if it.ai.flags&DeletedFlag != 0 {
@@ -876,20 +926,19 @@ func (sc *StateCache) WalkWrites(
 	return err
 }
 
-func (sc *StateCache) TurnWritesToReads() {
-	idx := sc.readQueue.end
-	sc.writes.Ascend(func(i btree.Item) bool {
+func (sc *StateCache) TurnWritesToReads(writes *btree.BTree) {
+	writes.Ascend(func(i btree.Item) bool {
 		cacheWriteItem := i.(CacheWriteItem)
 		cacheItem := cacheWriteItem.GetCacheItem()
-		cacheItem.ClearFlags(ModifiedFlag)
-		cacheItem.SetQueuePos(idx)
-		sc.readQueue.items[idx] = cacheItem
-		idx++
+		if !cacheItem.HasFlag(ModifiedFlag) {
+			// Cannot touch items that have been modified since we have taken away the writes
+			cacheItem.ClearFlags(ModifiedFlag)
+			cacheItem.SetQueuePos(len(sc.readQueue.items))
+			sc.readQueue.items = append(sc.readQueue.items, cacheItem)
+		}
 		return true
 	})
-	sc.readQueue.end = idx
 	heap.Init(&sc.readQueue) // This might be more efficient than pushing items to the queue one by one
-	sc.writes.Clear(true /* addNodesToFreeList */)
 }
 
 func (sc *StateCache) TotalCount() int {
@@ -898,4 +947,12 @@ func (sc *StateCache) TotalCount() int {
 
 func (sc *StateCache) WriteCount() int {
 	return sc.writes.Len()
+}
+
+func (sc *StateCache) WriteSize() int {
+	return sc.writeSize
+}
+
+func (sc *StateCache) ReadSize() int {
+	return sc.readSize
 }

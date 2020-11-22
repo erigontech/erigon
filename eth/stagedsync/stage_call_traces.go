@@ -30,8 +30,8 @@ import (
 const (
 	callIndicesMemLimit       = 256 * datasize.MB
 	callIndicesCheckSizeEvery = 30 * time.Second
-	cacheLimit                = 4000000
-	cacheWatermark            = 2000000
+	cacheLimit                = 4 * 1024 * 1024 * 1024 /* 4 Gb */
+	cacheWatermark            = 512 * 1024 * 1025      /* 512 Mb */
 )
 
 type CallTracesStageParams struct {
@@ -120,7 +120,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			prev = blockNum
 
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, dbutils.CallFromIndex, common.StorageSize(sz), dbutils.CallToIndex, common.StorageSize(sz2),
-				"blk/second", speed, "cache writes", cache.WriteCount(), "cache total", cache.TotalCount(),
+				"blk/second", speed, "cache writes", common.StorageSize(cache.WriteSize()), "cache read", common.StorageSize(cache.ReadSize()),
 				"alloc", common.StorageSize(m.Alloc),
 				"sys", common.StorageSize(m.Sys),
 				"numGC", int(m.NumGC))
@@ -182,8 +182,9 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			}
 			m.Add(uint32(blockNum))
 		}
-		if cache.WriteCount() >= cacheWatermark {
-			cache.TurnWritesToReads()
+		if cache.WriteSize() >= cacheWatermark {
+			writes := cache.PrepareWrites()
+			cache.TurnWritesToReads(writes)
 		}
 	}
 
@@ -317,8 +318,9 @@ func unwindCallTraces(logPrefix string, db rawdb.DatabaseReader, from, to uint64
 		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("exec block: %w", err)
 		}
-		if cache.WriteCount() >= cacheWatermark {
-			cache.TurnWritesToReads()
+		if cache.WriteSize() >= cacheWatermark {
+			writes := cache.PrepareWrites()
+			cache.TurnWritesToReads(writes)
 		}
 	}
 	for addr := range tracer.froms {

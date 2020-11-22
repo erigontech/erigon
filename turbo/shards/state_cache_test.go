@@ -141,7 +141,7 @@ func TestCacheBtreeAll(t *testing.T) {
 }
 
 func TestAccountReads(t *testing.T) {
-	sc := NewStateCache(32, 4)
+	sc := NewStateCache(32, 4*accountItemSize)
 	var account1 accounts.Account
 	account1.Balance.SetUint64(1)
 	var addr1 common.Address
@@ -185,7 +185,7 @@ func TestAccountReads(t *testing.T) {
 }
 
 func TestAccountReadWrites(t *testing.T) {
-	sc := NewStateCache(32, 9)
+	sc := NewStateCache(32, 9*accountItemSize)
 	var account1 accounts.Account
 	account1.Balance.SetUint64(1)
 	var addr1 common.Address
@@ -281,7 +281,7 @@ func TestAccountReadWrites(t *testing.T) {
 }
 
 func TestReplaceAccountReadsWithWrites(t *testing.T) {
-	sc := NewStateCache(32, 6)
+	sc := NewStateCache(32, 6*accountItemSize)
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
@@ -289,7 +289,8 @@ func TestReplaceAccountReadsWithWrites(t *testing.T) {
 		account.Balance.SetUint64(uint64(i))
 		sc.SetAccountWrite(addr.Bytes(), &account)
 	}
-	sc.TurnWritesToReads()
+	writes := sc.PrepareWrites()
+	sc.TurnWritesToReads(writes)
 	if sc.writes.Len() != 0 {
 		t.Fatalf("Write queue is expected to be empty, got: %d", sc.writes.Len())
 	}
@@ -329,7 +330,7 @@ func TestReplaceAccountReadsWithWrites(t *testing.T) {
 }
 
 func TestReadAccountExisting(t *testing.T) {
-	sc := NewStateCache(32, 2)
+	sc := NewStateCache(32, 2*accountItemSize)
 	var account1 accounts.Account
 	account1.Balance.SetUint64(1)
 	var addr1 common.Address
@@ -344,7 +345,7 @@ func TestReadAccountExisting(t *testing.T) {
 }
 
 func TestWriteAccountExceedLimit(t *testing.T) {
-	sc := NewStateCache(32, 2)
+	sc := NewStateCache(32, 2*accountItemSize)
 	defer func() {
 		//nolint:staticcheck
 		if r := recover(); r != nil {
@@ -357,11 +358,10 @@ func TestWriteAccountExceedLimit(t *testing.T) {
 		account.Balance.SetUint64(uint64(i))
 		sc.SetAccountWrite(addr.Bytes(), &account)
 	}
-	t.Fatalf("Expected to panic")
 }
 
 func TestReadWriteAbsentDeleteStorage(t *testing.T) {
-	sc := NewStateCache(32, 4)
+	sc := NewStateCache(32, 4*storageItemSize)
 	// Add absents
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
@@ -460,7 +460,7 @@ func TestReadWriteAbsentDeleteStorage(t *testing.T) {
 }
 
 func TestReadStorageExisting(t *testing.T) {
-	sc := NewStateCache(32, 2)
+	sc := NewStateCache(32, 2*storageItemSize)
 	var addr1 common.Address
 	addr1[0] = 1
 	var loc1 common.Hash
@@ -477,7 +477,7 @@ func TestReadStorageExisting(t *testing.T) {
 }
 
 func TestWriteStorageExceedLimit(t *testing.T) {
-	sc := NewStateCache(32, 2)
+	sc := NewStateCache(32, 2*storageItemSize)
 	defer func() {
 		//nolint:staticcheck
 		if r := recover(); r != nil {
@@ -492,11 +492,10 @@ func TestWriteStorageExceedLimit(t *testing.T) {
 		val[2] = byte(i)
 		sc.SetStorageWrite(addr.Bytes(), 1, loc.Bytes(), val.Bytes())
 	}
-	t.Fatalf("Expected to panic")
 }
 
 func TestCodeReadWriteAbsentDelete(t *testing.T) {
-	sc := NewStateCache(32, 4)
+	sc := NewStateCache(32, 4*(codeItemSize+3))
 	// Add absents
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
@@ -575,7 +574,7 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 }
 
 func TestReadCodeExisting(t *testing.T) {
-	sc := NewStateCache(32, 2)
+	sc := NewStateCache(32, 2*(codeItemSize+3))
 	var addr1 common.Address
 	addr1[0] = 1
 	code1 := []byte{1, 2, 3}
@@ -590,7 +589,7 @@ func TestReadCodeExisting(t *testing.T) {
 }
 
 func TestWriteCodeExceedLimit(t *testing.T) {
-	sc := NewStateCache(32, 2)
+	sc := NewStateCache(32, 2*(codeItemSize+3))
 	defer func() {
 		//nolint:staticcheck
 		if r := recover(); r != nil {
@@ -602,5 +601,4 @@ func TestWriteCodeExceedLimit(t *testing.T) {
 		code := []byte{byte(i), 2, 3}
 		sc.SetCodeWrite(addr.Bytes(), 1, code)
 	}
-	t.Fatalf("Expected to panic")
 }
