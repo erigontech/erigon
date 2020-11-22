@@ -63,11 +63,10 @@ type KV interface {
 type TxFlags uint
 
 const (
-	RW         TxFlags = 0x00 // default
-	RO         TxFlags = 0x02
-	Try        TxFlags = 0x04
-	NoMetaSync TxFlags = 0x08
-	NoSync     TxFlags = 0x10
+	RW     TxFlags = 0x00 // default
+	RO     TxFlags = 0x02
+	Try    TxFlags = 0x04
+	NoSync TxFlags = 0x08
 )
 
 type Tx interface {

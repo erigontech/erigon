@@ -23,7 +23,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -67,7 +66,7 @@ var AllStages = []SyncStage{
 }
 
 // GetStageProgress retrieves saved progress of given sync stage from the database
-func GetStageProgress(db rawdb.DatabaseReader, stage SyncStage) (uint64, []byte, error) {
+func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
 	v, err := db.Get(dbutils.SyncStageProgress, stage)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, nil, err

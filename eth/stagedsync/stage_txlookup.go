@@ -85,16 +85,13 @@ func UnwindTxLookup(u *UnwindState, s *StageState, db ethdb.Database, tmpdir str
 			return false, err
 		}
 
-		bodyRlp, err := rawdb.DecompressBlockBody(v)
-		if err != nil {
-			return false, err
-		}
-
-		body := new(types.Body)
-		if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
+		body := new(types.BodyForStorage)
+		if err := rlp.Decode(bytes.NewReader(v), body); err != nil {
 			return false, fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
 		}
-		for _, tx := range body.Transactions {
+
+		txs, _ := rawdb.ReadTransactions(db, body.BaseTxId, body.TxAmount)
+		for _, tx := range txs {
 			if err := collector.Collect(tx.Hash().Bytes(), nil); err != nil {
 				return false, err
 			}

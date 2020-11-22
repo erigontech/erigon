@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -10,13 +11,18 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func CheckIndex(chaindata string, changeSetBucket string, indexBucket string) error {
+func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, indexBucket string) error {
 	db := ethdb.MustOpen(chaindata)
 	startTime := time.Now()
 
 	if err := changeset.Walk(db, changeSetBucket, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN%100_000 == 0 {
 			fmt.Printf("Processed %dK, %s\n", blockN/1000, time.Since(startTime))
+		}
+		select {
+		default:
+		case <-ctx.Done():
+			return false, ctx.Err()
 		}
 
 		indexBytes, innerErr := db.GetIndexChunk(indexBucket, k, blockN)

@@ -378,7 +378,7 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 // -- For convienience, we return both Parity and Geth traces for now. In the future we will either separate
 //    these functions or eliminate Geth traces
 // -- The function convertToParityTraces takes a hierarchical Geth trace and returns a flattened Parity trace
-func (api *TraceAPIImpl) getTransactionTraces(dbtx rawdb.DatabaseReader, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
+func (api *TraceAPIImpl) getTransactionTraces(dbtx ethdb.Database, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
 	getter := adapter.NewBlockGetter(dbtx)
 	chainContext := adapter.NewChainContext(dbtx)
 	genesis, err := rawdb.ReadBlockByNumber(dbtx, 0)
