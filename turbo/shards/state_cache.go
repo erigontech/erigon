@@ -486,7 +486,9 @@ func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(key.addrHash[:])
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
@@ -504,11 +506,15 @@ func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(key.addrHash[:])
 	key.incarnation = incarnation
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(location)
+	//nolint:errcheck
 	h.Sha.Read(key.locHash[:])
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
@@ -526,7 +532,9 @@ func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool)
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(key.addrHash[:])
 	key.incarnation = incarnation
 	if item, ok := sc.get(&key); ok {
@@ -569,7 +577,9 @@ func (sc *StateCache) SetAccountRead(address []byte, account *accounts.Account) 
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(ai.addrHash[:])
 	ai.account.Copy(account)
 	sc.setRead(&ai, false /* absent */)
@@ -581,7 +591,9 @@ func (sc *StateCache) SetAccountAbsent(address []byte) {
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(ai.addrHash[:])
 	sc.setRead(&ai, true /* absent */)
 }
@@ -643,7 +655,9 @@ func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account)
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(ai.addrHash[:])
 	ai.account.Copy(account)
 	var awi AccountWriteItem
@@ -658,7 +672,9 @@ func (sc *StateCache) SetAccountDelete(address []byte) {
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(ai.addrHash[:])
 	var awi AccountWriteItem
 	copy(awi.address[:], address)
@@ -671,11 +687,15 @@ func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, locatio
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(si.addrHash[:])
 	si.incarnation = incarnation
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(location)
+	//nolint:errcheck
 	h.Sha.Read(si.locHash[:])
 	si.value.SetBytes(value)
 	sc.setRead(&si, false /* absent */)
@@ -686,11 +706,15 @@ func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, locat
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(si.addrHash[:])
 	si.incarnation = incarnation
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(location)
+	//nolint:errcheck
 	h.Sha.Read(si.locHash[:])
 	sc.setRead(&si, true /* absent */)
 }
@@ -700,11 +724,15 @@ func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, locati
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(si.addrHash[:])
 	si.incarnation = incarnation
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(location)
+	//nolint:errcheck
 	h.Sha.Read(si.locHash[:])
 	si.value.SetBytes(value)
 	var swi StorageWriteItem
@@ -719,11 +747,15 @@ func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, locat
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(si.addrHash[:])
 	si.incarnation = incarnation
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(location)
+	//nolint:errcheck
 	h.Sha.Read(si.locHash[:])
 	var swi StorageWriteItem
 	copy(swi.address[:], address)
@@ -737,7 +769,9 @@ func (sc *StateCache) SetCodeRead(address []byte, incarnation uint64, code []byt
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(ci.addrHash[:])
 	ci.incarnation = incarnation
 	ci.code = make([]byte, len(code))
@@ -750,7 +784,9 @@ func (sc *StateCache) SetCodeAbsent(address []byte, incarnation uint64) {
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(ci.addrHash[:])
 	ci.incarnation = incarnation
 	sc.setRead(&ci, true /* absent */)
@@ -762,7 +798,9 @@ func (sc *StateCache) SetCodeWrite(address []byte, incarnation uint64, code []by
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(ci.addrHash[:])
 	ci.incarnation = incarnation
 	ci.code = make([]byte, len(code))
@@ -779,7 +817,9 @@ func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
+	//nolint:errcheck
 	h.Sha.Write(address)
+	//nolint:errcheck
 	h.Sha.Read(ci.addrHash[:])
 	ci.incarnation = incarnation
 	ci.code = nil
