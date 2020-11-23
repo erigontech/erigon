@@ -328,6 +328,8 @@ func toMdbx(ctx context.Context, from, to string) error {
 		appendFunc := c.Append
 		if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
 			appendFunc = c.(ethdb.CursorDupSort).AppendDup
+		} else if b.Flags&dbutils.DupFixed != 0 && !b.AutoDupSortKeysConversion {
+			appendFunc = c.(ethdb.CursorDupFixed).AppendDup
 		}
 
 		srcC := srcTx.Cursor(name)
@@ -358,9 +360,8 @@ func toMdbx(ctx context.Context, from, to string) error {
 				appendFunc = c.Append
 				if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
 					appendFunc = c.(ethdb.CursorDupSort).AppendDup
-				}
-				if b.Flags&dbutils.DupFixed != 0 && !b.AutoDupSortKeysConversion {
-					appendFunc = c.(ethdb.CursorDupSort).AppendDup
+				} else if b.Flags&dbutils.DupFixed != 0 && !b.AutoDupSortKeysConversion {
+					appendFunc = c.(ethdb.CursorDupFixed).AppendDup
 				}
 			}
 		}
@@ -370,7 +371,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		if err != nil {
 			return err
 		}
-		_, err = dstTx.Sequence(name, currentID+1)
+		_, err = dstTx.Sequence(name, currentID)
 		if err != nil {
 			return err
 		}
