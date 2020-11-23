@@ -359,6 +359,9 @@ func toMdbx(ctx context.Context, from, to string) error {
 				if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
 					appendFunc = c.(ethdb.CursorDupSort).AppendDup
 				}
+				if b.Flags&dbutils.DupFixed != 0 && !b.AutoDupSortKeysConversion {
+					appendFunc = c.(ethdb.CursorDupSort).AppendDup
+				}
 			}
 		}
 
