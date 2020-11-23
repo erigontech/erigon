@@ -229,7 +229,7 @@ func TestEnv_SetDebug(t *testing.T) {
 		t.Error(err)
 	}
 
-	err = env.SetDebug(LogLvlDoNotChange, DbgLegacyTxOverlap)
+	err = env.SetDebug(LogLvlDoNotChange, DbgLegacyTxOverlap, LoggerDoNotChange)
 	if err != nil {
 		t.Error(err)
 	}

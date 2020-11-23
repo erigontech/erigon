@@ -86,6 +86,10 @@ const (
 	DbgDoNotChange     = C.MDBX_DBG_DONTCHANGE
 )
 
+var (
+	LoggerDoNotChange = C.MDBX_LOGGER_DONTCHANGE
+)
+
 // DBI is a handle for a database in an Env.
 //
 // See MDBX_dbi
@@ -159,6 +163,10 @@ func (env *Env) FD() (uintptr, error) {
 		return 0, errNotOpen
 	}
 	return fd, nil
+}
+
+func (env *Env) StderrLogger() *C.MDBX_debug_func {
+	return C.mdbxgo_stderr_logger()
 }
 
 // ReaderList dumps the contents of the reader lock table as text.  Readers
@@ -387,8 +395,8 @@ func (env *Env) Flags() (uint, error) {
 	return uint(_flags), nil
 }
 
-func (env *Env) SetDebug(logLvl int, dbg int) error {
-	ret := C.mdbx_setup_debug(C.MDBX_log_level_t(logLvl), C.MDBX_debug_flags_t(dbg), C.MDBX_LOGGER_DONTCHANGE)
+func (env *Env) SetDebug(logLvl int, dbg int, logger *C.MDBX_debug_func) error {
+	ret := C.mdbx_setup_debug(C.MDBX_log_level_t(logLvl), C.MDBX_debug_flags_t(dbg), logger)
 	return operrno("mdbx_setup_debug", ret)
 }
 

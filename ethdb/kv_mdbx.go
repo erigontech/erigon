@@ -2,6 +2,7 @@
 
 package ethdb
 
+import "C"
 import (
 	"bytes"
 	"context"
@@ -17,6 +18,19 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
+)
+
+var (
+	mdbxPutNoOverwriteTimer = metrics.NewRegisteredTimer("mdbx/put/no_overwrite", nil)
+	mdbxPutCurrentTimer     = metrics.NewRegisteredTimer("mdbx/put/direct", nil)
+	mdbxGetBothRangeTimer   = metrics.NewRegisteredTimer("mdbx/get/both_range", nil)
+	mdbxPutUpsertTimer      = metrics.NewRegisteredTimer("mdbx/put/upsert", nil)
+	mdbxPutCurrent2Timer    = metrics.NewRegisteredTimer("mdbx/put/current2", nil)
+	mdbxPutUpsert2Timer     = metrics.NewRegisteredTimer("mdbx/put/upsert2", nil)
+	mdbxDelCurrentTimer     = metrics.NewRegisteredTimer("mdbx/del/current", nil)
+	mdbxSeekExactTimer      = metrics.NewRegisteredTimer("mdbx/seek/exact", nil)
+	mdbxSeekExact2Timer     = metrics.NewRegisteredTimer("mdbx/seek/exact2", nil)
 )
 
 var _ DbCopier = &MdbxKV{}
@@ -24,7 +38,7 @@ var _ DbCopier = &MdbxKV{}
 type MdbxOpts struct {
 	inMem            bool
 	exclusive        bool
-	readOnly         bool
+	flags            uint
 	path             string
 	bucketsCfg       BucketConfigsFunc
 	mapSize          datasize.ByteSize
@@ -50,6 +64,11 @@ func (opts MdbxOpts) Exclusive() MdbxOpts {
 	return opts
 }
 
+func (opts MdbxOpts) Flags(flags uint) MdbxOpts {
+	opts.flags = flags
+	return opts
+}
+
 func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 	opts.mapSize = sz
 	return opts
@@ -57,11 +76,6 @@ func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 
 func (opts MdbxOpts) MaxFreelistReuse(pages uint) MdbxOpts {
 	opts.maxFreelistReuse = pages
-	return opts
-}
-
-func (opts MdbxOpts) ReadOnly() MdbxOpts {
-	opts.readOnly = true
 	return opts
 }
 
@@ -76,7 +90,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	//_ = env.SetDebug(mdbx.LogLvlDoNotChange, mdbx.DbgLegacyTxOverlap) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
+	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAudit, env.StderrLogger()) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 
 	err = env.SetMaxDBs(100)
 	if err != nil {
@@ -102,7 +116,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 		}
 	}
 
-	if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(1*datasize.GB), -1, 4096); err != nil {
+	if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, -1); err != nil {
 		return nil, err
 	}
 
@@ -114,12 +128,11 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 	}
 
-	var flags uint = mdbx.NoReadahead | mdbx.Durable
-	if opts.readOnly {
-		flags |= mdbx.Readonly
-	}
+	var flags uint = opts.flags | mdbx.NoReadahead
 	if opts.inMem {
 		flags |= mdbx.NoMetaSync | mdbx.SafeNoSync
+	} else {
+		flags |= mdbx.Durable
 	}
 	if opts.exclusive {
 		flags |= mdbx.Exclusive
@@ -145,7 +158,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 	}
 
 	// Open or create buckets
-	if opts.readOnly {
+	if opts.flags&mdbx.Readonly != 0 {
 		tx, innerErr := db.Begin(context.Background(), nil, RO)
 		if innerErr != nil {
 			return nil, innerErr
@@ -457,7 +470,7 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 func (tx *mdbxTx) CreateBucket(name string) error {
 	var flags = tx.db.buckets[name].Flags
 	var nativeFlags uint
-	if !tx.db.opts.readOnly {
+	if tx.db.opts.flags&mdbx.Readonly == 0 {
 		nativeFlags |= mdbx.Create
 	}
 	cnfCopy := tx.db.buckets[name]
@@ -503,7 +516,7 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 		if err != nil {
 			return err
 		}
-		if s.Entries < 100_000 {
+		if s.Entries == 0 {
 			break
 		}
 		c := tx.Cursor(name)
@@ -518,7 +531,7 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 				return err
 			}
 			i++
-			if i > 100_000 {
+			if i == 100_000 {
 				break
 			}
 
@@ -592,7 +605,9 @@ func (tx *mdbxTx) Commit(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Commit", "preparation", latency.Preparation, "gc", latency.GC, "audit", latency.Audit, "write", latency.Preparation, "fsync", latency.Sync, "ending", latency.Ending, "whole", latency.Whole)
+	if latency.Whole > 1*time.Second {
+		log.Info("Commit", "preparation", latency.Preparation, "gc", latency.GC, "audit", latency.Audit, "write", latency.Write, "fsync", latency.Sync, "ending", latency.Ending, "whole", latency.Whole)
+	}
 
 	return nil
 }
@@ -1165,10 +1180,19 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 	}
 
 	if len(key) != from {
+		t := time.Now()
 		err := c.putNoOverwrite(key, value)
+		if c.bucketName == dbutils.PlainStateBucket {
+			mdbxPutNoOverwriteTimer.UpdateSince(t)
+		}
 		if err != nil {
 			if mdbx.IsKeyExists(err) {
-				return c.putCurrent(key, value)
+				t = time.Now()
+				err = c.putCurrent(key, value)
+				if c.bucketName == dbutils.PlainStateBucket {
+					mdbxPutCurrentTimer.UpdateSince(t)
+				}
+				return err
 			}
 			return err
 		}
@@ -1177,25 +1201,48 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 
 	value = append(key[to:], value...)
 	key = key[:to]
+	t := time.Now()
 	_, v, err := c.getBothRange(key, value[:from-to])
+	if c.bucketName == dbutils.PlainStateBucket {
+		mdbxGetBothRangeTimer.UpdateSince(t)
+	}
 	if err != nil { // if key not found, or found another one - then just insert
 		if mdbx.IsNotFound(err) {
-			return c.put(key, value)
+			t = time.Now()
+			err = c.put(key, value)
+			if c.bucketName == dbutils.PlainStateBucket {
+				mdbxPutUpsertTimer.UpdateSince(t)
+			}
+			return err
 		}
 		return err
 	}
 
 	if bytes.Equal(v[:from-to], value[:from-to]) {
 		if len(v) == len(value) { // in DupSort case mdbx.Current works only with values of same length
-			return c.putCurrent(key, value)
+			t = time.Now()
+			err = c.putCurrent(key, value)
+			if c.bucketName == dbutils.PlainStateBucket {
+				mdbxPutCurrent2Timer.UpdateSince(t)
+			}
+			return err
 		}
+		t = time.Now()
 		err = c.delCurrent()
+		if c.bucketName == dbutils.PlainStateBucket {
+			mdbxDelCurrentTimer.UpdateSince(t)
+		}
 		if err != nil {
 			return err
 		}
 	}
 
-	return c.put(key, value)
+	t = time.Now()
+	err = c.put(key, value)
+	if c.bucketName == dbutils.PlainStateBucket {
+		mdbxPutUpsert2Timer.UpdateSince(t)
+	}
+	return err
 }
 
 func (c *MdbxCursor) PutCurrent(key []byte, value []byte) error {
@@ -1227,7 +1274,11 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
+		t := time.Now()
 		k, v, err := c.getBothRange(key[:to], key[to:])
+		if c.bucketName == dbutils.PlainStateBucket {
+			mdbxSeekExactTimer.UpdateSince(t)
+		}
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil, nil, nil
@@ -1240,7 +1291,11 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 		return k, v[from-to:], nil
 	}
 
+	t := time.Now()
 	_, v, err := c.set(key)
+	if c.bucketName == dbutils.PlainStateBucket {
+		mdbxSeekExact2Timer.UpdateSince(t)
+	}
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1313,13 +1368,13 @@ func (c *MdbxDupSortCursor) initCursor() error {
 		return nil
 	}
 
-	//if c.bucketCfg.AutoDupSortKeysConversion {
-	//	return fmt.Errorf("class MdbxDupSortCursor not compatible with AutoDupSortKeysConversion buckets")
-	//}
-	//
-	//if c.bucketCfg.Flags&mdbx.DupSort == 0 {
-	//	return fmt.Errorf("class MdbxDupSortCursor can be used only if bucket created with flag mdbx.DupSort")
-	//}
+	if c.bucketCfg.AutoDupSortKeysConversion {
+		return fmt.Errorf("class MdbxDupSortCursor not compatible with AutoDupSortKeysConversion buckets")
+	}
+
+	if c.bucketCfg.Flags&mdbx.DupSort == 0 {
+		return fmt.Errorf("class MdbxDupSortCursor can be used only if bucket created with flag mdbx.DupSort")
+	}
 
 	return c.MdbxCursor.initCursor()
 }

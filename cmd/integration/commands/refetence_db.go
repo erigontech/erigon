@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -257,23 +258,16 @@ func fToMdbx(ctx context.Context, to string) error {
 	commitEvery := time.NewTicker(5 * time.Minute)
 	defer commitEvery.Stop()
 
-	type A interface {
-		Internal() *mdbx.Cursor
-	}
-
 	//r := csv.NewReader(bufio.NewReaderSize(file, 1024*1024))
 	//r.Read()
-	_ = dstTx.(ethdb.BucketMigrator).ClearBucket(dbutils.CurrentStateBucket)
+	//_ = dstTx.(ethdb.BucketMigrator).ClearBucket(dbutils.CurrentStateBucket)
 
 	fileScanner := bufio.NewScanner(file)
-	c := dstTx.CursorDupSort(dbutils.CurrentStateBucket).(A).Internal()
-	i := 0
+	c := dstTx.CursorDupSort(dbutils.CurrentStateBucket)
 	for fileScanner.Scan() {
-		i++
 		kv := strings.Split(fileScanner.Text(), ",")
 		k, _ := hex.DecodeString(kv[0])
 		v, _ := hex.DecodeString(kv[1])
-		fmt.Printf("%x, %x\n", k, v)
 		select {
 		default:
 		case <-logEvery.C:
@@ -282,7 +276,7 @@ func fToMdbx(ctx context.Context, to string) error {
 			return ctx.Err()
 		}
 
-		if err = c.Put(k, v, mdbx.AppendDup); err != nil {
+		if err = c.AppendDup(k, v); err != nil {
 			return err
 		}
 	}
@@ -297,12 +291,11 @@ func fToMdbx(ctx context.Context, to string) error {
 
 	return nil
 }
-
 func toMdbx(ctx context.Context, from, to string) error {
 	_ = os.RemoveAll(to)
 
-	src := ethdb.NewLMDB().Path(from).MustOpen()
-	dst := ethdb.NewMDBX().Path(to).MustOpen()
+	src := ethdb.NewLMDB().Path(from).Flags(lmdb.Readonly).MustOpen()
+	dst := ethdb.NewMDBX().Path(to).Flags(mdbx.WriteMap | mdbx.UtterlyNoSync | mdbx.NoMemInit).MustOpen()
 	srcTx, err1 := src.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return err1
@@ -319,7 +312,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 	logEvery := time.NewTicker(15 * time.Second)
 	defer logEvery.Stop()
 
-	commitEvery := time.NewTicker(5 * time.Minute)
+	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
 	for name, b := range dbutils.BucketsConfigs {

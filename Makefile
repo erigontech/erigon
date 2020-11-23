@@ -103,17 +103,20 @@ db-tools:
 
 ethdb/mdbx/dist/libmdbx.a:
 	echo "Building mdbx"
-	cd ethdb/mdbx/dist/ && make libmdbx.a && cat config.h
+	cd ethdb/mdbx/dist/ \
+		&& make config.h \
+		&& echo '#define MDBX_HUGE_TRANSACTIONS 1' > config.h \
+		&& echo '#define MDBX_TXN_CHECKOWNER 1' > config.h \
+		&& CFLAGS_EXTRA="-Wno-deprecated-declarations" make libmdbx.a
 
 test: ethdb/mdbx/dist/libmdbx.a
 	$(GOTEST)
-	du -h
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
 
 test-mdbx: ethdb/mdbx/dist/libmdbx.a
-	TEST_DB=mdbx $(GOTEST_MDBX)
+	TEST_DB=mdbx $(GOTEST)
 
 lint: lintci
 

@@ -1,6 +1,7 @@
 package snapshotsync
 
 import (
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -22,9 +23,9 @@ var (
 func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.KV, error) {
 	log.Info("Wrap db to snapshots", "dir", snapshotDir, "mode", mode.ToString())
 	if mode.Bodies {
-		snapshotKV, err := ethdb.NewLMDB().Path(snapshotDir + "/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		snapshotKV, err := ethdb.NewLMDB().Flags(lmdb.Readonly).Path(snapshotDir + "/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 			return bucketConfigs[SnapshotType_bodies]
-		}).ReadOnly().Open()
+		}).Open()
 		if err != nil {
 			log.Error("Can't open body snapshot", "err", err)
 			return nil, err
@@ -37,9 +38,9 @@ func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.
 	}
 
 	if mode.Headers {
-		snapshotKV, err := ethdb.NewLMDB().Path(snapshotDir + "/headers").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		snapshotKV, err := ethdb.NewLMDB().Flags(lmdb.Readonly).Path(snapshotDir + "/headers").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 			return bucketConfigs[SnapshotType_headers]
-		}).ReadOnly().Open()
+		}).Open()
 		if err != nil {
 			log.Error("Can't open headers snapshot", "err", err)
 			return nil, err
@@ -58,9 +59,9 @@ func WrapBySnapshots2(kv ethdb.KV, snapshots map[SnapshotType]*SnapshotsInfo) (e
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
 		cfg := bucketConfigs[k]
-		snapshotKV, err := ethdb.NewLMDB().Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		snapshotKV, err := ethdb.NewLMDB().Flags(lmdb.Readonly).Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 			return cfg
-		}).ReadOnly().Open()
+		}).Open()
 		if err != nil {
 			log.Error("Can't open snapshot", "err", err)
 			return nil, err

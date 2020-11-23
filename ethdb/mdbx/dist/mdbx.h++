@@ -208,7 +208,8 @@ using filehandle = ::mdbx_filehandle_t;
     (defined(__cpp_lib_filesystem) && __cpp_lib_filesystem >= 201703L &&       \
      (!defined(__MAC_OS_X_VERSION_MIN_REQUIRED) ||                             \
       __MAC_OS_X_VERSION_MIN_REQUIRED >= 101500))
-using path = std::filesystem::path;
+#define MDBX_STD_FILESYSTEM_PATH
+using path = ::std::filesystem::path;
 #elif defined(_WIN32) || defined(_WIN64)
 using path = ::std::wstring;
 #else
@@ -396,8 +397,7 @@ struct LIBMDBX_API_TYPE slice : public ::MDBX_val {
   template <size_t SIZE>
   MDBX_CXX14_CONSTEXPR slice(const char (&text)[SIZE]) noexcept
       : slice(text, SIZE - 1) {
-    static_assert(SIZE > 0 && text[SIZE - 1] == '\0',
-                  "Must be a null-terminated C-string");
+    MDBX_CONSTEXPR_ASSERT(SIZE > 0 && text[SIZE - 1] == '\0');
   }
   /// \brief Create a slice that refers to c_str[0,strlen(c_str)-1].
   explicit MDBX_CXX17_CONSTEXPR slice(const char *c_str);
@@ -1651,9 +1651,9 @@ struct LIBMDBX_API_TYPE map_handle {
 
 /// \brief Key-value pairs put mode.
 enum put_mode {
-  insert = MDBX_NOOVERWRITE, ///< Insert only unique keys.
-  upsert = MDBX_UPSERT,      ///< Insert or update.
-  update = MDBX_CURRENT,     ///< Update existing, don't insert new.
+  insert_unique = MDBX_NOOVERWRITE, ///< Insert only unique keys.
+  upsert = MDBX_UPSERT,             ///< Insert or update.
+  update = MDBX_CURRENT,            ///< Update existing, don't insert new.
 };
 
 /// \brief Unmanaged database environment.
@@ -1916,7 +1916,15 @@ public:
 
   /// \brief Make a copy (backup) of an existing environment to the specified
   /// path.
-  env &copy(const path &destination, bool compactify,
+#ifdef MDBX_STD_FILESYSTEM_PATH
+  env &copy(const ::std::filesystem::path &destination, bool compactify,
+            bool force_dynamic_size = false);
+#endif /* MDBX_STD_FILESYSTEM_PATH */
+#if defined(_WIN32) || defined(_WIN64)
+  env &copy(const ::std::wstring &destination, bool compactify,
+            bool force_dynamic_size = false);
+#endif /* Windows */
+  env &copy(const ::std::string &destination, bool compactify,
             bool force_dynamic_size = false);
 
   /// \brief Copy an environment to the specified file descriptor.
@@ -1941,7 +1949,16 @@ public:
 
   /// \brief Removes the environment's files in a proper and multiprocess-safe
   /// way.
-  static bool remove(const path &, const remove_mode mode = just_remove);
+#ifdef MDBX_STD_FILESYSTEM_PATH
+  static bool remove(const ::std::filesystem::path &,
+                     const remove_mode mode = just_remove);
+#endif /* MDBX_STD_FILESYSTEM_PATH */
+#if defined(_WIN32) || defined(_WIN64)
+  static bool remove(const ::std::wstring &,
+                     const remove_mode mode = just_remove);
+#endif /* Windows */
+  static bool remove(const ::std::string &,
+                     const remove_mode mode = just_remove);
 
   /// \brief Statistics for a database in the MDBX environment.
   using stat = ::MDBX_stat;
@@ -2177,7 +2194,16 @@ public:
   MDBX_CXX11_CONSTEXPR env_managed() noexcept = default;
 
   /// \brief Open existing database.
-  env_managed(const path &, const operate_parameters &, bool accede = true);
+#ifdef MDBX_STD_FILESYSTEM_PATH
+  env_managed(const ::std::filesystem::path &, const operate_parameters &,
+              bool accede = true);
+#endif /* MDBX_STD_FILESYSTEM_PATH */
+#if defined(_WIN32) || defined(_WIN64)
+  env_managed(const ::std::wstring &, const operate_parameters &,
+              bool accede = true);
+#endif /* Windows */
+  env_managed(const ::std::string &, const operate_parameters &,
+              bool accede = true);
 
   /// \brief Additional parameters for creating a new database.
   struct create_parameters {
@@ -2187,7 +2213,15 @@ public:
   };
 
   /// \brief Create new or open existing database.
-  env_managed(const path &, const create_parameters &,
+#ifdef MDBX_STD_FILESYSTEM_PATH
+  env_managed(const ::std::filesystem::path &, const create_parameters &,
+              const operate_parameters &, bool accede = true);
+#endif /* MDBX_STD_FILESYSTEM_PATH */
+#if defined(_WIN32) || defined(_WIN64)
+  env_managed(const ::std::wstring &, const create_parameters &,
+              const operate_parameters &, bool accede = true);
+#endif /* Windows */
+  env_managed(const ::std::string &, const create_parameters &,
               const operate_parameters &, bool accede = true);
 
   /// \brief Explicitly closes the environment and release the memory map.
@@ -2680,6 +2714,7 @@ public:
 
 LIBMDBX_API ::std::ostream &operator<<(::std::ostream &, const slice &);
 LIBMDBX_API ::std::ostream &operator<<(::std::ostream &, const pair &);
+LIBMDBX_API ::std::ostream &operator<<(::std::ostream &, const pair_result &);
 template <class ALLOCATOR>
 inline ::std::ostream &operator<<(::std::ostream &out,
                                   const buffer<ALLOCATOR> &it) {
@@ -3127,7 +3162,7 @@ inline ::mdbx::string<ALLOCATOR>
 slice::hex_encode(bool uppercase, const ALLOCATOR &allocator) const {
   ::mdbx::string<ALLOCATOR> result(allocator);
   if (MDBX_LIKELY(length() > 0)) {
-    result.reserve(to_hex_bytes());
+    result.resize(to_hex_bytes());
     result.resize(to_hex(const_cast<char *>(result.data()), result.capacity()) -
                       result.data(),
                   uppercase);
@@ -3140,7 +3175,7 @@ inline ::mdbx::string<ALLOCATOR>
 slice::hex_decode(const ALLOCATOR &allocator) const {
   ::mdbx::string<ALLOCATOR> result(allocator);
   if (MDBX_LIKELY(length() > 0)) {
-    result.reserve(from_hex_bytes());
+    result.resize(from_hex_bytes());
     result.resize(
         from_hex(static_cast<byte *>(
                      static_cast<void *>(const_cast<char *>(result.data()))),
@@ -3155,7 +3190,7 @@ inline ::mdbx::string<ALLOCATOR>
 slice::base58_encode(const ALLOCATOR &allocator) const {
   ::mdbx::string<ALLOCATOR> result(allocator);
   if (MDBX_LIKELY(length() > 0)) {
-    result.reserve(to_base58_bytes());
+    result.resize(to_base58_bytes());
     result.resize(
         to_base58(const_cast<char *>(result.data()), result.capacity()) -
         result.data());
@@ -3168,7 +3203,7 @@ inline ::mdbx::string<ALLOCATOR>
 slice::base58_decode(const ALLOCATOR &allocator) const {
   ::mdbx::string<ALLOCATOR> result(allocator);
   if (MDBX_LIKELY(length() > 0)) {
-    result.reserve(from_base58_bytes());
+    result.resize(from_base58_bytes());
     result.resize(
         from_base58(static_cast<byte *>(
                         static_cast<void *>(const_cast<char *>(result.data()))),
@@ -3183,7 +3218,7 @@ inline ::mdbx::string<ALLOCATOR>
 slice::base64_encode(const ALLOCATOR &allocator) const {
   ::mdbx::string<ALLOCATOR> result(allocator);
   if (MDBX_LIKELY(length() > 0)) {
-    result.reserve(to_base64_bytes());
+    result.resize(to_base64_bytes());
     result.resize(
         to_base64(const_cast<char *>(result.data()), result.capacity()) -
         result.data());
@@ -3196,7 +3231,7 @@ inline ::mdbx::string<ALLOCATOR>
 slice::base64_decode(const ALLOCATOR &allocator) const {
   ::mdbx::string<ALLOCATOR> result(allocator);
   if (MDBX_LIKELY(length() > 0)) {
-    result.reserve(from_base64_bytes());
+    result.resize(from_base64_bytes());
     result.resize(
         from_base64(static_cast<byte *>(
                         static_cast<void *>(const_cast<char *>(result.data()))),
@@ -3839,14 +3874,14 @@ inline void txn::put(map_handle map, const slice &key, slice value,
 inline void txn::insert(map_handle map, const slice &key, slice value) {
   error::success_or_throw(
       put(map, key, &value /* takes the present value in case MDBX_KEYEXIST */,
-          MDBX_put_flags_t(put_mode::insert)));
+          MDBX_put_flags_t(put_mode::insert_unique)));
 }
 
 inline value_result txn::try_insert(map_handle map, const slice &key,
                                     slice value) {
   const int err =
       put(map, key, &value /* takes the present value in case MDBX_KEYEXIST */,
-          MDBX_put_flags_t(put_mode::insert));
+          MDBX_put_flags_t(put_mode::insert_unique));
   switch (err) {
   case MDBX_SUCCESS:
     return value_result{slice(), true};
@@ -3862,7 +3897,7 @@ inline slice txn::insert_reserve(map_handle map, const slice &key,
   slice result(nullptr, value_length);
   error::success_or_throw(
       put(map, key, &result /* takes the present value in case MDBX_KEYEXIST */,
-          MDBX_put_flags_t(put_mode::insert) | MDBX_RESERVE));
+          MDBX_put_flags_t(put_mode::insert_unique) | MDBX_RESERVE));
   return result;
 }
 
@@ -3871,7 +3906,7 @@ inline value_result txn::try_insert_reserve(map_handle map, const slice &key,
   slice result(nullptr, value_length);
   const int err =
       put(map, key, &result /* takes the present value in case MDBX_KEYEXIST */,
-          MDBX_put_flags_t(put_mode::insert) | MDBX_RESERVE);
+          MDBX_put_flags_t(put_mode::insert_unique) | MDBX_RESERVE);
   switch (err) {
   case MDBX_SUCCESS:
     return value_result{result, true};
@@ -4308,13 +4343,13 @@ inline MDBX_error_t cursor::put(const slice &key, slice *value,
 inline void cursor::insert(const slice &key, slice value) {
   error::success_or_throw(
       put(key, &value /* takes the present value in case MDBX_KEYEXIST */,
-          MDBX_put_flags_t(put_mode::insert)));
+          MDBX_put_flags_t(put_mode::insert_unique)));
 }
 
 inline value_result cursor::try_insert(const slice &key, slice value) {
   const int err =
       put(key, &value /* takes the present value in case MDBX_KEYEXIST */,
-          MDBX_put_flags_t(put_mode::insert));
+          MDBX_put_flags_t(put_mode::insert_unique));
   switch (err) {
   case MDBX_SUCCESS:
     return value_result{slice(), true};
@@ -4329,7 +4364,7 @@ inline slice cursor::insert_reserve(const slice &key, size_t value_length) {
   slice result(nullptr, value_length);
   error::success_or_throw(
       put(key, &result /* takes the present value in case MDBX_KEYEXIST */,
-          MDBX_put_flags_t(put_mode::insert) | MDBX_RESERVE));
+          MDBX_put_flags_t(put_mode::insert_unique) | MDBX_RESERVE));
   return result;
 }
 
@@ -4338,7 +4373,7 @@ inline value_result cursor::try_insert_reserve(const slice &key,
   slice result(nullptr, value_length);
   const int err =
       put(key, &result /* takes the present value in case MDBX_KEYEXIST */,
-          MDBX_put_flags_t(put_mode::insert) | MDBX_RESERVE);
+          MDBX_put_flags_t(put_mode::insert_unique) | MDBX_RESERVE);
   switch (err) {
   case MDBX_SUCCESS:
     return value_result{result, true};

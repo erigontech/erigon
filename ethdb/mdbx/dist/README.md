@@ -1,12 +1,15 @@
 <!-- Required extensions: pymdownx.betterem, pymdownx.tilde, pymdownx.emoji, pymdownx.tasklist, pymdownx.superfences -->
 
-libmdbx
-========
-
 > Please refer to the online [documentation](https://erthink.github.io/libmdbx/)
 > with [`C` API description](https://erthink.github.io/libmdbx/group__c__api.html)
 > and pay attention to the preliminary [`C++` API](https://github.com/erthink/libmdbx/blob/devel/mdbx.h%2B%2B).
+>
 > Questions, feedback and suggestions are welcome to the [Telegram' group](https://t.me/libmdbx).
+>
+> For NEWS take a look to the [ChangeLog](./ChangeLog.md).
+
+libmdbx
+========
 
 <!-- section-begin overview -->
 _libmdbx_ is an extremely fast, compact, powerful, embedded,
@@ -480,6 +483,7 @@ Bindings
 
 | Runtime | GitHub | Author |
 | ------- | ------ | ------ |
+| [Nim](https://en.wikipedia.org/wiki/Nim_(programming_language)) | [NimDBX](https://github.com/snej/nimdbx) | [Jens Alfke](https://github.com/snej)
 | Rust    | [mdbx-rs](https://github.com/Kerollmops/mdbx-rs)   | [Clément Renault](https://github.com/Kerollmops) |
 | Java    | [mdbxjni](https://github.com/castortech/mdbxjni)   | [Castor Technologies](https://castortech.com/) |
 | .NET    | [mdbx.NET](https://github.com/wangjia184/mdbx.NET) | [Jerry Wang](https://github.com/wangjia184) |
