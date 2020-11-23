@@ -31,6 +31,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -955,55 +956,15 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 
 func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[string][]byte, storageMap map[string][]byte) error {
 	accountHistoryEffects := make(map[string][]byte)
-	startKey := make([]byte, common.HashLength+8)
 	for key := range accountMap {
-		copy(startKey, []byte(key))
-		binary.BigEndian.PutUint64(startKey[common.HashLength:], timestampTo)
-		if err := tds.db.Walk(dbutils.AccountsHistoryBucket, startKey, 8*common.HashLength, func(k, v []byte) (bool, error) {
-			timestamp := binary.BigEndian.Uint64(k[common.HashLength:]) // the last timestamp in the chunk
-			kStr := string(common.CopyBytes(k))
-			if timestamp > timestampTo {
-				accountHistoryEffects[kStr] = nil
-				// truncate the chunk
-				index := dbutils.WrapHistoryIndex(v)
-				index = index.TruncateGreater(timestampTo)
-				if len(index) > 8 { // If the chunk is empty after truncation, it gets simply deleted
-					// Truncated chunk becomes "the last chunk" with the timestamp 0xffff....ffff
-					lastK := make([]byte, len(k))
-					copy(lastK, k[:common.HashLength])
-					binary.BigEndian.PutUint64(lastK[common.HashLength:], ^uint64(0))
-					accountHistoryEffects[string(lastK)] = common.CopyBytes(index)
-				}
-			}
-			return true, nil
-		}); err != nil {
-			return err
+		if err := bitmapdb.TruncateRange(tds.db, dbutils.AccountsHistoryBucket, []byte(key), uint32(timestampTo+1)); err != nil {
+			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
 		}
 	}
 	storageHistoryEffects := make(map[string][]byte)
-	startKey = make([]byte, 2*common.HashLength+8)
 	for key := range storageMap {
-		copy(startKey, []byte(key)[:common.HashLength])
-		copy(startKey[common.HashLength:], []byte(key)[common.HashLength+8:])
-		binary.BigEndian.PutUint64(startKey[2*common.HashLength:], timestampTo)
-		if err := tds.db.Walk(dbutils.StorageHistoryBucket, startKey, 8*2*common.HashLength, func(k, v []byte) (bool, error) {
-			timestamp := binary.BigEndian.Uint64(k[2*common.HashLength:]) // the last timestamp in the chunk
-			kStr := string(common.CopyBytes(k))
-			if timestamp > timestampTo {
-				storageHistoryEffects[kStr] = nil
-				index := dbutils.WrapHistoryIndex(v)
-				index = index.TruncateGreater(timestampTo)
-				if len(index) > 8 { // If the chunk is empty after truncation, it gets simply deleted
-					// Truncated chunk becomes "the last chunk" with the timestamp 0xffff....ffff
-					lastK := make([]byte, len(k))
-					copy(lastK, k[:2*common.HashLength])
-					binary.BigEndian.PutUint64(lastK[2*common.HashLength:], ^uint64(0))
-					storageHistoryEffects[string(lastK)] = common.CopyBytes(index)
-				}
-			}
-			return true, nil
-		}); err != nil {
-			return err
+		if err := bitmapdb.TruncateRange(tds.db, dbutils.AccountsHistoryBucket, dbutils.CompositeKeyWithoutIncarnation([]byte(key)), uint32(timestampTo+1)); err != nil {
+			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
 		}
 	}
 	for key, value := range accountHistoryEffects {

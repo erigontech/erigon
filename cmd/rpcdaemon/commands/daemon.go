@@ -17,7 +17,7 @@ func APIList(db ethdb.KV, eth ethdb.Backend, filters *filters.Filters, cfg cli.F
 	tgImpl := NewTgAPI(db, dbReader)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(db, dbReader)
-	traceImpl := NewTraceAPI(db, dbReader, &cfg)
+	traceImpl := NewTraceAPI(dbReader, &cfg)
 	web3Impl := NewWeb3APIImpl()
 	dbImpl := NewDBAPIImpl()   /* deprecated */
 	shhImpl := NewSHHAPIImpl() /* deprecated */

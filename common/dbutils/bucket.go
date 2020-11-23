@@ -66,11 +66,13 @@ var (
 
 	//key - address hash
 	//value - list of block where it's changed
-	AccountsHistoryBucket = "hAT"
+	AccountsHistoryBucket  = "hAT2"
+	AccountsHistoryBucket2 = "hAT"
 
 	//key - address hash
 	//value - list of block where it's changed
-	StorageHistoryBucket = "hST"
+	StorageHistoryBucket  = "hST2"
+	StorageHistoryBucket2 = "hST"
 
 	//key - contract code hash
 	//value - contract code
@@ -174,7 +176,7 @@ var (
 
 // Keys
 var (
-	// last block that was pruned
+	// last  block that was pruned
 	// it's saved one in 5 minutes
 	LastPrunedBlockKey = []byte("LastPrunedBlock")
 	//StorageModeHistory - does node save history.
@@ -206,7 +208,9 @@ var (
 var Buckets = []string{
 	CurrentStateBucket,
 	AccountsHistoryBucket,
+	AccountsHistoryBucket2,
 	StorageHistoryBucket,
+	StorageHistoryBucket2,
 	CodeBucket,
 	ContractCodeBucket,
 	AccountChangeSetBucket,
