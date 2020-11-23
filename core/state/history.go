@@ -78,11 +78,6 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 
 	var data []byte
 	if ok {
-		// set == true if this change was from empty record (non-existent account) to non-empty
-		// In such case, we do not need to examine changeSet and return empty data
-		//if set && !storage {
-		//	return []byte{}, nil
-		//}
 		csBucket, _ := dbutils.ChangeSetByIndexBucket(storage)
 		c := tx.CursorDupSort(csBucket)
 		defer c.Close()
