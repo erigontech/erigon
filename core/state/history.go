@@ -76,9 +76,6 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 	found, ok := bitmapdb.SeekInBitmap(index, uint32(timestamp))
 	changeSetBlock := uint64(found)
 
-	//if timestamp <= 49891 {
-	//	fmt.Printf("2: %d->%d, %t %x\n", timestamp, changeSetBlock, ok, key)
-	//}
 	var data []byte
 	if ok {
 		// set == true if this change was from empty record (non-existent account) to non-empty
