@@ -1,30 +1,44 @@
 package commands
 
 import (
-"context"
-"fmt"
-"github.com/ledgerwatch/turbo-geth/common/dbutils"
-"github.com/ledgerwatch/turbo-geth/core/rawdb"
-"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-"github.com/ledgerwatch/turbo-geth/ethdb"
-"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-"io/ioutil"
-"os"
-"os/signal"
+	"context"
+	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/spf13/cobra"
+	"io/ioutil"
+	"os"
+	"time"
 )
-func VerifyStateSnapshot(dbPath, snapshotPath string, block uint64) error {
-	ch := make(chan os.Signal, 1)
-	quitCh := make(chan struct{})
-	signal.Notify(ch, os.Interrupt)
-	go func() {
-		<-ch
-		close(quitCh)
-	}()
-	db:=ethdb.MustOpen(dbPath)
+
+func init() {
+	withChaindata(verifyStateSnapshotCmd)
+	withSnapshotFile(verifyStateSnapshotCmd)
+	withBlock(verifyStateSnapshotCmd)
+
+	rootCmd.AddCommand(verifyStateSnapshotCmd)
+}
+
+var verifyStateSnapshotCmd = &cobra.Command{
+	Use:     "verify_state",
+	Short:   "Verify state snapshot",
+	Example: "go run cmd/snapshots/generator/main.go headers --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/headers_test",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return VerifyStateSnapshot(cmd.Context(), chaindata, snapshotFile, block)
+	},
+}
+
+func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block uint64) error {
+	db, err:= ethdb.Open(dbPath, true)
+	if err!=nil {
+		return fmt.Errorf("Open err: %w", err)
+	}
 	snapshotDir:= "/media/b00ris/nvme/snapshotsync/tg/snapshots"
 	snapshotMode:="hb"
 	kv:=db.KV()
-	var err error
 	if snapshotDir != "" {
 		var mode snapshotsync.SnapshotMode
 		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
@@ -37,10 +51,14 @@ func VerifyStateSnapshot(dbPath, snapshotPath string, block uint64) error {
 		}
 	}
 	db.SetKV(kv)
+
+
 	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket:       dbutils.BucketConfigItem{},
-			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+			dbutils.PlainStateBucket:   dbutils.BucketsConfigs[dbutils.PlainStateBucket],//    dbutils.BucketConfigItem{},
+			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],//    dbutils.BucketConfigItem{},
+			//dbutils.C:   dbutils.BucketsConfigs[dbutils.CodeBucket],//    dbutils.BucketConfigItem{},
+			//dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).ReadOnly().MustOpen()
 	tmpPath,err:=ioutil.TempDir(os.TempDir(),"vrf*")
@@ -50,9 +68,9 @@ func VerifyStateSnapshot(dbPath, snapshotPath string, block uint64) error {
 	tmpDB:=ethdb.NewLMDB().Path(tmpPath).MustOpen()
 	defer os.RemoveAll(tmpPath)
 	defer tmpDB.Close()
-	snkv=ethdb.NewSnapshotKV().SnapshotDB(snkv).DB(tmpDB).For(dbutils.PlainStateBucket).MustOpen()
+	snkv=ethdb.NewSnapshotKV().SnapshotDB(snkv).DB(tmpDB).For(dbutils.PlainStateBucket).For(dbutils.CodeBucket).MustOpen()
 	sndb:=ethdb.NewObjectDatabase(snkv)
-	tx,err:=sndb.Begin(context.Background(), ethdb.RO)
+	tx,err:=sndb.Begin(context.Background(), ethdb.RW)
 	if err!=nil {
 		return err
 	}
@@ -61,19 +79,22 @@ func VerifyStateSnapshot(dbPath, snapshotPath string, block uint64) error {
 	if err != nil {
 		return err
 	}
+
 	syncHeadHeader := rawdb.ReadHeader(db, hash, block)
 	if syncHeadHeader==nil {
 		return fmt.Errorf("empty header")
 	}
 	expectedRootHash := syncHeadHeader.Root
-	err = stagedsync.PromoteHashedStateCleanly("",tx, os.TempDir(), quitCh)
+	tt:=time.Now()
+	err = stagedsync.PromoteHashedStateCleanly("",tx, os.TempDir(), ctx.Done())
+	fmt.Println("Promote took", time.Since(tt))
 	if err!=nil {
-		return err
+		return fmt.Errorf("Promote state err: %w",err)
 	}
-	err = stagedsync.RegenerateIntermediateHashes("", tx, os.TempDir(),expectedRootHash, quitCh)
+
+	err = stagedsync.RegenerateIntermediateHashes("", tx, os.TempDir(),expectedRootHash, ctx.Done())
 	if err!=nil {
-		fmt.Println("RegenerateIntermediateHashes", err)
-		return err
+		return fmt.Errorf("RegenerateIntermediateHashes err: %w", err)
 	}
 	return nil
 }

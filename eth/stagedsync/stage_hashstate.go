@@ -109,7 +109,8 @@ func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.Extr
 	return func(k, v []byte, next etl.ExtractNextFunc) error {
 		newK, err := transformKey(k)
 		if err != nil {
-			return err
+			fmt.Println("Promote err", err, common.Bytes2Hex(k))
+			return nil
 		}
 		return next(k, newK, v)
 	}

@@ -215,7 +215,7 @@ func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, flags TxFlags) (Tx,
 	t := &snapshotTX{
 		dbTX: dbTx,
 		snTX: newVirtualTx(func() (Tx, error) {
-			return s.snapshotDB.Begin(ctx, parentTx, flags)
+			return s.snapshotDB.Begin(ctx, parentTx, RO)
 		}, s.forBuckets),
 		forBuckets: s.forBuckets,
 	}
