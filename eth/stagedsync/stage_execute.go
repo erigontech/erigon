@@ -169,7 +169,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock = logProgress(logPrefix, logBlock, blockNum, tx)
+			logBlock = logProgress(logPrefix, logBlock, blockNum, cache)
 		}
 	}
 
@@ -238,14 +238,14 @@ func commitCache(tx ethdb.DbWithPendingMutations, writes *btree.BTree) error {
 	)
 }
 
-func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
+func logProgress(logPrefix string, prev, now uint64, cache *shards.StateCache) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix),
 		"number", now,
 		"blk/second", speed,
-		"batch", common.StorageSize(batch.BatchSize()),
+		"cache writes", common.StorageSize(cache.WriteSize()), "cache read", common.StorageSize(cache.ReadSize()),
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys),
 		"numGC", int(m.NumGC))
