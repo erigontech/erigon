@@ -84,7 +84,7 @@ func (r *StateReader) ReadAccountStorage(address common.Address, incarnation uin
 		r.storageReads[address] = m
 	}
 	m[*key] = struct{}{}
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, err := state.GetAsOf(r.tx, true /* storage */, compositeKey, r.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil

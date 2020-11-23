@@ -165,6 +165,7 @@ type Downloader struct {
 
 	storageMode ethdb.StorageMode
 	tmpdir      string
+	cacheSize   int
 	batchSize   int
 
 	headersState    *stagedsync.StageState
@@ -287,7 +288,8 @@ func (d *Downloader) SetTmpDir(tmpdir string) {
 	d.tmpdir = tmpdir
 }
 
-func (d *Downloader) SetBatchSize(batchSize int) {
+func (d *Downloader) SetBatchSize(cacheSize, batchSize int) {
+	d.cacheSize = cacheSize
 	d.batchSize = batchSize
 }
 

@@ -209,7 +209,7 @@ func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation 
 			return s, nil
 		}
 	}
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, err := GetAsOf(dbs.tx, true /* storage */, compositeKey, dbs.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
@@ -242,7 +242,7 @@ func (dbs *PlainDBState) ReadAccountCode(address common.Address, incarnation uin
 		}
 		return nil, nil
 	}
-	if dbs.cache != nil {
+	if dbs.cache != nil && len(code) <= 1024 {
 		dbs.cache.SetCodeRead(address.Bytes(), incarnation, code)
 	}
 	return code, err

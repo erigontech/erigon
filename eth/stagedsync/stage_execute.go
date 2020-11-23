@@ -2,11 +2,13 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"runtime"
 	"time"
 
+	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -19,6 +21,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
 const (
@@ -39,6 +42,7 @@ type ExecuteBlockStageParams struct {
 	ToBlock       uint64 // not setting this params means no limit
 	WriteReceipts bool
 	BatchSize     int
+	CacheSize     int
 	ChangeSetHook ChangeSetHook
 	ReaderBuilder StateReaderBuilder
 	WriterBuilder StateWriterBuilder
@@ -74,8 +78,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		defer tx.Rollback()
 	}
 
-	batch := tx.NewBatch()
-	defer batch.Rollback()
+	cache := shards.NewStateCache(32, params.CacheSize)
 
 	engine := chainContext.Engine()
 	chainContext.SetDB(tx)
@@ -108,15 +111,19 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		var stateWriter state.WriterWithChangeSets
 
 		if params.ReaderBuilder != nil {
-			stateReader = params.ReaderBuilder(batch)
+			stateReader = params.ReaderBuilder(tx)
 		} else {
-			stateReader = state.NewPlainStateReader(batch)
+			reader := state.NewPlainStateReader(tx)
+			reader.SetCache(cache)
+			stateReader = reader
 		}
 
 		if params.WriterBuilder != nil {
-			stateWriter = params.WriterBuilder(batch, tx, blockNum)
+			stateWriter = params.WriterBuilder(tx, tx, blockNum)
 		} else {
-			stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
+			writer := state.NewPlainStateWriter(tx, tx, blockNum)
+			writer.SetCache(cache)
+			stateWriter = writer
 		}
 
 		// where the magic happens
@@ -131,11 +138,14 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			}
 		}
 
-		if batch.BatchSize() >= params.BatchSize {
-			if err = s.Update(batch, blockNum); err != nil {
+		if cache.WriteSize() >= params.BatchSize {
+			if err = s.Update(tx, blockNum); err != nil {
 				return err
 			}
-			if err = batch.CommitAndBegin(context.Background()); err != nil {
+			start := time.Now()
+			writes := cache.PrepareWrites()
+			log.Info("PrepareWrites", "in", time.Since(start))
+			if err := commitCache(tx, writes); err != nil {
 				return err
 			}
 			if !useExternalTx {
@@ -144,6 +154,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				}
 				chainContext.SetDB(tx)
 			}
+			start = time.Now()
+			cache.TurnWritesToReads(writes)
+			log.Info("TurnWritesToReads", "in", time.Since(start))
+
 		}
 
 		if params.ChangeSetHook != nil {
@@ -155,25 +169,73 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock = logProgress(logPrefix, logBlock, blockNum, batch)
+			logBlock = logProgress(logPrefix, logBlock, blockNum, tx)
 		}
 	}
 
-	if err := s.Update(batch, stageProgress); err != nil {
+	if err := s.Update(tx, stageProgress); err != nil {
 		return err
 	}
-	if _, err := batch.Commit(); err != nil {
-		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
+	writes := cache.PrepareWrites()
+	if err := commitCache(tx, writes); err != nil {
+		return err
 	}
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
 			return err
 		}
 	}
-
+	cache.TurnWritesToReads(writes)
 	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	s.Done()
 	return nil
+}
+
+func commitCache(tx ethdb.DbWithPendingMutations, writes *btree.BTree) error {
+	return shards.WalkWrites(writes,
+		func(address []byte, account *accounts.Account) error { // accountWrite
+			value := make([]byte, account.EncodingLengthForStorage())
+			account.EncodeForStorage(value)
+			return tx.Put(dbutils.PlainStateBucket, address, value)
+		},
+		func(address []byte, original *accounts.Account) error { // accountDelete
+			if err := tx.Delete(dbutils.PlainStateBucket, address[:], nil); err != nil {
+				return err
+			}
+			if original != nil && original.Incarnation > 0 {
+				var b [8]byte
+				binary.BigEndian.PutUint64(b[:], original.Incarnation)
+				if err := tx.Put(dbutils.IncarnationMapBucket, address, b[:]); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		func(address []byte, incarnation uint64, location []byte, value []byte) error { // storageWrite
+			compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, location)
+			return tx.Put(dbutils.PlainStateBucket, compositeKey, value)
+		},
+		func(address []byte, incarnation uint64, location []byte) error { // storageDelete
+			compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, location)
+			return tx.Delete(dbutils.PlainStateBucket, compositeKey, nil)
+		},
+		func(address []byte, incarnation uint64, code []byte) error { // codeWrite
+			h := common.NewHasher()
+			h.Sha.Reset()
+			//nolint:errcheck
+			h.Sha.Write(code)
+			var codeHash common.Hash
+			//nolint:errcheck
+			h.Sha.Read(codeHash[:])
+			if err := tx.Put(dbutils.CodeBucket, codeHash.Bytes(), code); err != nil {
+				return err
+			}
+			return tx.Put(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address, incarnation), codeHash.Bytes())
+		},
+		func(address []byte, incarnation uint64) error { // codeDelete
+			return nil
+		},
+	)
 }
 
 func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {

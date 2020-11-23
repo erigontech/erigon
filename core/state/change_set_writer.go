@@ -40,7 +40,7 @@ func hashedStorageKeyGen(address common.Address, incarnation uint64, key common.
 }
 
 func plainStorageKeyGen(address common.Address, incarnation uint64, key common.Hash) ([]byte, error) {
-	return dbutils.PlainGenerateCompositeStorageKey(address, incarnation, key), nil
+	return dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes()), nil
 }
 
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.

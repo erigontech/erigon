@@ -39,7 +39,11 @@ func (w *CacheStateWriter) WriteAccountStorage(ctx context.Context, address comm
 	if *original == *value {
 		return nil
 	}
-	w.cache.SetStorageWrite(address.Bytes(), incarnation, key.Bytes(), value.Bytes())
+	if value.IsZero() {
+		w.cache.SetStorageDelete(address.Bytes(), incarnation, key.Bytes())
+	} else {
+		w.cache.SetStorageWrite(address.Bytes(), incarnation, key.Bytes(), value.Bytes())
+	}
 	return nil
 }
 

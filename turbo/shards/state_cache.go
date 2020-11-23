@@ -881,7 +881,7 @@ func (sc *StateCache) PrepareWrites() *btree.BTree {
 func WalkWrites(
 	writes *btree.BTree,
 	accountWrite func(address []byte, account *accounts.Account) error,
-	accountDelete func(address []byte) error,
+	accountDelete func(address []byte, original *accounts.Account) error,
 	storageWrite func(address []byte, incarnation uint64, location []byte, value []byte) error,
 	storageDelete func(address []byte, incarnation uint64, location []byte) error,
 	codeWrite func(address []byte, incarnation uint64, code []byte) error,
@@ -892,7 +892,7 @@ func WalkWrites(
 		switch it := i.(type) {
 		case *AccountWriteItem:
 			if it.ai.flags&DeletedFlag != 0 {
-				if err = accountDelete(it.address.Bytes()); err != nil {
+				if err = accountDelete(it.address.Bytes(), &it.ai.account); err != nil {
 					return false
 				}
 			} else {

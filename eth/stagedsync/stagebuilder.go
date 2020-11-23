@@ -32,6 +32,7 @@ type StageParameters struct {
 	TX          ethdb.Database
 	pid         string
 	batchSize   int // Batch size for the execution stage
+	cacheSize   int // Cache size for the execution stage
 	storageMode ethdb.StorageMode
 	tmpdir      string
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
@@ -178,6 +179,7 @@ func DefaultStages() StageBuilders {
 							ExecuteBlockStageParams{
 								WriteReceipts: world.storageMode.Receipts,
 								BatchSize:     world.batchSize,
+								CacheSize:     world.cacheSize,
 								ChangeSetHook: world.changeSetHook,
 								ReaderBuilder: world.stateReaderBuilder,
 								WriterBuilder: world.stateWriterBuilder,
