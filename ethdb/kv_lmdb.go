@@ -719,6 +719,10 @@ func (tx *lmdbTx) Sequence(bucket string, amount uint64) (uint64, error) {
 		currentV = binary.BigEndian.Uint64(v)
 	}
 
+	if amount == 0 {
+		return currentV, nil
+	}
+
 	newVBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
 	err = c.Put([]byte(bucket), newVBytes)
