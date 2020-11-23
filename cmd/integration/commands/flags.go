@@ -16,6 +16,7 @@ var (
 	block              uint64
 	unwind             uint64
 	unwindEvery        uint64
+	cacheSizeStr       string
 	batchSizeStr       string
 	reset              bool
 	bucket             string
@@ -84,6 +85,7 @@ func withDatadir(cmd *cobra.Command) {
 }
 
 func withBatchSize(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&cacheSizeStr, "cacheSize", "1G", "cache size for execution stage")
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", "512M", "batch size for execution stage")
 }
 

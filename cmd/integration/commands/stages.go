@@ -359,12 +359,15 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 	}
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
 	return stagedsync.SpawnExecuteBlocksStage(stage4, db,
 		bc.Config(), cc, bc.GetVMConfig(),
 		ch,
 		stagedsync.ExecuteBlockStageParams{
 			ToBlock:       block, // limit execution to the specified block
 			WriteReceipts: sm.Receipts,
+			CacheSize:     int(cacheSize),
 			BatchSize:     int(batchSize),
 		})
 
