@@ -371,7 +371,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		if err != nil {
 			return err
 		}
-		_, err = dstTx.Sequence(name, currentID+1)
+		_, err = dstTx.Sequence(name, currentID)
 		if err != nil {
 			return err
 		}
