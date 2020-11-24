@@ -145,7 +145,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			start := time.Now()
 			writes := cache.PrepareWrites()
 			log.Info("PrepareWrites", "in", time.Since(start))
-			if err := commitCache(tx, writes); err != nil {
+			if err = commitCache(tx, writes); err != nil {
 				return err
 			}
 			if !useExternalTx {
