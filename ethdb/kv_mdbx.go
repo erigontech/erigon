@@ -1277,11 +1277,7 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 	}
 
 	if b.Flags&mdbx.DupSort != 0 {
-		// try with Append|AppendDup flag, if face error (key exists) - try with AppendDup
-		if err := c.c.Put(k, v, mdbx.Append|mdbx.AppendDup); err != nil {
-			return c.appendDup(k, v)
-		}
-		return nil
+		return c.appendDup(k, v)
 	}
 
 	return c.append(k, v)
@@ -1488,6 +1484,19 @@ func (c *MdbxDupSortCursor) LastDup(k []byte) ([]byte, error) {
 		return nil, fmt.Errorf("in LastDup: %w", err)
 	}
 	return v, nil
+}
+
+func (c *MdbxDupSortCursor) Append(k []byte, v []byte) error {
+	if c.c == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
+	}
+
+	if err := c.c.Put(k, v, mdbx.Append|mdbx.AppendDup); err != nil {
+		return fmt.Errorf("in Append: %w", err)
+	}
+	return nil
 }
 
 func (c *MdbxDupSortCursor) AppendDup(k []byte, v []byte) error {

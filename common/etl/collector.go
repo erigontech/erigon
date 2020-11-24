@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
@@ -170,9 +171,11 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 		}
 	}
 	var canUseAppend bool
+	isDupSort := dbutils.BucketsConfigs[bucket].Flags&dbutils.DupSort != 0 && !dbutils.BucketsConfigs[bucket].AutoDupSortKeysConversion
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
+	var pervK []byte
 
 	i := 0
 	loadNextFunc := func(originalK, k, v []byte) error {
@@ -207,9 +210,23 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 			return nil
 		}
 		if canUseAppend {
-			if err := tx.(*ethdb.TxDb).Append(bucket, k, v); err != nil {
-				return fmt.Errorf("%s: append: k=%x, %w", logPrefix, k, err)
+			if isDupSort {
+				if bytes.Equal(k, pervK) {
+					if err := tx.(*ethdb.TxDb).AppendDup(bucket, k, v); err != nil {
+						return fmt.Errorf("%s: append: k=%x, %w", logPrefix, k, err)
+					}
+				} else {
+					if err := tx.Append(bucket, k, v); err != nil {
+						return fmt.Errorf("%s: append: k=%x, %w", logPrefix, k, err)
+					}
+				}
+				pervK = k
+			} else {
+				if err := tx.Append(bucket, k, v); err != nil {
+					return fmt.Errorf("%s: append: k=%x, %w", logPrefix, k, err)
+				}
 			}
+
 			return nil
 		}
 		if err := tx.Put(bucket, k, v); err != nil {
