@@ -22,10 +22,11 @@ func init() {
 	rootCmd.AddCommand(verifyStateSnapshotCmd)
 }
 
+//go run cmd/snapshots/generator/main.go verify_state --block 11000000 --snapshot /media/b00ris/nvme/snapshotsync/tg/chaindata/ --chaindata /media/b00ris/nvme/backup/snapshotsync/tg/chaindata/ &> /media/b00ris/nvme/verify.log
 var verifyStateSnapshotCmd = &cobra.Command{
 	Use:     "verify_state",
 	Short:   "Verify state snapshot",
-	Example: "go run cmd/snapshots/generator/main.go headers --block 11000000 --chaindata /media/b00ris/nvme/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/headers_test",
+	Example: "tbd",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return VerifyStateSnapshot(cmd.Context(), chaindata, snapshotFile, block)
 	},
@@ -56,6 +57,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket:   dbutils.BucketsConfigs[dbutils.PlainStateBucket],//    dbutils.BucketConfigItem{},
+			dbutils.PlainContractCodeBucket:   dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],//    dbutils.BucketConfigItem{},
 			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],//    dbutils.BucketConfigItem{},
 			//dbutils.C:   dbutils.BucketsConfigs[dbutils.CodeBucket],//    dbutils.BucketConfigItem{},
 			//dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
@@ -68,7 +70,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 	tmpDB:=ethdb.NewLMDB().Path(tmpPath).MustOpen()
 	defer os.RemoveAll(tmpPath)
 	defer tmpDB.Close()
-	snkv=ethdb.NewSnapshotKV().SnapshotDB(snkv).DB(tmpDB).For(dbutils.PlainStateBucket).For(dbutils.CodeBucket).MustOpen()
+	snkv=ethdb.NewSnapshotKV().SnapshotDB(snkv).DB(tmpDB).For(dbutils.PlainStateBucket).For(dbutils.PlainContractCodeBucket).For(dbutils.CodeBucket).MustOpen()
 	sndb:=ethdb.NewObjectDatabase(snkv)
 	tx,err:=sndb.Begin(context.Background(), ethdb.RW)
 	if err!=nil {
