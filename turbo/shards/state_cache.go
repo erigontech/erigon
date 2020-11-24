@@ -640,6 +640,8 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		} else {
 			cacheItem.ClearFlags(DeletedFlag)
 		}
+		cacheItem.SetSequence(sc.sequence)
+		sc.sequence++
 		return
 	}
 	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
@@ -656,6 +658,8 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		} else {
 			cacheItem.ClearFlags(DeletedFlag)
 		}
+		cacheItem.SetSequence(sc.sequence)
+		sc.sequence++
 		// Remove from the reads queue
 		heap.Remove(&sc.readQueue, cacheItem.GetQueuePos())
 		writeItem.SetCacheItem(cacheItem)
@@ -933,7 +937,6 @@ func (sc *StateCache) TurnWritesToReads(writes *btree.BTree) {
 		if !cacheItem.HasFlag(ModifiedFlag) {
 			// Cannot touch items that have been modified since we have taken away the writes
 			cacheItem.ClearFlags(ModifiedFlag)
-			cacheItem.SetQueuePos(len(sc.readQueue.items))
 			heap.Push(&sc.readQueue, cacheItem)
 		}
 		return true
