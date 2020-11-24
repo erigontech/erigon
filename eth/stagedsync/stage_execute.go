@@ -48,7 +48,7 @@ type ExecuteBlockStageParams struct {
 	SilkwormExecutionFunc unsafe.Pointer
 }
 
-func readBlock(blockNum uint64, tx rawdb.DatabaseReader) (*types.Block, error) {
+func readBlock(blockNum uint64, tx ethdb.Database) (*types.Block, error) {
 	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
 		return nil, err
