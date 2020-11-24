@@ -173,6 +173,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		}
 	}
 
+	logProgress(logPrefix, logBlock, stageProgress, cache)
 	if err := s.Update(tx, stageProgress); err != nil {
 		return err
 	}

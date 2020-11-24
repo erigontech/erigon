@@ -561,6 +561,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			p.id,
 			d.storageMode,
 			d.tmpdir,
+			d.cacheSize,
 			d.batchSize,
 			d.quitCh,
 			fetchers,
