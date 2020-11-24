@@ -212,7 +212,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 		if canUseAppend {
 			if isDupSort {
 				if bytes.Equal(k, pervK) {
-					if err := tx.(*ethdb.TxDb).AppendDup(bucket, k, v); err != nil {
+					if err := tx.AppendDup(bucket, k, v); err != nil {
 						return fmt.Errorf("%s: append: k=%x, %w", logPrefix, k, err)
 					}
 				} else {
