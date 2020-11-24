@@ -290,7 +290,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 	return nil
 }
 
-func unwindCallTraces(logPrefix string, db rawdb.DatabaseReader, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}) error {
+func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}) error {
 	froms := map[string]struct{}{}
 	tos := map[string]struct{}{}
 	tx := db.(ethdb.HasTx).Tx()

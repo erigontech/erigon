@@ -529,21 +529,30 @@ func stageHistory(db ethdb.Database, ctx context.Context) error {
 		return nil
 	}
 	execStage := progress(stages.Execution)
-	stage7 := progress(stages.AccountHistoryIndex)
-	stage8 := progress(stages.StorageHistoryIndex)
-	log.Info("Stage4", "progress", execStage.BlockNumber)
-	log.Info("Stage7", "progress", stage7.BlockNumber)
-	log.Info("Stage8", "progress", stage8.BlockNumber)
+	stageAcc := progress(stages.AccountHistoryIndex)
+	stageStorage := progress(stages.StorageHistoryIndex)
+	log.Info("Stage exec", "progress", execStage.BlockNumber)
+	log.Info("Stage acc history", "progress", stageAcc.BlockNumber)
+	log.Info("Stage storage history", "progress", stageStorage.BlockNumber)
 	ch := ctx.Done()
 
 	if unwind > 0 { //nolint:staticcheck
-		// TODO
+		u := &stagedsync.UnwindState{Stage: stages.StorageHistoryIndex, UnwindPoint: stageStorage.BlockNumber - unwind}
+		s := progress(stages.StorageHistoryIndex)
+		if err := stagedsync.UnwindStorageHistoryIndex(u, s, db, ch); err != nil {
+			return err
+		}
+		u = &stagedsync.UnwindState{Stage: stages.AccountHistoryIndex, UnwindPoint: stageAcc.BlockNumber - unwind}
+		s = progress(stages.AccountHistoryIndex)
+		if err := stagedsync.UnwindAccountHistoryIndex(u, s, db, ch); err != nil {
+			return err
+		}
+		return nil
 	}
-
-	if err := stagedsync.SpawnAccountHistoryIndex(stage7, db, tmpdir, ch); err != nil {
+	if err := stagedsync.SpawnAccountHistoryIndex(stageAcc, db, tmpdir, ch); err != nil {
 		return err
 	}
-	if err := stagedsync.SpawnStorageHistoryIndex(stage8, db, tmpdir, ch); err != nil {
+	if err := stagedsync.SpawnStorageHistoryIndex(stageStorage, db, tmpdir, ch); err != nil {
 		return err
 	}
 	return nil
@@ -580,7 +589,7 @@ func stageTxLookup(db ethdb.Database, ctx context.Context) error {
 	return stagedsync.SpawnTxLookup(stage9, db, tmpdir, ch)
 }
 
-func printAllStages(db rawdb.DatabaseReader, _ context.Context) error {
+func printAllStages(db ethdb.Getter, _ context.Context) error {
 	return printStages(db)
 }
 

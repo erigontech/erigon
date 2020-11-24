@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 )
 
-func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader rawdb.DatabaseReader) (uint64, common.Hash, error) {
+func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader ethdb.Database) (uint64, common.Hash, error) {
 	var blockNumber uint64
 	var err error
 	hash, ok := blockNrOrHash.Hash()
@@ -63,7 +63,7 @@ func GetAccount(tx ethdb.Tx, blockNumber uint64, address common.Address) (*accou
 	return reader.ReadAccountData(address)
 }
 
-func GetHashByNumber(blockNumber uint64, requireCanonical bool, dbReader rawdb.DatabaseReader) (common.Hash, error) {
+func GetHashByNumber(blockNumber uint64, requireCanonical bool, dbReader ethdb.Database) (common.Hash, error) {
 	if requireCanonical {
 		return rawdb.ReadCanonicalHash(dbReader, blockNumber)
 	}

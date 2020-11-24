@@ -2,6 +2,7 @@ package commands
 
 import (
 	"github.com/ledgerwatch/turbo-geth/cmd/state/verify"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -16,6 +17,6 @@ var checkIndexCMD = &cobra.Command{
 	Use:   "checkIndex",
 	Short: "Index checker",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return verify.CheckIndex(chaindata, changeSetBucket, indexBucket)
+		return verify.CheckIndex(utils.RootContext(), chaindata, changeSetBucket, indexBucket)
 	},
 }
