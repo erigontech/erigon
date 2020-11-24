@@ -3,12 +3,12 @@ package commands
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
-func getBlockNumber(number rpc.BlockNumber, dbReader rawdb.DatabaseReader) (uint64, error) {
+func getBlockNumber(number rpc.BlockNumber, dbReader ethdb.Getter) (uint64, error) {
 	var blockNum uint64
 	var err error
 	if number == rpc.LatestBlockNumber || number == rpc.PendingBlockNumber {
@@ -25,7 +25,7 @@ func getBlockNumber(number rpc.BlockNumber, dbReader rawdb.DatabaseReader) (uint
 	return blockNum, nil
 }
 
-func getLatestBlockNumber(dbReader rawdb.DatabaseReader) (uint64, error) {
+func getLatestBlockNumber(dbReader ethdb.Getter) (uint64, error) {
 	blockNum, _, err := stages.GetStageProgress(dbReader, stages.Execution)
 	if err != nil {
 		return 0, fmt.Errorf("getting latest block number: %v", err)

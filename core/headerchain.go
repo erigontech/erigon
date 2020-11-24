@@ -107,7 +107,7 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 
 // GetBlockNumber retrieves the block number belonging to the given hash
 // from the cache or database
-func (hc *HeaderChain) GetBlockNumber(dbr rawdb.DatabaseReader, hash common.Hash) *uint64 {
+func (hc *HeaderChain) GetBlockNumber(dbr ethdb.Database, hash common.Hash) *uint64 {
 	number := rawdb.ReadHeaderNumber(dbr, hash)
 	return number
 }

@@ -37,7 +37,7 @@ type HeaderChain interface {
 	GetHeaderByHash(hash common.Hash) *types.Header
 
 	GetBlockHashesFromHash(hash common.Hash, max uint64) []common.Hash
-	GetBlockNumber(dbr rawdb.DatabaseReader, hash common.Hash) *uint64
+	GetBlockNumber(dbr ethdb.Database, hash common.Hash) *uint64
 }
 
 // FakePeer is a mock downloader peer that operates on a local database instance

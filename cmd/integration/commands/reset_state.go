@@ -265,7 +265,7 @@ func resetFinish(db ethdb.Putter) error {
 	return nil
 }
 
-func printStages(db rawdb.DatabaseReader) error {
+func printStages(db ethdb.Getter) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)

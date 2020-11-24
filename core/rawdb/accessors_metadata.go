@@ -31,7 +31,7 @@ import (
 )
 
 // ReadDatabaseVersion retrieves the version number of the database.
-func ReadDatabaseVersion(db DatabaseReader) *uint64 {
+func ReadDatabaseVersion(db databaseReader) *uint64 {
 	var version uint64
 
 	enc, _ := db.Get(dbutils.DatabaseVerisionKey, []byte(dbutils.DatabaseVerisionKey))
@@ -58,7 +58,7 @@ func WriteDatabaseVersion(db DatabaseWriter, version uint64) error {
 }
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
-func ReadChainConfig(db DatabaseReader, hash common.Hash) (*params.ChainConfig, error) {
+func ReadChainConfig(db databaseReader, hash common.Hash) (*params.ChainConfig, error) {
 	data, err := db.Get(dbutils.ConfigPrefix, hash[:])
 	if err != nil && errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
@@ -89,7 +89,7 @@ func WriteChainConfig(db DatabaseWriter, hash common.Hash, cfg *params.ChainConf
 }
 
 // ReadPreimage retrieves a single preimage of the provided hash.
-func ReadPreimage(db DatabaseReader, hash common.Hash) []byte {
+func ReadPreimage(db databaseReader, hash common.Hash) []byte {
 	data, _ := db.Get(dbutils.PreimagePrefix, hash.Bytes())
 	return data
 }

@@ -107,14 +107,15 @@ var (
 	DatabaseVerisionKey = "DatabaseVersion"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
-	HeaderPrefix       = "h"         // headerPrefix + num (uint64 big endian) + hash -> header
-	HeaderTDSuffix     = []byte("t") // headerPrefix + num (uint64 big endian) + hash + headerTDSuffix -> td
-	HeaderHashSuffix   = []byte("n") // headerPrefix + num (uint64 big endian) + headerHashSuffix -> hash
+	HeaderPrefix       = "h"         // block_num_u64 + hash -> header
+	HeaderTDSuffix     = []byte("t") // block_num_u64 + hash + headerTDSuffix -> td
+	HeaderHashSuffix   = []byte("n") // block_num_u64 + headerHashSuffix -> hash
 	HeaderNumberPrefix = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
 
-	BlockBodyPrefix     = "b"   // blockBodyPrefix + num (uint64 big endian) + hash -> block body
-	BlockReceiptsPrefix = "r"   // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
-	Log                 = "log" // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+	BlockBodyPrefix     = "b"      // block_num_u64 + hash -> block body
+	EthTx               = "eth_tx" // tbl_sequence_u64 -> rlp(tx)
+	BlockReceiptsPrefix = "r"      // block_num_u64 + hash -> block receipts
+	Log                 = "log"    // block_num_u64 + hash -> block receipts
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -243,6 +244,7 @@ var Buckets = []string{
 	CallToIndex,
 	Log,
 	Sequence,
+	EthTx,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

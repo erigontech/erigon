@@ -4,10 +4,11 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func NotifyRpcDaemon(from, to uint64, notifier ChainEventNotifier, db rawdb.DatabaseReader) error {
+func NotifyRpcDaemon(from, to uint64, notifier ChainEventNotifier, db ethdb.Database) error {
 	if notifier == nil {
 		log.Warn("rpc notifier is not set, rpc daemon won't be updated about headers")
 		return nil
