@@ -2734,14 +2734,3 @@ Date:   Tue Nov 24 10:55:17 2020 +0100
 
     les: fix GetProofsV2 bug (#21896)
 
-commit 6b5840961407960a06ed20cb5dd1b782080653ff
-Author: LieutenantRoger <dijsky_2015@hotmail.com>
-Date:   Tue Nov 24 17:33:58 2020 +0800
-
-    cmd/faucet: improve handling of facebook post url (#21838)
-    
-    Resolves #21532
-    
-    Co-authored-by: roger <dengjun@huobi.com>
-
-
