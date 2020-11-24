@@ -1277,7 +1277,11 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 	}
 
 	if b.Flags&mdbx.DupSort != 0 {
-		return c.appendDup(k, v)
+		// try with Append|AppendDup flag, if face error (key exists) - try with AppendDup
+		if err := c.c.Put(k, v, mdbx.Append|mdbx.AppendDup); err != nil {
+			return c.appendDup(k, v)
+		}
+		return nil
 	}
 
 	return c.append(k, v)

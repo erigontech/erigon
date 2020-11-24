@@ -1317,7 +1317,11 @@ func (c *LmdbCursor) Append(k []byte, v []byte) error {
 	}
 
 	if b.Flags&lmdb.DupSort != 0 {
-		return c.appendDup(k, v)
+		// try with Append|AppendDup flag, if face error (key exists) - try with AppendDup
+		if err := c.c.Put(k, v, lmdb.Append|lmdb.AppendDup); err != nil {
+			return c.appendDup(k, v)
+		}
+		return nil
 	}
 
 	return c.append(k, v)
