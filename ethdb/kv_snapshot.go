@@ -740,8 +740,8 @@ type snCursor2 struct {
 	dbCursor Cursor
 	snCursor Cursor
 
-	cDBEmpty bool
-	lastKey  []byte
+	cDBEmpty   bool
+	currentKey []byte
 }
 
 func (s *snCursor2) Prefix(v []byte) Cursor {
@@ -776,10 +776,10 @@ func (s *snCursor2) First() ([]byte, []byte, error) {
 	}
 
 	if cmp <= 0 {
-		s.lastKey = common.CopyBytes(lastDBKey)
+		s.currentKey = common.CopyBytes(lastDBKey)
 		return lastDBKey, lastDBVal, nil
 	}
-	s.lastKey = common.CopyBytes(lastSNDBKey)
+	s.currentKey = common.CopyBytes(lastSNDBKey)
 	return lastSNDBKey, lastSNDBVal, nil
 }
 
@@ -810,7 +810,7 @@ func (s *snCursor2) Next() ([]byte, []byte, error) {
 		lastDBKey, lastDBVal, err = s.dbCursor.Next()
 	}
 
-	if cmp, _ := common.KeyCmp(s.lastKey, lastDBKey); cmp > 0 && len(s.lastKey) > 0 {
+	if cmp, _ := common.KeyCmp(s.currentKey, lastDBKey); cmp > 0 && len(s.currentKey) > 0 {
 		lastDBKey, lastDBVal, err = s.dbCursor.Next()
 		if err != nil && s.cDBEmpty == false {
 			return nil, nil, err
@@ -822,7 +822,7 @@ func (s *snCursor2) Next() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	if cmp, _ := common.KeyCmp(s.lastKey, lastSNDBKey); cmp > 0 && len(s.lastKey) > 0 {
+	if cmp, _ := common.KeyCmp(s.currentKey, lastSNDBKey); cmp > 0 && len(s.currentKey) > 0 {
 		lastSNDBKey, lastSNDBVal, err = s.snCursor.Next()
 		if err != nil {
 			return nil, nil, err
@@ -858,15 +858,60 @@ func (s *snCursor2) Next() ([]byte, []byte, error) {
 		return s.Next()
 	}
 	if cmp <= 0 {
-		s.lastKey = common.CopyBytes(lastDBKey)
+		s.currentKey = common.CopyBytes(lastDBKey)
 		return lastDBKey, lastDBVal, nil
 	}
-	s.lastKey = common.CopyBytes(lastSNDBKey)
+	s.currentKey = common.CopyBytes(lastSNDBKey)
 	return lastSNDBKey, lastSNDBVal, nil
 }
 
 func (s *snCursor2) Prev() ([]byte, []byte, error) {
-	panic("implement me")
+	var err error
+	//current returns error on empty bucket
+	lastDBKey, lastDBVal, err := s.dbCursor.Current()
+	if err != nil && s.cDBEmpty == false {
+		return nil, nil, err
+	}
+
+	lastSNDBKey, lastSNDBVal, err := s.snCursor.Current()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cmp, br := common.KeyCmp(lastDBKey, lastSNDBKey)
+	if br {
+		return nil, nil, nil
+	}
+
+	if cmp <= 0 {
+		lastSNDBKey, lastSNDBVal, err = s.snCursor.Prev()
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+
+	//current receives last acceptable key. If it is empty
+	if cmp >= 0 {
+		lastDBKey, lastDBVal, err = s.dbCursor.Prev()
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cmp, br = common.KeyCmp(lastDBKey, lastSNDBKey)
+	if br {
+		return nil, nil, nil
+	}
+	if cmp == 0 && bytes.Equal(lastDBVal, DeletedValue) {
+		//@todo think about better solution
+		return s.Prev()
+	}
+	if cmp >=0 {
+		s.currentKey = common.CopyBytes(lastDBKey)
+		return lastDBKey, lastDBVal, nil
+	}
+	s.currentKey = common.CopyBytes(lastSNDBKey)
+	return lastSNDBKey, lastSNDBVal, nil
 }
 
 func (s *snCursor2) Last() ([]byte, []byte, error) {
@@ -893,7 +938,7 @@ func (s *snCursor2) Last() ([]byte, []byte, error) {
 
 func (s *snCursor2) Current() ([]byte, []byte, error) {
 	k, v, err := s.dbCursor.Current()
-	if bytes.Equal(k, s.lastKey) {
+	if bytes.Equal(k, s.currentKey) {
 		return k, v, err
 	}
 	return s.snCursor.Current()

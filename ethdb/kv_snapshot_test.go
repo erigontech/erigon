@@ -802,8 +802,85 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkKV(t, k, v, nil, nil)
+
+	t.Log(c.First())
+	t.Log(c.Next())
+	t.Log(c.Next())
+	t.Log(c.Next())
+	k, v, err = c.Prev()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[3].K, data[3].V)
+
+	k, v, err = c.Prev()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[0].K, data[0].V)
+
 }
 
+
+func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
+	data := []kvData{
+		{K: []byte{1}, V: []byte{1}},
+		{K: []byte{2}, V: []byte{2}},
+		{K: []byte{3}, V: []byte{3}},
+		{K: []byte{4}, V: []byte{4}},
+		{K: []byte{5}, V: []byte{5}},
+	}
+	snapshotDB, err := genStateData(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainDB := NewLMDB().InMem().MustOpen()
+	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+		MustOpen()
+
+	tx, err := kv.Begin(context.Background(), nil, RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := tx.Cursor(dbutils.PlainStateBucket)
+	deleteCursor := tx.Cursor(dbutils.PlainStateBucket)
+
+	//get first correct k&v
+	k, v, err := c.First()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[0].K, data[0].V)
+
+	//remove value
+	err = deleteCursor.Delete(data[1].K, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = deleteCursor.Delete(data[2].K, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = deleteCursor.Delete(data[4].K, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// check the key that we've replaced value
+	k, v, err = c.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[3].K, data[3].V)
+
+	k, v, err = c.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, nil, nil)
+}
 func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
 	snapshotData := []kvData{
 		{
@@ -872,6 +949,9 @@ func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
 	checkKV(t, k, v, snapshotData[1].K, snapshotData[1].V)
 
 	k, v, err = c.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
 	checkKV(t, k, v, nil, nil)
 }
 
