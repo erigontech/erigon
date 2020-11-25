@@ -497,7 +497,7 @@ func (s *snapshotCursor) Delete(k, v []byte) error {
 }
 
 func (s *snapshotCursor) Append(key []byte, value []byte) error {
-	return s.dbCursor.Append(key, value)
+	return s.dbCursor.Put(key, value)
 }
 
 func (s *snapshotCursor) SeekExact(key []byte) ([]byte, []byte, error) {

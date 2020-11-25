@@ -221,7 +221,7 @@ func (m *mutation) doCommit(tx Tx) error {
 			prevTable = mi.table
 			firstKey, _, err := c.Seek(mi.key)
 			if err != nil {
-				fmt.Println("Seek err")
+				fmt.Println("Seek err",err, common.Bytes2Hex(mi.key), mi.table)
 				innerErr = err
 				return false
 			}
@@ -230,20 +230,20 @@ func (m *mutation) doCommit(tx Tx) error {
 		if isEndOfBucket {
 			if len(mi.value) > 0 {
 				if err := c.Append(mi.key, mi.value); err != nil {
-					fmt.Println("Append err")
+					fmt.Println("Append err", err,  common.Bytes2Hex(mi.key), mi.table)
 					innerErr = err
 					return false
 				}
 			}
 		} else if len(mi.value) == 0 {
 			if err := c.Delete(mi.key, nil); err != nil {
-				fmt.Println("Deleteerr")
+				fmt.Println("Deleteerr", err,  common.Bytes2Hex(mi.key), mi.table)
 				innerErr = err
 				return false
 			}
 		} else {
 			if err := c.Put(mi.key, mi.value); err != nil {
-				fmt.Println("Put err",common.Bytes2Hex(mi.key), len(mi.key), common.Bytes2Hex(mi.value))
+				fmt.Println("Put err",err, mi.table, common.Bytes2Hex(mi.key), len(mi.key), common.Bytes2Hex(mi.value))
 				innerErr = err
 				return false
 			}

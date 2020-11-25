@@ -56,11 +56,9 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 
 	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket:   dbutils.BucketsConfigs[dbutils.PlainStateBucket],//    dbutils.BucketConfigItem{},
-			dbutils.PlainContractCodeBucket:   dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],//    dbutils.BucketConfigItem{},
-			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],//    dbutils.BucketConfigItem{},
-			//dbutils.C:   dbutils.BucketsConfigs[dbutils.CodeBucket],//    dbutils.BucketConfigItem{},
-			//dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+			dbutils.PlainStateBucket:   dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+			dbutils.PlainContractCodeBucket:   dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],
 		}
 	}).Path(snapshotPath).ReadOnly().MustOpen()
 	tmpPath,err:=ioutil.TempDir(os.TempDir(),"vrf*")
