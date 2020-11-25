@@ -29,13 +29,12 @@ const (
 	codeWriteItemSize    = int(unsafe.Sizeof(CodeWriteItem{})) + codeItemSize
 )
 
-//nolint:maligned
 type AccountItem struct {
-	addrHash common.Hash
-	account  accounts.Account
 	sequence int
 	queuePos int
 	flags    uint16
+	addrHash common.Hash
+	account  accounts.Account
 }
 
 type AccountWriteItem struct {
@@ -43,15 +42,14 @@ type AccountWriteItem struct {
 	ai      *AccountItem
 }
 
-//nolint:maligned
 type StorageItem struct {
+	sequence    int
+	queuePos    int
+	flags       uint16
 	addrHash    common.Hash
 	incarnation uint64
 	locHash     common.Hash
 	value       uint256.Int
-	sequence    int
-	queuePos    int
-	flags       uint16
 }
 
 type StorageWriteItem struct {
@@ -60,14 +58,13 @@ type StorageWriteItem struct {
 	si       *StorageItem
 }
 
-//nolint:maligned
 type CodeItem struct {
-	addrHash    common.Hash
-	incarnation uint64
-	code        []byte
 	sequence    int
 	queuePos    int
 	flags       uint16
+	addrHash    common.Hash
+	incarnation uint64
+	code        []byte
 }
 
 type CodeWriteItem struct {
