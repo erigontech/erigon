@@ -22,8 +22,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/stretchr/testify/assert"
 )
@@ -61,6 +65,7 @@ func TestGraphQLHTTPOnSamePort_GQLRequest_Successful(t *testing.T) {
 		t.Fatalf("could not read from response body: %v", err)
 	}
 	expected := "{\"data\":{\"block\":{\"number\":\"0x0\"}}}"
+	assert.Equal(t, 200, resp.StatusCode)
 	assert.Equal(t, expected, string(bodyBytes))
 }
 
@@ -90,6 +95,32 @@ func TestGraphQLHTTPOnSamePort_GQLRequest_Unsuccessful(t *testing.T) {
 	assert.Equal(t, "404 page not found\n", string(bodyBytes))
 }
 
+// Tests that 400 is returned when an invalid RPC request is made.
+func TestGraphQL_BadRequest(t *testing.T) {
+	stack := createNode(t, true)
+	defer stack.Close()
+	// start node
+	if err := stack.Start(); err != nil {
+		t.Fatalf("could not start node: %v", err)
+	}
+	// create http request
+	body := strings.NewReader("{\"query\": \"{bleh{number}}\",\"variables\": null}")
+	gqlReq, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/graphql", "127.0.0.1:9393"), body)
+	if err != nil {
+		t.Error("could not issue new http request ", err)
+	}
+	gqlReq.Header.Set("Content-Type", "application/json")
+	// read from response
+	resp := doHTTPRequest(t, gqlReq)
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("could not read from response body: %v", err)
+	}
+	expected := "{\"errors\":[{\"message\":\"Cannot query field \\\"bleh\\\" on type \\\"Query\\\".\",\"locations\":[{\"line\":1,\"column\":2}]}]}"
+	assert.Equal(t, expected, string(bodyBytes))
+	assert.Equal(t, 400, resp.StatusCode)
+}
+
 func createNode(t *testing.T, gqlEnabled bool) *node.Node {
 	stack, err := node.New(&node.Config{
 		HTTPHost: "127.0.0.1",
@@ -111,7 +142,23 @@ func createNode(t *testing.T, gqlEnabled bool) *node.Node {
 
 func createGQLService(t *testing.T, stack *node.Node, endpoint string) { //nolint:unparam
 	// create backend
-	ethBackend, err := eth.New(stack, &eth.DefaultConfig)
+	ethConf := &eth.Config{
+		Genesis: core.DeveloperGenesisBlock(15, common.Address{}),
+		Miner: miner.Config{
+			Etherbase: common.HexToAddress("0xaabb"),
+		},
+		Ethash: ethash.Config{
+			PowMode: ethash.ModeTest,
+		},
+		NetworkId:               1337,
+		TrieCleanCache:          5,
+		TrieCleanCacheJournal:   "triecache",
+		TrieCleanCacheRejournal: 60 * time.Minute,
+		TrieDirtyCache:          5,
+		TrieTimeout:             60 * time.Minute,
+		SnapshotCache:           5,
+	}
+	ethBackend, err := eth.New(stack, ethConf)
 	if err != nil {
 		t.Fatalf("could not create eth backend: %v", err)
 	}
