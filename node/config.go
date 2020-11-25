@@ -191,6 +191,10 @@ type Config struct {
 	// empty string means not to start the listener
 	PrivateApiAddr string
 
+	// Address to listen to when launching listener for txpool provider
+	// empty string means not to start the listener
+	TxPoolProviderAddr string
+
 	staticNodesWarning     bool
 	trustedNodesWarning    bool
 	oldGethResourceWarning bool

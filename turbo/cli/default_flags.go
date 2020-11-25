@@ -31,6 +31,7 @@ var DefaultFlags = []cli.Flag{
 	BatchSizeFlag,
 	DatabaseFlag,
 	PrivateApiAddr,
+	TxPoolProviderAddr,
 	EtlBufferSizeFlag,
 	LMDBMapSizeFlag,
 	LMDBMaxFreelistReuseFlag,

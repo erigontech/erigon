@@ -58,8 +58,9 @@ func (tg *TurboGethNode) run() {
 //
 // NB: You have to declare your custom buckets here to be able to use them in the app.
 type Params struct {
-	GitCommit     string
-	CustomBuckets dbutils.BucketsCfg
+	GitCommit      string
+	CustomBuckets  dbutils.BucketsCfg
+	TxpoolProvider bool
 }
 
 // New creates a new `TurboGethNode`.

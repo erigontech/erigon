@@ -25,8 +25,10 @@ require (
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/emicklei/dot v0.11.0
 	github.com/ethereum/evmc/v7 v7.3.0
-	github.com/fatih/color v1.7.0
+	github.com/fatih/color v1.9.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
+	github.com/fullstorydev/grpcui v1.1.0 // indirect
+	github.com/fullstorydev/grpcurl v1.8.0 // indirect
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
 	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect

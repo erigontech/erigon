@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package txpool_control;
+
+message AccountInfoRequest {
+  bytes block_hash = 1;
+  bytes account = 2;
+}
+message AccountInfoReply {
+  bytes balance = 1;
+  bytes nonce = 2;
+}
+message BlockStreamRequest {
+  oneof start_with {
+    google.protobuf.Empty latest = 1;
+    bytes block_hash = 2;
+  }
+}
+
+message AccountInfo {
+  bytes address = 1;
+  bytes balance = 2;
+  bytes nonce = 3;
+}
+
+message AppliedBlock {
+  bytes hash = 1;
+  bytes parent_hash = 2;
+  repeated AccountDiff account_diffs = 3;
+}
+
+message RevertedBlock {
+  bytes reverted_hash = 1;
+  repeated bytes reverted_transactions = 2;
+  bytes new_hash = 3;
+  bytes new_parent = 4;
+  repeated AccountInfo new_state = 5;
+}
+
+message BlockDiff {
+  oneof diff {
+    AppliedBlock applied = 1;
+    RevertedBlock reverted = 2;
+  }
+}
+
+service TxpoolControl {
+  rpc AccountInfo(AccountInfoRequest) returns(AccountInfoReply);
+  rpc BlockStream(BlockStreamRequest) returns(stream BlockDiff);
+}

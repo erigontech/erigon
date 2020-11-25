@@ -36,13 +36,16 @@ var (
 		Usage: "Buffer size for ETL operations.",
 		Value: etl.BufferOptimalSize.String(),
 	}
-
 	PrivateApiAddr = cli.StringFlag{
 		Name:  "private.api.addr",
 		Usage: "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
 		Value: "",
 	}
-
+	TxPoolProviderAddr = cli.StringFlag{
+		Name:  "txpool.api.addr",
+		Usage: "txpool provider api network address, for example: 127.0.0.1:9091, empty string means not to start the listener.",
+		Value: "",
+	}
 	StorageModeFlag = cli.StringFlag{
 		Name: "storage-mode",
 		Usage: `Configures the storage mode of the app:
@@ -65,12 +68,10 @@ var (
 		Name:  "snapshot.seed",
 		Usage: `Seed snapshot seeding(default: true)`,
 	}
-
 	ExternalSnapshotDownloaderAddrFlag = cli.StringFlag{
 		Name:  "snapshot.downloader.addr",
 		Usage: `enable external snapshot downloader`,
 	}
-
 	// LMDB flags
 	LMDBMapSizeFlag = cli.StringFlag{
 		Name:  "lmdb.mapSize",
@@ -82,7 +83,6 @@ var (
 		Usage: "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.",
 		Value: ethdb.LMDBDefaultMaxFreelistReuse,
 	}
-
 	// mTLS flags
 	TLSFlag = cli.BoolFlag{
 		Name:  "tls",
@@ -155,6 +155,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *eth.Config) {
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 
 	setPrivateApi(ctx, cfg)
+	cfg.TxPoolProviderAddr = ctx.GlobalString(TxPoolProviderAddr.Name)
 
 	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
 	cfg.MDBX = strings.EqualFold(databaseFlag, "mdbx") //case insensitive

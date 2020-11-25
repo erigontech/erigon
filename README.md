@@ -213,3 +213,17 @@ it impacts performance - one of main TG optimisations: "reduce Disk random acces
 "Blocks Execution stage" still does much random reads - this is reason why it's slowest stage.
 We do not recommend run multiple genesis syncs on same Disk. 
 If genesis sync passed, then it's fine to run multiple TG on same Disk.
+=======
+# Interfaces
+Interfaces for turbo-geth components. Currently it is a collection of `.proto` files describing gRPC interfaces between components, but later documentation about each interface, its components, as well as required version of gRPC will be added
+
+# Suggested integration into other repositories
+```
+git subtree add --prefix interfaces --squash https://github.com/ledgerwatch/interfaces master
+```
+
+When you need to update the subtree to a specific commit or tag, you can use this command:
+
+```
+git subtree pull --prefix interfaces --squash https://github.com/ledgerwatch/interfaces <tag_or_commit>
+```
