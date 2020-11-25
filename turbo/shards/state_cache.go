@@ -583,17 +583,13 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	if sc.readSize+item.GetSize() > sc.limit {
 		for sc.readQueue.Len() > 0 && sc.readSize+item.GetSize() > sc.limit {
 			// Read queue cannot grow anymore, need to evict one element
-			cacheItem := sc.readQueue.items[0].(CacheItem)
+			cacheItem := heap.Pop(&sc.readQueue).(CacheItem)
 			sc.readSize -= cacheItem.GetSize()
 			sc.readWrites.Delete(cacheItem)
-			sc.readQueue.items[0] = item
-			item.SetQueuePos(0)
-			heap.Fix(&sc.readQueue, 0)
 		}
-	} else {
-		// Push new element on the read queue
-		heap.Push(&sc.readQueue, item)
 	}
+	// Push new element on the read queue
+	heap.Push(&sc.readQueue, item)
 	sc.readWrites.ReplaceOrInsert(item)
 	sc.readSize += item.GetSize()
 }
@@ -647,19 +643,19 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
 	if existing := sc.readWrites.Get(item); existing != nil {
 		cacheItem := existing.(CacheItem)
+		// Remove from the reads queue
+		heap.Remove(&sc.readQueue, cacheItem.GetQueuePos())
 		sc.readSize += item.GetSize()
 		sc.readSize -= cacheItem.GetSize()
 		cacheItem.CopyValueFrom(item)
-		cacheItem.SetSequence(sc.sequence)
-		sc.sequence++
 		cacheItem.SetFlags(ModifiedFlag)
 		if delete {
 			cacheItem.SetFlags(DeletedFlag)
 		} else {
 			cacheItem.ClearFlags(DeletedFlag)
 		}
-		// Remove from the reads queue
-		heap.Remove(&sc.readQueue, cacheItem.GetQueuePos())
+		cacheItem.SetSequence(sc.sequence)
+		sc.sequence++
 		writeItem.SetCacheItem(cacheItem)
 		sc.writes.ReplaceOrInsert(writeItem)
 		sc.writeSize += writeItem.GetSize()
@@ -934,7 +930,6 @@ func (sc *StateCache) TurnWritesToReads(writes *btree.BTree) {
 		cacheItem := cacheWriteItem.GetCacheItem()
 		if !cacheItem.HasFlag(ModifiedFlag) {
 			// Cannot touch items that have been modified since we have taken away the writes
-			cacheItem.ClearFlags(ModifiedFlag)
 			heap.Push(&sc.readQueue, cacheItem)
 		}
 		return true
