@@ -16,10 +16,13 @@ import (
 // Every element is marked either as Read, Updated, or Deleted via flags
 
 const (
-	ModifiedFlag uint16 = 1
-	DeletedFlag  uint16 = 2
+	ModifiedFlag    uint16 = 1 // Set when the item is different from what is last committed to the database
+	DeletedFlag     uint16 = 2 // Set when the item is marked for deletion, even though it might have the value in it
+	UnprocessedFlag uint16 = 3 // Set when there is a modification in the item that invalidates merkle root calculated previously
 )
 
+// Sizes of B-tree items for the purposes of keeping track of the size of reads and writes
+// The sizes of the nodes of the B-tree are not accounted for, because their are private to the `btree` package
 const (
 	accountItemSize      = int(unsafe.Sizeof(AccountItem{}))
 	accountWriteItemSize = int(unsafe.Sizeof(AccountWriteItem{})) + accountItemSize
@@ -29,6 +32,10 @@ const (
 	codeWriteItemSize    = int(unsafe.Sizeof(CodeWriteItem{})) + codeItemSize
 )
 
+// AccountItem is an element in the `readWrites` B-tree representing an Ethereum account. It can mean either value just read from the database and cache (read), or value that
+// is different from what the last committed value in the DB is (write). Reads can be removed or evicted from the B-tree at any time, because this
+// does not hurt the consistency. Writes cannot be removed or evicted one by one, therefore they can either be deleted all together, or
+// committed all together and turned into reads.
 type AccountItem struct {
 	sequence int
 	queuePos int
@@ -37,6 +44,10 @@ type AccountItem struct {
 	account  accounts.Account
 }
 
+// AccountWriteItem is an item in the `writes` B-tree. As can be seen, it always references a corresponding `AccountItem`. There can be `AccountItem` without corresponding `AccountWriteItem`
+// (in that case `AccountItem` represents a cached read), but there cannot be `AccountWriteItem` without a corresponding `AccountItem`. Such pair represents an account that has been modified
+// in the cache, but the modification has not been committed to the database yet. The correspondence of an `ai AccountItem` and an `awi AccountWriteItem` implies that
+// `keccak(awi.address) == ai.addrHash`.
 type AccountWriteItem struct {
 	address common.Address
 	ai      *AccountItem
@@ -92,21 +103,77 @@ type CacheWriteItem interface {
 	GetSize() int
 }
 
+func compare_account_account(i1 *AccountItem, i2 *AccountItem) int {
+	return bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
+}
+
+func compare_account_storage(i1 *AccountItem, i2 *StorageItem) int {
+	return bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
+}
+
+func compare_account_code(i1 *AccountItem, i2 *CodeItem) int {
+	return bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
+}
+
+func compare_storage_storage(i1 *StorageItem, i2 *StorageItem) int {
+	c := bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
+	if c != 0 {
+		return c
+	}
+	if i1.incarnation == i2.incarnation {
+		return bytes.Compare(i1.locHash.Bytes(), i2.locHash.Bytes())
+	}
+	if i1.incarnation < i2.incarnation {
+		return -1
+	}
+	return 1
+}
+
+func compare_storage_code(i1 *StorageItem, i2 *CodeItem) int {
+	c := bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
+	if c != 0 {
+		return c
+	}
+	if i1.incarnation == i2.incarnation {
+		return 0
+	}
+	if i1.incarnation < i2.incarnation {
+		return -1
+	}
+	return 1
+}
+
+func compare_code_code(i1 *CodeItem, i2 *CodeItem) int {
+	c := bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
+	if c != 0 {
+		return c
+	}
+	if i1.incarnation == i2.incarnation {
+		return 0
+	}
+	if i1.incarnation < i2.incarnation {
+		return -1
+	}
+	return 1
+}
+
 func (ai *AccountItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
 	case *AccountItem:
-		return bytes.Compare(ai.addrHash.Bytes(), i.addrHash.Bytes()) < 0
+		return compare_account_account(ai, i) < 0
 	case *StorageItem:
-		c := bytes.Compare(ai.addrHash.Bytes(), i.addrHash.Bytes())
-		if c == 0 {
-			// Account comes before its storage items
-			return true
-		}
-		return c < 0
+		// Under equality the result is "true", account comes before its storage item
+		return compare_account_storage(ai, i) <= 0
 	case *CodeItem:
+		// Under equality the result is "true", code comes before its storage item
+		return compare_account_code(ai, i) <= 0
+	case *AccountHashItem:
+		// Under equality the result is "false" - account comes after hash
+		return compare_account_accountHash(ai, i) < 0
+	case *StorageHashItem:
 		c := bytes.Compare(ai.addrHash.Bytes(), i.addrHash.Bytes())
 		if c == 0 {
-			// Account comes before its code
+			// Account comes before storage hashes
 			return true
 		}
 		return c < 0
@@ -197,27 +264,27 @@ func (ai *AccountItem) CopyValueFrom(item CacheItem) {
 func (si *StorageItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
 	case *AccountItem:
-		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
-		if c == 0 {
-			// Account comes before its storage items
-			return false
-		}
-		return c < 0
+		// Under equality the result is "false", account comes before its storage item
+		return compare_account_storage(i, si) > 0
 	case *StorageItem:
-		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
-		if c == 0 {
-			if si.incarnation == i.incarnation {
-				return bytes.Compare(si.locHash.Bytes(), i.locHash.Bytes()) < 0
-			}
-			return si.incarnation < i.incarnation
-		}
-		return c < 0
+		return compare_storage_storage(si, i) < 0
 	case *CodeItem:
+		// Under equality the result is "false", code of account comes before its storage item
+		return compare_storage_code(i, si) > 0
+	case *AccountHashItem:
+		// Under equality the result is "false", account hash comes before storage item of the account
+		return compare_storage_accountHash(si, i) < 0
+	case *StorageHashItem:
 		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
 		if c == 0 {
 			if si.incarnation == i.incarnation {
-				// Code comes before storage items
-				return false
+				wholeBytes, mask := bytesandmask(i.bits)
+				c = bytes.Compare(si.locHash[:wholeBytes], i.locHasPrefix[:wholeBytes])
+				if c == 0 {
+					// Case of equality results in "false" - storage comes after hash
+					return (si.locHash[wholeBytes] & mask) < (i.locaHashPrefix[wholeBytes] & mask)
+				}
+				return c < 0
 			}
 			return si.incarnation < i.incarnation
 		}
@@ -319,26 +386,21 @@ func (si *StorageItem) CopyValueFrom(item CacheItem) {
 func (ci *CodeItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
 	case *AccountItem:
-		c := bytes.Compare(ci.addrHash.Bytes(), i.addrHash.Bytes())
-		if c == 0 {
-			// Account before its code
-			return false
-		}
-		return c < 0
+		// Under equality the result is "false" - code comes after the account itself
+		return compare_account_code(i, ci) > 0
 	case *StorageItem:
-		c := bytes.Compare(ci.addrHash.Bytes(), i.addrHash.Bytes())
-		if c == 0 {
-			// Code comes before storage items
-			if ci.incarnation == i.incarnation {
-				return true
-			}
-			return ci.incarnation < i.incarnation
-		}
-		return c < 0
+		// Under equality the result is "true" - code comes before the storage items
+		return compare_storage_code(i, ci) >= 0
 	case *CodeItem:
+		return compare_code_code(ci, i) < 0
+	case *AccountHashItem:
+		// Under equality the result is "false" - code comes after account hash
+		return compare_code_accountHash(ci, i) < 0
+	case *StorageHashItem:
 		c := bytes.Compare(ci.addrHash.Bytes(), i.addrHash.Bytes())
 		if c == 0 {
-			return ci.incarnation < i.incarnation
+			// Code of account comes before storage hashes
+			return true
 		}
 		return c < 0
 	default:
