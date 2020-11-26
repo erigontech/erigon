@@ -266,7 +266,7 @@ func (si *StorageItem) Less(than btree.Item) bool {
 		return compare_storage_storage(si, i) < 0
 	case *CodeItem:
 		// Under equality the result is "false", code of account comes before its storage item
-		return compare_storage_code(si, i) > 0
+		return compare_storage_code(si, i) < 0
 	case *AccountHashItem:
 		// Under equality the result is "false", account hash comes before storage item of the account
 		return compare_storage_accountHash(si, i) < 0
