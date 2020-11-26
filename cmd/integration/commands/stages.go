@@ -494,16 +494,25 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 	log.Info("Stage call traces", "progress", s.BlockNumber)
 	ch := ctx.Done()
 
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.CallTraces, UnwindPoint: s.BlockNumber - unwind}
-		return stagedsync.UnwindCallTraces(u, s, db, bc.Config(), bc, ch)
+		return stagedsync.UnwindCallTraces(u, s, db, bc.Config(), bc, ch,
+			stagedsync.CallTracesStageParams{
+				ToBlock:   block,
+				CacheSize: int(cacheSize),
+				BatchSize: int(batchSize),
+			})
 	}
-
-	var toBlock uint64
 
 	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, tmpdir, ch,
 		stagedsync.CallTracesStageParams{
-			ToBlock: toBlock,
+			ToBlock:   block,
+			CacheSize: int(cacheSize),
+			BatchSize: int(batchSize),
 		}); err != nil {
 		return err
 	}

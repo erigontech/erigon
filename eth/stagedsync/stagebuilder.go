@@ -282,10 +282,17 @@ func DefaultStages() StageBuilders {
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.tmpdir, world.QuitCh,
-							CallTracesStageParams{})
+							CallTracesStageParams{
+								CacheSize: world.cacheSize,
+								BatchSize: world.batchSize,
+							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh)
+						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh,
+							CallTracesStageParams{
+								CacheSize: world.cacheSize,
+								BatchSize: world.batchSize,
+							})
 					},
 				}
 			},

@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -47,7 +46,6 @@ type PlainDBState struct {
 	tx      ethdb.Tx
 	blockNr uint64
 	storage map[common.Address]*llrb.LLRB
-	cache   *shards.StateCache
 }
 
 func NewPlainDBState(tx ethdb.Tx, blockNr uint64) *PlainDBState {
@@ -56,10 +54,6 @@ func NewPlainDBState(tx ethdb.Tx, blockNr uint64) *PlainDBState {
 		blockNr: blockNr,
 		storage: make(map[common.Address]*llrb.LLRB),
 	}
-}
-
-func (dbs *PlainDBState) SetCache(cache *shards.StateCache) {
-	dbs.cache = cache
 }
 
 func (dbs *PlainDBState) SetBlockNr(blockNr uint64) {
@@ -168,19 +162,11 @@ func (dbs *PlainDBState) ForEachAccount(start common.Address, cb func(address *c
 }
 
 func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	if dbs.cache != nil {
-		if a, ok := dbs.cache.GetAccount(address.Bytes()); ok {
-			return a, nil
-		}
-	}
 	enc, err := GetAsOf(dbs.tx, false /* storage */, address[:], dbs.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
 	if len(enc) == 0 {
-		if dbs.cache != nil {
-			dbs.cache.SetAccountAbsent(address.Bytes())
-		}
 		return nil, nil
 	}
 	var a accounts.Account
@@ -197,31 +183,17 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 			return nil, err1
 		}
 	}
-	if dbs.cache != nil {
-		dbs.cache.SetAccountRead(address.Bytes(), &a)
-	}
 	return &a, nil
 }
 
 func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	if dbs.cache != nil {
-		if s, ok := dbs.cache.GetStorage(address.Bytes(), incarnation, key.Bytes()); ok {
-			return s, nil
-		}
-	}
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, err := GetAsOf(dbs.tx, true /* storage */, compositeKey, dbs.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
 	if len(enc) == 0 {
-		if dbs.cache != nil {
-			dbs.cache.SetStorageAbsent(address.Bytes(), incarnation, key.Bytes())
-		}
 		return nil, nil
-	}
-	if dbs.cache != nil {
-		dbs.cache.SetStorageRead(address.Bytes(), incarnation, key.Bytes(), enc)
 	}
 	return enc, nil
 }
@@ -230,20 +202,9 @@ func (dbs *PlainDBState) ReadAccountCode(address common.Address, incarnation uin
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	if dbs.cache != nil {
-		if c, ok := dbs.cache.GetCode(address.Bytes(), incarnation); ok {
-			return c, nil
-		}
-	}
 	code, err := ethdb.Get(dbs.tx, dbutils.CodeBucket, codeHash[:])
 	if len(code) == 0 {
-		if dbs.cache != nil {
-			dbs.cache.SetCodeAbsent(address.Bytes(), incarnation)
-		}
 		return nil, nil
-	}
-	if dbs.cache != nil && len(code) <= 1024 {
-		dbs.cache.SetCodeRead(address.Bytes(), incarnation, code)
 	}
 	return code, err
 }

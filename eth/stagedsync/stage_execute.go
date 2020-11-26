@@ -114,8 +114,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			stateReader = params.ReaderBuilder(tx)
 		} else {
 			reader := state.NewPlainStateReader(tx)
-			reader.SetCache(cache)
-			stateReader = reader
+			stateReader = state.NewCachedReader(reader, cache)
 		}
 
 		if params.WriterBuilder != nil {

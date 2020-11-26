@@ -30,12 +30,12 @@ import (
 const (
 	callIndicesMemLimit       = 256 * datasize.MB
 	callIndicesCheckSizeEvery = 30 * time.Second
-	cacheLimit                = 4 * 1024 * 1024 * 1024 /* 4 Gb */
-	cacheWatermark            = 512 * 1024 * 1025      /* 512 Mb */
 )
 
 type CallTracesStageParams struct {
-	ToBlock uint64 // not setting this params means no limit
+	ToBlock   uint64 // not setting this params means no limit
+	BatchSize int
+	CacheSize int
 }
 
 func SpawnCallTraces(s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, tmpdir string, quit <-chan struct{}, params CallTracesStageParams) error {
@@ -95,7 +95,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	defer checkFlushEvery.Stop()
 	engine := chainContext.Engine()
 
-	var cache = shards.NewStateCache(32, cacheLimit)
+	var cache = shards.NewStateCache(32, params.CacheSize)
 
 	prev := startBlock
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
@@ -156,8 +156,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		var stateWriter state.WriterWithChangeSets
 		reader := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
 		writer := state.NewCacheStateWriter(cache)
-		reader.SetCache(cache)
-		stateReader = reader
+		stateReader = state.NewCachedReader(reader, cache)
 		stateWriter = writer
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
@@ -182,7 +181,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 			}
 			m.Add(uint32(blockNum))
 		}
-		if cache.WriteSize() >= cacheWatermark {
+		if cache.WriteSize() >= params.BatchSize {
 			start := time.Now()
 			writes := cache.PrepareWrites()
 			log.Info("PrepareWrites", "in", time.Since(start))
@@ -257,7 +256,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 	return nil
 }
 
-func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}) error {
+func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}, params CallTracesStageParams) error {
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -273,7 +272,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, chainConfig, chainContext, quitCh); err != nil {
+	if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, chainConfig, chainContext, quitCh, params); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -290,7 +289,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 	return nil
 }
 
-func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}) error {
+func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}, params CallTracesStageParams) error {
 	froms := map[string]struct{}{}
 	tos := map[string]struct{}{}
 	tx := db.(ethdb.HasTx).Tx()
@@ -298,7 +297,7 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 
 	tracer := NewCallTracer()
 	vmConfig := &vm.Config{Debug: true, NoReceipts: true, Tracer: tracer}
-	var cache = shards.NewStateCache(32, cacheLimit)
+	var cache = shards.NewStateCache(32, params.CacheSize)
 	for blockNum := to + 1; blockNum <= from; blockNum++ {
 		if err := common.Stopped(quitCh); err != nil {
 			return err
@@ -315,14 +314,13 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 		senders := rawdb.ReadSenders(db, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
-		stateReader := state.NewPlainDBState(tx, blockNum-1)
-		stateReader.SetCache(cache)
+		stateReader := state.NewCachedReader(state.NewPlainDBState(tx, blockNum-1), cache)
 		stateWriter := state.NewCacheStateWriter(cache)
 
 		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("exec block: %w", err)
 		}
-		if cache.WriteSize() >= cacheWatermark {
+		if cache.WriteSize() >= params.BatchSize {
 			start := time.Now()
 			writes := cache.PrepareWrites()
 			log.Info("PrepareWrites", "in", time.Since(start))
