@@ -15,6 +15,7 @@ type CachedReader struct {
 	cache *shards.StateCache
 }
 
+// NewCachedReader wraps a given state reader into the cached reader
 func NewCachedReader(r StateReader, cache *shards.StateCache) *CachedReader {
 	return &CachedReader{r: r, cache: cache}
 }

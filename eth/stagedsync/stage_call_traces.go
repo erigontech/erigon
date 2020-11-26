@@ -155,9 +155,8 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
 		reader := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
-		writer := state.NewCacheStateWriter(cache)
 		stateReader = state.NewCachedReader(reader, cache)
-		stateWriter = writer
+		stateWriter = state.NewCachedWriter(state.NewNoopWriter(), cache)
 		tracer := NewCallTracer()
 		vmConfig := &vm.Config{Debug: true, NoReceipts: true, ReadOnly: false, Tracer: tracer}
 		if _, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
@@ -315,7 +314,7 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 		block.Body().SendersToTxs(senders)
 
 		stateReader := state.NewCachedReader(state.NewPlainDBState(tx, blockNum-1), cache)
-		stateWriter := state.NewCacheStateWriter(cache)
+		stateWriter := state.NewCachedWriter(state.NewNoopWriter(), cache)
 
 		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
 			return fmt.Errorf("exec block: %w", err)
