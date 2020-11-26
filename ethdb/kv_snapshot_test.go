@@ -956,6 +956,102 @@ func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
 	checkKV(t, k, v, nil, nil)
 }
 
+func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
+	snapshotData := []kvData{
+		{
+			K: []byte{0, 1},
+			V: []byte{1},
+		},
+		{
+			K: []byte{0, 4},
+			V: []byte{4},
+		},
+	}
+	replacedValue := []byte{1, 1}
+	mainData := []kvData{
+		{
+			K: []byte{0, 1},
+			V: replacedValue,
+		},
+		{
+			K: []byte{0, 2},
+			V: []byte{2},
+		},
+		{
+			K: []byte{0, 3},
+			V: []byte{3},
+		},
+	}
+	data:=[]kvData {
+		mainData[0],
+		mainData[1],
+		mainData[2],
+		snapshotData[1],
+	}
+	snapshotDB, err := genStateData(snapshotData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainDB, err := genStateData(mainData)
+
+	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+		MustOpen()
+
+	tx, err := kv.Begin(context.Background(), nil, RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := tx.Cursor(dbutils.PlainStateBucket)
+	//get first correct k&v
+	k, v, err := c.First()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[0].K, data[0].V)
+
+	for i:=1; i< len(data); i++ {
+		k, v, err = c.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkKV(t, k, v, data[i].K, data[i].V)
+		k, v, err = c.Current()
+		checkKV(t, k, v, data[i].K, data[i].V)
+
+	}
+
+	for i:=len(data)-2; i>0; i-- {
+		k, v, err = c.Prev()
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkKV(t, k, v, data[i].K, data[i].V)
+		k, v, err = c.Current()
+		checkKV(t, k, v, data[i].K, data[i].V)
+	}
+
+	k,v,err=c.Last()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[len(data)-1].K, data[len(data)-1].V)
+	k, v, err = c.Current()
+	checkKV(t, k, v, data[len(data)-1].K, data[len(data)-1].V)
+
+
+	for i:=len(data)-2; i>0; i-- {
+		k, v, err = c.Prev()
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkKV(t, k, v, data[i].K, data[i].V)
+		k, v, err = c.Current()
+		checkKV(t, k, v, data[i].K, data[i].V)
+	}
+
+}
+
 func printBucket(kv KV, bucket string) {
 	fmt.Println("+Print bucket", bucket)
 	defer func() {
