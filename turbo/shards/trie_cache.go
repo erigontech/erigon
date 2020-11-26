@@ -3,6 +3,7 @@ package shards
 import (
 	"bytes"
 	"fmt"
+	"unsafe"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -10,96 +11,58 @@ import (
 
 // An optional addition to the state cache, helping to calculate state root
 
-
-func bytesandmask(bits int) (bytes int, mask byte) {
-	wholeBytes = (fixedbits+7)/8 - 1
-	shiftbits := fixedbits & 7
-	mask = byte(0xff)
-	if shiftbits != 0 {
-		mask = 0xff << (8 - shiftbits)
-	}
-	return wholeBytes, mask
-}
+// Sizes of B-tree items for the purposes of keeping track of the size of reads and writes
+// The sizes of the nodes of the B-tree are not accounted for, because their are private to the `btree` package
+const (
+	accountHashItemSize = int(unsafe.Sizeof(AccountHashItem{}))
+)
 
 type AccountHashItem struct {
 	sequence       int
 	queuePos       int
 	flags          uint16
-	hash 		    common.Hash
+	hash           common.Hash
 	bits           int
 	addrHashPrefix []byte
 }
 
 func compare_account_accountHash(i1 *AccountItem, i2 *AccountHashItem) int {
-	wholeBytes, mask := bytesandmask(i2.bits)
-	c := bytes.Compare(i1.addrHash[:wholeBytes], i2.addrHashPrefix[:wholeBytes])
+	c := bytes.Compare(i1.addrHash.Bytes(), i2.addrHashPrefix)
 	if c != 0 {
 		return c
 	}
-	m1 := i1.addrHash[wholeBytes] & mask
-	m2 := i2.addrHashPrefix[wholeBytes] & mask
-	if m1 == m2 {
-		return 0
+	if 8*len(i1.addrHash) > i2.bits {
+		return 1
 	}
-	if m1 < m2 {
-		return -1
-	}
-	return 1
+	return 0
 }
 
 func compare_storage_accountHash(i1 *StorageItem, i2 *AccountHashItem) int {
-	wholeBytes, mask := bytesandmask(i2.bits)
-	c : = bytes.Compare(i1.addrHash[:wholeBytes], i2.addrHashPrefix[:wholeBytes])
+	c := bytes.Compare(i1.addrHash.Bytes(), i2.addrHashPrefix)
 	if c != 0 {
 		return c
 	}
-	m1 := i1.addrHash[wholeBytes] & mask
-	m2 := i2.addrHashPrefix[wholeBytes] & mask
-	if m1 == m2 {
-		return 0
+	if 8*len(i1.addrHash) > i2.bits {
+		return 1
 	}
-	if m1 < m2 {
-		return -1
-	}
-	return 1
+	return 0
 }
 
 func compare_code_accountHash(i1 *CodeItem, i2 *AccountHashItem) int {
-	wholeBytes, mask := bytesandmask(i2.bits)
-	c := bytes.Compare(i1.addrHash[:wholeBytes], i2.addrHashPrefix[:wholeBytes])
+	c := bytes.Compare(i1.addrHash.Bytes(), i2.addrHashPrefix)
 	if c != 0 {
 		return c
 	}
-	m1 := i1.addrHash[wholeBytes] & mask
-	m2 := i2.addrHashPrefix[wholeBytes] & mask
-	if m1 == m2 {
-		return 0
+	if 8*len(i1.addrHash) > i2.bits {
+		return 1
 	}
-	if m1 < m2 {
-		return -1
-	}
-	return 1	
+	return 0
 }
 
 func compare_accountHash_accountHash(i1 *AccountHashItem, i2 *AccountHashItem) int {
-	var minBits int
-	if i1.bits < i2.bits {
-		minBits = i1.bits
-	} else {
-		minBits = i2.bits
-	}
-	wholeBytes, mask := bytesandmask(minBits)
-	c : = bytes.Compare(i1.addrHashPrefix[:wholeBytes], i2.addrHashPrefix[:wholeBytes])
+	c := bytes.Compare(i1.addrHashPrefix, i2.addrHashPrefix)
 	if c != 0 {
 		return c
-	}
-	m1 := i1.addrHashPrefix[wholeBytes]&mask
-	m2 := i2.addrHashPrefix[wholeBytes]&mask
-	if m1 < m2 {
-		return -1
-	}
-	if m1 > m2 {
-		return 1
 	}
 	if i1.bits == i2.bits {
 		return 0
@@ -108,14 +71,6 @@ func compare_accountHash_accountHash(i1 *AccountHashItem, i2 *AccountHashItem) i
 		return -1
 	}
 	return 1
-}
-
-func compare_accountHash_storageHash(i1 *AccountHashItem, i2 *StorageHashItem) {
-	wholeBytes, mask := bytesandmask(i1.bits)
-	c := bytes.Compare(i1.addrHashPrefix[:wholeBytes], i2.addrHash[:wholeBytes])
-	if c != 0 {
-		return c
-	}
 }
 
 func compare_account_storageHash(i1 *AccountItem, i2 *StorageHashItem) int {
@@ -128,20 +83,14 @@ func compare_storage_storageHash(i1 *StorageItem, i2 *StorageHashItem) int {
 		return c
 	}
 	if i1.incarnation == i2.incarnation {
-		wholeBytes, mask := bytesandmask(i2.bits)
-		c = bytes.Compare(i1.locHash[:wholeBytes], i2.locHasPrefix[:wholeBytes])
+		c = bytes.Compare(i1.locHash.Bytes(), i2.locHashPrefix)
 		if c != 0 {
 			return c
 		}
-		m1 := i1.locHash[wholeBytes] & mask
-		m2 := i2.locaHashPrefix[wholeBytes] & mask
-		if m1 == m2 {
-			return 0
+		if 8*len(i1.locHash) > i2.bits {
+			return 1
 		}
-		if m1 < m2 {
-			return -1
-		}
-		return 1
+		return 0
 	}
 	if i1.incarnation < i2.incarnation {
 		return -1
@@ -153,6 +102,40 @@ func compare_code_storageHash(i1 *CodeItem, i2 *StorageHashItem) int {
 	return bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
 }
 
+func compare_accountHash_storageHash(i1 *AccountHashItem, i2 *StorageHashItem) int {
+	c := bytes.Compare(i1.addrHashPrefix, i2.addrHash.Bytes())
+	if c != 0 {
+		return c
+	}
+	if i1.bits < 8*len(i2.addrHash) {
+		return -1
+	}
+	return 0
+}
+
+func compare_storageHash_storageHash(i1 *StorageHashItem, i2 *StorageHashItem) int {
+	c := bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
+	if c != 0 {
+		return c
+	}
+	if i1.incarnation == i2.incarnation {
+		c = bytes.Compare(i1.locHashPrefix, i2.locHashPrefix)
+		if c != 0 {
+			return c
+		}
+		if i1.bits == i2.bits {
+			return 0
+		}
+		if i1.bits < i2.bits {
+			return -1
+		}
+		return 1
+	}
+	if i1.incarnation < i2.incarnation {
+		return -1
+	}
+	return 1
+}
 
 func (ahi *AccountHashItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
@@ -168,7 +151,7 @@ func (ahi *AccountHashItem) Less(than btree.Item) bool {
 	case *AccountHashItem:
 		return compare_accountHash_accountHash(ahi, i) < 0
 	case *StorageHashItem:
-		// Under equality result is "true" - account hash comes before storage hashes 
+		// Under equality result is "true" - account hash comes before storage hashes
 		return compare_accountHash_storageHash(ahi, i) < 0
 	default:
 		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
@@ -184,7 +167,7 @@ func (ahi *AccountHashItem) SetSequence(sequence int) {
 }
 
 func (ahi *AccountHashItem) GetSize() int {
-	return accountHashItemSize
+	return accountHashItemSize + len(ahi.addrHashPrefix)
 }
 
 func (ahi *AccountHashItem) GetQueuePos() int {
@@ -208,7 +191,7 @@ func (ahi *AccountHashItem) ClearFlags(flags uint16) {
 }
 
 func (ahi *AccountHashItem) String() string {
-	return fmt.Sprintf("AccountHashItem(addrHash=%x)", ahi.addrHash)
+	return fmt.Sprintf("AccountHashItem(addrHashPrefix=%x,bits=%d)", ahi.addrHashPrefix, ahi.bits)
 }
 
 func (ahi *AccountHashItem) CopyValueFrom(item CacheItem) {
@@ -216,7 +199,7 @@ func (ahi *AccountHashItem) CopyValueFrom(item CacheItem) {
 	if !ok {
 		panic(fmt.Sprintf("expected AccountHashItem, got %T", item))
 	}
-	copy(ahi.hash[:], otherAhi.Bytes())
+	copy(ahi.hash[:], otherAhi.hash.Bytes())
 }
 
 type StorageHashItem struct {
@@ -275,7 +258,7 @@ func (uh *UnprocessedHeap) Push(x interface{}) {
 }
 
 func (uh *UnprocessedHeap) Pop() interface{} {
-	cacheItem := rh.items[len(uh.items)-1]
+	cacheItem := uh.items[len(uh.items)-1]
 	uh.items = uh.items[:len(uh.items)-1]
 	return cacheItem
 }
