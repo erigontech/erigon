@@ -78,7 +78,15 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		defer tx.Rollback()
 	}
 
-	cache := shards.NewStateCache(32, params.CacheSize)
+	var batch ethdb.DbWithPendingMutations
+	var cache *shards.StateCache
+	if params.CacheSize == 0 {
+		batch = tx.NewBatch()
+		defer batch.Rollback()
+	} else {
+		batch = tx
+		cache = shards.NewStateCache(32, params.CacheSize)
+	}
 
 	engine := chainContext.Engine()
 	chainContext.SetDB(tx)
@@ -111,18 +119,20 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		var stateWriter state.WriterWithChangeSets
 
 		if params.ReaderBuilder != nil {
-			stateReader = params.ReaderBuilder(tx)
+			stateReader = params.ReaderBuilder(batch)
 		} else {
-			reader := state.NewPlainStateReader(tx)
-			stateReader = state.NewCachedReader(reader, cache)
+			stateReader = state.NewPlainStateReader(batch)
+		}
+		if cache != nil {
+			stateReader = state.NewCachedReader(stateReader, cache)
 		}
 
 		if params.WriterBuilder != nil {
-			stateWriter = params.WriterBuilder(tx, tx, blockNum)
+			stateWriter = params.WriterBuilder(batch, tx, blockNum)
 		} else {
-			writer := state.NewPlainStateWriter(tx, tx, blockNum)
-			stateWriter = state.NewCachedWriter(writer, cache)
+			stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
 		}
+		stateWriter = state.NewCachedWriter(stateWriter, cache)
 
 		// where the magic happens
 		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
@@ -136,26 +146,42 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			}
 		}
 
-		if cache.WriteSize() >= params.BatchSize {
-			if err = s.Update(tx, blockNum); err != nil {
-				return err
-			}
-			start := time.Now()
-			writes := cache.PrepareWrites()
-			log.Info("PrepareWrites", "in", time.Since(start))
-			if err = commitCache(tx, writes); err != nil {
-				return err
-			}
-			if !useExternalTx {
-				if err = tx.CommitAndBegin(context.Background()); err != nil {
+		if cache == nil {
+			if batch.BatchSize() >= params.BatchSize {
+				if err = s.Update(batch, blockNum); err != nil {
 					return err
 				}
-				chainContext.SetDB(tx)
+				if err = batch.CommitAndBegin(context.Background()); err != nil {
+					return err
+				}
+				if !useExternalTx {
+					if err = tx.CommitAndBegin(context.Background()); err != nil {
+						return err
+					}
+					chainContext.SetDB(tx)
+				}
 			}
-			start = time.Now()
-			cache.TurnWritesToReads(writes)
-			log.Info("TurnWritesToReads", "in", time.Since(start))
-
+		} else {
+			if cache.WriteSize() >= params.BatchSize {
+				if err = s.Update(tx, blockNum); err != nil {
+					return err
+				}
+				start := time.Now()
+				writes := cache.PrepareWrites()
+				log.Info("PrepareWrites", "in", time.Since(start))
+				if err = commitCache(tx, writes); err != nil {
+					return err
+				}
+				if !useExternalTx {
+					if err = tx.CommitAndBegin(context.Background()); err != nil {
+						return err
+					}
+					chainContext.SetDB(tx)
+				}
+				start = time.Now()
+				cache.TurnWritesToReads(writes)
+				log.Info("TurnWritesToReads", "in", time.Since(start))
+			}
 		}
 
 		if params.ChangeSetHook != nil {
@@ -167,24 +193,38 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock = logProgress(logPrefix, logBlock, blockNum, cache)
+			logBlock = logProgress(logPrefix, logBlock, blockNum, batch, cache)
 		}
 	}
 
-	logProgress(logPrefix, logBlock, stageProgress, cache)
-	if err := s.Update(tx, stageProgress); err != nil {
-		return err
-	}
-	writes := cache.PrepareWrites()
-	if err := commitCache(tx, writes); err != nil {
-		return err
-	}
-	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
+	logProgress(logPrefix, logBlock, stageProgress, batch, cache)
+	if cache == nil {
+		if err := s.Update(batch, stageProgress); err != nil {
 			return err
 		}
+		if _, err := batch.Commit(); err != nil {
+			return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
+		}
+		if !useExternalTx {
+			if _, err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+	} else {
+		if err := s.Update(tx, stageProgress); err != nil {
+			return err
+		}
+		writes := cache.PrepareWrites()
+		if err := commitCache(tx, writes); err != nil {
+			return err
+		}
+		if !useExternalTx {
+			if _, err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+		cache.TurnWritesToReads(writes)
 	}
-	cache.TurnWritesToReads(writes)
 	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	s.Done()
 	return nil
@@ -237,18 +277,27 @@ func commitCache(tx ethdb.DbWithPendingMutations, writes *btree.BTree) error {
 	)
 }
 
-func logProgress(logPrefix string, prev, now uint64, cache *shards.StateCache) uint64 {
+func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMutations, cache *shards.StateCache) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix),
-		"number", now,
-		"blk/second", speed,
-		"cache writes", common.StorageSize(cache.WriteSize()), "cache read", common.StorageSize(cache.ReadSize()),
-		"alloc", common.StorageSize(m.Alloc),
-		"sys", common.StorageSize(m.Sys),
-		"numGC", int(m.NumGC))
-
+	if cache == nil {
+		log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix),
+			"number", now,
+			"blk/second", speed,
+			"batch", common.StorageSize(batch.BatchSize()),
+			"alloc", common.StorageSize(m.Alloc),
+			"sys", common.StorageSize(m.Sys),
+			"numGC", int(m.NumGC))
+	} else {
+		log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix),
+			"number", now,
+			"blk/second", speed,
+			"cache writes", common.StorageSize(cache.WriteSize()), "cache read", common.StorageSize(cache.ReadSize()),
+			"alloc", common.StorageSize(m.Alloc),
+			"sys", common.StorageSize(m.Sys),
+			"numGC", int(m.NumGC))
+	}
 	return now
 }
 

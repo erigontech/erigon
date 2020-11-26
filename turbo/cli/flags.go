@@ -24,7 +24,7 @@ var (
 	CacheSizeFlag = cli.StringFlag{
 		Name:  "cacheSize",
 		Usage: "Cache size for the execution stage",
-		Value: "1G",
+		Value: "0",
 	}
 	BatchSizeFlag = cli.StringFlag{
 		Name:  "batchSize",
@@ -130,7 +130,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *eth.Config) {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
-	if cfg.BatchSize >= cfg.CacheSize {
+	if cfg.CacheSize != 0 && cfg.BatchSize >= cfg.CacheSize {
 		utils.Fatalf("batchSize %d >= cacheSize %d", cfg.BatchSize, cfg.CacheSize)
 	}
 
