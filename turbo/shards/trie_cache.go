@@ -10,23 +10,6 @@ import (
 
 // An optional addition to the state cache, helping to calculate state root
 
-type AccountHashItem struct {
-	sequence       int
-	queuePos       int
-	flags          uint16
-	bits           int
-	addrHashPrefix []byte
-}
-
-type StorageHashItem struct {
-	sequence      int
-	queuePos      int
-	flags         uint16
-	addrHash      common.Hash
-	incarnation   uint64
-	bits          int
-	locHashPrefix []byte
-}
 
 func bytesandmask(bits int) (bytes int, mask byte) {
 	wholeBytes = (fixedbits+7)/8 - 1
@@ -36,6 +19,15 @@ func bytesandmask(bits int) (bytes int, mask byte) {
 		mask = 0xff << (8 - shiftbits)
 	}
 	return wholeBytes, mask
+}
+
+type AccountHashItem struct {
+	sequence       int
+	queuePos       int
+	flags          uint16
+	hash 		    common.Hash
+	bits           int
+	addrHashPrefix []byte
 }
 
 func compare_account_accountHash(i1 *AccountItem, i2 *AccountHashItem) int {
@@ -118,6 +110,50 @@ func compare_accountHash_accountHash(i1 *AccountHashItem, i2 *AccountHashItem) i
 	return 1
 }
 
+func compare_accountHash_storageHash(i1 *AccountHashItem, i2 *StorageHashItem) {
+	wholeBytes, mask := bytesandmask(i1.bits)
+	c := bytes.Compare(i1.addrHashPrefix[:wholeBytes], i2.addrHash[:wholeBytes])
+	if c != 0 {
+		return c
+	}
+}
+
+func compare_account_storageHash(i1 *AccountItem, i2 *StorageHashItem) int {
+	return bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
+}
+
+func compare_storage_storageHash(i1 *StorageItem, i2 *StorageHashItem) int {
+	c := bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
+	if c != 0 {
+		return c
+	}
+	if i1.incarnation == i2.incarnation {
+		wholeBytes, mask := bytesandmask(i2.bits)
+		c = bytes.Compare(i1.locHash[:wholeBytes], i2.locHasPrefix[:wholeBytes])
+		if c != 0 {
+			return c
+		}
+		m1 := i1.locHash[wholeBytes] & mask
+		m2 := i2.locaHashPrefix[wholeBytes] & mask
+		if m1 == m2 {
+			return 0
+		}
+		if m1 < m2 {
+			return -1
+		}
+		return 1
+	}
+	if i1.incarnation < i2.incarnation {
+		return -1
+	}
+	return 1
+}
+
+func compare_code_storageHash(i1 *CodeItem, i2 *StorageHashItem) int {
+	return bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
+}
+
+
 func (ahi *AccountHashItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
 	case *AccountItem:
@@ -127,55 +163,92 @@ func (ahi *AccountHashItem) Less(than btree.Item) bool {
 		// Under equality result is "true" - account hash comes before storage items
 		return compare_storage_accountHash(i, ahi) >= 0
 	case *CodeItem:
-		// Under equalirt result is "true" - account hash comes before account code
+		// Under equality result is "true" - account hash comes before account code
 		return compare_code_accountHash(i, ahi) >= 0
 	case *AccountHashItem:
 		return compare_accountHash_accountHash(ahi, i) < 0
+	case *StorageHashItem:
+		// Under equality result is "true" - account hash comes before storage hashes 
+		return compare_accountHash_storageHash(ahi, i) < 0
+	default:
+		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
 	}
 }
 
-func (ai *AccountItem) GetSequence() int {
-	return ai.sequence
+func (ahi *AccountHashItem) GetSequence() int {
+	return ahi.sequence
 }
 
-func (ai *AccountItem) SetSequence(sequence int) {
-	ai.sequence = sequence
+func (ahi *AccountHashItem) SetSequence(sequence int) {
+	ahi.sequence = sequence
 }
 
-func (ai *AccountItem) GetSize() int {
-	return accountItemSize
+func (ahi *AccountHashItem) GetSize() int {
+	return accountHashItemSize
 }
 
-func (ai *AccountItem) GetQueuePos() int {
-	return ai.queuePos
+func (ahi *AccountHashItem) GetQueuePos() int {
+	return ahi.queuePos
 }
 
-func (ai *AccountItem) SetQueuePos(pos int) {
-	ai.queuePos = pos
+func (ahi *AccountHashItem) SetQueuePos(pos int) {
+	ahi.queuePos = pos
 }
 
-func (ai *AccountItem) HasFlag(flag uint16) bool {
-	return ai.flags&flag != 0
+func (ahi *AccountHashItem) HasFlag(flag uint16) bool {
+	return ahi.flags&flag != 0
 }
 
-func (ai *AccountItem) SetFlags(flags uint16) {
-	ai.flags |= flags
+func (ahi *AccountHashItem) SetFlags(flags uint16) {
+	ahi.flags |= flags
 }
 
-func (ai *AccountItem) ClearFlags(flags uint16) {
-	ai.flags &^= flags
+func (ahi *AccountHashItem) ClearFlags(flags uint16) {
+	ahi.flags &^= flags
 }
 
-func (ai *AccountItem) String() string {
-	return fmt.Sprintf("AccountItem(addrHash=%x)", ai.addrHash)
+func (ahi *AccountHashItem) String() string {
+	return fmt.Sprintf("AccountHashItem(addrHash=%x)", ahi.addrHash)
 }
 
-func (ai *AccountItem) CopyValueFrom(item CacheItem) {
-	otherAi, ok := item.(*AccountItem)
+func (ahi *AccountHashItem) CopyValueFrom(item CacheItem) {
+	otherAhi, ok := item.(*AccountHashItem)
 	if !ok {
-		panic(fmt.Sprintf("expected AccountItem, got %T", item))
+		panic(fmt.Sprintf("expected AccountHashItem, got %T", item))
 	}
-	ai.account.Copy(&otherAi.account)
+	copy(ahi.hash[:], otherAhi.Bytes())
+}
+
+type StorageHashItem struct {
+	sequence      int
+	queuePos      int
+	flags         uint16
+	addrHash      common.Hash
+	incarnation   uint64
+	hash          common.Hash
+	bits          int
+	locHashPrefix []byte
+}
+
+func (shi *StorageHashItem) Less(than btree.Item) bool {
+	switch i := than.(type) {
+	case *AccountItem:
+		// Under equality result is "false" - storage hash comes after account
+		return compare_account_storageHash(i, shi) > 0
+	case *StorageItem:
+		// Under equality result is "true" - storage hash comes before storage items
+		return compare_storage_storageHash(i, shi) >= 0
+	case *CodeItem:
+		// Under equality result is "false" - storage hash comes after account code
+		return compare_code_storageHash(i, shi) > 0
+	case *AccountHashItem:
+		// Under equility result is "false" - storage hashes comes after account hash
+		return compare_accountHash_storageHash(i, shi) > 0
+	case *StorageHashItem:
+		return compare_storageHash_storageHash(shi, i) < 0
+	default:
+		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
+	}
 }
 
 // UnprocessedHeap is a priority queue of items that were modified after the last recalculation of the merkle tree

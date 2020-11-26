@@ -171,12 +171,8 @@ func (ai *AccountItem) Less(than btree.Item) bool {
 		// Under equality the result is "false" - account comes after hash
 		return compare_account_accountHash(ai, i) < 0
 	case *StorageHashItem:
-		c := bytes.Compare(ai.addrHash.Bytes(), i.addrHash.Bytes())
-		if c == 0 {
-			// Account comes before storage hashes
-			return true
-		}
-		return c < 0
+		// Under equality the result is "true" - account comes before any storage hashes
+		return compare_account_storageHash(ai, i) <= 0
 	default:
 		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
 	}
@@ -275,20 +271,8 @@ func (si *StorageItem) Less(than btree.Item) bool {
 		// Under equality the result is "false", account hash comes before storage item of the account
 		return compare_storage_accountHash(si, i) < 0
 	case *StorageHashItem:
-		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
-		if c == 0 {
-			if si.incarnation == i.incarnation {
-				wholeBytes, mask := bytesandmask(i.bits)
-				c = bytes.Compare(si.locHash[:wholeBytes], i.locHasPrefix[:wholeBytes])
-				if c == 0 {
-					// Case of equality results in "false" - storage comes after hash
-					return (si.locHash[wholeBytes] & mask) < (i.locaHashPrefix[wholeBytes] & mask)
-				}
-				return c < 0
-			}
-			return si.incarnation < i.incarnation
-		}
-		return c < 0
+		// Under equality the result is "false", storage hash comes before storage item
+		return compare_storage_storageHash(si, i) < 0
 	default:
 		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
 	}
@@ -397,12 +381,8 @@ func (ci *CodeItem) Less(than btree.Item) bool {
 		// Under equality the result is "false" - code comes after account hash
 		return compare_code_accountHash(ci, i) < 0
 	case *StorageHashItem:
-		c := bytes.Compare(ci.addrHash.Bytes(), i.addrHash.Bytes())
-		if c == 0 {
-			// Code of account comes before storage hashes
-			return true
-		}
-		return c < 0
+		// Under equality the result is "true" - code comes before the storage hashes
+		return compare_code_storageHash(ci, i) <= 0
 	default:
 		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
 	}
