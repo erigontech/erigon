@@ -6,7 +6,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -21,7 +20,6 @@ type PlainStateWriter struct {
 	changeSetsDB ethdb.Database
 	csw          *ChangeSetWriter
 	blockNumber  uint64
-	cache        *shards.StateCache
 }
 
 func NewPlainStateWriter(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) *PlainStateWriter {
@@ -33,43 +31,28 @@ func NewPlainStateWriter(db ethdb.Database, changeSetsDB ethdb.Database, blockNu
 	}
 }
 
-func (w *PlainStateWriter) SetCache(cache *shards.StateCache) {
-	w.cache = cache
-}
-
 func (w *PlainStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	if err := w.csw.UpdateAccountData(ctx, address, original, account); err != nil {
 		return err
 	}
-	if w.cache == nil {
-		value := make([]byte, account.EncodingLengthForStorage())
-		account.EncodeForStorage(value)
-		return w.db.Put(dbutils.PlainStateBucket, address[:], value)
-	}
-	w.cache.SetAccountWrite(address.Bytes(), account)
-	return nil
+	value := make([]byte, account.EncodingLengthForStorage())
+	account.EncodeForStorage(value)
+	return w.db.Put(dbutils.PlainStateBucket, address[:], value)
 }
 
 func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if err := w.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 		return err
 	}
-	if w.cache == nil {
-		if err := w.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
-			return err
-		}
-		return w.db.Put(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), codeHash[:])
+	if err := w.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
+		return err
 	}
-	w.cache.SetCodeWrite(address.Bytes(), incarnation, code)
-	return nil
+	return w.db.Put(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), codeHash[:])
 }
 
 func (w *PlainStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
 	if err := w.csw.DeleteAccount(ctx, address, original); err != nil {
 		return err
-	}
-	if w.cache != nil {
-		w.cache.SetAccountDelete(address.Bytes())
 	}
 	if err := w.db.Delete(dbutils.PlainStateBucket, address[:], nil); err != nil {
 		return err
@@ -94,13 +77,6 @@ func (w *PlainStateWriter) WriteAccountStorage(ctx context.Context, address comm
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 
 	v := value.Bytes()
-	if w.cache != nil {
-		if value.IsZero() {
-			w.cache.SetStorageDelete(address.Bytes(), incarnation, key.Bytes())
-		} else {
-			w.cache.SetStorageWrite(address.Bytes(), incarnation, key.Bytes(), value.Bytes())
-		}
-	}
 	if len(v) == 0 {
 		return w.db.Delete(dbutils.PlainStateBucket, compositeKey, nil)
 	}
