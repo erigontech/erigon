@@ -15,6 +15,7 @@ import (
 // The sizes of the nodes of the B-tree are not accounted for, because their are private to the `btree` package
 const (
 	accountHashItemSize = int(unsafe.Sizeof(AccountHashItem{}))
+	storageHashItemSize = int(unsafe.Sizeof(StorageHashItem{}))
 )
 
 type AccountHashItem struct {
@@ -232,6 +233,50 @@ func (shi *StorageHashItem) Less(than btree.Item) bool {
 	default:
 		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
 	}
+}
+
+func (shi *StorageHashItem) GetSequence() int {
+	return shi.sequence
+}
+
+func (shi *StorageHashItem) SetSequence(sequence int) {
+	shi.sequence = sequence
+}
+
+func (shi *StorageHashItem) GetSize() int {
+	return storageHashItemSize + len(shi.locHashPrefix)
+}
+
+func (shi *StorageHashItem) GetQueuePos() int {
+	return shi.queuePos
+}
+
+func (shi *StorageHashItem) SetQueuePos(pos int) {
+	shi.queuePos = pos
+}
+
+func (shi *StorageHashItem) HasFlag(flag uint16) bool {
+	return shi.flags&flag != 0
+}
+
+func (shi *StorageHashItem) SetFlags(flags uint16) {
+	shi.flags |= flags
+}
+
+func (shi *StorageHashItem) ClearFlags(flags uint16) {
+	shi.flags &^= flags
+}
+
+func (shi *StorageHashItem) String() string {
+	return fmt.Sprintf("StorageHashItem(addrHash=%x,incarnation=%d,locHashPrefix=%x,bits=%d)", shi.addrHash, shi.incarnation, shi.locHashPrefix, shi.bits)
+}
+
+func (shi *StorageHashItem) CopyValueFrom(item CacheItem) {
+	otherShi, ok := item.(*StorageHashItem)
+	if !ok {
+		panic(fmt.Sprintf("expected StorageHashItem, got %T", item))
+	}
+	copy(shi.hash[:], otherShi.hash.Bytes())
 }
 
 // UnprocessedHeap is a priority queue of items that were modified after the last recalculation of the merkle tree
