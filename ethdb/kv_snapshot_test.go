@@ -961,7 +961,7 @@ func printBucket(kv KV, bucket string) {
 	defer func() {
 		fmt.Println("-Print bucket", bucket)
 	}()
-	kv.View(context.Background(), func(tx Tx) error {
+	err := kv.View(context.Background(), func(tx Tx) error {
 		c := tx.Cursor(bucket)
 		k, v, err := c.First()
 		if err != nil {
@@ -976,6 +976,7 @@ func printBucket(kv KV, bucket string) {
 		}
 		return nil
 	})
+	fmt.Println("Print err", err)
 }
 
 func checkKV(t *testing.T, key, val, expectedKey, expectedVal []byte) {
