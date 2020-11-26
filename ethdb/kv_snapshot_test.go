@@ -845,7 +845,7 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	}
 
 	c := tx.Cursor(dbutils.PlainStateBucket)
-	deleteCursor := tx.Cursor(dbutils.PlainStateBucket)
+	//deleteCursor := tx.Cursor(dbutils.PlainStateBucket)
 
 	//get first correct k&v
 	k, v, err := c.First()
@@ -854,18 +854,15 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	}
 	checkKV(t, k, v, data[0].K, data[0].V)
 
-	//remove value
-	err = deleteCursor.Delete(data[1].K, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = deleteCursor.Delete(data[2].K, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = deleteCursor.Delete(data[4].K, nil)
-	if err != nil {
-		t.Fatal(err)
+	for i:=1; i<len(data); i++ {
+		k, v, err = c.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkKV(t, k, v, data[i].K, data[i].V)
+		k, v, err = c.Current()
+		checkKV(t, k, v, data[i].K, data[i].V)
+
 	}
 
 	// check the key that we've replaced value
@@ -873,13 +870,17 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k, v, data[3].K, data[3].V)
-
-	k, v, err = c.Next()
-	if err != nil {
-		t.Fatal(err)
-	}
 	checkKV(t, k, v, nil, nil)
+
+	for i:=len(data)-2; i>=0; i-- {
+		k, v, err = c.Prev()
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkKV(t, k, v, data[i].K, data[i].V)
+		k, v, err = c.Current()
+		checkKV(t, k, v, data[i].K, data[i].V)
+	}
 }
 func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
 	snapshotData := []kvData{

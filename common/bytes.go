@@ -162,37 +162,16 @@ func TrimRightZeroes(s []byte) []byte {
 
 func KeyCmp(key1, key2 []byte) (int, bool) {
 	switch {
+	//both keys are empty
 	case len(key1) == 0 && len(key2) == 0:
 		return 0, true
+	//	key1 is empty
 	case len(key1) == 0 && len(key2) != 0:
 		return 1, false
+	//	key2 is empty
 	case len(key1) != 0 && len(key2) == 0:
 		return -1, false
 	default:
 		return bytes.Compare(key1, key2), false
 	}
 }
-func KeyCmpLess(key1, key2 []byte) (int, bool) {
-	switch {
-	case len(key1) == 0 && len(key2) == 0:
-		return 0, true
-	case len(key1) == 0 && len(key2) != 0:
-		return 1, false
-	case len(key1) != 0 && len(key2) == 0:
-		return -1, false
-	default:
-		return bytes.Compare(key1, key2), false
-	}
-}
-//func KeyCmp2(key1, key2 []byte) (int, bool) {
-//	switch {
-//	case len(key1) == 0 && len(key2) == 0:
-//		return 0, true
-//	case len(key1) == 0 && len(key2) != 0:
-//		return 1, false
-//	case len(key1) != 0 && len(key2) == 0:
-//		return -1, false
-//	default:
-//		return bytes.Compare(key1, key2), false
-//	}
-//}

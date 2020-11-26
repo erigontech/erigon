@@ -878,7 +878,7 @@ func (s *snCursor2) Prev() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	cmp, br := common.KeyCmp(lastDBKey, lastSNDBKey)
+	cmp, br := KeyCmpBackward(lastDBKey, lastSNDBKey)
 	if br {
 		return nil, nil, nil
 	}
@@ -898,7 +898,7 @@ func (s *snCursor2) Prev() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	cmp, br = common.KeyCmp(lastDBKey, lastSNDBKey)
+	cmp, br = KeyCmpBackward(lastDBKey, lastSNDBKey)
 	if br {
 		return nil, nil, nil
 	}
@@ -906,6 +906,7 @@ func (s *snCursor2) Prev() ([]byte, []byte, error) {
 		//@todo think about better solution
 		return s.Prev()
 	}
+
 	if cmp >=0 {
 		s.currentKey = common.CopyBytes(lastDBKey)
 		return lastDBKey, lastDBVal, nil
@@ -975,4 +976,18 @@ func (s snCursor2) Count() (uint64, error) {
 func (s snCursor2) Close() {
 	s.dbCursor.Close()
 	s.snCursor.Close()
+}
+
+
+func KeyCmpBackward(key1, key2 []byte) (int, bool) {
+	switch {
+	case len(key1) == 0 && len(key2) == 0:
+		return 0, true
+	case len(key1) == 0 && len(key2) != 0:
+		return -1, false
+	case len(key1) != 0 && len(key2) == 0:
+		return 1, false
+	default:
+		return bytes.Compare(key1, key2), false
+	}
 }
