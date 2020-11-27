@@ -3289,7 +3289,7 @@ LIBMDBX_API int mdbx_dbi_open(MDBX_txn *txn, const char *name,
  * \param [in] datacmp Optional custom data comparison function for a database.
  * \param [out] dbi    Address where the new MDBX_dbi handle will be stored.
  * \returns A non-zero error value on failure and 0 on success. */
-MDBX_DEPRECATED LIBMDBX_API int
+LIBMDBX_API int
 mdbx_dbi_open_ex(MDBX_txn *txn, const char *name, MDBX_db_flags_t flags,
                  MDBX_dbi *dbi, MDBX_cmp_func *keycmp, MDBX_cmp_func *datacmp);
 
