@@ -323,19 +323,27 @@ func toMdbx(ctx context.Context, from, to string) error {
 		}
 
 		c := dstTx.Cursor(name)
-		appendFunc := c.Append
-		if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
-			appendFunc = c.(ethdb.CursorDupSort).AppendDup
-		}
-
 		srcC := srcTx.Cursor(name)
+		var prevK []byte
 		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 			if err != nil {
 				return err
 			}
 
-			if err = appendFunc(k, v); err != nil {
-				return err
+			if casted, ok := c.(ethdb.CursorDupSort); ok {
+				if bytes.Equal(k, prevK) {
+					if err = casted.AppendDup(k, v); err != nil {
+						return err
+					}
+				} else {
+					if err = casted.Append(k, v); err != nil {
+						return err
+					}
+				}
+			} else {
+				if err = casted.Append(k, v); err != nil {
+					return err
+				}
 			}
 
 			select {
@@ -352,11 +360,8 @@ func toMdbx(ctx context.Context, from, to string) error {
 					return err
 				}
 				c = dstTx.Cursor(name)
-				appendFunc = c.Append
-				if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
-					appendFunc = c.(ethdb.CursorDupSort).AppendDup
-				}
 			}
+			prevK = nil
 		}
 
 		// migrate bucket sequences to native mdbx implementation
