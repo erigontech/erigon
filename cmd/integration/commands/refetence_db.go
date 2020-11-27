@@ -306,7 +306,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		return err1
 	}
 	defer srcTx.Rollback()
-	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW)
+	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW|ethdb.NoSync)
 	if err1 != nil {
 		return err1
 	}
@@ -326,8 +326,6 @@ func toMdbx(ctx context.Context, from, to string) error {
 		appendFunc := c.Append
 		if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
 			appendFunc = c.(ethdb.CursorDupSort).AppendDup
-		} else if b.Flags&dbutils.DupFixed != 0 && !b.AutoDupSortKeysConversion {
-			appendFunc = c.(ethdb.CursorDupFixed).AppendDup
 		}
 
 		srcC := srcTx.Cursor(name)
@@ -357,8 +355,6 @@ func toMdbx(ctx context.Context, from, to string) error {
 				appendFunc = c.Append
 				if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
 					appendFunc = c.(ethdb.CursorDupSort).AppendDup
-				} else if b.Flags&dbutils.DupFixed != 0 && !b.AutoDupSortKeysConversion {
-					appendFunc = c.(ethdb.CursorDupFixed).AppendDup
 				}
 			}
 		}
