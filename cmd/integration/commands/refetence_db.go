@@ -295,7 +295,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 	_ = os.RemoveAll(to)
 
 	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint {
-		return flags | lmdb.Readonly ^ lmdb.NoReadahead
+		return (flags | lmdb.Readonly) ^ lmdb.NoReadahead
 	}).MustOpen()
 	dst := ethdb.NewMDBX().Path(to).Flags(func(flags uint) uint {
 		return flags | mdbx.WriteMap | mdbx.NoMemInit
