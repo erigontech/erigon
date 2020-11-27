@@ -493,8 +493,8 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 		}
 		dbi = dbutils.DBI(nativeDBI)
 	}
-	commitEvery := time.NewTicker(30 * time.Second)
-	defer commitEvery.Stop()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	for {
 		s, err := tx.BucketStat(name)
 		if err != nil {
@@ -512,7 +512,7 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 			}
 			select {
 			default:
-			case <-commitEvery.C:
+			case <-logEvery.C:
 				log.Info("dropping bucket", "name", name, "current key", fmt.Sprintf("%x", k))
 			}
 
