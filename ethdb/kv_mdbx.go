@@ -493,6 +493,62 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 		}
 		dbi = dbutils.DBI(nativeDBI)
 	}
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	for {
+		s, err := tx.BucketStat(name)
+		if err != nil {
+			return err
+		}
+		if s.Entries == 0 {
+			break
+		}
+		c := tx.Cursor(name)
+		i := 0
+		var k []byte
+		for k, _, err = c.First(); k != nil; k, _, err = c.First() {
+			if err != nil {
+				return err
+			}
+			select {
+			default:
+			case <-logEvery.C:
+				log.Info("dropping bucket", "name", name, "current key", fmt.Sprintf("%x", k))
+			}
+
+			i++
+			if casted, ok := c.(CursorDupSort); ok {
+				err = casted.DeleteCurrentDuplicates()
+				if err != nil {
+					return err
+				}
+				if i == 100 {
+					break
+				}
+			} else {
+				err = c.DeleteCurrent()
+				if err != nil {
+					return err
+				}
+				if i == 10_000 {
+					break
+				}
+			}
+		}
+
+		c.Close()
+		_, err = tx.tx.Commit()
+		if err != nil {
+			return err
+		}
+		txn, err := tx.db.env.BeginTxn(nil, mdbx.TxRW|mdbx.TxNoSync)
+		if err != nil {
+			return err
+		}
+		txn.RawRead = true
+		tx.tx = txn
+	}
+
 	if err := tx.tx.Drop(mdbx.DBI(dbi), true); err != nil {
 		return err
 	}
