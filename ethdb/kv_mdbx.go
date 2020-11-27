@@ -522,7 +522,7 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 				if err != nil {
 					return err
 				}
-				if i == 1_000 {
+				if i == 100 {
 					break
 				}
 			} else {
@@ -530,7 +530,7 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 				if err != nil {
 					return err
 				}
-				if i == 100_000 {
+				if i == 10_000 {
 					break
 				}
 			}
@@ -541,7 +541,7 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 		if err != nil {
 			return err
 		}
-		txn, err := tx.db.env.BeginTxn(nil, mdbx.TxRW)
+		txn, err := tx.db.env.BeginTxn(nil, mdbx.TxRW|mdbx.TxNoSync)
 		if err != nil {
 			return err
 		}
