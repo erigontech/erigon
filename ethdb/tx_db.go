@@ -418,6 +418,70 @@ func (m *TxDb) BucketExists(name string) (bool, error) {
 }
 
 func (m *TxDb) ClearBuckets(buckets ...string) error {
+	if _, ok := m.tx.(*mdbxTx); ok {
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+		for i := range buckets {
+			name := buckets[i]
+
+			migrator, ok := m.tx.(BucketMigrator)
+			if !ok {
+				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
+			}
+			logEvery := time.NewTicker(30 * time.Second)
+			defer logEvery.Stop()
+			for {
+				c := m.tx.Cursor(name)
+				s, err := c.Count()
+				if err != nil {
+					return err
+				}
+				if s == 0 {
+					break
+				}
+				i := 0
+				var k []byte
+				for k, _, err = c.First(); k != nil; k, _, err = c.First() {
+					if err != nil {
+						return err
+					}
+					select {
+					default:
+					case <-logEvery.C:
+						log.Info("dropping bucket", "name", name, "current key", fmt.Sprintf("%x", k))
+					}
+
+					i++
+					if casted, ok := c.(CursorDupSort); ok {
+						err = casted.DeleteCurrentDuplicates()
+						if err != nil {
+							return err
+						}
+					} else {
+						err = c.DeleteCurrent()
+						if err != nil {
+							return err
+						}
+					}
+					if i == 10_000 {
+						break
+					}
+				}
+
+				c.Close()
+				err = m.CommitAndBegin(context.Background())
+				if err != nil {
+					return err
+				}
+			}
+
+			if err := migrator.ClearBucket(name); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
 	for i := range buckets {
 		name := buckets[i]
 
@@ -425,6 +489,7 @@ func (m *TxDb) ClearBuckets(buckets ...string) error {
 		if !ok {
 			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
 		}
+
 		if err := migrator.ClearBucket(name); err != nil {
 			return err
 		}
