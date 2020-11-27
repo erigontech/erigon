@@ -428,8 +428,6 @@ func (m *TxDb) ClearBuckets(buckets ...string) error {
 			if !ok {
 				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
 			}
-			logEvery := time.NewTicker(30 * time.Second)
-			defer logEvery.Stop()
 			for {
 				c := m.tx.Cursor(name)
 				s, err := c.Count()
