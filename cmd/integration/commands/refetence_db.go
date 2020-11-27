@@ -340,6 +340,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 						return err
 					}
 				}
+				prevK = k
 			} else {
 				if err = casted.Append(k, v); err != nil {
 					return err
