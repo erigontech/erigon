@@ -560,6 +560,27 @@ func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 	return nil, false
 }
 
+// GetDeletedAccount attempts to retrieve the last version of account before it was deleted
+func (sc *StateCache) GetDeletedAccount(address []byte) *accounts.Account {
+	var key AccountItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	//nolint:errcheck
+	h.Sha.Write(address)
+	//nolint:errcheck
+	h.Sha.Read(key.addrHash[:])
+	item := sc.readWrites.Get(&key)
+	if item == nil {
+		return nil
+	}
+	ai := item.(*AccountItem)
+	if !ai.HasFlag(DeletedFlag) {
+		return nil
+	}
+	return &ai.account
+}
+
 // GetStorage searches storage item with given address, incarnation, and location, without modifying any structures
 // Second return value is true if such item is found
 func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []byte) ([]byte, bool) {
@@ -669,10 +690,10 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		sc.readSize -= cacheItem.GetSize()
 		sc.writeSize += writeItem.GetSize()
 		sc.writeSize -= cacheWriteItem.GetSize()
-		cacheItem.CopyValueFrom(item)
 		if delete {
 			cacheItem.SetFlags(DeletedFlag)
 		} else {
+			cacheItem.CopyValueFrom(item)
 			cacheItem.ClearFlags(DeletedFlag)
 		}
 		cacheItem.SetSequence(sc.sequence)
@@ -686,11 +707,11 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		heap.Remove(&sc.readQueue, cacheItem.GetQueuePos())
 		sc.readSize += item.GetSize()
 		sc.readSize -= cacheItem.GetSize()
-		cacheItem.CopyValueFrom(item)
 		cacheItem.SetFlags(ModifiedFlag)
 		if delete {
 			cacheItem.SetFlags(DeletedFlag)
 		} else {
+			cacheItem.CopyValueFrom(item)
 			cacheItem.ClearFlags(DeletedFlag)
 		}
 		cacheItem.SetSequence(sc.sequence)

@@ -360,6 +360,31 @@ func TestWriteAccountExceedLimit(t *testing.T) {
 	}
 }
 
+func TestGetDeletedAccount(t *testing.T) {
+	sc := NewStateCache(32, 4*accountItemSize)
+	var account1 accounts.Account
+	account1.Balance.SetUint64(1)
+	account1.Incarnation = 1
+	var addr1 common.Address
+	addr1[0] = 1
+	sc.SetAccountRead(addr1.Bytes(), &account1)
+	var account11 accounts.Account
+	account11.Incarnation = 2
+	sc.SetAccountWrite(addr1.Bytes(), &account11)
+	acc := sc.GetDeletedAccount(addr1.Bytes())
+	if acc != nil {
+		t.Fatalf("Did not expect to find deleted account before deletion")
+	}
+	sc.SetAccountDelete(addr1.Bytes())
+	acc = sc.GetDeletedAccount(addr1.Bytes())
+	if acc == nil {
+		t.Fatalf("Expected to find deleted account")
+	}
+	if acc.Incarnation != 2 {
+		t.Fatalf("Expected to find deleted account with incarnation 2, got %d", acc.Incarnation)
+	}
+}
+
 func TestReadWriteAbsentDeleteStorage(t *testing.T) {
 	sc := NewStateCache(32, 4*storageItemSize)
 	// Add absents
