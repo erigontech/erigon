@@ -461,7 +461,7 @@ func (m *TxDb) ClearBuckets(buckets ...string) error {
 							return err
 						}
 					}
-					if i == 10_000 {
+					if i == 100_000 {
 						break
 					}
 				}
