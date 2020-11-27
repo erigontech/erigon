@@ -74,7 +74,7 @@ pics:
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
 rpcdaemon:
-	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X commands.gitCommit=${GIT_COMMIT}" ./cmd/rpcdaemon
+	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X commands.gitCommit=${GIT_COMMIT}" -tags 'mdbx' ./cmd/rpcdaemon
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
