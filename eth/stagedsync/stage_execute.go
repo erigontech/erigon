@@ -132,7 +132,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		} else {
 			stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
 		}
-		stateWriter = state.NewCachedWriter(stateWriter, cache)
+		if cache != nil {
+			stateWriter = state.NewCachedWriter(stateWriter, cache)
+		}
 
 		// where the magic happens
 		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
