@@ -15,10 +15,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/stretchr/testify/assert"
 )
@@ -59,17 +61,12 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.FailNow()
 	}
 
-	indexBytes, innerErr := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes(), 1)
-	if innerErr != nil {
+	index, err := bitmapdb.Get(db, dbutils.AccountsHistoryBucket, addrHashes[0].Bytes(), 0, math.MaxUint32)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	index := dbutils.WrapHistoryIndex(indexBytes)
-
-	parsed, _, innerErr := index.Decode()
-	if innerErr != nil {
-		t.Fatal(innerErr)
-	}
+	parsed := index.ToArray()
 	if parsed[0] != 1 {
 		t.Fatal("incorrect block num")
 	}
@@ -125,18 +122,13 @@ func TestMutationCommitThinHistory(t *testing.T) {
 			t.Fatal("Accounts not equals")
 		}
 
-		indexBytes, err := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addr.Bytes(), 2)
+		index, err := bitmapdb.Get(db, dbutils.AccountsHistoryBucket, addr.Bytes(), 0, math.MaxUint32)
 		if err != nil {
-			t.Fatal("error on get account", i, err)
+			t.Fatal(err)
 		}
 
-		index := dbutils.WrapHistoryIndex(indexBytes)
-		parsedIndex, _, err := index.Decode()
-		if err != nil {
-			t.Fatal("error on get account", i, err)
-		}
-
-		if parsedIndex[0] != 1 && index.Len() != 1 {
+		parsedIndex := index.ToArray()
+		if parsedIndex[0] != 1 && index.GetCardinality() != 1 {
 			t.Fatal("incorrect history index")
 		}
 

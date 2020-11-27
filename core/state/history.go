@@ -252,7 +252,7 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 		0,                      /* fixedBits */
 		common.AddressLength,   /* part1end */
 		common.AddressLength,   /* part2start */
-		common.AddressLength+8, /* part3start */
+		common.AddressLength+4, /* part3start */
 	)
 	csCursor := tx.CursorDupSort(dbutils.PlainAccountChangeSetBucket)
 	defer csCursor.Close()
@@ -299,7 +299,7 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 			if ok {
 				// Extract value from the changeSet
 				csKey := dbutils.EncodeBlockNumber(changeSetBlock)
-				kData, data, err3 := csCursor.SeekBothRange(dbutils.EncodeBlockNumber(changeSetBlock), hK)
+				kData, data, err3 := csCursor.SeekBothRange(csKey, hK)
 				if err3 != nil {
 					return err3
 				}

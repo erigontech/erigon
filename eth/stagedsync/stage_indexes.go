@@ -119,7 +119,7 @@ func promoteHistory(logPrefix string, db ethdb.Database, changesetBucket string,
 	defer logEvery.Stop()
 
 	updates := map[string]*roaring.Bitmap{}
-	creates := map[string]*roaring.Bitmap{}
+	//creates := map[string]*roaring.Bitmap{}
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
 
@@ -159,14 +159,14 @@ func promoteHistory(logPrefix string, db ethdb.Database, changesetBucket string,
 		}
 
 		kStr := string(k)
-		if len(v) == 0 {
-			m, ok := creates[kStr]
-			if !ok {
-				m = roaring.New()
-				creates[kStr] = m
-			}
-			m.Add(uint32(blockN))
-		}
+		//if len(v) == 0 {
+		//	m, ok := creates[kStr]
+		//	if !ok {
+		//		m = roaring.New()
+		//		creates[kStr] = m
+		//	}
+		//	m.Add(uint32(blockN))
+		//}
 		m, ok := updates[kStr]
 		if !ok {
 			m = roaring.New()

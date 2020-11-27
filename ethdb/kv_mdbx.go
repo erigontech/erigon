@@ -588,7 +588,7 @@ func (tx *mdbxTx) Commit(ctx context.Context) error {
 	if tx.tx == nil {
 		return nil
 	}
-	defer func() {
+	defer func()
 		tx.tx = nil
 		if !tx.isSubTx {
 			tx.db.wg.Done()

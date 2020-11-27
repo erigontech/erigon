@@ -14,7 +14,7 @@ import (
 )
 
 var historyAccBitmap = Migration{
-	Name: "history_account_bitmap_14",
+	Name: "history_account_bitmap",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -65,7 +65,7 @@ var historyAccBitmap = Migration{
 			}
 			collectorB.Close(logPrefix)
 		}()
-		if err = db.Walk(dbutils.AccountsHistoryBucket2, nil, 0, func(k, v []byte) (bool, error) {
+		if err = db.Walk(dbutils.AccountsHistoryBucket, nil, 0, func(k, v []byte) (bool, error) {
 			select {
 			default:
 			case <-logEvery.C:
@@ -131,7 +131,7 @@ var historyAccBitmap = Migration{
 }
 
 var historyStorageBitmap = Migration{
-	Name: "history_storage_bitmap_14",
+	Name: "history_storage_bitmap",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -182,7 +182,7 @@ var historyStorageBitmap = Migration{
 			}
 			collectorB.Close(logPrefix)
 		}()
-		if err = db.Walk(dbutils.StorageHistoryBucket2, nil, 0, func(k, v []byte) (bool, error) {
+		if err = db.Walk(dbutils.StorageHistoryBucket, nil, 0, func(k, v []byte) (bool, error) {
 			select {
 			default:
 			case <-logEvery.C:

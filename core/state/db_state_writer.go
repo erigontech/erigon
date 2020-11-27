@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -254,23 +255,15 @@ func (dsw *DbStateWriter) WriteHistory() error {
 }
 
 func writeIndex(blocknum uint64, changes *changeset.ChangeSet, bucket string, changeDb ethdb.GetterPutter) error {
+	buf := bytes.NewBuffer(nil)
 	for _, change := range changes.Changes {
 		k := dbutils.CompositeKeyWithoutIncarnation(change.Key)
-		index := roaring.New()
 
-		indexBytes, err := changeDb.Get(bucket, k)
-		if err != nil && err != ethdb.ErrKeyNotFound {
+		index, err := bitmapdb.Get(changeDb, bucket, k, 0, math.MaxUint32)
+		if err != nil {
 			return fmt.Errorf("find chunk failed: %w", err)
 		}
-		if len(indexBytes) > 0 {
-			_, err = index.FromBuffer(indexBytes)
-		}
-		if err != nil {
-			return err
-		}
 		index.Add(uint32(blocknum))
-		buf := bytes.NewBuffer(nil)
-
 		if err = bitmapdb.WalkChunkWithKeys(k, index, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring.Bitmap) error {
 			buf.Reset()
 			if _, err = chunk.WriteTo(buf); err != nil {
