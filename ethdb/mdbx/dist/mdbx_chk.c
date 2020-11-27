@@ -34,7 +34,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY 8d6e38d79c0c12de0524b2725ce3cd654a2b19095f635450f971020f4fda7173_v0_9_1_138_g6d2914c9
+#define MDBX_BUILD_SOURCERY 7386e70918ee962c2a528e023183881d607461e5e1740d95d04df9cbb3f63c56_v0_9_1_138_g6d2914c9
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
