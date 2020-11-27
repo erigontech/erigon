@@ -362,8 +362,8 @@ func toMdbx(ctx context.Context, from, to string) error {
 				}
 				c = dstTx.Cursor(name)
 			}
-			prevK = nil
 		}
+		prevK = nil
 
 		// migrate bucket sequences to native mdbx implementation
 		currentID, err := srcTx.Sequence(name, 0)
