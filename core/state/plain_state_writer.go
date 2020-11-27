@@ -26,7 +26,7 @@ func NewPlainStateWriter(db ethdb.Database, changeSetsDB ethdb.Database, blockNu
 	return &PlainStateWriter{
 		db:           db,
 		changeSetsDB: changeSetsDB,
-		csw:          NewChangeSetWriterPlain(blockNumber),
+		csw:          NewChangeSetWriterPlain(changeSetsDB, blockNumber),
 		blockNumber:  blockNumber,
 	}
 }

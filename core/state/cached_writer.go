@@ -21,21 +21,33 @@ func NewCachedWriter(w WriterWithChangeSets, cache *shards.StateCache) *CachedWr
 }
 
 func (cw *CachedWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
+	if err := cw.w.UpdateAccountData(ctx, address, original, account); err != nil {
+		return err
+	}
 	cw.cache.SetAccountWrite(address.Bytes(), account)
 	return nil
 }
 
 func (cw *CachedWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	if err := cw.w.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
+		return err
+	}
 	cw.cache.SetCodeWrite(address.Bytes(), incarnation, code)
 	return nil
 }
 
 func (cw *CachedWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
+	if err := cw.w.DeleteAccount(ctx, address, original); err != nil {
+		return err
+	}
 	cw.cache.SetAccountDelete(address.Bytes())
 	return nil
 }
 
 func (cw *CachedWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	if err := cw.w.WriteAccountStorage(ctx, address, incarnation, key, original, value); err != nil {
+		return err
+	}
 	if *original == *value {
 		return nil
 	}

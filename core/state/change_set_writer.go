@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 type changesetFactory func() *changeset.ChangeSet
@@ -45,6 +46,7 @@ func plainStorageKeyGen(address common.Address, incarnation uint64, key common.H
 
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type ChangeSetWriter struct {
+	db             ethdb.Database
 	accountChanges map[common.Address][]byte
 	storageChanged map[common.Address]bool
 	storageChanges map[string][]byte
@@ -66,8 +68,9 @@ func NewChangeSetWriter() *ChangeSetWriter {
 		storageKeyGen:  hashedStorageKeyGen,
 	}
 }
-func NewChangeSetWriterPlain(blockNumber uint64) *ChangeSetWriter {
+func NewChangeSetWriterPlain(db ethdb.Database, blockNumber uint64) *ChangeSetWriter {
 	return &ChangeSetWriter{
+		db:             db,
 		accountChanges: make(map[common.Address][]byte),
 		storageChanged: make(map[common.Address]bool),
 		storageChanges: make(map[string][]byte),
@@ -161,6 +164,54 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 }
 
 func (w *ChangeSetWriter) CreateContract(address common.Address) error {
+	return nil
+}
+
+func (w *ChangeSetWriter) WriteChangeSets() error {
+	accountChanges, err := w.GetAccountChanges()
+	if err != nil {
+		return err
+	}
+	if err = changeset.Mapper[dbutils.PlainAccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
+		return w.db.Append(dbutils.PlainAccountChangeSetBucket, k, v)
+	}); err != nil {
+		return err
+	}
+
+	storageChanges, err := w.GetStorageChanges()
+	if err != nil {
+		return err
+	}
+	if storageChanges.Len() == 0 {
+		return nil
+	}
+	if err = changeset.Mapper[dbutils.PlainStorageChangeSetBucket].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
+		return w.db.Append(dbutils.PlainStorageChangeSetBucket, k, v)
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *ChangeSetWriter) WriteHistory() error {
+	accountChanges, err := w.GetAccountChanges()
+	if err != nil {
+		return err
+	}
+	err = writeIndex(w.blockNumber, accountChanges, dbutils.AccountsHistoryBucket, w.db)
+	if err != nil {
+		return err
+	}
+
+	storageChanges, err := w.GetStorageChanges()
+	if err != nil {
+		return err
+	}
+	err = writeIndex(w.blockNumber, storageChanges, dbutils.StorageHistoryBucket, w.db)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

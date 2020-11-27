@@ -129,11 +129,10 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 
 		if params.WriterBuilder != nil {
 			stateWriter = params.WriterBuilder(batch, tx, blockNum)
-		} else {
+		} else if cache == nil {
 			stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
-		}
-		if cache != nil {
-			stateWriter = state.NewCachedWriter(stateWriter, cache)
+		} else {
+			stateWriter = state.NewCachedWriter(state.NewChangeSetWriterPlain(tx, blockNum), cache)
 		}
 
 		// where the magic happens
