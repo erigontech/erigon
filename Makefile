@@ -69,7 +69,7 @@ run-web-ui:
 	@cd debug-web-ui && yarn start
 
 pics:
-	$(GOBUILD) -o $(GOBIN)/pics ./cmd/pics
+	$(GOBUILD) -o $(GOBIN)/pics -tags 'mdbx' ./cmd/pics
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
