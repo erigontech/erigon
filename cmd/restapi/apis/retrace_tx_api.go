@@ -63,7 +63,7 @@ func Retrace(blockNumber, chain string, kv ethdb.KV, db ethdb.Database) (Retrace
 		return RetraceResponse{}, err
 	}
 	chainCtx := NewRemoteContext(kv, db)
-	writer := state.NewChangeSetWriterPlain(uint64(bn - 1))
+	writer := state.NewChangeSetWriterPlain(db, uint64(bn-1))
 	reader := NewRemoteReader(kv, uint64(bn))
 	intraBlockState := state.New(reader)
 
