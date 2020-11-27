@@ -294,8 +294,13 @@ func fToMdbx(ctx context.Context, to string) error {
 func toMdbx(ctx context.Context, from, to string) error {
 	_ = os.RemoveAll(to)
 
-	src := ethdb.NewLMDB().Path(from).Flags(lmdb.Readonly).MustOpen()
-	dst := ethdb.NewMDBX().Path(to).Flags(mdbx.WriteMap | mdbx.SafeNoSync | mdbx.NoMemInit).MustOpen()
+	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint {
+		return flags | lmdb.Readonly ^ lmdb.NoReadahead
+	}).MustOpen()
+	dst := ethdb.NewMDBX().Path(to).Flags(func(flags uint) uint {
+		return flags | mdbx.WriteMap | mdbx.NoMemInit
+	}).MustOpen()
+
 	srcTx, err1 := src.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return err1
@@ -309,10 +314,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		dstTx.Rollback()
 	}()
 
-	logEvery := time.NewTicker(15 * time.Second)
-	defer logEvery.Stop()
-
-	commitEvery := time.NewTicker(30 * time.Second)
+	commitEvery := time.NewTicker(15 * time.Second)
 	defer commitEvery.Stop()
 
 	for name, b := range dbutils.BucketsConfigs {
@@ -342,9 +344,8 @@ func toMdbx(ctx context.Context, from, to string) error {
 			default:
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-logEvery.C:
-				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
 			case <-commitEvery.C:
+				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
 				if err2 := dstTx.Commit(ctx); err2 != nil {
 					return err2
 				}

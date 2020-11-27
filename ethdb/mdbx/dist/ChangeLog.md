@@ -56,6 +56,8 @@ Fixes:
  - Added workaround for MSVC 19.28 (Visual Studio 16.8) (but may still hang during compilation).
  - Fixed paranoidal Clang C++ UB for bitwise operations with flags defined by enums.
  - Fixed large pages checking (for compatibility and to avoid false-positive errors from `mdbx_chk`).
+ - Added workaround for Wine (https://github.com/miranda-ng/miranda-ng/issues/1209).
+ - Fixed `ERROR_NOT_SUPPORTED` while opening DB by UNC pathnames (https://github.com/miranda-ng/miranda-ng/issues/2627).
 
 
 ## v0.9.1 2020-09-30

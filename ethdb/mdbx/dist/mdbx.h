@@ -1347,9 +1347,9 @@ enum MDBX_db_flags_t {
   /** With \ref MDBX_DUPSORT; sorted dup items have fixed size */
   MDBX_DUPFIXED = UINT32_C(0x10),
 
-  /** With \ref MDBX_DUPSORT; dups are \ref MDBX_INTEGERKEY -style integers. The
-   * data values must all be of the same size and must be aligned while passing
-   * as arguments. */
+  /** With \ref MDBX_DUPSORT and with \ref MDBX_DUPFIXED; dups are fixed size
+   * \ref MDBX_INTEGERKEY -style integers. The data values must all be of the
+   * same size and must be aligned while passing as arguments. */
   MDBX_INTEGERDUP = UINT32_C(0x20),
 
   /** With \ref MDBX_DUPSORT; use reverse string comparison */

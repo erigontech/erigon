@@ -3,6 +3,7 @@ package verify
 import (
 	"context"
 	"errors"
+
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -12,7 +13,7 @@ import (
 )
 
 func HeadersSnapshot(snapshotPath string) error {
-	snKV := ethdb.NewLMDB().Path(snapshotPath).Flags(lmdb.Readonly).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snKV := ethdb.NewLMDB().Path(snapshotPath).Flags(func(flags uint) uint { return flags | lmdb.Readonly }).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
 			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},

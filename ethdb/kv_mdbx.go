@@ -18,19 +18,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
-)
-
-var (
-	mdbxPutNoOverwriteTimer = metrics.NewRegisteredTimer("mdbx/put/no_overwrite", nil)
-	mdbxPutCurrentTimer     = metrics.NewRegisteredTimer("mdbx/put/direct", nil)
-	mdbxGetBothRangeTimer   = metrics.NewRegisteredTimer("mdbx/get/both_range", nil)
-	mdbxPutUpsertTimer      = metrics.NewRegisteredTimer("mdbx/put/upsert", nil)
-	mdbxPutCurrent2Timer    = metrics.NewRegisteredTimer("mdbx/put/current2", nil)
-	mdbxPutUpsert2Timer     = metrics.NewRegisteredTimer("mdbx/put/upsert2", nil)
-	mdbxDelCurrentTimer     = metrics.NewRegisteredTimer("mdbx/del/current", nil)
-	mdbxSeekExactTimer      = metrics.NewRegisteredTimer("mdbx/seek/exact", nil)
-	mdbxSeekExact2Timer     = metrics.NewRegisteredTimer("mdbx/seek/exact2", nil)
 )
 
 var _ DbCopier = &MdbxKV{}
@@ -43,6 +30,13 @@ type MdbxOpts struct {
 	bucketsCfg       BucketConfigsFunc
 	mapSize          datasize.ByteSize
 	maxFreelistReuse uint
+}
+
+func NewMDBX() MdbxOpts {
+	return MdbxOpts{
+		bucketsCfg: DefaultBucketConfigs,
+		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
+	}
 }
 
 func (opts MdbxOpts) Path(path string) MdbxOpts {
@@ -64,8 +58,8 @@ func (opts MdbxOpts) Exclusive() MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) Flags(flags uint) MdbxOpts {
-	opts.flags = flags
+func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts {
+	opts.flags = f(opts.flags)
 	return opts
 }
 
@@ -128,18 +122,12 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 	}
 
-	var flags uint = opts.flags | mdbx.NoReadahead
+	var flags = opts.flags
 	if opts.inMem {
+		flags ^= mdbx.Durable
 		flags |= mdbx.NoMetaSync | mdbx.SafeNoSync
-	} else {
-		flags |= mdbx.Durable
-	}
-	if opts.exclusive {
-		flags |= mdbx.Exclusive
 	}
 
-	//flags |= mdbx.LifoReclaim
-	flags |= mdbx.Coalesce
 	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
@@ -247,10 +235,6 @@ type MdbxKV struct {
 	log     log.Logger
 	buckets dbutils.BucketsCfg
 	wg      *sync.WaitGroup
-}
-
-func NewMDBX() MdbxOpts {
-	return MdbxOpts{bucketsCfg: DefaultBucketConfigs}
 }
 
 // Close closes db
@@ -526,19 +510,29 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 			if err != nil {
 				return err
 			}
-			err = c.DeleteCurrent()
-			if err != nil {
-				return err
-			}
-			i++
-			if i == 100_000 {
-				break
-			}
-
 			select {
 			default:
 			case <-logEvery.C:
 				log.Info("dropping bucket", "name", name, "current key", fmt.Sprintf("%x", k))
+			}
+
+			i++
+			if casted, ok := c.(CursorDupSort); ok {
+				err = casted.DeleteCurrentDuplicates()
+				if err != nil {
+					return err
+				}
+				if i == 1_000 {
+					break
+				}
+			} else {
+				err = c.DeleteCurrent()
+				if err != nil {
+					return err
+				}
+				if i == 100_000 {
+					break
+				}
 			}
 		}
 
@@ -605,7 +599,7 @@ func (tx *mdbxTx) Commit(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if latency.Whole > 1*time.Second {
+	if latency.Whole > 20*time.Second {
 		log.Info("Commit", "preparation", latency.Preparation, "gc", latency.GC, "audit", latency.Audit, "write", latency.Write, "fsync", latency.Sync, "ending", latency.Ending, "whole", latency.Whole)
 	}
 
@@ -1180,19 +1174,10 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 	}
 
 	if len(key) != from {
-		t := time.Now()
 		err := c.putNoOverwrite(key, value)
-		if c.bucketName == dbutils.PlainStateBucket {
-			mdbxPutNoOverwriteTimer.UpdateSince(t)
-		}
 		if err != nil {
 			if mdbx.IsKeyExists(err) {
-				t = time.Now()
-				err = c.putCurrent(key, value)
-				if c.bucketName == dbutils.PlainStateBucket {
-					mdbxPutCurrentTimer.UpdateSince(t)
-				}
-				return err
+				return c.putCurrent(key, value)
 			}
 			return err
 		}
@@ -1201,48 +1186,25 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 
 	value = append(key[to:], value...)
 	key = key[:to]
-	t := time.Now()
 	_, v, err := c.getBothRange(key, value[:from-to])
-	if c.bucketName == dbutils.PlainStateBucket {
-		mdbxGetBothRangeTimer.UpdateSince(t)
-	}
 	if err != nil { // if key not found, or found another one - then just insert
 		if mdbx.IsNotFound(err) {
-			t = time.Now()
-			err = c.put(key, value)
-			if c.bucketName == dbutils.PlainStateBucket {
-				mdbxPutUpsertTimer.UpdateSince(t)
-			}
-			return err
+			return c.put(key, value)
 		}
 		return err
 	}
 
 	if bytes.Equal(v[:from-to], value[:from-to]) {
 		if len(v) == len(value) { // in DupSort case mdbx.Current works only with values of same length
-			t = time.Now()
-			err = c.putCurrent(key, value)
-			if c.bucketName == dbutils.PlainStateBucket {
-				mdbxPutCurrent2Timer.UpdateSince(t)
-			}
-			return err
+			return c.putCurrent(key, value)
 		}
-		t = time.Now()
 		err = c.delCurrent()
-		if c.bucketName == dbutils.PlainStateBucket {
-			mdbxDelCurrentTimer.UpdateSince(t)
-		}
 		if err != nil {
 			return err
 		}
 	}
 
-	t = time.Now()
-	err = c.put(key, value)
-	if c.bucketName == dbutils.PlainStateBucket {
-		mdbxPutUpsert2Timer.UpdateSince(t)
-	}
-	return err
+	return c.put(key, value)
 }
 
 func (c *MdbxCursor) PutCurrent(key []byte, value []byte) error {
@@ -1274,11 +1236,7 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
-		t := time.Now()
 		k, v, err := c.getBothRange(key[:to], key[to:])
-		if c.bucketName == dbutils.PlainStateBucket {
-			mdbxSeekExactTimer.UpdateSince(t)
-		}
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil, nil, nil
@@ -1291,11 +1249,7 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 		return k, v[from-to:], nil
 	}
 
-	t := time.Now()
 	_, v, err := c.set(key)
-	if c.bucketName == dbutils.PlainStateBucket {
-		mdbxSeekExact2Timer.UpdateSince(t)
-	}
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil

@@ -82,7 +82,7 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 	default:
 		opts := NewLMDB().Path(path)
 		if readOnly {
-			opts = opts.Flags(lmdb.Readonly)
+			opts = opts.Flags(func(flags uint) uint { return flags | lmdb.Readonly })
 		}
 		kv, err = opts.Open()
 	}

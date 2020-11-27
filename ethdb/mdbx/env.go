@@ -32,12 +32,9 @@ const (
 	Readonly   = C.MDBX_RDONLY     // Used in several functions to denote an object as readonly.
 	WriteMap   = C.MDBX_WRITEMAP   // Use a writable memory map.
 	NoMetaSync = C.MDBX_NOMETASYNC // Don't fsync metapage after commit.
-	//NoSync      = C.MDBX_NOSYNC     // Don't fsync after commit.
-	SafeNoSync    = C.MDBX_SAFE_NOSYNC
-	Durable       = C.MDBX_SYNC_DURABLE
-	UtterlyNoSync = C.MDBX_UTTERLY_NOSYNC
-	MapAsync      = C.MDBX_MAPASYNC // Flush asynchronously when using the WriteMap flag.
-	NoTLS         = C.MDBX_NOTLS    // Danger zone. When unset reader locktable slots are tied to their thread.
+	SafeNoSync = C.MDBX_SAFE_NOSYNC
+	Durable    = C.MDBX_SYNC_DURABLE
+	NoTLS      = C.MDBX_NOTLS // Danger zone. When unset reader locktable slots are tied to their thread.
 	//NoLock      = C.MDBX_NOLOCK     // Danger zone. LMDB does not use any locks.
 	NoReadahead = C.MDBX_NORDAHEAD // Disable readahead. Requires OS support.
 	NoMemInit   = C.MDBX_NOMEMINIT // Disable LMDB memory initialization.

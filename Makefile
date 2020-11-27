@@ -104,9 +104,9 @@ db-tools:
 ethdb/mdbx/dist/libmdbx.a:
 	echo "Building mdbx"
 	cd ethdb/mdbx/dist/ \
-		&& make config.h \
-		&& echo '#define MDBX_HUGE_TRANSACTIONS 1' > config.h \
-		&& echo '#define MDBX_TXN_CHECKOWNER 1' > config.h \
+		&& make clean && make config.h \
+		&& echo '#define MDBX_HUGE_TRANSACTIONS 1' >> config.h \
+		&& echo '#define MDBX_TXN_CHECKOWNER 0' >> config.h \
 		&& CFLAGS_EXTRA="-Wno-deprecated-declarations" make libmdbx.a
 
 test: ethdb/mdbx/dist/libmdbx.a

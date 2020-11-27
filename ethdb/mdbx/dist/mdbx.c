@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 7fb62b9ea3b7a16a523a861bb0c0eea52baa9cd0b2437b1964dfa5696dea557e_v0_9_1_131_gf76bf72
+#define MDBX_BUILD_SOURCERY 8d6e38d79c0c12de0524b2725ce3cd654a2b19095f635450f971020f4fda7173_v0_9_1_138_g6d2914c9
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -7834,9 +7834,11 @@ static __cold int mdbx_mapresize(MDBX_env *env, const pgno_t used_pgno,
     goto bailout;
 
   if (limit_bytes != env->me_dxb_mmap.limit && env->me_lck && !implicit) {
-    rc = mdbx_rdt_lock(env) /* lock readers table until remap done */;
-    if (unlikely(rc != MDBX_SUCCESS))
+    int err = mdbx_rdt_lock(env) /* lock readers table until remap done */;
+    if (unlikely(MDBX_IS_ERROR(err))) {
+      rc = err;
       goto bailout;
+    }
 
     /* looking for readers from this process */
     MDBX_lockinfo *const lck = env->me_lck;
@@ -12569,9 +12571,11 @@ mdbx_env_set_geometry(MDBX_env *env, intptr_t size_lower, intptr_t size_now,
           rc = MDBX_EPERM;
           goto bailout;
         }
-        rc = mdbx_rdt_lock(env);
-        if (unlikely(rc != MDBX_SUCCESS))
+        int err = mdbx_rdt_lock(env);
+        if (unlikely(MDBX_IS_ERROR(err))) {
+          rc = err;
           goto bailout;
+        }
 
         /* Check if there are any reading threads that do not use the SRWL */
         const size_t CurrentTid = GetCurrentThreadId();
@@ -13149,7 +13153,9 @@ static __cold int mdbx_setup_lck(MDBX_env *env, char *lck_pathname,
 
     /* ensure the file system is read-only */
     err = mdbx_check_fs_rdonly(env->me_lazy_fd, lck_pathname, err);
-    if (err != MDBX_SUCCESS)
+    if (err != MDBX_SUCCESS &&
+        /* ignore ERROR_NOT_SUPPORTED for exclusive mode */
+        !(err == MDBX_ENOSYS && (env->me_flags & MDBX_EXCLUSIVE)))
       return err;
 
     /* LY: without-lck mode (e.g. exclusive or on read-only filesystem) */
@@ -13836,6 +13842,13 @@ __cold int mdbx_env_open(MDBX_env *env, const char *pathname,
     rc = lck_rc;
     goto bailout;
   }
+
+  /* Set the position in files outside of the data to avoid corruption
+   * due to erroneous use of file descriptors in the application code. */
+  mdbx_fseek(env->me_lfd, UINT64_C(1) << 63);
+  mdbx_fseek(env->me_lazy_fd, UINT64_C(1) << 63);
+  if (env->me_dsync_fd != INVALID_HANDLE_VALUE)
+    mdbx_fseek(env->me_dsync_fd, UINT64_C(1) << 63);
 
   const MDBX_env_flags_t rigorous_flags =
       MDBX_SAFE_NOSYNC | MDBX_DEPRECATED_MAPASYNC;
@@ -23181,6 +23194,9 @@ typedef struct _FILE_PROVIDER_EXTERNAL_INFO_V1 {
 #ifndef STATUS_INVALID_DEVICE_REQUEST
 #define STATUS_INVALID_DEVICE_REQUEST ((NTSTATUS)0xC0000010L)
 #endif
+#ifndef STATUS_NOT_SUPPORTED
+#define STATUS_NOT_SUPPORTED ((NTSTATUS)0xC00000BBL)
+#endif
 
 #ifndef FILE_DEVICE_FILE_SYSTEM
 #define FILE_DEVICE_FILE_SYSTEM 0x00000009
@@ -24128,7 +24144,8 @@ static int mdbx_check_fs_local(mdbx_filehandle_t handle, int flags) {
       if (!(flags & MDBX_EXCLUSIVE))
         return ERROR_REMOTE_STORAGE_MEDIA_ERROR;
     } else if (rc != STATUS_OBJECT_NOT_EXTERNALLY_BACKED &&
-               rc != STATUS_INVALID_DEVICE_REQUEST)
+               rc != STATUS_INVALID_DEVICE_REQUEST &&
+               rc != STATUS_NOT_SUPPORTED)
       return ntstatus2errcode(rc);
   }
 
@@ -24512,10 +24529,9 @@ MDBX_INTERNAL_FUNC int mdbx_mresize(int flags, mdbx_mmap_t *map, size_t size,
   LARGE_INTEGER SectionSize;
   int err, rc = MDBX_SUCCESS;
 
-  if (!(flags & MDBX_RDONLY) && limit == map->limit && size > map->current) {
+  if (!(flags & MDBX_RDONLY) && limit == map->limit && size > map->current &&
+      /* workaround for Wine */ mdbx_NtExtendSection) {
     /* growth rw-section */
-    if (!mdbx_NtExtendSection)
-      return MDBX_UNABLE_EXTEND_MAPSIZE /* workaround for Wine */;
     SectionSize.QuadPart = size;
     status = mdbx_NtExtendSection(map->section, &SectionSize);
     if (!NT_SUCCESS(status))
@@ -25397,9 +25413,9 @@ __dll_export
         0,
         9,
         1,
-        131,
-        {"2020-11-20T11:52:44+03:00", "5bab85712c2a208b2bf3cc6a4643f9b4a1f375d0", "f76bf7202146022baed0fd5f4e8da60d5e24846c",
-         "v0.9.1-131-gf76bf72"},
+        138,
+        {"2020-11-25T17:55:29+03:00", "f107e15d0925be4c74830eea091d547250b4edf8", "6d2914c99bf5bd672147f00fc290569b1bb33a8f",
+         "v0.9.1-138-g6d2914c9"},
         sourcery};
 
 __dll_export

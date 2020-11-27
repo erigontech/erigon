@@ -53,7 +53,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snKV := ethdb.NewLMDB().Path(snPath).Flags(lmdb.Readonly).WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
+	snKV := ethdb.NewLMDB().Path(snPath).Flags(func(flags uint) uint { return flags | lmdb.Readonly }).WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
 
 	snKV = ethdb.NewSnapshotKV().For(dbutils.HeaderPrefix).For(dbutils.SnapshotInfoBucket).SnapshotDB(snKV).DB(db).MustOpen()
 	err = GenerateHeaderIndexes(context.Background(), ethdb.NewObjectDatabase(snKV))
