@@ -45,22 +45,22 @@ hack:
 	@echo "Run \"$(GOBIN)/hack\" to launch hack."
 
 tester:
-	$(GOBUILD) -o $(GOBIN)/tester ./cmd/tester
+	$(GOBUILD) -o $(GOBIN)/tester -tags 'mdbx' ./cmd/tester
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tester\" to launch tester."
 
 rpctest:
-	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest
+	$(GOBUILD) -o $(GOBIN)/rpctest -tags 'mdbx' ./cmd/rpctest
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
 
 state:
-	$(GOBUILD) -o $(GOBIN)/state ./cmd/state
+	$(GOBUILD) -o $(GOBIN)/state -tags 'mdbx' ./cmd/state
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/state\" to launch state."
 
 restapi:
-	$(GOBUILD) -o $(GOBIN)/restapi ./cmd/restapi
+	$(GOBUILD) -o $(GOBIN)/restapi -tags 'mdbx' ./cmd/restapi
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/restapi\" to launch restapi."
 
