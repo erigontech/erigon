@@ -79,7 +79,7 @@ rpcdaemon:
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
 integration:
-	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
+	$(GOBUILD) -o $(GOBIN)/integration -tags 'mdbx' ./cmd/integration
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
