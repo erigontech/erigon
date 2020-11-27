@@ -418,7 +418,7 @@ func (m *TxDb) BucketExists(name string) (bool, error) {
 }
 
 func (m *TxDb) ClearBuckets(buckets ...string) error {
-	if _, ok := m.tx.(*mdbxTx); ok {
+	if _, ok := m.tx.(*MdbxTx); ok {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 		for i := range buckets {

@@ -295,7 +295,7 @@ func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (Tx, error)
 
 	var parentTx *mdbx.Txn
 	if parent != nil {
-		parentTx = parent.(*mdbxTx).tx
+		parentTx = parent.(*MdbxTx).tx
 	}
 	tx, err := db.env.BeginTxn(parentTx, nativeFlags)
 	if err != nil {
@@ -305,14 +305,14 @@ func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (Tx, error)
 		return nil, err
 	}
 	tx.RawRead = true
-	return &mdbxTx{
+	return &MdbxTx{
 		db:      db,
 		tx:      tx,
 		isSubTx: isSubTx,
 	}, nil
 }
 
-type mdbxTx struct {
+type MdbxTx struct {
 	isSubTx bool
 	tx      *mdbx.Txn
 	db      *MdbxKV
@@ -320,7 +320,7 @@ type mdbxTx struct {
 }
 
 type MdbxCursor struct {
-	tx         *mdbxTx
+	tx         *MdbxTx
 	bucketName string
 	dbi        mdbx.DBI
 	bucketCfg  dbutils.BucketConfigItem
@@ -345,7 +345,7 @@ func (db *MdbxKV) AllBuckets() dbutils.BucketsCfg {
 	return db.buckets
 }
 
-func (tx *mdbxTx) Comparator(bucket string) dbutils.CmpFunc {
+func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {
 	b := tx.db.buckets[bucket]
 	return chooseComparator2(tx.tx, mdbx.DBI(b.DBI), b)
 }
@@ -380,21 +380,21 @@ func CustomDupCmpFunc2(tx *mdbx.Txn, dbi mdbx.DBI) dbutils.CmpFunc {
 }
 
 // Cmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
-func (tx *mdbxTx) Cmp(bucket string, a, b []byte) int {
+func (tx *MdbxTx) Cmp(bucket string, a, b []byte) int {
 	return tx.tx.Cmp(mdbx.DBI(tx.db.buckets[bucket].DBI), a, b)
 }
 
 // DCmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
-func (tx *mdbxTx) DCmp(bucket string, a, b []byte) int {
+func (tx *MdbxTx) DCmp(bucket string, a, b []byte) int {
 	return tx.tx.DCmp(mdbx.DBI(tx.db.buckets[bucket].DBI), a, b)
 }
 
-func (tx *mdbxTx) Sequence(bucket string, amount uint64) (uint64, error) {
+func (tx *MdbxTx) Sequence(bucket string, amount uint64) (uint64, error) {
 	return tx.tx.Sequence(mdbx.DBI(tx.db.buckets[bucket].DBI), amount)
 }
 
 // All buckets stored as keys of un-named bucket
-func (tx *mdbxTx) ExistingBuckets() ([]string, error) {
+func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
 	var res []string
 	rawTx := tx.tx
 	root, err := rawTx.OpenRoot(0)
@@ -451,7 +451,7 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	return nil
 }
 
-func (tx *mdbxTx) CreateBucket(name string) error {
+func (tx *MdbxTx) CreateBucket(name string) error {
 	var flags = tx.db.buckets[name].Flags
 	var nativeFlags uint
 	if tx.db.opts.flags&mdbx.Readonly == 0 {
@@ -479,7 +479,7 @@ func (tx *mdbxTx) CreateBucket(name string) error {
 	return nil
 }
 
-func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
+func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	dbi := tx.db.buckets[name].DBI
 	// if bucket was not open on db start, then it's may be deprecated
 	// try to open it now without `Create` flag, and if fail then nothing to drop
@@ -502,14 +502,14 @@ func (tx *mdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	return nil
 }
 
-func (tx *mdbxTx) ClearBucket(bucket string) error {
+func (tx *MdbxTx) ClearBucket(bucket string) error {
 	if err := tx.dropEvenIfBucketIsNotDeprecated(bucket); err != nil {
 		return err
 	}
 	return tx.CreateBucket(bucket)
 }
 
-func (tx *mdbxTx) DropBucket(bucket string) error {
+func (tx *MdbxTx) DropBucket(bucket string) error {
 	if cfg, ok := tx.db.buckets[bucket]; !(ok && cfg.IsDeprecated) {
 		return fmt.Errorf("%w, bucket: %s", ErrAttemptToDeleteNonDeprecatedBucket, bucket)
 	}
@@ -517,14 +517,14 @@ func (tx *mdbxTx) DropBucket(bucket string) error {
 	return tx.dropEvenIfBucketIsNotDeprecated(bucket)
 }
 
-func (tx *mdbxTx) ExistsBucket(bucket string) bool {
+func (tx *MdbxTx) ExistsBucket(bucket string) bool {
 	if cfg, ok := tx.db.buckets[bucket]; ok {
 		return cfg.DBI != NonExistingDBI
 	}
 	return false
 }
 
-func (tx *mdbxTx) Commit(ctx context.Context) error {
+func (tx *MdbxTx) Commit(ctx context.Context) error {
 	if tx.db.env == nil {
 		return fmt.Errorf("db closed")
 	}
@@ -550,7 +550,7 @@ func (tx *mdbxTx) Commit(ctx context.Context) error {
 	return nil
 }
 
-func (tx *mdbxTx) Rollback() {
+func (tx *MdbxTx) Rollback() {
 	if tx.db.env == nil {
 		return
 	}
@@ -568,11 +568,11 @@ func (tx *mdbxTx) Rollback() {
 	tx.tx.Abort()
 }
 
-func (tx *mdbxTx) get(dbi mdbx.DBI, key []byte) ([]byte, error) {
+func (tx *MdbxTx) get(dbi mdbx.DBI, key []byte) ([]byte, error) {
 	return tx.tx.Get(dbi, key)
 }
 
-func (tx *mdbxTx) closeCursors() {
+func (tx *MdbxTx) closeCursors() {
 	for _, c := range tx.cursors {
 		if c != nil {
 			c.Close()
@@ -591,7 +591,7 @@ func (c *MdbxCursor) Prefetch(v uint) Cursor {
 	return c
 }
 
-func (tx *mdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
+func (tx *MdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
@@ -623,7 +623,7 @@ func (tx *mdbxTx) GetOne(bucket string, key []byte) ([]byte, error) {
 	return val, nil
 }
 
-func (tx *mdbxTx) HasOne(bucket string, key []byte) (bool, error) {
+func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
@@ -651,7 +651,7 @@ func (tx *mdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 	}
 }
 
-func (tx *mdbxTx) BucketSize(name string) (uint64, error) {
+func (tx *MdbxTx) BucketSize(name string) (uint64, error) {
 	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
 	if err != nil {
 		return 0, err
@@ -659,7 +659,7 @@ func (tx *mdbxTx) BucketSize(name string) (uint64, error) {
 	return (st.LeafPages + st.BranchPages + st.OverflowPages) * uint64(os.Getpagesize()), nil
 }
 
-func (tx *mdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
+func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 	if name == "freelist" || name == "gc" || name == "free_list" {
 		return tx.tx.StatDBI(mdbx.DBI(0))
 	}
@@ -669,7 +669,7 @@ func (tx *mdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 	return tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
 }
 
-func (tx *mdbxTx) Cursor(bucket string) Cursor {
+func (tx *MdbxTx) Cursor(bucket string) Cursor {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion {
 		return tx.stdCursor(bucket)
@@ -686,17 +686,17 @@ func (tx *mdbxTx) Cursor(bucket string) Cursor {
 	return tx.stdCursor(bucket)
 }
 
-func (tx *mdbxTx) stdCursor(bucket string) Cursor {
+func (tx *MdbxTx) stdCursor(bucket string) Cursor {
 	b := tx.db.buckets[bucket]
 	return &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI)}
 }
 
-func (tx *mdbxTx) CursorDupSort(bucket string) CursorDupSort {
+func (tx *MdbxTx) CursorDupSort(bucket string) CursorDupSort {
 	basicCursor := tx.stdCursor(bucket).(*MdbxCursor)
 	return &MdbxDupSortCursor{MdbxCursor: basicCursor}
 }
 
-func (tx *mdbxTx) CursorDupFixed(bucket string) CursorDupFixed {
+func (tx *MdbxTx) CursorDupFixed(bucket string) CursorDupFixed {
 	basicCursor := tx.CursorDupSort(bucket).(*MdbxDupSortCursor)
 	return &MdbxDupFixedCursor{MdbxDupSortCursor: basicCursor}
 }
