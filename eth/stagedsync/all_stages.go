@@ -77,7 +77,7 @@ func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, engine c
 		BlockNumber: num - 1,
 	}, db, config, cc, bc.GetVMConfig(), nil, ExecuteBlockStageParams{
 		WriteReceipts: true,
-		CacheSize:     16 * 1024,
+		CacheSize:     0,
 		BatchSize:     8 * 1024,
 	}); err != nil {
 		return err
