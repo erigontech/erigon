@@ -90,10 +90,11 @@ type CacheItem interface {
 	GetSize() int
 	GetQueuePos() int
 	SetQueuePos(pos int)
-	HasFlag(flag uint16) bool     // Check if specified flag is set
-	SetFlags(flags uint16)        // Set specified flags, but leaves other flags alone
-	ClearFlags(flags uint16)      // Clear specified flags, but laves other flags alone
-	CopyValueFrom(item CacheItem) // Copy value (not key) from given item
+	HasFlag(flag uint16) bool        // Check if specified flag is set
+	SetFlags(flags uint16)           // Set specified flags, but leaves other flags alone
+	ClearFlags(flags uint16)         // Clear specified flags, but laves other flags alone
+	CopyValueFrom(item CacheItem)    // Copy value (not key) from given item
+	HasPrefix(prefix CacheItem) bool // Whether this item has specified item as a prefix
 }
 
 type CacheWriteItem interface {
@@ -509,14 +510,16 @@ func (rh *ReadHeap) Pop() interface{} {
 	return cacheItem
 }
 
+// StateCache is the structure containing B-trees and priority queues for the state cache
 type StateCache struct {
-	readWrites *btree.BTree // Mixed reads and writes
-	writes     *btree.BTree // Only writes for the effective iteration
-	readQueue  ReadHeap
-	limit      int //  Total sizr of reads that triggers eviction
-	readSize   int
-	writeSize  int
-	sequence   int
+	readWrites  *btree.BTree // Mixed reads and writes
+	writes      *btree.BTree // Only writes for the effective iteration
+	readQueue   ReadHeap     // Priority queue of read elements eligible for eviction (sorted by sequence)
+	limit       int          // Total size of the readQueue (if new item causes the size to go over the limit, some existing items are evicted)
+	readSize    int
+	writeSize   int
+	sequence    int             // Current sequence assigned to any item that has been "touched" (created, deleted, read). Incremented after every touch
+	unprocQueue UnprocessedHeap // Priority queue of items appeared since last root calculation processing (sorted by the keys - addrHash, incarnation, locHash)
 }
 
 // NewStateCache create a new state cache based on the B-trees of specific degree. The second and the third parameters are the limit on the number of reads and writes to cache, respectively
@@ -525,6 +528,8 @@ func NewStateCache(degree int, limit int) *StateCache {
 	sc.readWrites = btree.New(degree)
 	sc.writes = btree.New(degree)
 	sc.limit = limit
+	heap.Init(&sc.readQueue)
+	heap.Init(&sc.unprocQueue)
 	return &sc
 }
 

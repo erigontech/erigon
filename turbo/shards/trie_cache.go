@@ -307,3 +307,157 @@ func (uh *UnprocessedHeap) Pop() interface{} {
 	uh.items = uh.items[:len(uh.items)-1]
 	return cacheItem
 }
+
+func bytesandmask(bits int) (bytes int, mask byte) {
+	wholeBytes := (bits+7)/8 - 1
+	shiftbits := bits & 7
+	mask = byte(0xff)
+	if shiftbits != 0 {
+		mask = 0xff << (8 - shiftbits)
+	}
+	return wholeBytes, mask
+}
+
+func (ai *AccountItem) HasPrefix(prefix CacheItem) bool {
+	switch i := prefix.(type) {
+	case *AccountItem:
+		return ai.addrHash == i.addrHash && ai.account.Incarnation == i.account.Incarnation
+	case *StorageItem:
+		return false
+	case *CodeItem:
+		return false
+	case *AccountHashItem:
+		wholeBytes, mask := bytesandmask(i.bits)
+		if !bytes.Equal(ai.addrHash[:wholeBytes], i.addrHashPrefix[:wholeBytes]) {
+			return false
+		}
+		return (ai.addrHash[wholeBytes] & mask) == (i.addrHashPrefix[wholeBytes] & mask)
+	case *StorageHashItem:
+		return false
+	default:
+		panic(fmt.Sprintf("unrecognised type of cache item: %T", prefix))
+	}
+}
+
+func (si *StorageItem) HasPrefix(prefix CacheItem) bool {
+	switch i := prefix.(type) {
+	case *AccountItem:
+		return si.addrHash == i.addrHash && si.incarnation == i.account.Incarnation
+	case *StorageItem:
+		return si.addrHash == i.addrHash && si.incarnation == i.incarnation && si.locHash == i.locHash
+	case *CodeItem:
+		return false
+	case *AccountHashItem:
+		wholeBytes, mask := bytesandmask(i.bits)
+		if !bytes.Equal(si.addrHash[:wholeBytes], i.addrHashPrefix[:wholeBytes]) {
+			return false
+		}
+		return (si.addrHash[wholeBytes] & mask) == (i.addrHashPrefix[wholeBytes] & mask)
+	case *StorageHashItem:
+		if si.addrHash != i.addrHash || si.incarnation != i.incarnation {
+			return false
+		}
+		wholeBytes, mask := bytesandmask(i.bits)
+		if !bytes.Equal(si.locHash[:wholeBytes], i.locHashPrefix[:wholeBytes]) {
+			return false
+		}
+		return (si.locHash[wholeBytes] & mask) == (i.locHashPrefix[wholeBytes] & mask)
+	default:
+		panic(fmt.Sprintf("unrecognised type of cache item: %T", prefix))
+	}
+}
+
+func (ci *CodeItem) HasPrefix(prefix CacheItem) bool {
+	switch i := prefix.(type) {
+	case *AccountItem:
+		return ci.addrHash == i.addrHash && ci.incarnation == i.account.Incarnation
+	case *StorageItem:
+		return false
+	case *CodeItem:
+		return ci.addrHash == i.addrHash && ci.incarnation == i.incarnation
+	case *AccountHashItem:
+		wholeBytes, mask := bytesandmask(i.bits)
+		if !bytes.Equal(ci.addrHash[:wholeBytes], i.addrHashPrefix[:wholeBytes]) {
+			return false
+		}
+		return (ci.addrHash[wholeBytes] & mask) == (i.addrHashPrefix[wholeBytes] & mask)
+	case *StorageHashItem:
+		return false
+	default:
+		panic(fmt.Sprintf("unrecognised type of cache item: %T", prefix))
+	}
+}
+
+func (ahi *AccountHashItem) HasPrefix(prefix CacheItem) bool {
+	switch i := prefix.(type) {
+	case *AccountItem:
+		return false
+	case *StorageItem:
+		return false
+	case *CodeItem:
+		return false
+	case *AccountHashItem:
+		if ahi.bits < i.bits {
+			return false
+		}
+		wholeBytes, mask := bytesandmask(i.bits)
+		if !bytes.Equal(ahi.addrHashPrefix[:wholeBytes], i.addrHashPrefix[:wholeBytes]) {
+			return false
+		}
+		return (ahi.addrHashPrefix[wholeBytes] & mask) == (i.addrHashPrefix[wholeBytes] & mask)
+	case *StorageHashItem:
+		return false
+	default:
+		panic(fmt.Sprintf("unrecognised type of cache item: %T", prefix))
+	}
+}
+
+func (shi *StorageHashItem) HasPrefix(prefix CacheItem) bool {
+	switch i := prefix.(type) {
+	case *AccountItem:
+		return shi.addrHash == i.addrHash && shi.incarnation == i.account.Incarnation
+	case *StorageItem:
+		return false
+	case *CodeItem:
+		return false
+	case *AccountHashItem:
+		wholeBytes, mask := bytesandmask(i.bits)
+		if !bytes.Equal(shi.addrHash[:wholeBytes], i.addrHashPrefix[:wholeBytes]) {
+			return false
+		}
+		return (shi.addrHash[wholeBytes] & mask) == (i.addrHashPrefix[wholeBytes] & mask)
+	case *StorageHashItem:
+		if shi.addrHash != i.addrHash || shi.incarnation != i.incarnation {
+			return false
+		}
+		if shi.bits < i.bits {
+			return false
+		}
+		wholeBytes, mask := bytesandmask(i.bits)
+		if !bytes.Equal(shi.locHashPrefix[:wholeBytes], i.locHashPrefix[:wholeBytes]) {
+			return false
+		}
+		return (shi.locHashPrefix[wholeBytes] & mask) == (i.locHashPrefix[wholeBytes] & mask)
+	default:
+		panic(fmt.Sprintf("unrecognised type of cache item: %T", prefix))
+	}
+}
+
+func (sc *StateCache) Root() common.Hash {
+	var lastItem, nextItem CacheItem
+	itemIterator := func(i btree.Item) bool {
+		nextItem = i.(CacheItem)
+		return false
+	}
+	for {
+		if lastItem == nil {
+			sc.readWrites.Ascend(itemIterator)
+		} else {
+			sc.readWrites.AscendGreaterOrEqual(lastItem, itemIterator)
+		}
+		if nextItem == nil {
+			break
+		}
+	}
+	return common.Hash{}
+}
