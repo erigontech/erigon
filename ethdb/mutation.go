@@ -81,10 +81,6 @@ func (m *mutation) Sequence(bucket string, amount uint64) (res uint64, err error
 		currentV = binary.BigEndian.Uint64(v)
 	}
 
-	if amount == 0 {
-		return currentV, nil
-	}
-
 	newVBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
 	if err := m.Put(dbutils.Sequence, []byte(bucket), newVBytes); err != nil {
