@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -37,15 +38,16 @@ type StageParameters struct {
 	tmpdir      string
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
 	// the stage can take significant time and gracefully shutdown at Ctrl+C.
-	QuitCh             <-chan struct{}
-	headersFetchers    []func() error
-	txPool             *core.TxPool
-	poolStart          func() error
-	changeSetHook      ChangeSetHook
-	prefetchedBlocks   *PrefetchedBlocks
-	stateReaderBuilder StateReaderBuilder
-	stateWriterBuilder StateWriterBuilder
-	notifier           ChainEventNotifier
+	QuitCh                <-chan struct{}
+	headersFetchers       []func() error
+	txPool                *core.TxPool
+	poolStart             func() error
+	changeSetHook         ChangeSetHook
+	prefetchedBlocks      *PrefetchedBlocks
+	stateReaderBuilder    StateReaderBuilder
+	stateWriterBuilder    StateWriterBuilder
+	notifier              ChainEventNotifier
+	silkwormExecutionFunc unsafe.Pointer
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -177,12 +179,13 @@ func DefaultStages() StageBuilders {
 							world.chainConfig, world.chainContext, world.vmConfig,
 							world.QuitCh,
 							ExecuteBlockStageParams{
-								WriteReceipts: world.storageMode.Receipts,
-								BatchSize:     world.batchSize,
-								CacheSize:     world.cacheSize,
-								ChangeSetHook: world.changeSetHook,
-								ReaderBuilder: world.stateReaderBuilder,
-								WriterBuilder: world.stateWriterBuilder,
+								WriteReceipts:         world.storageMode.Receipts,
+								CacheSize:             world.cacheSize,
+								BatchSize:             world.batchSize,
+								ChangeSetHook:         world.changeSetHook,
+								ReaderBuilder:         world.stateReaderBuilder,
+								WriterBuilder:         world.stateWriterBuilder,
+								SilkwormExecutionFunc: world.silkwormExecutionFunc,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {

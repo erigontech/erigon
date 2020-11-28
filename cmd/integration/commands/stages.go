@@ -2,11 +2,13 @@ package commands
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"runtime"
 	"sort"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -22,6 +24,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/silkworm"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
@@ -230,6 +233,7 @@ func init() {
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
 	withBatchSize(cmdStageExec)
+	withSilkworm(cmdStageExec)
 
 	rootCmd.AddCommand(cmdStageExec)
 
@@ -335,6 +339,18 @@ func stageSenders(db ethdb.Database, ctx context.Context) error {
 	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, tmpdir, ch)
 }
 
+func silkwormExecutionFunc() unsafe.Pointer {
+	if silkwormPath == "" {
+		return nil
+	}
+
+	funcPtr, err := silkworm.LoadExecutionFunctionPointer(silkwormPath)
+	if err != nil {
+		panic(fmt.Errorf("failed to load Silkworm dynamic library: %v", err))
+	}
+	return funcPtr
+}
+
 func stageExec(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
@@ -365,12 +381,12 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 		bc.Config(), cc, bc.GetVMConfig(),
 		ch,
 		stagedsync.ExecuteBlockStageParams{
-			ToBlock:       block, // limit execution to the specified block
-			WriteReceipts: sm.Receipts,
-			CacheSize:     int(cacheSize),
-			BatchSize:     int(batchSize),
+			ToBlock:               block, // limit execution to the specified block
+			WriteReceipts:         sm.Receipts,
+			CacheSize:             int(cacheSize),
+			BatchSize:             int(batchSize),
+			SilkwormExecutionFunc: silkwormExecutionFunc(),
 		})
-
 }
 
 func stageIHash(db ethdb.Database, ctx context.Context) error {
@@ -628,7 +644,12 @@ func removeMigration(db rawdb.DatabaseDeleter, _ context.Context) error {
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
 func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook stagedsync.ChangeSetHook) (*core.TinyChainContext, *core.BlockChain, *stagedsync.State, progressFunc) {
-	chainConfig, bc, err := newBlockChain(db)
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		panic(err)
+	}
+
+	chainConfig, bc, err := newBlockChain(db, sm)
 	if err != nil {
 		panic(err)
 	}
@@ -636,10 +657,6 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	cc := &core.TinyChainContext{}
 	cc.SetDB(tx)
 	cc.SetEngine(ethash.NewFaker())
-	sm, err := ethdb.GetStorageModeFromDB(db)
-	if err != nil {
-		panic(err)
-	}
 	var cacheSize datasize.ByteSize
 	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
 	var batchSize datasize.ByteSize
@@ -647,7 +664,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	st, err := stagedsync.New(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
-		stagedsync.OptionalParameters{},
+		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
 	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), int(cacheSize), int(batchSize), quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
@@ -671,8 +688,10 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	return cc, bc, st, progress
 }
 
-func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, error) {
-	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+func newBlockChain(db ethdb.Database, sm ethdb.StorageMode) (*params.ChainConfig, *core.BlockChain, error) {
+	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{
+		NoReceipts: !sm.Receipts,
+	}, nil, nil)
 	if err1 != nil {
 		return nil, nil, err1
 	}

@@ -24,6 +24,7 @@ var (
 	mapSizeStr         string
 	freelistReuse      int
 	migration          string
+	silkwormPath       string
 )
 
 func must(err error) {
@@ -91,4 +92,9 @@ func withBatchSize(cmd *cobra.Command) {
 
 func withMigration(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&migration, "migration", "", "action to apply to given migration")
+}
+
+func withSilkworm(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&silkwormPath, "silkworm", "", "file path of libsilkworm_tg_api.so")
+	must(cmd.MarkFlagFilename("silkworm"))
 }

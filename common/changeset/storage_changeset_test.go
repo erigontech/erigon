@@ -403,9 +403,9 @@ func doTestFind(
 		}
 
 		c := tx.Cursor(bucket)
-		defer c.Close()
+
 		err := encodeFunc(1, ch, func(k, v []byte) error {
-			if err2 := c.Append(common.CopyBytes(k), common.CopyBytes(v)); err2 != nil {
+			if err2 := c.Put(common.CopyBytes(k), common.CopyBytes(v)); err2 != nil {
 				return err2
 			}
 			return nil
@@ -427,25 +427,16 @@ func doTestFind(
 
 	for _, v := range numOfChanges[:len(numOfChanges)-2] {
 		v := v
-		t.Run(fmt.Sprintf("elements: %d keys: %d", v, 1), func(t *testing.T) {
-			f(t, v, 1)
-		})
+		f(t, v, 1)
 	}
 
 	for _, v := range numOfChanges[:len(numOfChanges)-2] {
 		v := v
-		t.Run(fmt.Sprintf("elements: %d keys: %d", v, 5), func(t *testing.T) {
-			f(t, v, 5)
-		})
+		f(t, v, 5)
 	}
 
-	t.Run(formatTestName(50, 1000), func(t *testing.T) {
-		f(t, 50, 1000)
-	})
-
-	t.Run(formatTestName(100, 1000), func(t *testing.T) {
-		f(t, 100, 1000)
-	})
+	f(t, 50, 1000)
+	f(t, 100, 1000)
 }
 
 func BenchmarkDecodeNewStorage(t *testing.B) {
@@ -555,7 +546,7 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC.Bytes(), 5, key4.Bytes()), val4))
 
 	assert.NoError(t, EncodeStoragePlain(1, ch, func(k, v []byte) error {
-		return c.Append(k, v)
+		return c.Put(k, v)
 	}))
 
 	data1, err1 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes()))

@@ -144,6 +144,10 @@ func (m *mutation) Append(table string, key []byte, value []byte) error {
 	return m.Put(table, key, value)
 }
 
+func (m *mutation) AppendDup(table string, key []byte, value []byte) error {
+	return m.Put(table, key, value)
+}
+
 func (m *mutation) MultiPut(tuples ...[]byte) (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

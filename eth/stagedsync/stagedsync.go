@@ -1,6 +1,8 @@
 package stagedsync
 
 import (
+	"unsafe"
+
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -30,6 +32,8 @@ type OptionalParameters struct {
 
 	// Notifier allows sending some data when new headers or new blocks are added
 	Notifier ChainEventNotifier
+
+	SilkwormExecutionFunc unsafe.Pointer
 }
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
@@ -75,26 +79,27 @@ func (stagedSync *StagedSync) Prepare(
 
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
-			d:                  d,
-			chainConfig:        chainConfig,
-			chainContext:       chainContext,
-			vmConfig:           vmConfig,
-			db:                 db,
-			TX:                 tx,
-			pid:                pid,
-			storageMode:        storageMode,
-			tmpdir:             tmpdir,
-			QuitCh:             quitCh,
-			headersFetchers:    headersFetchers,
-			txPool:             txPool,
-			poolStart:          poolStart,
-			changeSetHook:      changeSetHook,
-			cacheSize:          cacheSize,
-			batchSize:          batchSize,
-			prefetchedBlocks:   stagedSync.PrefetchedBlocks,
-			stateReaderBuilder: readerBuilder,
-			stateWriterBuilder: writerBuilder,
-			notifier:           stagedSync.Notifier,
+			d:                     d,
+			chainConfig:           chainConfig,
+			chainContext:          chainContext,
+			vmConfig:              vmConfig,
+			db:                    db,
+			TX:                    tx,
+			pid:                   pid,
+			storageMode:           storageMode,
+			tmpdir:                tmpdir,
+			QuitCh:                quitCh,
+			headersFetchers:       headersFetchers,
+			txPool:                txPool,
+			poolStart:             poolStart,
+			changeSetHook:         changeSetHook,
+			cacheSize:             cacheSize,
+			batchSize:             batchSize,
+			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
+			stateReaderBuilder:    readerBuilder,
+			stateWriterBuilder:    writerBuilder,
+			notifier:              stagedSync.Notifier,
+			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
 		},
 	)
 	state := NewState(stages)

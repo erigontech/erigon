@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"runtime"
 	"time"
+	"unsafe"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -15,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -22,6 +24,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
+	"github.com/ledgerwatch/turbo-geth/turbo/silkworm"
 )
 
 const (
@@ -39,13 +42,74 @@ type StateReaderBuilder func(ethdb.Getter) state.StateReader
 type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) state.WriterWithChangeSets
 
 type ExecuteBlockStageParams struct {
-	ToBlock       uint64 // not setting this params means no limit
-	WriteReceipts bool
-	BatchSize     int
-	CacheSize     int
-	ChangeSetHook ChangeSetHook
-	ReaderBuilder StateReaderBuilder
-	WriterBuilder StateWriterBuilder
+	ToBlock               uint64 // not setting this params means no limit
+	WriteReceipts         bool
+	CacheSize             int
+	BatchSize             int
+	ChangeSetHook         ChangeSetHook
+	ReaderBuilder         StateReaderBuilder
+	WriterBuilder         StateWriterBuilder
+	SilkwormExecutionFunc unsafe.Pointer
+}
+
+func readBlock(blockNum uint64, tx ethdb.Database) (*types.Block, error) {
+	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	block := rawdb.ReadBlock(tx, blockHash, blockNum)
+
+	senders := rawdb.ReadSenders(tx, blockHash, blockNum)
+	block.Body().SendersToTxs(senders)
+
+	return block, nil
+}
+
+func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, cache *shards.StateCache, batch ethdb.Database, chainConfig *params.ChainConfig,
+	chainContext core.ChainContext, vmConfig *vm.Config, params ExecuteBlockStageParams) error {
+
+	blockNum := block.NumberU64()
+	var stateReader state.StateReader
+	var stateWriter state.WriterWithChangeSets
+
+	if params.ReaderBuilder != nil {
+		stateReader = params.ReaderBuilder(batch)
+	} else {
+		stateReader = state.NewPlainStateReader(batch)
+	}
+	if cache != nil {
+		stateReader = state.NewCachedReader(stateReader, cache)
+	}
+
+	if params.WriterBuilder != nil {
+		stateWriter = params.WriterBuilder(batch, tx, blockNum)
+	} else if cache == nil {
+		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
+	} else {
+		stateWriter = state.NewCachedWriter(state.NewChangeSetWriterPlain(tx, blockNum), cache)
+	}
+
+	engine := chainContext.Engine()
+
+	// where the magic happens
+	receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
+	if err != nil {
+		return err
+	}
+
+	if params.WriteReceipts {
+		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
+			return err
+		}
+	}
+
+	if params.ChangeSetHook != nil {
+		if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
+			params.ChangeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
+		}
+	}
+
+	return nil
 }
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext *core.TinyChainContext, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
@@ -78,82 +142,72 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		defer tx.Rollback()
 	}
 
-	var batch ethdb.DbWithPendingMutations
+	useSilkworm := params.SilkwormExecutionFunc != nil
+	if useSilkworm && params.ChangeSetHook != nil {
+		panic("ChangeSetHook is not supported with Silkworm")
+	}
+	if useSilkworm && params.CacheSize != 0 {
+		panic("CacheSize is not supported with Silkworm yet")
+	}
+
 	var cache *shards.StateCache
-	if params.CacheSize == 0 {
+	var batch ethdb.DbWithPendingMutations
+	useBatch := !useSilkworm && params.CacheSize == 0
+	if useBatch {
 		batch = tx.NewBatch()
 		defer batch.Rollback()
-	} else {
+	}
+	if params.CacheSize > 0 {
 		batch = tx
 		cache = shards.NewStateCache(32, params.CacheSize)
 	}
 
-	engine := chainContext.Engine()
 	chainContext.SetDB(tx)
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
+	logTime := time.Now()
 
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
-		if err := common.Stopped(quit); err != nil {
+		err := common.Stopped(quit)
+		if err != nil {
+			return err
+		}
+		if useSilkworm {
+			txn := tx.(ethdb.HasTx).Tx()
+			// Silkworm executes many blocks simultaneously
+			blockNum, err = silkworm.ExecuteBlocks(params.SilkwormExecutionFunc, txn, chainConfig.ChainID, blockNum, to, params.BatchSize, params.WriteReceipts)
+		} else {
+			var block *types.Block
+			block, err = readBlock(blockNum, tx)
+			if err != nil {
+				return err
+			}
+			if block == nil {
+				log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
+				break
+			}
+			err = executeBlockWithGo(block, tx, cache, batch, chainConfig, chainContext, vmConfig, params)
+		}
+
+		if err != nil {
 			return err
 		}
 
 		stageProgress = blockNum
 
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-		if err != nil {
-			return err
-		}
-		block := rawdb.ReadBlock(tx, blockHash, blockNum)
-		if block == nil {
-			log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "hash", blockHash.String(), "blocknum", blockNum)
-			break
-		}
-		senders := rawdb.ReadSenders(tx, blockHash, blockNum)
-		block.Body().SendersToTxs(senders)
-
-		var stateReader state.StateReader
-		var stateWriter state.WriterWithChangeSets
-
-		if params.ReaderBuilder != nil {
-			stateReader = params.ReaderBuilder(batch)
-		} else {
-			stateReader = state.NewPlainStateReader(batch)
-		}
-		if cache != nil {
-			stateReader = state.NewCachedReader(stateReader, cache)
-		}
-
-		if params.WriterBuilder != nil {
-			stateWriter = params.WriterBuilder(batch, tx, blockNum)
-		} else if cache == nil {
-			stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
-		} else {
-			stateWriter = state.NewCachedWriter(state.NewChangeSetWriterPlain(tx, blockNum), cache)
-		}
-
-		// where the magic happens
-		receipts, err := core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter)
-		if err != nil {
-			return err
-		}
-
-		if params.WriteReceipts {
-			if err = rawdb.AppendReceipts(tx, block.NumberU64(), receipts); err != nil {
-				return err
-			}
-		}
-
 		if cache == nil {
-			if batch.BatchSize() >= params.BatchSize {
-				if err = s.Update(batch, blockNum); err != nil {
+			updateProgress := !useBatch || batch.BatchSize() >= params.BatchSize
+			if updateProgress {
+				if err = s.Update(tx, stageProgress); err != nil {
 					return err
 				}
-				if err = batch.CommitAndBegin(context.Background()); err != nil {
-					return err
+				if useBatch {
+					if err = batch.CommitAndBegin(context.Background()); err != nil {
+						return err
+					}
 				}
 				if !useExternalTx {
 					if err = tx.CommitAndBegin(context.Background()); err != nil {
@@ -185,26 +239,21 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 			}
 		}
 
-		if params.ChangeSetHook != nil {
-			if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
-				params.ChangeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
-			}
-		}
-
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock = logProgress(logPrefix, logBlock, blockNum, batch, cache)
+			logBlock, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, batch, cache)
 		}
 	}
 
-	logProgress(logPrefix, logBlock, stageProgress, batch, cache)
 	if cache == nil {
-		if err := s.Update(batch, stageProgress); err != nil {
-			return err
-		}
-		if _, err := batch.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
+		if useBatch {
+			if err := s.Update(batch, stageProgress); err != nil {
+				return err
+			}
+			if _, err := batch.Commit(); err != nil {
+				return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
+			}
 		}
 		if !useExternalTx {
 			if _, err := tx.Commit(); err != nil {
@@ -278,28 +327,26 @@ func commitCache(tx ethdb.DbWithPendingMutations, writes *btree.BTree) error {
 	)
 }
 
-func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMutations, cache *shards.StateCache) uint64 {
-	speed := float64(now-prev) / float64(logInterval/time.Second)
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, batch ethdb.DbWithPendingMutations, cache *shards.StateCache) (uint64, time.Time) {
+	currentTime := time.Now()
+	interval := currentTime.Sub(prevTime)
+	speed := float64(currentBlock-prevBlock) / float64(interval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	if cache == nil {
-		log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix),
-			"number", now,
-			"blk/second", speed,
-			"batch", common.StorageSize(batch.BatchSize()),
-			"alloc", common.StorageSize(m.Alloc),
-			"sys", common.StorageSize(m.Sys),
-			"numGC", int(m.NumGC))
-	} else {
-		log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix),
-			"number", now,
-			"blk/second", speed,
-			"cache writes", common.StorageSize(cache.WriteSize()), "cache read", common.StorageSize(cache.ReadSize()),
-			"alloc", common.StorageSize(m.Alloc),
-			"sys", common.StorageSize(m.Sys),
-			"numGC", int(m.NumGC))
+	var logpairs = []interface{}{
+		"number", currentBlock,
+		"blk/second", speed,
 	}
-	return now
+	if batch != nil && cache == nil {
+		logpairs = append(logpairs, "batch", common.StorageSize(batch.BatchSize()))
+	}
+	if cache != nil {
+		logpairs = append(logpairs, "cache writes", common.StorageSize(cache.WriteSize()), "cache read", common.StorageSize(cache.ReadSize()))
+	}
+	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix), logpairs...)
+
+	return currentBlock, currentTime
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database, writeReceipts bool) error {
@@ -324,14 +371,10 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	rewindFunc := changeset.RewindDataPlain
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
-	deleteAccountFunc := deleteAccountPlain
-	writeAccountFunc := writeAccountPlain
-	recoverCodeHashFunc := recoverCodeHashPlain
 
-	accountMap, storageMap, errRewind := rewindFunc(tx, s.BlockNumber, u.UnwindPoint)
+	accountMap, storageMap, errRewind := changeset.RewindDataPlain(tx, s.BlockNumber, u.UnwindPoint)
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
@@ -343,12 +386,12 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 			}
 
 			// Fetch the code hash
-			recoverCodeHashFunc(&acc, tx, key)
-			if err := writeAccountFunc(logPrefix, tx, key, acc); err != nil {
+			recoverCodeHashPlain(&acc, tx, key)
+			if err := writeAccountPlain(logPrefix, tx, key, acc); err != nil {
 				return err
 			}
 		} else {
-			if err := deleteAccountFunc(tx, key); err != nil {
+			if err := deleteAccountPlain(tx, key); err != nil {
 				return err
 			}
 		}

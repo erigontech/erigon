@@ -3,6 +3,7 @@ package ethdb
 import (
 	"context"
 	"errors"
+	"unsafe"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -97,6 +98,8 @@ type Tx interface {
 	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
 	// Starts from 0.
 	Sequence(bucket string, amount uint64) (uint64, error)
+
+	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
 }
 
 // Interface used for buckets migration, don't use it in usual app code

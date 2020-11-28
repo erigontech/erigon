@@ -103,6 +103,11 @@ var (
 		Usage: "Specify certificate authority",
 		Value: "",
 	}
+	SilkwormFlag = cli.StringFlag{
+		Name:  "silkworm",
+		Usage: "File path of libsilkworm_tg_api dynamic library (default = do not use Silkworm)",
+		Value: "",
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *eth.Config) {
