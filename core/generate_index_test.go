@@ -222,7 +222,7 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlo
 			expected3[len(expected3)-1] = expected3[len(expected3)-1].Append(uint64(i), false)
 		}
 		err = csInfo.Encode(uint64(i), cs, func(k, v []byte) error {
-			return db.Append(csBucket, k, v)
+			return db.Put(csBucket, k, v)
 		})
 		if err != nil {
 			t.Fatal(err)

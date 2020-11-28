@@ -403,9 +403,9 @@ func doTestFind(
 		}
 
 		c := tx.Cursor(bucket)
-		defer c.Close()
+
 		err := encodeFunc(1, ch, func(k, v []byte) error {
-			if err2 := c.Append(common.CopyBytes(k), common.CopyBytes(v)); err2 != nil {
+			if err2 := c.Put(common.CopyBytes(k), common.CopyBytes(v)); err2 != nil {
 				return err2
 			}
 			return nil
@@ -555,7 +555,7 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC, 5, key4), val4))
 
 	assert.NoError(t, EncodeStoragePlain(1, ch, func(k, v []byte) error {
-		return c.Append(k, v)
+		return c.Put(k, v)
 	}))
 
 	data1, err1 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key1))

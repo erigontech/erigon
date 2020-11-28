@@ -104,6 +104,7 @@ type Database interface {
 	Ancients() (uint64, error)
 	TruncateAncients(items uint64) error
 	Append(bucket string, key, value []byte) error
+	AppendDup(bucket string, key, value []byte) error
 	Sequence(bucket string, amount uint64) (uint64, error)
 }
 

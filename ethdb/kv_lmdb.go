@@ -1526,6 +1526,19 @@ func (c *LmdbDupSortCursor) LastDup(k []byte) ([]byte, error) {
 	return v, nil
 }
 
+func (c *LmdbDupSortCursor) Append(k []byte, v []byte) error {
+	if c.c == nil {
+		if err := c.initCursor(); err != nil {
+			return err
+		}
+	}
+
+	if err := c.c.Put(k, v, lmdb.Append|lmdb.AppendDup); err != nil {
+		return fmt.Errorf("in Append: %w", err)
+	}
+	return nil
+}
+
 func (c *LmdbDupSortCursor) AppendDup(k []byte, v []byte) error {
 	if c.c == nil {
 		if err := c.initCursor(); err != nil {
