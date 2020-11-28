@@ -758,7 +758,7 @@ func (tx *MdbxTx) CursorDupFixed(bucket string) CursorDupFixed {
 	return &MdbxDupFixedCursor{MdbxDupSortCursor: basicCursor}
 }
 
-func (tx *mdbxTx) CHandle() unsafe.Pointer {
+func (tx *MdbxTx) CHandle() unsafe.Pointer {
 	panic("not implemented yet")
 }
 
