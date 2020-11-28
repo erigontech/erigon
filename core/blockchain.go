@@ -2257,11 +2257,10 @@ func InsertBodies(
 	batch := db.NewBatch()
 	stats := InsertStats{StartTime: mclock.Now()}
 
-	var parent *types.Block
 	var parentNumber = chain[0].NumberU64() - 1
 	parentHash := chain[0].ParentHash()
-	parent = rawdb.ReadBlock(batch, parentHash, parentNumber)
-	if parent == nil {
+
+	if parent := rawdb.ReadStorageBodyRLP(batch, parentHash, parentNumber); parent == nil {
 		log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
 		return true, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 	}
