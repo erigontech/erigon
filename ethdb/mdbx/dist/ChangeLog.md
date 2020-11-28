@@ -1,18 +1,37 @@
 ChangeLog
 ---------
 
-## v0.9.2 (in development)
+## v0.9.3 (in development)
 
-TODO:
-
+ - Engage new terminology (https://github.com/erthink/libmdbx/issues/137).
  - Rework/speedup the implementation of the dirty page list (lazy compactification, lazy sorting via merge).
- - Finalize C++ API (few typos and trivia bugs are likely for now).
+ - Resolve few TODOs (https://github.com/erthink/libmdbx/issues/123, https://github.com/erthink/libmdbx/issues/124,
+   https://github.com/erthink/libmdbx/issues/127, https://github.com/erthink/libmdbx/issues/128,
+   https://github.com/erthink/libmdbx/issues/132, https://github.com/erthink/libmdbx/issues/115).
+ - Finalize C++ API (few typos and trivia bugs are still likely for now).
  - Packages for ROSA Linux, ALT Linux, Fedora/RHEL, Debian/Ubuntu.
 
+## v0.9.2 (scheduled at 2020-11-26)
+
+Acknowledgements:
+
+ - Jens Alfke (Mobile Architect at [Couchbase](https://www.couchbase.com/)) for [NimDBX](https://github.com/snej/nimdbx).
+ - Clément Renault (CTO at [MeiliSearch](https://www.meilisearch.com/)) for [mdbx-rs](https://github.com/Kerollmops/mdbx-rs).
+ - Alex Sharov (Go-Lang Teach Lead at [TurboGeth/Ethereum](https://ethereum.org/)) for an extreme test cases and bug reporting.
+ - George Hazan (CTO at [Miranda NG](https://www.miranda-ng.org/)) for bug reporting.
+ - [Positive Technologies](https://www.ptsecurity.com/) for funding and [The Standoff](https://standoff365.com/).
+
 Added features:
+
  - Provided package for [buildroot](https://buildroot.org/).
+ - Binding for Nim is [available](https://github.com/snej/nimdbx) now by Jens Alfke.
  - Added `mdbx_env_delete()` for deletion an environment files in a proper and multiprocess-safe way.
  - Added `mdbx_txn_commit_ex()` with collecting latency information.
+ - Fast completion pure nested transactions.
+ - Added `LIBMDBX_INLINE_API` macro and inline versions of some API functions.
+ - Added `mdbx_cursor_copy()` function.
+ - Extended tests for checking cursor tracking.
+ - Added `MDBX_SET_LOWERBOUND` operation for `mdbx_cursor_get()`.
 
 Fixes:
 
@@ -27,6 +46,19 @@ Fixes:
  - Fixed copy&paste typos.
  - Fixed minor false-positive GCC warning.
  - Added workaround for broken `DEFINE_ENUM_FLAG_OPERATORS` from Windows SDK.
+ - Fixed cursor state after multimap/dupsort repeated deletes (https://github.com/erthink/libmdbx/issues/121).
+ - Added `SIGPIPE` suppression for internal thread during `mdbx_env_copy()`.
+ - Fixed extra-rare `MDBX_KEY_EXIST` error during `mdbx_commit()` (https://github.com/erthink/libmdbx/issues/131).
+ - Fixed spilled pages checking (https://github.com/erthink/libmdbx/issues/126).
+ - Fixed `mdbx_load` for 'plain text' and without `-s name` cases (https://github.com/erthink/libmdbx/issues/136).
+ - Fixed save/restore/commit of cursors for nested transactions.
+ - Fixed cursors state in rare/special cases (move next beyond end-of-data, after deletion and so on).
+ - Added workaround for MSVC 19.28 (Visual Studio 16.8) (but may still hang during compilation).
+ - Fixed paranoidal Clang C++ UB for bitwise operations with flags defined by enums.
+ - Fixed large pages checking (for compatibility and to avoid false-positive errors from `mdbx_chk`).
+ - Added workaround for Wine (https://github.com/miranda-ng/miranda-ng/issues/1209).
+ - Fixed `ERROR_NOT_SUPPORTED` while opening DB by UNC pathnames (https://github.com/miranda-ng/miranda-ng/issues/2627).
+
 
 ## v0.9.1 2020-09-30
 

@@ -15,6 +15,9 @@ scrape_configs:
           - host.docker.internal:6060 # this is how docker-for-mac allow to access host machine
           - host.docker.internal:6061
           - host.docker.internal:6062
+          - 192.168.255.134:6060
+          - 192.168.255.134:6061
+          - 192.168.255.134:6062
           - 192.168.255.138:6060
           - 192.168.255.138:6061
           - 192.168.255.138:6062
@@ -30,6 +33,9 @@ scrape_configs:
           - host.docker.internal:6060
           - host.docker.internal:6061
           - host.docker.internal:6062
+          - 192.168.255.134:6060
+          - 192.168.255.134:6061
+          - 192.168.255.134:6062
           - 192.168.255.138:6060
           - 192.168.255.138:6061
           - 192.168.255.138:6062

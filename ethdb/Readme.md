@@ -68,7 +68,7 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
 
 ## ethdb.AbstractKV design:
 
-- InMemory, ReadOnly: `NewLMDB().InMem().ReadOnly().Open()`
+- InMemory, ReadOnly: `NewLMDB().Flags(lmdb.ReadOnly).InMem().Open()`
 - MultipleDatabases, Customization: `NewLMDB().Path(path).WithBucketsConfig(config).Open()`
 
 

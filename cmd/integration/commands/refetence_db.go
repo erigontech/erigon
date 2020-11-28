@@ -10,9 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
@@ -262,9 +264,7 @@ func fToMdbx(ctx context.Context, to string) error {
 
 	fileScanner := bufio.NewScanner(file)
 	c := dstTx.CursorDupSort(dbutils.CurrentStateBucket)
-	i := 0
 	for fileScanner.Scan() {
-		i++
 		kv := strings.Split(fileScanner.Text(), ",")
 		k, _ := hex.DecodeString(kv[0])
 		v, _ := hex.DecodeString(kv[1])
@@ -276,9 +276,6 @@ func fToMdbx(ctx context.Context, to string) error {
 			return ctx.Err()
 		}
 
-		if k[0] < uint8(50) {
-			continue
-		}
 		if err = c.AppendDup(k, v); err != nil {
 			return err
 		}
@@ -294,18 +291,22 @@ func fToMdbx(ctx context.Context, to string) error {
 
 	return nil
 }
-
 func toMdbx(ctx context.Context, from, to string) error {
 	_ = os.RemoveAll(to)
 
-	src := ethdb.NewLMDB().Path(from).MustOpen()
-	dst := ethdb.NewMDBX().Path(to).MustOpen()
+	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint {
+		return (flags | lmdb.Readonly) ^ lmdb.NoReadahead
+	}).MustOpen()
+	dst := ethdb.NewMDBX().Path(to).Flags(func(flags uint) uint {
+		return flags | mdbx.WriteMap | mdbx.NoMemInit
+	}).MustOpen()
+
 	srcTx, err1 := src.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
 		return err1
 	}
 	defer srcTx.Rollback()
-	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW)
+	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW|ethdb.NoSync)
 	if err1 != nil {
 		return err1
 	}
@@ -313,10 +314,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		dstTx.Rollback()
 	}()
 
-	logEvery := time.NewTicker(15 * time.Second)
-	defer logEvery.Stop()
-
-	commitEvery := time.NewTicker(5 * time.Minute)
+	commitEvery := time.NewTicker(15 * time.Second)
 	defer commitEvery.Stop()
 
 	for name, b := range dbutils.BucketsConfigs {
@@ -325,46 +323,47 @@ func toMdbx(ctx context.Context, from, to string) error {
 		}
 
 		c := dstTx.Cursor(name)
-		appendFunc := c.Append
-		if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
-			appendFunc = c.(ethdb.CursorDupSort).AppendDup
-		} else if b.Flags&dbutils.DupFixed != 0 && !b.AutoDupSortKeysConversion {
-			appendFunc = c.(ethdb.CursorDupFixed).AppendDup
-		}
-
 		srcC := srcTx.Cursor(name)
+		var prevK []byte
 		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 			if err != nil {
 				return err
 			}
 
-			if err = appendFunc(k, v); err != nil {
-				return err
+			if casted, ok := c.(ethdb.CursorDupSort); ok {
+				if bytes.Equal(k, prevK) {
+					if err = casted.AppendDup(k, v); err != nil {
+						return err
+					}
+				} else {
+					if err = casted.Append(k, v); err != nil {
+						return err
+					}
+				}
+				prevK = k
+			} else {
+				if err = c.Append(k, v); err != nil {
+					return err
+				}
 			}
 
 			select {
 			default:
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-logEvery.C:
-				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
 			case <-commitEvery.C:
+				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
 				if err2 := dstTx.Commit(ctx); err2 != nil {
 					return err2
 				}
-				dstTx, err = dst.Begin(ctx, nil, ethdb.RW)
+				dstTx, err = dst.Begin(ctx, nil, ethdb.RW|ethdb.NoSync)
 				if err != nil {
 					return err
 				}
 				c = dstTx.Cursor(name)
-				appendFunc = c.Append
-				if b.Flags&dbutils.DupSort != 0 && !b.AutoDupSortKeysConversion {
-					appendFunc = c.(ethdb.CursorDupSort).AppendDup
-				} else if b.Flags&dbutils.DupFixed != 0 && !b.AutoDupSortKeysConversion {
-					appendFunc = c.(ethdb.CursorDupFixed).AppendDup
-				}
 			}
 		}
+		prevK = nil
 
 		// migrate bucket sequences to native mdbx implementation
 		currentID, err := srcTx.Sequence(name, 0)

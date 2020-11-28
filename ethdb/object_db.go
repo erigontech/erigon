@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/google/btree"
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -81,7 +82,7 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 	default:
 		opts := NewLMDB().Path(path)
 		if readOnly {
-			opts = opts.ReadOnly()
+			opts = opts.Flags(func(flags uint) uint { return flags | lmdb.Readonly })
 		}
 		kv, err = opts.Open()
 	}
@@ -104,6 +105,14 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error {
 	err := db.kv.Update(context.Background(), func(tx Tx) error {
 		return tx.Cursor(bucket).Append(key, value)
+	})
+	return err
+}
+
+// AppendDup appends a single entry to the end of the bucket.
+func (db *ObjectDatabase) AppendDup(bucket string, key []byte, value []byte) error {
+	err := db.kv.Update(context.Background(), func(tx Tx) error {
+		return tx.CursorDupSort(bucket).AppendDup(key, value)
 	})
 	return err
 }
