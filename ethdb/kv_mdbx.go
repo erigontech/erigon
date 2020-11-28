@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -755,6 +756,10 @@ func (tx *MdbxTx) CursorDupSort(bucket string) CursorDupSort {
 func (tx *MdbxTx) CursorDupFixed(bucket string) CursorDupFixed {
 	basicCursor := tx.CursorDupSort(bucket).(*MdbxDupSortCursor)
 	return &MdbxDupFixedCursor{MdbxDupSortCursor: basicCursor}
+}
+
+func (tx *MdbxTx) CHandle() unsafe.Pointer {
+	panic("not implemented yet")
 }
 
 // methods here help to see better pprof picture

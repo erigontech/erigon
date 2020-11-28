@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/c2h5oh/datasize"
@@ -33,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
+	"github.com/ledgerwatch/turbo-geth/turbo/silkworm"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -257,6 +259,7 @@ func init() {
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
 	withBatchSize(cmdStageExec)
+	withSilkworm(cmdStageExec)
 
 	rootCmd.AddCommand(cmdStageExec)
 
@@ -366,6 +369,18 @@ func stageSenders(db ethdb.Database, ctx context.Context) error {
 	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, tmpdir, ch)
 }
 
+func silkwormExecutionFunc() unsafe.Pointer {
+	if silkwormPath == "" {
+		return nil
+	}
+
+	funcPtr, err := silkworm.LoadExecutionFunctionPointer(silkwormPath)
+	if err != nil {
+		panic(fmt.Errorf("failed to load Silkworm dynamic library: %v", err))
+	}
+	return funcPtr
+}
+
 func stageExec(db ethdb.Database, ctx context.Context) error {
 	core.UsePlainStateExecution = true
 
@@ -394,11 +409,11 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 		bc.Config(), cc, bc.GetVMConfig(),
 		ch,
 		stagedsync.ExecuteBlockStageParams{
-			ToBlock:       block, // limit execution to the specified block
-			WriteReceipts: sm.Receipts,
-			BatchSize:     int(batchSize),
+			ToBlock:               block, // limit execution to the specified block
+			WriteReceipts:         sm.Receipts,
+			BatchSize:             int(batchSize),
+			SilkwormExecutionFunc: silkwormExecutionFunc(),
 		})
-
 }
 
 func stageIHash(db ethdb.Database, ctx context.Context) error {
@@ -813,7 +828,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	st, err := stagedsync.New(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
-		stagedsync.OptionalParameters{},
+		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
 	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), int(batchSize), quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)

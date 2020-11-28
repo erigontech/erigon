@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
@@ -775,6 +776,10 @@ func (tx *lmdbTx) CursorDupSort(bucket string) CursorDupSort {
 func (tx *lmdbTx) CursorDupFixed(bucket string) CursorDupFixed {
 	basicCursor := tx.CursorDupSort(bucket).(*LmdbDupSortCursor)
 	return &LmdbDupFixedCursor{LmdbDupSortCursor: basicCursor}
+}
+
+func (tx *lmdbTx) CHandle() unsafe.Pointer {
+	return tx.tx.CHandle()
 }
 
 // methods here help to see better pprof picture

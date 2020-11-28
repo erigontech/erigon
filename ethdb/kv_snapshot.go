@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"unsafe"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -51,6 +52,10 @@ func (s *snapshotTX) DCmp(bucket string, a, b []byte) int {
 	return s.dbTX.DCmp(bucket, a, b)
 }
 
+func (s *snapshotTX) CHandle() unsafe.Pointer {
+	return s.dbTX.CHandle()
+}
+
 func (v *lazyTx) CursorDupSort(bucket string) CursorDupSort {
 	panic("implement me")
 }
@@ -72,6 +77,10 @@ func (v *lazyTx) Cmp(bucket string, a, b []byte) int {
 }
 
 func (v *lazyTx) DCmp(bucket string, a, b []byte) int {
+	panic("implement me")
+}
+
+func (v *lazyTx) CHandle() unsafe.Pointer {
 	panic("implement me")
 }
 
