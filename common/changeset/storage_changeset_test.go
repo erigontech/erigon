@@ -427,25 +427,16 @@ func doTestFind(
 
 	for _, v := range numOfChanges[:len(numOfChanges)-2] {
 		v := v
-		t.Run(fmt.Sprintf("elements: %d keys: %d", v, 1), func(t *testing.T) {
-			f(t, v, 1)
-		})
+		f(t, v, 1)
 	}
 
 	for _, v := range numOfChanges[:len(numOfChanges)-2] {
 		v := v
-		t.Run(fmt.Sprintf("elements: %d keys: %d", v, 5), func(t *testing.T) {
-			f(t, v, 5)
-		})
+		f(t, v, 5)
 	}
 
-	t.Run(formatTestName(50, 1000), func(t *testing.T) {
-		f(t, 50, 1000)
-	})
-
-	t.Run(formatTestName(100, 1000), func(t *testing.T) {
-		f(t, 100, 1000)
-	})
+	f(t, 50, 1000)
+	f(t, 100, 1000)
 }
 
 func BenchmarkDecodeNewStorage(t *testing.B) {

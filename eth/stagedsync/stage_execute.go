@@ -213,14 +213,10 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	rewindFunc := changeset.RewindDataPlain
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
-	deleteAccountFunc := deleteAccountPlain
-	writeAccountFunc := writeAccountPlain
-	recoverCodeHashFunc := recoverCodeHashPlain
 
-	accountMap, storageMap, errRewind := rewindFunc(tx, s.BlockNumber, u.UnwindPoint)
+	accountMap, storageMap, errRewind := changeset.RewindDataPlain(tx, s.BlockNumber, u.UnwindPoint)
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
@@ -232,12 +228,12 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 			}
 
 			// Fetch the code hash
-			recoverCodeHashFunc(&acc, tx, key)
-			if err := writeAccountFunc(logPrefix, tx, key, acc); err != nil {
+			recoverCodeHashPlain(&acc, tx, key)
+			if err := writeAccountPlain(logPrefix, tx, key, acc); err != nil {
 				return err
 			}
 		} else {
-			if err := deleteAccountFunc(tx, key); err != nil {
+			if err := deleteAccountPlain(tx, key); err != nil {
 				return err
 			}
 		}

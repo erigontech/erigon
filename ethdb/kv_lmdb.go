@@ -25,11 +25,6 @@ const (
 	NonExistingDBI dbutils.DBI = 999_999_999
 )
 
-const (
-	TxRO = 1
-	TxRW
-)
-
 var (
 	LMDBDefaultMapSize          = 2 * datasize.TB
 	LMDBDefaultMaxFreelistReuse = uint(1000) // measured in pages
@@ -38,12 +33,19 @@ var (
 type BucketConfigsFunc func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg
 type LmdbOpts struct {
 	inMem            bool
-	readOnly         bool
+	flags            uint
 	path             string
 	exclusive        bool
 	bucketsCfg       BucketConfigsFunc
 	mapSize          datasize.ByteSize
 	maxFreelistReuse uint
+}
+
+func NewLMDB() LmdbOpts {
+	return LmdbOpts{
+		bucketsCfg: DefaultBucketConfigs,
+		flags:      lmdb.NoReadahead | lmdb.NoSync, // do call .Sync manually after commit to measure speed of commit and speed of fsync individually
+	}
 }
 
 func (opts LmdbOpts) Path(path string) LmdbOpts {
@@ -70,8 +72,8 @@ func (opts LmdbOpts) MaxFreelistReuse(pages uint) LmdbOpts {
 	return opts
 }
 
-func (opts LmdbOpts) ReadOnly() LmdbOpts {
-	opts.readOnly = true
+func (opts LmdbOpts) Flags(f func(uint) uint) LmdbOpts {
+	opts.flags = f(opts.flags)
 	return opts
 }
 
@@ -128,20 +130,16 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 		return nil, err
 	}
 
-	if !opts.readOnly {
+	if opts.flags&lmdb.Readonly == 0 {
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 		}
 	}
 
-	var flags uint = lmdb.NoReadahead
-	if opts.readOnly {
-		flags |= lmdb.Readonly
-	}
+	var flags = opts.flags
 	if opts.inMem {
 		flags |= lmdb.NoMetaSync
 	}
-	flags |= lmdb.NoSync
 
 	var exclusiveLock fileutil.Releaser
 	if opts.exclusive {
@@ -182,7 +180,7 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 	}
 
 	// Open or create buckets
-	if opts.readOnly {
+	if opts.flags&lmdb.Readonly != 0 {
 		tx, innerErr := db.Begin(context.Background(), nil, RO)
 		if innerErr != nil {
 			return nil, innerErr
@@ -276,9 +274,6 @@ type LmdbKV struct {
 	exclusiveLock fileutil.Releaser
 }
 
-func NewLMDB() LmdbOpts {
-	return LmdbOpts{bucketsCfg: DefaultBucketConfigs}
-}
 func (db *LmdbKV) NewDbWithTheSameParameters() *ObjectDatabase {
 	opts := db.opts
 	return NewObjectDatabase(NewLMDB().Set(opts).MustOpen())
@@ -465,7 +460,7 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 func (tx *lmdbTx) CreateBucket(name string) error {
 	var flags = tx.db.buckets[name].Flags
 	var nativeFlags uint
-	if !tx.db.opts.readOnly {
+	if tx.db.opts.flags&lmdb.Readonly == 0 {
 		nativeFlags |= lmdb.Create
 	}
 	switch flags {
@@ -592,7 +587,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		log.Info("Batch", "commit", commitTook)
 	}
 
-	if !tx.isSubTx && !tx.db.opts.readOnly && !tx.db.opts.inMem { // call fsync only after main transaction commit
+	if !tx.isSubTx && tx.db.opts.flags&lmdb.Readonly == 0 && !tx.db.opts.inMem { // call fsync only after main transaction commit
 		fsyncTimer := time.Now()
 		if err := tx.db.env.Sync(tx.flags&NoSync == 0); err != nil {
 			log.Warn("fsync after commit failed", "err", err)

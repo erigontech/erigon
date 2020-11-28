@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/stretchr/testify/require"
 )
@@ -87,11 +88,11 @@ func TestReadOnlyMode(t *testing.T) {
 	}).MustOpen()
 	db1.Close()
 
-	db2 := NewLMDB().Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	db2 := NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeaderPrefix: dbutils.BucketConfigItem{},
 		}
-	}).ReadOnly().MustOpen()
+	}).MustOpen()
 
 	tx, err := db2.Begin(context.Background(), nil, RO)
 	if err != nil {

@@ -90,14 +90,14 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		}
 	}
 
-	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW|ethdb.NoSync)
+	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
 	cc, bc, st, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
 	cc.SetDB(tx)
 
-	tx, err = tx.Begin(ctx, ethdb.RW|ethdb.NoSync)
+	tx, err = tx.Begin(ctx, ethdb.RW)
 	if err != nil {
 		return err
 	}

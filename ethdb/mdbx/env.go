@@ -32,12 +32,9 @@ const (
 	Readonly   = C.MDBX_RDONLY     // Used in several functions to denote an object as readonly.
 	WriteMap   = C.MDBX_WRITEMAP   // Use a writable memory map.
 	NoMetaSync = C.MDBX_NOMETASYNC // Don't fsync metapage after commit.
-	//NoSync      = C.MDBX_NOSYNC     // Don't fsync after commit.
-	SafeNoSync    = C.MDBX_SAFE_NOSYNC
-	Durable       = C.MDBX_SYNC_DURABLE
-	UtterlyNoSync = C.MDBX_UTTERLY_NOSYNC
-	MapAsync      = C.MDBX_MAPASYNC // Flush asynchronously when using the WriteMap flag.
-	NoTLS         = C.MDBX_NOTLS    // Danger zone. When unset reader locktable slots are tied to their thread.
+	SafeNoSync = C.MDBX_SAFE_NOSYNC
+	Durable    = C.MDBX_SYNC_DURABLE
+	NoTLS      = C.MDBX_NOTLS // Danger zone. When unset reader locktable slots are tied to their thread.
 	//NoLock      = C.MDBX_NOLOCK     // Danger zone. LMDB does not use any locks.
 	NoReadahead = C.MDBX_NORDAHEAD // Disable readahead. Requires OS support.
 	NoMemInit   = C.MDBX_NOMEMINIT // Disable LMDB memory initialization.
@@ -84,6 +81,10 @@ const (
 	DbgLegacyMultiOpen = C.MDBX_DBG_LEGACY_MULTIOPEN
 	DbgLegacyTxOverlap = C.MDBX_DBG_LEGACY_OVERLAP
 	DbgDoNotChange     = C.MDBX_DBG_DONTCHANGE
+)
+
+var (
+	LoggerDoNotChange = C.MDBX_LOGGER_DONTCHANGE
 )
 
 // DBI is a handle for a database in an Env.
@@ -159,6 +160,10 @@ func (env *Env) FD() (uintptr, error) {
 		return 0, errNotOpen
 	}
 	return fd, nil
+}
+
+func (env *Env) StderrLogger() *C.MDBX_debug_func {
+	return C.mdbxgo_stderr_logger()
 }
 
 // ReaderList dumps the contents of the reader lock table as text.  Readers
@@ -387,8 +392,8 @@ func (env *Env) Flags() (uint, error) {
 	return uint(_flags), nil
 }
 
-func (env *Env) SetDebug(logLvl int, dbg int) error {
-	ret := C.mdbx_setup_debug(C.MDBX_log_level_t(logLvl), C.MDBX_debug_flags_t(dbg), C.MDBX_LOGGER_DONTCHANGE)
+func (env *Env) SetDebug(logLvl int, dbg int, logger *C.MDBX_debug_func) error {
+	ret := C.mdbx_setup_debug(C.MDBX_log_level_t(logLvl), C.MDBX_debug_flags_t(dbg), logger)
 	return operrno("mdbx_setup_debug", ret)
 }
 

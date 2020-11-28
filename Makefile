@@ -34,7 +34,7 @@ geth:
 
 tg:
 	@echo "Building mdbx"
-	cd ethdb/mdbx/dist/ && make clean && make libmdbx.a && cat config.h
+	cd ethdb/mdbx/dist/ && make clean && make mdbx-static.o && cat config.h
 	$(GOBUILD) -o $(GOBIN)/tg -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
@@ -45,22 +45,22 @@ hack:
 	@echo "Run \"$(GOBIN)/hack\" to launch hack."
 
 tester:
-	$(GOBUILD) -o $(GOBIN)/tester ./cmd/tester
+	$(GOBUILD) -o $(GOBIN)/tester -tags 'mdbx' ./cmd/tester
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tester\" to launch tester."
 
 rpctest:
-	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest
+	$(GOBUILD) -o $(GOBIN)/rpctest -tags 'mdbx' ./cmd/rpctest
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
 
 state:
-	$(GOBUILD) -o $(GOBIN)/state ./cmd/state
+	$(GOBUILD) -o $(GOBIN)/state -tags 'mdbx' ./cmd/state
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/state\" to launch state."
 
 restapi:
-	$(GOBUILD) -o $(GOBIN)/restapi ./cmd/restapi
+	$(GOBUILD) -o $(GOBIN)/restapi -tags 'mdbx' ./cmd/restapi
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/restapi\" to launch restapi."
 
@@ -69,17 +69,17 @@ run-web-ui:
 	@cd debug-web-ui && yarn start
 
 pics:
-	$(GOBUILD) -o $(GOBIN)/pics ./cmd/pics
+	$(GOBUILD) -o $(GOBIN)/pics -tags 'mdbx' ./cmd/pics
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
 rpcdaemon:
-	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X commands.gitCommit=${GIT_COMMIT}" ./cmd/rpcdaemon
+	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X commands.gitCommit=${GIT_COMMIT}" -tags 'mdbx' ./cmd/rpcdaemon
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
 integration:
-	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
+	$(GOBUILD) -o $(GOBIN)/integration -tags 'mdbx' ./cmd/integration
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
@@ -101,23 +101,26 @@ db-tools:
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
-ethdb/mdbx/dist/libmdbx.a:
+ethdb/mdbx/dist/mdbx-static.o:
 	echo "Building mdbx"
-	cd ethdb/mdbx/dist/ && make libmdbx.a && cat config.h
+	cd ethdb/mdbx/dist/ \
+		&& make clean && make config.h \
+		&& echo '#define MDBX_HUGE_TRANSACTIONS 1' >> config.h \
+		&& echo '#define MDBX_TXN_CHECKOWNER 0' >> config.h \
+		&& CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
-test: ethdb/mdbx/dist/libmdbx.a
+test: ethdb/mdbx/dist/mdbx-static.o
 	$(GOTEST)
-	du -h
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
 
-test-mdbx: ethdb/mdbx/dist/libmdbx.a
-	TEST_DB=mdbx $(GOTEST_MDBX)
+test-mdbx: ethdb/mdbx/dist/mdbx-static.o
+	TEST_DB=mdbx $(GOTEST)
 
 lint: lintci
 
-lintci: ethdb/mdbx/dist/libmdbx.a
+lintci: ethdb/mdbx/dist/mdbx-static.o
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \

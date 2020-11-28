@@ -11,7 +11,8 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_ALLOY 1n#define MDBX_BUILD_SOURCERY e8754d452194a57d79e25d7c7923f991b403b70c238ecfb3ce34dab15aa2ddde_v0_9_1_41_g97b47de
+#define MDBX_ALLOY 1
+#define MDBX_BUILD_SOURCERY 7386e70918ee962c2a528e023183881d607461e5e1740d95d04df9cbb3f63c56_v0_9_1_138_g6d2914c9
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -1116,8 +1117,7 @@ MDBX_INTERNAL_FUNC int mdbx_vasprintf(char **strp, const char *fmt, va_list ap);
 
 #if defined(__linux__) || defined(__gnu_linux__)
 MDBX_INTERNAL_VAR uint32_t mdbx_linux_kernel_version;
-MDBX_INTERNAL_VAR bool
-    mdbx_RunningOnWSL /* Windows Subsystem for Linux is mad and trouble-full */;
+MDBX_INTERNAL_VAR bool mdbx_RunningOnWSL1 /* Windows Subsystem 1 for Linux */;
 #endif /* Linux */
 
 #ifndef mdbx_strdup
@@ -1979,7 +1979,7 @@ typedef struct MDBX_meta {
 typedef struct MDBX_page {
   union {
     struct MDBX_page *mp_next; /* for in-memory list of freed pages */
-    uint64_t mp_txnid;         /* txnid during which the page has been COW-ed */
+    uint64_t mp_txnid;         /* txnid that committed this page */
   };
   uint16_t mp_leaf2_ksize; /* key size if this is a LEAF2 page */
 #define P_BRANCH 0x01      /* branch page */
@@ -2386,8 +2386,6 @@ struct MDBX_txn {
   MDBX_db *mt_dbs;
   /* Array of sequence numbers for each DB handle */
   unsigned *mt_dbiseqs;
-  /* In write txns, array of cursors for each DB */
-  MDBX_cursor **mt_cursors;
 
   /* Transaction DBI Flags */
 #define DBI_DIRTY MDBX_DBI_DIRTY /* DB was written in this txn */
@@ -2414,6 +2412,8 @@ struct MDBX_txn {
       MDBX_reader *reader;
     } to;
     struct {
+      /* In write txns, array of cursors for each DB */
+      MDBX_cursor **cursors;
       pgno_t *reclaimed_pglist; /* Reclaimed GC pages */
       txnid_t last_reclaimed;   /* ID of last used record */
       pgno_t loose_refund_wl /* FIXME: describe */;
@@ -2837,7 +2837,7 @@ static __maybe_unused __inline void mdbx_jitter4testing(bool tiny) {
   ((rc) != MDBX_RESULT_TRUE && (rc) != MDBX_RESULT_FALSE)
 
 /* Internal error codes, not exposed outside libmdbx */
-#define MDBX_NO_ROOT (MDBX_LAST_LMDB_ERRCODE + 10)
+#define MDBX_NO_ROOT (MDBX_LAST_ADDED_ERRCODE + 10)
 
 /* Debugging output value of a cursor DBI: Negative in a sub-cursor. */
 #define DDBI(mc)                                                               \
@@ -3446,15 +3446,15 @@ __cold void error::throw_exception() const {
 
 bool slice::is_printable(bool disable_utf8) const noexcept {
   enum : byte {
-    LS = 5,                     // shift for UTF8 sequence length
-    P_ = 1 << (LS - 1),         // printable ASCII flag
+    LS = 4,                     // shift for UTF8 sequence length
+    P_ = 1 << LS,               // printable ASCII flag
     N_ = 0,                     // non-printable ASCII
     second_range_mask = P_ - 1, // mask for range flag
-    r80_BF = P_ | 0,            // flag for UTF8 2nd byte range
-    rA0_BF = P_ | 1,            // flag for UTF8 2nd byte range
-    r80_9F = P_ | 2,            // flag for UTF8 2nd byte range
-    r90_BF = P_ | 3,            // flag for UTF8 2nd byte range
-    r80_8F = P_ | 4,            // flag for UTF8 2nd byte range
+    r80_BF = 0,                 // flag for UTF8 2nd byte range
+    rA0_BF = 1,                 // flag for UTF8 2nd byte range
+    r80_9F = 2,                 // flag for UTF8 2nd byte range
+    r90_BF = 3,                 // flag for UTF8 2nd byte range
+    r80_8F = 4,                 // flag for UTF8 2nd byte range
 
     // valid utf-8 byte sequences
     // http://www.unicode.org/versions/Unicode6.0.0/ch03.pdf - page 94
@@ -4122,9 +4122,35 @@ bool env::is_pristine() const {
 
 bool env::is_empty() const { return get_stat().ms_branch_pages == 0; }
 
-env &env::copy(const path &destination, bool compactify,
+#ifdef MDBX_STD_FILESYSTEM_PATH
+env &env::copy(const ::std::filesystem::path &destination, bool compactify,
                bool force_dynamic_size) {
-  const path_to_pchar<path> utf8(destination);
+  const path_to_pchar<::std::filesystem::path> utf8(destination);
+  error::success_or_throw(
+      ::mdbx_env_copy(handle_, utf8,
+                      (compactify ? MDBX_CP_COMPACT : MDBX_CP_DEFAULTS) |
+                          (force_dynamic_size ? MDBX_CP_FORCE_DYNAMIC_SIZE
+                                              : MDBX_CP_DEFAULTS)));
+  return *this;
+}
+#endif /* MDBX_STD_FILESYSTEM_PATH */
+
+#if defined(_WIN32) || defined(_WIN64)
+env &env::copy(const ::std::wstring &destination, bool compactify,
+               bool force_dynamic_size) {
+  const path_to_pchar<::std::wstring> utf8(destination);
+  error::success_or_throw(
+      ::mdbx_env_copy(handle_, utf8,
+                      (compactify ? MDBX_CP_COMPACT : MDBX_CP_DEFAULTS) |
+                          (force_dynamic_size ? MDBX_CP_FORCE_DYNAMIC_SIZE
+                                              : MDBX_CP_DEFAULTS)));
+  return *this;
+}
+#endif /* Windows */
+
+env &env::copy(const ::std::string &destination, bool compactify,
+               bool force_dynamic_size) {
+  const path_to_pchar<::std::string> utf8(destination);
   error::success_or_throw(
       ::mdbx_env_copy(handle_, utf8,
                       (compactify ? MDBX_CP_COMPACT : MDBX_CP_DEFAULTS) |
@@ -4148,8 +4174,25 @@ path env::get_path() const {
   return pchar_to_path<path>(c_str);
 }
 
-bool env::remove(const path &pathname, const remove_mode mode) {
-  const path_to_pchar<path> utf8(pathname);
+#ifdef MDBX_STD_FILESYSTEM_PATH
+bool env::remove(const ::std::filesystem::path &pathname,
+                 const remove_mode mode) {
+  const path_to_pchar<::std::filesystem::path> utf8(pathname);
+  return error::boolean_or_throw(
+      ::mdbx_env_delete(utf8, MDBX_env_delete_mode_t(mode)));
+}
+#endif /* MDBX_STD_FILESYSTEM_PATH */
+
+#if defined(_WIN32) || defined(_WIN64)
+bool env::remove(const ::std::wstring &pathname, const remove_mode mode) {
+  const path_to_pchar<::std::wstring> utf8(pathname);
+  return error::boolean_or_throw(
+      ::mdbx_env_delete(utf8, MDBX_env_delete_mode_t(mode)));
+}
+#endif /* Windows */
+
+bool env::remove(const ::std::string &pathname, const remove_mode mode) {
+  const path_to_pchar<::std::string> utf8(pathname);
   return error::boolean_or_throw(
       ::mdbx_env_delete(utf8, MDBX_env_delete_mode_t(mode)));
 }
@@ -4190,11 +4233,12 @@ __cold void env_managed::setup(unsigned max_maps, unsigned max_readers) {
     error::success_or_throw(::mdbx_env_set_maxdbs(handle_, max_maps));
 }
 
-__cold env_managed::env_managed(const path &pathname,
+#ifdef MDBX_STD_FILESYSTEM_PATH
+__cold env_managed::env_managed(const ::std::filesystem::path &pathname,
                                 const operate_parameters &op, bool accede)
     : env_managed(create_env()) {
   setup(op.max_maps, op.max_readers);
-  const path_to_pchar<path> utf8(pathname);
+  const path_to_pchar<::std::filesystem::path> utf8(pathname);
   error::success_or_throw(
       ::mdbx_env_open(handle_, utf8, op.make_flags(accede), 0));
 
@@ -4203,12 +4247,73 @@ __cold env_managed::env_managed(const path &pathname,
     error::throw_exception(MDBX_INCOMPATIBLE);
 }
 
-__cold env_managed::env_managed(const path &pathname,
+__cold env_managed::env_managed(const ::std::filesystem::path &pathname,
                                 const env_managed::create_parameters &cp,
                                 const env::operate_parameters &op, bool accede)
     : env_managed(create_env()) {
   setup(op.max_maps, op.max_readers);
-  const path_to_pchar<path> utf8(pathname);
+  const path_to_pchar<::std::filesystem::path> utf8(pathname);
+  set_geometry(cp.geometry);
+  error::success_or_throw(
+      ::mdbx_env_open(handle_, utf8, op.make_flags(accede, cp.use_subdirectory),
+                      cp.file_mode_bits));
+
+  if (op.options.nested_write_transactions &&
+      !get_options().nested_write_transactions)
+    error::throw_exception(MDBX_INCOMPATIBLE);
+}
+#endif /* MDBX_STD_FILESYSTEM_PATH */
+
+#if defined(_WIN32) || defined(_WIN64)
+__cold env_managed::env_managed(const ::std::wstring &pathname,
+                                const operate_parameters &op, bool accede)
+    : env_managed(create_env()) {
+  setup(op.max_maps, op.max_readers);
+  const path_to_pchar<::std::wstring> utf8(pathname);
+  error::success_or_throw(
+      ::mdbx_env_open(handle_, utf8, op.make_flags(accede), 0));
+
+  if (op.options.nested_write_transactions &&
+      !get_options().nested_write_transactions)
+    error::throw_exception(MDBX_INCOMPATIBLE);
+}
+
+__cold env_managed::env_managed(const ::std::wstring &pathname,
+                                const env_managed::create_parameters &cp,
+                                const env::operate_parameters &op, bool accede)
+    : env_managed(create_env()) {
+  setup(op.max_maps, op.max_readers);
+  const path_to_pchar<::std::wstring> utf8(pathname);
+  set_geometry(cp.geometry);
+  error::success_or_throw(
+      ::mdbx_env_open(handle_, utf8, op.make_flags(accede, cp.use_subdirectory),
+                      cp.file_mode_bits));
+
+  if (op.options.nested_write_transactions &&
+      !get_options().nested_write_transactions)
+    error::throw_exception(MDBX_INCOMPATIBLE);
+}
+#endif /* Windows */
+
+__cold env_managed::env_managed(const ::std::string &pathname,
+                                const operate_parameters &op, bool accede)
+    : env_managed(create_env()) {
+  setup(op.max_maps, op.max_readers);
+  const path_to_pchar<::std::string> utf8(pathname);
+  error::success_or_throw(
+      ::mdbx_env_open(handle_, utf8, op.make_flags(accede), 0));
+
+  if (op.options.nested_write_transactions &&
+      !get_options().nested_write_transactions)
+    error::throw_exception(MDBX_INCOMPATIBLE);
+}
+
+__cold env_managed::env_managed(const ::std::string &pathname,
+                                const env_managed::create_parameters &cp,
+                                const env::operate_parameters &op, bool accede)
+    : env_managed(create_env()) {
+  setup(op.max_maps, op.max_readers);
+  const path_to_pchar<::std::string> utf8(pathname);
   set_geometry(cp.geometry);
   error::success_or_throw(
       ::mdbx_env_open(handle_, utf8, op.make_flags(accede, cp.use_subdirectory),
@@ -4311,15 +4416,24 @@ __cold ::std::ostream &operator<<(::std::ostream &out, const slice &it) {
     out << "EMPTY->" << it.data();
   else {
     const slice root(it.head(std::min(it.length(), size_t(64))));
-    out << it.length() << "->"
-        << (root.is_printable() ? root.string() : root.base58_encode())
-        << ((root == it) ? "" : "...");
+    out << it.length() << ".";
+    if (root.is_printable())
+      (out << "\"").write(root.char_ptr(), root.length()) << "\"";
+    else
+      out << root.base58_encode();
+    if (root.length() < it.length())
+      out << "...";
   }
   return out << "}";
 }
 
 __cold ::std::ostream &operator<<(::std::ostream &out, const pair &it) {
   return out << "{" << it.key << " => " << it.value << "}";
+}
+
+__cold ::std::ostream &operator<<(::std::ostream &out, const pair_result &it) {
+  return out << "{" << (it.done ? "done: " : "non-done: ") << it.key << " => "
+             << it.value << "}";
 }
 
 __cold ::std::ostream &operator<<(::std::ostream &out,

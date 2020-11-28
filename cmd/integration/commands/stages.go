@@ -795,7 +795,12 @@ func (ds *DispatcherServerImpl) StartDispatch(connection shards.Dispatcher_Start
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
 func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook stagedsync.ChangeSetHook) (*core.TinyChainContext, *core.BlockChain, *stagedsync.State, progressFunc) {
-	chainConfig, bc, err := newBlockChain(db)
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		panic(err)
+	}
+
+	chainConfig, bc, err := newBlockChain(db, sm)
 	if err != nil {
 		panic(err)
 	}
@@ -803,10 +808,6 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	cc := &core.TinyChainContext{}
 	cc.SetDB(tx)
 	cc.SetEngine(ethash.NewFaker())
-	sm, err := ethdb.GetStorageModeFromDB(db)
-	if err != nil {
-		panic(err)
-	}
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 	st, err := stagedsync.New(
@@ -836,8 +837,10 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	return cc, bc, st, progress
 }
 
-func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, error) {
-	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+func newBlockChain(db ethdb.Database, sm ethdb.StorageMode) (*params.ChainConfig, *core.BlockChain, error) {
+	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{
+		NoReceipts: !sm.Receipts,
+	}, nil, nil)
 	if err1 != nil {
 		return nil, nil, err1
 	}

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/google/btree"
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -81,7 +82,7 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 	default:
 		opts := NewLMDB().Path(path)
 		if readOnly {
-			opts = opts.ReadOnly()
+			opts = opts.Flags(func(flags uint) uint { return flags | lmdb.Readonly })
 		}
 		kv, err = opts.Open()
 	}

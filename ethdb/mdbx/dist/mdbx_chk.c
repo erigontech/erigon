@@ -34,6 +34,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
+#define MDBX_BUILD_SOURCERY 7386e70918ee962c2a528e023183881d607461e5e1740d95d04df9cbb3f63c56_v0_9_1_138_g6d2914c9
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -1138,8 +1139,7 @@ MDBX_INTERNAL_FUNC int mdbx_vasprintf(char **strp, const char *fmt, va_list ap);
 
 #if defined(__linux__) || defined(__gnu_linux__)
 MDBX_INTERNAL_VAR uint32_t mdbx_linux_kernel_version;
-MDBX_INTERNAL_VAR bool
-    mdbx_RunningOnWSL /* Windows Subsystem for Linux is mad and trouble-full */;
+MDBX_INTERNAL_VAR bool mdbx_RunningOnWSL1 /* Windows Subsystem 1 for Linux */;
 #endif /* Linux */
 
 #ifndef mdbx_strdup
@@ -2001,7 +2001,7 @@ typedef struct MDBX_meta {
 typedef struct MDBX_page {
   union {
     struct MDBX_page *mp_next; /* for in-memory list of freed pages */
-    uint64_t mp_txnid;         /* txnid during which the page has been COW-ed */
+    uint64_t mp_txnid;         /* txnid that committed this page */
   };
   uint16_t mp_leaf2_ksize; /* key size if this is a LEAF2 page */
 #define P_BRANCH 0x01      /* branch page */
@@ -2408,8 +2408,6 @@ struct MDBX_txn {
   MDBX_db *mt_dbs;
   /* Array of sequence numbers for each DB handle */
   unsigned *mt_dbiseqs;
-  /* In write txns, array of cursors for each DB */
-  MDBX_cursor **mt_cursors;
 
   /* Transaction DBI Flags */
 #define DBI_DIRTY MDBX_DBI_DIRTY /* DB was written in this txn */
@@ -2436,6 +2434,8 @@ struct MDBX_txn {
       MDBX_reader *reader;
     } to;
     struct {
+      /* In write txns, array of cursors for each DB */
+      MDBX_cursor **cursors;
       pgno_t *reclaimed_pglist; /* Reclaimed GC pages */
       txnid_t last_reclaimed;   /* ID of last used record */
       pgno_t loose_refund_wl /* FIXME: describe */;
@@ -2859,7 +2859,7 @@ static __maybe_unused __inline void mdbx_jitter4testing(bool tiny) {
   ((rc) != MDBX_RESULT_TRUE && (rc) != MDBX_RESULT_FALSE)
 
 /* Internal error codes, not exposed outside libmdbx */
-#define MDBX_NO_ROOT (MDBX_LAST_LMDB_ERRCODE + 10)
+#define MDBX_NO_ROOT (MDBX_LAST_ADDED_ERRCODE + 10)
 
 /* Debugging output value of a cursor DBI: Negative in a sub-cursor. */
 #define DDBI(mc)                                                               \
