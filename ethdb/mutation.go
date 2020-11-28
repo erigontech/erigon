@@ -3,6 +3,8 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,6 +15,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
@@ -65,7 +68,30 @@ func (m *mutation) getMem(table string, key []byte) ([]byte, bool) {
 }
 
 func (m *mutation) Sequence(bucket string, amount uint64) (res uint64, err error) {
-	return m.db.Sequence(bucket, amount)
+	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
+	if !ok && m.db != nil {
+		var err error
+		v, err = m.db.Get(dbutils.Sequence, []byte(bucket))
+		if !errors.Is(err, ErrKeyNotFound) {
+			return 0, err
+		}
+	}
+	var currentV uint64 = 0
+	if len(v) > 0 {
+		currentV = binary.BigEndian.Uint64(v)
+	}
+
+	if amount == 0 {
+		return currentV, nil
+	}
+
+	newVBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
+	if err := m.Put(dbutils.Sequence, []byte(bucket), newVBytes); err != nil {
+		return 0, err
+	}
+
+	return currentV, nil
 }
 
 // Can only be called from the worker thread
