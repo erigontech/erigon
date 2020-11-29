@@ -68,8 +68,6 @@ func (m *mutation) getMem(table string, key []byte) ([]byte, bool) {
 }
 
 func (m *mutation) Sequence(bucket string, amount uint64) (res uint64, err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
 		v, err = m.db.Get(dbutils.Sequence, []byte(bucket))
