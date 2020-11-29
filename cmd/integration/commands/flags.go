@@ -25,6 +25,7 @@ var (
 	freelistReuse      int
 	migration          string
 	silkwormPath       string
+	file               string
 )
 
 func must(err error) {
@@ -40,6 +41,12 @@ func withChaindata(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&snapshotMode, "snapshotMode", "", "set of snapshots to use")
 	cmd.Flags().StringVar(&snapshotDir, "snapshotDir", "", "snapshot dir")
 	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+}
+
+func withFile(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&file, "file", "", "path to file")
+	must(cmd.MarkFlagFilename("file"))
+	must(cmd.MarkFlagRequired("file"))
 }
 
 func withLmdbFlags(cmd *cobra.Command) {

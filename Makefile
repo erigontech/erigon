@@ -107,10 +107,11 @@ ethdb/mdbx/dist/mdbx-static.o:
 		&& make clean && make config.h \
 		&& echo '#define MDBX_HUGE_TRANSACTIONS 1' >> config.h \
 		&& echo '#define MDBX_TXN_CHECKOWNER 0' >> config.h \
-		&& CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
+		&& echo '#define MDBX_FORCE_ASSERTIONS 1' >> config.h \
+        && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
 test: ethdb/mdbx/dist/mdbx-static.o
-	$(GOTEST)
+	TEST_DB=mdbx $(GOTEST)
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
