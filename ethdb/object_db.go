@@ -150,6 +150,13 @@ func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
 }
 
 func (db *ObjectDatabase) Sequence(bucket string, amount uint64) (res uint64, err error) {
+	if amount == 0 {
+		err = db.kv.View(context.Background(), func(tx Tx) error {
+			res, err = tx.Sequence(bucket, amount)
+			return err
+		})
+		return res, err
+	}
 	err = db.kv.Update(context.Background(), func(tx Tx) error {
 		res, err = tx.Sequence(bucket, amount)
 		return err

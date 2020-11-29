@@ -68,9 +68,10 @@ func (m *mutation) getMem(table string, key []byte) ([]byte, bool) {
 }
 
 func (m *mutation) Sequence(bucket string, amount uint64) (res uint64, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
-		var err error
 		v, err = m.db.Get(dbutils.Sequence, []byte(bucket))
 		if !errors.Is(err, ErrKeyNotFound) {
 			return 0, err
@@ -83,7 +84,7 @@ func (m *mutation) Sequence(bucket string, amount uint64) (res uint64, err error
 
 	newVBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
-	if err := m.Put(dbutils.Sequence, []byte(bucket), newVBytes); err != nil {
+	if err = m.Put(dbutils.Sequence, []byte(bucket), newVBytes); err != nil {
 		return 0, err
 	}
 
