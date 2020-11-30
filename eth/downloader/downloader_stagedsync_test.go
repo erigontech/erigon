@@ -158,11 +158,11 @@ func (st *stagedSyncTester) HasHeader(hash common.Hash, number uint64) bool {
 }
 
 // InsertBodyChain is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) InsertBodyChain(_ string, _ context.Context, blocks types.Blocks) (bool, error) {
+func (st *stagedSyncTester) InsertBodyChain(_ string, _ context.Context, db ethdb.Database, blocks types.Blocks) (bool, error) {
 	st.lock.Lock()
 	defer st.lock.Unlock()
 	for _, block := range blocks {
-		if err := rawdb.WriteBlock(context.Background(), st.db, block); err != nil {
+		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
 			panic(err)
 		}
 	}

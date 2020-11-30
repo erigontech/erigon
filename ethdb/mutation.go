@@ -71,7 +71,7 @@ func (m *mutation) Sequence(bucket string, amount uint64) (res uint64, err error
 	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
 		v, err = m.db.Get(dbutils.Sequence, []byte(bucket))
-		if !errors.Is(err, ErrKeyNotFound) {
+		if err != nil && !errors.Is(err, ErrKeyNotFound) {
 			return 0, err
 		}
 	}
