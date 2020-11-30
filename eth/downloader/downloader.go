@@ -224,7 +224,7 @@ type BlockChain interface {
 	InsertChain(context.Context, types.Blocks) (int, error)
 
 	// InsertBodyChain inserts a batch of blocks into the local chain, without executing them.
-	InsertBodyChain(string, context.Context, types.Blocks) (bool, error)
+	InsertBodyChain(string, context.Context, ethdb.Database, types.Blocks) (bool, error)
 
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []types.Receipts, uint64) (int, error)
@@ -1807,7 +1807,7 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 	if execute {
 		index, err = d.blockchain.InsertChain(context.Background(), blocks)
 	} else {
-		stopped, err = d.blockchain.InsertBodyChain(logPrefix, context.Background(), blocks)
+		stopped, err = d.blockchain.InsertBodyChain(logPrefix, context.Background(), d.stateDB, blocks)
 		if stopped {
 			index = 0
 		} else {
