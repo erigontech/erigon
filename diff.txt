@@ -2560,15 +2560,3 @@ Date:   Mon Nov 30 18:58:47 2020 +0100
     
     The cause is that many operations may be pending, but if the close happens, only one of them gets awoken and exits, the others remain waiting for a signal that never comes.
 
-commit a1ddd9e1d313553b0f584d5d3aeb2a4026a1b0c4
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Mon Nov 30 15:23:48 2020 +0100
-
-    cmd/devp2p/internal/ethtest: add transaction tests (#21857)
-
-commit aba0c234c29c72860c369ec97553716a3fad11cd
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Mon Nov 30 14:43:20 2020 +0100
-
-    cmd/geth: make tests run quicker + use less memory and disk (#21919)
-
