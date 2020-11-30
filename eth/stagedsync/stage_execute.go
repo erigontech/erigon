@@ -85,7 +85,8 @@ func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, cac
 		stateWriter = params.WriterBuilder(batch, tx, blockNum)
 	} else if cache == nil {
 		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
-	} else {
+	}
+	if cache != nil {
 		stateWriter = state.NewCachedWriter(state.NewChangeSetWriterPlain(tx, blockNum), cache)
 	}
 
@@ -157,7 +158,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		batch = tx.NewBatch()
 		defer batch.Rollback()
 	}
-	if params.CacheSize > 0 {
+	if !useSilkworm && params.CacheSize > 0 {
 		batch = tx
 		cache = shards.NewStateCache(32, params.CacheSize)
 	}
