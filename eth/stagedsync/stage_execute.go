@@ -85,8 +85,7 @@ func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, cac
 		stateWriter = params.WriterBuilder(batch, tx, blockNum)
 	} else if cache == nil {
 		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum)
-	}
-	if cache != nil {
+	} else {
 		stateWriter = state.NewCachedWriter(state.NewChangeSetWriterPlain(tx, blockNum), cache)
 	}
 
