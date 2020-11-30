@@ -63,20 +63,26 @@ type SnapshotKV2 struct {
 }
 
 func (s *SnapshotKV2) View(ctx context.Context, f func(tx Tx) error) error {
-	dbTx, err := s.db.Begin(ctx, nil, RO)
+	snTX, err:=s.Begin(ctx, nil, RO)
 	if err != nil {
 		return err
 	}
-	defer dbTx.Rollback()
-	return f(&sn2TX{
-		dbTX:      dbTx,
-		snapshots: s.snapshots,
-		snTX:      map[string]Tx{},
-	})
+	defer snTX.Rollback()
+	return f(snTX)
 }
 
 func (s *SnapshotKV2) Update(ctx context.Context, f func(tx Tx) error) error {
-	panic("implement me")
+	tx,err:=s.Begin(ctx, nil, RW)
+	if err!=nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	err = f(tx)
+	if err==nil {
+		return tx.Commit(ctx)
+	}
+	return err
 }
 
 func (s *SnapshotKV2) Close() {
@@ -99,7 +105,7 @@ func (s *SnapshotKV2) Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, 
 }
 
 func (s *SnapshotKV2) AllBuckets() dbutils.BucketsCfg {
-	panic("implement me")
+	return s.db.AllBuckets()
 }
 
 var ErrUnavailableSnapshot = errors.New("unavailable snapshot")
@@ -132,9 +138,13 @@ func (s *sn2TX) ExistingBuckets() ([]string, error) {
 }
 
 func (s *sn2TX) Cursor(bucket string) Cursor {
-	tx, err := s.getTX(bucket)
-	if err != nil {
+	tx, err := s.getSnapshotTX(bucket)
+	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
+	}
+	//process only db buckets
+	if errors.Is(err, ErrUnavailableSnapshot) {
+		return s.dbTX.Cursor(bucket)
 	}
 	return &snCursor2{
 		dbCursor: s.dbTX.Cursor(bucket),
@@ -156,18 +166,19 @@ func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {
 		return nil, err
 	}
 	if len(v) == 0 {
-		snTx, err := s.getTX(bucket)
+		snTx, err := s.getSnapshotTX(bucket)
 		if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 			return nil, err
 		}
-		if snTx != nil {
-			s.snTX[bucket] = snTx
-			return s.snTX[bucket].GetOne(bucket, key)
+		//process only db buckets
+		if errors.Is(err, ErrUnavailableSnapshot) {
+			return v, nil
 		}
+		return snTx.GetOne(bucket, key)
 	}
 	return v, nil
 }
-func (s *sn2TX) getTX(bucket string) (Tx, error) {
+func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
 	tx, ok := s.snTX[bucket]
 	if ok {
 		return tx, nil
@@ -192,14 +203,16 @@ func (s *sn2TX) HasOne(bucket string, key []byte) (bool, error) {
 		return false, err
 	}
 	if !v {
-		snTx, err := s.getTX(bucket)
+		snTx, err := s.getSnapshotTX(bucket)
 		if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 			return false, err
 		}
-		if snTx != nil {
-			s.snTX[bucket] = snTx
-			return s.snTX[bucket].HasOne(bucket, key)
+		//process only db buckets
+		if errors.Is(err, ErrUnavailableSnapshot) {
+			return v, nil
 		}
+
+		return snTx.HasOne(bucket, key)
 	}
 	return v, nil
 }
@@ -287,14 +300,15 @@ func (s *snCursor2) Seek(seek []byte) ([]byte, []byte, error) {
 	if err!=nil && !errors.Is(err, ErrKeyNotFound) {
 		return nil, nil, err
 	}
-	if bytes.Equal(dbKey, seek) {
-		return dbKey, dbVal, err
-	}
 	sndbKey, sndbVal, err:=s.snCursor.Seek(seek)
 	if err!=nil && !errors.Is(err, ErrKeyNotFound) {
 		return nil, nil, err
 	}
-	if bytes.Equal(dbKey, seek) {
+
+	if bytes.Equal(dbKey, seek) && dbVal!=nil {
+		return dbKey, dbVal, err
+	}
+	if bytes.Equal(sndbKey, seek) && sndbVal!=nil {
 		return sndbKey, sndbVal, err
 	}
 	cmp,_:=common.KeyCmp(dbKey, sndbKey)
@@ -546,4 +560,32 @@ func KeyCmpBackward(key1, key2 []byte) (int, bool) {
 	default:
 		return bytes.Compare(key1, key2), false
 	}
+}
+
+
+type KvData struct {
+	K []byte
+	V []byte
+}
+func GenStateData(data []KvData) (KV, error) {
+	snapshot := NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.PlainStateBucket: dbutils.BucketConfigItem{},
+		}
+	}).InMem().MustOpen()
+
+	err := snapshot.Update(context.Background(), func(tx Tx) error {
+		c := tx.Cursor(dbutils.PlainStateBucket)
+		for i := range data {
+			innerErr := c.Put(data[i].K, data[i].V)
+			if innerErr != nil {
+				return innerErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
 }

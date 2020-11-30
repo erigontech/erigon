@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -646,45 +649,20 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	}
 }
 
-func genStateData(data []kvData) (KV, error) {
-	snapshot := NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket: dbutils.BucketConfigItem{},
-		}
-	}).InMem().MustOpen()
 
-	err := snapshot.Update(context.Background(), func(tx Tx) error {
-		c := tx.Cursor(dbutils.PlainStateBucket)
-		for i := range data {
-			innerErr := c.Put(data[i].K, data[i].V)
-			if innerErr != nil {
-				return innerErr
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return snapshot, nil
-}
 
-type kvData struct {
-	K []byte
-	V []byte
-}
 
 func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
-	data := []kvData{}
+	data := []KvData{}
 	for i := 1; i < 3; i++ {
 		for j := 1; j < 3; j++ {
-			data = append(data, kvData{
+			data = append(data, KvData{
 				K: dbutils.PlainGenerateCompositeStorageKey(common.Address{uint8(i) * 2}, 1, common.Hash{uint8(j) * 2}),
 				V: []byte{uint8(i) * 2, uint8(j) * 2},
 			})
 		}
 	}
-	snapshotDB, err := genStateData(data)
+	snapshotDB, err := GenStateData(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -745,14 +723,14 @@ func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
 }
 
 func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
-	data := []kvData{
+	data := []KvData{
 		{K: []byte{1}, V: []byte{1}},
 		{K: []byte{2}, V: []byte{2}},
 		{K: []byte{3}, V: []byte{3}},
 		{K: []byte{4}, V: []byte{4}},
 		{K: []byte{5}, V: []byte{5}},
 	}
-	snapshotDB, err := genStateData(data)
+	snapshotDB, err := GenStateData(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -819,14 +797,14 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 
 
 func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
-	data := []kvData{
+	data := []KvData{
 		{K: []byte{1}, V: []byte{1}},
 		{K: []byte{2}, V: []byte{2}},
 		{K: []byte{3}, V: []byte{3}},
 		{K: []byte{4}, V: []byte{4}},
 		{K: []byte{5}, V: []byte{5}},
 	}
-	snapshotDB, err := genStateData(data)
+	snapshotDB, err := GenStateData(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -900,7 +878,7 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 
 }
 func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
-	snapshotData := []kvData{
+	snapshotData := []KvData{
 		{
 			K: []byte{0, 1},
 			V: []byte{1},
@@ -911,7 +889,7 @@ func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
 		},
 	}
 	replacedValue := []byte{1, 1}
-	mainData := []kvData{
+	mainData := []KvData{
 		{
 			K: []byte{0, 1},
 			V: replacedValue,
@@ -925,11 +903,11 @@ func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
 			V: []byte{3},
 		},
 	}
-	snapshotDB, err := genStateData(snapshotData)
+	snapshotDB, err := GenStateData(snapshotData)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mainDB, err := genStateData(mainData)
+	mainDB, err := GenStateData(mainData)
 
 	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		MustOpen()
@@ -974,7 +952,7 @@ func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
 }
 
 func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
-	snapshotData := []kvData{
+	snapshotData := []KvData{
 		{
 			K: []byte{0, 1},
 			V: []byte{1},
@@ -985,7 +963,7 @@ func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
 		},
 	}
 	replacedValue := []byte{1, 1}
-	mainData := []kvData{
+	mainData := []KvData{
 		{
 			K: []byte{0, 1},
 			V: replacedValue,
@@ -999,17 +977,17 @@ func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
 			V: []byte{3},
 		},
 	}
-	data:=[]kvData {
+	data:=[]KvData{
 		mainData[0],
 		mainData[1],
 		mainData[2],
 		snapshotData[1],
 	}
-	snapshotDB, err := genStateData(snapshotData)
+	snapshotDB, err := GenStateData(snapshotData)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mainDB, err := genStateData(mainData)
+	mainDB, err := GenStateData(mainData)
 
 	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		MustOpen()
@@ -1067,18 +1045,63 @@ func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
 		checkKV(t, k, v, data[i].K, data[i].V)
 	}
 
+	i:=0
+	err = Walk(c, []byte{}, 0, func(k, v []byte) (bool, error) {
+		fmt.Println(common.Bytes2Hex(k),  " => ", common.Bytes2Hex(v))
+		checkKV(t, k, v, data[i].K, data[i].V)
+		i++
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
 }
 
-
-func TestSnapshot2WritablePrevAndDeleteKey(t *testing.T) {
-	data := []kvData{
+func TestSnapshot2WalkByEmptyDB(t *testing.T) {
+	data := []KvData{
 		{K: []byte{1}, V: []byte{1}},
 		{K: []byte{2}, V: []byte{2}},
 		{K: []byte{3}, V: []byte{3}},
 		{K: []byte{4}, V: []byte{4}},
 		{K: []byte{5}, V: []byte{5}},
 	}
-	snapshotDB, err := genStateData(data)
+	snapshotDB, err := GenStateData(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainDB := NewLMDB().InMem().MustOpen()
+	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+		MustOpen()
+
+	tx, err := kv.Begin(context.Background(), nil, RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c:=tx.Cursor(dbutils.PlainStateBucket)
+	i:=0
+	err = Walk(c, []byte{}, 0, func(k, v []byte) (bool, error) {
+		fmt.Println(common.Bytes2Hex(k),  " => ", common.Bytes2Hex(v))
+		checkKV(t, k, v, data[i].K, data[i].V)
+		i++
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+}
+
+func TestSnapshot2WritablePrevAndDeleteKey(t *testing.T) {
+	data := []KvData{
+		{K: []byte{1}, V: []byte{1}},
+		{K: []byte{2}, V: []byte{2}},
+		{K: []byte{3}, V: []byte{3}},
+		{K: []byte{4}, V: []byte{4}},
+		{K: []byte{5}, V: []byte{5}},
+	}
+	snapshotDB, err := GenStateData(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1152,6 +1175,51 @@ func printBucket(kv KV, bucket string) {
 		return nil
 	})
 	fmt.Println("Print err", err)
+}
+
+func TestDebugWalk(t *testing.T)  {
+	osTmpDir:= func() string{
+		//return os.TempDir()
+		return "/media/b00ris/nvme/tmp"
+	}
+	path,err:=ioutil.TempDir(osTmpDir(), "sndbg")
+	if err!= nil {
+		t.Fatal(err)
+	}
+	stateSnapshotPath:=filepath.Join("/media/b00ris/nvme/snapshots", "state")
+	stateSnapshot:=NewLMDB().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.PlainStateBucket:   dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+			dbutils.PlainContractCodeBucket:   dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],
+		}
+	}).ReadOnly().MustOpen()
+
+
+	tmpDb :=NewLMDB().Path(path).MustOpen()
+	defer os.RemoveAll(path)
+
+	kv:=NewSnapshot2KV().
+		DB(tmpDb).
+		//SnapshotDB([]string{dbutils.HeaderPrefix, dbutils.BlockBodyPrefix, dbutils.Senders}, mainDB.KV()).
+		SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).
+		MustOpen()
+
+	db:=NewObjectDatabase(kv)
+	i:=uint64(0)
+	j:=0
+	err = db.Walk(dbutils.PlainStateBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if i>1000000 {
+			j++
+			i=0
+			fmt.Println(j, common.Bytes2Hex(k))
+		}
+		i++
+		return true, nil
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
 }
 
 func checkKV(t *testing.T, key, val, expectedKey, expectedVal []byte) {
