@@ -18,7 +18,6 @@ package clique
 
 import (
 	"math/big"
-	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -58,7 +57,7 @@ func TestReimportMirroredState(t *testing.T) {
 	genesis := genspec.MustCommit(db)
 
 	// Generate a batch of blocks, each properly signed
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	txCacher := core.NewTxSenderCacher(1)
 	chain, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher)
 	defer chain.Stop()
 
@@ -96,7 +95,7 @@ func TestReimportMirroredState(t *testing.T) {
 	db = ethdb.NewMemDatabase()
 	genspec.MustCommit(db)
 
-	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
+	txCacher1 := core.NewTxSenderCacher(1)
 	chain1, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher1)
 	defer chain1.Stop()
 
@@ -110,7 +109,7 @@ func TestReimportMirroredState(t *testing.T) {
 	// Simulate a crash by creating a new chain on top of the database, without
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
-	txCacher2 := core.NewTxSenderCacher(runtime.NumCPU())
+	txCacher2 := core.NewTxSenderCacher(1)
 	chain2, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher2)
 	defer chain2.Stop()
 
