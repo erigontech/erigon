@@ -309,11 +309,11 @@ func (db *LmdbKV) Close() {
 }
 
 func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
-	stats, err := db.env.Stat()
+	fileInfo, err := os.Stat(path.Join(db.opts.path, "data.mdb"))
 	if err != nil {
-		return 0, fmt.Errorf("could not read database size: %w", err)
+		return 0, err
 	}
-	return uint64(stats.PSize) * (stats.LeafPages + stats.BranchPages + stats.OverflowPages), nil
+	return uint64(fileInfo.Size()), nil
 }
 
 func (db *LmdbKV) Begin(_ context.Context, parent Tx, flags TxFlags) (Tx, error) {
