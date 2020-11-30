@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"runtime"
 	"time"
@@ -148,7 +147,7 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.Getter) (*StageState
 	return &StageState{s, stage, blockNum, stageData}, nil
 }
 
-func (s *State) Run(db ethdb.Database, tx ethdb.GetterPutter) error {
+func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 	var timings []interface{}
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
@@ -201,15 +200,7 @@ func (s *State) Run(db ethdb.Database, tx ethdb.GetterPutter) error {
 		if err := s.runStage(stage, db, tx); err != nil {
 			return err
 		}
-		timing := time.Since(t)
-		timings = append(timings, string(stage.ID), timing)
-		if timing > time.Minute {
-			sz, err := db.(ethdb.HasStats).DiskSize(context.Background())
-			if err != nil {
-				return err
-			}
-			log.Info("DB stats", "size", common.StorageSize(sz))
-		}
+		timings = append(timings, string(stage.ID), time.Since(t))
 	}
 
 	var m runtime.MemStats
