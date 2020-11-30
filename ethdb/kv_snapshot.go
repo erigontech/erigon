@@ -153,7 +153,18 @@ func (s *sn2TX) Cursor(bucket string) Cursor {
 }
 
 func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
-	panic("implement me")
+	tx, err := s.getSnapshotTX(bucket)
+	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
+		panic(err.Error())
+	}
+	//process only db buckets
+	if errors.Is(err, ErrUnavailableSnapshot) {
+		return s.dbTX.CursorDupSort(bucket)
+	}
+	return &snCursor2{
+		dbCursor: s.dbTX.CursorDupSort(bucket),
+		snCursor: tx.CursorDupSort(bucket),
+	}
 }
 
 func (s *sn2TX) CursorDupFixed(bucket string) CursorDupFixed {
@@ -331,6 +342,77 @@ func (s *snCursor2) SeekExact(key []byte) ([]byte, []byte, error) {
 	return k, v, err
 }
 
+func (s *snCursor2) Move(dbNextElement func()([]byte, []byte, error), sndbNextElement func()([]byte, []byte, error), cmpFunc func(kdb, ksndb []byte) (int, bool)) ([]byte, []byte, error) {
+	var err error
+	//current returns error on empty bucket
+	lastDBKey, lastDBVal, err := s.dbCursor.Current()
+	if err != nil {
+		var innerErr error
+		lastDBKey, lastDBVal, innerErr = dbNextElement()
+		if innerErr!=nil {
+			return nil, nil, fmt.Errorf("get current from db %w inner %v", err, innerErr)
+		}
+	}
+
+	lastSNDBKey, lastSNDBVal, err := s.snCursor.Current()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cmp, br := cmpFunc(lastDBKey, lastSNDBKey)
+	if br {
+		return nil, nil, nil
+	}
+
+	if cmp > 0 {
+		lastSNDBKey, lastSNDBVal, err = sndbNextElement()
+		if err != nil {
+			return nil, nil, err
+		}
+		//todo
+		if cmp, _:=common.KeyCmp(s.currentKey, lastDBKey);  len(lastSNDBKey)==0 &&  cmp>=0 && len(s.currentKey)>0 {
+			lastDBKey, lastDBVal, err = dbNextElement()
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	//current receives last acceptable key. If it is empty
+	if cmp < 0 {
+		lastDBKey, lastDBVal, err = dbNextElement()
+		if err != nil {
+			return nil, nil, err
+		}
+		if cmp, _:=common.KeyCmp(s.currentKey, lastSNDBKey);  len(lastDBKey)==0 &&  cmp>=0 && len(s.currentKey)>0 {
+			lastSNDBKey, lastSNDBVal, err = sndbNextElement()
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if cmp==0 {
+		lastDBKey, lastDBVal, err = dbNextElement()
+		if err != nil {
+			return nil, nil, err
+		}
+		lastSNDBKey, lastSNDBVal, err = sndbNextElement()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	cmp, br = cmpFunc(lastDBKey, lastSNDBKey)
+	if br {
+		return nil, nil, nil
+	}
+	if cmp <= 0 {
+		return lastDBKey, lastDBVal, nil
+	}
+
+	return lastSNDBKey, lastSNDBVal, nil
+}
+
 func (s *snCursor2) Next() ([]byte, []byte, error) {
 	f:=func(dbNextElement func()([]byte, []byte, error), sndbNextElement func()([]byte, []byte, error))([]byte, []byte, error) {
 		var err error
@@ -401,13 +483,13 @@ func (s *snCursor2) Next() ([]byte, []byte, error) {
 
 		return lastSNDBKey, lastSNDBVal, nil
 	}
-
-	k,v, err:=f(s.dbCursor.Next, s.snCursor.Next)
+	_=f
+	k,v, err:=s.Move(s.dbCursor.Next, s.snCursor.Next, common.KeyCmp)//f(s.dbCursor.Next, s.snCursor.Next)
 	if err!=nil {
 		return nil, nil, err
 	}
 	for bytes.Equal(v, DeletedValue) {
-		k,v, err=f(s.dbCursor.Next, s.snCursor.Next)
+		k,v, err=s.Move(s.dbCursor.Next, s.snCursor.Next, common.KeyCmp)// f(s.dbCursor.Next, s.snCursor.Next)
 		if err!=nil {
 			return nil, nil, err
 		}
@@ -418,64 +500,153 @@ func (s *snCursor2) Next() ([]byte, []byte, error) {
 }
 
 func (s *snCursor2) Prev() ([]byte, []byte, error) {
-	var err error
-	//current returns error on empty bucket
-	lastDBKey, lastDBVal, err := s.dbCursor.Current()
-	if err != nil {
-		var innerErr error
-		lastDBKey, lastDBVal, innerErr = s.dbCursor.Prev()
-		if innerErr!=nil {
-			return nil, nil, fmt.Errorf("get current from db %w inner %v", err, innerErr)
+	f:=func(dbNextElement func()([]byte, []byte, error), sndbNextElement func()([]byte, []byte, error))([]byte, []byte, error) {
+		var err error
+		//current returns error on empty bucket
+		lastDBKey, lastDBVal, err := s.dbCursor.Current()
+		if err != nil {
+			var innerErr error
+			lastDBKey, lastDBVal, innerErr = dbNextElement()
+			if innerErr!=nil {
+				return nil, nil, fmt.Errorf("get current from db %w inner %v", err, innerErr)
+			}
 		}
-	}
 
-	lastSNDBKey, lastSNDBVal, err := s.snCursor.Current()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cmp, br := KeyCmpBackward(lastDBKey, lastSNDBKey)
-	if br {
-		return nil, nil, nil
-	}
-
-	if cmp <= 0 {
-		lastSNDBKey, lastSNDBVal, err = s.snCursor.Prev()
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-
-	//current receives last acceptable key. If it is empty
-	if cmp >= 0 {
-		lastDBKey, lastDBVal, err = s.dbCursor.Prev()
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cmp, br = KeyCmpBackward(lastDBKey, lastSNDBKey)
-	if br {
-		return nil, nil, nil
-	}
-
-	if cmp == 0 && bytes.Equal(lastDBVal, DeletedValue) {
-		//@todo think about better solution
-		return s.Prev()
-	}
-
-	if cmp >=0 {
-		if cmpKeys,_:=common.KeyCmp(s.currentKey, lastDBKey); cmpKeys==0 {
-			return s.Prev()
+		lastSNDBKey, lastSNDBVal, err := s.snCursor.Current()
+		if err != nil {
+			return nil, nil, err
 		}
-		s.saveCurrent(lastDBKey)
-		return lastDBKey, lastDBVal, nil
+
+		cmp, br := KeyCmpBackward(lastDBKey, lastSNDBKey)
+		if br {
+			return nil, nil, nil
+		}
+
+		if cmp < 0 {
+			lastSNDBKey, lastSNDBVal, err = sndbNextElement()
+			if err != nil {
+				return nil, nil, err
+			}
+			if cmp, _:=KeyCmpBackward(s.currentKey, lastDBKey);  len(lastSNDBKey)==0 &&  cmp>=0 && len(s.currentKey)>0 {
+				lastDBKey, lastDBVal, err = dbNextElement()
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+
+		//current receives last acceptable key. If it is empty
+		if cmp > 0 {
+			lastDBKey, lastDBVal, err = dbNextElement()
+			if err != nil {
+				return nil, nil, err
+			}
+			if cmp, _:=KeyCmpBackward(s.currentKey, lastSNDBKey);  len(lastDBKey)==0 &&  cmp>=0 && len(s.currentKey)>0 {
+				lastSNDBKey, lastSNDBVal, err = sndbNextElement()
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		if cmp==0 {
+			lastDBKey, lastDBVal, err = dbNextElement()
+			if err != nil {
+				return nil, nil, err
+			}
+			lastSNDBKey, lastSNDBVal, err = sndbNextElement()
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+
+		cmp, br = KeyCmpBackward(lastDBKey, lastSNDBKey)
+		if br {
+			return nil, nil, nil
+		}
+		if cmp >= 0 {
+			return lastDBKey, lastDBVal, nil
+		}
+
+		return lastSNDBKey, lastSNDBVal, nil
 	}
-	if cmpKeys,_:=common.KeyCmp(s.currentKey, lastSNDBKey); cmpKeys==0 {
-		return s.Prev()
+	_=f
+	k,v, err:=s.Move(s.dbCursor.Prev, s.snCursor.Prev, func(kdb, ksndb []byte) (int, bool) {
+		cmp,br:=KeyCmpBackward(kdb, ksndb)
+		return -1 * cmp, br
+	})//f(s.dbCursor.Prev, s.snCursor.Prev)
+	if err!=nil {
+		return nil, nil, err
 	}
-	s.saveCurrent(lastSNDBKey)
-	return lastSNDBKey, lastSNDBVal, nil
+	for bytes.Equal(v, DeletedValue) {
+		k,v, err=s.Move(s.dbCursor.Prev, s.snCursor.Prev,func(kdb, ksndb []byte) (int, bool) {
+			cmp,br:=KeyCmpBackward(kdb, ksndb)
+			return -1 * cmp, br
+		})//f(s.dbCursor.Prev, s.snCursor.Prev)
+		if err!=nil {
+			return nil, nil, err
+		}
+
+	}
+	s.saveCurrent(k)
+	return k,v, nil
+	//var err error
+	////current returns error on empty bucket
+	//lastDBKey, lastDBVal, err := s.dbCursor.Current()
+	//if err != nil {
+	//	var innerErr error
+	//	lastDBKey, lastDBVal, innerErr = s.dbCursor.Prev()
+	//	if innerErr!=nil {
+	//		return nil, nil, fmt.Errorf("get current from db %w inner %v", err, innerErr)
+	//	}
+	//}
+	//
+	//lastSNDBKey, lastSNDBVal, err := s.snCursor.Current()
+	//if err != nil {
+	//	return nil, nil, err
+	//}
+	//
+	//cmp, br := KeyCmpBackward(lastDBKey, lastSNDBKey)
+	//if br {
+	//	return nil, nil, nil
+	//}
+	//
+	//if cmp <= 0 {
+	//	lastSNDBKey, lastSNDBVal, err = s.snCursor.Prev()
+	//}
+	//if err != nil {
+	//	return nil, nil, err
+	//}
+	//
+	////current receives last acceptable key. If it is empty
+	//if cmp >= 0 {
+	//	lastDBKey, lastDBVal, err = s.dbCursor.Prev()
+	//}
+	//if err != nil {
+	//	return nil, nil, err
+	//}
+	//
+	//cmp, br = KeyCmpBackward(lastDBKey, lastSNDBKey)
+	//if br {
+	//	return nil, nil, nil
+	//}
+	//
+	//if cmp == 0 && bytes.Equal(lastDBVal, DeletedValue) {
+	//	//@todo think about better solution
+	//	return s.Prev()
+	//}
+	//
+	//if cmp >=0 {
+	//	if cmpKeys,_:=common.KeyCmp(s.currentKey, lastDBKey); cmpKeys==0 {
+	//		return s.Prev()
+	//	}
+	//	s.saveCurrent(lastDBKey)
+	//	return lastDBKey, lastDBVal, nil
+	//}
+	//if cmpKeys,_:=common.KeyCmp(s.currentKey, lastSNDBKey); cmpKeys==0 {
+	//	return s.Prev()
+	//}
+	//s.saveCurrent(lastSNDBKey)
+	//return lastSNDBKey, lastSNDBVal, nil
 }
 
 func (s *snCursor2) Last() ([]byte, []byte, error) {
@@ -543,6 +714,43 @@ func (s snCursor2) Close() {
 }
 
 
+func (c *snCursor2) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *snCursor2) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *snCursor2) FirstDup() ([]byte, error) {
+	panic("implement me")
+}
+
+func (c *snCursor2) NextDup() ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *snCursor2) NextNoDup() ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *snCursor2) LastDup(k []byte) ([]byte, error) {
+	panic("implement me")
+}
+
+func (c *snCursor2) CountDuplicates() (uint64, error) {
+	panic("implement me")
+}
+
+func (c *snCursor2) DeleteCurrentDuplicates() error {
+	panic("implement me")
+}
+
+func (c *snCursor2) AppendDup(key, value []byte) error {
+	panic("implement me")
+}
+
+
 func (s *snCursor2) saveCurrent(k []byte) {
 	if k!=nil {
 		s.currentKey = common.CopyBytes(k)
@@ -588,4 +796,114 @@ func GenStateData(data []KvData) (KV, error) {
 		return nil, err
 	}
 	return snapshot, nil
+}
+
+type cursorSnapshotDupsort struct {
+
+}
+
+func (c *cursorSnapshotDupsort) Prefix(v []byte) Cursor {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Prefetch(v uint) Cursor {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) First() ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Seek(seek []byte) ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) SeekExact(key []byte) ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Next() ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Prev() ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Last() ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Current() ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Put(k, v []byte) error {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Append(k []byte, v []byte) error {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Delete(k, v []byte) error {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) DeleteCurrent() error {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Reserve(k []byte, n int) ([]byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) PutCurrent(key, value []byte) error {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Count() (uint64, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) Close() {
+	panic("implement me")
+}
+
+
+//dupsort
+func (c *cursorSnapshotDupsort) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) FirstDup() ([]byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) NextDup() ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) NextNoDup() ([]byte, []byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) LastDup(k []byte) ([]byte, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) CountDuplicates() (uint64, error) {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) DeleteCurrentDuplicates() error {
+	panic("implement me")
+}
+
+func (c *cursorSnapshotDupsort) AppendDup(key, value []byte) error {
+	panic("implement me")
 }

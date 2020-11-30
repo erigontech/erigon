@@ -795,10 +795,10 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 
 func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	data := []KvData{
-		{K: []byte{1}, V: []byte{1}},
+		{K: []byte{1}, V: []byte{1}}, //to remove
 		{K: []byte{2}, V: []byte{2}},
 		{K: []byte{3}, V: []byte{3}},
-		{K: []byte{4}, V: []byte{4}},
+		{K: []byte{4}, V: []byte{4}}, //to remove
 		{K: []byte{5}, V: []byte{5}},
 	}
 	snapshotDB, err := GenStateData(data)
@@ -843,12 +843,14 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	checkKV(t, k, v, data[4].K, data[4].V)
 
 	err=deleteCursor.Delete(data[3].K, nil)
 	if err!=nil {
 		t.Fatal(err)
 	}
 
+	//cursor on data[2] after it
 	k, v, err = c.Prev()
 	if err != nil {
 		t.Fatal(err)
@@ -1149,6 +1151,98 @@ func TestSnapshot2WritablePrevAndDeleteKey(t *testing.T) {
 		k, v, err = c.Current()
 		checkKV(t, k, v, data[i].K, data[i].V)
 	}
+}
+
+func TestSnapshot2WritableTxNextAndPrevWithDeleteAndPutKeys(t *testing.T) {
+	data := []KvData{
+		{K: []byte{1}, V: []byte{1}},
+		{K: []byte{2}, V: []byte{2}},
+		{K: []byte{3}, V: []byte{3}},
+		{K: []byte{4}, V: []byte{4}},
+		{K: []byte{5}, V: []byte{5}},
+	}
+	snapshotDB, err := GenStateData(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainDB := NewLMDB().InMem().MustOpen()
+	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+		MustOpen()
+
+	tx, err := kv.Begin(context.Background(), nil, RW)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := tx.Cursor(dbutils.PlainStateBucket)
+	deleteCursor := tx.Cursor(dbutils.PlainStateBucket)
+
+	//get first correct k&v
+	k, v, err := c.First()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[0].K, data[0].V)
+
+	k, v, err = c.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[1].K, data[1].V)
+
+	err = deleteCursor.Delete(data[2].K, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	k, v, err = c.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[3].K, data[3].V)
+
+
+	k, v, err = c.Prev()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[1].K, data[1].V)
+
+	err = deleteCursor.Put(data[2].K, data[2].V)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	k, v, err = c.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[2].K, data[2].V)
+
+	k, v, err = c.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[3].K, data[3].V)
+
+	err = deleteCursor.Delete(data[2].K, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	k, v, err = c.Prev()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[1].K, data[1].V)
+
+	k, v, err = c.Prev()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkKV(t, k, v, data[0].K, data[0].V)
+
 }
 
 func printBucket(kv KV, bucket string) {
