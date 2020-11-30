@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"io/ioutil"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -1175,51 +1172,6 @@ func printBucket(kv KV, bucket string) {
 		return nil
 	})
 	fmt.Println("Print err", err)
-}
-
-func TestDebugWalk(t *testing.T)  {
-	osTmpDir:= func() string{
-		//return os.TempDir()
-		return "/media/b00ris/nvme/tmp"
-	}
-	path,err:=ioutil.TempDir(osTmpDir(), "sndbg")
-	if err!= nil {
-		t.Fatal(err)
-	}
-	stateSnapshotPath:=filepath.Join("/media/b00ris/nvme/snapshots", "state")
-	stateSnapshot:=NewLMDB().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket:   dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-			dbutils.PlainContractCodeBucket:   dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],
-		}
-	}).ReadOnly().MustOpen()
-
-
-	tmpDb :=NewLMDB().Path(path).MustOpen()
-	defer os.RemoveAll(path)
-
-	kv:=NewSnapshot2KV().
-		DB(tmpDb).
-		//SnapshotDB([]string{dbutils.HeaderPrefix, dbutils.BlockBodyPrefix, dbutils.Senders}, mainDB.KV()).
-		SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).
-		MustOpen()
-
-	db:=NewObjectDatabase(kv)
-	i:=uint64(0)
-	j:=0
-	err = db.Walk(dbutils.PlainStateBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		if i>1000000 {
-			j++
-			i=0
-			fmt.Println(j, common.Bytes2Hex(k))
-		}
-		i++
-		return true, nil
-	})
-	if err!=nil {
-		t.Fatal(err)
-	}
 }
 
 func checkKV(t *testing.T, key, val, expectedKey, expectedVal []byte) {

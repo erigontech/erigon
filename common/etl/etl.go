@@ -97,10 +97,10 @@ func Transform(
 		disposeProviders(logPrefix, collector.dataProviders)
 		return err
 	}
-	log.Debug(fmt.Sprintf("[%s] Extraction finished", logPrefix), "it took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Extraction finished", logPrefix), "it took", time.Since(t))
 
 	defer func(t time.Time) {
-		log.Debug(fmt.Sprintf("[%s] Collection finished", logPrefix), "it took", time.Since(t))
+		log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix), "it took", time.Since(t))
 	}(time.Now())
 	return collector.Load(logPrefix, db, toBucket, loadFunc, args)
 }

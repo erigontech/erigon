@@ -132,24 +132,24 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		}
 		defer tx.Rollback()
 
-		hash, err := rawdb.ReadCanonicalHash(db, snapshotBlock)
+		hash, err := rawdb.ReadCanonicalHash(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}
 
-		syncHeadHeader := rawdb.ReadHeader(db, hash, snapshotBlock)
+		syncHeadHeader := rawdb.ReadHeader(tx, hash, snapshotBlock)
 		if syncHeadHeader==nil {
 			return fmt.Errorf("empty header for %v", snapshotBlock)
 		}
 		expectedRootHash := syncHeadHeader.Root
 		tt:=time.Now()
-		err = stagedsync.PromoteHashedStateCleanly("",db, tmpDir, ctx.Done())
+		err = stagedsync.PromoteHashedStateCleanly("",tx, tmpDir, ctx.Done())
 		log.Info("Promote took", "t", time.Since(tt))
 		if err!=nil {
 			return fmt.Errorf("Promote state err: %w",err)
 		}
 		tt= time.Now()
-		err = stagedsync.RegenerateIntermediateHashes("", db, tmpDir,expectedRootHash, ctx.Done())
+		err = stagedsync.RegenerateIntermediateHashes("", tx, tmpDir,expectedRootHash, ctx.Done())
 		if err!=nil {
 			return fmt.Errorf("RegenerateIntermediateHashes err: %w", err)
 		}
