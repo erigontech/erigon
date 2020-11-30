@@ -75,7 +75,7 @@ func TestCreate2Revive(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	txCacher := core.NewTxSenderCacher(1)
 	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		t.Fatal(err)

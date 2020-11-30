@@ -17,8 +17,9 @@ import (
 
 const (
 	ModifiedFlag    uint16 = 1 // Set when the item is different from what is last committed to the database
-	DeletedFlag     uint16 = 2 // Set when the item is marked for deletion, even though it might have the value in it
-	UnprocessedFlag uint16 = 3 // Set when there is a modification in the item that invalidates merkle root calculated previously
+	AbsentFlag      uint16 = 2 // Set when the item is absent in the state
+	DeletedFlag     uint16 = 4 // Set when the item is marked for deletion, even though it might have the value in it
+	UnprocessedFlag uint16 = 8 // Set when there is a modification in the item that invalidates merkle root calculated previously
 )
 
 // Sizes of B-tree items for the purposes of keeping track of the size of reads and writes
@@ -539,7 +540,7 @@ func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
 		return nil, false
 	}
 	cacheItem := item.(CacheItem)
-	if cacheItem.HasFlag(DeletedFlag) {
+	if cacheItem.HasFlag(DeletedFlag) || cacheItem.HasFlag(AbsentFlag) {
 		return nil, true
 	}
 	return cacheItem, true
@@ -641,9 +642,9 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	sc.sequence++
 	item.ClearFlags(ModifiedFlag)
 	if absent {
-		item.SetFlags(DeletedFlag)
+		item.SetFlags(AbsentFlag)
 	} else {
-		item.ClearFlags(DeletedFlag)
+		item.ClearFlags(AbsentFlag)
 	}
 	if sc.readSize+item.GetSize() > sc.limit {
 		for sc.readQueue.Len() > 0 && sc.readSize+item.GetSize() > sc.limit {
@@ -713,6 +714,7 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		sc.readSize += item.GetSize()
 		sc.readSize -= cacheItem.GetSize()
 		cacheItem.SetFlags(ModifiedFlag)
+		cacheItem.ClearFlags(AbsentFlag)
 		if delete {
 			cacheItem.SetFlags(DeletedFlag)
 		} else {
@@ -993,6 +995,10 @@ func (sc *StateCache) TurnWritesToReads(writes *btree.BTree) {
 	writes.Ascend(func(i btree.Item) bool {
 		cacheWriteItem := i.(CacheWriteItem)
 		cacheItem := cacheWriteItem.GetCacheItem()
+		if cacheItem.HasFlag(DeletedFlag) {
+			cacheItem.ClearFlags(DeletedFlag)
+			cacheItem.SetFlags(AbsentFlag)
+		}
 		if !cacheItem.HasFlag(ModifiedFlag) {
 			// Cannot touch items that have been modified since we have taken away the writes
 			heap.Push(&sc.readQueue, cacheItem)

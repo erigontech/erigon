@@ -1,12 +1,10 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 
-	"github.com/VictoriaMetrics/fastcache"
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -33,34 +31,14 @@ func NewDbStateWriter(db ethdb.Database, blockNr uint64) *DbStateWriter {
 }
 
 type DbStateWriter struct {
-	db            ethdb.Database
-	pw            *PreimageWriter
-	blockNr       uint64
-	csw           *ChangeSetWriter
-	accountCache  *fastcache.Cache
-	storageCache  *fastcache.Cache
-	codeCache     *fastcache.Cache
-	codeSizeCache *fastcache.Cache
+	db      ethdb.Database
+	pw      *PreimageWriter
+	blockNr uint64
+	csw     *ChangeSetWriter
 }
 
 func (dsw *DbStateWriter) ChangeSetWriter() *ChangeSetWriter {
 	return dsw.csw
-}
-
-func (dsw *DbStateWriter) SetAccountCache(accountCache *fastcache.Cache) {
-	dsw.accountCache = accountCache
-}
-
-func (dsw *DbStateWriter) SetStorageCache(storageCache *fastcache.Cache) {
-	dsw.storageCache = storageCache
-}
-
-func (dsw *DbStateWriter) SetCodeCache(codeCache *fastcache.Cache) {
-	dsw.codeCache = codeCache
-}
-
-func (dsw *DbStateWriter) SetCodeSizeCache(codeSizeCache *fastcache.Cache) {
-	dsw.codeSizeCache = codeSizeCache
 }
 
 func originalAccountData(original *accounts.Account, omitHashes bool) []byte {
@@ -95,9 +73,6 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err := dsw.db.Put(dbutils.CurrentStateBucket, addrHash[:], value); err != nil {
 		return err
 	}
-	if dsw.accountCache != nil {
-		dsw.accountCache.Set(address[:], value)
-	}
 	return nil
 }
 
@@ -119,17 +94,6 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 			return err
 		}
 	}
-	if dsw.accountCache != nil {
-		dsw.accountCache.Set(address[:], nil)
-	}
-	if dsw.codeCache != nil {
-		dsw.codeCache.Set(address[:], nil)
-	}
-	if dsw.codeSizeCache != nil {
-		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], 0)
-		dsw.codeSizeCache.Set(address[:], b[:])
-	}
 	return nil
 }
 
@@ -148,18 +112,6 @@ func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation 
 	//save contract to codeHash mapping
 	if err := dsw.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:]); err != nil {
 		return err
-	}
-	if dsw.codeCache != nil {
-		if len(code) <= 1024 {
-			dsw.codeCache.Set(address[:], code)
-		} else {
-			dsw.codeCache.Del(address[:])
-		}
-	}
-	if dsw.codeSizeCache != nil {
-		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
-		dsw.codeSizeCache.Set(address[:], b[:])
 	}
 	return nil
 }
@@ -183,9 +135,6 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 
 	v := value.Bytes()
-	if dsw.storageCache != nil {
-		dsw.storageCache.Set(compositeKey, v)
-	}
 	if len(v) == 0 {
 		return dsw.db.Delete(dbutils.CurrentStateBucket, compositeKey, nil)
 	}
@@ -205,50 +154,6 @@ func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 // WriteChangeSets causes accumulated change sets to be written into
 // the database (or batch) associated with the `dsw`
 func (dsw *DbStateWriter) WriteChangeSets() error {
-	accountChanges, err := dsw.csw.GetAccountChanges()
-	if err != nil {
-		return err
-	}
-	var prevK []byte
-	if err = changeset.Mapper[dbutils.AccountChangeSetBucket].Encode(dsw.blockNr, accountChanges, func(k, v []byte) error {
-		if bytes.Equal(k, prevK) {
-			if err = dsw.db.AppendDup(dbutils.AccountChangeSetBucket, k, v); err != nil {
-				return err
-			}
-		} else {
-			if err = dsw.db.Append(dbutils.AccountChangeSetBucket, k, v); err != nil {
-				return err
-			}
-		}
-		prevK = k
-		return nil
-	}); err != nil {
-		return err
-	}
-	prevK = nil
-
-	storageChanges, err := dsw.csw.GetStorageChanges()
-	if err != nil {
-		return err
-	}
-	if storageChanges.Len() == 0 {
-		return nil
-	}
-	if err = changeset.Mapper[dbutils.StorageChangeSetBucket].Encode(dsw.blockNr, storageChanges, func(k, v []byte) error {
-		if bytes.Equal(k, prevK) {
-			if err = dsw.db.AppendDup(dbutils.StorageChangeSetBucket, k, v); err != nil {
-				return err
-			}
-		} else {
-			if err = dsw.db.Append(dbutils.StorageChangeSetBucket, k, v); err != nil {
-				return err
-			}
-		}
-		prevK = k
-		return nil
-	}); err != nil {
-		return err
-	}
 	return nil
 }
 
