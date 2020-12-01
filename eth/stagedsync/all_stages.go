@@ -40,16 +40,13 @@ func createStageBuilders(blocks []*types.Block, checkRoot bool) StageBuilders {
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						if _, err := core.InsertBodyChain("logPrefix", context.TODO(), world.db, blocks); err != nil {
+						if _, err := core.InsertBodyChain("logPrefix", context.TODO(), world.TX, blocks); err != nil {
 							return err
 						}
-						if err := stages.SaveStageProgress(world.db, stages.Bodies, blocks[len(blocks)-1].Number().Uint64(), nil); err != nil {
-							return err
-						}
-						return nil
+						return s.DoneAndUpdate(world.TX, blocks[len(blocks)-1].Number().Uint64())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return nil
+						return u.Done(world.db)
 					},
 				}
 			},
@@ -267,6 +264,9 @@ func createStageBuilders(blocks []*types.Block, checkRoot bool) StageBuilders {
 }
 
 func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, blocks []*types.Block, checkRoot bool) (int, error) {
+	if len(blocks) == 0 {
+		return 0, nil
+	}
 	headers := make([]*types.Header, len(blocks))
 	for i, block := range blocks {
 		headers[i] = block.Header()
@@ -276,7 +276,17 @@ func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, vmConfi
 		return 0, err
 	}
 	stageBuilders := createStageBuilders(blocks, checkRoot)
-	state := NewState(stageBuilders.Build(StageParameters{TX: db}))
+	cc := &core.TinyChainContext{}
+	cc.SetDB(nil)
+	cc.SetEngine(engine)
+	state := NewState(stageBuilders.Build(StageParameters{
+		chainContext: cc,
+		chainConfig:  config,
+		vmConfig:     vmConfig,
+		db:           db,
+		TX:           db,
+		tmpdir:       "",
+	}))
 	if reorg {
 		if err = state.UnwindTo(forkblocknumber, db); err != nil {
 			return 0, err

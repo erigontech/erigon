@@ -1784,7 +1784,7 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 		if err != nil {
 			t.Fatalf("error creating chain err=%v", err)
 		}
-		if _, err := stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, sideblocks); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, sideblocks, true /* checkRoot */); err != nil {
 			t.Fatalf("Failed to import side chain: %v", err)
 		}
 		//if _, err = chain.InsertChain(context.TODO(), sideblocks); err != nil {
@@ -1800,7 +1800,7 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 		t.Fatalf("error when generating chain err=%v", err)
 	}
 
-	if _, err := stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, canonblocks[:tt.commitBlock]); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, canonblocks[:tt.commitBlock], true /* checkRoot */); err != nil {
 		t.Fatalf("Failed to import canonical chain start: %v", err)
 	}
 
