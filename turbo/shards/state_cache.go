@@ -640,7 +640,7 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	}
 	item.SetSequence(sc.sequence)
 	sc.sequence++
-	item.ClearFlags(ModifiedFlag)
+	item.ClearFlags(ModifiedFlag | DeletedFlag)
 	if absent {
 		item.SetFlags(AbsentFlag)
 	} else {
@@ -739,6 +739,7 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 	item.SetSequence(sc.sequence)
 	sc.sequence++
 	item.SetFlags(ModifiedFlag)
+	item.ClearFlags(AbsentFlag)
 	if delete {
 		item.SetFlags(DeletedFlag)
 	} else {
@@ -933,8 +934,13 @@ func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 
 func (sc *StateCache) PrepareWrites() *btree.BTree {
 	sc.writes.Ascend(func(i btree.Item) bool {
-		cacheItem := i.(CacheWriteItem)
-		cacheItem.GetCacheItem().ClearFlags(ModifiedFlag)
+		writeItem := i.(CacheWriteItem)
+		cacheItem := writeItem.GetCacheItem()
+		cacheItem.ClearFlags(ModifiedFlag)
+		if cacheItem.HasFlag(DeletedFlag) {
+			cacheItem.ClearFlags(DeletedFlag)
+			cacheItem.SetFlags(AbsentFlag)
+		}
 		return true
 	})
 	writes := sc.writes.Clone()
@@ -995,10 +1001,6 @@ func (sc *StateCache) TurnWritesToReads(writes *btree.BTree) {
 	writes.Ascend(func(i btree.Item) bool {
 		cacheWriteItem := i.(CacheWriteItem)
 		cacheItem := cacheWriteItem.GetCacheItem()
-		if cacheItem.HasFlag(DeletedFlag) {
-			cacheItem.ClearFlags(DeletedFlag)
-			cacheItem.SetFlags(AbsentFlag)
-		}
 		if !cacheItem.HasFlag(ModifiedFlag) {
 			// Cannot touch items that have been modified since we have taken away the writes
 			heap.Push(&sc.readQueue, cacheItem)
