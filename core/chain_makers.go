@@ -302,6 +302,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
 			if hash, err := loader.CalcTrieRoot(tx, nil); err == nil {
+				//fmt.Printf("Chainmaker CalcTrieRoot: %x\n", hash)
 				b.header.Root = hash
 			} else {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)

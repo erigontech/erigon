@@ -167,7 +167,7 @@ func ImportChain(chain *core.BlockChain, fn string) error {
 			log.Info("Skipping batch as all blocks present", "batch", batch, "first", blocks[0].Hash(), "last", blocks[i-1].Hash())
 			continue
 		}
-		if _, err := stagedsync.InsertBlocksInStages(chain.ChainDb(), chain.Config(), chain.Engine(), missing, chain); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(chain.ChainDb(), chain.Config(), chain.GetVMConfig(), chain.Engine(), missing); err != nil {
 			return fmt.Errorf("invalid block %d: %v", n, err)
 		}
 	}

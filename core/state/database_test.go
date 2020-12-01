@@ -995,7 +995,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[0], blockchain); err != nil {
+	if err = stagedsync.InsertBlockInStages(db, gspec.Config, engine, blocks[0], blockchain, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 

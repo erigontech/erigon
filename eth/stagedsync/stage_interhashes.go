@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
-func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
+func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bool, tmpdir string, quit <-chan struct{}) error {
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -56,11 +56,11 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, tmpdir strin
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 {
-		if err := regenerateIntermediateHashes(logPrefix, tx, tmpdir, expectedRootHash, quit); err != nil {
+		if err := regenerateIntermediateHashes(logPrefix, tx, checkRoot, tmpdir, expectedRootHash, quit); err != nil {
 			return err
 		}
 	} else {
-		if err := incrementIntermediateHashes(logPrefix, s, tx, to, tmpdir, expectedRootHash, quit); err != nil {
+		if err := incrementIntermediateHashes(logPrefix, s, tx, to, checkRoot, tmpdir, expectedRootHash, quit); err != nil {
 			return err
 		}
 	}
@@ -78,7 +78,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, tmpdir strin
 	return nil
 }
 
-func regenerateIntermediateHashes(logPrefix string, db ethdb.Database, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+func regenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot bool, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	log.Info(fmt.Sprintf("[%s] Regeneration intermediate hashes started", logPrefix))
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
@@ -100,7 +100,7 @@ func regenerateIntermediateHashes(logPrefix string, db ethdb.Database, tmpdir st
 	t := time.Now()
 	if hash, err := loader.CalcTrieRoot(db, quit); err == nil {
 		generationIHTook := time.Since(t)
-		if hash != expectedRootHash {
+		if checkRoot && hash != expectedRootHash {
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
 		log.Debug("Collection finished",
@@ -223,7 +223,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	return nil
 }
 
-func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Database, to uint64, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Database, to uint64, checkRoot bool, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = tmpdir
 	var exclude [][]byte
@@ -271,7 +271,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		return err
 	}
 	generationIHTook := time.Since(t)
-	if hash != expectedRootHash {
+	if checkRoot && hash != expectedRootHash {
 		return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 	}
 	log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),

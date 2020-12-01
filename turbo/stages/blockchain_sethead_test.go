@@ -20,7 +20,7 @@
 // IGORM: for tests here, turbo-geth doesn't have any cache, so the "commit" parameter makes no sense.
 // that also alters behaviour of quite a few tests between turbo-geth and vanilla geth.
 
-package core
+package stages
 
 import (
 	"context"
@@ -31,8 +31,10 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -1764,36 +1766,47 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 
 	// Initialize a fresh chain
 	var (
-		genesis = new(Genesis).MustCommit(db)
+		genesis = new(core.Genesis).MustCommit(db)
 		engine  = ethash.NewFullFaker()
 	)
-	chain, err := NewBlockChain(db, nil, params.AllEthashProtocolChanges, engine, vm.Config{}, nil, nil)
+	chainConfig := params.AllEthashProtocolChanges
+	chain, err := core.NewBlockChain(db, nil, chainConfig, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create chain: %v", err)
 	}
 	// If sidechain blocks are needed, make a light chain and import it
 	var sideblocks types.Blocks
+	fmt.Printf("Sidechain blocks: %d\n", tt.sidechainBlocks)
 	if tt.sidechainBlocks > 0 {
-		sideblocks, _, err = GenerateChain(params.TestChainConfig, genesis, engine, ethdb.NewMemDatabase(), tt.sidechainBlocks, func(i int, b *BlockGen) {
+		sideblocks, _, err = core.GenerateChain(chainConfig, genesis, engine, db, tt.sidechainBlocks, func(i int, b *core.BlockGen) {
 			b.SetCoinbase(common.Address{0x01})
 		}, false)
 		if err != nil {
 			t.Fatalf("error creating chain err=%v", err)
 		}
-		if _, err = chain.InsertChain(context.TODO(), sideblocks); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, sideblocks); err != nil {
 			t.Fatalf("Failed to import side chain: %v", err)
 		}
+		//if _, err = chain.InsertChain(context.TODO(), sideblocks); err != nil {
+		//	t.Fatalf("Failed to import side chain: %v", err)
+		//}
 	}
-	canonblocks, _, err := GenerateChain(params.TestChainConfig, genesis, engine, ethdb.NewMemDatabase(), tt.canonicalBlocks, func(i int, b *BlockGen) {
+	fmt.Printf("Canonical blocks: %d, commitBlock %d\n", tt.canonicalBlocks, tt.commitBlock)
+	canonblocks, _, err := core.GenerateChain(chainConfig, genesis, engine, db, tt.canonicalBlocks, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{0x02})
 		b.SetDifficulty(big.NewInt(1000000))
 	}, false)
 	if err != nil {
 		t.Fatalf("error when generating chain err=%v", err)
 	}
-	if _, err := chain.InsertChain(context.TODO(), canonblocks[:tt.commitBlock]); err != nil {
+
+	if _, err := stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, canonblocks[:tt.commitBlock]); err != nil {
 		t.Fatalf("Failed to import canonical chain start: %v", err)
 	}
+
+	//if _, err := chain.InsertChain(context.TODO(), canonblocks[:tt.commitBlock]); err != nil {
+	//	t.Fatalf("Failed to import canonical chain start: %v", err)
+	//}
 	if _, err := chain.InsertChain(context.TODO(), canonblocks[tt.commitBlock:]); err != nil {
 		t.Fatalf("Failed to import canonical chain tail: %v", err)
 	}
@@ -1819,7 +1832,7 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 
 // verifyNoGaps checks that there are no gaps after the initial set of blocks in
 // the database and errors if found.
-func verifyNoGaps(t *testing.T, chain *BlockChain, canonical bool, inserted types.Blocks) {
+func verifyNoGaps(t *testing.T, chain *core.BlockChain, canonical bool, inserted types.Blocks) {
 	t.Helper()
 
 	var end uint64
@@ -1871,7 +1884,7 @@ func verifyNoGaps(t *testing.T, chain *BlockChain, canonical bool, inserted type
 
 // verifyCutoff checks that there are no chain data available in the chain after
 // the specified limit, but that it is available before.
-func verifyCutoff(t *testing.T, chain *BlockChain, canonical bool, inserted types.Blocks, head int) {
+func verifyCutoff(t *testing.T, chain *core.BlockChain, canonical bool, inserted types.Blocks, head int) {
 	t.Helper()
 
 	for i := 1; i <= len(inserted); i++ {

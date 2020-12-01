@@ -422,7 +422,7 @@ func stageIHash(db ethdb.Database, ctx context.Context) error {
 		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
 		return stagedsync.UnwindIntermediateHashesStage(u, stage5, db, tmpdir, ch)
 	}
-	return stagedsync.SpawnIntermediateHashesStage(stage5, db, tmpdir, ch)
+	return stagedsync.SpawnIntermediateHashesStage(stage5, db, true /* checkRoot */, tmpdir, ch)
 }
 
 func stageHashState(db ethdb.Database, ctx context.Context) error {
