@@ -2528,35 +2528,3 @@ Date:   Wed Dec 2 16:42:38 2020 +0100
     This updates the snappy library depency to include a fix for
     a Go 1.16 incompatibility issue.
 
-commit e9e86aeacbfc810016c2451e8b21616a3ea0b927
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Wed Dec 2 12:49:20 2020 +0100
-
-    eth: fix error in tracing if reexec is set (#21830)
-    
-    * eth: fix error in tracing if reexec is set
-    
-    * eth: change pointer embedding to value-embedding
-
-commit 908c18073a4df12866c84c4ff5f63430e28a62d0
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed Dec 2 16:17:59 2020 +0800
-
-    params: update CHTs (#21941)
-
-commit a2795c8055988ce231ff4abf1731514c75c4be5b
-Author: Zsolt Felföldi <zsfelfoldi@gmail.com>
-Date:   Tue Dec 1 10:03:41 2020 +0100
-
-    les: fix nodiscover option (#21906)
-
-commit e7db1dbc96fb366c13e05ee9b3b0a57ba26ca49b
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Mon Nov 30 18:58:47 2020 +0100
-
-    p2p/nodestate: fix deadlock during shutdown of les server (#21927)
-    
-    This PR fixes a deadlock reported here: #21925
-    
-    The cause is that many operations may be pending, but if the close happens, only one of them gets awoken and exits, the others remain waiting for a signal that never comes.
-
