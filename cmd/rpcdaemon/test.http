@@ -86,7 +86,7 @@ Content-Type: application/json
 
 {
   "jsonrpc": "2.0",
-  "method": "eth_getLogsByHash",
+  "method": "tg_getLogsByHash",
   "params": [
     "0x343f85f13356e138152d77287fda5ae0818c514119119ad439f81d69c59fc2f6"
   ],
