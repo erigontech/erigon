@@ -37,7 +37,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 	if err!=nil {
 		return fmt.Errorf("Open err: %w", err)
 	}
-	snapshotDir:= "/media/b00ris/nvme/snapshotsync/tg/snapshots"
+	snapshotDir:= "/media/b00ris/nvme/snapshots"
 	snapshotMode:="hb"
 	kv:=db.KV()
 	if snapshotDir != "" {
@@ -61,12 +61,12 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],
 		}
 	}).Path(snapshotPath).ReadOnly().MustOpen()
-	tmpPath,err:=ioutil.TempDir(os.TempDir(),"vrf*")
+	tmpPath,err:=ioutil.TempDir("/media/b00ris/nvme/tmp","vrf*")
 	if err!=nil {
 		return err
 	}
 	tmpDB:=ethdb.NewLMDB().Path(tmpPath).MustOpen()
-	defer os.RemoveAll(tmpPath)
+	//defer os.RemoveAll(tmpPath)
 	defer tmpDB.Close()
 	snkv=ethdb.NewSnapshotKV().SnapshotDB(snkv).DB(tmpDB).For(dbutils.PlainStateBucket).For(dbutils.PlainContractCodeBucket).For(dbutils.CodeBucket).MustOpen()
 	sndb:=ethdb.NewObjectDatabase(snkv)

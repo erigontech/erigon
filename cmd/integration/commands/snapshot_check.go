@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -20,12 +21,20 @@ import (
 func init() {
 	withChaindata(cmdSnapshotCheck)
 	withBlock(cmdSnapshotCheck)
-	cmdSnapshotCheck.Flags().StringVar(&tmpDBPath, "tmd_db", "", "path to temporary db(for debug)")
+	cmdSnapshotCheck.Flags().StringVar(&tmpDBPath, "tmp_db", "", "path to temporary db(for debug)")
 	rootCmd.AddCommand(cmdSnapshotCheck)
 }
 
 var tmpDBPath string
+//go run cmd/integration/main.go snapshot_check --block 11000002 --chaindata /media/b00ris/nvme/backup/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshots/ --snapshotMode s
+
 ///media/b00ris/nvme/tmp/sndbg351954303
+/**
+
+RegenerateIntermediateHashes err: : wrong trie root: cf8d0af42c095de90f9513ebd5f74f8bcc62c4fc4c68f2b5badcf1604718432f, expected (from header): 8b2258fc3693f6ed1102f3142839a174b27f215841d2f542b586682898981c6d
+exit status 1
+
+ */
 var cmdSnapshotCheck = &cobra.Command{
 	Use:   "snapshot_check",
 	Short: "check execution over state snapshot by block",
@@ -126,6 +135,27 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 
 	if isNew {
 		log.Info("New tmp db. We need to promote hash state.")
+		tx, err := db.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return err
+		}
+
+		tt := time.Now()
+		err = stagedsync.PromoteHashedStateCleanly("", tx, tmpDir, ctx.Done())
+		log.Info("Promote took", "t", time.Since(tt))
+		if err != nil {
+			return fmt.Errorf("Promote state err: %w", err)
+		}
+		tt = time.Now()
+		_, err = tx.Commit()
+		if err != nil {
+			return fmt.Errorf("Commit promote state err: %w", err)
+		}
+		log.Info("Promote commited", "t", time.Since(tt))
+	}
+
+	if true {
+		log.Info("Regenerate IH")
 		tx,err:=db.Begin(context.Background(), ethdb.RW)
 		if err!=nil {
 			return err
@@ -142,23 +172,33 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 			return fmt.Errorf("empty header for %v", snapshotBlock)
 		}
 		expectedRootHash := syncHeadHeader.Root
-		tt:=time.Now()
-		err = stagedsync.PromoteHashedStateCleanly("",tx, tmpDir, ctx.Done())
-		log.Info("Promote took", "t", time.Since(tt))
-		if err!=nil {
-			return fmt.Errorf("Promote state err: %w",err)
-		}
-		tt= time.Now()
+
+		tt:= time.Now()
+		core.UsePlainStateExecution = true
 		err = stagedsync.RegenerateIntermediateHashes("", tx, tmpDir,expectedRootHash, ctx.Done())
 		if err!=nil {
 			return fmt.Errorf("RegenerateIntermediateHashes err: %w", err)
 		}
 		log.Info("RegenerateIntermediateHashes took", "t", time.Since(tt))
+		tt = time.Now()
 		_, err = tx.Commit()
 		if err!=nil {
 			return err
 		}
+		log.Info("Commit", "t", time.Since(tt))
 	}
+
+	return nil
+	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	defer bc.Stop()
+
+
+	stage4 := progress(stages.Execution)
+	stage5 := progress(stages.IntermediateHashes)
+	log.Info("Stage4", "progress", stage4.BlockNumber)
+	log.Info("Stage5", "progress", stage5.BlockNumber)
+	ch := ctx.Done()
+
 
 	for blockNumber :=snapshotBlock; blockNumber <= lastBlockHeaderNumber; blockNumber++ {
 		tx,err:=db.Begin(context.Background(), ethdb.RW)
@@ -171,7 +211,8 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 			log.Error("Error on execution", "err", err, "block", blockNumber)
 			return err
 		}
-		if err := stageIHash(db, ctx); err != nil {
+
+		if err := stagedsync.SpawnIntermediateHashesStage(stage5, db, tmpDir, ch); err != nil {
 			log.Error("Error on ih", "err", err, "block", blockNumber)
 			return err
 		}

@@ -778,18 +778,18 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 	}
 	checkKV(t, k, v, nil, nil)
 
+	//2,3,5 removed. Current 4. Prev -
 	k, v, err = c.Prev()
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k, v, data[2].K, data[2].V)
+	checkKV(t, k, v, data[0].K, data[0].V)
 
 	k, v, err = c.Prev()
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkKV(t, k, v, data[1].K, data[1].V)
-
+	checkKV(t, k, v, nil, nil)
 }
 
 
@@ -845,12 +845,13 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	}
 	checkKV(t, k, v, data[4].K, data[4].V)
 
+	//remove 4. Current on 5
 	err=deleteCursor.Delete(data[3].K, nil)
 	if err!=nil {
 		t.Fatal(err)
 	}
 
-	//cursor on data[2] after it
+	//cursor on 3 after it
 	k, v, err = c.Prev()
 	if err != nil {
 		t.Fatal(err)
