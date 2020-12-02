@@ -171,7 +171,7 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 				}
 				timings = append(timings, "Unwind "+string(unwind.Stage), time.Since(t))
 			}
-			if err := s.SetCurrentStage(stages.Headers); err != nil {
+			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 				return err
 			}
 		}

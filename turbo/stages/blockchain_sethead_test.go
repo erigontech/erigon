@@ -23,7 +23,6 @@
 package stages
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"strings"
@@ -32,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -1776,7 +1776,6 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 	}
 	// If sidechain blocks are needed, make a light chain and import it
 	var sideblocks types.Blocks
-	fmt.Printf("Sidechain blocks: %d\n", tt.sidechainBlocks)
 	if tt.sidechainBlocks > 0 {
 		sideblocks, _, err = core.GenerateChain(chainConfig, genesis, engine, db, tt.sidechainBlocks, func(i int, b *core.BlockGen) {
 			b.SetCoinbase(common.Address{0x01})
@@ -1784,14 +1783,7 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 		if err != nil {
 			t.Fatalf("error creating chain err=%v", err)
 		}
-		if _, err := stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, sideblocks, true /* checkRoot */); err != nil {
-			t.Fatalf("Failed to import side chain: %v", err)
-		}
-		//if _, err = chain.InsertChain(context.TODO(), sideblocks); err != nil {
-		//	t.Fatalf("Failed to import side chain: %v", err)
-		//}
 	}
-	fmt.Printf("Canonical blocks: %d, commitBlock %d\n", tt.canonicalBlocks, tt.commitBlock)
 	canonblocks, _, err := core.GenerateChain(chainConfig, genesis, engine, db, tt.canonicalBlocks, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{0x02})
 		b.SetDifficulty(big.NewInt(1000000))
@@ -1799,19 +1791,22 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 	if err != nil {
 		t.Fatalf("error when generating chain err=%v", err)
 	}
+	if tt.sidechainBlocks > 0 {
+		if _, err := stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, sideblocks, true /* checkRoot */); err != nil {
+			t.Fatalf("Failed to import side chain: %v", err)
+		}
+	}
 
 	if _, err := stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, canonblocks[:tt.commitBlock], true /* checkRoot */); err != nil {
 		t.Fatalf("Failed to import canonical chain start: %v", err)
 	}
-
-	//if _, err := chain.InsertChain(context.TODO(), canonblocks[:tt.commitBlock]); err != nil {
-	//	t.Fatalf("Failed to import canonical chain start: %v", err)
-	//}
-	if _, err := chain.InsertChain(context.TODO(), canonblocks[tt.commitBlock:]); err != nil {
-		t.Fatalf("Failed to import canonical chain tail: %v", err)
+	if _, err := stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, canonblocks[tt.commitBlock:], true /* checkRoot */); err != nil {
+		t.Fatalf("Failed to import canonical chain start: %v", err)
 	}
-	// Set the head of the chain back to the requested number
-	chain.SetHead(tt.setheadBlock) //nolint:errcheck
+
+	if err := stagedsync.SetHead(db, chainConfig, &vm.Config{}, engine, tt.setheadBlock, true /* checkRoot */); err != nil {
+		t.Fatalf("Failed to set head: %v", err)
+	}
 
 	// Iterate over all the remaining blocks and ensure there are no gaps
 	verifyNoGaps(t, chain, true, canonblocks)
@@ -1819,13 +1814,14 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 	verifyCutoff(t, chain, true, canonblocks, tt.expCanonicalBlocks)
 	verifyCutoff(t, chain, false, sideblocks, tt.expSidechainBlocks)
 
-	if head := chain.CurrentHeader(); head.Number.Uint64() != tt.expHeadHeader {
+	if head, err := rawdb.ReadHeaderByHash(db, rawdb.ReadHeadHeaderHash(db)); err != nil {
+		t.Errorf("Reading head header: %v", err)
+	} else if head.Number.Uint64() != tt.expHeadHeader {
 		t.Errorf("Head header mismatch: have %d, want %d", head.Number, tt.expHeadHeader)
 	}
-	if head := chain.CurrentFastBlock(); head.NumberU64() != tt.expHeadFastBlock {
-		t.Errorf("Head fast block mismatch: have %d, want %d", head.NumberU64(), tt.expHeadFastBlock)
-	}
-	if head := chain.CurrentBlock(); head.NumberU64() != tt.expHeadFastBlock { // turbo-geth treats all blocks as "fast" due to the db structure, no need to make a distinction there
+	if head, err := rawdb.ReadBlockByHash(db, rawdb.ReadHeadHeaderHash(db)); err != nil {
+		t.Errorf("Reading head block: %v", err)
+	} else if head.NumberU64() != tt.expHeadFastBlock {
 		t.Errorf("Head block mismatch: have %d, want %d", head.NumberU64(), tt.expHeadFastBlock)
 	}
 }

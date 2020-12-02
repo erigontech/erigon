@@ -175,6 +175,7 @@ Error: %v
 		deepFork = true
 	}
 	var forkBlockNumber uint64
+	var fork bool // Set to true if forkBlockNumber is initialised
 	ignored := 0
 	batch := db.NewBatch()
 	// Do a full insert if pre-checks passed
@@ -194,10 +195,12 @@ Error: %v
 			return false, 0, err
 		}
 		hashesMatch := header.Hash() == ch
-		if newCanonical && !deepFork && forkBlockNumber == 0 && !hashesMatch {
+		if newCanonical && !deepFork && !fork && !hashesMatch {
 			forkBlockNumber = number - 1
+			fork = true
 		} else if newCanonical && hashesMatch {
 			forkBlockNumber = number
+			fork = true
 		}
 		if newCanonical {
 			err = rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
@@ -219,6 +222,7 @@ Error: %v
 	if deepFork {
 		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 		forkBlockNumber = forkHeader.Number.Uint64() - 1
+		fork = true
 		forkHash := forkHeader.ParentHash
 		for {
 			ch, err := rawdb.ReadCanonicalHash(batch, forkBlockNumber)
