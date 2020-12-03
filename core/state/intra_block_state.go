@@ -97,6 +97,7 @@ type IntraBlockState struct {
 	nextRevisionID int
 	tracer         StateTracer
 	trace          bool
+	accessList     *accessList
 }
 
 // Create a new state from a given trie
@@ -109,6 +110,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		logs:              make(map[common.Hash][]*types.Log),
 		preimages:         make(map[common.Hash][]byte),
 		journal:           newJournal(),
+		accessList:        newAccessList(),
 	}
 }
 
@@ -161,6 +163,13 @@ func (sdb *IntraBlockState) Copy() *IntraBlockState {
 	for hash, preimage := range sdb.preimages {
 		ibs.preimages[hash] = preimage
 	}
+	// comment from https://github.com/ethereum/go-ethereum/commit/6487c002f6b47e08cb9814f16712c6789b313a97#diff-c3757dc9e9d868f63bc84a0cc67159c1d5c22cc5d8c9468757098f0492e0658cR705
+	// Do we need to copy the access list? In practice: No. At the start of a
+	// transaction, the access list is empty. In practice, we only ever copy state
+	// _between_ transactions/blocks, never in the middle of a transaction.
+	// However, it doesn't cost us much to copy an empty list, so we do it anyway
+	// to not blow up if we ever decide copy it in the middle of a transaction
+	ibs.accessList = sdb.accessList.Copy()
 	return ibs
 }
 
@@ -211,6 +220,7 @@ func (sdb *IntraBlockState) Reset() error {
 	sdb.logSize = 0
 	sdb.preimages = make(map[common.Hash][]byte)
 	sdb.clearJournalAndRefund()
+	sdb.accessList = newAccessList()
 	return nil
 }
 
@@ -909,6 +919,7 @@ func (sdb *IntraBlockState) Prepare(thash, bhash common.Hash, ti int) {
 	sdb.thash = thash
 	sdb.bhash = bhash
 	sdb.txIndex = ti
+	sdb.accessList = newAccessList()
 }
 
 // no not lock
@@ -916,4 +927,39 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal = newJournal()
 	sdb.validRevisions = sdb.validRevisions[:0]
 	sdb.refund = 0
+}
+
+// AddAddressToAccessList adds the given address to the access list
+func (sdb *IntraBlockState) AddAddressToAccessList(addr common.Address) {
+	if sdb.accessList.AddAddress(addr) {
+		sdb.journal.append(accessListAddAccountChange{&addr})
+	}
+}
+
+// AddSlotToAccessList adds the given (address, slot)-tuple to the access list
+func (sdb *IntraBlockState) AddSlotToAccessList(addr common.Address, slot common.Hash) {
+	addrMod, slotMod := sdb.accessList.AddSlot(addr, slot)
+	if addrMod {
+		// In practice, this should not happen, since there is no way to enter the
+		// scope of 'address' without having the 'address' become already added
+		// to the access list (via call-variant, create, etc).
+		// Better safe than sorry, though
+		sdb.journal.append(accessListAddAccountChange{&addr})
+	}
+	if slotMod {
+		sdb.journal.append(accessListAddSlotChange{
+			address: &addr,
+			slot:    &slot,
+		})
+	}
+}
+
+// AddressInAccessList returns true if the given address is in the access list.
+func (sdb *IntraBlockState) AddressInAccessList(addr common.Address) bool {
+	return sdb.accessList.ContainsAddress(addr)
+}
+
+// SlotInAccessList returns true if the given (address, slot)-tuple is in the access list.
+func (sdb *IntraBlockState) SlotInAccessList(addr common.Address, slot common.Hash) (addressPresent bool, slotPresent bool) {
+	return sdb.accessList.Contains(addr, slot)
 }

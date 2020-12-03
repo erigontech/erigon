@@ -17,7 +17,7 @@
 package state
 
 import (
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 type accessList struct {
@@ -55,13 +55,13 @@ func newAccessList() *accessList {
 }
 
 // Copy creates an independent copy of an accessList.
-func (a *accessList) Copy() *accessList {
+func (al *accessList) Copy() *accessList {
 	cp := newAccessList()
-	for k, v := range a.addresses {
+	for k, v := range al.addresses {
 		cp.addresses[k] = v
 	}
-	cp.slots = make([]map[common.Hash]struct{}, len(a.slots))
-	for i, slotMap := range a.slots {
+	cp.slots = make([]map[common.Hash]struct{}, len(al.slots))
+	for i, slotMap := range al.slots {
 		newSlotmap := make(map[common.Hash]struct{}, len(slotMap))
 		for k := range slotMap {
 			newSlotmap[k] = struct{}{}
