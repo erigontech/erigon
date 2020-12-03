@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/devp2p/internal/v4test"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/internal/utesting"
 	"github.com/ledgerwatch/turbo-geth/p2p/discover"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"

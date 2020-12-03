@@ -129,10 +129,10 @@ func loadChain(chainfile string, genesis string) (*Chain, error) {
 		return nil, err
 	}
 	var gen core.Genesis
-	if err := json.Unmarshal(chainConfig, &gen); err != nil {
+	if err = json.Unmarshal(chainConfig, &gen); err != nil {
 		return nil, err
 	}
-	gblock := gen.ToBlock(nil)
+	gblock, _, _, _ := gen.ToBlock(nil, false)
 
 	// Load chain.rlp.
 	fh, err := os.Open(chainfile)

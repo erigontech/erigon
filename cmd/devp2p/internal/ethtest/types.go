@@ -221,7 +221,7 @@ func (c *Conn) ReadAndServe(chain *Chain, timeout time.Duration) Message {
 	start := time.Now()
 	for time.Since(start) < timeout {
 		timeout := time.Now().Add(10 * time.Second)
-		c.SetReadDeadline(timeout)
+		c.SetReadDeadline(timeout) //nolint:errcheck
 		switch msg := c.Read().(type) {
 		case *Ping:
 			c.Write(&Pong{}) //nolint:errcheck
@@ -254,8 +254,8 @@ func (c *Conn) Write(msg Message) error {
 // handshake checks to make sure a `HELLO` is received.
 //nolint:unparam
 func (c *Conn) handshake(t *utesting.T) Message {
-	defer c.SetDeadline(time.Time{})
-	c.SetDeadline(time.Now().Add(10 * time.Second))
+	defer c.SetDeadline(time.Time{})                //nolint:errcheck
+	c.SetDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
 
 	// write hello to client
 	pub0 := crypto.FromECDSAPub(&c.ourKey.PublicKey)[1:]
@@ -306,8 +306,8 @@ func (c *Conn) negotiateEthProtocol(caps []p2p.Cap) {
 // statusExchange performs a `Status` message exchange with the given
 // node.
 func (c *Conn) statusExchange(t *utesting.T, chain *Chain) Message {
-	defer c.SetDeadline(time.Time{})
-	c.SetDeadline(time.Now().Add(20 * time.Second))
+	defer c.SetDeadline(time.Time{})                //nolint:errcheck
+	c.SetDeadline(time.Now().Add(20 * time.Second)) //nolint:errcheck
 
 	// read status message from client
 	var message Message
@@ -359,10 +359,10 @@ loop:
 // waitForBlock waits for confirmation from the client that it has
 // imported the given block.
 func (c *Conn) waitForBlock(block *types.Block) error {
-	defer c.SetReadDeadline(time.Time{})
+	defer c.SetReadDeadline(time.Time{}) //nolint:errcheck
 
 	timeout := time.Now().Add(20 * time.Second)
-	c.SetReadDeadline(timeout)
+	c.SetReadDeadline(timeout) //nolint:errcheck
 	for {
 		req := &GetBlockHeaders{Origin: hashOrNumber{Hash: block.Hash()}, Amount: 1}
 		if err := c.Write(req); err != nil {

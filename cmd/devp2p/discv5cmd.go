@@ -22,8 +22,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/cmd/devp2p/internal/v5test"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/internal/utesting"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/discover"
 	"github.com/urfave/cli"
 )
