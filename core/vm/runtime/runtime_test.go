@@ -777,13 +777,14 @@ func TestEip2929Cases(t *testing.T) {
 		fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
 			comment,
 			code, ops)
+		//nolint:errcheck
 		Execute(code, nil, &Config{
 			EVMConfig: vm.Config{
 				Debug:     true,
 				Tracer:    vm.NewMarkdownLogger(nil, os.Stdout),
 				ExtraEips: []int{2929},
 			},
-		})
+		}, 0)
 	}
 
 	{ // First eip testcase
