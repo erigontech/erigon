@@ -142,7 +142,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 				v, _ := tr.Get(trieKey)
 				bv := new(big.Int)
 				bv.SetBytes(v)
-				storageProof[i] = StorageResult{key, (*hexutil.Big)(bv), common.ToHexArray(proof)}
+				storageProof[i] = StorageResult{key, (*hexutil.Big)(bv), toHexSlice(proof)}
 			} else {
 				return nil, err3
 			}
@@ -156,7 +156,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	}
 	return &AccountResult{
 		Address:      address,
-		AccountProof: common.ToHexArray(accountProof),
+		AccountProof: toHexSlice(accountProof),
 		Balance:      (*hexutil.Big)(acc.Balance.ToBig()),
 		CodeHash:     acc.CodeHash,
 		Nonce:        hexutil.Uint64(acc.Nonce),

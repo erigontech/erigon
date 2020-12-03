@@ -1,6 +1,7 @@
 package trie
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -13,7 +14,8 @@ func TestValue(t *testing.T) {
 	var hn common.Hash
 	h.hash(valueNode([]byte("BLAH")), false, hn[:])
 	expected := "0x0"
-	if common.ToHex(hn[:]) != expected {
-		t.Errorf("Expected %s, got %s", expected, common.ToHex(hn[:]))
+	actual := fmt.Sprintf("0x%x", hn[:])
+	if actual != expected {
+		t.Errorf("Expected %s, got %x", expected, actual)
 	}
 }

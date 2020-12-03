@@ -22,7 +22,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/cmd/devp2p/internal/ethtest"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/internal/utesting"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/rlpx"
 	"github.com/ledgerwatch/turbo-geth/rlp"
