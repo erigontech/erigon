@@ -7,9 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sort"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -118,8 +119,8 @@ func promoteHistory(logPrefix string, db ethdb.Database, changesetBucket string,
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	updates := map[string]*roaring.Bitmap{}
-	creates := map[string]*roaring.Bitmap{}
+	updates := map[string]*roaring64.Bitmap{}
+	//creates := map[string]*roaring64.Bitmap{}
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
 
@@ -143,75 +144,75 @@ func promoteHistory(logPrefix string, db ethdb.Database, changesetBucket string,
 			runtime.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		case <-checkFlushEvery.C:
-			if needFlush(updates, bufLimit) {
-				if err := flushBitmaps(collectorUpdates, updates); err != nil {
+			if needFlush64(updates, bufLimit) {
+				if err := flushBitmaps64(collectorUpdates, updates); err != nil {
 					return false, err
 				}
-				updates = map[string]*roaring.Bitmap{}
+				updates = map[string]*roaring64.Bitmap{}
 			}
 
-			//if needFlush(creates, bitmapsBufLimit) {
-			//	if err := flushBitmaps(collectorCreates, creates); err != nil {
+			//if needFlush64(creates, bitmapsBufLimit) {
+			//	if err := flushBitmaps64(collectorCreates, creates); err != nil {
 			//		return false, err
 			//	}
-			//	creates = map[string]*roaring.Bitmap{}
+			//	creates = map[string]*roaring64.Bitmap{}
 			//}
 		}
 
 		kStr := string(k)
-		if len(v) == 0 {
-			m, ok := creates[kStr]
-			if !ok {
-				m = roaring.New()
-				creates[kStr] = m
-			}
-			m.Add(uint32(blockN))
-		}
+		//if len(v) == 0 {
+		//	m, ok := creates[kStr]
+		//	if !ok {
+		//		m = roaring64.New()
+		//		creates[kStr] = m
+		//	}
+		//	m.Add(blockN)
+		//}
 		m, ok := updates[kStr]
 		if !ok {
-			m = roaring.New()
+			m = roaring64.New()
 			updates[kStr] = m
 		}
-		m.Add(uint32(blockN))
+		m.Add(blockN)
 
 		return true, nil
 	}); err != nil {
 		return err
 	}
 
-	if err := flushBitmaps(collectorUpdates, updates); err != nil {
+	if err := flushBitmaps64(collectorUpdates, updates); err != nil {
 		return err
 	}
-	//if err := flushBitmaps(collectorCreates, creates); err != nil {
+	//if err := flushBitmaps64(collectorCreates, creates); err != nil {
 	//	return err
 	//}
 
-	var currentBitmap = roaring.New()
+	var currentBitmap = roaring64.New()
 	var buf = bytes.NewBuffer(nil)
 
 	lastChunkKey := make([]byte, 128)
 	var loaderFunc = func(k []byte, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if _, err := currentBitmap.FromBuffer(v); err != nil {
+		if _, err := currentBitmap.ReadFrom(bytes.NewReader(v)); err != nil {
 			return err
 		}
 
-		lastChunkKey = lastChunkKey[:len(k)+4]
+		lastChunkKey = lastChunkKey[:len(k)+8]
 		copy(lastChunkKey, k)
-		binary.BigEndian.PutUint32(lastChunkKey[len(k):], ^uint32(0))
+		binary.BigEndian.PutUint64(lastChunkKey[len(k):], ^uint64(0))
 		lastChunkBytes, err := table.Get(lastChunkKey)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return fmt.Errorf("find last chunk failed: %w", err)
 		}
 		if len(lastChunkBytes) > 0 {
-			lastChunk := roaring.New()
-			_, err = lastChunk.FromBuffer(lastChunkBytes)
+			lastChunk := roaring64.New()
+			_, err = lastChunk.ReadFrom(bytes.NewReader(lastChunkBytes))
 			if err != nil {
 				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
 			}
 
 			currentBitmap.Or(lastChunk) // merge last existing chunk from db - next loop will overwrite it
 		}
-		if err = bitmapdb.WalkChunkWithKeys(k, currentBitmap, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring.Bitmap) error {
+		if err = bitmapdb.WalkChunkWithKeys64(k, currentBitmap, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
 			buf.Reset()
 			if _, err = chunk.WriteTo(buf); err != nil {
 				return err
@@ -318,8 +319,49 @@ func unwindHistory(logPrefix string, db ethdb.Database, csBucket string, to uint
 		return err
 	}
 
-	if err := truncateBitmaps(db, changeset.Mapper[csBucket].IndexBucket, updates, to); err != nil {
+	if err := truncateBitmaps64(db, changeset.Mapper[csBucket].IndexBucket, updates, to); err != nil {
 		return err
 	}
+	return nil
+}
+
+func needFlush64(bitmaps map[string]*roaring64.Bitmap, memLimit datasize.ByteSize) bool {
+	sz := uint64(0)
+	for _, m := range bitmaps {
+		sz += m.GetSizeInBytes()
+	}
+	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
+	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
+}
+
+func flushBitmaps64(c *etl.Collector, inMem map[string]*roaring64.Bitmap) error {
+	for k, v := range inMem {
+		v.RunOptimize()
+		if v.GetCardinality() == 0 {
+			continue
+		}
+		newV := bytes.NewBuffer(make([]byte, 0, v.GetSerializedSizeInBytes()))
+		if _, err := v.WriteTo(newV); err != nil {
+			return err
+		}
+		if err := c.Collect([]byte(k), newV.Bytes()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func truncateBitmaps64(tx ethdb.Database, bucket string, inMem map[string]struct{}, to uint64) error {
+	keys := make([]string, 0, len(inMem))
+	for k := range inMem {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if err := bitmapdb.TruncateRange64(tx, bucket, []byte(k), to+1); err != nil {
+			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", bucket, err)
+		}
+	}
+
 	return nil
 }

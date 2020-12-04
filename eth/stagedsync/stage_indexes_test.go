@@ -88,92 +88,92 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 			return arr[:pos]
 		}
 
-		t.Run("truncate to 2050 "+csbucket, func(t *testing.T) {
-			expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 2050)
-			expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 2050)
-			expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2050)
+		//t.Run("truncate to 2050 "+csbucket, func(t *testing.T) {
+		expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 2050)
+		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 2050)
+		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2050)
 
-			err := unwindHistory("logPrefix", tx, csbucket, 2050, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
+		err = unwindHistory("logPrefix", tx, csbucket, 2050, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-			checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
-			checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
-			checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
-		})
+		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
+		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
+		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
+		//})
 
-		t.Run("truncate to 2000 "+csbucket, func(t *testing.T) {
-			expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 2000)
-			expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 2000)
-			expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2000)
+		//t.Run("truncate to 2000 "+csbucket, func(t *testing.T) {
+		expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 2000)
+		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 2000)
+		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2000)
 
-			err := unwindHistory("logPrefix", tx, csbucket, 2000, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
+		err = unwindHistory("logPrefix", tx, csbucket, 2000, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-			checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
-			checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
-			checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
-		})
+		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
+		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
+		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
+		//})
 
-		t.Run("truncate to 1999 "+csbucket, func(t *testing.T) {
-			err := unwindHistory("logPrefix", tx, csbucket, 1999, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 1999)
-			expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 1999)
-			expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 1999)
+		//t.Run("truncate to 1999 "+csbucket, func(t *testing.T) {
+		err = unwindHistory("logPrefix", tx, csbucket, 1999, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 1999)
+		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 1999)
+		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 1999)
 
-			checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
-			checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
-			checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
-			bm, err := bitmapdb.Get(tx, indexBucket, hashes[0], 1999, math.MaxUint32)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
-				t.Fatal(bm.Maximum())
-			}
-			bm, err = bitmapdb.Get(tx, indexBucket, hashes[1], 1999, math.MaxUint32)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
-				t.Fatal()
-			}
-		})
+		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
+		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
+		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
+		bm, err := bitmapdb.Get64(tx, indexBucket, hashes[0], 1999, math.MaxUint32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
+			t.Fatal(bm.Maximum())
+		}
+		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 1999, math.MaxUint32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
+			t.Fatal()
+		}
+		//})
 
-		t.Run("truncate to 999 "+csbucket, func(t *testing.T) {
-			expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 999)
-			expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 999)
-			expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 999)
+		//t.Run("truncate to 999 "+csbucket, func(t *testing.T) {
+		expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 999)
+		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 999)
+		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 999)
 
-			err := unwindHistory("logPrefix", tx, csbucket, 999, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			bm, err := bitmapdb.Get(tx, indexBucket, hashes[0], 999, math.MaxUint32)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
-				t.Fatal()
-			}
-			bm, err = bitmapdb.Get(tx, indexBucket, hashes[1], 999, math.MaxUint32)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
-				t.Fatal()
-			}
+		err = unwindHistory("logPrefix", tx, csbucket, 999, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[0], 999, math.MaxUint32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
+			t.Fatal()
+		}
+		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 999, math.MaxUint32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
+			t.Fatal()
+		}
 
-			checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
-			checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
-			checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
-		})
+		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
+		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
+		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
+		//})
 		tx.Rollback()
 		db.Close()
 	}
@@ -251,12 +251,12 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlo
 func checkIndex(t *testing.T, db ethdb.Getter, bucket string, k []byte, expected []uint64) {
 	t.Helper()
 	k = dbutils.CompositeKeyWithoutIncarnation(k)
-	m, err := bitmapdb.Get(db, bucket, k, 0, math.MaxUint32)
+	m, err := bitmapdb.Get64(db, bucket, k, 0, math.MaxUint32)
 	if err != nil {
 		t.Fatal(err, common.Bytes2Hex(k))
 	}
 	val := m.ToArray()
-	if !reflect.DeepEqual(val, toU32(expected)) {
+	if !reflect.DeepEqual(val, expected) {
 		fmt.Printf("get     : %v\n", val)
 		fmt.Printf("expected: %v\n", toU32(expected))
 		t.Fatal()

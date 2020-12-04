@@ -5,7 +5,7 @@ go 1.15
 require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/JekaMas/notify v0.9.4
-	github.com/RoaringBitmap/roaring v0.5.5
+	github.com/RoaringBitmap/roaring v0.5.6-0.20201124195327-6ec715d630bc
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.5.7
 	github.com/anacrolix/log v0.7.0

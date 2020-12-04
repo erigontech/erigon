@@ -955,38 +955,14 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 }
 
 func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[string][]byte, storageMap map[string][]byte) error {
-	accountHistoryEffects := make(map[string][]byte)
 	for key := range accountMap {
-		if err := bitmapdb.TruncateRange(tds.db, dbutils.AccountsHistoryBucket, []byte(key), uint32(timestampTo+1)); err != nil {
+		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, []byte(key), timestampTo+1); err != nil {
 			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
 		}
 	}
-	storageHistoryEffects := make(map[string][]byte)
 	for key := range storageMap {
-		if err := bitmapdb.TruncateRange(tds.db, dbutils.AccountsHistoryBucket, dbutils.CompositeKeyWithoutIncarnation([]byte(key)), uint32(timestampTo+1)); err != nil {
+		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, dbutils.CompositeKeyWithoutIncarnation([]byte(key)), timestampTo+1); err != nil {
 			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
-		}
-	}
-	for key, value := range accountHistoryEffects {
-		if value == nil {
-			if err := tds.db.Delete(dbutils.AccountsHistoryBucket, []byte(key), nil); err != nil {
-				return err
-			}
-		} else {
-			if err := tds.db.Put(dbutils.AccountsHistoryBucket, []byte(key), value); err != nil {
-				return err
-			}
-		}
-	}
-	for key, value := range storageHistoryEffects {
-		if value == nil {
-			if err := tds.db.Delete(dbutils.StorageHistoryBucket, []byte(key), nil); err != nil {
-				return err
-			}
-		} else {
-			if err := tds.db.Put(dbutils.StorageHistoryBucket, []byte(key), value); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

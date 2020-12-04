@@ -24,7 +24,7 @@ import (
 
 const (
 	bitmapsBufLimit   = 256 * datasize.MB // limit how much memory can use bitmaps before flushing to DB
-	bitmapsFlushEvery = 30 * time.Second
+	bitmapsFlushEvery = 10 * time.Second
 )
 
 func SpawnLogIndex(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {

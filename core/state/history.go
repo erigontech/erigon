@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -51,7 +51,7 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 
 	ch := tx.Cursor(hBucket)
 	defer ch.Close()
-	k, v, seekErr := ch.Seek(dbutils.IndexChunkKey32(key, uint32(timestamp)))
+	k, v, seekErr := ch.Seek(dbutils.IndexChunkKey(key, timestamp))
 	if seekErr != nil {
 		return nil, seekErr
 	}
@@ -69,12 +69,12 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 			return nil, ethdb.ErrKeyNotFound
 		}
 	}
-	index := roaring.New()
-	if _, err := index.FromBuffer(v); err != nil {
+	index := roaring64.New()
+	if _, err := index.ReadFrom(bytes.NewReader(v)); err != nil {
 		return nil, err
 	}
-	found, ok := bitmapdb.SeekInBitmap(index, uint32(timestamp))
-	changeSetBlock := uint64(found)
+	found, ok := bitmapdb.SeekInBitmap64(index, timestamp)
+	changeSetBlock := found
 
 	var data []byte
 	if ok {
@@ -168,7 +168,7 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 	if err2 != nil {
 		return err2
 	}
-	for hLoc != nil && binary.BigEndian.Uint32(tsEnc) < uint32(timestamp) {
+	for hLoc != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
 		if hAddr, hLoc, tsEnc, hV, err2 = hCursor.Next(); err2 != nil {
 			return err2
 		}
@@ -191,12 +191,12 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 		if cmp < 0 {
 			goOn, err = walker(addr, loc, v)
 		} else {
-			index := roaring.New()
-			if _, err = index.FromBuffer(hV); err != nil {
+			index := roaring64.New()
+			if _, err = index.ReadFrom(bytes.NewReader(hV)); err != nil {
 				return err
 			}
-			found, ok := bitmapdb.SeekInBitmap(index, uint32(timestamp))
-			changeSetBlock := uint64(found)
+			found, ok := bitmapdb.SeekInBitmap64(index, timestamp)
+			changeSetBlock := found
 
 			if ok {
 				// Extract value from the changeSet
@@ -230,7 +230,7 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 			}
 			if cmp >= 0 {
 				hLoc0 := hLoc
-				for hLoc != nil && (bytes.Equal(hLoc0, hLoc) || binary.BigEndian.Uint32(tsEnc) < uint32(timestamp)) {
+				for hLoc != nil && (bytes.Equal(hLoc0, hLoc) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
 					if hAddr, hLoc, tsEnc, hV, err2 = hCursor.Next(); err2 != nil {
 						return err2
 					}
@@ -271,7 +271,7 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 	if err2 != nil {
 		return err2
 	}
-	for hK != nil && binary.BigEndian.Uint32(tsEnc) < uint32(timestamp) {
+	for hK != nil && binary.BigEndian.Uint64(tsEnc) < timestamp {
 		hK, tsEnc, _, hV, err2 = hCursor.Next()
 		if err2 != nil {
 			return err2
@@ -289,17 +289,17 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 		if cmp < 0 {
 			goOn, err = walker(k, v)
 		} else {
-			index := roaring.New()
-			_, err = index.FromBuffer(hV)
+			index := roaring64.New()
+			_, err = index.ReadFrom(bytes.NewReader(hV))
 			if err != nil {
 				return err
 			}
-			found, ok := bitmapdb.SeekInBitmap(index, uint32(timestamp))
-			changeSetBlock := uint64(found)
+			found, ok := bitmapdb.SeekInBitmap64(index, timestamp)
+			changeSetBlock := found
 			if ok {
 				// Extract value from the changeSet
 				csKey := dbutils.EncodeBlockNumber(changeSetBlock)
-				kData, data, err3 := csCursor.SeekBothRange(dbutils.EncodeBlockNumber(changeSetBlock), hK)
+				kData, data, err3 := csCursor.SeekBothRange(csKey, hK)
 				if err3 != nil {
 					return err3
 				}
@@ -332,7 +332,7 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 			}
 			if cmp >= 0 {
 				hK0 := hK
-				for hK != nil && (bytes.Equal(hK0, hK) || binary.BigEndian.Uint32(tsEnc) < uint32(timestamp)) {
+				for hK != nil && (bytes.Equal(hK0, hK) || binary.BigEndian.Uint64(tsEnc) < timestamp) {
 					hK, tsEnc, _, hV, err1 = hCursor.Next()
 					if err1 != nil {
 						return err1

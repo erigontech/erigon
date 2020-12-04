@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -14,7 +14,7 @@ import (
 )
 
 var historyAccBitmap = Migration{
-	Name: "history_account_bitmap_14",
+	Name: "history_account_bitmap",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -22,7 +22,7 @@ var historyAccBitmap = Migration{
 
 		const loadStep = "load"
 		var prevK []byte
-		blocks := roaring.New()
+		blocks := roaring64.New()
 		buf := bytes.NewBuffer(nil)
 
 		collectorB, err1 := etl.NewCollectorFromFiles(tmpdir + "1") // B - stands for blocks
@@ -65,7 +65,7 @@ var historyAccBitmap = Migration{
 			}
 			collectorB.Close(logPrefix)
 		}()
-		if err = db.Walk(dbutils.AccountsHistoryBucket2, nil, 0, func(k, v []byte) (bool, error) {
+		if err = db.Walk(dbutils.AccountsHistoryBucket, nil, 0, func(k, v []byte) (bool, error) {
 			select {
 			default:
 			case <-logEvery.C:
@@ -79,7 +79,7 @@ var historyAccBitmap = Migration{
 			}
 
 			if prevK != nil && !bytes.Equal(k[:20], prevK[:20]) {
-				if err = bitmapdb.WalkChunkWithKeys(prevK[:20], blocks, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring.Bitmap) error {
+				if err = bitmapdb.WalkChunkWithKeys64(prevK[:20], blocks, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
 					buf.Reset()
 					if _, err = chunk.WriteTo(buf); err != nil {
 						return err
@@ -91,7 +91,7 @@ var historyAccBitmap = Migration{
 				blocks.Clear()
 			}
 
-			blocks.AddMany(toU32(blockNums))
+			blocks.AddMany(blockNums)
 			prevK = k
 			return true, nil
 		}); err != nil {
@@ -100,7 +100,7 @@ var historyAccBitmap = Migration{
 
 		if prevK != nil {
 
-			if err = bitmapdb.WalkChunkWithKeys(prevK[:20], blocks, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring.Bitmap) error {
+			if err = bitmapdb.WalkChunkWithKeys64(prevK[:20], blocks, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
 				buf.Reset()
 				if _, err = chunk.WriteTo(buf); err != nil {
 					return err
@@ -131,7 +131,7 @@ var historyAccBitmap = Migration{
 }
 
 var historyStorageBitmap = Migration{
-	Name: "history_storage_bitmap_14",
+	Name: "history_storage_bitmap",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
@@ -139,7 +139,7 @@ var historyStorageBitmap = Migration{
 
 		const loadStep = "load"
 		var prevK []byte
-		blocks := roaring.New()
+		blocks := roaring64.New()
 		buf := bytes.NewBuffer(nil)
 
 		collectorB, err1 := etl.NewCollectorFromFiles(tmpdir + "1") // B - stands for blocks
@@ -182,7 +182,7 @@ var historyStorageBitmap = Migration{
 			}
 			collectorB.Close(logPrefix)
 		}()
-		if err = db.Walk(dbutils.StorageHistoryBucket2, nil, 0, func(k, v []byte) (bool, error) {
+		if err = db.Walk(dbutils.StorageHistoryBucket, nil, 0, func(k, v []byte) (bool, error) {
 			select {
 			default:
 			case <-logEvery.C:
@@ -196,7 +196,7 @@ var historyStorageBitmap = Migration{
 			}
 
 			if prevK != nil && !bytes.Equal(k[:52], prevK[:52]) {
-				if err = bitmapdb.WalkChunkWithKeys(prevK[:52], blocks, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring.Bitmap) error {
+				if err = bitmapdb.WalkChunkWithKeys64(prevK[:52], blocks, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
 					buf.Reset()
 					if _, err = chunk.WriteTo(buf); err != nil {
 						return err
@@ -208,7 +208,7 @@ var historyStorageBitmap = Migration{
 				blocks.Clear()
 			}
 
-			blocks.AddMany(toU32(blockNums))
+			blocks.AddMany(blockNums)
 			prevK = k
 			return true, nil
 		}); err != nil {
@@ -216,7 +216,7 @@ var historyStorageBitmap = Migration{
 		}
 
 		if prevK != nil {
-			if err = bitmapdb.WalkChunkWithKeys(prevK[:52], blocks, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring.Bitmap) error {
+			if err = bitmapdb.WalkChunkWithKeys64(prevK[:52], blocks, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
 				buf.Reset()
 				if _, err = chunk.WriteTo(buf); err != nil {
 					return err
@@ -245,12 +245,4 @@ var historyStorageBitmap = Migration{
 		}
 		return nil
 	},
-}
-
-func toU32(in []uint64) []uint32 {
-	out := make([]uint32, len(in))
-	for i := range in {
-		out[i] = uint32(in[i])
-	}
-	return out
 }
