@@ -103,13 +103,11 @@ func newCanonical(engine consensus.Engine, n int, full bool) (*ethdb.ObjectDatab
 		// Full block-chain requested
 		blocks := makeBlockChain(genesis, n, engine, db, canonicalSeed)
 		_, err = stagedsync.InsertBlocksInStages(db, params.AllEthashProtocolChanges, &vm.Config{}, engine, blocks, true /* checkRoot */)
-		//_, err = blockchain.InsertChain(context.Background(), blocks)
 		return db, blockchain, err
 	}
 	// Header-only chain requested
 	headers := makeHeaderChain(genesis.Header(), n, engine, db, canonicalSeed)
 	_, _, err = stagedsync.InsertHeadersInStages(db, params.AllEthashProtocolChanges, ethash.NewFaker(), headers)
-	//_, err = blockchain.InsertHeaderChain(headers, 1)
 	return db, blockchain, err
 }
 
@@ -142,41 +140,37 @@ func testFork(t *testing.T, blockchain *core.BlockChain, i, n int, full bool, co
 	)
 	var tdPre, tdPost *big.Int
 	if full {
-		blockChainB = makeBlockChain(blockchain2.CurrentBlock(), n, ethash.NewFaker(), db, forkSeed)
 		currentBlockHash := rawdb.ReadHeadBlockHash(db)
-		currentHeader, err1 := rawdb.ReadHeaderByHash(db, currentBlockHash)
+		currentBlock, err1 := rawdb.ReadBlockByHash(db, currentBlockHash)
 		if err1 != nil {
 			t.Fatalf("Failed to read current bock: %v", err1)
 		}
-		tdPre, err = rawdb.ReadTd(db, currentBlockHash, currentHeader.Number.Uint64())
+		blockChainB = makeBlockChain(currentBlock, n, ethash.NewFaker(), db, forkSeed)
+		tdPre, err = rawdb.ReadTd(db, currentBlockHash, currentBlock.NumberU64())
 		if err != nil {
 			t.Fatalf("Failed to read TD for current block: %v", err)
 		}
-		//tdPre = blockchain.GetTdByHash(blockchain.CurrentBlock().Hash())
 		if _, err := stagedsync.InsertBlocksInStages(db, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), blockChainB, true /* checkRoot */); err != nil {
-			//if _, err := blockchain.InsertChain(context.Background(), blockChainB); err != nil {
 			t.Fatalf("failed to insert forking chain: %v", err)
 		}
 		currentBlockHash = blockChainB[len(blockChainB)-1].Hash()
-		currentHeader, err1 = rawdb.ReadHeaderByHash(db, currentBlockHash)
+		currentBlock, err1 = rawdb.ReadBlockByHash(db, currentBlockHash)
 		if err1 != nil {
 			t.Fatalf("Failed to read last header: %v", err1)
 		}
-		tdPost, err = rawdb.ReadTd(db, currentBlockHash, currentHeader.Number.Uint64())
+		tdPost, err = rawdb.ReadTd(db, currentBlockHash, currentBlock.NumberU64())
 	} else {
-		headerChainB = makeHeaderChain(blockchain2.CurrentHeader(), n, ethash.NewFaker(), db, forkSeed)
 		currentHeaderHash := rawdb.ReadHeadHeaderHash(db)
 		currentHeader, err1 := rawdb.ReadHeaderByHash(db, currentHeaderHash)
 		if err1 != nil {
 			t.Fatalf("Failed to read current header: %v", err1)
 		}
+		headerChainB = makeHeaderChain(currentHeader, n, ethash.NewFaker(), db, forkSeed)
 		tdPre, err = rawdb.ReadTd(db, currentHeaderHash, currentHeader.Number.Uint64())
 		if err != nil {
 			t.Fatalf("Failed to read TD for current header: %v", err)
 		}
-		//tdPre = blockchain.GetTdByHash(blockchain.CurrentHeader().Hash())
 		if _, _, err = stagedsync.InsertHeadersInStages(db, params.AllEthashProtocolChanges, ethash.NewFaker(), headerChainB); err != nil {
-			//if _, err := blockchain.InsertHeaderChain(headerChainB, 1); err != nil {
 			t.Fatalf("failed to insert forking chain: %v", err)
 		}
 		currentHeader = headerChainB[len(headerChainB)-1]
@@ -196,7 +190,6 @@ func testFork(t *testing.T, blockchain *core.BlockChain, i, n int, full bool, co
 		}
 	}
 	// Compare the total difficulties of the chains
-	fmt.Printf("tdPre: %d, tdPost: %d\n", tdPre, tdPost)
 	comparator(tdPre, tdPost)
 }
 
