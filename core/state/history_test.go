@@ -30,8 +30,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	acc := make([]*accounts.Account, 10)
 	addr := make([]common.Address, 10)
 	addrHashes := make([]common.Hash, 10)
-	tds := NewTrieDbState(common.Hash{}, db, 1)
-	blockWriter := tds.DbStateWriter()
+	blockWriter := NewPlainStateWriter(db, db, 1)
 	ctx := context.Background()
 	emptyAccount := accounts.NewAccount()
 	for i := range acc {
@@ -48,7 +47,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	}
 
 	i := 0
-	err := db.Walk(dbutils.AccountChangeSetBucket, nil, 0, func(k, v []byte) (bool, error) {
+	err := db.Walk(dbutils.PlainAccountChangeSetBucket, nil, 0, func(k, v []byte) (bool, error) {
 		i++
 		return true, nil
 	})
@@ -59,7 +58,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.FailNow()
 	}
 
-	indexBytes, innerErr := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes(), 1)
+	indexBytes, innerErr := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addr[0].Bytes(), 1)
 	if innerErr != nil {
 		t.Fatal(err)
 	}
@@ -72,11 +71,6 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	}
 	if parsed[0] != 1 {
 		t.Fatal("incorrect block num")
-	}
-
-	err = tds.deleteTimestamp(1)
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	count := 0
@@ -300,6 +294,7 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash
 }
 
 func TestUnwindTruncateHistory(t *testing.T) {
+	t.Skip("tds.Unwind is not supported")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	mutDB := db.NewBatch()

@@ -962,7 +962,7 @@ func WalkWrites(
 	writes.Ascend(func(i btree.Item) bool {
 		switch it := i.(type) {
 		case *AccountWriteItem:
-			if it.ai.flags&DeletedFlag != 0 {
+			if it.ai.flags&AbsentFlag != 0 {
 				if err = accountDelete(it.address.Bytes(), &it.ai.account); err != nil {
 					return false
 				}
@@ -972,7 +972,7 @@ func WalkWrites(
 				}
 			}
 		case *StorageWriteItem:
-			if it.si.flags&DeletedFlag != 0 {
+			if it.si.flags&AbsentFlag != 0 {
 				if err = storageDelete(it.address.Bytes(), it.si.incarnation, it.location.Bytes()); err != nil {
 					return false
 				}
@@ -982,7 +982,7 @@ func WalkWrites(
 				}
 			}
 		case *CodeWriteItem:
-			if it.ci.flags&DeletedFlag != 0 {
+			if it.ci.flags&AbsentFlag != 0 {
 				if err = codeDelete(it.address.Bytes(), it.ci.incarnation); err != nil {
 					return false
 				}
