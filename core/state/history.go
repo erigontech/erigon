@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 )
 
 //MaxChangesetsSearch -
@@ -46,12 +48,14 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 	} else {
 		hBucket = dbutils.AccountsHistoryBucket
 	}
-	c := tx.Cursor(hBucket)
-	defer c.Close()
-	k, v, seekErr := c.Seek(dbutils.IndexChunkKey(key, timestamp))
+
+	ch := tx.Cursor(hBucket)
+	defer ch.Close()
+	k, v, seekErr := ch.Seek(dbutils.IndexChunkKey(key, timestamp))
 	if seekErr != nil {
 		return nil, seekErr
 	}
+
 	if k == nil {
 		return nil, ethdb.ErrKeyNotFound
 	}
@@ -65,16 +69,15 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 			return nil, ethdb.ErrKeyNotFound
 		}
 	}
-	index := dbutils.WrapHistoryIndex(v)
+	index := roaring64.New()
+	if _, err := index.ReadFrom(bytes.NewReader(v)); err != nil {
+		return nil, err
+	}
+	found, ok := bitmapdb.SeekInBitmap64(index, timestamp)
+	changeSetBlock := found
 
-	changeSetBlock, set, ok := index.Search(timestamp)
 	var data []byte
 	if ok {
-		// set == true if this change was from empty record (non-existent account) to non-empty
-		// In such case, we do not need to examine changeSet and return empty data
-		if set && !storage {
-			return []byte{}, nil
-		}
 		csBucket, _ := dbutils.ChangeSetByIndexBucket(storage)
 		c := tx.CursorDupSort(csBucket)
 		defer c.Close()
@@ -188,27 +191,29 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 		if cmp < 0 {
 			goOn, err = walker(addr, loc, v)
 		} else {
-			index := dbutils.WrapHistoryIndex(hV)
-			if changeSetBlock, set, ok := index.Search(timestamp); ok {
-				// set == true if this change was from empty record (non-existent storage item) to non-empty
-				// In such case, we do not need to examine changeSet and simply skip the record
-				if !set {
-					// Extract value from the changeSet
-					csKey := make([]byte, 8+common.AddressLength+common.IncarnationLength)
-					copy(csKey[:], dbutils.EncodeBlockNumber(changeSetBlock))
-					copy(csKey[8:], address[:]) // address + incarnation
-					binary.BigEndian.PutUint64(csKey[8+common.AddressLength:], incarnation)
-					kData, data, err3 := csCursor.SeekBothRange(csKey, hLoc)
-					if err3 != nil {
-						return err3
-					}
-					if !bytes.Equal(kData, csKey) || !bytes.HasPrefix(data, hLoc) {
-						return fmt.Errorf("inconsistent storage changeset and history kData %x, csKey %x, data %x, hLoc %x", kData, csKey, data, hLoc)
-					}
-					data = data[common.HashLength:]
-					if len(data) > 0 { // Skip deleted entries
-						goOn, err = walker(hAddr, hLoc, data)
-					}
+			index := roaring64.New()
+			if _, err = index.ReadFrom(bytes.NewReader(hV)); err != nil {
+				return err
+			}
+			found, ok := bitmapdb.SeekInBitmap64(index, timestamp)
+			changeSetBlock := found
+
+			if ok {
+				// Extract value from the changeSet
+				csKey := make([]byte, 8+common.AddressLength+common.IncarnationLength)
+				copy(csKey[:], dbutils.EncodeBlockNumber(changeSetBlock))
+				copy(csKey[8:], address[:]) // address + incarnation
+				binary.BigEndian.PutUint64(csKey[8+common.AddressLength:], incarnation)
+				kData, data, err3 := csCursor.SeekBothRange(csKey, hLoc)
+				if err3 != nil {
+					return err3
+				}
+				if !bytes.Equal(kData, csKey) || !bytes.HasPrefix(data, hLoc) {
+					return fmt.Errorf("inconsistent storage changeset and history kData %x, csKey %x, data %x, hLoc %x", kData, csKey, data, hLoc)
+				}
+				data = data[common.HashLength:]
+				if len(data) > 0 { // Skip deleted entries
+					goOn, err = walker(hAddr, hLoc, data)
 				}
 			} else if cmp == 0 {
 				goOn, err = walker(addr, loc, v)
@@ -284,24 +289,26 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 		if cmp < 0 {
 			goOn, err = walker(k, v)
 		} else {
-			index := dbutils.WrapHistoryIndex(hV)
-			if changeSetBlock, set, ok := index.Search(timestamp); ok {
-				// set == true if this change was from empty record (non-existent account) to non-empty
-				// In such case, we do not need to examine changeSet and simply skip the record
-				if !set {
-					// Extract value from the changeSet
-					csKey := dbutils.EncodeBlockNumber(changeSetBlock)
-					kData, data, err3 := csCursor.SeekBothRange(dbutils.EncodeBlockNumber(changeSetBlock), hK)
-					if err3 != nil {
-						return err3
-					}
-					if !bytes.Equal(kData, csKey) || !bytes.HasPrefix(data, hK) {
-						return fmt.Errorf("inconsistent account history and changesets, kData %x, csKey %x, data %x, hK %x", kData, csKey, data, hK)
-					}
-					data = data[common.AddressLength:]
-					if len(data) > 0 { // Skip accounts did not exist
-						goOn, err = walker(hK, data)
-					}
+			index := roaring64.New()
+			_, err = index.ReadFrom(bytes.NewReader(hV))
+			if err != nil {
+				return err
+			}
+			found, ok := bitmapdb.SeekInBitmap64(index, timestamp)
+			changeSetBlock := found
+			if ok {
+				// Extract value from the changeSet
+				csKey := dbutils.EncodeBlockNumber(changeSetBlock)
+				kData, data, err3 := csCursor.SeekBothRange(csKey, hK)
+				if err3 != nil {
+					return err3
+				}
+				if !bytes.Equal(kData, csKey) || !bytes.HasPrefix(data, hK) {
+					return fmt.Errorf("inconsistent account history and changesets, kData %x, csKey %x, data %x, hK %x", kData, csKey, data, hK)
+				}
+				data = data[common.AddressLength:]
+				if len(data) > 0 { // Skip accounts did not exist
+					goOn, err = walker(hK, data)
 				}
 			} else if cmp == 0 {
 				goOn, err = walker(k, v)
@@ -336,26 +343,4 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 	}
 	return err
 
-}
-
-func findInHistory(hK, hV []byte, timestamp uint64, csWalker changeset.Walker2) ([]byte, bool, error) {
-	index := dbutils.WrapHistoryIndex(hV)
-	if changeSetBlock, set, ok := index.Search(timestamp); ok {
-		// set == true if this change was from empty record (non-existent account) to non-empty
-		// In such case, we do not need to examine changeSet and simply skip the record
-		if !set {
-			// Extract value from the changeSet
-			data, err := csWalker.Find(changeSetBlock, hK)
-			if err != nil {
-				return nil, false, fmt.Errorf("could not find key %x in the ChangeSet record for index entry %d (query timestamp %d): %v",
-					hK,
-					changeSetBlock,
-					timestamp,
-					err)
-			}
-			return data, true, nil
-		}
-		return nil, true, nil
-	}
-	return nil, false, nil
 }

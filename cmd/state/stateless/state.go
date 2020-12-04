@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -170,6 +171,11 @@ func (r *StateGrowth1Reporter) interrupt(ctx context.Context, i int, startTime t
 }
 
 func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
+	tx, err2 := r.remoteDB.Begin(ctx, nil, ethdb.RO)
+	if err2 != nil {
+		panic(err2)
+	}
+	defer tx.Rollback()
 	startTime := time.Now()
 
 	var i int
@@ -183,62 +189,59 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 		}
 	}
 
-	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		var lastAddress []byte
-		var lastTimestamp uint64
-		cs := tx.Cursor(dbutils.PlainStateBucket).Prefetch(CursorBatchSize)
-		sk, _, serr := cs.First()
-		if serr != nil {
-			return serr
+	var lastAddress []byte
+	_ = lastAddress
+	var lastTimestamp uint64
+	cs := tx.Cursor(dbutils.PlainStateBucket).Prefetch(CursorBatchSize)
+	sk, _, serr := cs.First()
+	if serr != nil {
+		panic(serr)
+	}
+	c := tx.Cursor(dbutils.AccountsHistoryBucket).Prefetch(CursorBatchSize)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			panic(err)
 		}
-		c := tx.Cursor(dbutils.AccountsHistoryBucket).Prefetch(CursorBatchSize)
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			address := k[:common.AddressLength]
-			hi := dbutils.WrapHistoryIndex(v)
-			blockNums, created, err1 := hi.Decode()
-			if err1 != nil {
-				return err1
-			}
-			if created[0] {
-				if bytes.Equal(address, lastAddress) {
-					r.CreationsByBlock[lastTimestamp]--
+		address := k[:common.AddressLength]
+		hi := roaring.New()
+		if _, err1 := hi.FromBuffer(v); err1 != nil {
+			panic(err1)
+		}
+		blockNums := hi.ToArray()
+		// TODO: there is no more index for creations
+		//if created[0] {
+		//	if bytes.Equal(address, lastAddress) {
+		//		r.CreationsByBlock[lastTimestamp]--
+		//	}
+		//}
+		//for i, timestamp := range blockNums {
+		//	if created[i] {
+		//		r.CreationsByBlock[timestamp]++
+		//		if i > 0 {
+		//			r.CreationsByBlock[blockNums[i-1]]--
+		//		}
+		//	}
+		//}
+		if binary.BigEndian.Uint64(k[common.AddressLength:]) == 0xffffffffffffffff {
+			for ; sk != nil && bytes.Compare(sk, address) < 0; sk, _, serr = cs.Next() {
+				if serr != nil {
+					panic(serr)
 				}
 			}
-			for i, timestamp := range blockNums {
-				if created[i] {
-					r.CreationsByBlock[timestamp]++
-					if i > 0 {
-						r.CreationsByBlock[blockNums[i-1]]--
-					}
-				}
+			if !bytes.Equal(sk, address) {
+				r.CreationsByBlock[uint64(blockNums[len(blockNums)-1])]--
 			}
-			if binary.BigEndian.Uint64(k[common.AddressLength:]) == 0xffffffffffffffff {
-				for ; sk != nil && bytes.Compare(sk, address) < 0; sk, _, serr = cs.Next() {
-					if serr != nil {
-						return serr
-					}
-				}
-				if !bytes.Equal(sk, address) {
-					r.CreationsByBlock[blockNums[len(blockNums)-1]]--
-				}
-			}
-			i++
-			if i%100000 == 0 {
-				fmt.Printf("Processed %d account history records\n", i)
-			}
-			lastAddress = address
-			lastTimestamp = blockNums[len(blockNums)-1]
+		}
+		i++
+		if i%100000 == 0 {
+			fmt.Printf("Processed %d account history records\n", i)
+		}
+		lastAddress = address
+		lastTimestamp = uint64(blockNums[len(blockNums)-1])
 
-			if lastTimestamp+1 > r.MaxTimestamp {
-				r.MaxTimestamp = lastTimestamp + 1
-			}
+		if lastTimestamp+1 > r.MaxTimestamp {
+			r.MaxTimestamp = lastTimestamp + 1
 		}
-		return nil
-	}); err != nil {
-		check(err)
 	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
@@ -265,6 +268,8 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 		cumulative += tsi.values[i]
 		fmt.Fprintf(w, "%d, %d, %d\n", tsi.timestamps[i], tsi.values[i], cumulative)
 	}
+	_ = lastAddress
+	_ = lastTimestamp
 }
 
 type StateGrowth2Reporter struct {
@@ -303,78 +308,81 @@ func (r *StateGrowth2Reporter) interrupt(ctx context.Context, i int, startTime t
 }
 
 func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
+	tx, err2 := r.remoteDB.Begin(context.Background(), nil, ethdb.RO)
+	if err2 != nil {
+		panic(err2)
+	}
+	defer tx.Rollback()
 	startTime := time.Now()
 
 	var i int
-	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		var lastAddress []byte
-		var lastLocation []byte
-		var lastTimestamp uint64
-		cs := tx.Cursor(dbutils.PlainStateBucket).Prefetch(CursorBatchSize)
-		sk, _, serr := cs.First()
-		if serr != nil {
-			return serr
+	var lastAddress []byte
+	var lastLocation []byte
+	_ = lastAddress
+	_ = lastLocation
+	var lastTimestamp uint64
+	cs := tx.Cursor(dbutils.PlainStateBucket).Prefetch(CursorBatchSize)
+	sk, _, serr := cs.First()
+	if serr != nil {
+		panic(serr)
+	}
+	c := tx.Cursor(dbutils.StorageHistoryBucket).Prefetch(CursorBatchSize)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			panic(err)
 		}
-		c := tx.Cursor(dbutils.StorageHistoryBucket).Prefetch(CursorBatchSize)
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			address := k[:common.AddressLength]
-			location := k[common.AddressLength : common.AddressLength+common.HashLength]
-			hi := dbutils.WrapHistoryIndex(v)
-			blockNums, created, err1 := hi.Decode()
-			if err1 != nil {
-				return err1
-			}
-			if created[0] {
-				if bytes.Equal(address, lastAddress) || bytes.Equal(location, lastLocation) {
-					r.CreationsByBlock[lastTimestamp]--
+		address := k[:common.AddressLength]
+		location := k[common.AddressLength : common.AddressLength+common.HashLength]
+		hi := roaring.New()
+		if _, err1 := hi.FromBuffer(v); err1 != nil {
+			panic(err1)
+		}
+		blockNums := hi.ToArray()
+		// TODO: there is no more index for creations
+		//if created[0] {
+		//	if bytes.Equal(address, lastAddress) || bytes.Equal(location, lastLocation) {
+		//		r.CreationsByBlock[lastTimestamp]--
+		//	}
+		//}
+		//for i, timestamp := range blockNums {
+		//	if created[i] {
+		//		r.CreationsByBlock[timestamp]++
+		//		if i > 0 {
+		//			r.CreationsByBlock[blockNums[i-1]]--
+		//		}
+		//	}
+		//}
+		if binary.BigEndian.Uint64(k[common.AddressLength+common.HashLength:]) == 0xffffffffffffffff {
+			var aCmp, lCmp int
+			for ; sk != nil; sk, _, serr = cs.Next() {
+				if serr != nil {
+					panic(serr)
+				}
+				sAddress := sk[:common.AddressLength]
+				var sLocation []byte
+				if len(sk) >= common.AddressLength+common.IncarnationLength {
+					sLocation = sk[common.AddressLength+common.IncarnationLength:]
+				}
+				aCmp = bytes.Compare(sAddress, address)
+				lCmp = bytes.Compare(sLocation, location)
+				if aCmp > 0 || (aCmp == 0 && lCmp >= 0) {
+					break
 				}
 			}
-			for i, timestamp := range blockNums {
-				if created[i] {
-					r.CreationsByBlock[timestamp]++
-					if i > 0 {
-						r.CreationsByBlock[blockNums[i-1]]--
-					}
-				}
-			}
-			if binary.BigEndian.Uint64(k[common.AddressLength+common.HashLength:]) == 0xffffffffffffffff {
-				var aCmp, lCmp int
-				for ; sk != nil; sk, _, serr = cs.Next() {
-					if serr != nil {
-						return serr
-					}
-					sAddress := sk[:common.AddressLength]
-					var sLocation []byte
-					if len(sk) >= common.AddressLength+common.IncarnationLength {
-						sLocation = sk[common.AddressLength+common.IncarnationLength:]
-					}
-					aCmp = bytes.Compare(sAddress, address)
-					lCmp = bytes.Compare(sLocation, location)
-					if aCmp > 0 || (aCmp == 0 && lCmp >= 0) {
-						break
-					}
-				}
-				if aCmp != 0 || lCmp != 0 {
-					r.CreationsByBlock[blockNums[len(blockNums)-1]]--
-				}
-			}
-			i++
-			if i%100000 == 0 {
-				fmt.Printf("Processed %d storage history records\n", i)
-			}
-			lastAddress = address
-			lastLocation = location
-			lastTimestamp = blockNums[len(blockNums)-1]
-			if lastTimestamp+1 > r.MaxTimestamp {
-				r.MaxTimestamp = lastTimestamp + 1
+			if aCmp != 0 || lCmp != 0 {
+				r.CreationsByBlock[uint64(blockNums[len(blockNums)-1])]--
 			}
 		}
-		return nil
-	}); err != nil {
-		check(err)
+		i++
+		if i%100000 == 0 {
+			fmt.Printf("Processed %d storage history records\n", i)
+		}
+		lastAddress = address
+		lastLocation = location
+		lastTimestamp = uint64(blockNums[len(blockNums)-1])
+		if lastTimestamp+1 > r.MaxTimestamp {
+			r.MaxTimestamp = lastTimestamp + 1
+		}
 	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
@@ -403,6 +411,8 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	}
 
 	debug.PrintMemStats(true)
+	_ = lastAddress
+	_ = lastLocation
 }
 
 type GasLimitReporter struct {

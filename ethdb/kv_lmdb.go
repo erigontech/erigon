@@ -464,11 +464,18 @@ func (tx *lmdbTx) CreateBucket(name string) error {
 	if tx.db.opts.flags&lmdb.Readonly == 0 {
 		nativeFlags |= lmdb.Create
 	}
-	switch flags {
-	case dbutils.DupSort:
+
+	if flags&dbutils.DupSort != 0 {
 		nativeFlags |= lmdb.DupSort
-	case dbutils.DupFixed:
+		flags ^= dbutils.DupSort
+	}
+	if flags&dbutils.DupFixed != 0 {
 		nativeFlags |= lmdb.DupFixed
+		flags ^= dbutils.DupFixed
+	}
+
+	if flags != 0 {
+		return fmt.Errorf("some not supported flag provided for bucket")
 	}
 	dbi, err := tx.tx.OpenDBI(name, nativeFlags)
 	if err != nil {

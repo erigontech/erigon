@@ -465,10 +465,18 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		dcmp = tx.tx.GetCmpExcludeSuffix32()
 	}
 
-	switch flags {
-	case dbutils.DupSort:
+	if flags&dbutils.DupSort != 0 {
 		nativeFlags |= mdbx.DupSort
+		flags ^= dbutils.DupSort
 	}
+	if flags&dbutils.DupFixed != 0 {
+		nativeFlags |= mdbx.DupFixed
+		flags ^= dbutils.DupFixed
+	}
+	if flags != 0 {
+		return fmt.Errorf("some not supported flag provided for bucket")
+	}
+
 	dbi, err := tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
 	if err != nil {
 		return err

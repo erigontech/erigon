@@ -136,31 +136,6 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, startLocation commo
 	return innerErr
 }
 
-func (dbs *PlainDBState) ForEachAccount(start common.Address, cb func(address *common.Address, addrHash common.Hash), maxResults int) {
-	results := 0
-	err := WalkAsOfAccounts(dbs.tx, start, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
-		if len(vs) == 0 {
-			// Skip deleted entries
-			return true, nil
-		}
-
-		if len(ks) > 20 {
-			return true, nil
-		}
-		addr := common.BytesToAddress(ks)
-		addrHash, err1 := common.HashData(ks)
-		if err1 != nil {
-			return false, err1
-		}
-		cb(&addr, addrHash)
-		results++
-		return results < maxResults, nil
-	})
-	if err != nil {
-		log.Error("ForEachAccount walk error", "err", err)
-	}
-}
-
 func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, err := GetAsOf(dbs.tx, false /* storage */, address[:], dbs.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {

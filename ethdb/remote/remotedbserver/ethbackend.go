@@ -60,12 +60,18 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 	return &remote.NetVersionReply{Id: id}, nil
 }
 
-func (s *EthBackendServer) Subscribe(_ *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
+func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
 	log.Debug("establishing event subscription channel with the RPC daemon")
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-
 	s.events.AddHeaderSubscription(func(h *types.Header) error {
+		select {
+		case <-subscribeServer.Context().Done():
+			wg.Done()
+			return subscribeServer.Context().Err()
+		default:
+		}
+
 		payload, err := json.Marshal(h)
 		if err != nil {
 			log.Warn("error while marshaling a header", "err", err)
@@ -84,10 +90,10 @@ func (s *EthBackendServer) Subscribe(_ *remote.SubscribeRequest, subscribeServer
 		// next time we try to send an event
 		if err != nil {
 			log.Info("event subscription channel was closed", "reason", err)
-			wg.Done()
 		}
 		return err
 	})
+
 	log.Info("event subscription channel established with the RPC daemon")
 	wg.Wait()
 	log.Info("event subscription channel closed with the RPC daemon")
