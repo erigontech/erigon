@@ -2058,7 +2058,7 @@ func dupSz(chaindata string) error {
 		total += len(k) + len(v) + 8
 		for k, v, err := c.NextDup(); k != nil; k, v, err = c.NextDup() {
 			check(err)
-			total += len(v) + 8
+			total += len(v)
 			//fmt.Printf("\t%x\n", v)
 		}
 	}

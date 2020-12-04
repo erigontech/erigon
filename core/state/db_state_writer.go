@@ -6,15 +6,17 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
@@ -275,35 +277,22 @@ func (dsw *DbStateWriter) WriteHistory() error {
 }
 
 func writeIndex(blocknum uint64, changes *changeset.ChangeSet, bucket string, changeDb ethdb.GetterPutter) error {
+	buf := bytes.NewBuffer(nil)
 	for _, change := range changes.Changes {
-		currentChunkKey := dbutils.CurrentChunkKey(change.Key)
-		indexBytes, err := changeDb.Get(bucket, currentChunkKey)
-		if err != nil && err != ethdb.ErrKeyNotFound {
+		k := dbutils.CompositeKeyWithoutIncarnation(change.Key)
+
+		index, err := bitmapdb.Get64(changeDb, bucket, k, 0, math.MaxUint32)
+		if err != nil {
 			return fmt.Errorf("find chunk failed: %w", err)
 		}
-
-		var index dbutils.HistoryIndexBytes
-		if len(indexBytes) == 0 {
-			index = dbutils.NewHistoryIndex()
-		} else if dbutils.CheckNewIndexChunk(indexBytes, blocknum) {
-			// Chunk overflow, need to write the "old" current chunk under its key derived from the last element
-			index = dbutils.WrapHistoryIndex(indexBytes)
-			indexKey, err := index.Key(change.Key)
-			if err != nil {
+		index.Add(blocknum)
+		if err = bitmapdb.WalkChunkWithKeys64(k, index, bitmapdb.ChunkLimit, func(chunkKey []byte, chunk *roaring64.Bitmap) error {
+			buf.Reset()
+			if _, err = chunk.WriteTo(buf); err != nil {
 				return err
 			}
-			// Flush the old chunk
-			if err := changeDb.Put(bucket, indexKey, index); err != nil {
-				return err
-			}
-			// Start a new chunk
-			index = dbutils.NewHistoryIndex()
-		} else {
-			index = dbutils.WrapHistoryIndex(indexBytes)
-		}
-		index = index.Append(blocknum, len(change.Value) == 0)
-
-		if err := changeDb.Put(bucket, currentChunkKey, index); err != nil {
+			return changeDb.Put(bucket, chunkKey, common.CopyBytes(buf.Bytes()))
+		}); err != nil {
 			return err
 		}
 	}

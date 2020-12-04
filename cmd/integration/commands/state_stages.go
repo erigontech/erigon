@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
@@ -258,14 +259,12 @@ func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) er
 	}
 
 	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, k, v []byte) (bool, error) {
-		indexBytes, innerErr := db.GetIndexChunk(vv.IndexBucket, k, blockN)
+		bm, innerErr := bitmapdb.Get(db, vv.IndexBucket, k, uint32(blockN-1), uint32(blockN+1))
 		if innerErr != nil {
 			return false, innerErr
 		}
-
-		index := dbutils.WrapHistoryIndex(indexBytes)
-		if findVal, _, ok := index.Search(blockN); !ok {
-			return false, fmt.Errorf("%v,%v,%v", blockN, findVal, common.Bytes2Hex(k))
+		if !bm.Contains(uint32(blockN)) {
+			return false, fmt.Errorf("%v,%v", blockN, common.Bytes2Hex(k))
 		}
 		return true, nil
 	}); err != nil {
