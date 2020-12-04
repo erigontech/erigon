@@ -55,30 +55,6 @@ func getReceipts(ctx context.Context, tx ethdb.Database, number uint64, hash com
 	return receipts, nil
 }
 
-// GetLogsByHash non-standard RPC that returns all logs in a block
-// TODO(tjayrush): Since this is non-standard we could rename it to GetLogsByBlockHash to be more consistent and avoid confusion
-func (api *APIImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
-	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, fmt.Errorf("block not found: %x", hash)
-	}
-	receipts, err := getReceipts(ctx, tx, *number, hash)
-	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %v", err)
-	}
-	logs := make([][]*types.Log, len(receipts))
-	for i, receipt := range receipts {
-		logs[i] = receipt.Logs
-	}
-	return logs, nil
-}
-
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
 	var begin, end uint64

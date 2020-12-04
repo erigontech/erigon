@@ -310,7 +310,7 @@ func (c *Config) ResolvePath(path string) (string, error) {
 		return path, nil
 	}
 	if c.DataDir == "" {
-		return filepath.Abs("")
+		return "", nil
 	}
 	return filepath.Join(c.instanceDir(), path), nil
 }
