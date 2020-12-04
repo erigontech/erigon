@@ -182,9 +182,9 @@ func (st *StateTransition) to() common.Address {
 func (st *StateTransition) buyGas(gasBailout bool) error {
 	mgval := new(big.Int).Mul(new(big.Int).SetUint64(st.msg.Gas()), st.gasPrice.ToBig())
 	gasCost, overflow := uint256.FromBig(mgval)
-	if overflow || st.state.GetBalance(st.msg.From()).Lt(gasCost) {
+	if have, want := st.state.GetBalance(st.msg.From()), mgval; overflow || st.state.GetBalance(st.msg.From()).Lt(gasCost) {
 		if !gasBailout {
-			return ErrInsufficientFunds
+		return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 		}
 	} else {
 		st.state.SubBalance(st.msg.From(), gasCost)
@@ -202,13 +202,13 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 func (st *StateTransition) preCheck(gasBailout bool) error {
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
-		nonce := st.state.GetNonce(st.msg.From())
-		if nonce < st.msg.Nonce() {
-			log.Error("Nonce too high", "from", fmt.Sprintf("0x%x", st.msg.From()), "state nonce", nonce, "tx nonce", st.msg.Nonce())
-			return ErrNonceTooHigh
-		} else if nonce > st.msg.Nonce() {
-			log.Error("Nonce too low", "from", fmt.Sprintf("0x%x", st.msg.From()), "state nonce", nonce, "tx nonce", st.msg.Nonce())
-			return ErrNonceTooLow
+		stNonce := st.state.GetNonce(st.msg.From())
+		if msgNonce := st.msg.Nonce(); stNonce < msgNonce {
+			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
+				st.msg.From().Hex(), msgNonce, stNonce)
+		} else if stNonce > msgNonce {
+			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
+				st.msg.From().Hex(), msgNonce, stNonce)
 		}
 	}
 	return st.buyGas(gasBailout)
@@ -254,7 +254,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		return nil, err
 	}
 	if st.gas < gas {
-		return nil, ErrIntrinsicGas
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, gas)
 	}
 	st.gas -= gas
 
@@ -264,7 +264,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		if gasBailout {
 			bailout = true
 		} else {
-			return nil, ErrInsufficientFundsForTransfer
+			return nil, fmt.Errorf("%w: address %v", ErrInsufficientFundsForTransfer, msg.From().Hex())
 		}
 	}
 	var (
