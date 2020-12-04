@@ -2483,48 +2483,4 @@ Date:   Fri Dec 4 15:01:47 2020 +0100
     
     Co-authored-by: Felix Lange <fjl@twurst.com>
 
-commit 7770e41cb5fcc386a7d2329d1187174839122f24
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Fri Dec 4 12:22:19 2020 +0100
-
-    core: improve contextual information on core errors (#21869)
-    
-    A lot of times when we hit 'core' errors, example: invalid tx, the information provided is
-    insufficient. We miss several pieces of information: what account has nonce too high,
-    and what transaction in that block was offending?
-    
-    This PR adds that information, using the new type of wrapped errors.
-    It also adds a testcase which (partly) verifies the output from the errors.
-    
-    The first commit changes all usage of direct equality-checks on core errors, into
-    using errors.Is. The second commit adds contextual information. This wraps most
-    of the core errors with more information, and also wraps it one more time in
-    stateprocessor, to further provide tx index and tx hash, if such a tx is encoutered in
-    a block. The third commit uses the chainmaker to try to generate chains with such
-    errors in them, thus triggering the errors and checking that the generated string meets
-    expectations.
-
-commit 62cedb3aabf5db260b74830285975116ba464e86
-Author: Chris Ziogas <ziogas_chr@hotmail.com>
-Date:   Fri Dec 4 09:54:07 2020 +0200
-
-    core/vm/runtime: remove duplicated line (#21956)
-    
-    
-    This line is duplicated, though it doesn't cause any issues.
-
-commit d7a64dc02b788b9a77904108b49d19a7b4a1a224
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Thu Dec 3 13:16:20 2020 +0100
-
-    cmd/devp2p: add node filter for snap + fix arg error (#21950)
-
-commit 0b2f1446bbece9bb4e7abef0bf8de1a267aba654
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Wed Dec 2 16:42:38 2020 +0100
-
-    go.mod: update github.com/golang/snappy(#21934)
-    
-    This updates the snappy library depency to include a fix for
-    a Go 1.16 incompatibility issue.
 
