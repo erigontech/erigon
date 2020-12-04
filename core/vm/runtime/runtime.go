@@ -124,7 +124,6 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 		cfg.State.AddAddressToAccessList(address)
 		for _, addr := range vmenv.ActivePrecompiles() {
 			cfg.State.AddAddressToAccessList(addr)
-			cfg.State.AddAddressToAccessList(addr)
 		}
 	}
 	cfg.State.CreateAccount(address, true)
