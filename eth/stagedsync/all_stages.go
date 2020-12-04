@@ -310,6 +310,18 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	return nil
 }
 
+func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, headers []*types.Header) (bool, uint64, error) {
+	blockNum := headers[len(headers)-1].Number.Uint64()
+	reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers, config, engine, 1)
+	if err != nil {
+		return false, 0, err
+	}
+	if err = stages.SaveStageProgress(db, stages.Headers, blockNum, nil); err != nil {
+		return false, 0, err
+	}
+	return reorg, forkblocknumber, nil
+}
+
 func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, blocks []*types.Block, checkRoot bool) (int, error) {
 	if len(blocks) == 0 {
 		return 0, nil
