@@ -60,7 +60,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.FailNow()
 	}
 
-	index, err := bitmapdb.Get64(db, dbutils.AccountsHistoryBucket, addrHashes[0].Bytes(), 0, math.MaxUint32)
+	index, err := bitmapdb.Get64(db, dbutils.AccountsHistoryBucket, addr[0].Bytes(), 0, math.MaxUint32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	}
 
 	count := 0
-	err = changeset.Walk(db, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 		count++
 		return true, nil
 	})
@@ -82,7 +82,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.Fatal("changeset must be deleted")
 	}
 
-	_, err = db.Get(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes())
+	_, err = db.Get(dbutils.AccountsHistoryBucket, addr[0].Bytes())
 	if err != ethdb.ErrKeyNotFound {
 		t.Fatal("account must be deleted")
 	}
