@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -114,21 +112,6 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						var a accounts.Account
-						c := world.TX.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
-						for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-							if err != nil {
-								return err
-							}
-							if len(k) != 20 {
-								fmt.Printf("%x => %x\n", k, v)
-							}
-							if err1 := a.DecodeForStorage(v); err1 != nil {
-								return err1
-							}
-							fmt.Printf("%x => %d %d\n", k, a.Balance.ToBig(), a.Nonce)
-						}
-						c.Close()
 						return SpawnHashStateStage(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
@@ -144,6 +127,37 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
+						/*
+							var a accounts.Account
+							c := world.TX.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
+							for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+								if err != nil {
+									return err
+								}
+								if len(k) != 20 {
+									fmt.Printf("%x => %x\n", k, v)
+								}
+								if err1 := a.DecodeForStorage(v); err1 != nil {
+									return err1
+								}
+								fmt.Printf("%x => %d %d\n", k, a.Balance.ToBig(), a.Nonce)
+							}
+							c.Close()
+							c = world.TX.(ethdb.HasTx).Tx().Cursor(dbutils.CurrentStateBucket)
+							for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+								if err != nil {
+									return err
+								}
+								if len(k) != 32 {
+									fmt.Printf("%x => %x\n", k, v)
+								}
+								if err1 := a.DecodeForStorage(v); err1 != nil {
+									return err1
+								}
+								fmt.Printf("%x => %d %d\n", k, a.Balance.ToBig(), a.Nonce)
+							}
+							c.Close()
+						*/
 						return SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
@@ -327,16 +341,19 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	return nil
 }
 
-func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, headers []*types.Header) (bool, uint64, error) {
+func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, headers []*types.Header) (bool, bool, uint64, error) {
 	blockNum := headers[len(headers)-1].Number.Uint64()
-	reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers, config, engine, 1)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers, config, engine, 1)
 	if err != nil {
-		return false, 0, err
+		return false, false, 0, err
+	}
+	if !newCanonical {
+		return false, false, 0, nil
 	}
 	if err = stages.SaveStageProgress(db, stages.Headers, blockNum, nil); err != nil {
-		return false, 0, err
+		return false, false, 0, err
 	}
-	return reorg, forkblocknumber, nil
+	return newCanonical, reorg, forkblocknumber, nil
 }
 
 func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, blocks []*types.Block, checkRoot bool) (int, error) {
@@ -352,9 +369,15 @@ func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, vmConfi
 	for i, block := range blocks {
 		headers[i] = block.Header()
 	}
-	reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", tx, headers, config, engine, 1)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", tx, headers, config, engine, 1)
 	if err != nil {
 		return 0, err
+	}
+	if !newCanonical {
+		if _, err1 = tx.Commit(); err1 != nil {
+			return 0, fmt.Errorf("committing transaction after importing blocks: %v", err1)
+		}
+		return 0, nil // No change of the chain
 	}
 	blockNum := blocks[len(blocks)-1].Number().Uint64()
 	if err = stages.SaveStageProgress(tx, stages.Headers, blockNum, nil); err != nil {

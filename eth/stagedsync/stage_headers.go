@@ -70,7 +70,7 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlock(cr.db, hash, number)
 }
 
-func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) (bool, uint64, error) {
+func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) (bool, bool, uint64, error) {
 	start := time.Now()
 
 	// ignore headers that we already have
@@ -79,7 +79,7 @@ func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Hea
 		number := h.Number.Uint64()
 		ch, err := rawdb.ReadCanonicalHash(db, number)
 		if err != nil {
-			return false, 0, err
+			return false, false, 0, err
 		}
 		if h.Hash() == ch {
 			alreadyCanonicalIndex++
@@ -97,26 +97,26 @@ Hash: 0x%x
 Error: %v
 ##############################
 `, logPrefix, h.Number, h.Hash(), core.ErrBlacklistedHash))
-			return false, 0, core.ErrBlacklistedHash
+			return false, false, 0, core.ErrBlacklistedHash
 		}
 	}
 	headers = headers[alreadyCanonicalIndex:]
 	if len(headers) < 1 {
-		return false, 0, nil
+		return false, false, 0, nil
 	}
 
 	if rawdb.ReadHeader(db, headers[0].ParentHash, headers[0].Number.Uint64()-1) == nil {
-		return false, 0, fmt.Errorf("%s: unknown parent %x", logPrefix, headers[0].ParentHash)
+		return false, false, 0, fmt.Errorf("%s: unknown parent %x", logPrefix, headers[0].ParentHash)
 	}
 	parentTd, err := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	if err != nil {
-		return false, 0, err
+		return false, false, 0, err
 	}
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
 		if i > 0 {
 			if header.ParentHash != headers[i-1].Hash() {
-				return false, 0, fmt.Errorf("%s: broken chain", logPrefix)
+				return false, false, 0, fmt.Errorf("%s: broken chain", logPrefix)
 			}
 		}
 		externTd = externTd.Add(externTd, header.Difficulty)
@@ -143,14 +143,14 @@ Error: %v
 	for i := 0; i < len(headers); i++ {
 		// Otherwise wait for headers checks and ensure they pass
 		if err := <-results; err != nil {
-			return false, 0, err
+			return false, false, 0, err
 		}
 	}
 	headHash := rawdb.ReadHeadHeaderHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
 	localTd, err := rawdb.ReadTd(db, headHash, *headNumber)
 	if err != nil {
-		return false, 0, err
+		return false, false, 0, err
 	}
 	lastHeader := headers[len(headers)-1]
 	// If the total difficulty is higher than our known, add it to the canonical chain
@@ -169,7 +169,7 @@ Error: %v
 	var deepFork bool // Whether the forkBlock is outside this header chain segment
 	ch, err := rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1)
 	if err != nil {
-		return false, 0, err
+		return false, false, 0, err
 	}
 	if newCanonical && headers[0].ParentHash != ch {
 		deepFork = true
@@ -192,7 +192,7 @@ Error: %v
 		number := header.Number.Uint64()
 		ch, err := rawdb.ReadCanonicalHash(batch, number)
 		if err != nil {
-			return false, 0, err
+			return false, false, 0, err
 		}
 		hashesMatch := header.Hash() == ch
 		if newCanonical && !deepFork && !fork && !hashesMatch {
@@ -205,18 +205,18 @@ Error: %v
 		if newCanonical {
 			err = rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
 			if err != nil {
-				return false, 0, err
+				return false, false, 0, err
 			}
 		}
 		data, err := rlp.EncodeToBytes(header)
 		if err != nil {
-			return false, 0, fmt.Errorf("[%s] Failed to RLP encode header: %w", logPrefix, err)
+			return false, false, 0, fmt.Errorf("[%s] Failed to RLP encode header: %w", logPrefix, err)
 		}
 		if err := rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td); err != nil {
-			return false, 0, fmt.Errorf("[%s] Failed to WriteTd: %w", logPrefix, err)
+			return false, false, 0, fmt.Errorf("[%s] Failed to WriteTd: %w", logPrefix, err)
 		}
 		if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
-			return false, 0, fmt.Errorf("[%s] Failed to store header: %w", logPrefix, err)
+			return false, false, 0, fmt.Errorf("[%s] Failed to store header: %w", logPrefix, err)
 		}
 	}
 	if deepFork {
@@ -226,7 +226,7 @@ Error: %v
 		for {
 			ch, err := rawdb.ReadCanonicalHash(batch, forkBlockNumber)
 			if err != nil {
-				return false, 0, err
+				return false, false, 0, err
 			}
 			if forkHash == ch {
 				break
@@ -234,7 +234,7 @@ Error: %v
 
 			err = rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber)
 			if err != nil {
-				return false, 0, err
+				return false, false, 0, err
 			}
 			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)
 			forkBlockNumber = forkHeader.Number.Uint64() - 1
@@ -242,7 +242,7 @@ Error: %v
 		}
 		err = rawdb.WriteCanonicalHash(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 		if err != nil {
-			return false, 0, err
+			return false, false, 0, err
 		}
 	}
 	reorg := newCanonical && forkBlockNumber < *headNumber
@@ -251,7 +251,7 @@ Error: %v
 		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
 			err = rawdb.DeleteCanonicalHash(batch, i)
 			if err != nil {
-				return false, 0, err
+				return false, false, 0, err
 			}
 		}
 	}
@@ -259,12 +259,12 @@ Error: %v
 		encoded := dbutils.EncodeBlockNumber(lastHeader.Number.Uint64())
 
 		if err := batch.Put(dbutils.HeaderNumberPrefix, lastHeader.Hash().Bytes(), encoded); err != nil {
-			return false, 0, fmt.Errorf("[%s] Failed to store hash to number mapping: %w", logPrefix, err)
+			return false, false, 0, fmt.Errorf("[%s] Failed to store hash to number mapping: %w", logPrefix, err)
 		}
 		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
 	}
 	if _, err := batch.Commit(); err != nil {
-		return false, 0, fmt.Errorf("%s: write header markers into disk: %w", logPrefix, err)
+		return false, false, 0, fmt.Errorf("%s: write header markers into disk: %w", logPrefix, err)
 	}
 	// Report some public statistics so the user has a clue what's going on
 	ctx := []interface{}{
@@ -282,5 +282,5 @@ Error: %v
 	}
 
 	log.Info(fmt.Sprintf("[%s] Imported new block headers", logPrefix), ctx...)
-	return reorg, forkBlockNumber, nil
+	return newCanonical, reorg, forkBlockNumber, nil
 }

@@ -282,13 +282,13 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 func commitCache(tx ethdb.DbWithPendingMutations, writes *btree.BTree) error {
 	return shards.WalkWrites(writes,
 		func(address []byte, account *accounts.Account) error { // accountWrite
-			fmt.Printf("account write %x: balance %d, nonce %d\n", address, account.Balance.ToBig(), account.Nonce)
+			//fmt.Printf("account write %x: balance %d, nonce %d\n", address, account.Balance.ToBig(), account.Nonce)
 			value := make([]byte, account.EncodingLengthForStorage())
 			account.EncodeForStorage(value)
 			return tx.Put(dbutils.PlainStateBucket, address, value)
 		},
 		func(address []byte, original *accounts.Account) error { // accountDelete
-			fmt.Printf("account delete %x\n", address)
+			//fmt.Printf("account delete %x\n", address)
 			if err := tx.Delete(dbutils.PlainStateBucket, address[:], nil); err != nil {
 				return err
 			}
@@ -302,17 +302,17 @@ func commitCache(tx ethdb.DbWithPendingMutations, writes *btree.BTree) error {
 			return nil
 		},
 		func(address []byte, incarnation uint64, location []byte, value []byte) error { // storageWrite
-			fmt.Printf("storage write %x %d %x => %x\n", address, incarnation, location, value)
+			//fmt.Printf("storage write %x %d %x => %x\n", address, incarnation, location, value)
 			compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, location)
 			return tx.Put(dbutils.PlainStateBucket, compositeKey, value)
 		},
 		func(address []byte, incarnation uint64, location []byte) error { // storageDelete
-			fmt.Printf("storage delete %x %d %x\n", address, incarnation, location)
+			//fmt.Printf("storage delete %x %d %x\n", address, incarnation, location)
 			compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, location)
 			return tx.Delete(dbutils.PlainStateBucket, compositeKey, nil)
 		},
 		func(address []byte, incarnation uint64, code []byte) error { // codeWrite
-			fmt.Printf("code write %x %d\n", address, incarnation)
+			//fmt.Printf("code write %x %d\n", address, incarnation)
 			h := common.NewHasher()
 			h.Sha.Reset()
 			//nolint:errcheck

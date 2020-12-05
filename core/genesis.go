@@ -43,7 +43,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-var UsePlainStateExecution = false // FIXME: when we can move the hashed state forward.
+var UsePlainStateExecution = true // FIXME: when we can move the hashed state forward.
 //  ^--- will be overridden when parsing flags anyway
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go

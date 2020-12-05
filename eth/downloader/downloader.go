@@ -1692,11 +1692,12 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					}
 					var n int
 					var err error
+					var newCanonical bool
 					if mode == StagedSync {
 						var reorg bool
 						var forkBlockNumber uint64
 						logPrefix := d.stagedSyncState.LogPrefix()
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
+						newCanonical, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
@@ -1706,7 +1707,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					} else {
 						n, err = d.lightchain.InsertHeaderChain(chunk, frequency)
 					}
-					if err == nil && mode == StagedSync && d.headersState != nil {
+					if err == nil && mode == StagedSync && newCanonical && d.headersState != nil {
 						if err1 := d.headersState.Update(d.stateDB, chunk[len(chunk)-1].Number.Uint64()); err1 != nil {
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
