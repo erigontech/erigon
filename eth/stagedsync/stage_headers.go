@@ -222,7 +222,6 @@ Error: %v
 	if deepFork {
 		forkHeader := rawdb.ReadHeader(batch, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 		forkBlockNumber = forkHeader.Number.Uint64() - 1
-		fork = true
 		forkHash := forkHeader.ParentHash
 		for {
 			ch, err := rawdb.ReadCanonicalHash(batch, forkBlockNumber)
