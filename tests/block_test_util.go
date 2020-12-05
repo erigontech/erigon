@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"runtime"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -32,9 +31,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -121,7 +122,7 @@ func (t *BlockTest) Run(_ bool) error {
 	} else {
 		engine = ethash.NewShared()
 	}
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	txCacher := core.NewTxSenderCacher(1)
 	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
 		return err
@@ -132,8 +133,15 @@ func (t *BlockTest) Run(_ bool) error {
 	if err != nil {
 		return err
 	}
-	cmlast := chain.CurrentBlock().Hash()
+	cmlast := rawdb.ReadHeadBlockHash(db)
+	//cmlast := chain.CurrentBlock().Hash()
 	if common.Hash(t.json.BestBlock) != cmlast {
+		fmt.Printf("INSERTED CHAIN\n")
+		for _, b := range t.json.Blocks {
+			cb, _ := b.decode()
+			fmt.Printf("%d: %x\n", cb.NumberU64(), cb.Hash())
+		}
+		fmt.Printf("hash mismatch: wanted %x, got %x\n", t.json.BestBlock, cmlast)
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
 	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
@@ -178,7 +186,7 @@ func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
 */
 func (t *BlockTest) insertBlocks(blockchain *core.BlockChain) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
-	// insert the test blocks, which will execute all transactions
+	// insert the test blocks, which will execute all transaction
 	for _, b := range t.json.Blocks {
 		cb, err := b.decode()
 		if err != nil {
@@ -189,8 +197,8 @@ func (t *BlockTest) insertBlocks(blockchain *core.BlockChain) ([]btBlock, error)
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		if _, err = blockchain.InsertChain(context.Background(), []*types.Block{cb}); err != nil {
-			//if err := stagedsync.InsertBlockInStages(blockchain.ChainDb(), blockchain.Config(), blockchain.Engine(), cb, blockchain); err != nil {
+		if err = stagedsync.InsertBlockInStages(blockchain.ChainDb(), blockchain.Config(), &vm.Config{}, blockchain.Engine(), cb, true /* checkRoot */); err != nil {
+			//if _, err = blockchain.InsertChain(context.Background(), []*types.Block{cb}); err != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
