@@ -208,7 +208,6 @@ func (t *BlockTest) insertBlocks(blockchain *core.BlockChain) ([]btBlock, error)
 		if b.BlockHeader == nil {
 			return nil, fmt.Errorf("block insertion should have failed")
 		}
-
 		// validate RLP decoding by checking all values against test file JSON
 		if err = validateHeader(b.BlockHeader, cb.Header()); err != nil {
 			return nil, fmt.Errorf("deserialised block header validation failed: %v", err)

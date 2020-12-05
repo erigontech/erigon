@@ -221,8 +221,7 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
 
 	start := time.Now()
 	logPrefix := s.LogPrefix()
-	err = stage.ExecFunc(stageState, s)
-	if err != nil {
+	if err = stage.ExecFunc(stageState, s); err != nil {
 		return err
 	}
 
