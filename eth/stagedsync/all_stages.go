@@ -279,7 +279,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	cc := &core.TinyChainContext{}
 	cc.SetDB(nil)
 	cc.SetEngine(engine)
-	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 11}, OptionalParameters{})
+	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
 	syncState, err1 := stagedSync.Prepare(
 		nil,
 		config,
@@ -342,7 +342,7 @@ func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, vmConfi
 	cc := &core.TinyChainContext{}
 	cc.SetDB(nil)
 	cc.SetEngine(engine)
-	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 11}, OptionalParameters{})
+	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
 	syncState, err1 := stagedSync.Prepare(
 		nil,
 		config,

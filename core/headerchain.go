@@ -475,7 +475,9 @@ func (hc *HeaderChain) GetCanonicalHash(number uint64) common.Hash {
 // CurrentHeader retrieves the current head header of the canonical chain. The
 // header is retrieved from the HeaderChain's internal cache.
 func (hc *HeaderChain) CurrentHeader() *types.Header {
-	return hc.currentHeader.Load().(*types.Header)
+	headHash := rawdb.ReadHeadHeaderHash(hc.chainDb)
+	headNumber := rawdb.ReadHeaderNumber(hc.chainDb, headHash)
+	return rawdb.ReadHeader(hc.chainDb, headHash, *headNumber)
 }
 
 // SetCurrentHeader sets the current head header of the canonical chain.
