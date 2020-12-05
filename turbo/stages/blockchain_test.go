@@ -168,7 +168,7 @@ func testFork(t *testing.T, chainDb ethdb.Database, i, n int, full bool, compara
 		if err != nil {
 			t.Fatalf("Failed to read TD for current block: %v", err)
 		}
-		if _, err := stagedsync.InsertBlocksInStages(chainDb, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), blockChainB, true /* checkRoot */); err != nil {
+		if _, err = stagedsync.InsertBlocksInStages(chainDb, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), blockChainB, true /* checkRoot */); err != nil {
 			t.Fatalf("failed to insert forking chain: %v", err)
 		}
 		currentBlockHash = blockChainB[len(blockChainB)-1].Hash()
@@ -177,6 +177,9 @@ func testFork(t *testing.T, chainDb ethdb.Database, i, n int, full bool, compara
 			t.Fatalf("Failed to read last header: %v", err1)
 		}
 		tdPost, err = rawdb.ReadTd(chainDb, currentBlockHash, currentBlock.NumberU64())
+		if err != nil {
+			t.Fatalf("Failed to read TD for current header: %v", err)
+		}
 	} else {
 		currentHeaderHash := rawdb.ReadHeadHeaderHash(chainDb)
 		currentHeader, err1 := rawdb.ReadHeaderByHash(chainDb, currentHeaderHash)
@@ -529,10 +532,10 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 		t.Fatalf("generate chain: %v", err)
 	}
 	if full {
-		if _, err := stagedsync.InsertBlocksInStages(db, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), easyBlocks, true /* checkRoot */); err != nil {
+		if _, err = stagedsync.InsertBlocksInStages(db, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), easyBlocks, true /* checkRoot */); err != nil {
 			t.Fatalf("failed to insert easy chain: %v", err)
 		}
-		if _, err := stagedsync.InsertBlocksInStages(db, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), diffBlocks, true /* checkRoot */); err != nil {
+		if _, err = stagedsync.InsertBlocksInStages(db, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), diffBlocks, true /* checkRoot */); err != nil {
 			t.Fatalf("failed to insert difficult chain: %v", err)
 		}
 	} else {
