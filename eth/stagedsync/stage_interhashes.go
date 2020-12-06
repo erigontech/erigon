@@ -92,15 +92,12 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 	}
 	c.Close()
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
+	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket3)
 	buf.SetComparator(comparator)
 	collector := etl.NewCollector(tmpdir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
-		}
-		if len(keyHex) > trie.IHDupKeyLen {
-			return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
 		}
 		return collector.Collect(keyHex, hash)
 	}
@@ -121,7 +118,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 	} else {
 		return err
 	}
-	if err := collector.Load(logPrefix, db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+	if err := collector.Load(logPrefix, db, dbutils.IntermediateTrieHashBucket3, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:       quit,
 		Comparator: comparator,
 	}); err != nil {
@@ -258,17 +255,13 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	}
 
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
+	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket3)
 	buf.SetComparator(comparator)
 	collector := etl.NewCollector(tmpdir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
 		}
-		if len(keyHex) > trie.IHDupKeyLen {
-			return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
-		}
-
 		return collector.Collect(keyHex, hash)
 	}
 	loader := trie.NewFlatDBTrieLoader(logPrefix, dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
@@ -290,7 +283,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		"gen IH", generationIHTook,
 	)
 	if err := collector.Load(logPrefix, db,
-		dbutils.IntermediateTrieHashBucket,
+		dbutils.IntermediateTrieHashBucket3,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit:       quit,
@@ -360,15 +353,12 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	}
 
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
+	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket3)
 	buf.SetComparator(comparator)
 	collector := etl.NewCollector(tmpdir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
-		}
-		if len(keyHex) > trie.IHDupKeyLen {
-			return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
 		}
 		return collector.Collect(keyHex, hash)
 	}
@@ -391,7 +381,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		"gen IH", generationIHTook,
 	)
 	if err := collector.Load(logPrefix, db,
-		dbutils.IntermediateTrieHashBucket,
+		dbutils.IntermediateTrieHashBucket3,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit:       quit,
@@ -408,6 +398,9 @@ func ResetHashState(db ethdb.Database) error {
 		dbutils.CurrentStateBucket,
 		dbutils.ContractCodeBucket,
 		dbutils.IntermediateTrieHashBucket,
+		dbutils.HashedAccountsBucket,
+		dbutils.HashedStorageBucket,
+		dbutils.IntermediateTrieHashBucket3,
 	); err != nil {
 		return err
 	}

@@ -79,9 +79,25 @@ func PromoteHashedStateCleanly(logPrefix string, db ethdb.Database, tmpdir strin
 		logPrefix,
 		db,
 		dbutils.PlainStateBucket,
-		dbutils.CurrentStateBucket,
+		dbutils.HashedAccountsBucket,
 		tmpdir,
-		keyTransformExtractFunc(transformPlainStateKey),
+		keyTransformExtractAcc(transformPlainStateKey),
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			Quit: quit,
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	err = etl.Transform(
+		logPrefix,
+		db,
+		dbutils.PlainStateBucket,
+		dbutils.HashedStorageBucket,
+		tmpdir,
+		keyTransformExtractStorage(transformPlainStateKey),
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit: quit,
@@ -107,6 +123,32 @@ func PromoteHashedStateCleanly(logPrefix string, db ethdb.Database, tmpdir strin
 
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
 	return func(k, v []byte, next etl.ExtractNextFunc) error {
+		newK, err := transformKey(k)
+		if err != nil {
+			return err
+		}
+		return next(k, newK, v)
+	}
+}
+
+func keyTransformExtractAcc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
+	return func(k, v []byte, next etl.ExtractNextFunc) error {
+		if len(k) != 20 {
+			return nil
+		}
+		newK, err := transformKey(k)
+		if err != nil {
+			return err
+		}
+		return next(k, newK, v)
+	}
+}
+
+func keyTransformExtractStorage(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
+	return func(k, v []byte, next etl.ExtractNextFunc) error {
+		if len(k) == 20 {
+			return nil
+		}
 		newK, err := transformKey(k)
 		if err != nil {
 			return err
@@ -332,7 +374,11 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 		loadBucket = dbutils.ContractCodeBucket
 		extract = getExtractCode(p.db, changeSetBucket)
 	} else {
-		loadBucket = dbutils.CurrentStateBucket
+		if storage {
+			loadBucket = dbutils.HashedStorageBucket
+		} else {
+			loadBucket = dbutils.HashedAccountsBucket
+		}
 		extract = getExtractFunc(p.db, changeSetBucket)
 	}
 
@@ -377,8 +423,10 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 		l.innerLoadFunc = etl.IdentityLoadFunc
 		loadBucket = dbutils.CurrentStateBucket
 		if storage {
+			loadBucket = dbutils.HashedStorageBucket
 			extractFunc = getUnwindExtractStorage(changeSetBucket)
 		} else {
+			loadBucket = dbutils.HashedAccountsBucket
 			extractFunc = getUnwindExtractAccounts(p.db, changeSetBucket)
 		}
 	}

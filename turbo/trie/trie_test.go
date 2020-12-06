@@ -18,6 +18,7 @@ package trie
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
@@ -29,6 +30,7 @@ import (
 	"testing/quick"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -889,4 +891,66 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 	value, gotValue := trie.GetAccountCode(crypto.Keccak256(address[:]))
 	assert.Equal(t, codeValue1, value, "the value should NOT reset after account's non codehash had changed")
 	assert.True(t, gotValue, "should indicate that the code is still in the cache")
+}
+
+func TestNextSubtreeHex(t *testing.T) {
+	assert := assert.New(t)
+
+	type tc struct {
+		prev, next string
+		expect     bool
+	}
+
+	cases := []tc{
+		{prev: "1234", next: "1235", expect: true},
+		{prev: "12ff", next: "13", expect: true},
+		{prev: "12ff", next: "13000000", expect: true},
+		{prev: "1234", next: "5678", expect: false},
+	}
+	for _, tc := range cases {
+		next, _ := NextIH(common.FromHex(tc.prev))
+		res := isSequence(next, common.FromHex(tc.next))
+		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
+	}
+}
+
+func TestIHCursor(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+	for _, k := range []string{"00", "01", "0100", "0101", "0102", "02"} {
+		kk := common.FromHex(k)
+		kk = append(append([]byte{}, uint8(len(kk))), kk...)
+		db.Put(dbutils.IntermediateTrieHashBucket3, kk, kk)
+	}
+
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+
+	cursors := [73]ethdb.Cursor{}
+	for i := 0; i < 73; i++ {
+		cursors[i] = tx.Cursor(dbutils.IntermediateTrieHashBucket3)
+	}
+	var filter = func(k []byte) bool {
+		if bytes.Equal(k, common.FromHex("01")) {
+			return false
+		}
+		if bytes.Equal(k, common.FromHex("0101")) {
+			return false
+		}
+		return true
+	}
+	ih := IH(filter, cursors)
+	k, _, isSeq, _ := ih.First()
+	fmt.Printf("1: %x, %t\n", k, isSeq)
+	k, _, isSeq, _ = ih.Next()
+	fmt.Printf("2: %x, %t\n", k, isSeq)
+	k, _, isSeq, _ = ih.Next()
+	fmt.Printf("3: %x, %t\n", k, isSeq)
+	k, _, isSeq, _ = ih.Next()
+	fmt.Printf("4: %x, %t\n", k, isSeq)
+	k, _, isSeq, _ = ih.Next()
+	fmt.Printf("5: %x, %t\n", k, isSeq)
 }

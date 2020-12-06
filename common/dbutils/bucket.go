@@ -63,6 +63,8 @@ var (
 	//value - storage value(common.hash)
 	CurrentStateBucket     = "CST2"
 	CurrentStateBucketOld1 = "CST"
+	HashedAccountsBucket   = "hashed_accounts"
+	HashedStorageBucket    = "hashed_storage"
 
 	//key - address hash
 	//value - list of block where it's changed
@@ -97,6 +99,7 @@ var (
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
 	IntermediateTrieHashBucket     = "iTh2"
+	IntermediateTrieHashBucket3    = "iTh3"
 	IntermediateTrieHashBucketOld1 = "iTh"
 
 	// DatabaseInfoBucket is used to store information about data layout.
@@ -251,6 +254,9 @@ var Buckets = []string{
 	Log,
 	Sequence,
 	EthTx,
+	IntermediateTrieHashBucket3,
+	HashedAccountsBucket,
+	HashedStorageBucket,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
