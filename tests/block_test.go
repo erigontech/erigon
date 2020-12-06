@@ -44,9 +44,6 @@ func TestBlockchain(t *testing.T) {
 	// using 4.6 TGas
 	bt.skipLoad(`.*randomStatetest94.json.*`)
 
-	bt.fails(`(?m)^TestBlockchain/TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain2.json`, "Work in progress")
-	bt.fails(`(?m)^TestBlockchain/TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain.json`, "Work in progress")
-
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongTransactionsTrie.json`, "Validation happens in the fetcher")
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongUncleHash.json`, "Validation happens in the fetcher")
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_EIP150`, "No receipt validation before Byzantium")
