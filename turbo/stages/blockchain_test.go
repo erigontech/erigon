@@ -107,7 +107,7 @@ func newCanonical(engine consensus.Engine, n int, full bool) (*ethdb.ObjectDatab
 	}
 	// Header-only chain requested
 	headers := makeHeaderChain(genesis.Header(), n, engine, db, canonicalSeed)
-	_, _, err = stagedsync.InsertHeadersInStages(db, params.AllEthashProtocolChanges, ethash.NewFaker(), headers)
+	_, _, _, err = stagedsync.InsertHeadersInStages(db, params.AllEthashProtocolChanges, ethash.NewFaker(), headers)
 	return db, blockchain, err
 }
 
@@ -195,7 +195,7 @@ func testFork(t *testing.T, chainDb ethdb.Database, i, n int, full bool, compara
 		if err != nil {
 			t.Fatalf("Failed to read TD for current header: %v", err)
 		}
-		if _, _, err = stagedsync.InsertHeadersInStages(chainDb, params.AllEthashProtocolChanges, ethash.NewFaker(), headerChainB); err != nil {
+		if _, _, _, err = stagedsync.InsertHeadersInStages(chainDb, params.AllEthashProtocolChanges, ethash.NewFaker(), headerChainB); err != nil {
 			t.Fatalf("failed to insert forking chain: %v", err)
 		}
 		currentHeader = headerChainB[len(headerChainB)-1]
@@ -224,87 +224,15 @@ func testBlockChainImport(chain types.Blocks, blockchain *core.BlockChain) error
 	if _, err := stagedsync.InsertBlocksInStages(blockchain.ChainDb(), blockchain.Config(), &vm.Config{}, blockchain.Engine(), chain, true /* checkRoot */); err != nil {
 		return err
 	}
-	/*
-		for _, block := range chain {
-			ctx := blockchain.WithContext(context.Background(), block.Number())
-
-			// Try and process the block
-			err := blockchain.Engine().VerifyHeader(blockchain, block.Header(), true)
-			if err == nil {
-				err = blockchain.Validator().ValidateBody(ctx, block)
-			}
-			if err != nil {
-				if errors.Is(err, core.ErrKnownBlock) {
-					continue
-				}
-				return err
-			}
-			parent := blockchain.GetBlockByHash(block.ParentHash())
-			tds := state.NewTrieDbState(parent.Root(), blockchain.ChainDb(), parent.NumberU64())
-			statedb := state.New(tds)
-			receipts, _, usedGas, root, err := blockchain.Processor().PreProcess(block, statedb, tds, vm.Config{})
-			if err != nil {
-				blockchain.ReportBlock(block, receipts, err)
-				return err
-			}
-			err = blockchain.Validator().ValidateGasAndRoot(block, root, usedGas, tds)
-			if err != nil {
-				blockchain.ReportBlock(block, receipts, err)
-				return err
-			}
-			err = blockchain.Processor().PostProcess(block, tds, receipts)
-			if err != nil {
-				blockchain.ReportBlock(block, receipts, err)
-				return err
-			}
-			err = blockchain.Validator().ValidateReceipts(block, receipts)
-			if err != nil {
-				blockchain.ReportBlock(block, receipts, err)
-				return err
-			}
-			blockchain.Chainmu.Lock()
-			tds.SetBlockNr(block.NumberU64())
-			blockWriter := tds.DbStateWriter()
-			if err := statedb.CommitBlock(ctx, blockWriter); err != nil {
-				return err
-			}
-			if err := blockWriter.WriteChangeSets(); err != nil {
-				return err
-			}
-			if err := rawdb.WriteTd(blockchain.ChainDb(), block.Hash(), block.NumberU64(), new(big.Int).Add(block.Difficulty(), blockchain.GetTdByHash(block.ParentHash()))); err != nil {
-				panic(err)
-			}
-			if err := rawdb.WriteBlock(context.Background(), blockchain.ChainDb(), block); err != nil {
-				blockchain.ReportBlock(block, receipts, err)
-				return err
-			}
-			blockchain.Chainmu.Unlock()
-		}
-	*/
 	return nil
 }
 
 // testHeaderChainImport tries to process a chain of header, writing them into
 // the database if successful.
 func testHeaderChainImport(chain []*types.Header, blockchain *core.BlockChain) error {
-	if _, _, err := stagedsync.InsertHeadersInStages(blockchain.ChainDb(), blockchain.Config(), blockchain.Engine(), chain); err != nil {
+	if _, _, _, err := stagedsync.InsertHeadersInStages(blockchain.ChainDb(), blockchain.Config(), blockchain.Engine(), chain); err != nil {
 		return err
 	}
-	/*
-		for _, header := range chain {
-			// Try and validate the header
-			if err := blockchain.Engine().VerifyHeader(blockchain, header, false); err != nil {
-				return err
-			}
-			// Manually insert the header into the database, but don't reorganise (allows subsequent testing)
-			blockchain.Chainmu.Lock()
-			if err := rawdb.WriteTd(blockchain.ChainDb(), header.Hash(), header.Number.Uint64(), new(big.Int).Add(header.Difficulty, blockchain.GetTdByHash(header.ParentHash))); err != nil {
-				return err
-			}
-			rawdb.WriteHeader(context.Background(), blockchain.ChainDb(), header)
-			blockchain.Chainmu.Unlock()
-		}
-	*/
 	return nil
 }
 
@@ -547,10 +475,10 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 		for i, block := range diffBlocks {
 			diffHeaders[i] = block.Header()
 		}
-		if _, _, err = stagedsync.InsertHeadersInStages(db, params.TestChainConfig, ethash.NewFaker(), easyHeaders); err != nil {
+		if _, _, _, err = stagedsync.InsertHeadersInStages(db, params.TestChainConfig, ethash.NewFaker(), easyHeaders); err != nil {
 			t.Fatalf("failed to insert easy chain: %v", err)
 		}
-		if _, _, err = stagedsync.InsertHeadersInStages(db, params.TestChainConfig, ethash.NewFaker(), diffHeaders); err != nil {
+		if _, _, _, err = stagedsync.InsertHeadersInStages(db, params.TestChainConfig, ethash.NewFaker(), diffHeaders); err != nil {
 			t.Fatalf("failed to insert difficult chain: %v", err)
 		}
 	}
