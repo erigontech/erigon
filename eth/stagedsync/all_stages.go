@@ -17,7 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool) StageBuilders {
+func createStageBuilders(blocks []*types.Block, blockNum uint64, storageMode ethdb.StorageMode, checkRoot bool) StageBuilders {
 	return []StageBuilder{
 		{
 			ID: stages.BlockHashes,
@@ -306,7 +306,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	if err = stages.SaveStageProgress(db, stages.Headers, newHead, nil); err != nil {
 		return err
 	}
-	stageBuilders := createStageBuilders([]*types.Block{}, newHead, checkRoot)
+	stageBuilders := createStageBuilders([]*types.Block{}, newHead, ethdb.DefaultStorageMode, checkRoot)
 	cc := &core.TinyChainContext{}
 	cc.SetDB(nil)
 	cc.SetEngine(engine)
@@ -319,7 +319,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		db,
 		db,
 		"1",
-		ethdb.StorageMode{History: true, Receipts: true, TxIndex: true},
+		ethdb.DefaultStorageMode,
 		"",
 		16*1024,
 		8*1024,
@@ -343,7 +343,10 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 
 func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, headers []*types.Header) (bool, bool, uint64, error) {
 	blockNum := headers[len(headers)-1].Number.Uint64()
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers, config, engine, 1)
+	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
+		return false, false, 0, err
+	}
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers)
 	if err != nil {
 		return false, false, 0, err
 	}
@@ -356,24 +359,31 @@ func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine
 	return newCanonical, reorg, forkblocknumber, nil
 }
 
-func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, blocks []*types.Block, checkRoot bool) (int, error) {
+func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, blocks []*types.Block, checkRoot bool) (int, error) {
 	if len(blocks) == 0 {
 		return 0, nil
+	}
+	headers := make([]*types.Header, len(blocks))
+	for i, block := range blocks {
+		headers[i] = block.Header()
+	}
+	// Header verification happens outside of the transaction
+	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
+		return 0, err
 	}
 	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
 		return 0, fmt.Errorf("starting transaction for importing the blocks: %v", err1)
 	}
 	defer tx.Rollback()
-	headers := make([]*types.Header, len(blocks))
-	for i, block := range blocks {
-		headers[i] = block.Header()
-	}
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", tx, headers, config, engine, 1)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers)
 	if err != nil {
 		return 0, err
 	}
 	if !newCanonical {
+		if _, err = core.InsertBodyChain("Bodies", context.Background(), tx, blocks); err != nil {
+			return 0, fmt.Errorf("inserting block bodies chain for non-canonical chain")
+		}
 		if _, err1 = tx.Commit(); err1 != nil {
 			return 0, fmt.Errorf("committing transaction after importing blocks: %v", err1)
 		}
@@ -383,7 +393,7 @@ func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, vmConfi
 	if err = stages.SaveStageProgress(tx, stages.Headers, blockNum, nil); err != nil {
 		return 0, err
 	}
-	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)
+	stageBuilders := createStageBuilders(blocks, blockNum, storageMode, checkRoot)
 	cc := &core.TinyChainContext{}
 	cc.SetDB(nil)
 	cc.SetEngine(engine)
@@ -396,7 +406,7 @@ func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, vmConfi
 		tx,
 		tx,
 		"1",
-		ethdb.StorageMode{History: true, Receipts: true, TxIndex: true},
+		storageMode,
 		"",
 		16*1024,
 		8*1024,
@@ -424,7 +434,7 @@ func InsertBlocksInStages(db ethdb.Database, config *params.ChainConfig, vmConfi
 }
 
 func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, block *types.Block, checkRoot bool) error {
-	if _, err := InsertBlocksInStages(db, config, vmConfig, engine, []*types.Block{block}, checkRoot); err != nil {
+	if _, err := InsertBlocksInStages(db, ethdb.DefaultStorageMode, config, vmConfig, engine, []*types.Block{block}, checkRoot); err != nil {
 		return err
 	}
 	return nil

@@ -70,7 +70,36 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlock(cr.db, hash, number)
 }
 
-func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) (bool, bool, uint64, error) {
+func VerifyHeaders(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) error {
+	// Generate the list of seal verification requests, and start the parallel verifier
+	seals := make([]bool, len(headers))
+	if checkFreq != 0 {
+		// In case of checkFreq == 0 all seals are left false.
+		for i := 0; i < len(seals)/checkFreq; i++ {
+			index := i * checkFreq
+			if index >= len(seals) {
+				index = len(seals) - 1
+			}
+			seals[index] = true
+		}
+		// Last should always be verified to avoid junk.
+		seals[len(seals)-1] = true
+	}
+
+	cancel, results := engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
+	defer cancel()
+
+	// Iterate over the headers and ensure they all check out
+	for i := 0; i < len(headers); i++ {
+		// Otherwise wait for headers checks and ensure they pass
+		if err := <-results; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header) (bool, bool, uint64, error) {
 	start := time.Now()
 
 	// ignore headers that we already have
@@ -120,31 +149,6 @@ Error: %v
 			}
 		}
 		externTd = externTd.Add(externTd, header.Difficulty)
-	}
-	// Generate the list of seal verification requests, and start the parallel verifier
-	seals := make([]bool, len(headers))
-	if checkFreq != 0 {
-		// In case of checkFreq == 0 all seals are left false.
-		for i := 0; i < len(seals)/checkFreq; i++ {
-			index := i * checkFreq
-			if index >= len(seals) {
-				index = len(seals) - 1
-			}
-			seals[index] = true
-		}
-		// Last should always be verified to avoid junk.
-		seals[len(seals)-1] = true
-	}
-
-	cancel, results := engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
-	defer cancel()
-
-	// Iterate over the headers and ensure they all check out
-	for i := 0; i < len(headers); i++ {
-		// Otherwise wait for headers checks and ensure they pass
-		if err := <-results; err != nil {
-			return false, false, 0, err
-		}
 	}
 	headHash := rawdb.ReadHeadHeaderHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
@@ -203,8 +207,7 @@ Error: %v
 			fork = true
 		}
 		if newCanonical {
-			err = rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64())
-			if err != nil {
+			if err = rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64()); err != nil {
 				return false, false, 0, err
 			}
 		}

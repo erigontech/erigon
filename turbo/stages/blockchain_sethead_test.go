@@ -1789,15 +1789,15 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 		t.Fatalf("error when generating chain err=%v", err)
 	}
 	if tt.sidechainBlocks > 0 {
-		if _, err = stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, sideblocks, true /* checkRoot */); err != nil {
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, sideblocks, true /* checkRoot */); err != nil {
 			t.Fatalf("Failed to import side chain: %v", err)
 		}
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, canonblocks[:tt.commitBlock], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, canonblocks[:tt.commitBlock], true /* checkRoot */); err != nil {
 		t.Fatalf("Failed to import canonical chain start: %v", err)
 	}
-	if _, err = stagedsync.InsertBlocksInStages(db, chainConfig, &vm.Config{}, engine, canonblocks[tt.commitBlock:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, canonblocks[tt.commitBlock:], true /* checkRoot */); err != nil {
 		t.Fatalf("Failed to import canonical chain start: %v", err)
 	}
 

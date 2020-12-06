@@ -249,12 +249,46 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
 			// Write state changes to db
-			if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter:  %w", err)
-			}
+			//if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+			//	return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter:  %w", err)
+			//}
 			if err := ibs.CommitBlock(ctx, plainStateWriter); err != nil {
-				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter:  %w", err)
+				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
 			}
+			if err := tx.(ethdb.BucketsMigrator).ClearBuckets(dbutils.CurrentStateBucket); err != nil {
+				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
+			}
+			c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
+			h := common.NewHasher()
+			defer common.ReturnHasherToPool(h)
+			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return nil, nil, fmt.Errorf("interate over plain state: %w", err)
+				}
+				var newK []byte
+				if len(k) == common.AddressLength {
+					newK = make([]byte, common.HashLength)
+				} else {
+					newK = make([]byte, common.HashLength*2+common.IncarnationLength)
+				}
+				h.Sha.Reset()
+				//nolint:errcheck
+				h.Sha.Write(k[:common.AddressLength])
+				//nolint:errcheck
+				h.Sha.Read(newK[:common.HashLength])
+				if len(k) > common.AddressLength {
+					copy(newK[common.HashLength:], k[common.AddressLength:common.AddressLength+common.IncarnationLength])
+					h.Sha.Reset()
+					//nolint:errcheck
+					h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
+					//nolint:errcheck
+					h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
+				}
+				if err = tx.Put(dbutils.CurrentStateBucket, newK, common.CopyBytes(v)); err != nil {
+					return nil, nil, fmt.Errorf("insert hashed key: %w", err)
+				}
+			}
+			c.Close()
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", i)
 				if err := tx.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
@@ -268,41 +302,11 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			var hashCollector func(keyHex []byte, hash []byte) error
 			var collector *etl.Collector
 			unfurl := trie.NewRetainList(0)
-			if intermediateHashes {
-				buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-				buf.SetComparator(tx.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket))
-				collector = etl.NewCollector("", buf)
-				hashCollector = func(keyHex []byte, hash []byte) error {
-					if len(keyHex) == 0 {
-						return nil
-					}
-					if len(keyHex) > trie.IHDupKeyLen {
-						return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
-					}
-					return collector.Collect(keyHex, hash)
-				}
-				changeSetWriter := stateWriter.ChangeSetWriter()
-				accountChangeSet, err1 := changeSetWriter.GetAccountChanges()
-				if err1 != nil {
-					return nil, nil, err1
-				}
-				for _, accountChange := range accountChangeSet.Changes {
-					unfurl.AddKey(accountChange.Key)
-				}
-				storageChangeSet, err2 := changeSetWriter.GetStorageChanges()
-				if err2 != nil {
-					return nil, nil, err2
-				}
-				for _, storageChange := range storageChangeSet.Changes {
-					unfurl.AddKey(storageChange.Key)
-				}
-			}
 			loader := trie.NewFlatDBTrieLoader("GenerateChain", dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 			if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
 			if hash, err := loader.CalcTrieRoot(tx, nil); err == nil {
-				//fmt.Printf("Chainmaker CalcTrieRoot: %x\n", hash)
 				b.header.Root = hash
 			} else {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)

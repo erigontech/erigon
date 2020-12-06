@@ -1694,10 +1694,14 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					var err error
 					var newCanonical bool
 					if mode == StagedSync {
+						if err = stagedsync.VerifyHeaders(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency); err != nil {
+							log.Warn("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
+							return fmt.Errorf("%w: %v", errInvalidChain, err)
+						}
 						var reorg bool
 						var forkBlockNumber uint64
 						logPrefix := d.stagedSyncState.LogPrefix()
-						newCanonical, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
+						newCanonical, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
@@ -1712,7 +1716,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
 					}
-					if mode != StagedSync && err != nil {
+					if mode != StagedSync || err != nil {
 						// If some headers were inserted, add them too to the rollback list
 						if (mode == FastSync || frequency > 1) && n > 0 && rollback == 0 {
 							rollback = chunk[0].Number.Uint64()
