@@ -172,7 +172,7 @@ func (it *insertIterator) processed() int {
 
 // InsertBodyChain attempts to insert the given batch of block into the
 // canonical chain, without executing those blocks
-func InsertBodyChain(logPrefix string, ctx context.Context, db ethdb.Database, chain types.Blocks) (bool, error) {
+func InsertBodyChain(logPrefix string, ctx context.Context, db ethdb.Database, chain types.Blocks, newCanonical bool) (bool, error) {
 	// Sanity check that we have something meaningful to import
 	if len(chain) == 0 {
 		return true, nil
@@ -200,6 +200,7 @@ func InsertBodyChain(logPrefix string, ctx context.Context, db ethdb.Database, c
 		ctx,
 		chain,
 		db,
+		newCanonical,
 	)
 }
 
@@ -209,6 +210,7 @@ func InsertBodies(
 	ctx context.Context,
 	chain types.Blocks,
 	db ethdb.Database,
+	newCanonical bool,
 ) (bool, error) {
 	tx, err := db.Begin(ctx, ethdb.RW)
 	if err != nil {
@@ -258,7 +260,9 @@ func InsertBodies(
 	}
 	stats.Processed = len(chain)
 	stats.Report(logPrefix, chain, len(chain)-1, true)
-	rawdb.WriteHeadBlockHash(batch, chain[len(chain)-1].Hash())
+	if newCanonical {
+		rawdb.WriteHeadBlockHash(batch, chain[len(chain)-1].Hash())
+	}
 	if _, err := batch.Commit(); err != nil {
 		return true, fmt.Errorf("commit inserting bodies: %w", err)
 	}

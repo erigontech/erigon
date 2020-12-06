@@ -1812,7 +1812,7 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 	if execute {
 		index, err = d.blockchain.InsertChain(context.Background(), blocks)
 	} else {
-		stopped, err = core.InsertBodyChain(logPrefix, context.Background(), d.stateDB, blocks)
+		stopped, err = core.InsertBodyChain(logPrefix, context.Background(), d.stateDB, blocks, true /* newCanonical */)
 		if stopped {
 			index = 0
 		} else {

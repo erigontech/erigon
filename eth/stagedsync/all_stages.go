@@ -41,7 +41,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, storageMode eth
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						if _, err := core.InsertBodyChain("logPrefix", context.TODO(), world.TX, blocks); err != nil {
+						if _, err := core.InsertBodyChain("logPrefix", context.TODO(), world.TX, blocks, true /* newCanonical */); err != nil {
 							return err
 						}
 						return s.DoneAndUpdate(world.TX, blockNum)
@@ -381,7 +381,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		return 0, err
 	}
 	if !newCanonical {
-		if _, err = core.InsertBodyChain("Bodies", context.Background(), tx, blocks); err != nil {
+		if _, err = core.InsertBodyChain("Bodies", context.Background(), tx, blocks, false /* newCanonical */); err != nil {
 			return 0, fmt.Errorf("inserting block bodies chain for non-canonical chain")
 		}
 		if _, err1 = tx.Commit(); err1 != nil {
