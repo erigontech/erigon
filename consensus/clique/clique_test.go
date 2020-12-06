@@ -96,7 +96,7 @@ func TestReimportMirroredState(t *testing.T) {
 	db = ethdb.NewMemDatabase()
 	genspec.MustCommit(db)
 
-	if _, err := stagedsync.InsertBlocksInStages(db, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
 	if head, err1 := rawdb.ReadBlockByHash(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
@@ -112,7 +112,7 @@ func TestReimportMirroredState(t *testing.T) {
 	chain2, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher2)
 	defer chain2.Stop()
 
-	if _, err := stagedsync.InsertBlocksInStages(db, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[2:], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[2:], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
 	if head, err1 := rawdb.ReadBlockByHash(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {

@@ -2893,7 +2893,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
 	defer chain.Stop()
-	if n, err := chain.InsertChain(context.Background(), blocks); err != nil {
+	if n, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
 	}
 }
@@ -3008,7 +3008,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
 	defer chain.Stop()
-	if n, err := chain.InsertChain(context.Background(), blocks); err != nil {
+	if n, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
 	}
 	statedb := state.New(state.NewDbStateReader(db))
@@ -3098,7 +3098,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
 	defer chain.Stop()
-	if n, err := chain.InsertChain(context.Background(), blocks); err != nil {
+	if n, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
 	}
 	statedb := state.New(state.NewDbStateReader(db))
@@ -3285,8 +3285,8 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}
 	for i, block := range blocks {
 		blockNum := i + 1
-		if n, err := chain.InsertChain(context.Background(), []*types.Block{block}); err != nil {
-			t.Fatalf("block %d: failed to insert into chain: %v", n, err)
+		if err := stagedsync.InsertBlockInStages(db, params.TestChainConfig, &vm.Config{}, engine, block, true /* checkRoot */); err != nil {
+			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 		statedb := state.New(state.NewDbStateReader(db))
 		// If all is correct, then slot 1 and 2 are zero
@@ -3432,32 +3432,24 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	diskdb := ethdb.NewMemDatabase()
 	defer diskdb.Close()
 	gspec.MustCommit(diskdb)
-	txCacherChain := core.NewTxSenderCacher(1)
-	chain, err := core.NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{
-		//Debug:  true,
-		//Tracer: vm.NewJSONLogger(nil, os.Stdout),
-	}, nil, txCacherChain)
-	if err != nil {
-		t.Fatalf("failed to create tester chain: %v", err)
-	}
-	statedb := state.New(state.NewDbStateReader(db))
+	statedb := state.New(state.NewPlainStateReader(diskdb))
 	if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 		t.Fatalf("Genesis err, got %v exp %v", got, exp)
 	}
 	// First block tries to create, but fails
 	{
 		block := blocks[0]
-		if _, err := chain.InsertChain(context.Background(), []*types.Block{blocks[0]}); err != nil {
+		if err := stagedsync.InsertBlockInStages(diskdb, params.TestChainConfig, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 		}
-		statedb = state.New(state.NewDbStateReader(db))
+		statedb = state.New(state.NewPlainStateReader(diskdb))
 		if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 			t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
 		}
 	}
 	// Import the rest of the blocks
 	for _, block := range blocks[1:] {
-		if _, err := chain.InsertChain(context.Background(), []*types.Block{block}); err != nil {
+		if err := stagedsync.InsertBlockInStages(diskdb, params.TestChainConfig, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 		}
 	}
