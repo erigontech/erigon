@@ -80,9 +80,17 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 
 func regenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot bool, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	log.Info(fmt.Sprintf("[%s] Regeneration intermediate hashes started", logPrefix))
-	if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
-		return err
+	// Clear IH bucket
+	c := db.(ethdb.HasTx).Tx().Cursor(dbutils.IntermediateTrieHashBucket)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err = c.Delete(k, v); err != nil {
+			return err
+		}
 	}
+	c.Close()
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
 	buf.SetComparator(comparator)
@@ -297,7 +305,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
 	hash, err := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	if err != nil {
-		return err
+		return fmt.Errorf("read canonical hash: %w", err)
 	}
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
@@ -311,7 +319,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 		var err error
 		tx, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
-			return err
+			return fmt.Errorf("open transcation: %w", err)
 		}
 		defer tx.Rollback()
 	}
@@ -372,7 +380,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	t := time.Now()
 	hash, err := loader.CalcTrieRoot(db, quit)
 	if err != nil {
-		return err
+		return fmt.Errorf("calcTrieRoot: %w", err)
 	}
 	generationIHTook := time.Since(t)
 	if hash != expectedRootHash {
