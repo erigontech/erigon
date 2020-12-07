@@ -465,10 +465,9 @@ func TestClique(t *testing.T) {
 		}
 		// Pass all the headers through clique and ensure tallying succeeds
 		failed := false
-		var k int
 		for j := 0; j < len(batches)-1; j++ {
-			if k, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[j], true /* checkRoot */); err != nil {
-				t.Errorf("test %d: failed to import batch %d, block %d: %v", i, j, k, err)
+			if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[j], true /* checkRoot */); err != nil {
+				t.Errorf("test %d: failed to import batch %d, %v", i, j, err)
 				failed = true
 				break
 			}

@@ -55,7 +55,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	}
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -121,7 +121,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	}
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -181,7 +181,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -241,7 +241,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -300,7 +300,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -358,7 +358,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	defer clear()
 
 	// BLOCK 1
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -376,7 +376,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[1].Transactions(), blocks[1].Uncles(), receipts[1])
 
 	// BLOCK 2 - INCORRECT
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -390,7 +390,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2 - CORRECT
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -433,7 +433,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	defer clear()
 
 	// BLOCK 1
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -447,7 +447,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -465,12 +465,12 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[2].Transactions(), blocks[2].Uncles(), receipts[2])
 
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 3
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -508,7 +508,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	defer clear()
 
 	// BLOCK 1
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -522,7 +522,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -536,7 +536,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -545,12 +545,12 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[3].Transactions(), blocks[3].Uncles(), receipts[3])
 
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[3], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -588,7 +588,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	defer clear()
 
 	// BLOCK 1
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -602,7 +602,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -616,7 +616,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -625,12 +625,12 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[3].Transactions(), blocks[3].Uncles(), receipts[3])
 
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[3], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), blocks[3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 }

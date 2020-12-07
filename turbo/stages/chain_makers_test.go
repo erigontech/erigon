@@ -100,8 +100,8 @@ func ExampleGenerateChain() {
 	}
 
 	// Import the chain. This runs all block validation rules.
-	if i, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
-		fmt.Printf("insert error (block %d): %v\n", chain[i].NumberU64(), err)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
+		fmt.Printf("insert error%v\n", err)
 		return
 	}
 

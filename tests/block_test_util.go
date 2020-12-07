@@ -198,15 +198,17 @@ func (t *BlockTest) insertBlocks(blockchain *core.BlockChain) ([]btBlock, error)
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		if err = stagedsync.InsertBlockInStages(blockchain.ChainDb(), blockchain.Config(), &vm.Config{}, blockchain.Engine(), cb, true /* checkRoot */); err != nil {
+		if newCanonical, err1 := stagedsync.InsertBlockInStages(blockchain.ChainDb(), blockchain.Config(), &vm.Config{}, blockchain.Engine(), cb, true /* checkRoot */); err1 != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
-				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", cb.Number(), err)
+				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", cb.Number(), err1)
 			}
+		} else if newCanonical && b.BlockHeader == nil {
+			return nil, fmt.Errorf("block insertion should have failed")
 		}
 		if b.BlockHeader == nil {
-			return nil, fmt.Errorf("block insertion should have failed")
+			continue
 		}
 		// validate RLP decoding by checking all values against test file JSON
 		if err = validateHeader(b.BlockHeader, cb.Header()); err != nil {

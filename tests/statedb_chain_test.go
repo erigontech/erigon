@@ -114,12 +114,12 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCK 2
-	if err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database
