@@ -49,7 +49,7 @@ var UsePlainStateExecution = true // FIXME: when we can move the hashed state fo
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
 
-var errGenesisNoConfig = errors.New("genesis has no chain configuration")
+var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 
 // Genesis specifies the header fields, state of a genesis block. It also defines hard
 // fork switch-over blocks through the chain configuration.
@@ -161,7 +161,7 @@ func (e *GenesisMismatchError) Error() string {
 func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwrite bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 	var stateDB *state.IntraBlockState
 	if genesis != nil && genesis.Config == nil {
-		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, errGenesisNoConfig
+		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, ErrGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
 	stored, err := rawdb.ReadCanonicalHash(db, 0)

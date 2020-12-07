@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -89,8 +90,7 @@ func newTestBackend(t *testing.T) *testBackend {
 	if err != nil {
 		t.Fatalf("Failed to create local chain, %v", err)
 	}
-	_, err = chain.InsertChain(context.TODO(), blocks)
-	if err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Error(err)
 	}
 	return &testBackend{chain: chain}
