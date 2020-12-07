@@ -17,7 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-func createStageBuilders(blocks []*types.Block, blockNum uint64, storageMode ethdb.StorageMode, checkRoot bool) StageBuilders {
+func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool) StageBuilders {
 	return []StageBuilder{
 		{
 			ID: stages.BlockHashes,
@@ -306,7 +306,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	if err = stages.SaveStageProgress(db, stages.Headers, newHead, nil); err != nil {
 		return err
 	}
-	stageBuilders := createStageBuilders([]*types.Block{}, newHead, ethdb.DefaultStorageMode, checkRoot)
+	stageBuilders := createStageBuilders([]*types.Block{}, newHead, checkRoot)
 	cc := &core.TinyChainContext{}
 	cc.SetDB(nil)
 	cc.SetEngine(engine)
@@ -393,7 +393,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	if err = stages.SaveStageProgress(tx, stages.Headers, blockNum, nil); err != nil {
 		return 0, err
 	}
-	stageBuilders := createStageBuilders(blocks, blockNum, storageMode, checkRoot)
+	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)
 	cc := &core.TinyChainContext{}
 	cc.SetDB(nil)
 	cc.SetEngine(engine)
