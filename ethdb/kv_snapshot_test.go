@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"testing"
 )
 
@@ -1282,3 +1284,128 @@ func checkKV(t *testing.T, key, val, expectedKey, expectedVal []byte) {
 		t.Fatal("wrong value for key", common.Bytes2Hex(key))
 	}
 }
+
+func TestDebugStateSnapshot(t *testing.T)  {
+	snapshotPath:="/media/b00ris/nvme/snapshots/state"
+	sndbNew:=	NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.PlainStateBucket:   dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+			dbutils.PlainContractCodeBucket:   dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],
+		}
+	}).Path(snapshotPath).ReadOnly().MustOpen()
+	sndbOld:=	NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.PlainStateBucket:   dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+			dbutils.PlainContractCodeBucket:   dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],
+		}
+	}).Path(snapshotPath).ReadOnly().MustOpen()
+	tmpDbNew:=NewLMDB().InMem().MustOpen()
+	tmpDbOld:=NewLMDB().InMem().MustOpen()
+
+	dbNew:=NewSnapshot2KV().DB(tmpDbNew).SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, sndbNew).MustOpen()
+	dbOld:=NewSnapshotKV().DB(tmpDbOld).SnapshotDB(sndbOld).For(dbutils.PlainStateBucket).For(dbutils.CodeBucket).For(dbutils.PlainContractCodeBucket).MustOpen()
+
+	txNew,err:=dbNew.Begin(context.Background(), nil, RW)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	txOld,err:=dbOld.Begin(context.Background(), nil, RW)
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+	var knprev, vnprev, koprev, voprev []byte
+	cnew:=txNew.Cursor(dbutils.PlainStateBucket)
+	cold:=txOld.Cursor(dbutils.PlainStateBucket)
+	knew,vnew, err:=cnew.First()
+	if err!=nil {
+		t.Fatal(err)
+	}
+	kold,vold, err:=cold.First()
+	if err!=nil {
+		t.Fatal(err)
+	}
+	i:=0
+	errs:=0
+	for {
+		if !bytes.Equal(knew, kold) {
+			t.Log("keys not equal",common.Bytes2Hex(knew), common.Bytes2Hex(kold))
+			t.Log("prev",common.Bytes2Hex(knprev), common.Bytes2Hex(koprev))
+			errs++
+		}
+		if !bytes.Equal(vnew, vold) {
+			t.Log("vals not equal",common.Bytes2Hex(vnew), common.Bytes2Hex(vold), "for key", common.Bytes2Hex(knew), common.Bytes2Hex(kold))
+			t.Log("prev",common.Bytes2Hex(vnprev), common.Bytes2Hex(voprev))
+			errs++
+		}
+		if errs>30 {
+			t.Fatal()
+		}
+		if common.Bytes2Hex(knew)=="3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136bb98eca927b335f7e2f33dc71c6dfe94d5ceb49088c85d8a80d96443fd80d6" {
+			fmt.Println("debug")
+		}
+		knprev, koprev,vnprev, voprev = knew, kold, vnew, vold
+		knew,vnew, err=cnew.Next()
+		if err!=nil {
+			t.Fatal(err)
+		}
+		kold,vold, err=cold.Next()
+		if err!=nil {
+			t.Fatal(err)
+		}
+
+
+		if kold==nil&&knew==nil {
+			break
+		}
+		if i>1000000 {
+			fmt.Println("current",common.Bytes2Hex(knew))
+			i=0
+		}
+		i++
+	}
+}
+
+func TestName(t *testing.T) {
+	k := []byte{91,181,142,163,243,235,238,244,207,200,157,89,244,152,99,31,229,13,63,145}
+	v := []byte{105,116,32,105,115,32,100,101,108,101,116,101,100,32,118,97,108,117,101}
+
+	t.Log(common.Bytes2Hex(k))
+	t.Log(common.Bytes2Hex(v))
+	t.Log(string(v))
+	a:=accounts.Account{}
+	err := a.DecodeForStorage(v)
+	if err!=nil {
+		spew.Dump(a)
+		t.Fatal(err)
+	}
+
+}
+
+
+func TestName2(t *testing.T) {
+	k := []byte{91,181,142,163,243,235,238,244,207,200,157,89,244,152,99,31,229,13,63,145}
+	v := []byte{13,1,1,1,1,32,174,147,139,240,83,196,127,211,88,255,111,223,46,41,142,244,167,32,123,173,187,207,116,61,229,225,65,163,254,121,156,120}
+
+	t.Log(common.Bytes2Hex(k))
+	t.Log(common.Bytes2Hex(v))
+	a:=accounts.Account{}
+	err := a.DecodeForStorage(v)
+	if err!=nil {
+		spew.Dump(a)
+		t.Fatal(err)
+	}
+
+}
+/*
+ keys not equal 3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c0ed02b24d0464210ceea7616921a3b6e68814f7d7bf5260105f56d319f758 46422040616c6578616e6472652e6e617665726e696f756b
+				3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136bb98eca927b335f7e2f33dc71c6dfe94d5ceb49088c85d8a80d96443fd80d8 64656c
+
+				3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c3a69c9557c17e58e9acf58f5e684b024734b9e57abfdff847982215f92aa5 feb92d30bf01ff9a1901666c5573532bfa07eeec
+				3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c0ed02b24d0464210ceea7616921a3b6e68814f7d7bf5260105f56d319f758 46422040616c6578616e6472652e6e617665726e696f756b
+    kv_snapshot_test.go:1335: vals not equal   for key 3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c0ed02b24d0464210ceea7616921a3b6e68814f7d7bf5260105f56d319f758 3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136bb98eca927b335f7e2f33dc71c6dfe94d5ceb49088c85d8a80d96443fd80d8
+    kv_snapshot_test.go:1331: keys not equal
+    kv_snapshot_test.go:1335: vals not equal  for key 3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c3a69c9557c17e58e9acf58f5e684b024734b9e57abfdff847982215f92aa5 3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c0ed02b24d0464210ceea7616921a3b6e68814f7d7bf5260105f56d319f758
+ */

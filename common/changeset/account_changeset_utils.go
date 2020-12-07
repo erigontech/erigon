@@ -2,6 +2,7 @@ package changeset
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -25,6 +26,10 @@ func encodeAccounts2(blockN uint64, s *ChangeSet, f func(k, v []byte) error) err
 	sort.Sort(s)
 	newK := dbutils.EncodeBlockNumber(blockN)
 	for _, cs := range s.Changes {
+		addrKey:=[]byte{91,181,142,163,243,235,238,244,207,200,157,89,244,152,99,31,229,13,63,145}
+		if bytes.Equal(addrKey, cs.Key) {
+			fmt.Println("f")
+		}
 		newV := make([]byte, len(cs.Key)+len(cs.Value))
 		copy(newV, cs.Key)
 		copy(newV[len(cs.Key):], cs.Value)

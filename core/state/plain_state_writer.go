@@ -3,7 +3,6 @@ package state
 import (
 	"context"
 	"encoding/binary"
-
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"

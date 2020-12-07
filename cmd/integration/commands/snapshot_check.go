@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -28,11 +29,15 @@ func init() {
 var tmpDBPath string
 //go run cmd/integration/main.go snapshot_check --block 11000002 --chaindata /media/b00ris/nvme/backup/snapshotsync/tg/chaindata/ --snapshotDir /media/b00ris/nvme/snapshots/ --snapshotMode s
 
-///media/b00ris/nvme/tmp/sndbg351954303
-/**
 
-RegenerateIntermediateHashes err: : wrong trie root: cf8d0af42c095de90f9513ebd5f74f8bcc62c4fc4c68f2b5badcf1604718432f, expected (from header): 8b2258fc3693f6ed1102f3142839a174b27f215841d2f542b586682898981c6d
-exit status 1
+//tmp db path /media/b00ris/nvme/tmp/sndbg361939096
+/**
+k = [91,181,142,163,243,235,238,244,207,200,157,89,244,152,99,31,229,13,63,145]
+v = [105,116,32,105,115,32,100,101,108,101,,116,101,100,32,118,97,108,117,101]
+
+
+media/b00ris/nvme/snapshots/ --snapshotMode s --pprof
+INFO [12-04|17:51:11.549] Starting pprof server                    cpu="go tool pprof -lines -http=: http://127.0.0.1:6060/debug/pprof/profile?seconds=20" heap="go tool pprof -lines -http=: http://127.0.0.1:6060/debug/pprof/heap"
 
  */
 var cmdSnapshotCheck = &cobra.Command{
@@ -86,7 +91,7 @@ var cmdSnapshotCheck = &cobra.Command{
 
 		kv:=ethdb.NewSnapshot2KV().
 			DB(tmpDb).
-			SnapshotDB([]string{dbutils.HeaderPrefix, dbutils.BlockBodyPrefix, dbutils.Senders}, mainDB.KV()).
+			SnapshotDB([]string{dbutils.HeaderPrefix, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberPrefix}, mainDB.KV()).
 			SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).
 			MustOpen()
 
@@ -154,7 +159,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		log.Info("Promote commited", "t", time.Since(tt))
 	}
 
-	if true {
+	if isNew {
 		log.Info("Regenerate IH")
 		tx,err:=db.Begin(context.Background(), ethdb.RW)
 		if err!=nil {
@@ -188,40 +193,114 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		log.Info("Commit", "t", time.Since(tt))
 	}
 
-	return nil
-	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	cc, bc, st, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
+	st.DisableStages(stages.Headers,
+		stages.BlockHashes,
+		stages.Bodies,
+		stages.Senders,
+		//stages.Execution,
+		//stages.IntermediateHashes,
+		//stages.HashState,
+		stages.AccountHistoryIndex,
+		stages.StorageHistoryIndex,
+		stages.LogIndex,
+		stages.CallTraces,
+		stages.TxLookup,
+		stages.TxPool,
+		stages.Finish,
+	)
 
+	if true {
 
-	stage4 := progress(stages.Execution)
-	stage5 := progress(stages.IntermediateHashes)
-	log.Info("Stage4", "progress", stage4.BlockNumber)
-	log.Info("Stage5", "progress", stage5.BlockNumber)
-	ch := ctx.Done()
-
-
-	for blockNumber :=snapshotBlock; blockNumber <= lastBlockHeaderNumber; blockNumber++ {
-		tx,err:=db.Begin(context.Background(), ethdb.RW)
+		stage3 := progress(stages.Senders)
+		err = stage3.DoneAndUpdate(db, lastBlockHeaderNumber)
 		if err!=nil {
 			return err
 		}
-		defer tx.Rollback()
 
-		if err := stageExec(db, ctx); err != nil {
-			log.Error("Error on execution", "err", err, "block", blockNumber)
+		stage4 := progress(stages.Execution)
+		err = stage4.DoneAndUpdate(db, snapshotBlock)
+		if err!=nil {
+			return err
+		}
+		stage5 := progress(stages.HashState)
+		err = stage5.DoneAndUpdate(db, snapshotBlock)
+		if err!=nil {
 			return err
 		}
 
-		if err := stagedsync.SpawnIntermediateHashesStage(stage5, db, tmpDir, ch); err != nil {
+		stage6 := progress(stages.IntermediateHashes)
+		err = stage6.DoneAndUpdate(db, snapshotBlock)
+		if err!=nil {
+			return err
+		}
+	}
+
+	log.Info("Stage3", "progress", progress(stages.Senders).BlockNumber)
+	log.Info("Stage4", "progress", progress(stages.Execution).BlockNumber)
+	log.Info("Stage5", "progress", progress(stages.IntermediateHashes).BlockNumber)
+
+
+	ch := ctx.Done()
+
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	core.UsePlainStateExecution = true
+
+	tx,err:=db.Begin(context.Background(), ethdb.RW)
+	if err!=nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for blockNumber :=snapshotBlock+1; blockNumber <= lastBlockHeaderNumber; blockNumber++ {
+		err = st.SetCurrentStage(stages.Execution)
+		if err!=nil {
+			return err
+		}
+		stage4 := progress(stages.Execution)
+		stage4.BlockNumber = blockNumber - 1
+		log.Info("Stage4", "progress", stage4.BlockNumber)
+
+		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx,
+			bc.Config(), cc, bc.GetVMConfig(),
+			ch,
+			stagedsync.ExecuteBlockStageParams{
+				ToBlock:       blockNumber, // limit execution to the specified block
+				WriteReceipts: false,
+				BatchSize:     int(batchSize),
+			})
+		if err!=nil {
+			return fmt.Errorf("Execution err %w", err)
+		}
+
+		stage5 := progress(stages.HashState)
+		stage5.BlockNumber =  blockNumber - 1
+		log.Info("Stage5", "progress", stage5.BlockNumber)
+		err = stagedsync.SpawnHashStateStage(stage5, tx, tmpDir, ch)
+		if err!=nil {
+			return fmt.Errorf("SpawnHashStateStage err %w", err)
+		}
+
+		stage6 := progress(stages.IntermediateHashes)
+		stage6.BlockNumber =  blockNumber - 1
+		log.Info("Stage6", "progress", stage6.BlockNumber)
+		if err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, tmpDir, ch); err != nil {
 			log.Error("Error on ih", "err", err, "block", blockNumber)
-			return err
+			return fmt.Errorf("SpawnIntermediateHashesStage %w", err)
 		}
-		_,err = tx.Commit()
+
+		log.Info("Done", "progress", blockNumber)
+		err = tx.CommitAndBegin(context.TODO())
 		if err!=nil {
 			log.Error("Error on commit", "err", err, "block", blockNumber)
 			return err
 		}
+
+
 	}
+	time.Sleep(time.Second*30)
 
 	return nil
 }

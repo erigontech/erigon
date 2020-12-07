@@ -191,7 +191,11 @@ func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {
 		if errors.Is(err, ErrUnavailableSnapshot) {
 			return v, nil
 		}
-		return snTx.GetOne(bucket, key)
+		v,err:=snTx.GetOne(bucket, key)
+		if bytes.Equal(v, DeletedValue) {
+			return nil, nil
+		}
+		return v, nil
 	}
 	return v, nil
 }
@@ -229,7 +233,15 @@ func (s *sn2TX) HasOne(bucket string, key []byte) (bool, error) {
 			return v, nil
 		}
 
-		return snTx.HasOne(bucket, key)
+		v,err:=snTx.GetOne(bucket, key)
+		if err!=nil {
+			return false, err
+		}
+		if bytes.Equal(v, DeletedValue) {
+			return false, nil
+		}
+
+		return true, nil
 	}
 	return v, nil
 }
@@ -269,7 +281,7 @@ func (s *sn2TX) Sequence(bucket string, amount uint64) (uint64, error) {
 	panic("implement me")
 }
 
-var DeletedValue = []byte("del")
+var DeletedValue = []byte("it is deleted value")
 
 type snCursor2 struct {
 	dbCursor Cursor
@@ -341,6 +353,9 @@ func (s *snCursor2) SeekExact(key []byte) ([]byte, []byte, error) {
 	k, v, err := s.dbCursor.SeekExact(key)
 	if err != nil {
 		return nil, nil, err
+	}
+	if bytes.Equal(v, DeletedValue) {
+		return nil, nil, nil
 	}
 	if v == nil {
 		k, v, err = s.snCursor.SeekExact(key)
