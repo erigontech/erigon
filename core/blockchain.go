@@ -2188,6 +2188,15 @@ func ExecuteBlockEphemerally(
 			return nil, fmt.Errorf("writing changesets for block %d failed: %v", block.NumberU64(), err)
 		}
 	}
+	if *usedGas != header.GasUsed {
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+	}
+	if !vmConfig.NoReceipts {
+		bloom := types.CreateBloom(receipts)
+		if bloom != header.Bloom {
+			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+		}
+	}
 
 	return receipts, nil
 }
