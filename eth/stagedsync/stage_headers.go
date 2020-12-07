@@ -235,8 +235,7 @@ Error: %v
 				break
 			}
 
-			err = rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber)
-			if err != nil {
+			if err = rawdb.WriteCanonicalHash(batch, forkHash, forkBlockNumber); err != nil {
 				return false, false, 0, err
 			}
 			forkHeader = rawdb.ReadHeader(batch, forkHash, forkBlockNumber)

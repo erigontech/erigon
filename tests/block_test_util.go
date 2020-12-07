@@ -129,18 +129,19 @@ func (t *BlockTest) Run(_ bool) error {
 	}
 	defer chain.Stop()
 
-	validBlocks, err := t.insertBlocks(chain)
-	if err != nil {
-		return err
-	}
-	cmlast := rawdb.ReadHeadBlockHash(db)
-	//cmlast := chain.CurrentBlock().Hash()
-	if common.Hash(t.json.BestBlock) != cmlast {
+	/*
 		fmt.Printf("INSERTED CHAIN\n")
 		for _, b := range t.json.Blocks {
 			cb, _ := b.decode()
 			fmt.Printf("%d: %x\n", cb.NumberU64(), cb.Hash())
 		}
+	*/
+	validBlocks, err := t.insertBlocks(chain)
+	if err != nil {
+		return err
+	}
+	cmlast := rawdb.ReadHeadBlockHash(db)
+	if common.Hash(t.json.BestBlock) != cmlast {
 		fmt.Printf("hash mismatch: wanted %x, got %x\n", t.json.BestBlock, cmlast)
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
@@ -198,7 +199,6 @@ func (t *BlockTest) insertBlocks(blockchain *core.BlockChain) ([]btBlock, error)
 		}
 		// RLP decoding worked, try to insert into chain:
 		if err = stagedsync.InsertBlockInStages(blockchain.ChainDb(), blockchain.Config(), &vm.Config{}, blockchain.Engine(), cb, true /* checkRoot */); err != nil {
-			//if _, err = blockchain.InsertChain(context.Background(), []*types.Block{cb}); err != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {

@@ -80,6 +80,9 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 
 func regenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot bool, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	log.Info(fmt.Sprintf("[%s] Regeneration intermediate hashes started", logPrefix))
+	if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
+		return err
+	}
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
 	buf.SetComparator(comparator)

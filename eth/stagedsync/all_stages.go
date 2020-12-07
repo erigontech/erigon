@@ -136,11 +136,12 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 								}
 								if len(k) != 20 {
 									fmt.Printf("%x => %x\n", k, v)
+								} else {
+									if err1 := a.DecodeForStorage(v); err1 != nil {
+										return err1
+									}
+									fmt.Printf("%x => %d %d %x\n", k, a.Balance.ToBig(), a.Nonce, a.CodeHash)
 								}
-								if err1 := a.DecodeForStorage(v); err1 != nil {
-									return err1
-								}
-								fmt.Printf("%x => %d %d\n", k, a.Balance.ToBig(), a.Nonce)
 							}
 							c.Close()
 							c = world.TX.(ethdb.HasTx).Tx().Cursor(dbutils.CurrentStateBucket)
@@ -150,11 +151,12 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 								}
 								if len(k) != 32 {
 									fmt.Printf("%x => %x\n", k, v)
+								} else {
+									if err1 := a.DecodeForStorage(v); err1 != nil {
+										return err1
+									}
+									fmt.Printf("%x => %d %d %x\n", k, a.Balance.ToBig(), a.Nonce, a.CodeHash)
 								}
-								if err1 := a.DecodeForStorage(v); err1 != nil {
-									return err1
-								}
-								fmt.Printf("%x => %d %d\n", k, a.Balance.ToBig(), a.Nonce)
 							}
 							c.Close()
 						*/
