@@ -30,8 +30,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -204,7 +206,7 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	if err := n.Start(); err != nil {
 		t.Fatalf("can't start test node: %v", err)
 	}
-	if _, err := ethservice.BlockChain().InsertChain(context.Background(), blocks[1:]); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(ethservice.BlockChain().ChainDb(), ethdb.DefaultStorageMode, ethservice.BlockChain().Config(), &vm.Config{}, ethservice.BlockChain().Engine(), blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatalf("can't import test blocks: %v", err)
 	}
 	return n, blocks
