@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"testing"
 )
 
@@ -1118,7 +1116,6 @@ func TestSnapshot2WritablePrevAndDeleteKey(t *testing.T) {
 	}
 
 	c := tx.Cursor(dbutils.PlainStateBucket)
-	//deleteCursor := tx.Cursor(dbutils.PlainStateBucket)
 
 	//get first correct k&v
 	k, v, err := c.First()
@@ -1286,6 +1283,7 @@ func checkKV(t *testing.T, key, val, expectedKey, expectedVal []byte) {
 }
 
 func TestDebugStateSnapshot(t *testing.T)  {
+	t.Skip()
 	snapshotPath:="/media/b00ris/nvme/snapshots/state"
 	sndbNew:=	NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
@@ -1367,45 +1365,3 @@ func TestDebugStateSnapshot(t *testing.T)  {
 		i++
 	}
 }
-
-func TestName(t *testing.T) {
-	k := []byte{91,181,142,163,243,235,238,244,207,200,157,89,244,152,99,31,229,13,63,145}
-	v := []byte{105,116,32,105,115,32,100,101,108,101,116,101,100,32,118,97,108,117,101}
-
-	t.Log(common.Bytes2Hex(k))
-	t.Log(common.Bytes2Hex(v))
-	t.Log(string(v))
-	a:=accounts.Account{}
-	err := a.DecodeForStorage(v)
-	if err!=nil {
-		spew.Dump(a)
-		t.Fatal(err)
-	}
-
-}
-
-
-func TestName2(t *testing.T) {
-	k := []byte{91,181,142,163,243,235,238,244,207,200,157,89,244,152,99,31,229,13,63,145}
-	v := []byte{13,1,1,1,1,32,174,147,139,240,83,196,127,211,88,255,111,223,46,41,142,244,167,32,123,173,187,207,116,61,229,225,65,163,254,121,156,120}
-
-	t.Log(common.Bytes2Hex(k))
-	t.Log(common.Bytes2Hex(v))
-	a:=accounts.Account{}
-	err := a.DecodeForStorage(v)
-	if err!=nil {
-		spew.Dump(a)
-		t.Fatal(err)
-	}
-
-}
-/*
- keys not equal 3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c0ed02b24d0464210ceea7616921a3b6e68814f7d7bf5260105f56d319f758 46422040616c6578616e6472652e6e617665726e696f756b
-				3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136bb98eca927b335f7e2f33dc71c6dfe94d5ceb49088c85d8a80d96443fd80d8 64656c
-
-				3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c3a69c9557c17e58e9acf58f5e684b024734b9e57abfdff847982215f92aa5 feb92d30bf01ff9a1901666c5573532bfa07eeec
-				3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c0ed02b24d0464210ceea7616921a3b6e68814f7d7bf5260105f56d319f758 46422040616c6578616e6472652e6e617665726e696f756b
-    kv_snapshot_test.go:1335: vals not equal   for key 3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c0ed02b24d0464210ceea7616921a3b6e68814f7d7bf5260105f56d319f758 3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136bb98eca927b335f7e2f33dc71c6dfe94d5ceb49088c85d8a80d96443fd80d8
-    kv_snapshot_test.go:1331: keys not equal
-    kv_snapshot_test.go:1335: vals not equal  for key 3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c3a69c9557c17e58e9acf58f5e684b024734b9e57abfdff847982215f92aa5 3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136c0ed02b24d0464210ceea7616921a3b6e68814f7d7bf5260105f56d319f758
- */
