@@ -184,7 +184,6 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		chainKV:        chainDb.KV(),
 		eventMux:       stack.EventMux(),
 		accountManager: stack.AccountManager(),
-		engine:         CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
 		networkID:      config.NetworkID,
 		gasPrice:       config.Miner.GasPrice,
 		etherbase:      config.Miner.Etherbase,

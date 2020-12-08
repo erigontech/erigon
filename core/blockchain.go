@@ -1122,6 +1122,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	// Calculate the total difficulty of the block
 	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 	if ptd == nil {
+		fmt.Println("5")
 		return NonStatTy, consensus.ErrUnknownAncestor
 	}
 	externTd := new(big.Int).Add(block.Difficulty(), ptd)
@@ -2251,6 +2252,7 @@ func InsertBodies(
 		ptd := rawdb.ReadTd(batch, block.ParentHash(), block.NumberU64()-1)
 
 		if ptd == nil {
+			fmt.Println("4")
 			return true, consensus.ErrUnknownAncestor
 		}
 

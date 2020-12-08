@@ -288,36 +288,46 @@ func VerifyHeaders(db rawdb.DatabaseReader, engine consensus.EngineAPI, headers 
 	id := rand.Uint64()
 	requests <- consensus.VerifyHeaderRequest{id, headers, seals, nil}
 
-	fmt.Printf("\n\n\n===================== %d - %d(%d)\n", id, len(headers), len(seals))
+	fmt.Printf("\n\n\n*** client *** ===================== %d - %d(%d)\n", id, len(headers), len(seals))
 
 	reqResponses := make(map[common.Hash]struct{}, len(headers))
+
+	defer func() {
+		fmt.Printf("DONE. reqID = %d. %d out of %d\n\n", id, len(reqResponses), toVerify)
+	}()
 
 	for {
 		select {
 		case req := <-requests:
-			fmt.Println("requested", req.ID, req.Headers[0].Number.Uint64(), req.Headers[len(req.Headers)-1].Number)
+			fmt.Println("*** client *** requested", req.ID, req.Headers[0].Number.Uint64(), req.Headers[len(req.Headers)-1].Number)
 			engine.HeaderVerification() <- req
 		case result := <-engine.VerifyResults():
+			//fmt.Println("*** client *** verified", result.ID, result.Err, len(engine.VerifyResults()))
+
 			if result.Err != nil {
+				fmt.Printf("*** client *** %d - %v\nERROR!!!=====================\n\n", result.ID, result.Err)
 				return result.Err
 			}
 
 			reqResponses[result.Hash] = struct{}{}
 
 			if len(reqResponses) == toVerify {
-				fmt.Println("VERIFIED", result.ID, result.Err)
+				fmt.Println("*** client *** VERIFIED", result.ID, result.Err)
 				return nil
 			}
+			//fmt.Println("*** client *** VERIFIED-NOT", result.ID, len(reqResponses), toVerify)
 		case result := <-engine.HeaderRequest():
+			//fmt.Println("*** client *** parent requested", result.ID, result.HighestBlockNumber, result.Number)
 			var err error
 
 			length := 1
 			if result.Number > 0 {
 				length = int(result.Number)
 			}
-			if result.Number > 10000 {
-				fmt.Println("!!!!!!!!!!!!!!!", result.ID, result.Number, result.HighestHash.String(), result.HighestBlockNumber)
-			}
+
+			fmt.Printf("<-engine.HeaderRequest-1 ID=%d Number=%d Highest=%d length=%d\n",
+				result.ID, result.Number, result.HighestBlockNumber, length)
+
 			headers := make([]*types.Header, 0, length)
 
 			if result.HighestBlockNumber+1 < result.Number {
@@ -325,6 +335,9 @@ func VerifyHeaders(db rawdb.DatabaseReader, engine consensus.EngineAPI, headers 
 			}
 
 			parentHash := result.HighestHash
+
+			fmt.Printf("<-engine.HeaderRequest-2 ID=%d Number=%d Highest=%d length=%d\n",
+				result.ID, result.Number, result.HighestBlockNumber, length)
 
 			var parentNumber int
 			for parentNumber = int(result.HighestBlockNumber); parentNumber >= int(result.HighestBlockNumber+1)-int(result.Number); parentNumber-- {
@@ -338,12 +351,16 @@ func VerifyHeaders(db rawdb.DatabaseReader, engine consensus.EngineAPI, headers 
 				headers = append(headers, h)
 			}
 
+			//fmt.Printf("*** client *** sending parents. ID=%d.\n", result.ID)
+
 			resp := consensus.HeaderResponse{
 				ID:      result.ID,
 				Headers: headers,
 			}
 
 			if err != nil {
+				fmt.Printf("*** client *** sending parents. ID=%d. err %v\n", result.ID, err)
+
 				resp.Headers = nil
 				resp.BlockError = consensus.BlockError{
 					parentHash,

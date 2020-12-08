@@ -31,7 +31,6 @@ type HeadersRequest struct {
 	Number             uint64
 }
 
-// ответ в виде пачки на HeadersRequest
 type HeaderResponse struct {
 	ID      uint64
 	Headers []*types.Header

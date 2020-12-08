@@ -18,8 +18,9 @@ package clique
 
 import (
 	"bytes"
-	"encoding/json"
+	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -30,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 
 	lru "github.com/hashicorp/golang-lru"
+	json "github.com/json-iterator/go"
 )
 
 // Vote represents a single vote that an authorized signer made to modify the
@@ -59,6 +61,8 @@ type Snapshot struct {
 	Recents map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
 	Votes   []*Vote                     `json:"votes"`   // List of votes cast in chronological order
 	Tally   map[common.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
+
+	snapStorage storage `json:"-"`
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -88,28 +92,107 @@ func newSnapshot(config *params.CliqueConfig, sigcache *lru.ARCCache, number uin
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *params.CliqueConfig, sigcache *lru.ARCCache, db ethdb.Database, hash common.Hash) (*Snapshot, error) {
-	blob, err := db.Get(dbutils.CliqueBucket, hash[:])
+func loadAndFillSnapshot(db ethdb.Database, num uint64, hash common.Hash, config *params.CliqueConfig, sigcache *lru.ARCCache) (*Snapshot, error) {
+	snap, err := loadSnapshot(db, num, hash)
 	if err != nil {
 		return nil, err
 	}
-	snap := new(Snapshot)
-	if err := json.Unmarshal(blob, snap); err != nil {
-		return nil, err
-	}
+
+	//fmt.Printf("Snapshot.loadAndFillSnapshot for block %q - snap %d(%s): %d\n", hash.String(), snap.Number, snap.Hash.String(), len(snap.Signers))
+
 	snap.config = config
 	snap.sigcache = sigcache
 
 	return snap, nil
 }
 
+// loadSnapshot loads an existing snapshot from the database.
+func loadSnapshot(db ethdb.Database, num uint64, hash common.Hash) (*Snapshot, error) {
+	blob, err := getSnapshotData(db, num, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	snap := new(Snapshot)
+	if err := json.Unmarshal(blob, snap); err != nil {
+		return nil, err
+	}
+
+	//fmt.Printf("Snapshot.loadSnapshot for block %q - snap %d(%s): %d\n", hash.String(), snap.Number, snap.Hash.String(), len(snap.Signers))
+
+	return snap, nil
+}
+
+func getSnapshotData(db ethdb.Database, num uint64, hash common.Hash) ([]byte, error) {
+	return db.Get(dbutils.CliqueBucket, dbutils.BlockBodyKey(num, hash))
+}
+
+func hasSnapshotData(db ethdb.Database, num uint64, hash common.Hash) (bool, error) {
+	return db.Has(dbutils.CliqueBucket, dbutils.BlockBodyKey(num, hash))
+}
+
+func hasSnapshotByBlock(db ethdb.Database, num uint64) (bool, error) {
+	enc := dbutils.EncodeBlockNumber(num)
+	ok, err := db.Has(dbutils.HeaderNumberPrefix, enc)
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
+func addSnapshotByBlock(db ethdb.Database, num uint64, hash common.Hash) error {
+	enc := dbutils.EncodeBlockNumber(num)
+	return db.Put(dbutils.HeaderNumberPrefix, enc, hash[:])
+}
+
 // store inserts the snapshot into the database.
 func (s *Snapshot) store(db ethdb.Database) error {
+	t := time.Now()
 	blob, err := json.Marshal(s)
+	fmt.Println("+++store-0", time.Since(t))
+	t = time.Now()
 	if err != nil {
+		//fmt.Printf("Snapshot.store ERROR snap %d(%s): %v\n", s.Number, s.Hash.String(), err)
 		return err
 	}
-	return db.Put(dbutils.CliqueBucket, s.Hash[:], blob)
+
+	//fmt.Printf("Snapshot.store snap %d(%s): %v\n", s.Number, s.Hash.String(), spew.Sdump(s.Signers))
+
+	s.snapStorage.save(db, s.Number, s.Hash, blob)
+	fmt.Println("+++store-1", time.Since(t), len(blob))
+	return err
+}
+
+type storage struct {
+	ch chan snapObj
+	db ethdb.Database
+	sync.Once
+}
+
+type snapObj struct {
+	number uint64
+	hash   common.Hash
+	blob   []byte
+}
+
+func (st *storage) save(db ethdb.Database, number uint64, hash common.Hash, blob []byte) {
+	st.Once.Do(func() {
+		if st.db == nil {
+			st.db = db
+		}
+
+		st.ch = make(chan snapObj, 1024)
+
+		go func() {
+			var snap snapObj
+			for {
+				snap = <-st.ch
+				_ = st.db.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob)
+			}
+		}()
+	})
+
+	st.ch <- snapObj{number, hash, blob}
 }
 
 // copy creates a deep copy of the snapshot, though not the individual votes.
@@ -189,15 +272,20 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 	if len(headers) == 0 {
 		return s, nil
 	}
+
 	// Sanity check that the headers can be applied
 	for i := 0; i < len(headers)-1; i++ {
 		if headers[i+1].Number.Uint64() != headers[i].Number.Uint64()+1 {
+			//fmt.Println("errInvalidVotingChain1")
 			return nil, errInvalidVotingChain
 		}
 	}
+
 	if headers[0].Number.Uint64() != s.Number+1 {
+		//fmt.Println("errInvalidVotingChain2", headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), s.Number+1)
 		return nil, errInvalidVotingChain
 	}
+	// fixme it looks like we don't need .copy()
 	// Iterate through the headers and create a new snapshot
 	snap := s.copy()
 
@@ -205,7 +293,20 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		start  = time.Now()
 		logged = time.Now()
 	)
-	for i, header := range headers {
+
+	/*
+		var spanStr string
+		spanStr += fmt.Sprintf("!!! snap %d with %d headers:\n", s.Number, len(headers))
+		spanStr += fmt.Sprintf("\theader:")
+		for i := len(headers) - 1; i >= 0; i-- {
+			spanStr += fmt.Sprintf(" %d,", headers[i].Number.Uint64())
+		}
+		fmt.Println(spanStr)
+	*/
+
+	for i := len(headers) - 1; i >= 0; i-- {
+		header := headers[i]
+
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
 		if number%s.config.Epoch == 0 {
@@ -222,23 +323,25 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			return nil, err
 		}
 		if _, ok := snap.Signers[signer]; !ok {
+			//fmt.Printf("errUnauthorizedSigner-3 for block %d\n", number)
 			return nil, errUnauthorizedSigner
 		}
 		for _, recent := range snap.Recents {
 			if recent == signer {
+				//fmt.Println("recently signed2", number, b, recent.String())
 				return nil, errRecentlySigned
 			}
 		}
 		snap.Recents[number] = signer
 
 		// Header authorized, discard any previous votes from the signer
-		for i, vote := range snap.Votes {
+		for voteIdx, vote := range snap.Votes {
 			if vote.Signer == signer && vote.Address == header.Coinbase {
 				// Uncast the vote from the cached tally
 				snap.uncast(vote.Address, vote.Authorize)
 
 				// Uncast the vote from the chronological list
-				snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
+				snap.Votes = append(snap.Votes[:voteIdx], snap.Votes[voteIdx+1:]...)
 				break // only one vote allowed
 			}
 		}
@@ -272,23 +375,23 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 					delete(snap.Recents, number-limit)
 				}
 				// Discard any previous votes the deauthorized signer cast
-				for i := 0; i < len(snap.Votes); i++ {
-					if snap.Votes[i].Signer == header.Coinbase {
+				for voteIdx := 0; voteIdx < len(snap.Votes); voteIdx++ {
+					if snap.Votes[voteIdx].Signer == header.Coinbase {
 						// Uncast the vote from the cached tally
-						snap.uncast(snap.Votes[i].Address, snap.Votes[i].Authorize)
+						snap.uncast(snap.Votes[voteIdx].Address, snap.Votes[voteIdx].Authorize)
 
 						// Uncast the vote from the chronological list
-						snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
+						snap.Votes = append(snap.Votes[:voteIdx], snap.Votes[voteIdx+1:]...)
 
-						i--
+						voteIdx--
 					}
 				}
 			}
 			// Discard any previous votes around the just changed account
-			for i := 0; i < len(snap.Votes); i++ {
-				if snap.Votes[i].Address == header.Coinbase {
-					snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
-					i--
+			for voteIdx := 0; voteIdx < len(snap.Votes); voteIdx++ {
+				if snap.Votes[voteIdx].Address == header.Coinbase {
+					snap.Votes = append(snap.Votes[:voteIdx], snap.Votes[voteIdx+1:]...)
+					voteIdx--
 				}
 			}
 			delete(snap.Tally, header.Coinbase)
