@@ -2163,6 +2163,7 @@ func ExecuteBlockEphemerally(
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
+		//fmt.Printf("Tx Hash: %x\n", tx.Hash())
 		if !vmConfig.NoReceipts {
 			receipts = append(receipts, receipt)
 		}
