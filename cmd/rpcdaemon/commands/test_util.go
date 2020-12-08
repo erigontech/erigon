@@ -8,7 +8,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
-	"github.com/ledgerwatch/turbo-geth/cmd/pics/contracts"
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands/contracts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
