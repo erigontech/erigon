@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -64,8 +63,6 @@ func init() {
 }
 
 func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
-
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)

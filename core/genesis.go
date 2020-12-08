@@ -43,9 +43,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-var UsePlainStateExecution = true // FIXME: when we can move the hashed state forward.
-//  ^--- will be overridden when parsing flags anyway
-
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
 
@@ -344,12 +341,6 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 	if history {
 		if err := blockWriter.WriteHistory(); err != nil {
 			return nil, statedb, fmt.Errorf("cannot write history: %v", err)
-		}
-	}
-	if !UsePlainStateExecution {
-		blockWriter = tds.DbStateWriter()
-		if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
-			return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 		}
 	}
 

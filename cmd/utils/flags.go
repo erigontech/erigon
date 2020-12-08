@@ -1467,8 +1467,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
 
-	core.UsePlainStateExecution = true
-
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}

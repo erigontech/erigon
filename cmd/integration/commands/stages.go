@@ -352,8 +352,6 @@ func silkwormExecutionFunc() unsafe.Pointer {
 }
 
 func stageExec(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
-
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
@@ -390,7 +388,6 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 }
 
 func stageIHash(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	if err := migrations.NewMigrator().Apply(db, tmpdir); err != nil {
@@ -426,7 +423,6 @@ func stageIHash(db ethdb.Database, ctx context.Context) error {
 }
 
 func stageHashState(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
@@ -458,7 +454,6 @@ func stageHashState(db ethdb.Database, ctx context.Context) error {
 }
 
 func stageLogIndex(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
@@ -488,7 +483,6 @@ func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 }
 
 func stageCallTraces(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
@@ -536,7 +530,6 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 }
 
 func stageHistory(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
@@ -584,7 +577,6 @@ func stageHistory(db ethdb.Database, ctx context.Context) error {
 }
 
 func stageTxLookup(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)

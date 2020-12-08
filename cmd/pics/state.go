@@ -454,7 +454,6 @@ func initialState1() error {
 	}
 	db.Close()
 	// We reset the DB and use the generated blocks
-	core.UsePlainStateExecution = true
 	db = ethdb.NewMemDatabase()
 	kv = db.KV()
 	snapshotDB := db.MemCopy()

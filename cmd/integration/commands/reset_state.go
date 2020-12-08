@@ -90,7 +90,6 @@ func resetState(db ethdb.Database, _ context.Context) error {
 		return err
 	}
 
-	core.UsePlainStateExecution = true
 	// don't reset senders here
 	if err := resetExec(db); err != nil {
 		return err
