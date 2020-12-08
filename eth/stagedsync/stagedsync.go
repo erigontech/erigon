@@ -4,7 +4,6 @@ import (
 	"unsafe"
 
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -56,6 +55,7 @@ func (stagedSync *StagedSync) Prepare(
 	pid string,
 	storageMode ethdb.StorageMode,
 	tmpdir string,
+	cacheSize int,
 	batchSize int,
 	quitCh <-chan struct{},
 	headersFetchers []func() error,
@@ -66,17 +66,11 @@ func (stagedSync *StagedSync) Prepare(
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
 		readerBuilder = stagedSync.params.StateReaderBuilder
-	} else {
-		readerBuilder = func(getter ethdb.Getter) state.StateReader { return state.NewPlainStateReader(getter) }
 	}
 
 	var writerBuilder StateWriterBuilder
 	if stagedSync.params.StateWriterBuilder != nil {
 		writerBuilder = stagedSync.params.StateWriterBuilder
-	} else {
-		writerBuilder = func(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) state.WriterWithChangeSets {
-			return state.NewPlainStateWriter(db, changeSetsDB, blockNumber)
-		}
 	}
 
 	if stagedSync.params.Notifier != nil {
@@ -99,6 +93,7 @@ func (stagedSync *StagedSync) Prepare(
 			txPool:                txPool,
 			poolStart:             poolStart,
 			changeSetHook:         changeSetHook,
+			cacheSize:             cacheSize,
 			batchSize:             batchSize,
 			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
 			stateReaderBuilder:    readerBuilder,

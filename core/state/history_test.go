@@ -32,8 +32,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	acc := make([]*accounts.Account, 10)
 	addr := make([]common.Address, 10)
 	addrHashes := make([]common.Hash, 10)
-	tds := NewTrieDbState(common.Hash{}, db, 1)
-	blockWriter := tds.DbStateWriter()
+	blockWriter := NewPlainStateWriter(db, db, 1)
 	ctx := context.Background()
 	emptyAccount := accounts.NewAccount()
 	for i := range acc {
@@ -50,7 +49,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	}
 
 	i := 0
-	err := db.Walk(dbutils.AccountChangeSetBucket, nil, 0, func(k, v []byte) (bool, error) {
+	err := db.Walk(dbutils.PlainAccountChangeSetBucket, nil, 0, func(k, v []byte) (bool, error) {
 		i++
 		return true, nil
 	})
@@ -61,7 +60,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.FailNow()
 	}
 
-	index, err := bitmapdb.Get64(db, dbutils.AccountsHistoryBucket, addrHashes[0].Bytes(), 0, math.MaxUint32)
+	index, err := bitmapdb.Get64(db, dbutils.AccountsHistoryBucket, addr[0].Bytes(), 0, math.MaxUint32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,13 +70,8 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.Fatal("incorrect block num")
 	}
 
-	err = tds.deleteTimestamp(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	count := 0
-	err = changeset.Walk(db, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 		count++
 		return true, nil
 	})
@@ -88,7 +82,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.Fatal("changeset must be deleted")
 	}
 
-	_, err = db.Get(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes())
+	_, err = db.Get(dbutils.AccountsHistoryBucket, addr[0].Bytes())
 	if err != ethdb.ErrKeyNotFound {
 		t.Fatal("account must be deleted")
 	}
@@ -148,7 +142,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		for k, v := range accHistoryStateStorage[i] {
-			res, err := GetAsOf(tx, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr, acc.Incarnation, k), 1)
+			res, err := GetAsOf(tx, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), acc.Incarnation, k.Bytes()), 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -212,7 +206,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}
 			value := uint256.NewInt().SetUint64(uint64(10 + j))
-			if err2 := expectedChangeSet.Add(dbutils.PlainGenerateCompositeStorageKey(addr, accHistory[i].Incarnation, key), value.Bytes()); err2 != nil {
+			if err2 := expectedChangeSet.Add(dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), accHistory[i].Incarnation, key.Bytes()), value.Bytes()); err2 != nil {
 				t.Fatal(err2)
 			}
 		}
@@ -292,6 +286,7 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash
 }
 
 func TestUnwindTruncateHistory(t *testing.T) {
+	t.Skip("tds.Unwind is not supported")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	mutDB := db.NewBatch()

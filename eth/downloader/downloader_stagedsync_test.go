@@ -46,6 +46,7 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 		panic(err)
 	}
 	tester.downloader = New(uint64(StagedSync), tester.db, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
+	tester.downloader.SetBatchSize(32*1024 /* cacheSize */, 16*1024 /* batchSize */)
 	tester.downloader.SetStagedSync(
 		stagedsync.New(
 			stagedsync.DefaultStages(),

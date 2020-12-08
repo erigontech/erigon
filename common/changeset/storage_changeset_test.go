@@ -45,7 +45,7 @@ func hashKeyGenerator(address common.Address, inc uint64, key common.Hash) []byt
 }
 
 func plainKeyGenerator(address common.Address, inc uint64, key common.Hash) []byte {
-	return dbutils.PlainGenerateCompositeStorageKey(address, inc, key)
+	return dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), inc, key.Bytes())
 }
 
 func TestEncodingStorageNewWithRandomIncarnationHashed(t *testing.T) {
@@ -536,37 +536,37 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	c := tx.CursorDupSort(bkt)
 
 	ch := NewStorageChangeSetPlain()
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key1), val1))
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key5), val5))
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key6), val6))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes()), val1))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key5.Bytes()), val5))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key6.Bytes()), val6))
 
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key2), val2))
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key3), val3))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key2.Bytes()), val2))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key3.Bytes()), val3))
 
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC, 5, key4), val4))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC.Bytes(), 5, key4.Bytes()), val4))
 
 	assert.NoError(t, EncodeStoragePlain(1, ch, func(k, v []byte) error {
 		return c.Put(k, v)
 	}))
 
-	data1, err1 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA, 2, key1))
+	data1, err1 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes()))
 	assert.NoError(t, err1)
 	assert.Equal(t, data1, val1)
 
-	data3, err3 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key3))
+	data3, err3 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key3.Bytes()))
 	assert.NoError(t, err3)
 	assert.Equal(t, data3, val3)
 
-	data5, err5 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key5))
+	data5, err5 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key5.Bytes()))
 	assert.NoError(t, err5)
 	assert.Equal(t, data5, val5)
 
-	_, errA := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA, 1, key1))
+	_, errA := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key1.Bytes()))
 	assert.Error(t, errA)
 
-	_, errB := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractD, 2, key1))
+	_, errB := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractD.Bytes(), 2, key1.Bytes()))
 	assert.Error(t, errB)
 
-	_, errC := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractB, 1, key7))
+	_, errC := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key7.Bytes()))
 	assert.Error(t, errC)
 }

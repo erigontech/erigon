@@ -20,10 +20,9 @@
 // IGORM: for tests here, turbo-geth doesn't have any cache, so the "commit" parameter makes no sense.
 // that also alters behaviour of quite a few tests between turbo-geth and vanilla geth.
 
-package core
+package stages
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"strings"
@@ -31,8 +30,11 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -1764,67 +1766,71 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 
 	// Initialize a fresh chain
 	var (
-		genesis = new(Genesis).MustCommit(db)
+		genesis = new(core.Genesis).MustCommit(db)
 		engine  = ethash.NewFullFaker()
 	)
-	chain, err := NewBlockChain(db, nil, params.AllEthashProtocolChanges, engine, vm.Config{}, nil, nil)
-	if err != nil {
-		t.Fatalf("Failed to create chain: %v", err)
-	}
+	chainConfig := params.AllEthashProtocolChanges
 	// If sidechain blocks are needed, make a light chain and import it
 	var sideblocks types.Blocks
+	var err error
 	if tt.sidechainBlocks > 0 {
-		sideblocks, _, err = GenerateChain(params.TestChainConfig, genesis, engine, ethdb.NewMemDatabase(), tt.sidechainBlocks, func(i int, b *BlockGen) {
+		if sideblocks, _, err = core.GenerateChain(chainConfig, genesis, engine, db, tt.sidechainBlocks, func(i int, b *core.BlockGen) {
 			b.SetCoinbase(common.Address{0x01})
-		}, false)
-		if err != nil {
+		}, false); err != nil {
 			t.Fatalf("error creating chain err=%v", err)
 		}
-		if _, err = chain.InsertChain(context.TODO(), sideblocks); err != nil {
+
+	}
+	var canonblocks types.Blocks
+	if canonblocks, _, err = core.GenerateChain(chainConfig, genesis, engine, db, tt.canonicalBlocks, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(common.Address{0x02})
+		b.SetDifficulty(big.NewInt(1000000))
+	}, false); err != nil {
+		t.Fatalf("error when generating chain err=%v", err)
+	}
+	if tt.sidechainBlocks > 0 {
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, sideblocks, true /* checkRoot */); err != nil {
 			t.Fatalf("Failed to import side chain: %v", err)
 		}
 	}
-	canonblocks, _, err := GenerateChain(params.TestChainConfig, genesis, engine, ethdb.NewMemDatabase(), tt.canonicalBlocks, func(i int, b *BlockGen) {
-		b.SetCoinbase(common.Address{0x02})
-		b.SetDifficulty(big.NewInt(1000000))
-	}, false)
-	if err != nil {
-		t.Fatalf("error when generating chain err=%v", err)
-	}
-	if _, err := chain.InsertChain(context.TODO(), canonblocks[:tt.commitBlock]); err != nil {
+
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, canonblocks[:tt.commitBlock], true /* checkRoot */); err != nil {
 		t.Fatalf("Failed to import canonical chain start: %v", err)
 	}
-	if _, err := chain.InsertChain(context.TODO(), canonblocks[tt.commitBlock:]); err != nil {
-		t.Fatalf("Failed to import canonical chain tail: %v", err)
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, canonblocks[tt.commitBlock:], true /* checkRoot */); err != nil {
+		t.Fatalf("Failed to import canonical chain start: %v", err)
 	}
-	// Set the head of the chain back to the requested number
-	chain.SetHead(tt.setheadBlock) //nolint:errcheck
+
+	if err = stagedsync.SetHead(db, chainConfig, &vm.Config{}, engine, tt.setheadBlock, true /* checkRoot */); err != nil {
+		t.Fatalf("Failed to set head: %v", err)
+	}
 
 	// Iterate over all the remaining blocks and ensure there are no gaps
-	verifyNoGaps(t, chain, true, canonblocks)
-	verifyNoGaps(t, chain, false, sideblocks)
-	verifyCutoff(t, chain, true, canonblocks, tt.expCanonicalBlocks)
-	verifyCutoff(t, chain, false, sideblocks, tt.expSidechainBlocks)
+	verifyNoGaps(t, db, true, canonblocks)
+	verifyNoGaps(t, db, false, sideblocks)
+	verifyCutoff(t, db, true, canonblocks, tt.expCanonicalBlocks)
+	verifyCutoff(t, db, false, sideblocks, tt.expSidechainBlocks)
 
-	if head := chain.CurrentHeader(); head.Number.Uint64() != tt.expHeadHeader {
+	if head, err1 := rawdb.ReadHeaderByHash(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
+		t.Errorf("Reading head header: %v", err1)
+	} else if head.Number.Uint64() != tt.expHeadHeader {
 		t.Errorf("Head header mismatch: have %d, want %d", head.Number, tt.expHeadHeader)
 	}
-	if head := chain.CurrentFastBlock(); head.NumberU64() != tt.expHeadFastBlock {
-		t.Errorf("Head fast block mismatch: have %d, want %d", head.NumberU64(), tt.expHeadFastBlock)
-	}
-	if head := chain.CurrentBlock(); head.NumberU64() != tt.expHeadFastBlock { // turbo-geth treats all blocks as "fast" due to the db structure, no need to make a distinction there
+	if head, err1 := rawdb.ReadBlockByHash(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
+		t.Errorf("Reading head block: %v", err1)
+	} else if head.NumberU64() != tt.expHeadFastBlock {
 		t.Errorf("Head block mismatch: have %d, want %d", head.NumberU64(), tt.expHeadFastBlock)
 	}
 }
 
 // verifyNoGaps checks that there are no gaps after the initial set of blocks in
 // the database and errors if found.
-func verifyNoGaps(t *testing.T, chain *BlockChain, canonical bool, inserted types.Blocks) {
+func verifyNoGaps(t *testing.T, db ethdb.Database, canonical bool, inserted types.Blocks) {
 	t.Helper()
 
 	var end uint64
 	for i := uint64(0); i <= uint64(len(inserted)); i++ {
-		header := chain.GetHeaderByNumber(i)
+		header := rawdb.ReadHeaderByNumber(db, i)
 		if header == nil && end == 0 {
 			end = i
 		}
@@ -1839,7 +1845,10 @@ func verifyNoGaps(t *testing.T, chain *BlockChain, canonical bool, inserted type
 	}
 	end = 0
 	for i := uint64(0); i <= uint64(len(inserted)); i++ {
-		block := chain.GetBlockByNumber(i)
+		block, err := rawdb.ReadBlockByNumber(db, i)
+		if err != nil {
+			t.Errorf("Reading block with number %d: %v", i, err)
+		}
 		if block == nil && end == 0 {
 			end = i
 		}
@@ -1854,7 +1863,7 @@ func verifyNoGaps(t *testing.T, chain *BlockChain, canonical bool, inserted type
 	}
 	end = 0
 	for i := uint64(1); i <= uint64(len(inserted)); i++ {
-		receipts := chain.GetReceiptsByHash(inserted[i-1].Hash())
+		receipts, _, _, _ := rawdb.ReadReceipt(db, inserted[i-1].Hash())
 		if receipts == nil && end == 0 {
 			end = i
 		}
@@ -1871,19 +1880,19 @@ func verifyNoGaps(t *testing.T, chain *BlockChain, canonical bool, inserted type
 
 // verifyCutoff checks that there are no chain data available in the chain after
 // the specified limit, but that it is available before.
-func verifyCutoff(t *testing.T, chain *BlockChain, canonical bool, inserted types.Blocks, head int) {
+func verifyCutoff(t *testing.T, db ethdb.Database, canonical bool, inserted types.Blocks, head int) {
 	t.Helper()
 
 	for i := 1; i <= len(inserted); i++ {
 		if i <= head {
-			if header := chain.GetHeader(inserted[i-1].Hash(), uint64(i)); header == nil {
+			if header := rawdb.ReadHeader(db, inserted[i-1].Hash(), uint64(i)); header == nil {
 				if canonical {
 					t.Errorf("Canonical header   #%2d [%x...] missing before cap %d", inserted[i-1].Number(), inserted[i-1].Hash().Bytes()[:3], head)
 				} else {
 					t.Errorf("Sidechain header   #%2d [%x...] missing before cap %d", inserted[i-1].Number(), inserted[i-1].Hash().Bytes()[:3], head)
 				}
 			}
-			if block := chain.GetBlock(inserted[i-1].Hash(), uint64(i)); block == nil {
+			if block := rawdb.ReadBlock(db, inserted[i-1].Hash(), uint64(i)); block == nil {
 				if canonical {
 					t.Errorf("Canonical block    #%2d [%x...] missing before cap %d", inserted[i-1].Number(), inserted[i-1].Hash().Bytes()[:3], head)
 				} else {
@@ -1916,7 +1925,8 @@ func verifyCutoff(t *testing.T, chain *BlockChain, canonical bool, inserted type
 					}
 				}
 			*/
-			if receipts := chain.GetReceiptsByHash(inserted[i-1].Hash()); receipts != nil {
+			receipts, _, _, _ := rawdb.ReadReceipt(db, inserted[i-1].Hash())
+			if receipts != nil {
 				if canonical {
 					t.Errorf("Canonical receipts #%2d [%x...] present after cap %d", inserted[i-1].Number(), inserted[i-1].Hash().Bytes()[:3], head)
 				} else {

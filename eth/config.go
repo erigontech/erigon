@@ -128,6 +128,7 @@ type Config struct {
 	TxLookupLimit uint64 `toml:",omitempty"` // The maximum number of blocks from head whose tx indices are reserved.
 
 	StorageMode     ethdb.StorageMode
+	CacheSize       datasize.ByteSize // Cache size for execution stage
 	BatchSize       datasize.ByteSize // Batch size for execution stage
 	SnapshotMode    snapshotsync.SnapshotMode
 	SnapshotSeeding bool

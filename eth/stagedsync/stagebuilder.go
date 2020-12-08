@@ -33,6 +33,7 @@ type StageParameters struct {
 	TX          ethdb.Database
 	pid         string
 	batchSize   int // Batch size for the execution stage
+	cacheSize   int // Cache size for the execution stage
 	storageMode ethdb.StorageMode
 	tmpdir      string
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
@@ -179,6 +180,7 @@ func DefaultStages() StageBuilders {
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
+								CacheSize:             world.cacheSize,
 								BatchSize:             world.batchSize,
 								ChangeSetHook:         world.changeSetHook,
 								ReaderBuilder:         world.stateReaderBuilder,
@@ -214,7 +216,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnIntermediateHashesStage(s, world.TX, world.tmpdir, world.QuitCh)
+						return SpawnIntermediateHashesStage(s, world.TX, true /* checkRoot */, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindIntermediateHashesStage(u, s, world.TX, world.tmpdir, world.QuitCh)
@@ -283,10 +285,17 @@ func DefaultStages() StageBuilders {
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.tmpdir, world.QuitCh,
-							CallTracesStageParams{})
+							CallTracesStageParams{
+								CacheSize: world.cacheSize,
+								BatchSize: world.batchSize,
+							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh)
+						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh,
+							CallTracesStageParams{
+								CacheSize: world.cacheSize,
+								BatchSize: world.batchSize,
+							})
 					},
 				}
 			},

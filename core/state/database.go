@@ -57,8 +57,8 @@ const (
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
 	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
-	ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error)
-	ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error)
+	ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error)
+	ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error)
 	ReadAccountIncarnation(address common.Address) (uint64, error)
 }
 
@@ -1080,7 +1080,7 @@ func (tds *TrieDbState) readAccountCodeSizeFromTrie(addrHash []byte) (int, bool)
 	return tds.t.GetAccountCodeSize(addrHash)
 }
 
-func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
+func (tds *TrieDbState) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
@@ -1110,7 +1110,7 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 	return code, err
 }
 
-func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (codeSize int, err error) {
+func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (codeSize int, err error) {
 	addrHash, err := tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
 		return 0, err

@@ -171,7 +171,7 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 				}
 				timings = append(timings, "Unwind "+string(unwind.Stage), time.Since(t))
 			}
-			if err := s.SetCurrentStage(stages.Headers); err != nil {
+			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 				return err
 			}
 		}
@@ -221,8 +221,7 @@ func (s *State) runStage(stage *Stage, db ethdb.Getter, tx ethdb.Getter) error {
 
 	start := time.Now()
 	logPrefix := s.LogPrefix()
-	err = stage.ExecFunc(stageState, s)
-	if err != nil {
+	if err = stage.ExecFunc(stageState, s); err != nil {
 		return err
 	}
 

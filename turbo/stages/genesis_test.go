@@ -14,33 +14,33 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package stages
 
 import (
-	"context"
 	"math/big"
 	"reflect"
-	"runtime"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 func TestDefaultGenesisBlock(t *testing.T) {
-	block, _, tds, _ := DefaultGenesisBlock().ToBlock(nil, true)
+	block, _, tds, _ := core.DefaultGenesisBlock().ToBlock(nil, true)
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
 	defer tds.Database().Close()
 	var err error
-	block, _, tds, err = DefaultRopstenGenesisBlock().ToBlock(nil, true)
+	block, _, tds, err = core.DefaultRopstenGenesisBlock().ToBlock(nil, true)
 	if err != nil {
 		t.Errorf("error: %w", err)
 	}
@@ -53,9 +53,9 @@ func TestDefaultGenesisBlock(t *testing.T) {
 func TestSetupGenesis(t *testing.T) {
 	var (
 		customghash = common.HexToHash("0x89c99d90b79719238d2645c7642f2c9295246e80775b38cfd162b696817fbd50")
-		customg     = Genesis{
+		customg     = core.Genesis{
 			Config: &params.ChainConfig{HomesteadBlock: big.NewInt(3)},
-			Alloc: GenesisAlloc{
+			Alloc: core.GenesisAlloc{
 				{1}: {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{1}: {1}}},
 			},
 		}
@@ -72,15 +72,15 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "genesis without ChainConfig",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-				return SetupGenesisBlock(db, new(Genesis), true /* history */, false /* overwrite */)
+				return core.SetupGenesisBlock(db, new(core.Genesis), true /* history */, false /* overwrite */)
 			},
-			wantErr:    errGenesisNoConfig,
+			wantErr:    core.ErrGenesisNoConfig,
 			wantConfig: params.AllEthashProtocolChanges,
 		},
 		{
 			name: "no block in DB, genesis == nil",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-				return SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
+				return core.SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
 			},
 			wantHash:   params.MainnetGenesisHash,
 			wantConfig: params.MainnetChainConfig,
@@ -88,7 +88,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "mainnet block in DB, genesis == nil",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-				return SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
+				return core.SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
 			},
 			wantHash:   params.MainnetGenesisHash,
 			wantConfig: params.MainnetChainConfig,
@@ -97,7 +97,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == nil",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				customg.MustCommit(db)
-				return SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
+				return core.SetupGenesisBlock(db, nil, true /* history */, false /* overwrite */)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -106,9 +106,9 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == ropsten",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				customg.MustCommit(db)
-				return SetupGenesisBlock(db, DefaultRopstenGenesisBlock(), true /* history */, false /* overwrite */)
+				return core.SetupGenesisBlock(db, core.DefaultRopstenGenesisBlock(), true /* history */, false /* overwrite */)
 			},
-			wantErr:    &GenesisMismatchError{Stored: customghash, New: params.RopstenGenesisHash},
+			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.RopstenGenesisHash},
 			wantHash:   params.RopstenGenesisHash,
 			wantConfig: params.RopstenChainConfig,
 		},
@@ -116,7 +116,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "compatible config in DB",
 			fn: func(db *ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 				oldcustomg.MustCommit(db)
-				return SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
+				return core.SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -128,18 +128,15 @@ func TestSetupGenesis(t *testing.T) {
 				// Advance to block #4, past the homestead transition block of customg.
 				genesis := oldcustomg.MustCommit(db)
 
-				txCacher := NewTxSenderCacher(runtime.NumCPU())
-				bc, _ := NewBlockChain(db, nil, oldcustomg.Config, ethash.NewFullFaker(), vm.Config{}, nil, txCacher)
-				defer bc.Stop()
-
-				blocks, _, err := GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db, 4, nil, false /* intermediateHashes */)
+				blocks, _, err := core.GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db, 4, nil, false /* intermediateHashes */)
 				if err != nil {
 					return nil, common.Hash{}, nil, err
 				}
-				_, _ = bc.InsertChain(context.Background(), blocks)
-				bc.CurrentBlock()
+				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, ethash.NewFullFaker(), blocks, true /* checkRoot */); err != nil {
+					return nil, common.Hash{}, nil, err
+				}
 				// This should return a compatibility error.
-				return SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
+				return core.SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,

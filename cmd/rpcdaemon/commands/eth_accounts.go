@@ -75,7 +75,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 	if acc == nil || err != nil {
 		return hexutil.Bytes(""), nil
 	}
-	res, _ := reader.ReadAccountCode(address, acc.CodeHash)
+	res, _ := reader.ReadAccountCode(address, acc.Incarnation, acc.CodeHash)
 	if res == nil {
 		return hexutil.Bytes(""), nil
 	}

@@ -27,6 +27,7 @@ var DefaultFlags = []cli.Flag{
 	SnapshotModeFlag,
 	SeedSnapshotsFlag,
 	ExternalSnapshotDownloaderAddrFlag,
+	CacheSizeFlag,
 	BatchSizeFlag,
 	DatabaseFlag,
 	PrivateApiAddr,

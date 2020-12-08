@@ -6,6 +6,14 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
+	"math/big"
+	"os"
+	"os/signal"
+	"runtime"
+	"strconv"
+	"syscall"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -15,13 +23,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"math/big"
-	"os"
-	"os/signal"
-	"runtime"
-	"strconv"
-	"syscall"
-	"time"
 )
 
 //const MaxUint = ^uint(0)

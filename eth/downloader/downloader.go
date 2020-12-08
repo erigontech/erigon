@@ -165,6 +165,7 @@ type Downloader struct {
 
 	storageMode ethdb.StorageMode
 	tmpdir      string
+	cacheSize   int
 	batchSize   int
 
 	headersState    *stagedsync.StageState
@@ -222,9 +223,6 @@ type BlockChain interface {
 
 	// InsertChain inserts a batch of blocks into the local chain.
 	InsertChain(context.Context, types.Blocks) (int, error)
-
-	// InsertBodyChain inserts a batch of blocks into the local chain, without executing them.
-	InsertBodyChain(string, context.Context, ethdb.Database, types.Blocks) (bool, error)
 
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []types.Receipts, uint64) (int, error)
@@ -287,7 +285,8 @@ func (d *Downloader) SetTmpDir(tmpdir string) {
 	d.tmpdir = tmpdir
 }
 
-func (d *Downloader) SetBatchSize(batchSize int) {
+func (d *Downloader) SetBatchSize(cacheSize, batchSize int) {
+	d.cacheSize = cacheSize
 	d.batchSize = batchSize
 }
 
@@ -559,6 +558,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			p.id,
 			d.storageMode,
 			d.tmpdir,
+			d.cacheSize,
 			d.batchSize,
 			d.quitCh,
 			fetchers,
@@ -1692,11 +1692,16 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					}
 					var n int
 					var err error
+					var newCanonical bool
 					if mode == StagedSync {
+						if err = stagedsync.VerifyHeaders(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency); err != nil {
+							log.Warn("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
+							return fmt.Errorf("%w: %v", errInvalidChain, err)
+						}
 						var reorg bool
 						var forkBlockNumber uint64
 						logPrefix := d.stagedSyncState.LogPrefix()
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency)
+						newCanonical, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
@@ -1706,12 +1711,12 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					} else {
 						n, err = d.lightchain.InsertHeaderChain(chunk, frequency)
 					}
-					if err == nil && mode == StagedSync && d.headersState != nil {
+					if err == nil && mode == StagedSync && newCanonical && d.headersState != nil {
 						if err1 := d.headersState.Update(d.stateDB, chunk[len(chunk)-1].Number.Uint64()); err1 != nil {
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
 					}
-					if mode != StagedSync && err != nil {
+					if mode != StagedSync || err != nil {
 						// If some headers were inserted, add them too to the rollback list
 						if (mode == FastSync || frequency > 1) && n > 0 && rollback == 0 {
 							rollback = chunk[0].Number.Uint64()
@@ -1807,7 +1812,7 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 	if execute {
 		index, err = d.blockchain.InsertChain(context.Background(), blocks)
 	} else {
-		stopped, err = d.blockchain.InsertBodyChain(logPrefix, context.Background(), d.stateDB, blocks)
+		stopped, err = core.InsertBodyChain(logPrefix, context.Background(), d.stateDB, blocks, true /* newCanonical */)
 		if stopped {
 			index = 0
 		} else {
