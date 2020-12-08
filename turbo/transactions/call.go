@@ -109,7 +109,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, dbReader eth
 	}()
 
 	gp := new(core.GasPool).AddGas(msg.Gas())
-	result, err := core.ApplyMessage(evm, msg, gp)
+	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */)
 	if err != nil {
 		return nil, err
 	}

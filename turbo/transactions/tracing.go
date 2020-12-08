@@ -72,7 +72,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		}
 		// Not yet the searched for transaction, execute on top of the current state
 		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{})
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas()), true /* refunds */); err != nil {
 			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
@@ -121,7 +121,11 @@ func TraceTx(ctx context.Context, message core.Message, vmctx vm.Context, ibs vm
 	// Run the transaction with tracing enabled.
 	vmenv := vm.NewEVM(vmctx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
 
-	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()))
+	var refunds bool = true
+	if config.NoRefunds != nil && *config.NoRefunds {
+		refunds = false
+	}
+	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds)
 	if err != nil {
 		return nil, fmt.Errorf("tracing failed: %v", err)
 	}
