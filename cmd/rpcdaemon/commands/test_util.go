@@ -86,7 +86,7 @@ func createTestDb() (ethdb.Database, error) {
 		case 4:
 			tx, err = tokenContract.Transfer(transactOpts2, address, big.NewInt(3))
 		case 5:
-			// Muliple transactions sending small amounts of ether to various accounts
+			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
@@ -114,7 +114,7 @@ func createTestDb() (ethdb.Database, error) {
 				panic(err)
 			}
 			txs = append(txs, tx)
-			// Muliple transactions sending small amounts of ether to various accounts
+			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
 			var toAddr common.Address
 			for j = 1; j <= 32; j++ {
