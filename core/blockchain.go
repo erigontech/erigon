@@ -1914,12 +1914,8 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 	}
 	defer bc.doneJob()
 
-	whFunc := func(header *types.Header) error {
-		_, err := bc.hc.WriteHeader(context.Background(), header)
-		return err
-	}
-	n, err := bc.hc.InsertHeaderChain(chain, whFunc, start)
-	return n, err
+	_, err := bc.hc.InsertHeaderChain(chain, start)
+	return 0, err
 }
 
 // CurrentHeader retrieves the current head header of the canonical chain. The
