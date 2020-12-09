@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 
 	"github.com/c2h5oh/datasize"
@@ -12,6 +13,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -51,6 +54,22 @@ var stateStags = &cobra.Command{
 	},
 }
 
+var loopIhCmd = &cobra.Command{
+	Use: "loop_ih",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := loopIh(db, ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(stateStags)
 	withReferenceChaindata(stateStags)
@@ -60,6 +79,10 @@ func init() {
 	withBatchSize(stateStags)
 
 	rootCmd.AddCommand(stateStags)
+
+	withChaindata(loopIhCmd)
+
+	rootCmd.AddCommand(loopIhCmd)
 }
 
 func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
@@ -192,6 +215,75 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func loopIh(db ethdb.Database, ctx context.Context) error {
+	core.UsePlainStateExecution = true
+
+	ch := ctx.Done()
+
+	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+	defer tx.Rollback()
+
+	cc, bc, st, progress := newSync(ch, db, tx, nil)
+	defer bc.Stop()
+	cc.SetDB(tx)
+
+	var err error
+	tx, err = tx.Begin(ctx, ethdb.RW)
+	if err != nil {
+		return err
+	}
+
+	_ = clearUnwindStack(tx, context.Background())
+	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Execution, stages.AccountHistoryIndex, stages.StorageHistoryIndex, stages.TxPool, stages.TxLookup, stages.Finish)
+	if err = st.Run(db, tx); err != nil {
+		return err
+	}
+	execStage := progress(stages.HashState)
+	to := execStage.BlockNumber - 1
+	_ = st.SetCurrentStage(stages.HashState)
+	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: to}
+	if err = stagedsync.UnwindHashStateStage(u, progress(stages.HashState), tx, path.Join(datadir, etl.TmpDirName), ch); err != nil {
+		return err
+	}
+	_ = st.SetCurrentStage(stages.IntermediateHashes)
+	u = &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: to}
+	if err = stagedsync.UnwindIntermediateHashesStage(u, progress(stages.IntermediateHashes), tx, path.Join(datadir, etl.TmpDirName), ch); err != nil {
+		return err
+	}
+	_ = clearUnwindStack(tx, context.Background())
+	_ = tx.CommitAndBegin(context.Background())
+	_ = printAllStages(tx, context.Background())
+
+	st.DisableStages(stages.IntermediateHashes)
+	_ = st.SetCurrentStage(stages.HashState)
+	if err = st.Run(db, tx); err != nil {
+		return err
+	}
+	_ = tx.CommitAndBegin(context.Background())
+	_ = printAllStages(tx, context.Background())
+
+	st.DisableStages(stages.HashState)
+	st.EnableStages(stages.IntermediateHashes)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		_ = st.SetCurrentStage(stages.IntermediateHashes)
+		if err = st.Run(db, tx); err != nil {
+			return err
+		}
+		tx.Rollback()
+		tx, err = tx.Begin(ctx, ethdb.RW)
+		if err != nil {
+			return err
+		}
+	}
 }
 
 func checkChangeSet(db ethdb.Database, blockNum uint64, expectedAccountChanges *changeset.ChangeSet, expectedStorageChanges *changeset.ChangeSet) error {

@@ -82,24 +82,25 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 	log.Info(fmt.Sprintf("[%s] Regeneration intermediate hashes started", logPrefix))
 	// Clear IH bucket
 	c := db.(ethdb.HasTx).Tx().Cursor(dbutils.IntermediateTrieHashBucket)
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+	for k, _, err := c.First(); k != nil; k, _, err = c.First() {
 		if err != nil {
 			return err
 		}
-		if err = c.Delete(k, v); err != nil {
+		if err = c.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
 	c.Close()
-	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket3)
-	buf.SetComparator(comparator)
-	collector := etl.NewCollector(tmpdir, buf)
+	storageIHCollector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	accountIHCollector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
 		}
-		return collector.Collect(keyHex, hash)
+		if len(keyHex) <= common.HashLength*2 {
+			return accountIHCollector.Collect(keyHex, hash)
+		}
+		return storageIHCollector.Collect(keyHex, hash)
 	}
 	loader := trie.NewFlatDBTrieLoader(logPrefix, dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	if err := loader.Reset(trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
@@ -118,11 +119,23 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 	} else {
 		return err
 	}
-	if err := collector.Load(logPrefix, db, dbutils.IntermediateTrieHashBucket3, etl.IdentityLoadFunc, etl.TransformArgs{
-		Quit:       quit,
-		Comparator: comparator,
-	}); err != nil {
-		return fmt.Errorf("%s: fail load data to bucket: %w", logPrefix, err)
+	if err := accountIHCollector.Load(logPrefix, db,
+		dbutils.IntermediateHashOfAccountBucket,
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			Quit: quit,
+		},
+	); err != nil {
+		return err
+	}
+	if err := storageIHCollector.Load(logPrefix, db,
+		dbutils.IntermediateHashOfStorageBucket,
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			Quit: quit,
+		},
+	); err != nil {
+		return err
 	}
 	log.Info(fmt.Sprintf("[%s] Regeneration ended", logPrefix))
 	return nil
@@ -248,21 +261,23 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	if err := p.Promote(logPrefix, s, s.BlockNumber, to, true /* storage */, collect); err != nil {
 		return err
 	}
+	retListLen := len(exclude)
 	sort.Slice(exclude, func(i, j int) bool { return bytes.Compare(exclude[i], exclude[j]) < 0 })
 	unfurl := trie.NewRetainList(0)
 	for i := range exclude {
 		unfurl.AddKey(exclude[i])
 	}
 
-	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket3)
-	buf.SetComparator(comparator)
-	collector := etl.NewCollector(tmpdir, buf)
+	storageIHCollector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	accountIHCollector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
 		}
-		return collector.Collect(keyHex, hash)
+		if len(keyHex) <= common.HashLength*2 {
+			return accountIHCollector.Collect(keyHex, hash)
+		}
+		return storageIHCollector.Collect(keyHex, hash)
 	}
 	loader := trie.NewFlatDBTrieLoader(logPrefix, dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
@@ -278,16 +293,25 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	if checkRoot && hash != expectedRootHash {
 		return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 	}
-	log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
-		"root hash", hash.Hex(),
+	log.Warn("Collection finished",
+		//"root hash", hash.Hex(),
 		"gen IH", generationIHTook,
+		"retain list", retListLen,
 	)
-	if err := collector.Load(logPrefix, db,
-		dbutils.IntermediateTrieHashBucket3,
+	if err := accountIHCollector.Load(logPrefix, db,
+		dbutils.IntermediateHashOfAccountBucket,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
-			Quit:       quit,
-			Comparator: comparator,
+			Quit: quit,
+		},
+	); err != nil {
+		return err
+	}
+	if err := storageIHCollector.Load(logPrefix, db,
+		dbutils.IntermediateHashOfStorageBucket,
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			Quit: quit,
 		},
 	); err != nil {
 		return err
@@ -352,15 +376,16 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		unfurl.AddKey(exclude[i])
 	}
 
-	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket3)
-	buf.SetComparator(comparator)
-	collector := etl.NewCollector(tmpdir, buf)
+	storageIHCollector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	accountIHCollector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
 		}
-		return collector.Collect(keyHex, hash)
+		if len(keyHex) <= common.HashLength*2 {
+			return accountIHCollector.Collect(keyHex, hash)
+		}
+		return storageIHCollector.Collect(keyHex, hash)
 	}
 	loader := trie.NewFlatDBTrieLoader(logPrefix, dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
@@ -377,15 +402,23 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 	}
 	log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
-		"root hash", hash.Hex(),
+		//"root hash", hash.Hex(),
 		"gen IH", generationIHTook,
 	)
-	if err := collector.Load(logPrefix, db,
-		dbutils.IntermediateTrieHashBucket3,
+	if err := accountIHCollector.Load(logPrefix, db,
+		dbutils.IntermediateHashOfAccountBucket,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
-			Quit:       quit,
-			Comparator: comparator,
+			Quit: quit,
+		},
+	); err != nil {
+		return err
+	}
+	if err := storageIHCollector.Load(logPrefix, db,
+		dbutils.IntermediateHashOfStorageBucket,
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			Quit: quit,
 		},
 	); err != nil {
 		return err
@@ -400,7 +433,8 @@ func ResetHashState(db ethdb.Database) error {
 		dbutils.IntermediateTrieHashBucket,
 		dbutils.HashedAccountsBucket,
 		dbutils.HashedStorageBucket,
-		dbutils.IntermediateTrieHashBucket3,
+		dbutils.IntermediateHashOfAccountBucket,
+		dbutils.IntermediateHashOfStorageBucket,
 	); err != nil {
 		return err
 	}
