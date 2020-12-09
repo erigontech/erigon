@@ -1,7 +1,7 @@
 pragma solidity >=0.6.0;
 
-// solc --allow-paths ., --abi --bin --overwrite --optimize -o cmd/pics/contracts/build cmd/pics/contracts/token.sol
-// ./build/bin/abigen -abi cmd/pics/contracts/build/Token.abi -bin cmd/pics/contracts/build/Token.bin -pkg contracts -type token -out cmd/pics/contracts/gen_token.go
+// solc --allow-paths ., --abi --bin --overwrite --optimize -o cmd/rpcdaemon/commands/contracts/build cmd/pics/contracts/token.sol
+// ./build/bin/abigen -abi cmd/rpcdaemon/commands/contracts/build/Token.abi -bin cmd/rpcdaemon/commands/contracts/build/Token.bin -pkg contracts -type token -out cmd/rpcdaemon/commands/contracts/gen_token.go
 contract Token {
     uint256 public totalSupply;
     mapping(address => uint256) public balanceOf;

@@ -27,10 +27,10 @@ var (
 )
 
 // PolyABI is the input ABI used to generate the binding from.
-const PolyABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"d\",\"type\":\"address\"}],\"name\":\"DeployEvent\",\"type\":\"event\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"salt\",\"type\":\"uint256\"}],\"name\":\"deploy\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
+const PolyABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"d\",\"type\":\"address\"}],\"name\":\"DeployEvent\",\"type\":\"event\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"salt\",\"type\":\"uint256\"}],\"name\":\"deploy\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"salt\",\"type\":\"uint256\"}],\"name\":\"deployAndDestruct\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 
 // PolyBin is the compiled bytecode used for deploying new contracts.
-var PolyBin = "0x6080604052348015600f57600080fd5b5060f88061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b6040805180820190915260138082527260606000534360015360ff60025360036000f360681b60208301908152600091849183f5604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a150505056fea264697066735822122032d356806c978fb0bf45bc0b927ecf2af1ebbc7036396fe43793a0d0a312cac164736f6c63430007020033"
+var PolyBin = "0x608060405234801561001057600080fd5b506101d1806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80639debe9811461003b578063a5e387511461005a575b600080fd5b6100586004803603602081101561005157600080fd5b5035610077565b005b6100586004803603602081101561007057600080fd5b50356100fd565b6040805180820190915260138082527260606000534360015360ff60025360036000f360681b60208301908152600091849183f59050600080600080600085620186a0f150604080516001600160a01b038316815290517f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb9181900360200190a1505050565b6040805180820190915260138082527260606000534360015360ff60025360036000f360681b60208301908152600091849183f5604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a150505056fea2646970667358221220c4436dde70fbebb14cf02477e4d8f270620c7f9f54b9b1a2e09b1edcc8c6db6764736f6c637827302e372e352d646576656c6f702e323032302e31322e392b636f6d6d69742e65623737656430380058"
 
 // DeployPoly deploys a new Ethereum contract, binding an instance of Poly to it.
 func DeployPoly(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Poly, error) {
@@ -207,6 +207,27 @@ func (_Poly *PolySession) Deploy(salt *big.Int) (*types.Transaction, error) {
 // Solidity: function deploy(uint256 salt) returns()
 func (_Poly *PolyTransactorSession) Deploy(salt *big.Int) (*types.Transaction, error) {
 	return _Poly.Contract.Deploy(&_Poly.TransactOpts, salt)
+}
+
+// DeployAndDestruct is a paid mutator transaction binding the contract method 0x9debe981.
+//
+// Solidity: function deployAndDestruct(uint256 salt) returns()
+func (_Poly *PolyTransactor) DeployAndDestruct(opts *bind.TransactOpts, salt *big.Int) (*types.Transaction, error) {
+	return _Poly.contract.Transact(opts, "deployAndDestruct", salt)
+}
+
+// DeployAndDestruct is a paid mutator transaction binding the contract method 0x9debe981.
+//
+// Solidity: function deployAndDestruct(uint256 salt) returns()
+func (_Poly *PolySession) DeployAndDestruct(salt *big.Int) (*types.Transaction, error) {
+	return _Poly.Contract.DeployAndDestruct(&_Poly.TransactOpts, salt)
+}
+
+// DeployAndDestruct is a paid mutator transaction binding the contract method 0x9debe981.
+//
+// Solidity: function deployAndDestruct(uint256 salt) returns()
+func (_Poly *PolyTransactorSession) DeployAndDestruct(salt *big.Int) (*types.Transaction, error) {
+	return _Poly.Contract.DeployAndDestruct(&_Poly.TransactOpts, salt)
 }
 
 // PolyDeployEventIterator is returned from FilterDeployEvent and is used to iterate over the raw logs and unpacked data for DeployEvent events raised by the Poly contract.

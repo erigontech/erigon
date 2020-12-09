@@ -57,9 +57,6 @@ func createTestDb() (ethdb.Database, error) {
 	transactOpts1 := bind.NewKeyedTransactor(key1)
 	transactOpts2 := bind.NewKeyedTransactor(key2)
 	var poly *contracts.Poly
-	// Change this address whenever you make any changes in the code of the poly contract in
-	// contracts/poly.sol
-	var create2address = common.HexToAddress("c66aa74c220476f244b7f45897a124d1a01ca8a8")
 
 	var tokenContract *contracts.Token
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
@@ -154,18 +151,8 @@ func createTestDb() (ethdb.Database, error) {
 				panic(err)
 			}
 			txs = append(txs, tx)
-			tx, err = poly.Deploy(transactOpts, big.NewInt(0))
-			if err != nil {
-				panic(err)
-			}
-			txs = append(txs, tx)
 		case 9:
-			// Trigger self-destruct of poly
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), signer, key)
-			if err != nil {
-				panic(err)
-			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			tx, err = poly.DeployAndDestruct(transactOpts, big.NewInt(0))
 			if err != nil {
 				panic(err)
 			}
