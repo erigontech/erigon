@@ -261,7 +261,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	if err := p.Promote(logPrefix, s, s.BlockNumber, to, true /* storage */, collect); err != nil {
 		return err
 	}
-	retListLen := len(exclude)
 	sort.Slice(exclude, func(i, j int) bool { return bytes.Compare(exclude[i], exclude[j]) < 0 })
 	unfurl := trie.NewRetainList(0)
 	for i := range exclude {
@@ -293,10 +292,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	if checkRoot && hash != expectedRootHash {
 		return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 	}
-	log.Warn("Collection finished",
-		//"root hash", hash.Hex(),
+	log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
+		"root hash", hash.Hex(),
 		"gen IH", generationIHTook,
-		"retain list", retListLen,
 	)
 	if err := accountIHCollector.Load(logPrefix, db,
 		dbutils.IntermediateHashOfAccountBucket,
@@ -402,7 +400,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 	}
 	log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
-		//"root hash", hash.Hex(),
+		"root hash", hash.Hex(),
 		"gen IH", generationIHTook,
 	)
 	if err := accountIHCollector.Load(logPrefix, db,
