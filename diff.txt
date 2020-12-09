@@ -2352,9 +2352,3 @@ Date:   Wed Dec 9 15:43:36 2020 +0100
     
     The archive signing step in ci.go used getenvBase64, which decodes the key data.
     This is incorrect here because crypto/signify already base64-decodes the key.
-
-commit 915643a3e5a487899d925250b922824fb3d65708
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Wed Dec 9 13:59:24 2020 +0100
-
-    cmd/geth: add test to verify regexps in version check (#21962)
