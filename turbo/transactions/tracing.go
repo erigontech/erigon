@@ -122,7 +122,7 @@ func TraceTx(ctx context.Context, message core.Message, vmctx vm.Context, ibs vm
 	vmenv := vm.NewEVM(vmctx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
 
 	var refunds bool = true
-	if config.NoRefunds != nil && *config.NoRefunds {
+	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
 	}
 	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds)
