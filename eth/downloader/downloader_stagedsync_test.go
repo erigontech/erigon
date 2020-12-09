@@ -277,7 +277,6 @@ func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 }
 
 func TestStagedBase(t *testing.T) {
-	core.UsePlainStateExecution = true // Stage5 unwinds do not support hashed state
 	// Same as testChainForkLightA but much shorter
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	tester, clear := newStagedSyncTester()
@@ -299,7 +298,6 @@ func TestStagedBase(t *testing.T) {
 }
 
 func TestUnwind(t *testing.T) {
-	core.UsePlainStateExecution = true // Stage5 unwinds do not support hashed state
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	tester, clear := newStagedSyncTester()
 	defer clear()

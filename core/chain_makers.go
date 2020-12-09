@@ -23,7 +23,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -42,7 +41,6 @@ type BlockGen struct {
 	chain       []*types.Block
 	header      *types.Header
 	stateReader state.StateReader
-	stateWriter state.StateWriter
 	ibs         *state.IntraBlockState
 
 	gasPool  *GasPool
@@ -223,8 +221,8 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	defer tx.Rollback()
 
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
-		stateWriter *state.DbStateWriter, plainStateWriter *state.PlainStateWriter) (*types.Block, types.Receipts, error) {
-		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, stateWriter: stateWriter, config: config, engine: engine, txs: make([]*types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1)}
+		plainStateWriter *state.PlainStateWriter) (*types.Block, types.Receipts, error) {
+		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, config: config, engine: engine, txs: make([]*types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1)}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
@@ -300,7 +298,6 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				fmt.Printf("===============================\n")
 			}
 			var hashCollector func(keyHex []byte, hash []byte) error
-			var collector *etl.Collector
 			unfurl := trie.NewRetainList(0)
 			loader := trie.NewFlatDBTrieLoader("GenerateChain", dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 			if err := loader.Reset(unfurl, hashCollector, false); err != nil {
@@ -310,11 +307,6 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				b.header.Root = hash
 			} else {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
-			}
-			if intermediateHashes {
-				if err := collector.Load("GenerateChain", tx, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
-					return nil, nil, fmt.Errorf("loading intermediate hashes: %w", err)
-				}
 			}
 
 			// Recreating block to make sure Root makes it into the header
@@ -326,10 +318,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	for i := 0; i < n; i++ {
 		stateReader := state.NewPlainStateReader(tx)
-		stateWriter := state.NewDbStateWriter(tx, parent.Number().Uint64()+uint64(i)+1)
 		plainStateWriter := state.NewPlainStateWriter(tx, nil, parent.Number().Uint64()+uint64(i)+1)
 		ibs := state.New(stateReader)
-		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter, plainStateWriter)
+		block, receipt, err := genblock(i, parent, ibs, stateReader, plainStateWriter)
 		if err != nil {
 			return nil, nil, fmt.Errorf("generating block %d: %w", i, err)
 		}

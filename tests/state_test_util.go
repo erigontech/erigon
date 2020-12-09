@@ -212,7 +212,7 @@ func (t *StateTest) RunNoVerify(ctx context.Context, subtest StateSubtest, vmcon
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit())
 	snapshot := statedb.Snapshot()
-	if _, err = core.ApplyMessage(evm, msg, gaspool); err != nil {
+	if _, err = core.ApplyMessage(evm, msg, gaspool, true /* refunds */); err != nil {
 		statedb.RevertToSnapshot(snapshot)
 	}
 	// Commit block
