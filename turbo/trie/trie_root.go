@@ -156,25 +156,25 @@ func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 // CalcTrieRoot algo:
 //	for iterateIHOfAccounts {
 //		if isSequence {
-//			receive(IH)
+//			use(IH)
 //			continue
 //		}
 //
 //		for iterateAccounts from prevIH to currentIH {
-//			receive(account)
+//			use(account)
 //			for iterateIHOfStorage within accountWithIncarnation{
 //				if isSequence {
-//					receive(ihStorage)
+//					use(ihStorage)
 //					continue
 //				}
 //
 //				for iterateStorage from prevIHOfStorage to currentIHOfStorage {
-//					receive(storage)
+//					use(storage)
 //				}
-//				receive(ihStorage)
+//				use(ihStorage)
 //			}
 //		}
-//		receive(IH)
+//		use(IH)
 //	}
 func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{}) (common.Hash, error) {
 	var (
