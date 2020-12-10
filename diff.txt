@@ -2303,26 +2303,3 @@ Date:   Fri Dec 11 00:20:55 2020 +0800
     * les: introduce forkID
     
     * les: address comment
-
-commit b44f24e3e6644a2034ce23037827b21aa59e441d
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Thu Dec 10 14:48:32 2020 +0100
-
-    core, trie: speed up some tests with quadratic processing flaw (#21987)
-    
-    This commit fixes a flaw in two testcases, and brings down the exec-time from ~40s to ~8s for trie/TestIncompleteSync.
-    
-    The checkConsistency was performed over and over again on the complete set of nodes, not just the recently added, turning it into a quadratic runtime.
-
-commit 9f6bb492bbcd6def92d0bc195faeb751e1591535
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Thu Dec 10 21:33:52 2020 +0800
-
-    les, light: remove untrusted header retrieval in ODR (#21907)
-    
-    * les, light: remove untrusted header retrieval in ODR
-    
-    * les: polish
-    
-    * light: check the hash equality in odr
-e64-decodes the key.
