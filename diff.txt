@@ -2325,30 +2325,4 @@ Date:   Thu Dec 10 21:33:52 2020 +0800
     * les: polish
     
     * light: check the hash equality in odr
-
-commit 817a3fb5622c8704116e9847661c16f9f3d785c6
-Author: Felix Lange <fjl@twurst.com>
-Date:   Wed Dec 9 20:21:31 2020 +0100
-
-    p2p/enode: avoid crashing for invalid IP (#21981)
-    
-    The database panicked for invalid IPs. This is usually no problem
-    because all code paths leading to node DB access verify the IP, but it's
-    dangerous because improper validation can turn this panic into a DoS
-    vulnerability. The quick fix here is to just turn database accesses
-    using invalid IP into a noop. This isn't great, but I'm planning to
-    remove the node DB for discv5 long-term, so it should be fine to have
-    this quick fix for half a year.
-    
-    Fixes #21849
-
-commit f935b1d5426b7c4147914b9f120b07f1f983f0ef
-Author: Felix Lange <fjl@twurst.com>
-Date:   Wed Dec 9 15:43:36 2020 +0100
-
-    crypto/signify, build: fix archive signing with signify (#21977)
-    
-    This fixes some issues in crypto/signify and makes release signing work.
-    
-    The archive signing step in ci.go used getenvBase64, which decodes the key data.
-    This is incorrect here because crypto/signify already base64-decodes the key.
+e64-decodes the key.
