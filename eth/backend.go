@@ -249,6 +249,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
+
 			err = torrentClient.Load(chainDb)
 			if err != nil {
 				return nil, err

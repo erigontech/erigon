@@ -13,8 +13,15 @@ const (
 	SnapshotBlock    = 11_000_000
 	LmdbFilename     = "data.mdb"
 
-	HeadersSnapshotHash  = "7727174de470b7fe0bb3e36d35e85cc48853d470" //11кk block 1mb chunk
-	BlocksSnapshotHash   = "0546b881c50de9984dd8865d0f18cc5153e4c21b" //11кk block 1mb chunk
+	/*
+	true hash=
+	INFO [12-07|20:16:52.888] Snapshot stats                           snapshot=bodies  active peers=0 seeding=true hash=
+
+	*/
+	HeadersSnapshotHash  = "460da4ffbc2b77f6662a8a7c15e21f4c5981656d" //11кk block 1mb chunk
+	BlocksSnapshotHash   = "6353d013d614f1f8145d71e1479de9b4361d273f" //11кk block 1mb chunk
+	//HeadersSnapshotHash  = "7727174de470b7fe0bb3e36d35e85cc48853d470" //11кk block 1mb chunk
+	//BlocksSnapshotHash   = "0546b881c50de9984dd8865d0f18cc5153e4c21b" //11кk block 1mb chunk
 	StateSnapshotHash    = ""
 	ReceiptsSnapshotHash = ""
 
