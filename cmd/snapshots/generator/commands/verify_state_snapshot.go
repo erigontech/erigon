@@ -22,24 +22,23 @@ func init() {
 	rootCmd.AddCommand(verifyStateSnapshotCmd)
 }
 
-//go run cmd/snapshots/generator/main.go verify_state --block 11000000 --snapshot /media/b00ris/nvme/snapshotsync/tg/chaindata/ --chaindata /media/b00ris/nvme/backup/snapshotsync/tg/chaindata/ &> /media/b00ris/nvme/verify.log
+//
 var verifyStateSnapshotCmd = &cobra.Command{
 	Use:     "verify_state",
 	Short:   "Verify state snapshot",
-	Example: "tbd",
+	Example: "go run cmd/snapshots/generator/main.go verify_state --block 11000000 --snapshot /media/b00ris/nvme/snapshots/state/ --chaindata /media/b00ris/nvme/backup/snapshotsync/tg/chaindata/ ",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return VerifyStateSnapshot(cmd.Context(), chaindata, snapshotFile, block)
 	},
 }
 
 func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block uint64) error {
-	db, err:= ethdb.Open(dbPath, true)
-	if err!=nil {
+	db, err := ethdb.Open(dbPath, true)
+	if err != nil {
 		return fmt.Errorf("Open err: %w", err)
 	}
-	snapshotDir:= "/media/b00ris/nvme/snapshots"
-	snapshotMode:="hb"
-	kv:=db.KV()
+
+	kv := db.KV()
 	if snapshotDir != "" {
 		var mode snapshotsync.SnapshotMode
 		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
@@ -53,25 +52,25 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 	}
 	db.SetKV(kv)
 
-
 	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket:   dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-			dbutils.PlainContractCodeBucket:   dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],
+			dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+			dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+			dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
 		}
 	}).Path(snapshotPath).ReadOnly().MustOpen()
-	tmpPath,err:=ioutil.TempDir("/media/b00ris/nvme/tmp","vrf*")
-	if err!=nil {
+
+	tmpPath, err := ioutil.TempDir(os.TempDir(), "vrf*")
+	if err != nil {
 		return err
 	}
-	tmpDB:=ethdb.NewLMDB().Path(tmpPath).MustOpen()
-	//defer os.RemoveAll(tmpPath)
+	tmpDB := ethdb.NewLMDB().Path(tmpPath).MustOpen()
+	defer os.RemoveAll(tmpPath)
 	defer tmpDB.Close()
-	snkv=ethdb.NewSnapshotKV().SnapshotDB(snkv).DB(tmpDB).For(dbutils.PlainStateBucket).For(dbutils.PlainContractCodeBucket).For(dbutils.CodeBucket).MustOpen()
-	sndb:=ethdb.NewObjectDatabase(snkv)
-	tx,err:=sndb.Begin(context.Background(), ethdb.RW)
-	if err!=nil {
+	snkv = ethdb.NewSnapshotKV().SnapshotDB(snkv).DB(tmpDB).For(dbutils.PlainStateBucket).For(dbutils.PlainContractCodeBucket).For(dbutils.CodeBucket).MustOpen()
+	sndb := ethdb.NewObjectDatabase(snkv)
+	tx, err := sndb.Begin(context.Background(), ethdb.RW)
+	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
@@ -81,19 +80,19 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 	}
 
 	syncHeadHeader := rawdb.ReadHeader(db, hash, block)
-	if syncHeadHeader==nil {
+	if syncHeadHeader == nil {
 		return fmt.Errorf("empty header")
 	}
 	expectedRootHash := syncHeadHeader.Root
-	tt:=time.Now()
-	err = stagedsync.PromoteHashedStateCleanly("",tx, os.TempDir(), ctx.Done())
+	tt := time.Now()
+	err = stagedsync.PromoteHashedStateCleanly("", tx, os.TempDir(), ctx.Done())
 	fmt.Println("Promote took", time.Since(tt))
-	if err!=nil {
-		return fmt.Errorf("Promote state err: %w",err)
+	if err != nil {
+		return fmt.Errorf("Promote state err: %w", err)
 	}
 
-	err = stagedsync.RegenerateIntermediateHashes("", tx, os.TempDir(),expectedRootHash, ctx.Done())
-	if err!=nil {
+	err = stagedsync.RegenerateIntermediateHashes("", tx, os.TempDir(), expectedRootHash, ctx.Done())
+	if err != nil {
 		return fmt.Errorf("RegenerateIntermediateHashes err: %w", err)
 	}
 	return nil

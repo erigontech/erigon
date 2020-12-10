@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,7 +13,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/spf13/cobra"
 	"os"
-	"os/signal"
 	"time"
 )
 
@@ -60,6 +58,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			return err
 		}
 	}
+
 	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket:        dbutils.BucketConfigItem{},
@@ -68,14 +67,6 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			dbutils.SnapshotInfoBucket:      dbutils.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
-
-	ch := make(chan os.Signal, 1)
-	quitCh := make(chan struct{})
-	signal.Notify(ch, os.Interrupt)
-	go func() {
-		<-ch
-		close(quitCh)
-	}()
 
 	sndb := ethdb.NewObjectDatabase(snkv)
 	mt := sndb.NewBatch()
@@ -93,22 +84,19 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	i := 0
 	t := time.Now()
 	tt := time.Now()
-	//st:=0
-	//var emptyCodeHash = crypto.Keccak256Hash(nil)
 	err = state.WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, []byte{}, 0, toBlock+1, func(k []byte, v []byte) (bool, error) {
 		i++
-		if i%1000 == 0 {
+		if i%100000 == 0 {
 			fmt.Println(i, common.Bytes2Hex(k), "batch", time.Since(tt))
 			tt = time.Now()
 			select {
-			case <-ch:
+			case <-ctx.Done():
 				return false, errors.New("interrupted")
 			default:
 
 			}
 		}
 		if len(k) != 20 {
-			fmt.Println("ln", len(k))
 			return true, nil
 		}
 
@@ -123,13 +111,9 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 				t := trie.New(common.Hash{})
 				j := 0
 				innerErr := state.WalkAsOf(tx2, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, storagePrefix, 8*(common.AddressLength), toBlock+1, func(kk []byte, vv []byte) (bool, error) {
-					if !bytes.Equal(kk[:common.AddressLength], k) {
-						fmt.Println("k", common.Bytes2Hex(k), "kk", common.Bytes2Hex(k))
-					}
 					j++
 					innerErr1 := mt.Put(dbutils.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(common.BytesToAddress(kk[:common.AddressLength]), acc.Incarnation, common.BytesToHash(kk[common.AddressLength:])), common.CopyBytes(vv))
 					if innerErr1 != nil {
-						fmt.Println("mt.Put", innerErr1)
 						return false, innerErr1
 					}
 
@@ -139,7 +123,6 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 					return true, nil
 				})
 				if innerErr != nil {
-					fmt.Println("Storage walkasof")
 					return false, innerErr
 				}
 				acc.Root = t.Hash()
@@ -175,10 +158,9 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			ttt := time.Now()
 			innerErr = mt.CommitAndBegin(context.Background())
 			if innerErr != nil {
-				fmt.Println("mt.BatchSize", innerErr)
 				return false, innerErr
 			}
-			fmt.Println("Commited", time.Since(ttt))
+			fmt.Println("Committed", time.Since(ttt))
 		}
 		return true, nil
 	})

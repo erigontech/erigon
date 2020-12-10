@@ -3,10 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"time"
 
@@ -22,14 +19,7 @@ import (
 func Seed(ctx context.Context, datadir string) error {
 	datadir = filepath.Dir(datadir)
 	ctx, cancel := context.WithCancel(ctx)
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-	go func() {
-		<-c
-		cancel()
-	}()
-	chainDB:=ethdb.MustOpen("/media/b00ris/nvme/backup/snapshotsync/tg/chaindata")
+	defer cancel()
 
 	cfg := trnt.DefaultTorrentConfig()
 	cfg.NoDHT = false
@@ -42,7 +32,7 @@ func Seed(ctx context.Context, datadir string) error {
 	pathes := []string{
 		cfg.DataDir + "/headers",
 		cfg.DataDir + "/bodies",
-		//cfg.DataDir + "/state",
+		cfg.DataDir + "/state",
 		//cfg.DataDir+"/receipts",
 	}
 
@@ -81,7 +71,6 @@ func Seed(ctx context.Context, datadir string) error {
 			return err
 		}
 
-
 		torrents[i], _, err = cl.AddTorrentSpec(&torrent.TorrentSpec{
 			Trackers:  trnt.Trackers,
 			InfoHash:  mi.HashInfoBytes(),
@@ -107,19 +96,6 @@ func Seed(ctx context.Context, datadir string) error {
 
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
-
-		for _, t := range cl.Torrents() {
-			err := chainDB.Put(dbutils.SnapshotInfoBucket, trnt.MakeInfoHashKey(t.Name(), 1), t.InfoHash().Bytes())
-			if err != nil {
-				log.Info("Torrent added", "name", t.Name())
-			}
-			err = chainDB.Put(dbutils.SnapshotInfoBucket, trnt.MakeInfoBytesKey(t.Name(), 1), t.Metainfo().InfoBytes)
-			if err != nil {
-				log.Info("Torrent added", "name", t.Name())
-			}
-		}
-		log.Info("Fix applied")
-
 		for range ticker.C {
 			for _, t := range cl.Torrents() {
 				log.Info("Snapshot stats", "snapshot", t.Name(), "active peers", t.Stats().ActivePeers, "seeding", t.Seeding(), "hash", t.Metainfo().HashInfoBytes().String())
