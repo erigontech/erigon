@@ -17,14 +17,6 @@ import (
 
 func SpawnHashStateStage(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
 	
-	go func() {
-		// we block until we can read something from the channel and then we reset hash state
-		<-quit
-		if err := ResetHashState(db); err != nil {
-			fmt.Errorf("Unable to reset hashstate %v", err)
-		}
-	}()
-
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -52,7 +44,17 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, tmpdir string, quit <
 		}
 	}
 
-	return s.DoneAndUpdate(db, to)
+	for{   
+		//it will block until we get Ctrl+C pressed
+		<-quit 
+		if err := s.DoneAndUpdate(db, to); err != nil {
+			return err
+		}
+		break
+	}
+
+	return nil
+	
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
