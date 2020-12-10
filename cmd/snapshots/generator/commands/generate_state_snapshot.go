@@ -12,14 +12,32 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/spf13/cobra"
 	"os"
 	"os/signal"
 	"time"
 )
 
-//  ./build/bin/tg --datadir /media/b00ris/nvme/snapshotsync/ --nodiscover --snapshot-mode hb --port 30304
-// go run ./cmd/state/main.go stateSnapshot --block 11000000 --chaindata /media/b00ris/nvme/tgstaged/tg/chaindata/ --snapshot /media/b00ris/nvme/snapshots/state
-func GenerateStateSnapshot(dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
+func init() {
+	withChaindata(generateStateSnapshotCmd)
+	withSnapshotFile(generateStateSnapshotCmd)
+	withSnapshotData(generateStateSnapshotCmd)
+	withBlock(generateStateSnapshotCmd)
+	rootCmd.AddCommand(generateStateSnapshotCmd)
+
+}
+
+//go run cmd/snapshots/generator/main.go state_copy --block 11000000 --snapshot /media/b00ris/nvme/snapshots/state --chaindata /media/b00ris/nvme/backup/snapshotsync/tg/chaindata/ &> /media/b00ris/nvme/copy.log
+var generateStateSnapshotCmd = &cobra.Command{
+	Use:     "state",
+	Short:   "Generate state snapshot",
+	Example: "go run ./cmd/state/main.go stateSnapshot --block 11000000 --chaindata /media/b00ris/nvme/tgstaged/tg/chaindata/ --snapshot /media/b00ris/nvme/snapshots/state",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return GenerateStateSnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
+	},
+}
+
+func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	if snapshotPath == "" {
 		return errors.New("empty snapshot path")
 	}
@@ -44,10 +62,10 @@ func GenerateStateSnapshot(dbPath, snapshotPath string, toBlock uint64, snapshot
 	}
 	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket:       dbutils.BucketConfigItem{},
-			dbutils.PlainContractCodeBucket:       dbutils.BucketConfigItem{},
-			dbutils.CodeBucket:       dbutils.BucketConfigItem{},
-			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+			dbutils.PlainStateBucket:        dbutils.BucketConfigItem{},
+			dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},
+			dbutils.CodeBucket:              dbutils.BucketConfigItem{},
+			dbutils.SnapshotInfoBucket:      dbutils.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
@@ -59,31 +77,29 @@ func GenerateStateSnapshot(dbPath, snapshotPath string, toBlock uint64, snapshot
 		close(quitCh)
 	}()
 
-	//db := ethdb.NewObjectDatabase(kv)
 	sndb := ethdb.NewObjectDatabase(snkv)
-	mt:=sndb.NewBatch()
+	mt := sndb.NewBatch()
 
 	tx, err := kv.Begin(context.Background(), nil, ethdb.RO)
 	if err != nil {
 		return err
 	}
-	tx2, err := kv.Begin(context.Background(), nil,  ethdb.RO)
+	tx2, err := kv.Begin(context.Background(), nil, ethdb.RO)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-
-	i:=0
-	t:=time.Now()
-	tt:=time.Now()
+	i := 0
+	t := time.Now()
+	tt := time.Now()
 	//st:=0
 	//var emptyCodeHash = crypto.Keccak256Hash(nil)
-	err = state.WalkAsOf(tx, dbutils.PlainStateBucket,dbutils.AccountsHistoryBucket, []byte{},0,toBlock+1, func(k []byte, v []byte) (bool, error) {
+	err = state.WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, []byte{}, 0, toBlock+1, func(k []byte, v []byte) (bool, error) {
 		i++
-		if i%1000==0 {
-			fmt.Println(i, common.Bytes2Hex(k),"batch", time.Since(tt))
-			tt=time.Now()
+		if i%1000 == 0 {
+			fmt.Println(i, common.Bytes2Hex(k), "batch", time.Since(tt))
+			tt = time.Now()
 			select {
 			case <-ch:
 				return false, errors.New("interrupted")
@@ -95,99 +111,70 @@ func GenerateStateSnapshot(dbPath, snapshotPath string, toBlock uint64, snapshot
 			fmt.Println("ln", len(k))
 			return true, nil
 		}
-		addrHash,_:=common.HashData(k)
 
 		var acc accounts.Account
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
 		}
 
-		if acc.Incarnation>0 {
-			fmt.Println("Contract", common.Bytes2Hex(k), len(k), acc.Incarnation)
-			fmt.Println("Before Root", acc.Root.String(), acc.CodeHash.String())
-			t := trie.New(common.Hash{})
-
+		if acc.Incarnation > 0 {
 			storagePrefix := dbutils.PlainGenerateStoragePrefix(k, acc.Incarnation)
-			j:=0
-			innerErr := state.WalkAsOf(tx2, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, storagePrefix, 8*(common.AddressLength), toBlock+1, func(kk []byte, vv []byte) (bool, error) {
-				if !bytes.Equal(kk[:common.AddressLength], k) {
-					fmt.Println("k", common.Bytes2Hex(k), "kk",common.Bytes2Hex(k))
+			if acc.IsEmptyRoot() {
+				t := trie.New(common.Hash{})
+				j := 0
+				innerErr := state.WalkAsOf(tx2, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, storagePrefix, 8*(common.AddressLength), toBlock+1, func(kk []byte, vv []byte) (bool, error) {
+					if !bytes.Equal(kk[:common.AddressLength], k) {
+						fmt.Println("k", common.Bytes2Hex(k), "kk", common.Bytes2Hex(k))
+					}
+					j++
+					innerErr1 := mt.Put(dbutils.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(common.BytesToAddress(kk[:common.AddressLength]), acc.Incarnation, common.BytesToHash(kk[common.AddressLength:])), common.CopyBytes(vv))
+					if innerErr1 != nil {
+						fmt.Println("mt.Put", innerErr1)
+						return false, innerErr1
+					}
+
+					h, _ := common.HashData(kk[common.AddressLength:])
+					t.Update(h.Bytes(), common.CopyBytes(vv))
+
+					return true, nil
+				})
+				if innerErr != nil {
+					fmt.Println("Storage walkasof")
+					return false, innerErr
 				}
-				j++
-				innerErr1:=mt.Put(dbutils.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(common.BytesToAddress(kk[:common.AddressLength]),acc.Incarnation, common.BytesToHash(kk[common.AddressLength:])), common.CopyBytes(vv))
-				if innerErr1!=nil {
-					fmt.Println("mt.Put", innerErr1)
-					return false, innerErr1
+				acc.Root = t.Hash()
+			}
+
+			if acc.IsEmptyCodeHash() {
+				codeHash, err := tx2.GetOne(dbutils.PlainContractCodeBucket, storagePrefix)
+				if err != nil && err != ethdb.ErrKeyNotFound {
+					return false, fmt.Errorf("getting code hash for %x: %v", k, err)
 				}
-
-				h, _ := common.HashData(kk[common.AddressLength:])
-				t.Update(h.Bytes(), common.CopyBytes(vv))
-
-				return true, nil
-			})
-			if innerErr!=nil {
-				fmt.Println("Storage walkasof")
-				return false, innerErr
-			}
-
-			var codeHash []byte
-			codeHash, err = tx2.GetOne(dbutils.PlainContractCodeBucket, storagePrefix)
-			if err != nil && err != ethdb.ErrKeyNotFound {
-				return false, fmt.Errorf("getting code hash for %x: %v", k, err)
-			}
-			codeHash2, err := tx2.GetOne(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation))
-			if err != nil && err != ethdb.ErrKeyNotFound {
-				return false, fmt.Errorf("getting code hash for %x: %v", k, err)
-			}
-			if !bytes.Equal(codeHash, codeHash2) {
-				fmt.Println("plain&hashed not equal", common.Bytes2Hex(codeHash),"2:", common.Bytes2Hex(codeHash2), "3:", acc.CodeHash.String())
-			}
-
-			if !bytes.Equal(codeHash, acc.CodeHash.Bytes()) {
-				fmt.Println("Wrong code hash. Acc", common.Bytes2Hex(k), "1:",common.Bytes2Hex(codeHash), "2:", acc.CodeHash.String())
-				err:=mt.Put(dbutils.PlainContractCodeBucket, storagePrefix, codeHash)
-				if err!=nil {
-					return false, err
-				}
-
-				var code []byte
-				if len(codeHash)>0 {
-					if code, err = tx2.GetOne(dbutils.CodeBucket, codeHash); err != nil {
-						fmt.Println("tx.Get(dbutils.CodeBucket")
+				if len(codeHash) > 0 {
+					code, err := tx2.GetOne(dbutils.CodeBucket, codeHash)
+					if err != nil {
 						return false, err
 					}
 					if err := mt.Put(dbutils.CodeBucket, codeHash, code); err != nil {
-						fmt.Println("mt.Put(dbutils.CodeBucket")
 						return false, err
 					}
-				}
-
-				if acc.CodeHash!=(common.Hash{}) {
-					if code, err = tx2.GetOne(dbutils.CodeBucket, acc.CodeHash.Bytes()); err != nil {
-						fmt.Println("tx.Get(dbutils.CodeBucket")
-						return false, err
-					}
-					if err := mt.Put(dbutils.CodeBucket, acc.CodeHash.Bytes(), code); err != nil {
-						fmt.Println("mt.Put(dbutils.CodeBucket")
+					if err := mt.Put(dbutils.PlainContractCodeBucket, storagePrefix, codeHash); err != nil {
 						return false, err
 					}
 				}
 			}
-
-			acc.Root = t.Hash()
-			fmt.Println("After Root", acc.Root.String(), "code hash", common.Bytes2Hex(codeHash), "num of elements", j)
 		}
-		newAcc:=make([]byte, acc.EncodingLengthForStorage())
+		newAcc := make([]byte, acc.EncodingLengthForStorage())
 		acc.EncodeForStorage(newAcc)
-		innerErr:=mt.Put(dbutils.PlainStateBucket, common.CopyBytes(k), newAcc)
-		if innerErr!=nil {
+		innerErr := mt.Put(dbutils.PlainStateBucket, common.CopyBytes(k), newAcc)
+		if innerErr != nil {
 			return false, innerErr
 		}
 
 		if mt.BatchSize() >= mt.IdealBatchSize() {
-			ttt:=time.Now()
+			ttt := time.Now()
 			innerErr = mt.CommitAndBegin(context.Background())
-			if innerErr!=nil {
+			if innerErr != nil {
 				fmt.Println("mt.BatchSize", innerErr)
 				return false, innerErr
 			}
@@ -195,14 +182,14 @@ func GenerateStateSnapshot(dbPath, snapshotPath string, toBlock uint64, snapshot
 		}
 		return true, nil
 	})
-	if err!=nil {
+	if err != nil {
 		return err
 	}
-	_,err=mt.Commit()
-	if err!=nil {
+	_, err = mt.Commit()
+	if err != nil {
 		return err
 	}
 	fmt.Println("took", time.Since(t))
 
-	return err
+	return VerifyStateSnapshot(ctx, dbPath, snapshotFile, block)
 }
