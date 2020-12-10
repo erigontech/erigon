@@ -31,6 +31,7 @@ type TraceAPIImpl struct {
 	dbReader  ethdb.Database
 	maxTraces uint64
 	traceType string
+	gasCap    uint64
 }
 
 // NewTraceAPI returns NewTraceAPI instance
@@ -39,5 +40,6 @@ func NewTraceAPI(dbReader ethdb.Database, cfg *cli.Flags) *TraceAPIImpl {
 		dbReader:  dbReader,
 		maxTraces: cfg.MaxTraces,
 		traceType: cfg.TraceType,
+		gasCap:    cfg.Gascap,
 	}
 }

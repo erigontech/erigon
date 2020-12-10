@@ -378,7 +378,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	chainDb := ethdb.MustOpen(chaindata)
 	defer chainDb.Close()
 	historyDb := chainDb
-	historyTx, err1 := historyDb.KV().Begin(context.Background(), nil, ethdb.RO)
+	historyTx, err1 := historyDb.Begin(context.Background(), ethdb.RO)
 	if err1 != nil {
 		return err1
 	}

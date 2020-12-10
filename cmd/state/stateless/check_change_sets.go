@@ -47,7 +47,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	if chaindata != historyfile {
 		historyDb = ethdb.MustOpen(historyfile)
 	}
-	historyTx, err1 := historyDb.KV().Begin(context.Background(), nil, ethdb.RO)
+	historyTx, err1 := historyDb.Begin(context.Background(), ethdb.RO)
 	if err1 != nil {
 		return err1
 	}

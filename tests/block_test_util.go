@@ -145,7 +145,7 @@ func (t *BlockTest) Run(_ bool) error {
 		fmt.Printf("hash mismatch: wanted %x, got %x\n", t.json.BestBlock, cmlast)
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
-	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	tx, err1 := db.Begin(context.Background(), ethdb.RO)
 	if err1 != nil {
 		return fmt.Errorf("blockTest create tx: %v", err1)
 	}
