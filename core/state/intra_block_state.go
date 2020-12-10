@@ -18,7 +18,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"sort"
@@ -823,10 +822,6 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 }
 
 func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
-	addrKey:=[]byte{91,181,142,163,243,235,238,244,207,200,157,89,244,152,99,31,229,13,63,145}
-	if bytes.Equal(addrKey, addr.Bytes()) {
-		fmt.Println("f")
-	}
 	emptyRemoval := params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()
 	if stateObject.suicided || (isDirty && emptyRemoval) {
 		if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {

@@ -109,8 +109,7 @@ func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.Extr
 	return func(k, v []byte, next etl.ExtractNextFunc) error {
 		newK, err := transformKey(k)
 		if err != nil {
-			fmt.Println("Promote err", err, common.Bytes2Hex(k))
-			return nil
+			return err
 		}
 		return next(k, newK, v)
 	}
@@ -207,10 +206,6 @@ func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, _ := decode(dbKey, dbValue)
-		addrKey:=[]byte{91,181,142,163,243,235,238,244,207,200,157,89,244,152,99,31,229,13,63,145}
-		if bytes.Equal(addrKey, k) {
-			fmt.Println("f")
-		}
 		value, err := db.Get(dbutils.PlainStateBucket, k)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return err

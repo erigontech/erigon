@@ -240,7 +240,7 @@ func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([
 	return Walk(c, startkey, fixedbits, walker)
 }
 
-func Walk(c Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {   
+func Walk(c Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	k, v, err := c.Seek(startkey)
 	if err != nil {
