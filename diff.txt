@@ -2294,12 +2294,3 @@ Date:   Fri Dec 11 09:02:55 2020 +0100
 
     build: upgrade to Go 1.15.6 (#21986)
 
-commit 004541098d28ed2d76ac4aa524b0e3fa80140f97
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Fri Dec 11 00:20:55 2020 +0800
-
-    les: introduce forkID (#21974)
-    
-    * les: introduce forkID
-    
-    * les: address comment
