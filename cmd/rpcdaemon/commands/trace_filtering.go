@@ -270,8 +270,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 			tr.Action.Author = strings.ToLower(block.Coinbase().String())
 			tr.Action.RewardType = "block" // goconst
 			tr.Action.Value = minerReward.String()
-			tr.BlockHash = block.Hash()
-			tr.BlockNumber = block.NumberU64()
+			tr.BlockHash = &common.Hash{}
+			copy(tr.BlockHash[:], block.Hash().Bytes())
+			tr.BlockNumber = new(uint64)
+			*tr.BlockNumber = block.NumberU64()
 			tr.Type = "reward" // nolint: goconst
 			traces = append(traces, tr)
 			for i, uncle := range block.Uncles() {
@@ -280,8 +282,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 					tr.Action.Author = strings.ToLower(uncle.Coinbase.String())
 					tr.Action.RewardType = "uncle" // goconst
 					tr.Action.Value = uncleRewards[i].String()
-					tr.BlockHash = block.Hash()
-					tr.BlockNumber = block.NumberU64()
+					tr.BlockHash = &common.Hash{}
+					copy(tr.BlockHash[:], block.Hash().Bytes())
+					tr.BlockNumber = new(uint64)
+					*tr.BlockNumber = block.NumberU64()
 					tr.Type = "reward" // nolint: goconst
 					traces = append(traces, tr)
 				}

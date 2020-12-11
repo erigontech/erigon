@@ -30,11 +30,27 @@ type TraceCallParam struct {
 	Gas      *hexutil.Uint64 `json:"gas"`
 	GasPrice *hexutil.Big    `json:"gasPrice"`
 	Value    *hexutil.Big    `json:"value"`
-	Data     *hexutil.Bytes  `json:"data"`
+	Data     hexutil.Bytes   `json:"data"`
 }
 
 // TraceCallParams array of callMany structs
 type TraceCallParams []TraceCallParam
+
+// TraceCallResult is the response to `trace_call` method
+type TraceCallResult struct {
+	Output    hexutil.Bytes       `json:"output"`
+	StateDiff *TraceCallStateDiff `json:"stateDiff"`
+	Trace     []*ParityTrace      `json:"trace"`
+	VmTrace   *TraceCallVmTrace   `json:"vmTrace"`
+}
+
+// TraceCallStateDiff is the part of `trace_call` response that is under "stateDiff" tag
+type TraceCallStateDiff struct {
+}
+
+// TraceCallVmTrace is the part of `trace_call` response that is under "vmTrace" tag
+type TraceCallVmTrace struct {
+}
 
 // ToMessage converts CallArgs to the Message type used by the core evm
 func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
@@ -68,7 +84,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
 
 	var input []byte
 	if args.Data != nil {
-		input = *args.Data
+		input = args.Data
 	}
 
 	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, input, false)
@@ -77,13 +93,48 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
 
 // OpenEthereum-style tracer
 type OeTracer struct {
+	r          *TraceCallResult
+	traceAddr  []int
+	traceStack []*ParityTrace
 }
 
 func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+	if gas > 500000000 {
+		gas = 500000001 - (0x8000000000000000 - gas)
+	}
+	fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d\n", depth, from, to, create, input, gas, value)
+	trace := &ParityTrace{}
+	if create {
+		trace.Type = "create"
+	} else {
+		trace.Type = "call"
+	}
+	ot.r.Trace = append(ot.r.Trace, trace)
+	if depth > 0 {
+		topTrace := ot.traceStack[len(ot.traceStack)-1]
+		traceIdx := topTrace.Subtraces
+		ot.traceAddr = append(ot.traceAddr, traceIdx)
+		topTrace.Subtraces++
+	}
+	trace.TraceAddress = make([]int, len(ot.traceAddr))
+	copy(trace.TraceAddress, ot.traceAddr)
+	ot.traceStack = append(ot.traceStack, trace)
 	return nil
 }
 
 func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+	fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d\n", depth, output, gasUsed)
+	if depth == 0 {
+		ot.r.Output = common.CopyBytes(output)
+	}
+	topTrace := ot.traceStack[len(ot.traceStack)-1]
+	topTrace.Result.Output = common.CopyBytes(output)
+	topTrace.Result.GasUsed = new(hexutil.Big)
+	topTrace.Result.GasUsed.ToInt().SetUint64(gasUsed)
+	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
+	if depth > 0 {
+		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
+	}
 	return nil
 }
 
@@ -96,6 +147,7 @@ func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 }
 
 func (ot *OeTracer) CaptureCreate(creator common.Address, creation common.Address) error {
+	//fmt.Printf("CaptureCreate creator %x, creation %x\n", creator, creation)
 	return nil
 }
 func (ot *OeTracer) CaptureAccountRead(account common.Address) error {
@@ -108,7 +160,7 @@ func (ot *OeTracer) CaptureAccountWrite(account common.Address) error {
 const callTimeout = 5 * time.Minute
 
 // Call implements trace_call.
-func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash) ([]interface{}, error) {
+func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash) (*TraceCallResult, error) {
 	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
@@ -155,6 +207,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	defer cancel()
 
 	var ot OeTracer
+	ot.r = &TraceCallResult{}
+	ot.traceAddr = []int{}
 
 	// Get a new instance of the EVM.
 	msg := args.ToMessage(api.gasCap)
@@ -181,8 +235,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
 	}
 
-	var stub []interface{}
-	return stub, fmt.Errorf(NotImplemented, "trace_call")
+	return ot.r, nil
 }
 
 // TODO(tjayrush) - try to use a concrete type here

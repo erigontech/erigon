@@ -39,16 +39,16 @@ type GethTraces []*GethTrace
 // ParityTrace A trace in the desired format (Parity/OpenEtherum) See: https://openethereum.github.io/wiki/JSONRPC-trace-module
 type ParityTrace struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Action              TraceAction `json:"action"`
-	BlockHash           common.Hash `json:"blockHash"`
-	BlockNumber         uint64      `json:"blockNumber"`
-	Error               string      `json:"error,omitempty"`
-	Result              TraceResult `json:"result"`
-	Subtraces           int         `json:"subtraces"`
-	TraceAddress        []int       `json:"traceAddress"`
-	TransactionHash     common.Hash `json:"transactionHash"`
-	TransactionPosition uint64      `json:"transactionPosition"`
-	Type                string      `json:"type"`
+	Action              TraceAction  `json:"action"`
+	BlockHash           *common.Hash `json:"blockHash,omitempty"`
+	BlockNumber         *uint64      `json:"blockNumber,omitempty"`
+	Error               string       `json:"error,omitempty"`
+	Result              TraceResult  `json:"result"`
+	Subtraces           int          `json:"subtraces"`
+	TraceAddress        []int        `json:"traceAddress"`
+	TransactionHash     *common.Hash `json:"transactionHash,omitempty"`
+	TransactionPosition *uint64      `json:"transactionPosition,omitempty"`
+	Type                string       `json:"type"`
 }
 
 // ParityTraces An array of parity traces
@@ -74,10 +74,10 @@ type TraceAction struct {
 // TraceResult A parity formatted trace result
 type TraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Address string `json:"address,omitempty"`
-	Code    string `json:"code,omitempty"`
-	GasUsed string `json:"gasUsed,omitempty"`
-	Output  string `json:"output,omitempty"`
+	Address *common.Address `json:"address,omitempty"`
+	Code    hexutil.Bytes   `json:"code,omitempty"`
+	GasUsed *hexutil.Big    `json:"gasUsed"`
+	Output  hexutil.Bytes   `json:"output,omitempty"`
 }
 
 // Allows for easy printing of a geth trace for debugging
@@ -132,20 +132,26 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 		pt.Action.CallType = ""
 		pt.Action.From = gethTrace.From
 		pt.Action.Init = gethTrace.Input
-		pt.Result.Address = gethTrace.To
-		pt.Result.Output = ""
+		to := common.HexToAddress(gethTrace.To)
+		pt.Result.Address = &to
 		pt.Action.Value = gethTrace.Value
-		pt.Result.Code = gethTrace.Output
+		pt.Result.Code = common.FromHex(gethTrace.Output)
 		pt.Action.Gas = gethTrace.Gas
-		pt.Result.GasUsed = gethTrace.GasUsed
+		pt.Result.GasUsed = new(hexutil.Big)
+		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
+			panic(err)
+		}
 
 	} else if callType == "selfdestruct" {
 		pt.Action.CallType = ""
 		pt.Action.Input = gethTrace.Input
-		pt.Result.Output = gethTrace.Output
+		pt.Result.Output = common.FromHex(gethTrace.Output)
 		pt.Action.Balance = gethTrace.Value
 		pt.Action.Gas = gethTrace.Gas
-		pt.Result.GasUsed = gethTrace.GasUsed
+		pt.Result.GasUsed = new(hexutil.Big)
+		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
+			panic(err)
+		}
 		pt.Action.SelfDestructed = gethTrace.From
 		pt.Action.RefundAddress = gethTrace.To
 	} else {
@@ -153,20 +159,12 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 		pt.Action.Input = gethTrace.Input
 		pt.Action.From = gethTrace.From
 		pt.Action.To = gethTrace.To
-		pt.Result.Output = gethTrace.Output
+		pt.Result.Output = common.FromHex(gethTrace.Output)
 		pt.Action.Value = gethTrace.Value
-		pt.Result.Code = "" // gethTrace.XXX
 		pt.Action.Gas = gethTrace.Gas
-		pt.Result.GasUsed = gethTrace.GasUsed
-
-		// TODO(tjayrush): This extreme hack will be removed. It is here because it's the only way I could
-		// TODO(tjayrush): get test cases to pass. Search (gasUsedHack) for related code
-		if pt.Action.Gas == "0xdeadbeef" {
-			a, _ := hexutil.DecodeUint64(pt.Action.Gas)     // 0xdeadbeef
-			b, _ := hexutil.DecodeUint64(pt.Result.GasUsed) // the tracer returns a value too big by 0xdeadbeef - trueValue
-			c := a - b                                      // trueValue
-			pt.Action.Gas = hexutil.EncodeUint64(c)
-			pt.Result.GasUsed = hexutil.EncodeUint64(0)
+		pt.Result.GasUsed = new(hexutil.Big)
+		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
+			panic(err)
 		}
 	}
 
@@ -185,17 +183,19 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 		pt.Error = gethTrace.Error
 	}
 	if pt.Error != "" {
-		pt.Result.GasUsed = "0"
+		pt.Result.GasUsed = new(hexutil.Big)
 	}
 	// This ugly code is here to convert Geth error messages to Parity error message. One day, when
 	// we figure out what we want to do, it will be removed
 
-	pt.BlockHash = blockHash
-	pt.BlockNumber = blockNumber
+	pt.BlockHash = &blockHash
+	pt.BlockNumber = &blockNumber
 	pt.Subtraces = len(gethTrace.Calls)
 	pt.TraceAddress = depth
-	pt.TransactionHash = tx.Hash()
-	pt.TransactionPosition = txIndex
+	pt.TransactionHash = &common.Hash{}
+	copy(pt.TransactionHash[:], tx.Hash().Bytes())
+	pt.TransactionPosition = new(uint64)
+	*pt.TransactionPosition = txIndex
 	pt.Type = callType
 	if pt.Type == "delegatecall" || pt.Type == "staticcall" {
 		pt.Type = "call"
