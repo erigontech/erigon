@@ -582,7 +582,7 @@ func testThrottling(t *testing.T, protocol int, mode SyncMode) {
 	}
 
 	// Start a synchronisation concurrently
-	errc := make(chan error)
+	errc := make(chan error, 1)
 	go func() {
 		errc <- tester.sync("peer", nil, mode)
 	}()

@@ -402,7 +402,12 @@ func (w *worker) getCommit() (func(ctx consensus.Cancel, noempty bool, s int32),
 
 		v := interrupt.Load().(*int32)
 
-		w.newWorkCh <- &newWorkReq{interrupt: v, noempty: noempty, timestamp: atomic.LoadInt64(timestamp), cancel: consensus.NewCancel()}
+		select {
+		case w.newWorkCh <- &newWorkReq{interrupt: v, noempty: noempty, timestamp: atomic.LoadInt64(timestamp), cancel: consensus.NewCancel()}:
+		case <-w.exitCh:
+			return
+		}
+
 		atomic.StoreInt32(&w.newTxs, 0)
 	}, timestamp
 }
