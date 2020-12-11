@@ -470,7 +470,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	stack.RegisterAPIs(eth.APIs())
 	stack.RegisterProtocols(eth.Protocols())
 	stack.RegisterLifecycle(eth)
-	return eth, nil
+	// Check for unclean shutdown
 }
 
 func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig) {
@@ -478,6 +478,7 @@ func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig) {
 		vmConfig = vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
 			EWASMInterpreter:        config.EWASMInterpreter,
+		if discards > 0 {
 			EVMInterpreter:          config.EVMInterpreter,
 			NoReceipts:              !config.StorageMode.Receipts,
 		}
