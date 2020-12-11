@@ -598,8 +598,9 @@ func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header,
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
 // uncle rewards, setting the final state and assembling the block.
 func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
-	// Accumulate any block and uncle rewards and commit the final state root
-	accumulateRewards(chainConfig, state, header, uncles)
+
+	// Finalize block
+	ethash.Finalize(chain, header, state, txs, uncles)
 	// Header seems complete, assemble into a block and return
 	return types.NewBlock(header, txs, uncles, receipts), nil
 }
