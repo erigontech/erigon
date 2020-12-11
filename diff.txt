@@ -2268,11 +2268,3 @@ Date:   Fri Dec 11 04:29:42 2020 -0500
     
     Similarly, there are two goroutines using channel errc: the parent that runs the test receives from it, and the child created at line 573 sends to it. If the parent goroutine exits too early by calling t.Fatalf() at line 614, then the child goroutine will be blocked at line 574 forever. This commit adds 1 buffer to errc. Now send will not block, and receive is not influenced because receive still needs to wait for the send.
 
-commit 1a715d7db57997307d309a498e8f819dd08725ad
-Author: Guillaume Ballet <gballet@gmail.com>
-Date:   Fri Dec 11 09:28:01 2020 +0000
-
-    les: rework float conversion on arm64 and other architectures (#21994)
-    
-    The previous fix #21960 converted the float to an intermediate signed int, before attempting the uint conversion. Although this works, this doesn't guarantee that other architectures will work the same.
-
