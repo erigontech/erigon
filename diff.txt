@@ -2282,15 +2282,3 @@ Date:   Fri Dec 11 08:59:46 2020 +0100
 
     params: begin v1.9.26 release cycle
 
-commit e7872729012a4871397307b12cc3f4772ffcbec6
-Author: Felix Lange <fjl@twurst.com>
-Date:   Fri Dec 11 08:59:12 2020 +0100
-
-    params: go-ethereum v1.9.25 stable
-
-commit 1d1f5fea4a3327dd59e39bf1324501f9b43f3354
-Author: Felix Lange <fjl@twurst.com>
-Date:   Fri Dec 11 09:02:55 2020 +0100
-
-    build: upgrade to Go 1.15.6 (#21986)
-
