@@ -65,10 +65,21 @@ func (dbs *PlainDBState) GetBlockNr() uint64 {
 }
 
 func (dbs *PlainDBState) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
+	var tx ethdb.Tx
+	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		if err != nil {
+			return err
+		}
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
+	}
 	st := llrb.New()
 	var s [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addr[:])
-	accData, _ := GetAsOf(dbs.db.(ethdb.HasTx).Tx(), false /* storage */, addr[:], dbs.blockNr+1)
+	accData, _ := GetAsOf(tx, false /* storage */, addr[:], dbs.blockNr+1)
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)
@@ -92,7 +103,7 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, startLocation commo
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	if err := WalkAsOfStorage(dbs.db.(ethdb.HasTx).Tx(), addr, acc.Incarnation, startLocation, dbs.blockNr+1, func(kAddr, kLoc, vs []byte) (bool, error) {
+	if err := WalkAsOfStorage(tx, addr, acc.Incarnation, startLocation, dbs.blockNr+1, func(kAddr, kLoc, vs []byte) (bool, error) {
 		if !bytes.Equal(kAddr, addr[:]) {
 			return false, nil
 		}
@@ -137,7 +148,18 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, startLocation commo
 }
 
 func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := GetAsOf(dbs.db.(ethdb.HasTx).Tx(), false /* storage */, address[:], dbs.blockNr+1)
+	var tx ethdb.Tx
+	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		if err != nil {
+			return nil, err
+		}
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
+	}
+	enc, err := GetAsOf(tx, false /* storage */, address[:], dbs.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
@@ -150,7 +172,7 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 	}
 	//restore codehash
 	if a.Incarnation > 0 && a.IsEmptyCodeHash() {
-		if codeHash, err1 := dbs.db.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
+		if codeHash, err1 := tx.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
 			if len(codeHash) > 0 {
 				a.CodeHash = common.BytesToHash(codeHash)
 			}
@@ -162,8 +184,19 @@ func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Acco
 }
 
 func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	var tx ethdb.Tx
+	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		if err != nil {
+			return nil, err
+		}
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
+	}
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := GetAsOf(dbs.db.(ethdb.HasTx).Tx(), true /* storage */, compositeKey, dbs.blockNr+1)
+	enc, err := GetAsOf(tx, true /* storage */, compositeKey, dbs.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
@@ -174,10 +207,21 @@ func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation 
 }
 
 func (dbs *PlainDBState) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	var tx ethdb.Tx
+	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		if err != nil {
+			return nil, err
+		}
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
+	}
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	code, err := dbs.db.Get(dbutils.CodeBucket, codeHash[:])
+	code, err := tx.GetOne(dbutils.CodeBucket, codeHash[:])
 	if len(code) == 0 {
 		return nil, nil
 	}
@@ -190,7 +234,18 @@ func (dbs *PlainDBState) ReadAccountCodeSize(address common.Address, incarnation
 }
 
 func (dbs *PlainDBState) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc, err := GetAsOf(dbs.db.(ethdb.HasTx).Tx(), false /* storage */, address[:], dbs.blockNr+2)
+	var tx ethdb.Tx
+	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		if err != nil {
+			return 0, err
+		}
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
+	}
+	enc, err := GetAsOf(tx, false /* storage */, address[:], dbs.blockNr+2)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, err
 	}
