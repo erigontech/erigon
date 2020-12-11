@@ -2276,9 +2276,3 @@ Date:   Fri Dec 11 09:28:01 2020 +0000
     
     The previous fix #21960 converted the float to an intermediate signed int, before attempting the uint conversion. Although this works, this doesn't guarantee that other architectures will work the same.
 
-commit fc0662bb2372f9a94dea60c3dcf122afd6bda55f
-Author: Felix Lange <fjl@twurst.com>
-Date:   Fri Dec 11 08:59:46 2020 +0100
-
-    params: begin v1.9.26 release cycle
-
