@@ -39,7 +39,7 @@ type GethTraces []*GethTrace
 // ParityTrace A trace in the desired format (Parity/OpenEtherum) See: https://openethereum.github.io/wiki/JSONRPC-trace-module
 type ParityTrace struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Action              TraceAction  `json:"action"`
+	Action              interface{}  `json:"action"` // Can be either CallTraceAction or CreateTraceAction
 	BlockHash           *common.Hash `json:"blockHash,omitempty"`
 	BlockNumber         *uint64      `json:"blockNumber,omitempty"`
 	Error               string       `json:"error,omitempty"`
@@ -71,6 +71,21 @@ type TraceAction struct {
 	Value          string         `json:"value,omitempty"`
 }
 
+type CallTraceAction struct {
+	CallType string         `json:"callType"`
+	From     common.Address `json:"from"`
+	Gas      hexutil.Big    `json:"gas"`
+	Input    hexutil.Bytes  `json:"input"`
+	Value    hexutil.Big    `json:"value"`
+}
+
+type CreateTraceAction struct {
+	From  common.Address `json:"from"`
+	Gas   hexutil.Big    `json:"gas"`
+	Init  hexutil.Bytes  `json:"init"`
+	Value hexutil.Big    `json:"value"`
+}
+
 // TraceResult A parity formatted trace result
 type TraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
@@ -97,16 +112,16 @@ func (p GethTrace) String() string {
 // Allows for easy printing of a parity trace for debugging
 func (t ParityTrace) String() string {
 	var ret string
-	ret += fmt.Sprintf("Action.SelfDestructed: %s\n", t.Action.SelfDestructed)
-	ret += fmt.Sprintf("Action.Balance: %s\n", t.Action.Balance)
-	ret += fmt.Sprintf("Action.CallType: %s\n", t.Action.CallType)
-	ret += fmt.Sprintf("Action.From: %s\n", t.Action.From)
-	ret += fmt.Sprintf("Action.Gas: %d\n", t.Action.Gas.ToInt())
-	ret += fmt.Sprintf("Action.Init: %s\n", t.Action.Init)
-	ret += fmt.Sprintf("Action.Input: %s\n", t.Action.Input)
-	ret += fmt.Sprintf("Action.RefundAddress: %s\n", t.Action.RefundAddress)
-	ret += fmt.Sprintf("Action.To: %s\n", t.Action.To)
-	ret += fmt.Sprintf("Action.Value: %s\n", t.Action.Value)
+	//ret += fmt.Sprintf("Action.SelfDestructed: %s\n", t.Action.SelfDestructed)
+	//ret += fmt.Sprintf("Action.Balance: %s\n", t.Action.Balance)
+	//ret += fmt.Sprintf("Action.CallType: %s\n", t.Action.CallType)
+	//ret += fmt.Sprintf("Action.From: %s\n", t.Action.From)
+	//ret += fmt.Sprintf("Action.Gas: %d\n", t.Action.Gas.ToInt())
+	//ret += fmt.Sprintf("Action.Init: %s\n", t.Action.Init)
+	//ret += fmt.Sprintf("Action.Input: %s\n", t.Action.Input)
+	//ret += fmt.Sprintf("Action.RefundAddress: %s\n", t.Action.RefundAddress)
+	//ret += fmt.Sprintf("Action.To: %s\n", t.Action.To)
+	//ret += fmt.Sprintf("Action.Value: %s\n", t.Action.Value)
 	ret += fmt.Sprintf("BlockHash: %v\n", t.BlockHash)
 	ret += fmt.Sprintf("BlockNumber: %d\n", t.BlockNumber)
 	ret += fmt.Sprintf("Result.Address: %s\n", t.Result.Address)
@@ -129,49 +144,55 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 
 	callType := strings.ToLower(gethTrace.Type)
 	if callType == "create" {
-		pt.Action.CallType = ""
-		pt.Action.From = common.HexToAddress(gethTrace.From)
-		pt.Action.Init = common.FromHex(gethTrace.Input)
+		action := TraceAction{}
+		action.CallType = ""
+		action.From = common.HexToAddress(gethTrace.From)
+		action.Init = common.FromHex(gethTrace.Input)
 		to := common.HexToAddress(gethTrace.To)
 		pt.Result.Address = &to
-		pt.Action.Value = gethTrace.Value
+		action.Value = gethTrace.Value
 		pt.Result.Code = common.FromHex(gethTrace.Output)
-		if err := pt.Action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
+		if err := action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
 			panic(err)
 		}
 		pt.Result.GasUsed = new(hexutil.Big)
 		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
 			panic(err)
 		}
+		pt.Action = action
 
 	} else if callType == "selfdestruct" {
-		pt.Action.CallType = ""
-		pt.Action.Input = common.FromHex(gethTrace.Input)
+		action := TraceAction{}
+		action.CallType = ""
+		action.Input = common.FromHex(gethTrace.Input)
 		pt.Result.Output = common.FromHex(gethTrace.Output)
-		pt.Action.Balance = gethTrace.Value
-		if err := pt.Action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
+		action.Balance = gethTrace.Value
+		if err := action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
 			panic(err)
 		}
 		pt.Result.GasUsed = new(hexutil.Big)
 		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
 			panic(err)
 		}
-		pt.Action.SelfDestructed = gethTrace.From
-		pt.Action.RefundAddress = gethTrace.To
+		action.SelfDestructed = gethTrace.From
+		action.RefundAddress = gethTrace.To
+		pt.Action = &action
 	} else {
-		pt.Action.CallType = callType
-		pt.Action.Input = common.FromHex(gethTrace.Input)
-		pt.Action.From = common.HexToAddress(gethTrace.From)
-		pt.Action.To = gethTrace.To
+		action := TraceAction{}
+		action.CallType = callType
+		action.Input = common.FromHex(gethTrace.Input)
+		action.From = common.HexToAddress(gethTrace.From)
+		action.To = gethTrace.To
 		pt.Result.Output = common.FromHex(gethTrace.Output)
-		pt.Action.Value = gethTrace.Value
-		if err := pt.Action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
+		action.Value = gethTrace.Value
+		if err := action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
 			panic(err)
 		}
 		pt.Result.GasUsed = new(hexutil.Big)
 		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
 			panic(err)
 		}
+		pt.Action = &action
 	}
 
 	// This ugly code is here to convert Geth error messages to Parity error message. One day, when

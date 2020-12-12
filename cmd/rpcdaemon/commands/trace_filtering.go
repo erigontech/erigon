@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -266,10 +265,11 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 				return nil, err
 			}
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+			fmt.Printf("%v\n", minerReward)
 			var tr ParityTrace
-			tr.Action.Author = strings.ToLower(block.Coinbase().String())
-			tr.Action.RewardType = "block" // goconst
-			tr.Action.Value = minerReward.String()
+			//tr.Action.Author = strings.ToLower(block.Coinbase().String())
+			//tr.Action.RewardType = "block" // goconst
+			//tr.Action.Value = minerReward.String()
 			tr.BlockHash = &common.Hash{}
 			copy(tr.BlockHash[:], block.Hash().Bytes())
 			tr.BlockNumber = new(uint64)
@@ -277,11 +277,12 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 			tr.Type = "reward" // nolint: goconst
 			traces = append(traces, tr)
 			for i, uncle := range block.Uncles() {
+				fmt.Printf("%v\n", uncle)
 				if i < len(uncleRewards) {
 					var tr ParityTrace
-					tr.Action.Author = strings.ToLower(uncle.Coinbase.String())
-					tr.Action.RewardType = "uncle" // goconst
-					tr.Action.Value = uncleRewards[i].String()
+					//tr.Action.Author = strings.ToLower(uncle.Coinbase.String())
+					//tr.Action.RewardType = "uncle" // goconst
+					//tr.Action.Value = uncleRewards[i].String()
 					tr.BlockHash = &common.Hash{}
 					copy(tr.BlockHash[:], block.Hash().Bytes())
 					tr.BlockNumber = new(uint64)

@@ -122,13 +122,20 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	}
 	trace.TraceAddress = make([]int, len(ot.traceAddr))
 	copy(trace.TraceAddress, ot.traceAddr)
-	trace.Action.From = from
-	trace.Action.Gas.ToInt().SetUint64(gas)
 	if create {
-		trace.Action.Init = common.CopyBytes(input)
+		action := CreateTraceAction{}
+		action.From = from
+		action.Gas.ToInt().SetUint64(gas)
+		action.Init = common.CopyBytes(input)
+		action.Value.ToInt().Set(value)
+		trace.Action = &action
 	} else {
-		trace.Action.CallType = CALL
-		trace.Action.Input = common.CopyBytes(input)
+		action := CallTraceAction{}
+		action.CallType = CALL
+		action.Gas.ToInt().SetUint64(gas)
+		action.Input = common.CopyBytes(input)
+		action.Value.ToInt().Set(value)
+		trace.Action = &action
 	}
 	ot.r.Trace = append(ot.r.Trace, trace)
 	ot.traceStack = append(ot.traceStack, trace)
