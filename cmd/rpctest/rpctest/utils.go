@@ -85,6 +85,27 @@ func compareTraces(trace, traceg *EthTxTrace) bool {
 	return true
 }
 
+func compareTraceCalls(trace, traceg *TraceCall) bool {
+	r := trace.Result
+	rg := traceg.Result
+	if !bytes.Equal(r.Output, rg.Output) {
+		fmt.Print("Root output is different: %x %x\n", r.Output, rg.Output)
+		return false
+	}
+	if len(r.Trace) != len(rg.Trace) {
+		fmt.Printf("Traces have different lengths: %d / %d\n", len(r.Trace), len(rg.Trace))
+		return false
+	}
+	for i, t := range r.Trace {
+		tg := rg.Trace[i]
+		if t.Type != tg.Type {
+			fmt.Printf("Trace different Type: %d %s %s\n", i, t.Type, tg.Type)
+			return false
+		}
+	}
+	return true
+}
+
 func compareBalances(balance, balanceg *EthBalance) bool {
 	if balance.Balance.ToInt().Cmp(balanceg.Balance.ToInt()) != 0 {
 		fmt.Printf("Different balance: %d %d\n", balance.Balance.ToInt(), balanceg.Balance.ToInt())

@@ -2,6 +2,7 @@ package rpctest
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -32,10 +33,13 @@ type EthBalance struct {
 }
 
 type EthTransaction struct {
-	From common.Address  `json:"from"`
-	To   *common.Address `json:"to"` // Pointer because it might be missing
-	Hash string          `json:"hash"`
-	Gas  hexutil.Big     `json:"gas"`
+	From     common.Address  `json:"from"`
+	To       *common.Address `json:"to"` // Pointer because it might be missing
+	Hash     string          `json:"hash"`
+	Gas      hexutil.Big     `json:"gas"`
+	GasPrice hexutil.Big     `json:"gasPrice"`
+	Input    hexutil.Bytes   `json:"input"`
+	Value    hexutil.Big     `json:"value"`
 }
 
 type EthBlockByNumberResult struct {
@@ -73,6 +77,20 @@ type EthTxTraceResult struct {
 type EthTxTrace struct {
 	CommonResponse
 	Result EthTxTraceResult `json:"result"`
+}
+
+type TraceCall struct {
+	CommonResponse
+	Result TraceCallResult `json:"result"`
+}
+
+type TraceCallResult struct {
+	Output hexutil.Bytes    `json:"output"`
+	Trace  []TraceCallTrace `json:"trace"`
+}
+
+type TraceCallTrace struct {
+	Type string `json:"type"`
 }
 
 type DebugModifiedAccounts struct {

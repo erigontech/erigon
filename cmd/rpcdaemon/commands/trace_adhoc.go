@@ -92,7 +92,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
 		input = args.Data
 	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, input, false)
+	msg := types.NewMessage(addr, args.To, 0 /* nonce */, value, gas, gasPrice, input, false /* checkNonce */)
 	return msg
 }
 
