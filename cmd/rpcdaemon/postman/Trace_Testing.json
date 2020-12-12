@@ -851,6 +851,739 @@
 			"protocolProfileBehavior": {}
 		},
 		{
+			"name": "trace_replayTransaction",
+			"item": [
+				{
+					"name": "trace_replayTransaction - all",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "0df08365-de62-444f-a2a8-1585c6b2d9b1",
+								"exec": [
+									"var expected = {",
+									"  \"jsonrpc\": \"2.0\",",
+									"  \"result\": {",
+									"    \"output\": \"0x\",",
+									"    \"stateDiff\": {",
+									"      \"0x00a63d34051602b2cb268ea344d4b8bc4767f2d4\": {",
+									"        \"balance\": {",
+									"          \"*\": {",
+									"            \"from\": \"0x52b7cb1385ccf49b2b\",",
+									"            \"to\": \"0x5236bafcfeb4e73b2b\"",
+									"          }",
+									"        },",
+									"        \"code\": \"=\",",
+									"        \"nonce\": {",
+									"          \"*\": {",
+									"            \"from\": \"0xc6f\",",
+									"            \"to\": \"0xc70\"",
+									"          }",
+									"        },",
+									"        \"storage\": {}",
+									"      },",
+									"      \"0x1a060b0604883a99809eb3f798df71bef6c358f1\": {",
+									"        \"balance\": {",
+									"          \"*\": {",
+									"            \"from\": \"0x6f9b59db405cf2c70\",",
+									"            \"to\": \"0x6f9b71bb0e49d6c70\"",
+									"          }",
+									"        },",
+									"        \"code\": \"=\",",
+									"        \"nonce\": \"=\",",
+									"        \"storage\": {}",
+									"      },",
+									"      \"0x87cc0d78ee64a9f11b5affdd9ea523872eae14e4\": {",
+									"        \"balance\": {",
+									"          \"*\": {",
+									"            \"from\": \"0x3afccb788fcd0e00\",",
+									"            \"to\": \"0xbc0b6402c90c2e00\"",
+									"          }",
+									"        },",
+									"        \"code\": \"=\",",
+									"        \"nonce\": \"=\",",
+									"        \"storage\": {}",
+									"      }",
+									"    },",
+									"    \"trace\": [",
+									"      {",
+									"        \"action\": {",
+									"          \"callType\": \"call\",",
+									"          \"from\": \"0x00a63d34051602b2cb268ea344d4b8bc4767f2d4\",",
+									"          \"gas\": \"0x0\",",
+									"          \"input\": \"0x\",",
+									"          \"to\": \"0x87cc0d78ee64a9f11b5affdd9ea523872eae14e4\",",
+									"          \"value\": \"0x810e988a393f2000\"",
+									"        },",
+									"        \"result\": {",
+									"          \"gasUsed\": \"0x0\",",
+									"          \"output\": \"0x\"",
+									"        },",
+									"        \"subtraces\": 0,",
+									"        \"traceAddress\": [],",
+									"        \"type\": \"call\"",
+									"      }",
+									"    ],",
+									"    \"vmTrace\": {",
+									"      \"code\": \"0x\",",
+									"      \"ops\": []",
+									"    }",
+									"  },",
+									"  \"id\": \"1\"",
+									"}",
+									"",
+									"pm.test('Has correct result', function() {",
+									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n\t\"params\":[\n    \"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f\",\n    [\"trace\",\"vmTrace\",\"stateDiff\"]\n  ],\n\t\"id\":\"1\"\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "trace_replayTransaction - none",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "5f84df2a-b6ab-45ca-9b18-f4f9534c1458",
+								"exec": [
+									"var expected = {",
+									"  \"jsonrpc\": \"2.0\",",
+									"  \"result\": {",
+									"    \"output\": \"0x\",",
+									"    \"stateDiff\": null,",
+									"    \"trace\": [],",
+									"    \"vmTrace\": null",
+									"  },",
+									"  \"id\": \"1\"",
+									"}",
+									"",
+									"pm.test('Has correct result', function() {",
+									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n\t\"params\":[\n    \"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f\",\n    []\n  ],\n\t\"id\":\"1\"\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "trace_replayTransaction - trace only",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "33278201-153b-490c-acb2-07b233baac25",
+								"exec": [
+									"var expected = {",
+									"  \"jsonrpc\": \"2.0\",",
+									"  \"result\": {",
+									"    \"output\": \"0x\",",
+									"    \"stateDiff\": null,",
+									"    \"trace\": [",
+									"      {",
+									"        \"action\": {",
+									"          \"callType\": \"call\",",
+									"          \"from\": \"0x00a63d34051602b2cb268ea344d4b8bc4767f2d4\",",
+									"          \"gas\": \"0x0\",",
+									"          \"input\": \"0x\",",
+									"          \"to\": \"0x87cc0d78ee64a9f11b5affdd9ea523872eae14e4\",",
+									"          \"value\": \"0x810e988a393f2000\"",
+									"        },",
+									"        \"result\": {",
+									"          \"gasUsed\": \"0x0\",",
+									"          \"output\": \"0x\"",
+									"        },",
+									"        \"subtraces\": 0,",
+									"        \"traceAddress\": [],",
+									"        \"type\": \"call\"",
+									"      }",
+									"    ],",
+									"    \"vmTrace\": null",
+									"  },",
+									"  \"id\": \"1\"",
+									"}",
+									"",
+									"pm.test('Has correct result', function() {",
+									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n\t\"params\":[\n    \"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f\",\n    [\"trace\"]\n  ],\n\t\"id\":\"1\"\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "trace_replayTransaction - vmTrace only",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "a84b1a91-ee56-46ee-b4fa-231f7aad455e",
+								"exec": [
+									"var expected = {",
+									"  \"jsonrpc\": \"2.0\",",
+									"  \"result\": {",
+									"    \"output\": \"0x\",",
+									"    \"stateDiff\": null,",
+									"    \"trace\": [],",
+									"    \"vmTrace\": {",
+									"      \"code\": \"0x\",",
+									"      \"ops\": []",
+									"    }",
+									"  },",
+									"  \"id\": \"1\"",
+									"}",
+									"",
+									"pm.test('Has correct result', function() {",
+									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n\t\"params\":[\n    \"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f\",\n    [\"vmTrace\"]\n  ],\n\t\"id\":\"1\"\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "trace_replayTransaction - stateDiff only",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "915e86b3-5172-44b3-87d9-9025c074ea5b",
+								"exec": [
+									"var expected = {",
+									"  \"jsonrpc\": \"2.0\",",
+									"  \"result\": {",
+									"    \"output\": \"0x\",",
+									"    \"stateDiff\": {",
+									"      \"0x00a63d34051602b2cb268ea344d4b8bc4767f2d4\": {",
+									"        \"balance\": {",
+									"          \"*\": {",
+									"            \"from\": \"0x52b7cb1385ccf49b2b\",",
+									"            \"to\": \"0x5236bafcfeb4e73b2b\"",
+									"          }",
+									"        },",
+									"        \"code\": \"=\",",
+									"        \"nonce\": {",
+									"          \"*\": {",
+									"            \"from\": \"0xc6f\",",
+									"            \"to\": \"0xc70\"",
+									"          }",
+									"        },",
+									"        \"storage\": {}",
+									"      },",
+									"      \"0x1a060b0604883a99809eb3f798df71bef6c358f1\": {",
+									"        \"balance\": {",
+									"          \"*\": {",
+									"            \"from\": \"0x6f9b59db405cf2c70\",",
+									"            \"to\": \"0x6f9b71bb0e49d6c70\"",
+									"          }",
+									"        },",
+									"        \"code\": \"=\",",
+									"        \"nonce\": \"=\",",
+									"        \"storage\": {}",
+									"      },",
+									"      \"0x87cc0d78ee64a9f11b5affdd9ea523872eae14e4\": {",
+									"        \"balance\": {",
+									"          \"*\": {",
+									"            \"from\": \"0x3afccb788fcd0e00\",",
+									"            \"to\": \"0xbc0b6402c90c2e00\"",
+									"          }",
+									"        },",
+									"        \"code\": \"=\",",
+									"        \"nonce\": \"=\",",
+									"        \"storage\": {}",
+									"      }",
+									"    },",
+									"    \"trace\": [],",
+									"    \"vmTrace\": null",
+									"  },",
+									"  \"id\": \"1\"",
+									"}",
+									"",
+									"pm.test('Has correct result', function() {",
+									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n\t\"params\":[\n    \"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f\",\n    [\"stateDiff\"]\n  ],\n\t\"id\":\"1\"\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"protocolProfileBehavior": {}
+		},
+		{
+			"name": "trace_replayBlockTransactions",
+			"item": [
+				{
+					"name": "trace_replayBlockTransactions - all",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "38dda4a1-afc6-4d61-ae10-d59496d10eb3",
+								"exec": [
+									"var expected = {",
+									"  \"jsonrpc\": \"2.0\",",
+									"  \"result\": [",
+									"    {",
+									"      \"output\": \"0x\",",
+									"      \"stateDiff\": {",
+									"        \"0x104994f45d9d697ca104e5704a7b77d7fec3537c\": {",
+									"          \"balance\": {",
+									"            \"+\": \"0x821878651a4d70000\"",
+									"          },",
+									"          \"code\": {",
+									"            \"+\": \"0x\"",
+									"          },",
+									"          \"nonce\": {",
+									"            \"+\": \"0x0\"",
+									"          },",
+									"          \"storage\": {}",
+									"        },",
+									"        \"0x32be343b94f860124dc4fee278fdcbd38c102d88\": {",
+									"          \"balance\": {",
+									"            \"*\": {",
+									"              \"from\": \"0x29dd8f1fcd55eef7fe5c\",",
+									"              \"to\": \"0x29d56d960a08fbeb9e5c\"",
+									"            }",
+									"          },",
+									"          \"code\": \"=\",",
+									"          \"nonce\": {",
+									"            \"*\": {",
+									"              \"from\": \"0x1efc5\",",
+									"              \"to\": \"0x1efc6\"",
+									"            }",
+									"          },",
+									"          \"storage\": {}",
+									"        },",
+									"        \"0x61c808d82a3ac53231750dadc13c777b59310bd9\": {",
+									"          \"balance\": {",
+									"            \"*\": {",
+									"              \"from\": \"0x16d21cbe94fc6c3ebf7\",",
+									"              \"to\": \"0x16d21ce264b14f94bf7\"",
+									"            }",
+									"          },",
+									"          \"code\": \"=\",",
+									"          \"nonce\": \"=\",",
+									"          \"storage\": {}",
+									"        }",
+									"      },",
+									"      \"trace\": [",
+									"        {",
+									"          \"action\": {",
+									"            \"callType\": \"call\",",
+									"            \"from\": \"0x32be343b94f860124dc4fee278fdcbd38c102d88\",",
+									"            \"gas\": \"0x4c40d\",",
+									"            \"input\": \"0x\",",
+									"            \"to\": \"0x104994f45d9d697ca104e5704a7b77d7fec3537c\",",
+									"            \"value\": \"0x821878651a4d70000\"",
+									"          },",
+									"          \"result\": {",
+									"            \"gasUsed\": \"0x0\",",
+									"            \"output\": \"0x\"",
+									"          },",
+									"          \"subtraces\": 0,",
+									"          \"traceAddress\": [],",
+									"          \"type\": \"call\"",
+									"        }",
+									"      ],",
+									"      \"transactionHash\": \"0xc55e2b90168af6972193c1f86fa4d7d7b31a29c156665d15b9cd48618b5177ef\",",
+									"      \"vmTrace\": {",
+									"        \"code\": \"0x\",",
+									"        \"ops\": []",
+									"      }",
+									"    }",
+									"  ],",
+									"  \"id\": \"1\"",
+									"}",
+									"",
+									"pm.test('Has correct result', function() {",
+									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[\n    \"0x1e8480\",\n    [\"trace\",\"vmTrace\",\"stateDiff\"]\n  ],\n\t\"id\":\"1\"\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "trace_replayBlockTransactions - none",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "7ae24d9b-a87c-4e22-a604-9c20e6641ee5",
+								"exec": [
+									"var expected = {",
+									"  \"jsonrpc\": \"2.0\",",
+									"  \"result\": [",
+									"    {",
+									"      \"output\": \"0x\",",
+									"      \"stateDiff\": null,",
+									"      \"trace\": [],",
+									"      \"transactionHash\": \"0xc55e2b90168af6972193c1f86fa4d7d7b31a29c156665d15b9cd48618b5177ef\",",
+									"      \"vmTrace\": null",
+									"    }",
+									"  ],",
+									"  \"id\": \"1\"",
+									"}",
+									"",
+									"pm.test('Has correct result', function() {",
+									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[\n    \"0x1e8480\",\n    []\n  ],\n\t\"id\":\"1\"\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "trace_replayBlockTransactions - trace only",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "ed4c941b-54ee-487d-8aff-7d0ecb750523",
+								"exec": [
+									"var expected = {",
+									"  \"jsonrpc\": \"2.0\",",
+									"  \"result\": [",
+									"    {",
+									"      \"output\": \"0x\",",
+									"      \"stateDiff\": null,",
+									"      \"trace\": [",
+									"        {",
+									"          \"action\": {",
+									"            \"callType\": \"call\",",
+									"            \"from\": \"0x32be343b94f860124dc4fee278fdcbd38c102d88\",",
+									"            \"gas\": \"0x4c40d\",",
+									"            \"input\": \"0x\",",
+									"            \"to\": \"0x104994f45d9d697ca104e5704a7b77d7fec3537c\",",
+									"            \"value\": \"0x821878651a4d70000\"",
+									"          },",
+									"          \"result\": {",
+									"            \"gasUsed\": \"0x0\",",
+									"            \"output\": \"0x\"",
+									"          },",
+									"          \"subtraces\": 0,",
+									"          \"traceAddress\": [],",
+									"          \"type\": \"call\"",
+									"        }",
+									"      ],",
+									"      \"transactionHash\": \"0xc55e2b90168af6972193c1f86fa4d7d7b31a29c156665d15b9cd48618b5177ef\",",
+									"      \"vmTrace\": null",
+									"    }",
+									"  ],",
+									"  \"id\": \"1\"",
+									"}",
+									"",
+									"pm.test('Has correct result', function() {",
+									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[\n    \"0x1e8480\",\n    [\"trace\"]\n  ],\n\t\"id\":\"1\"\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "trace_replayBlockTransactions - vmTrace only",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "b3703c29-7bb8-4d08-b757-efbb4de8243d",
+								"exec": [
+									"var expected = {",
+									"  \"jsonrpc\": \"2.0\",",
+									"  \"result\": [",
+									"    {",
+									"      \"output\": \"0x\",",
+									"      \"stateDiff\": null,",
+									"      \"trace\": [],",
+									"      \"transactionHash\": \"0xc55e2b90168af6972193c1f86fa4d7d7b31a29c156665d15b9cd48618b5177ef\",",
+									"      \"vmTrace\": {",
+									"        \"code\": \"0x\",",
+									"        \"ops\": []",
+									"      }",
+									"    }",
+									"  ],",
+									"  \"id\": \"1\"",
+									"}",
+									"",
+									"pm.test('Has correct result', function() {",
+									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
+									"})",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[\n    \"0x1e8480\",\n    [\"vmTrace\"]\n  ],\n\t\"id\":\"1\"\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "trace_replayBlockTransactions - stateDiff only",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"id": "ac907f46-3f6d-436e-b0fb-3ab294e6c33f",
+								"exec": [
+									"utils.cannotTest(\"trace_rawTransaction - all\", pm.response.json())",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[\n    \"0x1e8480\",\n    [\"stateDiff\"]\n  ],\n\t\"id\":\"1\"\n}",
+							"options": {
+								"raw": {}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}",
+							"host": [
+								"{{HOST}}"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"protocolProfileBehavior": {}
+		},
+		{
 			"name": "trace_rawTransaction",
 			"item": [
 				{
@@ -2779,739 +3512,6 @@
 						"body": {
 							"mode": "raw",
 							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_rawTransaction\",\n\t\"params\":[\n    \"0xf86d09850cf032900f83030d4094109c4f2ccc82c4d77bde15f306707320294aea3f880de0b6b3a7640000801ca02da49aa24d7fa6fa876af59d77acfd60537eba478654934430b1b32893b65c85a02cdc152d81b71f25fd23e3e271c8c0b15a3a91ce104b6af35bd476d1e6d26fdf\",\n    [\"stateDiff\"]\n  ],\n\t\"id\":\"1\"\n}",
-							"options": {
-								"raw": {}
-							}
-						},
-						"url": {
-							"raw": "{{HOST}}",
-							"host": [
-								"{{HOST}}"
-							]
-						}
-					},
-					"response": []
-				}
-			],
-			"protocolProfileBehavior": {}
-		},
-		{
-			"name": "trace_replayBlockTransactions",
-			"item": [
-				{
-					"name": "trace_replayBlockTransactions - all",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"id": "38dda4a1-afc6-4d61-ae10-d59496d10eb3",
-								"exec": [
-									"var expected = {",
-									"  \"jsonrpc\": \"2.0\",",
-									"  \"result\": [",
-									"    {",
-									"      \"output\": \"0x\",",
-									"      \"stateDiff\": {",
-									"        \"0x104994f45d9d697ca104e5704a7b77d7fec3537c\": {",
-									"          \"balance\": {",
-									"            \"+\": \"0x821878651a4d70000\"",
-									"          },",
-									"          \"code\": {",
-									"            \"+\": \"0x\"",
-									"          },",
-									"          \"nonce\": {",
-									"            \"+\": \"0x0\"",
-									"          },",
-									"          \"storage\": {}",
-									"        },",
-									"        \"0x32be343b94f860124dc4fee278fdcbd38c102d88\": {",
-									"          \"balance\": {",
-									"            \"*\": {",
-									"              \"from\": \"0x29dd8f1fcd55eef7fe5c\",",
-									"              \"to\": \"0x29d56d960a08fbeb9e5c\"",
-									"            }",
-									"          },",
-									"          \"code\": \"=\",",
-									"          \"nonce\": {",
-									"            \"*\": {",
-									"              \"from\": \"0x1efc5\",",
-									"              \"to\": \"0x1efc6\"",
-									"            }",
-									"          },",
-									"          \"storage\": {}",
-									"        },",
-									"        \"0x61c808d82a3ac53231750dadc13c777b59310bd9\": {",
-									"          \"balance\": {",
-									"            \"*\": {",
-									"              \"from\": \"0x16d21cbe94fc6c3ebf7\",",
-									"              \"to\": \"0x16d21ce264b14f94bf7\"",
-									"            }",
-									"          },",
-									"          \"code\": \"=\",",
-									"          \"nonce\": \"=\",",
-									"          \"storage\": {}",
-									"        }",
-									"      },",
-									"      \"trace\": [",
-									"        {",
-									"          \"action\": {",
-									"            \"callType\": \"call\",",
-									"            \"from\": \"0x32be343b94f860124dc4fee278fdcbd38c102d88\",",
-									"            \"gas\": \"0x4c40d\",",
-									"            \"input\": \"0x\",",
-									"            \"to\": \"0x104994f45d9d697ca104e5704a7b77d7fec3537c\",",
-									"            \"value\": \"0x821878651a4d70000\"",
-									"          },",
-									"          \"result\": {",
-									"            \"gasUsed\": \"0x0\",",
-									"            \"output\": \"0x\"",
-									"          },",
-									"          \"subtraces\": 0,",
-									"          \"traceAddress\": [],",
-									"          \"type\": \"call\"",
-									"        }",
-									"      ],",
-									"      \"transactionHash\": \"0xc55e2b90168af6972193c1f86fa4d7d7b31a29c156665d15b9cd48618b5177ef\",",
-									"      \"vmTrace\": {",
-									"        \"code\": \"0x\",",
-									"        \"ops\": []",
-									"      }",
-									"    }",
-									"  ],",
-									"  \"id\": \"1\"",
-									"}",
-									"",
-									"pm.test('Has correct result', function() {",
-									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-									"})",
-									""
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[\n    \"0x1e8480\",\n    [\"trace\",\"vmTrace\",\"stateDiff\"]\n  ],\n\t\"id\":\"1\"\n}",
-							"options": {
-								"raw": {}
-							}
-						},
-						"url": {
-							"raw": "{{HOST}}",
-							"host": [
-								"{{HOST}}"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "trace_replayBlockTransactions - none",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"id": "7ae24d9b-a87c-4e22-a604-9c20e6641ee5",
-								"exec": [
-									"var expected = {",
-									"  \"jsonrpc\": \"2.0\",",
-									"  \"result\": [",
-									"    {",
-									"      \"output\": \"0x\",",
-									"      \"stateDiff\": null,",
-									"      \"trace\": [],",
-									"      \"transactionHash\": \"0xc55e2b90168af6972193c1f86fa4d7d7b31a29c156665d15b9cd48618b5177ef\",",
-									"      \"vmTrace\": null",
-									"    }",
-									"  ],",
-									"  \"id\": \"1\"",
-									"}",
-									"",
-									"pm.test('Has correct result', function() {",
-									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-									"})",
-									""
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[\n    \"0x1e8480\",\n    []\n  ],\n\t\"id\":\"1\"\n}",
-							"options": {
-								"raw": {}
-							}
-						},
-						"url": {
-							"raw": "{{HOST}}",
-							"host": [
-								"{{HOST}}"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "trace_replayBlockTransactions - trace only",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"id": "ed4c941b-54ee-487d-8aff-7d0ecb750523",
-								"exec": [
-									"var expected = {",
-									"  \"jsonrpc\": \"2.0\",",
-									"  \"result\": [",
-									"    {",
-									"      \"output\": \"0x\",",
-									"      \"stateDiff\": null,",
-									"      \"trace\": [",
-									"        {",
-									"          \"action\": {",
-									"            \"callType\": \"call\",",
-									"            \"from\": \"0x32be343b94f860124dc4fee278fdcbd38c102d88\",",
-									"            \"gas\": \"0x4c40d\",",
-									"            \"input\": \"0x\",",
-									"            \"to\": \"0x104994f45d9d697ca104e5704a7b77d7fec3537c\",",
-									"            \"value\": \"0x821878651a4d70000\"",
-									"          },",
-									"          \"result\": {",
-									"            \"gasUsed\": \"0x0\",",
-									"            \"output\": \"0x\"",
-									"          },",
-									"          \"subtraces\": 0,",
-									"          \"traceAddress\": [],",
-									"          \"type\": \"call\"",
-									"        }",
-									"      ],",
-									"      \"transactionHash\": \"0xc55e2b90168af6972193c1f86fa4d7d7b31a29c156665d15b9cd48618b5177ef\",",
-									"      \"vmTrace\": null",
-									"    }",
-									"  ],",
-									"  \"id\": \"1\"",
-									"}",
-									"",
-									"pm.test('Has correct result', function() {",
-									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-									"})",
-									""
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[\n    \"0x1e8480\",\n    [\"trace\"]\n  ],\n\t\"id\":\"1\"\n}",
-							"options": {
-								"raw": {}
-							}
-						},
-						"url": {
-							"raw": "{{HOST}}",
-							"host": [
-								"{{HOST}}"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "trace_replayBlockTransactions - vmTrace only",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"id": "b3703c29-7bb8-4d08-b757-efbb4de8243d",
-								"exec": [
-									"var expected = {",
-									"  \"jsonrpc\": \"2.0\",",
-									"  \"result\": [",
-									"    {",
-									"      \"output\": \"0x\",",
-									"      \"stateDiff\": null,",
-									"      \"trace\": [],",
-									"      \"transactionHash\": \"0xc55e2b90168af6972193c1f86fa4d7d7b31a29c156665d15b9cd48618b5177ef\",",
-									"      \"vmTrace\": {",
-									"        \"code\": \"0x\",",
-									"        \"ops\": []",
-									"      }",
-									"    }",
-									"  ],",
-									"  \"id\": \"1\"",
-									"}",
-									"",
-									"pm.test('Has correct result', function() {",
-									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-									"})",
-									""
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[\n    \"0x1e8480\",\n    [\"vmTrace\"]\n  ],\n\t\"id\":\"1\"\n}",
-							"options": {
-								"raw": {}
-							}
-						},
-						"url": {
-							"raw": "{{HOST}}",
-							"host": [
-								"{{HOST}}"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "trace_replayBlockTransactions - stateDiff only",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"id": "ac907f46-3f6d-436e-b0fb-3ab294e6c33f",
-								"exec": [
-									"utils.cannotTest(\"trace_rawTransaction - all\", pm.response.json())",
-									""
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayBlockTransactions\",\n\t\"params\":[\n    \"0x1e8480\",\n    [\"stateDiff\"]\n  ],\n\t\"id\":\"1\"\n}",
-							"options": {
-								"raw": {}
-							}
-						},
-						"url": {
-							"raw": "{{HOST}}",
-							"host": [
-								"{{HOST}}"
-							]
-						}
-					},
-					"response": []
-				}
-			],
-			"protocolProfileBehavior": {}
-		},
-		{
-			"name": "trace_replayTransaction",
-			"item": [
-				{
-					"name": "trace_replayTransaction - all",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"id": "0df08365-de62-444f-a2a8-1585c6b2d9b1",
-								"exec": [
-									"var expected = {",
-									"  \"jsonrpc\": \"2.0\",",
-									"  \"result\": {",
-									"    \"output\": \"0x\",",
-									"    \"stateDiff\": {",
-									"      \"0x00a63d34051602b2cb268ea344d4b8bc4767f2d4\": {",
-									"        \"balance\": {",
-									"          \"*\": {",
-									"            \"from\": \"0x52b7cb1385ccf49b2b\",",
-									"            \"to\": \"0x5236bafcfeb4e73b2b\"",
-									"          }",
-									"        },",
-									"        \"code\": \"=\",",
-									"        \"nonce\": {",
-									"          \"*\": {",
-									"            \"from\": \"0xc6f\",",
-									"            \"to\": \"0xc70\"",
-									"          }",
-									"        },",
-									"        \"storage\": {}",
-									"      },",
-									"      \"0x1a060b0604883a99809eb3f798df71bef6c358f1\": {",
-									"        \"balance\": {",
-									"          \"*\": {",
-									"            \"from\": \"0x6f9b59db405cf2c70\",",
-									"            \"to\": \"0x6f9b71bb0e49d6c70\"",
-									"          }",
-									"        },",
-									"        \"code\": \"=\",",
-									"        \"nonce\": \"=\",",
-									"        \"storage\": {}",
-									"      },",
-									"      \"0x87cc0d78ee64a9f11b5affdd9ea523872eae14e4\": {",
-									"        \"balance\": {",
-									"          \"*\": {",
-									"            \"from\": \"0x3afccb788fcd0e00\",",
-									"            \"to\": \"0xbc0b6402c90c2e00\"",
-									"          }",
-									"        },",
-									"        \"code\": \"=\",",
-									"        \"nonce\": \"=\",",
-									"        \"storage\": {}",
-									"      }",
-									"    },",
-									"    \"trace\": [",
-									"      {",
-									"        \"action\": {",
-									"          \"callType\": \"call\",",
-									"          \"from\": \"0x00a63d34051602b2cb268ea344d4b8bc4767f2d4\",",
-									"          \"gas\": \"0x0\",",
-									"          \"input\": \"0x\",",
-									"          \"to\": \"0x87cc0d78ee64a9f11b5affdd9ea523872eae14e4\",",
-									"          \"value\": \"0x810e988a393f2000\"",
-									"        },",
-									"        \"result\": {",
-									"          \"gasUsed\": \"0x0\",",
-									"          \"output\": \"0x\"",
-									"        },",
-									"        \"subtraces\": 0,",
-									"        \"traceAddress\": [],",
-									"        \"type\": \"call\"",
-									"      }",
-									"    ],",
-									"    \"vmTrace\": {",
-									"      \"code\": \"0x\",",
-									"      \"ops\": []",
-									"    }",
-									"  },",
-									"  \"id\": \"1\"",
-									"}",
-									"",
-									"pm.test('Has correct result', function() {",
-									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-									"})",
-									""
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n\t\"params\":[\n    \"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f\",\n    [\"trace\",\"vmTrace\",\"stateDiff\"]\n  ],\n\t\"id\":\"1\"\n}",
-							"options": {
-								"raw": {}
-							}
-						},
-						"url": {
-							"raw": "{{HOST}}",
-							"host": [
-								"{{HOST}}"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "trace_replayTransaction - none",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"id": "5f84df2a-b6ab-45ca-9b18-f4f9534c1458",
-								"exec": [
-									"var expected = {",
-									"  \"jsonrpc\": \"2.0\",",
-									"  \"result\": {",
-									"    \"output\": \"0x\",",
-									"    \"stateDiff\": null,",
-									"    \"trace\": [],",
-									"    \"vmTrace\": null",
-									"  },",
-									"  \"id\": \"1\"",
-									"}",
-									"",
-									"pm.test('Has correct result', function() {",
-									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-									"})",
-									""
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n\t\"params\":[\n    \"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f\",\n    []\n  ],\n\t\"id\":\"1\"\n}",
-							"options": {
-								"raw": {}
-							}
-						},
-						"url": {
-							"raw": "{{HOST}}",
-							"host": [
-								"{{HOST}}"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "trace_replayTransaction - trace only",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"id": "33278201-153b-490c-acb2-07b233baac25",
-								"exec": [
-									"var expected = {",
-									"  \"jsonrpc\": \"2.0\",",
-									"  \"result\": {",
-									"    \"output\": \"0x\",",
-									"    \"stateDiff\": null,",
-									"    \"trace\": [",
-									"      {",
-									"        \"action\": {",
-									"          \"callType\": \"call\",",
-									"          \"from\": \"0x00a63d34051602b2cb268ea344d4b8bc4767f2d4\",",
-									"          \"gas\": \"0x0\",",
-									"          \"input\": \"0x\",",
-									"          \"to\": \"0x87cc0d78ee64a9f11b5affdd9ea523872eae14e4\",",
-									"          \"value\": \"0x810e988a393f2000\"",
-									"        },",
-									"        \"result\": {",
-									"          \"gasUsed\": \"0x0\",",
-									"          \"output\": \"0x\"",
-									"        },",
-									"        \"subtraces\": 0,",
-									"        \"traceAddress\": [],",
-									"        \"type\": \"call\"",
-									"      }",
-									"    ],",
-									"    \"vmTrace\": null",
-									"  },",
-									"  \"id\": \"1\"",
-									"}",
-									"",
-									"pm.test('Has correct result', function() {",
-									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-									"})",
-									""
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n\t\"params\":[\n    \"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f\",\n    [\"trace\"]\n  ],\n\t\"id\":\"1\"\n}",
-							"options": {
-								"raw": {}
-							}
-						},
-						"url": {
-							"raw": "{{HOST}}",
-							"host": [
-								"{{HOST}}"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "trace_replayTransaction - vmTrace only",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"id": "a84b1a91-ee56-46ee-b4fa-231f7aad455e",
-								"exec": [
-									"var expected = {",
-									"  \"jsonrpc\": \"2.0\",",
-									"  \"result\": {",
-									"    \"output\": \"0x\",",
-									"    \"stateDiff\": null,",
-									"    \"trace\": [],",
-									"    \"vmTrace\": {",
-									"      \"code\": \"0x\",",
-									"      \"ops\": []",
-									"    }",
-									"  },",
-									"  \"id\": \"1\"",
-									"}",
-									"",
-									"pm.test('Has correct result', function() {",
-									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-									"})",
-									""
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n\t\"params\":[\n    \"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f\",\n    [\"vmTrace\"]\n  ],\n\t\"id\":\"1\"\n}",
-							"options": {
-								"raw": {}
-							}
-						},
-						"url": {
-							"raw": "{{HOST}}",
-							"host": [
-								"{{HOST}}"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "trace_replayTransaction - stateDiff only",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"id": "915e86b3-5172-44b3-87d9-9025c074ea5b",
-								"exec": [
-									"var expected = {",
-									"  \"jsonrpc\": \"2.0\",",
-									"  \"result\": {",
-									"    \"output\": \"0x\",",
-									"    \"stateDiff\": {",
-									"      \"0x00a63d34051602b2cb268ea344d4b8bc4767f2d4\": {",
-									"        \"balance\": {",
-									"          \"*\": {",
-									"            \"from\": \"0x52b7cb1385ccf49b2b\",",
-									"            \"to\": \"0x5236bafcfeb4e73b2b\"",
-									"          }",
-									"        },",
-									"        \"code\": \"=\",",
-									"        \"nonce\": {",
-									"          \"*\": {",
-									"            \"from\": \"0xc6f\",",
-									"            \"to\": \"0xc70\"",
-									"          }",
-									"        },",
-									"        \"storage\": {}",
-									"      },",
-									"      \"0x1a060b0604883a99809eb3f798df71bef6c358f1\": {",
-									"        \"balance\": {",
-									"          \"*\": {",
-									"            \"from\": \"0x6f9b59db405cf2c70\",",
-									"            \"to\": \"0x6f9b71bb0e49d6c70\"",
-									"          }",
-									"        },",
-									"        \"code\": \"=\",",
-									"        \"nonce\": \"=\",",
-									"        \"storage\": {}",
-									"      },",
-									"      \"0x87cc0d78ee64a9f11b5affdd9ea523872eae14e4\": {",
-									"        \"balance\": {",
-									"          \"*\": {",
-									"            \"from\": \"0x3afccb788fcd0e00\",",
-									"            \"to\": \"0xbc0b6402c90c2e00\"",
-									"          }",
-									"        },",
-									"        \"code\": \"=\",",
-									"        \"nonce\": \"=\",",
-									"        \"storage\": {}",
-									"      }",
-									"    },",
-									"    \"trace\": [],",
-									"    \"vmTrace\": null",
-									"  },",
-									"  \"id\": \"1\"",
-									"}",
-									"",
-									"pm.test('Has correct result', function() {",
-									"    pm.expect(pm.response.json()).to.be.deep.equal(expected);",
-									"})",
-									""
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n\t\"jsonrpc\":\"2.0\",\n\t\"method\":\"trace_replayTransaction\",\n\t\"params\":[\n    \"0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f\",\n    [\"stateDiff\"]\n  ],\n\t\"id\":\"1\"\n}",
 							"options": {
 								"raw": {}
 							}
