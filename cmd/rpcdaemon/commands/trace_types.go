@@ -57,18 +57,18 @@ type ParityTraces []ParityTrace
 // TraceAction A parity formatted trace action
 type TraceAction struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Author         string `json:"author,omitempty"`
-	RewardType     string `json:"rewardType,omitempty"`
-	SelfDestructed string `json:"address,omitempty"`
-	Balance        string `json:"balance,omitempty"`
-	CallType       string `json:"callType,omitempty"`
-	From           string `json:"from,omitempty"`
-	Gas            string `json:"gas,omitempty"`
-	Init           string `json:"init,omitempty"`
-	Input          string `json:"input,omitempty"`
-	RefundAddress  string `json:"refundAddress,omitempty"`
-	To             string `json:"to,omitempty"`
-	Value          string `json:"value,omitempty"`
+	Author         string         `json:"author,omitempty"`
+	RewardType     string         `json:"rewardType,omitempty"`
+	SelfDestructed string         `json:"address,omitempty"`
+	Balance        string         `json:"balance,omitempty"`
+	CallType       string         `json:"callType,omitempty"`
+	From           common.Address `json:"from"`
+	Gas            hexutil.Big    `json:"gas"`
+	Init           hexutil.Bytes  `json:"init,omitempty"`
+	Input          hexutil.Bytes  `json:"input,omitempty"`
+	RefundAddress  string         `json:"refundAddress,omitempty"`
+	To             string         `json:"to,omitempty"`
+	Value          string         `json:"value,omitempty"`
 }
 
 // TraceResult A parity formatted trace result
@@ -101,7 +101,7 @@ func (t ParityTrace) String() string {
 	ret += fmt.Sprintf("Action.Balance: %s\n", t.Action.Balance)
 	ret += fmt.Sprintf("Action.CallType: %s\n", t.Action.CallType)
 	ret += fmt.Sprintf("Action.From: %s\n", t.Action.From)
-	ret += fmt.Sprintf("Action.Gas: %s\n", t.Action.Gas)
+	ret += fmt.Sprintf("Action.Gas: %d\n", t.Action.Gas.ToInt())
 	ret += fmt.Sprintf("Action.Init: %s\n", t.Action.Init)
 	ret += fmt.Sprintf("Action.Input: %s\n", t.Action.Input)
 	ret += fmt.Sprintf("Action.RefundAddress: %s\n", t.Action.RefundAddress)
@@ -114,7 +114,7 @@ func (t ParityTrace) String() string {
 	ret += fmt.Sprintf("Result.GasUsed: %s\n", t.Result.GasUsed)
 	ret += fmt.Sprintf("Result.Output: %s\n", t.Result.Output)
 	ret += fmt.Sprintf("Subtraces: %d\n", t.Subtraces)
-	//ret += fmt.Sprintf("TraceAddress: %s\n", t.TraceAddress)
+	ret += fmt.Sprintf("TraceAddress: %v\n", t.TraceAddress)
 	ret += fmt.Sprintf("TransactionHash: %v\n", t.TransactionHash)
 	ret += fmt.Sprintf("TransactionPosition: %d\n", t.TransactionPosition)
 	ret += fmt.Sprintf("Type: %s\n", t.Type)
@@ -130,13 +130,15 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 	callType := strings.ToLower(gethTrace.Type)
 	if callType == "create" {
 		pt.Action.CallType = ""
-		pt.Action.From = gethTrace.From
-		pt.Action.Init = gethTrace.Input
+		pt.Action.From = common.HexToAddress(gethTrace.From)
+		pt.Action.Init = common.FromHex(gethTrace.Input)
 		to := common.HexToAddress(gethTrace.To)
 		pt.Result.Address = &to
 		pt.Action.Value = gethTrace.Value
 		pt.Result.Code = common.FromHex(gethTrace.Output)
-		pt.Action.Gas = gethTrace.Gas
+		if err := pt.Action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
+			panic(err)
+		}
 		pt.Result.GasUsed = new(hexutil.Big)
 		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
 			panic(err)
@@ -144,10 +146,12 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 
 	} else if callType == "selfdestruct" {
 		pt.Action.CallType = ""
-		pt.Action.Input = gethTrace.Input
+		pt.Action.Input = common.FromHex(gethTrace.Input)
 		pt.Result.Output = common.FromHex(gethTrace.Output)
 		pt.Action.Balance = gethTrace.Value
-		pt.Action.Gas = gethTrace.Gas
+		if err := pt.Action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
+			panic(err)
+		}
 		pt.Result.GasUsed = new(hexutil.Big)
 		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
 			panic(err)
@@ -156,12 +160,14 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 		pt.Action.RefundAddress = gethTrace.To
 	} else {
 		pt.Action.CallType = callType
-		pt.Action.Input = gethTrace.Input
-		pt.Action.From = gethTrace.From
+		pt.Action.Input = common.FromHex(gethTrace.Input)
+		pt.Action.From = common.HexToAddress(gethTrace.From)
 		pt.Action.To = gethTrace.To
 		pt.Result.Output = common.FromHex(gethTrace.Output)
 		pt.Action.Value = gethTrace.Value
-		pt.Action.Gas = gethTrace.Gas
+		if err := pt.Action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
+			panic(err)
+		}
 		pt.Result.GasUsed = new(hexutil.Big)
 		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
 			panic(err)

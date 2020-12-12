@@ -23,6 +23,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
+const (
+	CALL   = "call"
+	CREATE = "create"
+)
+
 // TraceCallParam (see SendTxArgs -- this allows optional prams plus don't use MixedcaseAddress
 type TraceCallParam struct {
 	From     *common.Address `json:"from"`
@@ -105,11 +110,10 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d\n", depth, from, to, create, input, gas, value)
 	trace := &ParityTrace{}
 	if create {
-		trace.Type = "create"
+		trace.Type = CREATE
 	} else {
-		trace.Type = "call"
+		trace.Type = CALL
 	}
-	ot.r.Trace = append(ot.r.Trace, trace)
 	if depth > 0 {
 		topTrace := ot.traceStack[len(ot.traceStack)-1]
 		traceIdx := topTrace.Subtraces
@@ -118,6 +122,15 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	}
 	trace.TraceAddress = make([]int, len(ot.traceAddr))
 	copy(trace.TraceAddress, ot.traceAddr)
+	trace.Action.From = from
+	trace.Action.Gas.ToInt().SetUint64(gas)
+	if create {
+		trace.Action.Init = common.CopyBytes(input)
+	} else {
+		trace.Action.CallType = CALL
+		trace.Action.Input = common.CopyBytes(input)
+	}
+	ot.r.Trace = append(ot.r.Trace, trace)
 	ot.traceStack = append(ot.traceStack, trace)
 	return nil
 }
