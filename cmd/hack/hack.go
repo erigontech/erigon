@@ -2093,6 +2093,36 @@ func indexKeySizes(chaindata string) error {
 	return nil
 }
 
+func extractBodies(chaindata string, block uint64) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RO)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockBodyPrefix)
+	defer c.Close()
+	blockEncoded := dbutils.EncodeBlockNumber(block)
+	for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		blockNumber := binary.BigEndian.Uint64(k[:8])
+		blockHash := common.BytesToHash(k[8:])
+		body := rawdb.ReadBody(db, blockHash, blockNumber)
+		b, err := rlp.EncodeToBytes(body)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Body %d %x: %x\n", blockNumber, blockHash, b)
+		if blockNumber > block+5 {
+			break
+		}
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -2275,6 +2305,11 @@ func main() {
 	if *action == "indexKeySizes" {
 		if err := indexKeySizes(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "extractBodies" {
+		if err := extractBodies(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error:%v\n", err)
 		}
 	}
 }
