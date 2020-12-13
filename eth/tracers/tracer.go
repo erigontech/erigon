@@ -531,7 +531,7 @@ func wrapError(context string, err error) error {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *big.Int) error {
 	if depth != 0 {
 		return nil
 	}

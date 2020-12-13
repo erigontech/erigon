@@ -89,7 +89,7 @@ func compareTraceCalls(trace, traceg *TraceCall) bool {
 	r := trace.Result
 	rg := traceg.Result
 	if !bytes.Equal(r.Output, rg.Output) {
-		fmt.Print("Root output is different: %x %x\n", r.Output, rg.Output)
+		fmt.Printf("Root output is different: %x %x\n", r.Output, rg.Output)
 		return false
 	}
 	if len(r.Trace) != len(rg.Trace) {

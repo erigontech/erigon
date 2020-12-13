@@ -333,7 +333,7 @@ type stepCounter struct {
 	steps int
 }
 
-func (s *stepCounter) CaptureStart(_ int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (s *stepCounter) CaptureStart(_ int, from common.Address, to common.Address, preimage bool, create bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
 

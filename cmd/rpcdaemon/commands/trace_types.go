@@ -74,6 +74,7 @@ type TraceAction struct {
 type CallTraceAction struct {
 	CallType string         `json:"callType"`
 	From     common.Address `json:"from"`
+	To       common.Address `json:"to"`
 	Gas      hexutil.Big    `json:"gas"`
 	Input    hexutil.Bytes  `json:"input"`
 	Value    hexutil.Big    `json:"value"`

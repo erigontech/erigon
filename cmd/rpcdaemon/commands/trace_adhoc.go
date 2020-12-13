@@ -101,9 +101,14 @@ type OeTracer struct {
 	r          *TraceCallResult
 	traceAddr  []int
 	traceStack []*ParityTrace
+	precompile bool // Whether the last CaptureStart was called with `precompile = true`
 }
 
-func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *big.Int) error {
+	if precompile {
+		ot.precompile = true
+		return nil
+	}
 	if gas > 500000000 {
 		gas = 500000001 - (0x8000000000000000 - gas)
 	}
@@ -132,6 +137,8 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	} else {
 		action := CallTraceAction{}
 		action.CallType = CALL
+		action.From = from
+		action.To = to
 		action.Gas.ToInt().SetUint64(gas)
 		action.Input = common.CopyBytes(input)
 		action.Value.ToInt().Set(value)
@@ -143,6 +150,10 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 }
 
 func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+	if ot.precompile {
+		ot.precompile = false
+		return nil
+	}
 	fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d\n", depth, output, gasUsed)
 	if depth == 0 {
 		ot.r.Output = common.CopyBytes(output)

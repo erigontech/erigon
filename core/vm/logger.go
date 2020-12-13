@@ -111,7 +111,7 @@ func (s *StructLog) ErrorString() string {
 // Note that reference types are actual VM data structures; make copies
 // if you need to retain them beyond the current call.
 type Tracer interface {
-	CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error
+	CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *big.Int) error
 	CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, rData []byte, contract *Contract, depth int, err error) error
 	CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, contract *Contract, depth int, err error) error
 	CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error
@@ -146,7 +146,7 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *StructLogger) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (l *StructLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
 
@@ -327,7 +327,7 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 	return l
 }
 
-func (t *mdLogger) CaptureStart(_ int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error { //nolint:interfacer
+func (t *mdLogger) CaptureStart(_ int, from common.Address, to common.Address, preimage bool, create bool, input []byte, gas uint64, value *big.Int) error { //nolint:interfacer
 	if !create {
 		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
 			from.String(), to.String(),
