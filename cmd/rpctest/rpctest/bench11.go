@@ -47,6 +47,7 @@ func Bench11(tgURL, oeURL string, needCompare bool, blockNum uint64) {
 
 		if b.Error != nil {
 			fmt.Printf("Error retrieving block (turbo-geth): %d %s\n", b.Error.Code, b.Error.Message)
+			return
 		}
 
 		if needCompare {
@@ -73,10 +74,12 @@ func Bench11(tgURL, oeURL string, needCompare bool, blockNum uint64) {
 			res = reqGen.TurboGeth("trace_call", reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1), &trace)
 			if res.Err != nil {
 				fmt.Printf("Could not trace call (turbo-geth) %s: %v\n", tx.Hash, res.Err)
+				return
 			}
 
 			if trace.Error != nil {
 				fmt.Printf("Error tracing call (turbo-geth): %d %s\n", trace.Error.Code, trace.Error.Message)
+				return
 			}
 
 			if needCompare {

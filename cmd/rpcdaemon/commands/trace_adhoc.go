@@ -24,8 +24,12 @@ import (
 )
 
 const (
-	CALL   = "call"
-	CREATE = "create"
+	CALL         = "call"
+	CALLCODE     = "callcode"
+	DELEGATECALL = "delegatecall"
+	STATICCALL   = "staticcall"
+	CREATE       = "create"
+	SUICIDE      = "suicide"
 )
 
 // TraceCallParam (see SendTxArgs -- this allows optional prams plus don't use MixedcaseAddress
@@ -104,7 +108,7 @@ type OeTracer struct {
 	precompile bool // Whether the last CaptureStart was called with `precompile = true`
 }
 
-func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *big.Int) error {
+func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
 	if precompile {
 		ot.precompile = true
 		return nil
@@ -114,8 +118,11 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	}
 	fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d\n", depth, from, to, create, input, gas, value)
 	trace := &ParityTrace{}
+	trace.Result = &TraceResult{}
 	if create {
 		trace.Type = CREATE
+		trace.Result.Address = new(common.Address)
+		copy(trace.Result.Address[:], to.Bytes())
 	} else {
 		trace.Type = CALL
 	}
@@ -136,7 +143,16 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 		trace.Action = &action
 	} else {
 		action := CallTraceAction{}
-		action.CallType = CALL
+		switch calltype {
+		case vm.CALL_TYPE:
+			action.CallType = CALL
+		case vm.CALLCODE_TYPE:
+			action.CallType = CALLCODE
+		case vm.DELEGATECALL_TYPE:
+			action.CallType = DELEGATECALL
+		case vm.STATICCALL_TYPE:
+			action.CallType = STATICCALL
+		}
 		action.From = from
 		action.To = to
 		action.Gas.ToInt().SetUint64(gas)
@@ -159,7 +175,14 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		ot.r.Output = common.CopyBytes(output)
 	}
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
-	topTrace.Result.Output = common.CopyBytes(output)
+	if len(output) > 0 {
+		switch topTrace.Type {
+		case CALL:
+			topTrace.Result.Output = common.CopyBytes(output)
+		case CREATE:
+			topTrace.Result.Code = common.CopyBytes(output)
+		}
+	}
 	topTrace.Result.GasUsed = new(hexutil.Big)
 	topTrace.Result.GasUsed.ToInt().SetUint64(gasUsed)
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
@@ -177,10 +200,17 @@ func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 	return nil
 }
 
-func (ot *OeTracer) CaptureCreate(creator common.Address, creation common.Address) error {
-	//fmt.Printf("CaptureCreate creator %x, creation %x\n", creator, creation)
-	return nil
+func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+	trace := &ParityTrace{}
+	trace.Type = SUICIDE
+	action := &SuicideTraceAction{}
+	action.Address = from
+	action.RefundAddress = to
+	action.Balance.ToInt().Set(value)
+	trace.Action = action
+	ot.r.Trace = append(ot.r.Trace, trace)
 }
+
 func (ot *OeTracer) CaptureAccountRead(account common.Address) error {
 	return nil
 }

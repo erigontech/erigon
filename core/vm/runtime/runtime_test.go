@@ -333,7 +333,7 @@ type stepCounter struct {
 	steps int
 }
 
-func (s *stepCounter) CaptureStart(_ int, from common.Address, to common.Address, preimage bool, create bool, input []byte, gas uint64, value *big.Int) error {
+func (s *stepCounter) CaptureStart(_ int, from common.Address, to common.Address, preimage bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
 
@@ -352,12 +352,13 @@ func (s *stepCounter) CaptureEnd(_ int, output []byte, gasUsed uint64, t time.Du
 	return nil
 }
 
-func (s *stepCounter) CaptureCreate(creator common.Address, creation common.Address) error {
-	return nil
+func (s *stepCounter) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
 }
+
 func (s *stepCounter) CaptureAccountRead(account common.Address) error {
 	return nil
 }
+
 func (s *stepCounter) CaptureAccountWrite(account common.Address) error {
 	return nil
 }

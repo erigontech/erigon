@@ -90,7 +90,30 @@ type TraceCallResult struct {
 }
 
 type TraceCallTrace struct {
-	Type string `json:"type"`
+	Type   string                `json:"type"`
+	Action TraceCallAction       `json:"action"`
+	Result *TraceCallTraceResult `json:"result"`
+}
+
+// TraceCallAction is superset of all possible action types
+type TraceCallAction struct {
+	CallType      string         `json:"callType"`
+	From          common.Address `json:"from"`
+	Gas           hexutil.Big    `json:"gas"`
+	Input         hexutil.Bytes  `json:"input"`
+	To            common.Address `json:"to"`
+	Value         hexutil.Big    `json:"value"`
+	Init          hexutil.Bytes  `json:"init"`
+	Address       common.Address `json:"address"`
+	RefundAddress common.Address `json:"refundAddress"`
+	Balance       hexutil.Big    `json:"balance"`
+}
+
+type TraceCallTraceResult struct {
+	GasUsed hexutil.Big    `json:"gasUsed"`
+	Output  hexutil.Bytes  `json:"output"`
+	Address common.Address `json:"address"`
+	Code    hexutil.Bytes  `json:"code"`
 }
 
 type DebugModifiedAccounts struct {

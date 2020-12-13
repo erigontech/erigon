@@ -43,7 +43,7 @@ type ParityTrace struct {
 	BlockHash           *common.Hash `json:"blockHash,omitempty"`
 	BlockNumber         *uint64      `json:"blockNumber,omitempty"`
 	Error               string       `json:"error,omitempty"`
-	Result              TraceResult  `json:"result"`
+	Result              *TraceResult `json:"result"`
 	Subtraces           int          `json:"subtraces"`
 	TraceAddress        []int        `json:"traceAddress"`
 	TransactionHash     *common.Hash `json:"transactionHash,omitempty"`
@@ -85,6 +85,12 @@ type CreateTraceAction struct {
 	Gas   hexutil.Big    `json:"gas"`
 	Init  hexutil.Bytes  `json:"init"`
 	Value hexutil.Big    `json:"value"`
+}
+
+type SuicideTraceAction struct {
+	Address       common.Address `json:"address"`
+	Balance       hexutil.Big    `json:"balance"`
+	RefundAddress common.Address `json:"refundAddress"`
 }
 
 // TraceResult A parity formatted trace result

@@ -857,9 +857,14 @@ func opStop(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 
 func opSuicide(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
 	beneficiary := callContext.stack.Pop()
-	balance := interpreter.evm.IntraBlockState.GetBalance(callContext.contract.Address())
-	interpreter.evm.IntraBlockState.AddBalance(common.Address(beneficiary.Bytes20()), balance)
-	interpreter.evm.IntraBlockState.Suicide(callContext.contract.Address())
+	callerAddr := callContext.contract.Address()
+	beneficiaryAddr := common.Address(beneficiary.Bytes20())
+	balance := interpreter.evm.IntraBlockState.GetBalance(callerAddr)
+	interpreter.evm.IntraBlockState.AddBalance(beneficiaryAddr, balance)
+	if interpreter.evm.vmConfig.Debug {
+		interpreter.evm.vmConfig.Tracer.CaptureSelfDestruct(callerAddr, beneficiaryAddr, balance.ToBig())
+	}
+	interpreter.evm.IntraBlockState.Suicide(callerAddr)
 	return nil, nil
 }
 
