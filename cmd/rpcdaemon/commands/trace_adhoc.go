@@ -131,6 +131,14 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 		traceIdx := topTrace.Subtraces
 		ot.traceAddr = append(ot.traceAddr, traceIdx)
 		topTrace.Subtraces++
+		if calltype == vm.DELEGATECALL_TYPE {
+			switch action := topTrace.Action.(type) {
+			case *CreateTraceAction:
+				value = action.Value.ToInt()
+			case *CallTraceAction:
+				value = action.Value.ToInt()
+			}
+		}
 	}
 	trace.TraceAddress = make([]int, len(ot.traceAddr))
 	copy(trace.TraceAddress, ot.traceAddr)
@@ -184,7 +192,12 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		case vm.ErrExecutionReverted:
 			topTrace.Error = "Reverted"
 		default:
-			topTrace.Error = err.Error()
+			switch err.(type) {
+			case *vm.ErrStackUnderflow:
+				topTrace.Error = "Stack underflow"
+			default:
+				topTrace.Error = err.Error()
+			}
 		}
 		topTrace.Result = nil
 	} else {
