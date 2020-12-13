@@ -108,12 +108,12 @@ func (s *StructLog) ErrorString() string {
 type CallType int
 
 const (
-	CALL_TYPE CallType = iota
-	CALLCODE_TYPE
-	DELEGATECALL_TYPE
-	STATICCALL_TYPE
-	CREATE_TYPE
-	CREATE2_TYPE
+	CALLT CallType = iota
+	CALLCODET
+	DELEGATECALLT
+	STATICCALLT
+	CREATET
+	CREATE2T
 )
 
 // Tracer is used to collect execution traces from an EVM transaction

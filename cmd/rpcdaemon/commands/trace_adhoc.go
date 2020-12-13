@@ -131,7 +131,7 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 		traceIdx := topTrace.Subtraces
 		ot.traceAddr = append(ot.traceAddr, traceIdx)
 		topTrace.Subtraces++
-		if calltype == vm.DELEGATECALL_TYPE {
+		if calltype == vm.DELEGATECALLT {
 			switch action := topTrace.Action.(type) {
 			case *CreateTraceAction:
 				value = action.Value.ToInt()
@@ -152,13 +152,13 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	} else {
 		action := CallTraceAction{}
 		switch calltype {
-		case vm.CALL_TYPE:
+		case vm.CALLT:
 			action.CallType = CALL
-		case vm.CALLCODE_TYPE:
+		case vm.CALLCODET:
 			action.CallType = CALLCODE
-		case vm.DELEGATECALL_TYPE:
+		case vm.DELEGATECALLT:
 			action.CallType = DELEGATECALL
-		case vm.STATICCALL_TYPE:
+		case vm.STATICCALLT:
 			action.CallType = STATICCALL
 		}
 		action.From = from
