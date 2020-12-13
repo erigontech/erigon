@@ -2116,6 +2116,12 @@ func extractBodies(chaindata string, block uint64) error {
 			return err
 		}
 		fmt.Printf("Body %d %x: %x\n", blockNumber, blockHash, b)
+		header := rawdb.ReadHeader(db, blockHash, blockNumber)
+		b, err = rlp.EncodeToBytes(header)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Header %d %x: %x\n", blockNumber, blockHash, b)
 		if blockNumber > block+5 {
 			break
 		}
