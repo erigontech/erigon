@@ -66,8 +66,9 @@ func (s *StageState) ExecutionAt(db ethdb.Getter) (uint64, error) {
 }
 
 // DoneAndUpdate a convenience method combining both `Done()` and `Update()` calls together.
-func (s *StageState) DoneAndUpdate(db ethdb.Putter, newBlockNum uint64) error {
+func (s *StageState) DoneAndUpdate(db ethdb.Putter, newBlockNum uint64, done <-chan struct{}) error {
 	err := stages.SaveStageProgress(db, s.Stage, newBlockNum, nil)
 	s.state.NextStage()
+	done <- struct{}{}
 	return err
 }

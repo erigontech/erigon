@@ -16,9 +16,43 @@ import (
 )
 
 func SpawnHashStateStage(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
-	
+
+	done := make(chan struct{}) // used for synchronization of go routine and SpawnHashStateStage
+
+	go func() {
+		quitFlag := false
+		//quitFlag = True pressed Ctrl+C we shutdown main gouroutine gracefully
+		//doneFlag = true main go routine completed execution, we terminate internal go routine()
+
+	L:
+		for {
+			select {
+			case <-quit:
+				quitFlag = true
+				break L
+			case <-done:
+				//doneFlag = true
+				break L
+			default:
+			}
+		}
+
+		if quitFlag {
+			//we pressed CTRL +C  call some method to shutdown SpawnHashStateStage gracefully
+			// howc an we do it? which method to call?
+
+		}
+		/*
+			if doneFlag {
+				 main go routine completed execution, we terminate listenChannels()
+				return
+
+		*/
+	}()
+
 	to, err := s.ExecutionAt(db)
 	if err != nil {
+		done <- struct{}{}
 		return err
 	}
 
@@ -26,35 +60,32 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, tmpdir string, quit <
 		// we already did hash check for this block
 		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
 		s.Done()
+		done <- struct{}{}
 		return nil
 	}
 	if s.BlockNumber > to {
+		done <- struct{}{}
 		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
 	}
 
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
-		if err := promoteHashedStateCleanly(logPrefix, db, tmpdir, quit); err != nil {
+		//TODO synchronization with done channel
+		if err := promoteHashedStateCleanly(logPrefix, db, tmpdir, done); err != nil {
+			done <- struct{}{}
 			return err
 		}
 	} else {
-		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, db, tmpdir, quit); err != nil {
+		//TODO synchronization with done channel
+		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, db, tmpdir, done); err != nil {
+			done <- struct{}{}
 			return err
 		}
 	}
+	// FIX added done channel as argument
+	return s.DoneAndUpdate(db, to, done)
 
-	for{   
-		//it will block until we get Ctrl+C pressed
-		<-quit 
-		if err := s.DoneAndUpdate(db, to); err != nil {
-			return err
-		}
-		break
-	}
-
-	return nil
-	
 }
 
 func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
