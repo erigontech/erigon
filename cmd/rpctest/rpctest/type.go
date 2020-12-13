@@ -90,9 +90,12 @@ type TraceCallResult struct {
 }
 
 type TraceCallTrace struct {
-	Type   string                `json:"type"`
-	Action TraceCallAction       `json:"action"`
-	Result *TraceCallTraceResult `json:"result"`
+	Type         string                `json:"type"`
+	Action       TraceCallAction       `json:"action"`
+	Result       *TraceCallTraceResult `json:"result"`
+	Subtraces    int                   `json:"subtraces"`
+	TraceAddress []int                 `json:"traceAddress"`
+	Error        string                `json:"error"`
 }
 
 // TraceCallAction is superset of all possible action types

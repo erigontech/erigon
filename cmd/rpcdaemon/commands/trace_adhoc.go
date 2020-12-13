@@ -170,21 +170,35 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		ot.precompile = false
 		return nil
 	}
-	fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d\n", depth, output, gasUsed)
+	fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d, err %v\n", depth, output, gasUsed, err)
 	if depth == 0 {
 		ot.r.Output = common.CopyBytes(output)
 	}
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
-	if len(output) > 0 {
-		switch topTrace.Type {
-		case CALL:
-			topTrace.Result.Output = common.CopyBytes(output)
-		case CREATE:
-			topTrace.Result.Code = common.CopyBytes(output)
+	if err != nil {
+		switch err {
+		case vm.ErrInvalidJump:
+			topTrace.Error = "Bad jump destination"
+		case vm.ErrOutOfGas:
+			topTrace.Error = "Out of gas"
+		case vm.ErrExecutionReverted:
+			topTrace.Error = "Reverted"
+		default:
+			topTrace.Error = err.Error()
 		}
+		topTrace.Result = nil
+	} else {
+		if len(output) > 0 {
+			switch topTrace.Type {
+			case CALL:
+				topTrace.Result.Output = common.CopyBytes(output)
+			case CREATE:
+				topTrace.Result.Code = common.CopyBytes(output)
+			}
+		}
+		topTrace.Result.GasUsed = new(hexutil.Big)
+		topTrace.Result.GasUsed.ToInt().SetUint64(gasUsed)
 	}
-	topTrace.Result.GasUsed = new(hexutil.Big)
-	topTrace.Result.GasUsed.ToInt().SetUint64(gasUsed)
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
 	if depth > 0 {
 		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
@@ -197,6 +211,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 }
 
 func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rst *stack.ReturnStack, contract *vm.Contract, opDepth int, err error) error {
+	fmt.Printf("CaptureFault depth %d\n", opDepth)
 	return nil
 }
 
@@ -208,6 +223,12 @@ func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, 
 	action.RefundAddress = to
 	action.Balance.ToInt().Set(value)
 	trace.Action = action
+	topTrace := ot.traceStack[len(ot.traceStack)-1]
+	traceIdx := topTrace.Subtraces
+	ot.traceAddr = append(ot.traceAddr, traceIdx)
+	topTrace.Subtraces++
+	trace.TraceAddress = make([]int, len(ot.traceAddr))
+	copy(trace.TraceAddress, ot.traceAddr)
 	ot.r.Trace = append(ot.r.Trace, trace)
 }
 

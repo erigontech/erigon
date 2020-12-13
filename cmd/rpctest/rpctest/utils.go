@@ -147,11 +147,11 @@ func compareTraceCalls(trace, traceg *TraceCall) bool {
 		result := t.Result
 		resultg := tg.Result
 		if result == nil && resultg != nil {
-			fmt.Printf("Traces difference result == nil, resultg != nil\n")
+			fmt.Printf("Traces difference result == nil, resultg != nil: %d\n", i)
 			return false
 		}
 		if result != nil && resultg == nil {
-			fmt.Printf("Traces difference result != nil, resultg == nil\n")
+			fmt.Printf("Traces difference result != nil, resultg == nil: %d\n", i)
 			return false
 		}
 		if result != nil {
@@ -169,6 +169,25 @@ func compareTraceCalls(trace, traceg *TraceCall) bool {
 			}
 			if result.Address != resultg.Address {
 				fmt.Printf("Trace different result.address: %d %x %x\n", i, result.Address, resultg.Address)
+				return false
+			}
+		}
+		if t.Error != tg.Error {
+			fmt.Printf("Traces diffetrent error: %d %s %s\n", i, t.Error, tg.Error)
+			return false
+		}
+		if t.Subtraces != tg.Subtraces {
+			fmt.Printf("Traces different subtraces: %d %d %d\n", i, t.Subtraces, tg.Subtraces)
+			return false
+		}
+		if len(t.TraceAddress) != len(tg.TraceAddress) {
+			fmt.Printf("Traces have traceAddress of different lengths: %d %d / %d\n", i, len(t.TraceAddress), len(tg.TraceAddress))
+			return false
+		}
+		for j, ta := range t.TraceAddress {
+			tag := tg.TraceAddress[j]
+			if ta != tag {
+				fmt.Printf("Traces different traceAddress: %d %v %v\n", i, t.TraceAddress, tg.TraceAddress)
 				return false
 			}
 		}
