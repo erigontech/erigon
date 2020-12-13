@@ -72,9 +72,9 @@ type TraceAction struct {
 }
 
 type CallTraceAction struct {
-	CallType string         `json:"callType"`
 	From     common.Address `json:"from"`
 	To       common.Address `json:"to"`
+	CallType string         `json:"callType"`
 	Gas      hexutil.Big    `json:"gas"`
 	Input    hexutil.Bytes  `json:"input"`
 	Value    hexutil.Big    `json:"value"`
@@ -89,8 +89,8 @@ type CreateTraceAction struct {
 
 type SuicideTraceAction struct {
 	Address       common.Address `json:"address"`
-	Balance       hexutil.Big    `json:"balance"`
 	RefundAddress common.Address `json:"refundAddress"`
+	Balance       hexutil.Big    `json:"balance"`
 }
 
 // TraceResult A parity formatted trace result

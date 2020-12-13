@@ -139,6 +139,9 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 				value = action.Value.ToInt()
 			}
 		}
+		if calltype == vm.STATICCALLT {
+			value = big.NewInt(0)
+		}
 	}
 	trace.TraceAddress = make([]int, len(ot.traceAddr))
 	copy(trace.TraceAddress, ot.traceAddr)
@@ -195,6 +198,8 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 			switch err.(type) {
 			case *vm.ErrStackUnderflow:
 				topTrace.Error = "Stack underflow"
+			case *vm.ErrInvalidOpCode:
+				topTrace.Error = "Bad instruction"
 			default:
 				topTrace.Error = err.Error()
 			}
@@ -242,6 +247,7 @@ func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, 
 	topTrace.Subtraces++
 	trace.TraceAddress = make([]int, len(ot.traceAddr))
 	copy(trace.TraceAddress, ot.traceAddr)
+	ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
 	ot.r.Trace = append(ot.r.Trace, trace)
 }
 
