@@ -603,6 +603,9 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	if !bytes.Equal(k, dbutils.HeaderKey(2, common.Hash{2})) {
 		t.Fatal(common.Bytes2Hex(k))
 	}
+	if !bytes.Equal(v, []byte{2}) {
+		t.Fatal(common.Bytes2Hex(k))
+	}
 
 	k, v, err = c.Next()
 	if err != nil {
@@ -611,6 +614,10 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	if !bytes.Equal(k, dbutils.HeaderKey(4, common.Hash{4})) {
 		t.Fatal("invalid key", common.Bytes2Hex(k))
 	}
+	if !bytes.Equal(v, []byte{4}) {
+		t.Fatal(common.Bytes2Hex(k), common.Bytes2Hex(v))
+	}
+
 	k, v, err = c.Next()
 	if k != nil || v != nil || err != nil {
 		t.Fatal(k, v, err)
@@ -632,6 +639,9 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	if !bytes.Equal(k, dbutils.BlockBodyKey(2, common.Hash{2})) {
 		t.Fatal()
 	}
+	if !bytes.Equal(v, []byte{2}) {
+		t.Fatal(common.Bytes2Hex(k), common.Bytes2Hex(v))
+	}
 
 	k, v, err = c.Next()
 	if err != nil {
@@ -640,14 +650,15 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	if !bytes.Equal(k, dbutils.BlockBodyKey(4, common.Hash{4})) {
 		t.Fatal()
 	}
+	if !bytes.Equal(v, []byte{4}) {
+		t.Fatal(common.Bytes2Hex(k), common.Bytes2Hex(v))
+	}
+
 	k, v, err = c.Next()
 	if k != nil || v != nil || err != nil {
 		t.Fatal(k, v, err)
 	}
 }
-
-
-
 
 func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
 	data := []KvData{}
@@ -792,7 +803,6 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 	checkKV(t, k, v, nil, nil)
 }
 
-
 func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	data := []KvData{
 		{K: []byte{1}, V: []byte{1}}, //to remove
@@ -825,7 +835,7 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	}
 	checkKV(t, k, v, data[len(data)-1].K, data[len(data)-1].V)
 
-	for i:=len(data)-2; i>=0; i-- {
+	for i := len(data) - 2; i >= 0; i-- {
 		k, v, err = c.Prev()
 		if err != nil {
 			t.Fatal(i, err)
@@ -846,8 +856,8 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	checkKV(t, k, v, data[4].K, data[4].V)
 
 	//remove 4. Current on 5
-	err=deleteCursor.Delete(data[3].K, nil)
-	if err!=nil {
+	err = deleteCursor.Delete(data[3].K, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -858,8 +868,8 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	}
 	checkKV(t, k, v, data[2].K, data[2].V)
 
-	err=deleteCursor.Delete(data[0].K, nil)
-	if err!=nil {
+	err = deleteCursor.Delete(data[0].K, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -874,7 +884,6 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkKV(t, k, v, nil, nil)
-
 
 }
 func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
@@ -908,6 +917,9 @@ func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainDB, err := GenStateData(mainData)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		MustOpen()
@@ -977,7 +989,7 @@ func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
 			V: []byte{3},
 		},
 	}
-	data:=[]KvData{
+	data := []KvData{
 		mainData[0],
 		mainData[1],
 		mainData[2],
@@ -988,6 +1000,9 @@ func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainDB, err := GenStateData(mainData)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	kv := NewSnapshot2KV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
 		MustOpen()
@@ -1005,54 +1020,68 @@ func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
 	}
 	checkKV(t, k, v, data[0].K, data[0].V)
 
-	for i:=1; i< len(data); i++ {
+	for i := 1; i < len(data); i++ {
 		k, v, err = c.Next()
 		if err != nil {
 			t.Fatal(err)
 		}
 		checkKV(t, k, v, data[i].K, data[i].V)
-		k, v, err = c.Current()
-		checkKV(t, k, v, data[i].K, data[i].V)
 
+		k, v, err = c.Current()
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkKV(t, k, v, data[i].K, data[i].V)
 	}
 
-	for i:=len(data)-2; i>0; i-- {
+	for i := len(data) - 2; i > 0; i-- {
 		k, v, err = c.Prev()
 		if err != nil {
 			t.Fatal(err)
 		}
 		checkKV(t, k, v, data[i].K, data[i].V)
+
 		k, v, err = c.Current()
+		if err != nil {
+			t.Fatal(err)
+		}
 		checkKV(t, k, v, data[i].K, data[i].V)
 	}
 
-	k,v,err=c.Last()
+	k, v, err = c.Last()
 	if err != nil {
 		t.Fatal(err)
 	}
 	checkKV(t, k, v, data[len(data)-1].K, data[len(data)-1].V)
 	k, v, err = c.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	checkKV(t, k, v, data[len(data)-1].K, data[len(data)-1].V)
 
-
-	for i:=len(data)-2; i>0; i-- {
+	for i := len(data) - 2; i > 0; i-- {
 		k, v, err = c.Prev()
 		if err != nil {
 			t.Fatal(err)
 		}
 		checkKV(t, k, v, data[i].K, data[i].V)
+
 		k, v, err = c.Current()
+		if err != nil {
+			t.Fatal(err)
+		}
 		checkKV(t, k, v, data[i].K, data[i].V)
 	}
 
-	i:=0
+	i := 0
 	err = Walk(c, []byte{}, 0, func(k, v []byte) (bool, error) {
-		fmt.Println(common.Bytes2Hex(k),  " => ", common.Bytes2Hex(v))
+		fmt.Println(common.Bytes2Hex(k), " => ", common.Bytes2Hex(v))
 		checkKV(t, k, v, data[i].K, data[i].V)
 		i++
 		return true, nil
 	})
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1079,15 +1108,15 @@ func TestSnapshot2WalkByEmptyDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c:=tx.Cursor(dbutils.PlainStateBucket)
-	i:=0
+	c := tx.Cursor(dbutils.PlainStateBucket)
+	i := 0
 	err = Walk(c, []byte{}, 0, func(k, v []byte) (bool, error) {
-		fmt.Println(common.Bytes2Hex(k),  " => ", common.Bytes2Hex(v))
+		fmt.Println(common.Bytes2Hex(k), " => ", common.Bytes2Hex(v))
 		checkKV(t, k, v, data[i].K, data[i].V)
 		i++
 		return true, nil
 	})
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -1120,19 +1149,23 @@ func TestSnapshot2WritablePrevAndDeleteKey(t *testing.T) {
 	//get first correct k&v
 	k, v, err := c.First()
 	if err != nil {
+		printBucket(kv, dbutils.PlainStateBucket)
 		t.Fatal(err)
 	}
 	checkKV(t, k, v, data[0].K, data[0].V)
 
-	for i:=1; i<len(data); i++ {
+	for i := 1; i < len(data); i++ {
 		k, v, err = c.Next()
 		if err != nil {
 			t.Fatal(err)
 		}
 		checkKV(t, k, v, data[i].K, data[i].V)
-		k, v, err = c.Current()
-		checkKV(t, k, v, data[i].K, data[i].V)
 
+		k, v, err = c.Current()
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkKV(t, k, v, data[i].K, data[i].V)
 	}
 
 	// check the key that we've replaced value
@@ -1142,13 +1175,17 @@ func TestSnapshot2WritablePrevAndDeleteKey(t *testing.T) {
 	}
 	checkKV(t, k, v, nil, nil)
 
-	for i:=len(data)-2; i>=0; i-- {
+	for i := len(data) - 2; i >= 0; i-- {
 		k, v, err = c.Prev()
 		if err != nil {
 			t.Fatal(err)
 		}
 		checkKV(t, k, v, data[i].K, data[i].V)
+
 		k, v, err = c.Current()
+		if err != nil {
+			t.Fatal(err)
+		}
 		checkKV(t, k, v, data[i].K, data[i].V)
 	}
 }
@@ -1202,7 +1239,6 @@ func TestSnapshot2WritableTxNextAndPrevWithDeleteAndPutKeys(t *testing.T) {
 	}
 	checkKV(t, k, v, data[3].K, data[3].V)
 
-
 	k, v, err = c.Prev()
 	if err != nil {
 		t.Fatal(err)
@@ -1254,13 +1290,13 @@ func printBucket(kv KV, bucket string) {
 		c := tx.Cursor(bucket)
 		k, v, err := c.First()
 		if err != nil {
-			panic(fmt.Errorf("First err: %w", err))
+			panic(fmt.Errorf("first err: %w", err))
 		}
 		for k != nil && v != nil {
 			fmt.Println("k:=", common.Bytes2Hex(k), "v:=", common.Bytes2Hex(v))
 			k, v, err = c.Next()
 			if err != nil {
-				panic(fmt.Errorf("Next err: %w", err))
+				panic(fmt.Errorf("next err: %w", err))
 			}
 		}
 		return nil

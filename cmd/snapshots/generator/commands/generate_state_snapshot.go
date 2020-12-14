@@ -84,7 +84,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	i := 0
 	t := time.Now()
 	tt := time.Now()
-	err = state.WalkAsOfAccounts(tx, common.Address{},  toBlock+1, func(k []byte, v []byte) (bool, error) {
+	err = state.WalkAsOfAccounts(tx, common.Address{}, toBlock+1, func(k []byte, v []byte) (bool, error) {
 		i++
 		if i%100000 == 0 {
 			fmt.Println(i, common.Bytes2Hex(k), "batch", time.Since(tt))
@@ -110,7 +110,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			if acc.IsEmptyRoot() {
 				t := trie.New(common.Hash{})
 				j := 0
-				innerErr := state.WalkAsOfStorage(tx2, common.BytesToAddress(k),acc.Incarnation, common.Hash{}, toBlock+1, func(k1, k2 []byte, vv []byte) (bool, error) {
+				innerErr := state.WalkAsOfStorage(tx2, common.BytesToAddress(k), acc.Incarnation, common.Hash{}, toBlock+1, func(k1, k2 []byte, vv []byte) (bool, error) {
 					j++
 					innerErr1 := mt.Put(dbutils.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(k1, acc.Incarnation, k2), common.CopyBytes(vv))
 					if innerErr1 != nil {
@@ -129,20 +129,20 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			}
 
 			if acc.IsEmptyCodeHash() {
-				codeHash, err := tx2.GetOne(dbutils.PlainContractCodeBucket, storagePrefix)
-				if err != nil && err != ethdb.ErrKeyNotFound {
-					return false, fmt.Errorf("getting code hash for %x: %v", k, err)
+				codeHash, err1 := tx2.GetOne(dbutils.PlainContractCodeBucket, storagePrefix)
+				if err1 != nil && errors.Is(err1, ethdb.ErrKeyNotFound) {
+					return false, fmt.Errorf("getting code hash for %x: %v", k, err1)
 				}
 				if len(codeHash) > 0 {
-					code, err := tx2.GetOne(dbutils.CodeBucket, codeHash)
-					if err != nil {
-						return false, err
+					code, err1 := tx2.GetOne(dbutils.CodeBucket, codeHash)
+					if err1 != nil {
+						return false, err1
 					}
-					if err := mt.Put(dbutils.CodeBucket, codeHash, code); err != nil {
-						return false, err
+					if err1 = mt.Put(dbutils.CodeBucket, codeHash, code); err1 != nil {
+						return false, err1
 					}
-					if err := mt.Put(dbutils.PlainContractCodeBucket, storagePrefix, codeHash); err != nil {
-						return false, err
+					if err1 = mt.Put(dbutils.PlainContractCodeBucket, storagePrefix, codeHash); err1 != nil {
+						return false, err1
 					}
 				}
 			}

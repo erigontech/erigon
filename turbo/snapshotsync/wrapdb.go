@@ -63,9 +63,9 @@ func WrapBySnapshots2(kv ethdb.KV, snapshots map[SnapshotType]*SnapshotsInfo) (e
 			log.Error("Can't open snapshot", "err", err)
 			return nil, err
 		} else { //nolint
-			buckets:=[]string{}
+			buckets := []string{}
 			for bucket := range bucketConfigs[k] {
-				buckets=append(buckets, bucket)
+				buckets = append(buckets, bucket)
 			}
 
 			snKV.SnapshotDB(buckets, snapshotKV)

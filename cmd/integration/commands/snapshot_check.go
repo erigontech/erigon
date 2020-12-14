@@ -118,9 +118,9 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 	var lastBlockHeaderNumber uint64
 	if block == 0 {
 		lastBlockHash := rawdb.ReadHeadBlockHash(db)
-		lastBlockHeader, err := rawdb.ReadHeaderByHash(db, lastBlockHash)
-		if err != nil {
-			return err
+		lastBlockHeader, innerErr := rawdb.ReadHeaderByHash(db, lastBlockHash)
+		if innerErr != nil {
+			return innerErr
 		}
 		lastBlockHeaderNumber = lastBlockHeader.Number.Uint64()
 	} else {
@@ -133,40 +133,43 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 
 	if isNew {
 		log.Info("New tmp db. We need to promote hash state.")
-		tx, err := db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return err
+		tx, innerErr := db.Begin(context.Background(), ethdb.RW)
+		if innerErr != nil {
+			return innerErr
 		}
 
 		tt := time.Now()
 		err = stagedsync.PromoteHashedStateCleanly("", tx, tmpDir, ctx.Done())
 		log.Info("Promote took", "t", time.Since(tt))
 		if err != nil {
-			return fmt.Errorf("Promote state err: %w", err)
+			tx.Rollback()
+			return fmt.Errorf("promote state err: %w", err)
 		}
 		tt = time.Now()
 		_, err = tx.Commit()
 		if err != nil {
-			return fmt.Errorf("Commit promote state err: %w", err)
+			tx.Rollback()
+			return fmt.Errorf("commit promote state err: %w", err)
 		}
-		log.Info("Promote commited", "t", time.Since(tt))
+		log.Info("promote committed", "t", time.Since(tt))
 	}
 
 	if isNew {
 		log.Info("Regenerate IH")
-		tx, err := db.Begin(context.Background(), ethdb.RW)
-		if err != nil {
-			return err
+		tx, innerErr := db.Begin(context.Background(), ethdb.RW)
+		if innerErr != nil {
+			return innerErr
 		}
-		defer tx.Rollback()
 
-		hash, err := rawdb.ReadCanonicalHash(tx, snapshotBlock)
-		if err != nil {
-			return err
+		hash, innerErr := rawdb.ReadCanonicalHash(tx, snapshotBlock)
+		if innerErr != nil {
+			tx.Rollback()
+			return innerErr
 		}
 
 		syncHeadHeader := rawdb.ReadHeader(tx, hash, snapshotBlock)
 		if syncHeadHeader == nil {
+			tx.Rollback()
 			return fmt.Errorf("empty header for %v", snapshotBlock)
 		}
 		expectedRootHash := syncHeadHeader.Root
@@ -174,12 +177,14 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		tt := time.Now()
 		err = stagedsync.RegenerateIntermediateHashes("", tx, true, tmpDir, expectedRootHash, ctx.Done())
 		if err != nil {
-			return fmt.Errorf("RegenerateIntermediateHashes err: %w", err)
+			tx.Rollback()
+			return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
 		}
 		log.Info("RegenerateIntermediateHashes took", "t", time.Since(tt))
 		tt = time.Now()
 		_, err = tx.Commit()
 		if err != nil {
+			tx.Rollback()
 			return err
 		}
 		log.Info("Commit", "t", time.Since(tt))
@@ -253,7 +258,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 				BatchSize:     int(batchSize),
 			})
 		if err != nil {
-			return fmt.Errorf("Execution err %w", err)
+			return fmt.Errorf("execution err %w", err)
 		}
 
 		stage5 := progress(stages.HashState)
@@ -261,15 +266,15 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		log.Info("Stage5", "progress", stage5.BlockNumber)
 		err = stagedsync.SpawnHashStateStage(stage5, tx, tmpDir, ch)
 		if err != nil {
-			return fmt.Errorf("SpawnHashStateStage err %w", err)
+			return fmt.Errorf("spawnHashStateStage err %w", err)
 		}
 
 		stage6 := progress(stages.IntermediateHashes)
 		stage6.BlockNumber = blockNumber - 1
 		log.Info("Stage6", "progress", stage6.BlockNumber)
-		if err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, true, tmpDir, ch); err != nil {
+		if err = stagedsync.SpawnIntermediateHashesStage(stage5, tx, true, tmpDir, ch); err != nil {
 			log.Error("Error on ih", "err", err, "block", blockNumber)
-			return fmt.Errorf("SpawnIntermediateHashesStage %w", err)
+			return fmt.Errorf("spawnIntermediateHashesStage %w", err)
 		}
 
 		log.Info("Done", "progress", blockNumber)

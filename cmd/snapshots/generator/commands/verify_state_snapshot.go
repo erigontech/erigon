@@ -36,7 +36,7 @@ var verifyStateSnapshotCmd = &cobra.Command{
 func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block uint64) error {
 	db, err := ethdb.Open(dbPath, true)
 	if err != nil {
-		return fmt.Errorf("Open err: %w", err)
+		return fmt.Errorf("open err: %w", err)
 	}
 
 	kv := db.KV()
@@ -89,12 +89,12 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 	err = stagedsync.PromoteHashedStateCleanly("", tx, os.TempDir(), ctx.Done())
 	fmt.Println("Promote took", time.Since(tt))
 	if err != nil {
-		return fmt.Errorf("Promote state err: %w", err)
+		return fmt.Errorf("promote state err: %w", err)
 	}
 
-	err = stagedsync.RegenerateIntermediateHashes("", tx,true,  os.TempDir(), expectedRootHash, ctx.Done())
+	err = stagedsync.RegenerateIntermediateHashes("", tx, true, os.TempDir(), expectedRootHash, ctx.Done())
 	if err != nil {
-		return fmt.Errorf("RegenerateIntermediateHashes err: %w", err)
+		return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
 	}
 	return nil
 }

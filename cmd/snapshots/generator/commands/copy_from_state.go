@@ -71,16 +71,16 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	max := 10000000
 	i := 0
 	err = db.Walk(dbutils.PlainStateBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		err := sndb.Put(dbutils.PlainStateBucket, k, v)
-		if err != nil {
-			return false, fmt.Errorf("Put state err: %w", err)
+		innerErr := sndb.Put(dbutils.PlainStateBucket, k, v)
+		if innerErr != nil {
+			return false, fmt.Errorf("put state err: %w", innerErr)
 		}
 		i++
 		if i > max {
 			i = 0
-			err = sndb.CommitAndBegin(ctx)
-			if err != nil {
-				return false, fmt.Errorf("Commit state err: %w", err)
+			innerErr = sndb.CommitAndBegin(ctx)
+			if innerErr != nil {
+				return false, fmt.Errorf("commit state err: %w", innerErr)
 			}
 			log.Info("Commit state", "batch", time.Since(tt2), "all", time.Since(tt))
 			tt2 = time.Now()
@@ -100,16 +100,16 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	tt = time.Now()
 	tt2 = time.Now()
 	err = db.Walk(dbutils.PlainContractCodeBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		err := sndb.Put(dbutils.PlainContractCodeBucket, k, v)
-		if err != nil {
-			return false, fmt.Errorf("Put contract code err: %w", err)
+		innerErr := sndb.Put(dbutils.PlainContractCodeBucket, k, v)
+		if innerErr != nil {
+			return false, fmt.Errorf("put contract code err: %w", innerErr)
 		}
 		i++
 		if i > max {
 			i = 0
-			err = sndb.CommitAndBegin(ctx)
-			if err != nil {
-				return false, fmt.Errorf("Commit contract code err: %w", err)
+			innerErr = sndb.CommitAndBegin(ctx)
+			if innerErr != nil {
+				return false, fmt.Errorf("commit contract code err: %w", innerErr)
 			}
 			log.Info("Commit contract code", "batch", time.Since(tt2), "all", time.Since(tt))
 			tt2 = time.Now()
@@ -129,16 +129,16 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	tt = time.Now()
 	tt2 = time.Now()
 	err = db.Walk(dbutils.CodeBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		err := sndb.Put(dbutils.CodeBucket, k, v)
-		if err != nil {
-			return false, fmt.Errorf("Put code err: %w", err)
+		innerErr := sndb.Put(dbutils.CodeBucket, k, v)
+		if innerErr != nil {
+			return false, fmt.Errorf("put code err: %w", innerErr)
 		}
 		i++
 		if i > max {
 			i = 0
-			err = sndb.CommitAndBegin(ctx)
-			if err != nil {
-				return false, fmt.Errorf("Commit code err: %w", err)
+			innerErr = sndb.CommitAndBegin(ctx)
+			if innerErr != nil {
+				return false, fmt.Errorf("commit code err: %w", innerErr)
 			}
 			log.Info("Commit code", "batch", time.Since(tt2), "all", time.Since(tt))
 			tt2 = time.Now()
