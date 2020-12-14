@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
@@ -58,7 +59,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 			dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
 			dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
 		}
-	}).Path(snapshotPath).ReadOnly().MustOpen()
+	}).Path(snapshotPath).Flags(func(flags uint) uint { return flags | lmdb.Readonly }).MustOpen()
 
 	tmpPath, err := ioutil.TempDir(os.TempDir(), "vrf*")
 	if err != nil {
@@ -67,7 +68,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 	tmpDB := ethdb.NewLMDB().Path(tmpPath).MustOpen()
 	defer os.RemoveAll(tmpPath)
 	defer tmpDB.Close()
-	snkv = ethdb.NewSnapshotKV().SnapshotDB(snkv).DB(tmpDB).For(dbutils.PlainStateBucket).For(dbutils.PlainContractCodeBucket).For(dbutils.CodeBucket).MustOpen()
+	snkv = ethdb.NewSnapshot2KV().SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snkv).DB(tmpDB).MustOpen()
 	sndb := ethdb.NewObjectDatabase(snkv)
 	tx, err := sndb.Begin(context.Background(), ethdb.RW)
 	if err != nil {
@@ -91,7 +92,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 		return fmt.Errorf("Promote state err: %w", err)
 	}
 
-	err = stagedsync.RegenerateIntermediateHashes("", tx, os.TempDir(), expectedRootHash, ctx.Done())
+	err = stagedsync.RegenerateIntermediateHashes("", tx,true,  os.TempDir(), expectedRootHash, ctx.Done())
 	if err != nil {
 		return fmt.Errorf("RegenerateIntermediateHashes err: %w", err)
 	}

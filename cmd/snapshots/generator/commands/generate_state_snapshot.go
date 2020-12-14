@@ -84,7 +84,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	i := 0
 	t := time.Now()
 	tt := time.Now()
-	err = state.WalkAsOf(tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, []byte{}, 0, toBlock+1, func(k []byte, v []byte) (bool, error) {
+	err = state.WalkAsOfAccounts(tx, common.Address{},  toBlock+1, func(k []byte, v []byte) (bool, error) {
 		i++
 		if i%100000 == 0 {
 			fmt.Println(i, common.Bytes2Hex(k), "batch", time.Since(tt))
@@ -110,14 +110,14 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			if acc.IsEmptyRoot() {
 				t := trie.New(common.Hash{})
 				j := 0
-				innerErr := state.WalkAsOf(tx2, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, storagePrefix, 8*(common.AddressLength), toBlock+1, func(kk []byte, vv []byte) (bool, error) {
+				innerErr := state.WalkAsOfStorage(tx2, common.BytesToAddress(k),acc.Incarnation, common.Hash{}, toBlock+1, func(k1, k2 []byte, vv []byte) (bool, error) {
 					j++
-					innerErr1 := mt.Put(dbutils.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(common.BytesToAddress(kk[:common.AddressLength]), acc.Incarnation, common.BytesToHash(kk[common.AddressLength:])), common.CopyBytes(vv))
+					innerErr1 := mt.Put(dbutils.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(k1, acc.Incarnation, k2), common.CopyBytes(vv))
 					if innerErr1 != nil {
 						return false, innerErr1
 					}
 
-					h, _ := common.HashData(kk[common.AddressLength:])
+					h, _ := common.HashData(k1)
 					t.Update(h.Bytes(), common.CopyBytes(vv))
 
 					return true, nil

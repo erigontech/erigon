@@ -654,7 +654,7 @@ func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
 	for i := 1; i < 3; i++ {
 		for j := 1; j < 3; j++ {
 			data = append(data, KvData{
-				K: dbutils.PlainGenerateCompositeStorageKey(common.Address{uint8(i) * 2}, 1, common.Hash{uint8(j) * 2}),
+				K: dbutils.PlainGenerateCompositeStorageKey([]byte{uint8(i) * 2}, 1, []byte{uint8(j) * 2}),
 				V: []byte{uint8(i) * 2, uint8(j) * 2},
 			})
 		}
@@ -674,9 +674,9 @@ func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
 	}
 
 	c := tx.Cursor(dbutils.PlainStateBucket)
-	replaceKey := dbutils.PlainGenerateCompositeStorageKey(common.Address{2}, 1, common.Hash{4})
+	replaceKey := dbutils.PlainGenerateCompositeStorageKey([]byte{2}, 1, []byte{4})
 	replaceValue := []byte{2, 4, 4}
-	newKey := dbutils.PlainGenerateCompositeStorageKey(common.Address{2}, 1, common.Hash{5})
+	newKey := dbutils.PlainGenerateCompositeStorageKey([]byte{2}, 1, []byte{5})
 	newValue := []byte{2, 5}
 
 	//get first correct k&v
@@ -1279,89 +1279,5 @@ func checkKV(t *testing.T, key, val, expectedKey, expectedVal []byte) {
 		t.Log("+", common.Bytes2Hex(expectedVal))
 		t.Log("-", common.Bytes2Hex(val))
 		t.Fatal("wrong value for key", common.Bytes2Hex(key))
-	}
-}
-
-func TestDebugStateSnapshot(t *testing.T)  {
-	t.Skip()
-	snapshotPath:="/media/b00ris/nvme/snapshots/state"
-	sndbNew:=	NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket:   dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-			dbutils.PlainContractCodeBucket:   dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],
-		}
-	}).Path(snapshotPath).ReadOnly().MustOpen()
-	sndbOld:=	NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket:   dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-			dbutils.PlainContractCodeBucket:   dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-			dbutils.CodeBucket:   dbutils.BucketsConfigs[dbutils.CodeBucket],
-		}
-	}).Path(snapshotPath).ReadOnly().MustOpen()
-	tmpDbNew:=NewLMDB().InMem().MustOpen()
-	tmpDbOld:=NewLMDB().InMem().MustOpen()
-
-	dbNew:=NewSnapshot2KV().DB(tmpDbNew).SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, sndbNew).MustOpen()
-	dbOld:=NewSnapshotKV().DB(tmpDbOld).SnapshotDB(sndbOld).For(dbutils.PlainStateBucket).For(dbutils.CodeBucket).For(dbutils.PlainContractCodeBucket).MustOpen()
-
-	txNew,err:=dbNew.Begin(context.Background(), nil, RW)
-	if err!=nil {
-		t.Fatal(err)
-	}
-	txOld,err:=dbOld.Begin(context.Background(), nil, RW)
-	if err!=nil {
-		t.Fatal(err)
-	}
-
-	var knprev, vnprev, koprev, voprev []byte
-	cnew:=txNew.Cursor(dbutils.PlainStateBucket)
-	cold:=txOld.Cursor(dbutils.PlainStateBucket)
-	knew,vnew, err:=cnew.First()
-	if err!=nil {
-		t.Fatal(err)
-	}
-	kold,vold, err:=cold.First()
-	if err!=nil {
-		t.Fatal(err)
-	}
-	i:=0
-	errs:=0
-	for {
-		if !bytes.Equal(knew, kold) {
-			t.Log("keys not equal",common.Bytes2Hex(knew), common.Bytes2Hex(kold))
-			t.Log("prev",common.Bytes2Hex(knprev), common.Bytes2Hex(koprev))
-			errs++
-		}
-		if !bytes.Equal(vnew, vold) {
-			t.Log("vals not equal",common.Bytes2Hex(vnew), common.Bytes2Hex(vold), "for key", common.Bytes2Hex(knew), common.Bytes2Hex(kold))
-			t.Log("prev",common.Bytes2Hex(vnprev), common.Bytes2Hex(voprev))
-			errs++
-		}
-		if errs>30 {
-			t.Fatal()
-		}
-		if common.Bytes2Hex(knew)=="3589d05a1ec4af9f65b0e5554e645707775ee43c000000000000000136bb98eca927b335f7e2f33dc71c6dfe94d5ceb49088c85d8a80d96443fd80d6" {
-			fmt.Println("debug")
-		}
-		knprev, koprev,vnprev, voprev = knew, kold, vnew, vold
-		knew,vnew, err=cnew.Next()
-		if err!=nil {
-			t.Fatal(err)
-		}
-		kold,vold, err=cold.Next()
-		if err!=nil {
-			t.Fatal(err)
-		}
-
-
-		if kold==nil&&knew==nil {
-			break
-		}
-		if i>1000000 {
-			fmt.Println("current",common.Bytes2Hex(knew))
-			i=0
-		}
-		i++
 	}
 }

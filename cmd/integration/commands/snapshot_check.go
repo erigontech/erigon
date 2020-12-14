@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -11,7 +12,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -57,7 +57,7 @@ var cmdSnapshotCheck = &cobra.Command{
 				dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
 				dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
 			}
-		}).ReadOnly().MustOpen()
+		}).Flags(func(flags uint) uint { return flags | lmdb.Readonly }).MustOpen()
 
 		isNew := true
 		var path string
@@ -172,8 +172,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		expectedRootHash := syncHeadHeader.Root
 
 		tt := time.Now()
-		core.UsePlainStateExecution = true
-		err = stagedsync.RegenerateIntermediateHashes("", tx, tmpDir, expectedRootHash, ctx.Done())
+		err = stagedsync.RegenerateIntermediateHashes("", tx, true, tmpDir, expectedRootHash, ctx.Done())
 		if err != nil {
 			return fmt.Errorf("RegenerateIntermediateHashes err: %w", err)
 		}
@@ -229,7 +228,6 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 	ch := ctx.Done()
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	core.UsePlainStateExecution = true
 
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
@@ -269,7 +267,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		stage6 := progress(stages.IntermediateHashes)
 		stage6.BlockNumber = blockNumber - 1
 		log.Info("Stage6", "progress", stage6.BlockNumber)
-		if err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, tmpDir, ch); err != nil {
+		if err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, true, tmpDir, ch); err != nil {
 			log.Error("Error on ih", "err", err, "block", blockNumber)
 			return fmt.Errorf("SpawnIntermediateHashesStage %w", err)
 		}
