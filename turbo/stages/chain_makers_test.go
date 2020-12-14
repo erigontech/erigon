@@ -14,21 +14,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package stages
 
 import (
-	"context"
 	"fmt"
 	"math/big"
-	"runtime"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -54,21 +54,21 @@ func ExampleGenerateChain() {
 	log.Root().SetHandler(log.DiscardHandler())
 
 	// Ensure that key1 has some funds in the genesis block.
-	gspec := &Genesis{
+	gspec := &core.Genesis{
 		Config: &params.ChainConfig{HomesteadBlock: new(big.Int)},
-		Alloc:  GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
+		Alloc:  core.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
 	genesis := gspec.MustCommit(db)
 
-	txCacher := NewTxSenderCacher(runtime.NumCPU())
-	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
+	txCacher := core.NewTxSenderCacher(1)
+	blockchain, _ := core.NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil, txCacher)
 	defer blockchain.Stop()
 
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the
 	// block index.
 	signer := types.HomesteadSigner{}
-	chain, _, err := GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 5, func(i int, gen *BlockGen) {
+	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 5, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, addr1 sends addr2 some ether.
@@ -100,8 +100,8 @@ func ExampleGenerateChain() {
 	}
 
 	// Import the chain. This runs all block validation rules.
-	if i, err := blockchain.InsertChain(context.Background(), chain); err != nil {
-		fmt.Printf("insert error (block %d): %v\n", chain[i].NumberU64(), err)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
+		fmt.Printf("insert error%v\n", err)
 		return
 	}
 

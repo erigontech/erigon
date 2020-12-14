@@ -71,12 +71,12 @@ func (m *TxDb) Reserve(bucket string, key []byte, i int) ([]byte, error) {
 
 func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
-	switch c := m.cursors[bucket].(type) {
-	case CursorDupSort:
-		return c.AppendDup(key, value)
-	default:
-		return c.Append(key, value)
-	}
+	return m.cursors[bucket].Append(key, value)
+}
+
+func (m *TxDb) AppendDup(bucket string, key []byte, value []byte) error {
+	m.len += uint64(len(key) + len(value))
+	return m.cursors[bucket].(CursorDupSort).AppendDup(key, value)
 }
 
 func (m *TxDb) Delete(bucket string, k, v []byte) error {

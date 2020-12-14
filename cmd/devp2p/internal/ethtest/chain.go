@@ -124,13 +124,22 @@ func (c *Chain) GetHeaders(req GetBlockHeaders) (BlockHeaders, error) {
 // loadChain takes the given chain.rlp file, and decodes and returns
 // the blocks from the file.
 func loadChain(chainfile string, genesis string) (*Chain, error) {
-	// Open the file handle and potentially unwrap the gzip stream
+	chainConfig, err := ioutil.ReadFile(genesis)
+	if err != nil {
+		return nil, err
+	}
+	var gen core.Genesis
+	if err = json.Unmarshal(chainConfig, &gen); err != nil {
+		return nil, err
+	}
+	gblock, _, _, _ := gen.ToBlock(nil, false)
+
+	// Load chain.rlp.
 	fh, err := os.Open(chainfile)
 	if err != nil {
 		return nil, err
 	}
 	defer fh.Close()
-
 	var reader io.Reader = fh
 	if strings.HasSuffix(chainfile, ".gz") {
 		if reader, err = gzip.NewReader(reader); err != nil {
@@ -138,29 +147,21 @@ func loadChain(chainfile string, genesis string) (*Chain, error) {
 		}
 	}
 	stream := rlp.NewStream(reader, 0)
-	var blocks []*types.Block
+	var blocks = make([]*types.Block, 1)
+	blocks[0] = gblock
 	for i := 0; ; i++ {
 		var b types.Block
 		if err = stream.Decode(&b); err == io.EOF {
 			break
 		} else if err != nil {
-			return nil, fmt.Errorf("at block %d: %v", i, err)
+			return nil, fmt.Errorf("at block index %d: %v", i, err)
+		}
+		if b.NumberU64() != uint64(i+1) {
+			return nil, fmt.Errorf("block at index %d has wrong number %d", i, b.NumberU64())
 		}
 		blocks = append(blocks, &b)
 	}
 
-	// Open the file handle and potentially unwrap the gzip stream
-	chainConfig, err := ioutil.ReadFile(genesis)
-	if err != nil {
-		return nil, err
-	}
-	var gen core.Genesis
-	if err := json.Unmarshal(chainConfig, &gen); err != nil {
-		return nil, err
-	}
-
-	return &Chain{
-		blocks:      blocks,
-		chainConfig: gen.Config,
-	}, nil
+	c := &Chain{blocks: blocks, chainConfig: gen.Config}
+	return c, nil
 }

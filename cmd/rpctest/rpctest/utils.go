@@ -85,6 +85,116 @@ func compareTraces(trace, traceg *EthTxTrace) bool {
 	return true
 }
 
+func compareTraceCalls(trace, traceg *TraceCall) bool {
+	r := trace.Result
+	rg := traceg.Result
+	if !bytes.Equal(r.Output, rg.Output) {
+		fmt.Printf("Root output is different: %x %x\n", r.Output, rg.Output)
+		return false
+	}
+	if len(r.Trace) != len(rg.Trace) {
+		fmt.Printf("Traces have different lengths: %d / %d\n", len(r.Trace), len(rg.Trace))
+		return false
+	}
+	for i, t := range r.Trace {
+		tg := rg.Trace[i]
+		if t.Type != tg.Type {
+			fmt.Printf("Trace different Type: %d %s %s\n", i, t.Type, tg.Type)
+			return false
+		}
+		action := t.Action
+		actiong := tg.Action
+		if action.CallType != actiong.CallType {
+			fmt.Printf("Trace different action.callType: %d %s %s\n", i, action.CallType, actiong.CallType)
+			return false
+		}
+		if action.From != actiong.From {
+			fmt.Printf("Trace different action.from: %d %x %x\n", i, action.From, actiong.From)
+			return false
+		}
+		if action.Gas.ToInt().Cmp(actiong.Gas.ToInt()) != 0 {
+			fmt.Printf("Trace different action.gas: %d %s %s\n", i, action.Gas.String(), actiong.Gas.String())
+			return false
+		}
+		if !bytes.Equal(action.Input, actiong.Input) {
+			fmt.Printf("Trace different action.input: %d %s %s\n", i, action.Input, actiong.Input)
+			return false
+		}
+		if action.To != actiong.To {
+			fmt.Printf("Trace different action.to: %d %x %x\n", i, action.To, actiong.To)
+			return false
+		}
+		if action.Value.ToInt().Cmp(actiong.Value.ToInt()) != 0 {
+			fmt.Printf("Trace different action.value: %d %s %s\n", i, action.Value.String(), actiong.Value.String())
+			return false
+		}
+		if !bytes.Equal(action.Init, actiong.Init) {
+			fmt.Printf("Trace different action.init: %d %s %s\n", i, action.Init, actiong.Init)
+			return false
+		}
+		if action.Address != actiong.Address {
+			fmt.Printf("Trace different action.address: %d %x %x\n", i, action.Address, actiong.Address)
+			return false
+		}
+		if action.RefundAddress != actiong.RefundAddress {
+			fmt.Printf("Trace different action.refundAddress: %d %x %x\n", i, action.RefundAddress, actiong.RefundAddress)
+			return false
+		}
+		if action.Balance.ToInt().Cmp(actiong.Balance.ToInt()) != 0 {
+			fmt.Printf("Trace different action.balance: %d %s %s\n", i, action.Balance.String(), actiong.Balance.String())
+			return false
+		}
+		result := t.Result
+		resultg := tg.Result
+		if result == nil && resultg != nil {
+			fmt.Printf("Traces difference result == nil, resultg != nil: %d\n", i)
+			return false
+		}
+		if result != nil && resultg == nil {
+			fmt.Printf("Traces difference result != nil, resultg == nil: %d\n", i)
+			return false
+		}
+		if result != nil {
+			if result.GasUsed.ToInt().Cmp(resultg.GasUsed.ToInt()) != 0 {
+				fmt.Printf("Trace different result.gasUsed: %d %s %s\n", i, result.GasUsed.String(), resultg.GasUsed.String())
+				return false
+			}
+			if !bytes.Equal(result.Output, resultg.Output) {
+				fmt.Printf("Trace different result.output: %d %s %s\n", i, result.Output, resultg.Output)
+				return false
+			}
+			if !bytes.Equal(result.Code, resultg.Code) {
+				fmt.Printf("Trace different result.code: %d %s %s\n", i, result.Code, resultg.Code)
+				return false
+			}
+			if result.Address != resultg.Address {
+				fmt.Printf("Trace different result.address: %d %x %x\n", i, result.Address, resultg.Address)
+				return false
+			}
+		}
+		if t.Error != tg.Error {
+			fmt.Printf("Traces diffetrent error: %d %s %s\n", i, t.Error, tg.Error)
+			return false
+		}
+		if t.Subtraces != tg.Subtraces {
+			fmt.Printf("Traces different subtraces: %d %d %d\n", i, t.Subtraces, tg.Subtraces)
+			return false
+		}
+		if len(t.TraceAddress) != len(tg.TraceAddress) {
+			fmt.Printf("Traces have traceAddress of different lengths: %d %d / %d\n", i, len(t.TraceAddress), len(tg.TraceAddress))
+			return false
+		}
+		for j, ta := range t.TraceAddress {
+			tag := tg.TraceAddress[j]
+			if ta != tag {
+				fmt.Printf("Traces different traceAddress: %d %v %v\n", i, t.TraceAddress, tg.TraceAddress)
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func compareBalances(balance, balanceg *EthBalance) bool {
 	if balance.Balance.ToInt().Cmp(balanceg.Balance.ToInt()) != 0 {
 		fmt.Printf("Different balance: %d %d\n", balance.Balance.ToInt(), balanceg.Balance.ToInt())

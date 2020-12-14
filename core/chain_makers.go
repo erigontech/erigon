@@ -23,7 +23,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -42,7 +41,6 @@ type BlockGen struct {
 	chain       []*types.Block
 	header      *types.Header
 	stateReader state.StateReader
-	stateWriter state.StateWriter
 	ibs         *state.IntraBlockState
 
 	gasPool  *GasPool
@@ -223,8 +221,8 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	defer tx.Rollback()
 
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
-		stateWriter *state.DbStateWriter, plainStateWriter *state.PlainStateWriter) (*types.Block, types.Receipts, error) {
-		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, stateWriter: stateWriter, config: config, engine: engine, txs: make([]*types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1)}
+		plainStateWriter *state.PlainStateWriter) (*types.Block, types.Receipts, error) {
+		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, config: config, engine: engine, txs: make([]*types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1)}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
@@ -249,12 +247,46 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
 			// Write state changes to db
-			if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
-				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter:  %w", err)
-			}
+			//if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+			//	return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter:  %w", err)
+			//}
 			if err := ibs.CommitBlock(ctx, plainStateWriter); err != nil {
-				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter:  %w", err)
+				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
 			}
+			if err := tx.(ethdb.BucketsMigrator).ClearBuckets(dbutils.CurrentStateBucket); err != nil {
+				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
+			}
+			c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
+			h := common.NewHasher()
+			defer common.ReturnHasherToPool(h)
+			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return nil, nil, fmt.Errorf("interate over plain state: %w", err)
+				}
+				var newK []byte
+				if len(k) == common.AddressLength {
+					newK = make([]byte, common.HashLength)
+				} else {
+					newK = make([]byte, common.HashLength*2+common.IncarnationLength)
+				}
+				h.Sha.Reset()
+				//nolint:errcheck
+				h.Sha.Write(k[:common.AddressLength])
+				//nolint:errcheck
+				h.Sha.Read(newK[:common.HashLength])
+				if len(k) > common.AddressLength {
+					copy(newK[common.HashLength:], k[common.AddressLength:common.AddressLength+common.IncarnationLength])
+					h.Sha.Reset()
+					//nolint:errcheck
+					h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
+					//nolint:errcheck
+					h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
+				}
+				if err = tx.Put(dbutils.CurrentStateBucket, newK, common.CopyBytes(v)); err != nil {
+					return nil, nil, fmt.Errorf("insert hashed key: %w", err)
+				}
+			}
+			c.Close()
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", i)
 				if err := tx.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
@@ -266,37 +298,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				fmt.Printf("===============================\n")
 			}
 			var hashCollector func(keyHex []byte, hash []byte) error
-			var collector *etl.Collector
 			unfurl := trie.NewRetainList(0)
-			if intermediateHashes {
-				buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
-				buf.SetComparator(tx.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket))
-				collector = etl.NewCollector("", buf)
-				hashCollector = func(keyHex []byte, hash []byte) error {
-					if len(keyHex) == 0 {
-						return nil
-					}
-					if len(keyHex) > trie.IHDupKeyLen {
-						return collector.Collect(keyHex[:trie.IHDupKeyLen], append(keyHex[trie.IHDupKeyLen:], hash...))
-					}
-					return collector.Collect(keyHex, hash)
-				}
-				changeSetWriter := stateWriter.ChangeSetWriter()
-				accountChangeSet, err1 := changeSetWriter.GetAccountChanges()
-				if err1 != nil {
-					return nil, nil, err1
-				}
-				for _, accountChange := range accountChangeSet.Changes {
-					unfurl.AddKey(accountChange.Key)
-				}
-				storageChangeSet, err2 := changeSetWriter.GetStorageChanges()
-				if err2 != nil {
-					return nil, nil, err2
-				}
-				for _, storageChange := range storageChangeSet.Changes {
-					unfurl.AddKey(storageChange.Key)
-				}
-			}
 			loader := trie.NewFlatDBTrieLoader("GenerateChain", dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 			if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
@@ -305,11 +307,6 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				b.header.Root = hash
 			} else {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
-			}
-			if intermediateHashes {
-				if err := collector.Load("GenerateChain", tx, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
-					return nil, nil, fmt.Errorf("loading intermediate hashes: %w", err)
-				}
 			}
 
 			// Recreating block to make sure Root makes it into the header
@@ -321,10 +318,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	for i := 0; i < n; i++ {
 		stateReader := state.NewPlainStateReader(tx)
-		stateWriter := state.NewDbStateWriter(tx, parent.Number().Uint64()+uint64(i)+1)
 		plainStateWriter := state.NewPlainStateWriter(tx, nil, parent.Number().Uint64()+uint64(i)+1)
 		ibs := state.New(stateReader)
-		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter, plainStateWriter)
+		block, receipt, err := genblock(i, parent, ibs, stateReader, plainStateWriter)
 		if err != nil {
 			return nil, nil, fmt.Errorf("generating block %d: %w", i, err)
 		}
@@ -364,24 +360,6 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		Number:   number,
 		Time:     time,
 	}
-}
-
-// makeHeaderChain creates a deterministic chain of headers rooted at parent.
-func makeHeaderChain(parent *types.Header, n int, engine consensus.Engine, db *ethdb.ObjectDatabase, seed int) []*types.Header {
-	blocks := makeBlockChain(types.NewBlockWithHeader(parent), n, engine, db, seed)
-	headers := make([]*types.Header, len(blocks))
-	for i, block := range blocks {
-		headers[i] = block.Header()
-	}
-	return headers
-}
-
-// makeBlockChain creates a deterministic chain of blocks rooted at parent.
-func makeBlockChain(parent *types.Block, n int, engine consensus.Engine, db *ethdb.ObjectDatabase, seed int) []*types.Block {
-	blocks, _, _ := GenerateChain(params.TestChainConfig, parent, engine, db, n, func(i int, b *BlockGen) {
-		b.SetCoinbase(common.Address{0: byte(seed), 19: byte(i)})
-	}, false /* intermediateHashes */)
-	return blocks
 }
 
 type fakeChainReader struct {

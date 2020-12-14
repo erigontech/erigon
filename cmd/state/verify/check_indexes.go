@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -8,25 +9,31 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 )
 
-func CheckIndex(chaindata string, changeSetBucket string, indexBucket string) error {
+func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, indexBucket string) error {
 	db := ethdb.MustOpen(chaindata)
 	startTime := time.Now()
 
+	i := 0
 	if err := changeset.Walk(db, changeSetBucket, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
-		if blockN%100_000 == 0 {
+		i++
+		if i%100_000 == 0 {
 			fmt.Printf("Processed %dK, %s\n", blockN/1000, time.Since(startTime))
 		}
+		select {
+		default:
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
 
-		indexBytes, innerErr := db.GetIndexChunk(indexBucket, k, blockN)
+		bm, innerErr := bitmapdb.Get(db, indexBucket, dbutils.CompositeKeyWithoutIncarnation(k), uint32(blockN-1), uint32(blockN+1))
 		if innerErr != nil {
 			return false, innerErr
 		}
-
-		index := dbutils.WrapHistoryIndex(indexBytes)
-		if findVal, _, ok := index.Search(blockN); !ok {
-			return false, fmt.Errorf("%v,%v,%v", blockN, findVal, common.Bytes2Hex(k))
+		if !bm.Contains(uint32(blockN)) {
+			return false, fmt.Errorf("%v,%v", blockN, common.Bytes2Hex(k))
 		}
 		return true, nil
 	}); err != nil {

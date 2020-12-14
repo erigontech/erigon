@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"unsafe"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
@@ -16,6 +19,85 @@ var (
 	_ Cursor         = &snCursor2{}
 )
 
+func (s *snapshotCursor) Reserve(k []byte, n int) ([]byte, error) {
+	return s.dbCursor.Reserve(k, n)
+}
+
+func (s *snapshotCursor) PutCurrent(key, value []byte) error {
+	return s.dbCursor.PutCurrent(key, value)
+}
+
+func (s *snapshotTX) CursorDupSort(bucket string) CursorDupSort {
+	return s.dbTX.CursorDupSort(bucket)
+}
+
+func (s *snapshotTX) Sequence(bucket string, amount uint64) (uint64, error) {
+	return s.dbTX.Sequence(bucket, amount)
+}
+
+func (s *snapshotTX) CursorDupFixed(bucket string) CursorDupFixed {
+	return s.dbTX.CursorDupFixed(bucket)
+}
+
+func (s *snapshotTX) Comparator(bucket string) dbutils.CmpFunc {
+	return s.dbTX.Comparator(bucket)
+}
+
+func (s *snapshotTX) Cmp(bucket string, a, b []byte) int {
+	return s.dbTX.Cmp(bucket, a, b)
+}
+
+func (s *snapshotTX) DCmp(bucket string, a, b []byte) int {
+	return s.dbTX.DCmp(bucket, a, b)
+}
+
+func (s *snapshotTX) CHandle() unsafe.Pointer {
+	return s.dbTX.CHandle()
+}
+
+func (v *lazyTx) CursorDupSort(bucket string) CursorDupSort {
+	panic("implement me")
+}
+
+func (v *lazyTx) CursorDupFixed(bucket string) CursorDupFixed {
+	panic("implement me")
+}
+
+func (v *lazyTx) Sequence(bucket string, amount uint64) (uint64, error) {
+	panic("implement me")
+}
+
+func (v *lazyTx) Comparator(bucket string) dbutils.CmpFunc {
+	panic("implement me")
+}
+
+func (v *lazyTx) Cmp(bucket string, a, b []byte) int {
+	panic("implement me")
+}
+
+func (v *lazyTx) DCmp(bucket string, a, b []byte) int {
+	panic("implement me")
+}
+
+func (v *lazyTx) CHandle() unsafe.Pointer {
+	panic("implement me")
+}
+
+func (s *snapshotCursor) Prev() ([]byte, []byte, error) {
+	return s.dbCursor.Prev()
+}
+
+func (s *snapshotCursor) Current() ([]byte, []byte, error) {
+	return s.dbCursor.Current()
+}
+
+func (s *snapshotCursor) DeleteCurrent() error {
+	return s.dbCursor.DeleteCurrent()
+}
+
+func (s *snapshotCursor) Count() (uint64, error) {
+	return s.dbCursor.Count()
+}
 
 
 func NewSnapshot2KV() snapshotOpts2 {

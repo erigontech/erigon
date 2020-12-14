@@ -88,7 +88,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	err := rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
 	assert.NoError(t, err)
 
-	reorg, _, err := InsertHeaderChain("logPrefix", db, headers1, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	_, reorg, _, err := InsertHeaderChain("logPrefix", db, headers1)
 	assert.NoError(t, err)
 	assert.False(t, reorg)
 
@@ -96,7 +96,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, expectedTdBlock3, td)
 
-	reorg, _, err = InsertHeaderChain("logPrefix", db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	_, reorg, _, err = InsertHeaderChain("logPrefix", db, headers2)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 
@@ -105,7 +105,7 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 
 	assert.Equal(t, expectedTdBlock4, td)
 
-	reorg, _, err = InsertHeaderChain("logPrefix", db, headers2, params.AllEthashProtocolChanges, ethash.NewFaker(), 0)
+	_, reorg, _, err = InsertHeaderChain("logPrefix", db, headers2)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 

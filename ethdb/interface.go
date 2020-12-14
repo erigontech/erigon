@@ -99,11 +99,8 @@ type Database interface {
 
 	Keys() ([][]byte, error)
 
-	// [TURBO-GETH] Freezer support (minimum amount that is actually used)
-	// FIXME: implement support if needed
-	Ancients() (uint64, error)
-	TruncateAncients(items uint64) error
 	Append(bucket string, key, value []byte) error
+	AppendDup(bucket string, key, value []byte) error
 	Sequence(bucket string, amount uint64) (uint64, error)
 }
 

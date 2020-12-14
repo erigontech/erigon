@@ -340,10 +340,12 @@ if(NOT DEFINED MDBX_CXX_STANDARD)
     set(MDBX_CXX_STANDARD 98)
   endif()
 endif()
-if(NOT HAS_C11 LESS 0)
-  set(MDBX_C_STANDARD 11)
-else()
+# MSVC >= 19.28 (Microsoft Visual Studio 16.8) is mad!
+#               It unable process Windows SDK headers in the C11 mode!
+if(HAS_C11 LESS 0 OR (MSVC AND MSVC_VERSION GREATER 1927))
   set(MDBX_C_STANDARD 99)
+else()
+  set(MDBX_C_STANDARD 11)
 endif()
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows" AND EXISTS "${MDBX_SOURCE_DIR}/ntdll.def")
@@ -756,14 +758,21 @@ if(NOT CMAKE_CONFIGURATION_TYPES)
   endif()
 endif()
 
+# choice target to fetch definitions and options
+if(MDBX_BUILD_SHARED_LIBRARY)
+  set(target4fetch mdbx)
+else()
+  set(target4fetch mdbx-static)
+endif()
+
 # get definitions
-get_target_property(defs_list mdbx-static COMPILE_DEFINITIONS)
+get_target_property(defs_list ${target4fetch} COMPILE_DEFINITIONS)
 if(defs_list)
   list(APPEND MDBX_BUILD_FLAGS ${defs_list})
 endif()
 
 # get target compile options
-get_target_property(options_list mdbx-static COMPILE_OPTIONS)
+get_target_property(options_list ${target4fetch} COMPILE_OPTIONS)
 if(options_list)
   list(APPEND MDBX_BUILD_FLAGS ${options_list})
 endif()

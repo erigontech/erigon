@@ -821,7 +821,7 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
-	result, err := core.ApplyMessage(evm, msg, gp)
+	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */)
 	if err := vmError(); err != nil {
 		return nil, err
 	}
@@ -1889,4 +1889,13 @@ func checkTxFee(gasPrice *big.Int, gas uint64, cap float64) error {
 		return fmt.Errorf("tx fee (%.2f ether) exceeds the configured cap (%.2f ether)", feeFloat, cap)
 	}
 	return nil
+}
+
+// toHexSlice creates a slice of hex-strings based on []byte.
+func toHexSlice(b [][]byte) []string {
+	r := make([]string, len(b))
+	for i := range b {
+		r[i] = hexutil.Encode(b[i])
+	}
+	return r
 }

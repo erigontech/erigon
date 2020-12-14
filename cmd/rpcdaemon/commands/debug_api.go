@@ -29,15 +29,13 @@ type PrivateDebugAPI interface {
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
-	db           ethdb.KV
 	dbReader     ethdb.Database
 	chainContext core.ChainContext
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Database) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(dbReader ethdb.Database) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
-		db:       db,
 		dbReader: dbReader,
 	}
 }
@@ -109,7 +107,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	}
 
 	dumper := state.NewDumper(tx.(ethdb.HasTx).Tx(), blockNumber)
-	res, err := dumper.IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages, startKey, maxResults)
+	res, err := dumper.IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages, common.BytesToAddress(startKey), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}

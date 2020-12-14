@@ -23,8 +23,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"io/ioutil"
 	"math/big"
 	"os"
@@ -34,6 +32,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -54,6 +55,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
@@ -356,6 +358,20 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
 
+	stagedSync := config.StagedSync
+
+	// setting notifier to support streaming events to rpc daemon
+	remoteEvents := remotedbserver.NewEvents()
+	if stagedSync == nil {
+		// if there is not stagedsync, we create one with the custom notifier
+		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: remoteEvents})
+	} else {
+		// otherwise we add one if needed
+		if stagedSync.Notifier == nil {
+			stagedSync.Notifier = remoteEvents
+		}
+	}
+
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
 			// load peer cert/key, ca cert
@@ -388,12 +404,12 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds, remoteEvents)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil, remoteEvents)
 			if err != nil {
 				return nil, err
 			}
@@ -404,12 +420,13 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	if checkpoint == nil {
 		//checkpoint = params.TrustedCheckpoints[genesisHash]
 	}
-	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist, config.StagedSync); err != nil {
+
+	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist, stagedSync); err != nil {
 		return nil, err
 	}
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
 	eth.protocolManager.SetTmpDir(tmpdir)
-	eth.protocolManager.SetBatchSize(int(config.BatchSize))
+	eth.protocolManager.SetBatchSize(int(config.CacheSize), int(config.BatchSize))
 
 	if config.SyncMode != downloader.StagedSync {
 		if err = eth.StartTxPool(); err != nil {
@@ -463,6 +480,7 @@ func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig) {
 			EnablePreimageRecording: config.EnablePreimageRecording,
 			EWASMInterpreter:        config.EWASMInterpreter,
 			EVMInterpreter:          config.EVMInterpreter,
+			NoReceipts:              !config.StorageMode.Receipts,
 		}
 		cacheConfig = &core.CacheConfig{
 			Pruning:             config.Pruning,

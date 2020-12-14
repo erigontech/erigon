@@ -219,7 +219,7 @@ func Main(ctx *cli.Context) error {
 	defer tx.Rollback()
 	dumper := state.NewDumper(tx, 0)
 
-	dumper.DumpToCollector(collector, false, false, false, nil, -1) //nolint:errcheck
+	dumper.DumpToCollector(collector, false, false, false, common.Address{}, -1) //nolint:errcheck
 	return dispatchOutput(ctx, baseDir, result, collector)
 
 }

@@ -84,7 +84,7 @@ func (r *StateReader) ReadAccountStorage(address common.Address, incarnation uin
 		r.storageReads[address] = m
 	}
 	m[*key] = struct{}{}
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, err := state.GetAsOf(r.tx, true /* storage */, compositeKey, r.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
@@ -92,7 +92,7 @@ func (r *StateReader) ReadAccountStorage(address common.Address, incarnation uin
 	return enc, nil
 }
 
-func (r *StateReader) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
+func (r *StateReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	r.codeReads[address] = struct{}{}
 	if bytes.Equal(codeHash[:], crypto.Keccak256(nil)) {
 		return nil, nil
@@ -106,8 +106,8 @@ func (r *StateReader) ReadAccountCode(address common.Address, codeHash common.Ha
 	return val, nil
 }
 
-func (r *StateReader) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
-	code, err := r.ReadAccountCode(address, codeHash)
+func (r *StateReader) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	code, err := r.ReadAccountCode(address, incarnation, codeHash)
 	if err != nil {
 		return 0, err
 	}
@@ -146,7 +146,7 @@ func (r *StateReader) CreateContract(address common.Address) error {
 	return nil
 }
 
-func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
+func (r *StateReader) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
 	st := llrb.New()
 	var s [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addr[:])
@@ -162,10 +162,10 @@ func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(
 		return fmt.Errorf("decoding account %x: %w", addr, err)
 	}
 	binary.BigEndian.PutUint64(s[common.AddressLength:], acc.Incarnation)
-	copy(s[common.AddressLength+common.IncarnationLength:], start)
+	copy(s[common.AddressLength+common.IncarnationLength:], startLocation[:])
 	var lastKey common.Hash
 	overrideCounter := 0
-	min := &storageItem{key: common.BytesToHash(start)}
+	min := &storageItem{key: startLocation}
 	if t, ok := r.storage[addr]; ok {
 		t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 			item := i.(*storageItem)
@@ -179,24 +179,22 @@ func (r *StateReader) ForEachStorage(addr common.Address, start []byte, cb func(
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	if err := state.WalkAsOf(r.tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.AddressLength+common.IncarnationLength), r.blockNr+1, func(ks, vs []byte) (bool, error) {
-		if !bytes.HasPrefix(ks, addr[:]) {
+	if err := state.WalkAsOfStorage(r.tx, addr, acc.Incarnation, startLocation, r.blockNr+1, func(kAddr, kLoc, vs []byte) (bool, error) {
+		if !bytes.HasPrefix(kAddr, addr[:]) {
 			return false, nil
 		}
 		if len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
 		}
-		key := ks[common.AddressLength:]
-		//fmt.Printf("key: %x (%x)\n", key, ks)
 		si := storageItem{}
-		copy(si.key[:], key)
+		copy(si.key[:], kLoc)
 		if st.Has(&si) {
 			return true, nil
 		}
 		si.value.SetBytes(vs)
 		st.InsertNoReplace(&si)
-		if bytes.Compare(key[:], lastKey[:]) > 0 {
+		if bytes.Compare(kLoc[:], lastKey[:]) > 0 {
 			// Beyond overrides
 			return st.Len() < maxResults+numDeletes, nil
 		}

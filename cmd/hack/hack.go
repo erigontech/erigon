@@ -1114,7 +1114,7 @@ func ValidateTxLookups2(chaindata string) {
 	log.Info("All done", "duration", time.Since(startTime))
 }
 
-func validateTxLookups2(db rawdb.DatabaseReader, startBlock uint64, interruptCh chan bool) {
+func validateTxLookups2(db ethdb.Database, startBlock uint64, interruptCh chan bool) {
 	blockNum := startBlock
 	iterations := 0
 	var interrupt bool
@@ -1918,7 +1918,7 @@ func mint(chaindata string, block uint64) error {
 		c = tx.Cursor(dbutils.BlockBodyPrefix)
 		var prevBlock uint64
 		var burntGas uint64
-		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
+		for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -1931,14 +1931,7 @@ func mint(chaindata string, block uint64) error {
 				fmt.Printf("Gap [%d-%d]\n", prevBlock, blockNumber-1)
 			}
 			prevBlock = blockNumber
-			bodyRlp, err := rawdb.DecompressBlockBody(v)
-			if err != nil {
-				return err
-			}
-			body := new(types.Body)
-			if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
-				return fmt.Errorf("invalid block body RLP: %w", err)
-			}
+			body := rawdb.ReadBody(db, blockHash, blockNumber)
 			header := rawdb.ReadHeader(db, blockHash, blockNumber)
 			senders := rawdb.ReadSenders(db, blockHash, blockNumber)
 			var ethSpent uint256.Int
@@ -2065,12 +2058,74 @@ func dupSz(chaindata string) error {
 		total += len(k) + len(v) + 8
 		for k, v, err := c.NextDup(); k != nil; k, v, err = c.NextDup() {
 			check(err)
-			total += len(v) + 8
+			total += len(v)
 			//fmt.Printf("\t%x\n", v)
 		}
 	}
 	fmt.Printf("total sz: %s\n", common.StorageSize(total))
 
+	return nil
+}
+
+func indexKeySizes(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	keySizes := make(map[int]int)
+	count := 0
+	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.AccountsHistoryBucket)
+		// This is a mapping of contractAddress + incarnation => CodeHash
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			keySizes[len(k)]++
+			count++
+			if count%1000000 == 0 {
+				log.Info("Processed", "records", count)
+			}
+		}
+		return nil
+	}); err1 != nil {
+		return err1
+	}
+	fmt.Printf("Key sizes: %v\n", keySizes)
+	return nil
+}
+
+func extractBodies(chaindata string, block uint64) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RO)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockBodyPrefix)
+	defer c.Close()
+	blockEncoded := dbutils.EncodeBlockNumber(block)
+	for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		blockNumber := binary.BigEndian.Uint64(k[:8])
+		blockHash := common.BytesToHash(k[8:])
+		body := rawdb.ReadBody(db, blockHash, blockNumber)
+		b, err := rlp.EncodeToBytes(body)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Body %d %x: %x\n", blockNumber, blockHash, b)
+		header := rawdb.ReadHeader(db, blockHash, blockNumber)
+		b, err = rlp.EncodeToBytes(header)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Header %d %x: %x\n", blockNumber, blockHash, b)
+		if blockNumber > block+5 {
+			break
+		}
+	}
 	return nil
 }
 
@@ -2251,6 +2306,16 @@ func main() {
 		sb := strings.Builder{}
 		if err := textInfo(*chaindata, &sb); err != nil {
 			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "indexKeySizes" {
+		if err := indexKeySizes(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "extractBodies" {
+		if err := extractBodies(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error:%v\n", err)
 		}
 	}
 }

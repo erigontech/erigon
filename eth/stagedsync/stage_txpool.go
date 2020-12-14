@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 
@@ -12,10 +11,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolStart func() error, quitCh <-chan struct{}) error {
+func spawnTxPool(s *StageState, db ethdb.Database, pool *core.TxPool, poolStart func() error, quitCh <-chan struct{}) error {
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -48,7 +46,7 @@ func spawnTxPool(s *StageState, db ethdb.GetterPutter, pool *core.TxPool, poolSt
 	return s.DoneAndUpdate(db, to)
 }
 
-func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
+func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, db ethdb.Database, quitCh <-chan struct{}) error {
 	headHash, err := rawdb.ReadCanonicalHash(db, to)
 	if err != nil {
 		return err
@@ -97,15 +95,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 			return true, nil
 		}
 
-		bodyRlp, err := rawdb.DecompressBlockBody(v)
-		if err != nil {
-			return false, err
-		}
-
-		body := new(types.Body)
-		if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
-			return false, fmt.Errorf("%s: invalid block body RLP: %w", logPrefix, err)
-		}
+		body := rawdb.ReadBody(db, blockHash, blockNumber)
 		for _, tx := range body.Transactions {
 			pool.RemoveTx(tx.Hash(), true /* outofbound */)
 		}
@@ -117,7 +107,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	return nil
 }
 
-func unwindTxPool(u *UnwindState, s *StageState, db ethdb.GetterPutter, pool *core.TxPool, quitCh <-chan struct{}) error {
+func unwindTxPool(u *UnwindState, s *StageState, db ethdb.Database, pool *core.TxPool, quitCh <-chan struct{}) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
@@ -136,7 +126,7 @@ func unwindTxPool(u *UnwindState, s *StageState, db ethdb.GetterPutter, pool *co
 	return nil
 }
 
-func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, db ethdb.Getter, quitCh <-chan struct{}) error {
+func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, db ethdb.Database, quitCh <-chan struct{}) error {
 	headHash, err := rawdb.ReadCanonicalHash(db, from)
 	if err != nil {
 		return err
@@ -209,15 +199,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, db
 			return true, nil
 		}
 
-		bodyRlp, err := rawdb.DecompressBlockBody(v)
-		if err != nil {
-			return false, err
-		}
-
-		body := new(types.Body)
-		if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
-			return false, fmt.Errorf("%s: invalid block body RLP: %w", logPrefix, err)
-		}
+		body := rawdb.ReadBody(db, blockHash, blockNumber)
 		body.SendersToTxs(senders[blockNumber-from-1])
 		txsToInject = append(txsToInject, body.Transactions...)
 		return true, nil

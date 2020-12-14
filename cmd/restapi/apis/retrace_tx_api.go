@@ -48,7 +48,7 @@ type RetraceResponse struct {
 	Account AccountWritesReads `json:"accounts"`
 }
 
-func Retrace(blockNumber, chain string, kv ethdb.KV, db ethdb.Getter) (RetraceResponse, error) {
+func Retrace(blockNumber, chain string, kv ethdb.KV, db ethdb.Database) (RetraceResponse, error) {
 	chainConfig, err := ReadChainConfig(kv, chain)
 	if err != nil {
 		return RetraceResponse{}, err
@@ -63,7 +63,7 @@ func Retrace(blockNumber, chain string, kv ethdb.KV, db ethdb.Getter) (RetraceRe
 		return RetraceResponse{}, err
 	}
 	chainCtx := NewRemoteContext(kv, db)
-	writer := state.NewChangeSetWriterPlain(uint64(bn - 1))
+	writer := state.NewChangeSetWriterPlain(db, uint64(bn-1))
 	reader := NewRemoteReader(kv, uint64(bn))
 	intraBlockState := state.New(reader)
 

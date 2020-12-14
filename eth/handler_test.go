@@ -294,6 +294,7 @@ func TestGetNodeData64(t *testing.T) { testGetNodeData(t, 64) }
 func TestGetNodeData65(t *testing.T) { testGetNodeData(t, 65) }
 
 func testGetNodeData(t *testing.T, protocol int) {
+	t.Skip("turbo-geth does not support GetNodeData")
 	debug.OverrideGetNodeData(true)
 	defer debug.OverrideGetNodeData(false)
 	// Assemble the test environment

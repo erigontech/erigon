@@ -16,6 +16,7 @@ var (
 	block              uint64
 	unwind             uint64
 	unwindEvery        uint64
+	cacheSizeStr       string
 	batchSizeStr       string
 	reset              bool
 	bucket             string
@@ -23,10 +24,7 @@ var (
 	mapSizeStr         string
 	freelistReuse      int
 	migration          string
-	dispatcherAddr     string
-	dispatcherLatency  int
-	shardBits          int
-	shardID            int
+	silkwormPath       string
 )
 
 func must(err error) {
@@ -88,6 +86,7 @@ func withDatadir(cmd *cobra.Command) {
 }
 
 func withBatchSize(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&cacheSizeStr, "cacheSize", "0", "cache size for execution stage")
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", "512M", "batch size for execution stage")
 }
 
@@ -95,14 +94,7 @@ func withMigration(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&migration, "migration", "", "action to apply to given migration")
 }
 
-func withDispatcher(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&dispatcherAddr, "dispatcher_addr", "", "address of shard dispatcher")
-	cmd.Flags().IntVar(&dispatcherLatency, "dispatcher_latency", 0, "artificial latency of dispatcher, in ms")
-	cmd.Flags().IntVar(&shardBits, "shard_bits", 2, "number of bits in the key used to derive shardID")
-}
-
-func withShard(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&dispatcherAddr, "dispatcher_addr", "", "address of shard dispatcher")
-	cmd.Flags().IntVar(&shardBits, "shard_bits", 2, "number of bits in the key used to derive shardID")
-	cmd.Flags().IntVar(&shardID, "shard_id", 0, "shard ID")
+func withSilkworm(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&silkwormPath, "silkworm", "", "file path of libsilkworm_tg_api.so")
+	must(cmd.MarkFlagFilename("silkworm"))
 }

@@ -47,7 +47,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	if chaindata != historyfile {
 		historyDb = ethdb.MustOpen(historyfile)
 	}
-	historyTx, err1 := historyDb.KV().Begin(context.Background(), nil, ethdb.RO)
+	historyTx, err1 := historyDb.Begin(context.Background(), ethdb.RO)
 	if err1 != nil {
 		return err1
 	}
@@ -95,7 +95,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 
 		dbstate := state.NewPlainDBState(historyTx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
-		csw := state.NewChangeSetWriterPlain(block.NumberU64() - 1)
+		csw := state.NewChangeSetWriterPlain(nil /* db */, block.NumberU64()-1)
 		var blockWriter state.StateWriter
 		if nocheck {
 			blockWriter = noOpWriter

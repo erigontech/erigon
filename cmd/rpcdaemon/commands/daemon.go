@@ -2,21 +2,22 @@ package commands
 
 import (
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
 // APIList describes the list of available RPC apis
-func APIList(db ethdb.KV, eth ethdb.Backend, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
+func APIList(db ethdb.KV, eth ethdb.Backend, filters *filters.Filters, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
 	dbReader := ethdb.NewObjectDatabase(db)
 
-	ethImpl := NewEthAPI(db, dbReader, eth, cfg.Gascap)
+	ethImpl := NewEthAPI(db, dbReader, eth, cfg.Gascap, filters)
 	tgImpl := NewTgAPI(db, dbReader)
 	netImpl := NewNetAPIImpl(eth)
-	debugImpl := NewPrivateDebugAPI(db, dbReader)
-	traceImpl := NewTraceAPI(db, dbReader, &cfg)
+	debugImpl := NewPrivateDebugAPI(dbReader)
+	traceImpl := NewTraceAPI(dbReader, &cfg)
 	web3Impl := NewWeb3APIImpl()
 	dbImpl := NewDBAPIImpl()   /* deprecated */
 	shhImpl := NewSHHAPIImpl() /* deprecated */

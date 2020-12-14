@@ -353,7 +353,7 @@ typedef mode_t mdbx_mode_t;
 /** \brief Auxiliary macro for robustly define the both inline version of API
  * function and non-inline fallback dll-exported version for applications linked
  * with old version of libmdbx, with a strictly ODR-common implementation. */
-#if !defined(LIBMDBX_INTERNALS) || defined(DOXYGEN)
+#if !defined(LIBMDBX_INTERNALS)
 #define LIBMDBX_INLINE_API(TYPE, NAME, ARGS) static __inline TYPE NAME ARGS
 #else
 #define LIBMDBX_INLINE_API(TYPE, NAME, ARGS)                                   \
@@ -483,9 +483,18 @@ typedef mode_t mdbx_mode_t;
   MDBX_CXX01_CONSTEXPR ENUM operator&(ENUM a, ENUM b) {                        \
     return ENUM(std::size_t(a) & std::size_t(b));                              \
   }                                                                            \
+  MDBX_CXX01_CONSTEXPR ENUM operator&(ENUM a, size_t b) {                      \
+    return ENUM(std::size_t(a) & b);                                           \
+  }                                                                            \
+  MDBX_CXX01_CONSTEXPR ENUM operator&(size_t a, ENUM b) {                      \
+    return ENUM(a & std::size_t(b));                                           \
+  }                                                                            \
   MDBX_CXX14_CONSTEXPR ENUM &operator&=(ENUM &a, ENUM b) { return a = a & b; } \
-  MDBX_CXX01_CONSTEXPR ENUM operator~(ENUM a) {                                \
-    return ENUM(~std::size_t(a));                                              \
+  MDBX_CXX14_CONSTEXPR ENUM &operator&=(ENUM &a, size_t b) {                   \
+    return a = a & b;                                                          \
+  }                                                                            \
+  MDBX_CXX01_CONSTEXPR std::size_t operator~(ENUM a) {                         \
+    return ~std::size_t(a);                                                    \
   }                                                                            \
   MDBX_CXX01_CONSTEXPR ENUM operator^(ENUM a, ENUM b) {                        \
     return ENUM(std::size_t(a) ^ std::size_t(b));                              \
@@ -1163,7 +1172,7 @@ enum MDBX_env_flags_t {
 
   /** Don't sync anything but keep previous steady commits.
    *
-   * Like \ref MDBX_UTTERLY_NOSYNC the `MDBX_SAFE_NOSYNC` flag similarly disable
+   * Like \ref MDBX_UTTERLY_NOSYNC the `MDBX_SAFE_NOSYNC` flag disable similarly
    * flush system buffers to disk when committing a transaction. But there is a
    * huge difference in how are recycled the MVCC snapshots corresponding to
    * previous "steady" transactions (see below).
@@ -1338,9 +1347,9 @@ enum MDBX_db_flags_t {
   /** With \ref MDBX_DUPSORT; sorted dup items have fixed size */
   MDBX_DUPFIXED = UINT32_C(0x10),
 
-  /** With \ref MDBX_DUPSORT; dups are \ref MDBX_INTEGERKEY -style integers. The
-   * data values must all be of the same size and must be aligned while passing
-   * as arguments. */
+  /** With \ref MDBX_DUPSORT and with \ref MDBX_DUPFIXED; dups are fixed size
+   * \ref MDBX_INTEGERKEY -style integers. The data values must all be of the
+   * same size and must be aligned while passing as arguments. */
   MDBX_INTEGERDUP = UINT32_C(0x20),
 
   /** With \ref MDBX_DUPSORT; use reverse string comparison */
@@ -1505,7 +1514,20 @@ enum MDBX_cursor_op {
 
   /** \ref MDBX_DUPFIXED -only: Position at previous page and return up to
    * a page of duplicate data items. */
-  MDBX_PREV_MULTIPLE
+  MDBX_PREV_MULTIPLE,
+
+  /** Position at first key-value pair greater than or equal to specified,
+   * return both key and data, and the return code depends on a exact match.
+   *
+   * For non DUPSORT-ed collections this work the same to \ref MDBX_SET_RANGE,
+   * but returns \ref MDBX_SUCCESS if key found exactly and
+   * \ref MDBX_RESULT_TRUE if greater key was found.
+   *
+   * For DUPSORT-ed a data value is taken into account for duplicates,
+   * i.e. for a pairs/tuples of a key and an each data value of duplicates.
+   * Returns \ref MDBX_SUCCESS if key-value pair found exactly and
+   * \ref MDBX_RESULT_TRUE if the next pair was returned. */
+  MDBX_SET_LOWERBOUND
 };
 #ifndef __cplusplus
 /** \ingroup c_cursors */
@@ -1863,7 +1885,7 @@ enum MDBX_env_delete_mode_t {
   MDBX_ENV_WAIT_FOR_UNUSED = 2,
 };
 #ifndef __cplusplus
-/** \c_extra c_statinfo */
+/** \ingroup c_extra */
 typedef enum MDBX_env_delete_mode_t MDBX_env_delete_mode_t;
 #endif
 
@@ -2833,9 +2855,9 @@ struct MDBX_txn_info {
   uint64_t txn_id;
 
   /** For READ-ONLY transaction: the lag from a recent MVCC-snapshot, i.e. the
-     number of committed transaction since read transaction started. For WRITE
-     transaction (provided if `scan_rlt=true`): the lag of the oldest reader
-     from current transaction (i.e. at least 1 if any reader running). */
+     number of committed transaction since read transaction started.
+     For WRITE transaction (provided if `scan_rlt=true`): the lag of the oldest
+     reader from current transaction (i.e. at least 1 if any reader running). */
   uint64_t txn_reader_lag;
 
   /** Used space by this transaction, i.e. corresponding to the last used
@@ -2859,7 +2881,8 @@ struct MDBX_txn_info {
 
   /** For READ-ONLY transaction: the space available for writer(s) and that
      must be exhausted for reason to call the Handle-Slow-Readers callback for
-     this read transaction. For WRITE transaction: the space inside transaction
+     this read transaction.
+     For WRITE transaction: the space inside transaction
      that left to `MDBX_TXN_FULL` error. */
   uint64_t txn_space_leftover;
 
@@ -3266,7 +3289,7 @@ LIBMDBX_API int mdbx_dbi_open(MDBX_txn *txn, const char *name,
  * \param [in] datacmp Optional custom data comparison function for a database.
  * \param [out] dbi    Address where the new MDBX_dbi handle will be stored.
  * \returns A non-zero error value on failure and 0 on success. */
-MDBX_DEPRECATED LIBMDBX_API int
+LIBMDBX_API int
 mdbx_dbi_open_ex(MDBX_txn *txn, const char *name, MDBX_db_flags_t flags,
                  MDBX_dbi *dbi, MDBX_cmp_func *keycmp, MDBX_cmp_func *datacmp);
 
@@ -3859,6 +3882,18 @@ mdbx_cursor_txn(const MDBX_cursor *cursor);
  *
  * \param [in] cursor  A cursor handle returned by \ref mdbx_cursor_open(). */
 LIBMDBX_API MDBX_dbi mdbx_cursor_dbi(const MDBX_cursor *cursor);
+
+/** \brief Copy cursor position and state.
+ * \ingroup c_cursors
+ *
+ * \param [in] src       A source cursor handle returned
+ * by \ref mdbx_cursor_create() or \ref mdbx_cursor_open().
+ *
+ * \param [in,out] dest  A destination cursor handle returned
+ * by \ref mdbx_cursor_create() or \ref mdbx_cursor_open().
+ *
+ * \returns A non-zero error value on failure and 0 on success. */
+LIBMDBX_API int mdbx_cursor_copy(const MDBX_cursor *src, MDBX_cursor *dest);
 
 /** \brief Retrieve by cursor.
  * \ingroup c_crud

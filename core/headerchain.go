@@ -107,7 +107,7 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 
 // GetBlockNumber retrieves the block number belonging to the given hash
 // from the cache or database
-func (hc *HeaderChain) GetBlockNumber(dbr rawdb.DatabaseReader, hash common.Hash) *uint64 {
+func (hc *HeaderChain) GetBlockNumber(dbr ethdb.Database, hash common.Hash) *uint64 {
 	number := rawdb.ReadHeaderNumber(dbr, hash)
 	return number
 }
@@ -475,7 +475,9 @@ func (hc *HeaderChain) GetCanonicalHash(number uint64) common.Hash {
 // CurrentHeader retrieves the current head header of the canonical chain. The
 // header is retrieved from the HeaderChain's internal cache.
 func (hc *HeaderChain) CurrentHeader() *types.Header {
-	return hc.currentHeader.Load().(*types.Header)
+	headHash := rawdb.ReadHeadHeaderHash(hc.chainDb)
+	headNumber := rawdb.ReadHeaderNumber(hc.chainDb, headHash)
+	return rawdb.ReadHeader(hc.chainDb, headHash, *headNumber)
 }
 
 // SetCurrentHeader sets the current head header of the canonical chain.
@@ -588,6 +590,10 @@ func (hc *HeaderChain) Config() *params.ChainConfig { return hc.config }
 
 // Engine retrieves the header chain's consensus engine.
 func (hc *HeaderChain) Engine() consensus.Engine { return hc.engine }
+
+func (hc *HeaderChain) SetEngine(engine consensus.Engine) {
+	hc.engine = engine
+}
 
 // GetBlock implements consensus.ChainReader, and returns nil for every input as
 // a header chain does not have blocks available for retrieval.

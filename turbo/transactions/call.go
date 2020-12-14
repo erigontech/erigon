@@ -23,7 +23,7 @@ import (
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, dbReader ethdb.Getter, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64, chainConfig *params.ChainConfig) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, dbReader ethdb.Database, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64, chainConfig *params.ChainConfig) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -37,7 +37,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, dbReader eth
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(dbReader)
+		stateReader = state.NewPlainStateReader(tx)
 	} else {
 		stateReader = state.NewPlainDBState(tx, blockNumber)
 	}
@@ -109,7 +109,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, dbReader eth
 	}()
 
 	gp := new(core.GasPool).AddGas(msg.Gas())
-	result, err := core.ApplyMessage(evm, msg, gp)
+	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, dbReader eth
 	return result, nil
 }
 
-func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, dbReader rawdb.DatabaseReader) vm.Context {
+func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, dbReader ethdb.Database) vm.Context {
 	return vm.Context{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
@@ -136,7 +136,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 	}
 }
 
-func getHashGetter(requireCanonical bool, dbReader rawdb.DatabaseReader) func(uint64) common.Hash {
+func getHashGetter(requireCanonical bool, dbReader ethdb.Database) func(uint64) common.Hash {
 	return func(n uint64) common.Hash {
 		hash, err := rpchelper.GetHashByNumber(n, requireCanonical, dbReader)
 		if err != nil {

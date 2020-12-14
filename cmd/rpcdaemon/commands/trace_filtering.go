@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -15,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
@@ -95,6 +95,12 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 // TODO(tjayrush): Eventually, we will need to protect ourselves from 'large' queries. Parity crashes when a range query of a very large size
 // is sent. We need to protect ourselves with maxTraces. It may already be done
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error) {
+	tx, err1 := api.dbReader.Begin(ctx, ethdb.RO)
+	if err1 != nil {
+		return nil, fmt.Errorf("traceFilter cannot open tx: %v", err1)
+	}
+	defer tx.Rollback()
+
 	var filteredHashes []common.Hash
 	// TODO(tjayrush): Parity intersperses block/uncle reward traces with transaction call traces. We need to be able to tell the
 	// difference. I do that with this boolean array. This will be re-written shortly. For now, we use this simple boolean flag.
@@ -121,7 +127,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 	}
 
 	if req.ToBlock == nil {
-		headNumber := rawdb.ReadHeaderNumber(api.dbReader, rawdb.ReadHeadHeaderHash(api.dbReader))
+		headNumber := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))
 		toBlock = *headNumber
 	} else {
 		toBlock = uint64(*req.ToBlock)
@@ -144,158 +150,151 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 		offset = *req.After
 	}
 
-	if err := api.db.View(ctx, func(tx ethdb.Tx) error {
-		if req.FromAddress != nil || req.ToAddress != nil { // use address history index to retrieve matching transactions
-			var historyFilter []*common.Address
-			isFromAddress := req.FromAddress != nil
-			if isFromAddress {
-				historyFilter = req.FromAddress
-			} else {
-				historyFilter = req.ToAddress
+	if req.FromAddress != nil || req.ToAddress != nil { // use address history index to retrieve matching transactions
+		var historyFilter []*common.Address
+		isFromAddress := req.FromAddress != nil
+		if isFromAddress {
+			historyFilter = req.FromAddress
+		} else {
+			historyFilter = req.ToAddress
+		}
+
+		for _, addr := range historyFilter {
+
+			addrBytes := addr.Bytes()
+			blockNumbers, err := retrieveHistory(tx, addr, fromBlock, toBlock)
+			if err != nil {
+				return nil, err
 			}
 
-			for _, addr := range historyFilter {
-
-				addrBytes := addr.Bytes()
-				blockNumbers, err := retrieveHistory(tx, addr, fromBlock, toBlock)
+			for _, num := range blockNumbers {
+				block, err := rawdb.ReadBlockByNumber(tx, num)
 				if err != nil {
-					return err
+					return nil, err
 				}
-
-				for _, num := range blockNumbers {
-
-					block, err := rawdb.ReadBlockByNumber(api.dbReader, num)
-					if err != nil {
-						return err
-					}
-					senders := rawdb.ReadSenders(api.dbReader, block.Hash(), num)
-					txs := block.Transactions()
-					for i, tx := range txs {
-						if uint64(len(filteredHashes)) == maxTracesCount {
-							if uint64(len(filteredHashes)) == api.maxTraces {
-								return fmt.Errorf("too many traces found")
-							}
-							return nil
-						}
-
-						var to *common.Address
-						if tx.To() == nil {
-							to = &common.Address{}
-						} else {
-							to = tx.To()
-						}
-
-						if isFromAddress {
-							if !isAddressInFilter(to, req.ToAddress) {
-								continue
-							}
-							if bytes.Equal(senders[i].Bytes(), addrBytes) {
-								filteredHashes = append(filteredHashes, tx.Hash())
-								traceTypes = append(traceTypes, false)
-							}
-						} else if bytes.Equal(to.Bytes(), addrBytes) {
-							if skipped < offset {
-								skipped++
-								continue
-							}
-							filteredHashes = append(filteredHashes, tx.Hash())
-							traceTypes = append(traceTypes, false)
-						}
-					}
-					// TODO(tjayrush): Parity does not (for some unknown reason) include blockReward traces here
-				}
-			}
-		} else if req.FromBlock != nil || req.ToBlock != nil { // iterate over blocks
-
-			for blockNum := fromBlock; blockNum < toBlock+1; blockNum++ {
-				block, err := rawdb.ReadBlockByNumber(api.dbReader, blockNum)
-				if err != nil {
-					return err
-				}
-				blockTransactions := block.Transactions()
-				for _, tx := range blockTransactions {
+				senders := rawdb.ReadSenders(tx, block.Hash(), num)
+				for i, txn := range block.Transactions() {
 					if uint64(len(filteredHashes)) == maxTracesCount {
 						if uint64(len(filteredHashes)) == api.maxTraces {
-							return fmt.Errorf("too many traces found")
+							return nil, fmt.Errorf("too many traces found")
 						}
-						return nil
+						return nil, nil
 					}
-					if skipped < offset {
-						skipped++
-						continue
+
+					var to *common.Address
+					if txn.To() == nil {
+						to = &common.Address{}
+					} else {
+						to = txn.To()
 					}
-					filteredHashes = append(filteredHashes, tx.Hash())
-					traceTypes = append(traceTypes, false)
+
+					if isFromAddress {
+						if !isAddressInFilter(to, req.ToAddress) {
+							continue
+						}
+						if bytes.Equal(senders[i].Bytes(), addrBytes) {
+							filteredHashes = append(filteredHashes, txn.Hash())
+							traceTypes = append(traceTypes, false)
+						}
+					} else if bytes.Equal(to.Bytes(), addrBytes) {
+						if skipped < offset {
+							skipped++
+							continue
+						}
+						filteredHashes = append(filteredHashes, txn.Hash())
+						traceTypes = append(traceTypes, false)
+					}
 				}
-				// TODO(tjayrush): Need much, much better testing surrounding offset and count especially when including block rewards
+				// TODO(tjayrush): Parity does not (for some unknown reason) include blockReward traces here
+			}
+		}
+	} else if req.FromBlock != nil || req.ToBlock != nil { // iterate over blocks
+
+		for blockNum := fromBlock; blockNum < toBlock+1; blockNum++ {
+			block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
+			for _, txn := range block.Transactions() {
+				if uint64(len(filteredHashes)) == maxTracesCount {
+					if uint64(len(filteredHashes)) == api.maxTraces {
+						return nil, fmt.Errorf("too many traces found")
+					}
+					return nil, nil
+				}
 				if skipped < offset {
 					skipped++
 					continue
 				}
-				// We need to intersperse block reward traces to match Parity
-				filteredHashes = append(filteredHashes, block.Hash())
-				traceTypes = append(traceTypes, true)
+				filteredHashes = append(filteredHashes, txn.Hash())
+				traceTypes = append(traceTypes, false)
 			}
-		} else {
-			return fmt.Errorf("invalid parameters")
+			// TODO(tjayrush): Need much, much better testing surrounding offset and count especially when including block rewards
+			if skipped < offset {
+				skipped++
+				continue
+			}
+			// We need to intersperse block reward traces to match Parity
+			filteredHashes = append(filteredHashes, block.Hash())
+			traceTypes = append(traceTypes, true)
 		}
-		return nil
-	}); err != nil {
-		return nil, err
+	} else {
+		return nil, fmt.Errorf("invalid parameters")
 	}
-	getter := adapter.NewBlockGetter(api.dbReader)
-	chainContext := adapter.NewChainContext(api.dbReader)
-	genesis, err := rawdb.ReadBlockByNumber(api.dbReader, 0)
+
+	getter := adapter.NewBlockGetter(tx)
+	chainContext := adapter.NewChainContext(tx)
+	genesis, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return nil, err
 	}
 	genesisHash := genesis.Hash()
-	chainConfig, err := rawdb.ReadChainConfig(api.dbReader, genesisHash)
+	chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
 	if err != nil {
 		return nil, err
 	}
 	traceType := "callTracer" // nolint: goconst
 	traces := ParityTraces{}
-	dbtx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
-	if err1 != nil {
-		return nil, fmt.Errorf("traceFilter cannot open tx: %v", err1)
-	}
-
-	defer dbtx.Rollback()
 
 	for i, txOrBlockHash := range filteredHashes {
 		if traceTypes[i] {
 			// In this case, we're processing a block (or uncle) reward trace. The hash is a block hash
 			// Because Geth does not return blockReward or uncleReward traces, we must create them here
-			block, err := rawdb.ReadBlockByHash(api.dbReader, txOrBlockHash)
+			block, err := rawdb.ReadBlockByHash(tx, txOrBlockHash)
 			if err != nil {
 				return nil, err
 			}
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+			fmt.Printf("%v\n", minerReward)
 			var tr ParityTrace
-			tr.Action.Author = strings.ToLower(block.Coinbase().String())
-			tr.Action.RewardType = "block" // goconst
-			tr.Action.Value = minerReward.String()
-			tr.BlockHash = block.Hash()
-			tr.BlockNumber = block.NumberU64()
+			//tr.Action.Author = strings.ToLower(block.Coinbase().String())
+			//tr.Action.RewardType = "block" // goconst
+			//tr.Action.Value = minerReward.String()
+			tr.BlockHash = &common.Hash{}
+			copy(tr.BlockHash[:], block.Hash().Bytes())
+			tr.BlockNumber = new(uint64)
+			*tr.BlockNumber = block.NumberU64()
 			tr.Type = "reward" // nolint: goconst
 			traces = append(traces, tr)
 			for i, uncle := range block.Uncles() {
+				fmt.Printf("%v\n", uncle)
 				if i < len(uncleRewards) {
 					var tr ParityTrace
-					tr.Action.Author = strings.ToLower(uncle.Coinbase.String())
-					tr.Action.RewardType = "uncle" // goconst
-					tr.Action.Value = uncleRewards[i].String()
-					tr.BlockHash = block.Hash()
-					tr.BlockNumber = block.NumberU64()
+					//tr.Action.Author = strings.ToLower(uncle.Coinbase.String())
+					//tr.Action.RewardType = "uncle" // goconst
+					//tr.Action.Value = uncleRewards[i].String()
+					tr.BlockHash = &common.Hash{}
+					copy(tr.BlockHash[:], block.Hash().Bytes())
+					tr.BlockNumber = new(uint64)
+					*tr.BlockNumber = block.NumberU64()
 					tr.Type = "reward" // nolint: goconst
 					traces = append(traces, tr)
 				}
 			}
 		} else {
 			// In this case, we're processing a transaction hash
-			tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(api.dbReader, txOrBlockHash)
-			msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, dbtx, blockHash, txIndex)
+			txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, txOrBlockHash)
+			msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
 			if err != nil {
 				return nil, err
 			}
@@ -310,55 +309,28 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest) (Pa
 			var gethTrace GethTrace
 			jsonStr, _ := traceJSON.MarshalJSON()
 			json.Unmarshal(jsonStr, &gethTrace) // nolint errcheck
-			converted := api.convertToParityTrace(gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
+			converted := api.convertToParityTrace(gethTrace, blockHash, blockNumber, txn, txIndex, []int{})
 			traces = append(traces, converted...)
 		}
 	}
 	return traces, nil
 }
 
-func retrieveHistory(tx ethdb.Tx, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
-	addrBytes := addr.Bytes()
-	ca := tx.Cursor(dbutils.AccountsHistoryBucket).Prefix(addrBytes)
-	var blockNumbers []uint64
-
-	for k, v, err := ca.First(); k != nil; k, v, err = ca.Next() {
-		if err != nil {
-			return nil, err
-		}
-
-		numbers, _, err := dbutils.WrapHistoryIndex(v).Decode()
-		if err != nil {
-			return nil, err
-		}
-
-		blockNumbers = append(blockNumbers, numbers...)
+func retrieveHistory(tx ethdb.Getter, addr *common.Address, fromBlock uint64, toBlock uint64) ([]uint64, error) {
+	blocks, err := bitmapdb.Get(tx, dbutils.AccountsHistoryBucket, addr.Bytes(), uint32(fromBlock), uint32(toBlock+1))
+	if err != nil {
+		return nil, err
 	}
+	blocks.RemoveRange(fromBlock, toBlock+1)
+	return toU64(blocks.ToArray()), nil
+}
 
-	// cleanup for invalid blocks
-	start := -1
-	end := -1
-	for i, b := range blockNumbers {
-		if b >= fromBlock && b <= toBlock && start == -1 {
-			start = i
-			continue
-		}
-
-		if b > toBlock {
-			end = i
-			break
-		}
+func toU64(in []uint32) []uint64 {
+	out := make([]uint64, len(in))
+	for i := range in {
+		out[i] = uint64(in[i])
 	}
-
-	if start == -1 {
-		return []uint64{}, nil
-	}
-
-	if end == -1 {
-		return blockNumbers[start:], nil
-	}
-	// Remove dublicates
-	return blockNumbers[start:end], nil
+	return out
 }
 
 func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
@@ -378,22 +350,22 @@ func isAddressInFilter(addr *common.Address, filter []*common.Address) bool {
 // -- For convienience, we return both Parity and Geth traces for now. In the future we will either separate
 //    these functions or eliminate Geth traces
 // -- The function convertToParityTraces takes a hierarchical Geth trace and returns a flattened Parity trace
-func (api *TraceAPIImpl) getTransactionTraces(dbtx rawdb.DatabaseReader, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
-	getter := adapter.NewBlockGetter(dbtx)
-	chainContext := adapter.NewChainContext(dbtx)
-	genesis, err := rawdb.ReadBlockByNumber(dbtx, 0)
+func (api *TraceAPIImpl) getTransactionTraces(tx ethdb.Database, ctx context.Context, txHash common.Hash) (ParityTraces, error) {
+	getter := adapter.NewBlockGetter(tx)
+	chainContext := adapter.NewChainContext(tx)
+	genesis, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return nil, err
 	}
 	genesisHash := genesis.Hash()
-	chainConfig, err := rawdb.ReadChainConfig(dbtx, genesisHash)
+	chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
 	if err != nil {
 		return nil, err
 	}
 	traceType := "callTracer" // nolint: goconst
 
-	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(dbtx, txHash)
-	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, dbtx.(ethdb.HasTx).Tx(), blockHash, txIndex)
+	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, txHash)
+	msg, vmctx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, chainContext, tx.(ethdb.HasTx).Tx(), blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -416,7 +388,7 @@ func (api *TraceAPIImpl) getTransactionTraces(dbtx rawdb.DatabaseReader, ctx con
 
 	traces := ParityTraces{}
 	// Time spent 3 out of 205
-	converted := api.convertToParityTrace(gethTrace, blockHash, blockNumber, tx, txIndex, []int{})
+	converted := api.convertToParityTrace(gethTrace, blockHash, blockNumber, txn, txIndex, []int{})
 	traces = append(traces, converted...)
 
 	return traces, nil

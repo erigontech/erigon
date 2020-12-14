@@ -366,6 +366,7 @@ func (api *PublicDebugAPI) AccountRange(blockNrOrHash rpc.BlockNumberOrHash, sta
 		if block == nil {
 			return state.IteratorDump{}, fmt.Errorf("block %s not found", hash.Hex())
 		}
+	} else {
 		blockNumber = block.NumberU64()
 	}
 

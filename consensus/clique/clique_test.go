@@ -18,13 +18,13 @@ package clique
 
 import (
 	"math/big"
-	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -58,7 +58,7 @@ func TestReimportMirroredState(t *testing.T) {
 	genesis := genspec.MustCommit(db)
 
 	// Generate a batch of blocks, each properly signed
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
+	txCacher := core.NewTxSenderCacher(1)
 	chain, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher)
 	defer chain.Stop()
 
@@ -96,28 +96,28 @@ func TestReimportMirroredState(t *testing.T) {
 	db = ethdb.NewMemDatabase()
 	genspec.MustCommit(db)
 
-	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
-	chain1, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher1)
-	defer chain1.Stop()
-
-	if _, err := stagedsync.InsertBlocksInStages(db, params.AllCliqueProtocolChanges, engine, blocks[:2], chain1); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
-	if head := chain1.CurrentBlock().NumberU64(); head != 2 {
-		t.Fatalf("chain head mismatch: have %d, want %d", head, 2)
+	if head, err1 := rawdb.ReadBlockByHash(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
+		t.Errorf("could not read chain head: %v", err1)
+	} else if head.NumberU64() != 2 {
+		t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 2)
 	}
 
 	// Simulate a crash by creating a new chain on top of the database, without
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
-	txCacher2 := core.NewTxSenderCacher(runtime.NumCPU())
+	txCacher2 := core.NewTxSenderCacher(1)
 	chain2, _ := core.NewBlockChain(db, nil, params.AllCliqueProtocolChanges, engine, vm.Config{}, nil, txCacher2)
 	defer chain2.Stop()
 
-	if _, err := stagedsync.InsertBlocksInStages(db, params.AllCliqueProtocolChanges, chain2.Engine(), blocks[2:], chain2); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllCliqueProtocolChanges, &vm.Config{}, engine, blocks[2:], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
-	if head := chain2.CurrentBlock().NumberU64(); head != 3 {
-		t.Fatalf("chain head mismatch: have %d, want %d", head, 3)
+	if head, err1 := rawdb.ReadBlockByHash(db, rawdb.ReadHeadHeaderHash(db)); err1 != nil {
+		t.Errorf("could not read chain head: %v", err1)
+	} else if head.NumberU64() != 3 {
+		t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 3)
 	}
 }

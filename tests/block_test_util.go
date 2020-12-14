@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"runtime"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -32,9 +31,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -121,31 +122,33 @@ func (t *BlockTest) Run(_ bool) error {
 	} else {
 		engine = ethash.NewShared()
 	}
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	chain, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		return err
-	}
-	defer chain.Stop()
 
-	validBlocks, err := t.insertBlocks(chain)
+	/*
+		fmt.Printf("INSERTED CHAIN\n")
+		for _, b := range t.json.Blocks {
+			cb, _ := b.decode()
+			fmt.Printf("%d: %x\n", cb.NumberU64(), cb.Hash())
+		}
+	*/
+	validBlocks, err := t.insertBlocks(db, config, engine)
 	if err != nil {
 		return err
 	}
-	cmlast := chain.CurrentBlock().Hash()
+	cmlast := rawdb.ReadHeadBlockHash(db)
 	if common.Hash(t.json.BestBlock) != cmlast {
+		fmt.Printf("hash mismatch: wanted %x, got %x\n", t.json.BestBlock, cmlast)
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
-	tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	tx, err1 := db.Begin(context.Background(), ethdb.RO)
 	if err1 != nil {
 		return fmt.Errorf("blockTest create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	newDB := state.New(state.NewPlainDBState(tx, chain.CurrentBlock().NumberU64()))
+	newDB := state.New(state.NewPlainStateReader(tx))
 	if err = t.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %v", err)
 	}
-	return t.validateImportedHeaders(chain, validBlocks)
+	return t.validateImportedHeaders(db, config, engine, validBlocks)
 }
 
 func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
@@ -176,9 +179,9 @@ func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
    expected we are expected to ignore it and continue processing and then validate the
    post state.
 */
-func (t *BlockTest) insertBlocks(blockchain *core.BlockChain) ([]btBlock, error) {
+func (t *BlockTest) insertBlocks(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
-	// insert the test blocks, which will execute all transactions
+	// insert the test blocks, which will execute all transaction
 	for _, b := range t.json.Blocks {
 		cb, err := b.decode()
 		if err != nil {
@@ -189,18 +192,18 @@ func (t *BlockTest) insertBlocks(blockchain *core.BlockChain) ([]btBlock, error)
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		if _, err = blockchain.InsertChain(context.Background(), []*types.Block{cb}); err != nil {
-			//if err := stagedsync.InsertBlockInStages(blockchain.ChainDb(), blockchain.Config(), blockchain.Engine(), cb, blockchain); err != nil {
+		if newCanonical, err1 := stagedsync.InsertBlockInStages(db, config, &vm.Config{}, engine, cb, true /* checkRoot */); err1 != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
-				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", cb.Number(), err)
+				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", cb.Number(), err1)
 			}
-		}
-		if b.BlockHeader == nil {
+		} else if newCanonical && b.BlockHeader == nil {
 			return nil, fmt.Errorf("block insertion should have failed")
 		}
-
+		if b.BlockHeader == nil {
+			continue
+		}
 		// validate RLP decoding by checking all values against test file JSON
 		if err = validateHeader(b.BlockHeader, cb.Header()); err != nil {
 			return nil, fmt.Errorf("deserialised block header validation failed: %v", err)
@@ -267,19 +270,25 @@ func (t *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		balance2 := statedb.GetBalance(addr)
 		nonce2 := statedb.GetNonce(addr)
 		if !bytes.Equal(code2, acct.Code) {
-			return fmt.Errorf("account code mismatch for addr: %s want: %v have: %s", addr, acct.Code, hex.EncodeToString(code2))
+			return fmt.Errorf("account code mismatch for addr: %x want: %v have: %s", addr, acct.Code, hex.EncodeToString(code2))
 		}
 		if balance2.ToBig().Cmp(acct.Balance) != 0 {
-			return fmt.Errorf("account balance mismatch for addr: %s, want: %d, have: %d", addr, acct.Balance, balance2)
+			return fmt.Errorf("account balance mismatch for addr: %x, want: %d, have: %d", addr, acct.Balance, balance2)
 		}
 		if nonce2 != acct.Nonce {
-			return fmt.Errorf("account nonce mismatch for addr: %s want: %d have: %d", addr, acct.Nonce, nonce2)
+			return fmt.Errorf("account nonce mismatch for addr: %x want: %d have: %d", addr, acct.Nonce, nonce2)
 		}
 	}
 	return nil
 }
 
-func (t *BlockTest) validateImportedHeaders(cm *core.BlockChain, validBlocks []btBlock) error {
+func (t *BlockTest) validateImportedHeaders(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, validBlocks []btBlock) error {
+	txCacher := core.NewTxSenderCacher(1)
+	cm, err := core.NewBlockChain(db, &core.CacheConfig{TrieCleanLimit: 0, Pruning: false}, config, engine, vm.Config{}, nil, txCacher)
+	if err != nil {
+		return err
+	}
+	defer cm.Stop()
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
 	bmap := make(map[common.Hash]btBlock, len(t.json.Blocks))
 	for _, b := range validBlocks {
@@ -291,7 +300,7 @@ func (t *BlockTest) validateImportedHeaders(cm *core.BlockChain, validBlocks []b
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of the longest chain until last block is imported.
 	for b := cm.CurrentBlock(); b != nil && b.NumberU64() != 0; b = cm.GetBlockByHash(b.Header().ParentHash) {
-		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
+		if err = validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %v", err)
 		}
 	}

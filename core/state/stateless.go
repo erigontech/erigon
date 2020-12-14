@@ -120,7 +120,7 @@ func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint6
 }
 
 // ReadAccountCode is a part of the StateReader interface
-func (s *Stateless) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
+func (s *Stateless) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
@@ -146,7 +146,7 @@ func (s *Stateless) ReadAccountCode(address common.Address, codeHash common.Hash
 // ReadAccountCodeSize is a part of the StateReader interface
 // This implementation looks the code up in the codeMap, and returns its size
 // It fails if the code is not found in the map
-func (s *Stateless) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (codeSize int, err error) {
+func (s *Stateless) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (codeSize int, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return 0, nil
 	}

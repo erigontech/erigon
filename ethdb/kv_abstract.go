@@ -3,9 +3,11 @@ package ethdb
 import (
 	"context"
 	"errors"
+	"unsafe"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
 var (
@@ -62,11 +64,10 @@ type KV interface {
 type TxFlags uint
 
 const (
-	RW         TxFlags = 0x00 // default
-	RO         TxFlags = 0x02
-	Try        TxFlags = 0x04
-	NoMetaSync TxFlags = 0x08
-	NoSync     TxFlags = 0x10
+	RW     TxFlags = 0x00 // default
+	RO     TxFlags = 0x02
+	Try    TxFlags = 0x04
+	NoSync TxFlags = 0x08
 )
 
 type Tx interface {
@@ -97,6 +98,8 @@ type Tx interface {
 	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
 	// Starts from 0.
 	Sequence(bucket string, amount uint64) (uint64, error)
+
+	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
 }
 
 // Interface used for buckets migration, don't use it in usual app code
@@ -198,6 +201,7 @@ type Backend interface {
 	AddLocal([]byte) ([]byte, error)
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
+	Subscribe(func(*remote.SubscribeReply)) error
 }
 
 type DbProvider uint8

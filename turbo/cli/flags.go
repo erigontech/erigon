@@ -21,6 +21,11 @@ var (
 		Usage: "Which database software to use? Currently supported values: lmdb|mdbx",
 		Value: "lmdb",
 	}
+	CacheSizeFlag = cli.StringFlag{
+		Name:  "cacheSize",
+		Usage: "Cache size for the execution stage",
+		Value: "0",
+	}
 	BatchSizeFlag = cli.StringFlag{
 		Name:  "batchSize",
 		Usage: "Batch size for the execution stage",
@@ -98,6 +103,11 @@ var (
 		Usage: "Specify certificate authority",
 		Value: "",
 	}
+	SilkwormFlag = cli.StringFlag{
+		Name:  "silkworm",
+		Usage: "File path of libsilkworm_tg_api dynamic library (default = do not use Silkworm)",
+		Value: "",
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *eth.Config) {
@@ -113,11 +123,20 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *eth.Config) {
 	cfg.SnapshotMode = snMode
 	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
 
+	if ctx.GlobalString(CacheSizeFlag.Name) != "" {
+		err := cfg.CacheSize.UnmarshalText([]byte(ctx.GlobalString(CacheSizeFlag.Name)))
+		if err != nil {
+			utils.Fatalf("Invalid cacheSize provided: %v", err)
+		}
+	}
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
+	}
+	if cfg.CacheSize != 0 && cfg.BatchSize >= cfg.CacheSize {
+		utils.Fatalf("batchSize %d >= cacheSize %d", cfg.BatchSize, cfg.CacheSize)
 	}
 
 	if ctx.GlobalString(EtlBufferSizeFlag.Name) != "" {

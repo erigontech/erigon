@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -9,18 +8,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type Stage3Config struct {
@@ -38,6 +35,7 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	if errStart != nil {
 		return errStart
 	}
+
 	var to = prevStageProgress
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
@@ -90,7 +88,8 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	collector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorSenders := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+
 	errCh := make(chan error)
 	go func() {
 		defer close(errCh)
@@ -108,9 +107,10 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			case <-logEvery.C:
 				log.Info(fmt.Sprintf("[%s] Recovery", logPrefix), "block_number", j.index)
 			}
+
 			k := make([]byte, 4)
 			binary.BigEndian.PutUint32(k, uint32(j.index))
-			if err := collector.Collect(k, j.senders); err != nil {
+			if err := collectorSenders.Collect(k, j.senders); err != nil {
 				errCh <- j.err
 				return
 			}
@@ -132,21 +132,14 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			// non-canonical case
 			return true, nil
 		}
-
-		data := make([]byte, len(v))
-		copy(data, v)
-
-		bodyRlp, err := rawdb.DecompressBlockBody(data)
-		if err != nil {
-			return false, err
-		}
+		body := rawdb.ReadBody(db, blockHash, blockNumber)
 
 		select {
 		case err := <-errCh:
 			if err != nil {
 				return false, err
 			}
-		case jobs <- &senderRecoveryJob{bodyRlp: bodyRlp, blockNumber: blockNumber, index: int(blockNumber - s.BlockNumber - 1)}:
+		case jobs <- &senderRecoveryJob{body: body, key: k, blockNumber: blockNumber, index: int(blockNumber - s.BlockNumber - 1)}:
 		}
 
 		return true, nil
@@ -168,14 +161,11 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 		return next(k, dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), value)
 	}
 
-	if err := collector.Load(logPrefix, db,
+	if err := collectorSenders.Load(logPrefix, db,
 		dbutils.Senders,
 		loadFunc,
 		etl.TransformArgs{
 			Quit: quitCh,
-			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"block", binary.BigEndian.Uint64(k)}
-			},
 			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 				return []interface{}{"block", binary.BigEndian.Uint64(k)}
 			},
@@ -188,7 +178,8 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 }
 
 type senderRecoveryJob struct {
-	bodyRlp     rlp.RawValue
+	body        *types.Body
+	key         []byte
 	blockNumber uint64
 	index       int
 	senders     []byte
@@ -200,12 +191,7 @@ func recoverSenders(logPrefix string, cryptoContext *secp256k1.Context, config *
 		if job == nil {
 			return
 		}
-		body := new(types.Body)
-		if err := rlp.Decode(bytes.NewReader(job.bodyRlp), body); err != nil {
-			job.err = fmt.Errorf("%s: invalid block body RLP: %w", logPrefix, err)
-			out <- job
-			return
-		}
+		body := job.body
 		signer := types.MakeSigner(config, big.NewInt(int64(job.blockNumber)))
 		job.senders = make([]byte, len(body.Transactions)*common.AddressLength)
 		for i, tx := range body.Transactions {

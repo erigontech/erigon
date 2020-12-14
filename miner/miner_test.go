@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -238,22 +238,17 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux) {
 	if err != nil {
 		t.Fatalf("can't create new chain config: %v", err)
 	}
-	// Create event Mux
-	mux := new(event.TypeMux)
 	// Create consensus engine
-	engine := ethash.New(ethash.Config{}, []string{}, false)
-	engine.SetThreads(-1)
-	// Create isLocalBlock
-	isLocalBlock := func(block *types.Block) bool {
-		return true
-	}
+	engine := clique.New(chainConfig.Clique, chainDB)
 	// Create Ethereum backend
-	bc, err := core.NewBlockChain(chainDB, new(core.CacheConfig), chainConfig, engine, vm.Config{}, isLocalBlock, nil)
+	bc, err := core.NewBlockChain(chainDB, new(core.CacheConfig), chainConfig, engine, vm.Config{}, nil /*isLocalBlock*/, nil)
 	if err != nil {
 		t.Fatalf("can't create new chain %v", err)
 	}
 	pool := core.NewTxPool(testTxPoolConfig, params.TestChainConfig, ethdb.NewMemDatabase(), nil)
 	backend := NewMockBackend(bc, pool)
+	// Create event Mux
+	mux := new(event.TypeMux)
 	// Create Miner
-	return New(backend, &config, chainConfig, mux, engine, isLocalBlock), mux
+	return New(backend, &config, chainConfig, mux, engine, nil), mux
 }

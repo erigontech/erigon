@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"net"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -109,9 +110,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (KV, Backend, erro
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Timeout: 10 * time.Minute,
-		}),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
 	if certFile == "" {
 		dialOpts = append(dialOpts, grpc.WithInsecure())
@@ -251,6 +250,7 @@ func (db *RemoteKV) Update(ctx context.Context, f func(tx Tx) error) (err error)
 func (tx *remoteTx) Comparator(bucket string) dbutils.CmpFunc { panic("not implemented yet") }
 func (tx *remoteTx) Cmp(bucket string, a, b []byte) int       { panic("not implemented yet") }
 func (tx *remoteTx) DCmp(bucket string, a, b []byte) int      { panic("not implemented yet") }
+func (tx *remoteTx) CHandle() unsafe.Pointer                  { panic("not implemented yet") }
 
 func (tx *remoteTx) Sequence(bucket string, amount uint64) (uint64, error) {
 	panic("not implemented yet")
@@ -724,4 +724,24 @@ func (back *RemoteBackend) NetVersion() (uint64, error) {
 	}
 
 	return res.Id, nil
+}
+
+func (back *RemoteBackend) Subscribe(onNewEvent func(*remote.SubscribeReply)) error {
+	subscription, err := back.remoteEthBackend.Subscribe(context.Background(), &remote.SubscribeRequest{})
+	if err != nil {
+		return err
+	}
+	for {
+		event, err := subscription.Recv()
+		if err == io.EOF {
+			log.Info("rpcdaemon: the subscription channel was closed")
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		onNewEvent(event)
+	}
+	return nil
 }

@@ -228,9 +228,9 @@ func TestCursor_Get_KV(t *testing.T) {
 				err = txn.Put(dbi, k, v, 0)
 			}
 		}
-		put([]byte("key"), []byte("1"))
-		put([]byte("key"), []byte("2"))
-		put([]byte("key"), []byte("3"))
+		put([]byte("k1"), []byte("v1"))
+		put([]byte("k1"), []byte("v2"))
+		put([]byte("k1"), []byte("v3"))
 		return err
 	})
 	if err != nil {
@@ -244,18 +244,23 @@ func TestCursor_Get_KV(t *testing.T) {
 		}
 		defer cur.Close()
 
-		k, v, err := cur.Get([]byte("key"), []byte("0"), GetBothRange)
+		k, v, err := cur.Get([]byte("k1"), []byte("v0"), GetBothRange)
 		if err != nil {
 			return err
 		}
-		if string(k) != "key" {
-			t.Errorf("unexpected key: %q (not %q)", k, "key")
+		if string(k) != "k1" {
+			t.Errorf("unexpected key: %q (not %q)", k, "k1")
 		}
-		if string(v) != "1" {
+		if string(v) != "v1" {
 			t.Errorf("unexpected value: %q (not %q)", k, "1")
 		}
 
-		_, _, err = cur.Get([]byte("key"), []byte("1"), GetBoth)
+		_, _, err = cur.Get([]byte("k0"), []byte("v0"), GetBothRange)
+		if !IsErrno(err, NotFound) {
+			t.Errorf("unexpected error: %s", err)
+		}
+
+		_, _, err = cur.Get([]byte("k1"), []byte("v1"), GetBoth)
 		return err
 	})
 	if err != nil {
@@ -331,12 +336,23 @@ func TestDupCmpExcludeSuffix32(t *testing.T) {
 		}
 
 		defer cur.Close()
+		k, v, err := cur.Get(nil, nil, Last)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(k, []byte{1}) {
+			t.Errorf("unexpected order: %x (not %x)", k, []byte{1})
+		}
+		if !bytes.Equal(v, hash32Bytes) {
+			t.Errorf("unexpected order: %x (not %x)", v, hash32Bytes)
+		}
+
 		_, _, err = cur.Get([]byte{0}, nil, First)
 		if err != nil {
 			return err
 		}
 
-		_, v, err := cur.Get(nil, nil, FirstDup)
+		_, v, err = cur.Get(nil, nil, FirstDup)
 		if err != nil {
 			return err
 		}
@@ -359,7 +375,7 @@ func TestDupCmpExcludeSuffix32(t *testing.T) {
 			t.Errorf("unexpected order: %x (not %x)", v, append([]byte{0, 0}, hash32Bytes...))
 		}
 
-		k, v, err := cur.Get(nil, nil, Next)
+		k, v, err = cur.Get(nil, nil, Next)
 		if err != nil {
 			return err
 		}

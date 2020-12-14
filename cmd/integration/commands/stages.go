@@ -3,41 +3,30 @@ package commands
 import (
 	"context"
 	"fmt"
-	"net"
 	"path"
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
+	"unsafe"
 
-	"github.com/VictoriaMetrics/fastcache"
 	"github.com/c2h5oh/datasize"
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
+	"github.com/ledgerwatch/turbo-geth/turbo/silkworm"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/keepalive"
 )
 
 var cmdStageSenders = &cobra.Command{
@@ -224,19 +213,6 @@ var cmdRunMigrations = &cobra.Command{
 	},
 }
 
-var cmdShardDispatcher = &cobra.Command{
-	Use:   "shard_dispatcher",
-	Short: "",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
-		if err := shardDispatcher(ctx); err != nil {
-			log.Error("Starting Shard Dispatcher failed", "err", err)
-			return err
-		}
-		return nil
-	},
-}
-
 func init() {
 	withChaindata(cmdPrintStages)
 	withLmdbFlags(cmdPrintStages)
@@ -257,6 +233,7 @@ func init() {
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
 	withBatchSize(cmdStageExec)
+	withSilkworm(cmdStageExec)
 
 	rootCmd.AddCommand(cmdStageExec)
 
@@ -302,7 +279,6 @@ func init() {
 	withBlock(cmdCallTraces)
 	withUnwind(cmdCallTraces)
 	withDatadir(cmdCallTraces)
-	withShard(cmdCallTraces)
 
 	rootCmd.AddCommand(cmdCallTraces)
 
@@ -327,9 +303,6 @@ func init() {
 	withLmdbFlags(cmdRunMigrations)
 	withDatadir(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
-
-	withDispatcher(cmdShardDispatcher)
-	rootCmd.AddCommand(cmdShardDispatcher)
 }
 
 func stageSenders(db ethdb.Database, ctx context.Context) error {
@@ -366,9 +339,19 @@ func stageSenders(db ethdb.Database, ctx context.Context) error {
 	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, tmpdir, ch)
 }
 
-func stageExec(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
+func silkwormExecutionFunc() unsafe.Pointer {
+	if silkwormPath == "" {
+		return nil
+	}
 
+	funcPtr, err := silkworm.LoadExecutionFunctionPointer(silkwormPath)
+	if err != nil {
+		panic(fmt.Errorf("failed to load Silkworm dynamic library: %v", err))
+	}
+	return funcPtr
+}
+
+func stageExec(db ethdb.Database, ctx context.Context) error {
 	sm, err := ethdb.GetStorageModeFromDB(db)
 	if err != nil {
 		panic(err)
@@ -390,19 +373,21 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 	}
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
 	return stagedsync.SpawnExecuteBlocksStage(stage4, db,
 		bc.Config(), cc, bc.GetVMConfig(),
 		ch,
 		stagedsync.ExecuteBlockStageParams{
-			ToBlock:       block, // limit execution to the specified block
-			WriteReceipts: sm.Receipts,
-			BatchSize:     int(batchSize),
+			ToBlock:               block, // limit execution to the specified block
+			WriteReceipts:         sm.Receipts,
+			CacheSize:             int(cacheSize),
+			BatchSize:             int(batchSize),
+			SilkwormExecutionFunc: silkwormExecutionFunc(),
 		})
-
 }
 
 func stageIHash(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	if err := migrations.NewMigrator().Apply(db, tmpdir); err != nil {
@@ -434,11 +419,10 @@ func stageIHash(db ethdb.Database, ctx context.Context) error {
 		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
 		return stagedsync.UnwindIntermediateHashesStage(u, stage5, db, tmpdir, ch)
 	}
-	return stagedsync.SpawnIntermediateHashesStage(stage5, db, tmpdir, ch)
+	return stagedsync.SpawnIntermediateHashesStage(stage5, db, true /* checkRoot */, tmpdir, ch)
 }
 
 func stageHashState(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
@@ -470,7 +454,6 @@ func stageHashState(db ethdb.Database, ctx context.Context) error {
 }
 
 func stageLogIndex(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
@@ -500,7 +483,6 @@ func stageLogIndex(db ethdb.Database, ctx context.Context) error {
 }
 
 func stageCallTraces(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
@@ -522,48 +504,25 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 	log.Info("Stage call traces", "progress", s.BlockNumber)
 	ch := ctx.Done()
 
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.CallTraces, UnwindPoint: s.BlockNumber - unwind}
-		return stagedsync.UnwindCallTraces(u, s, db, bc.Config(), bc, ch)
-	}
-
-	var accessBuilder stagedsync.StateAccessBuilder
-	var toBlock uint64
-	if dispatcherAddr != "" {
-		// CREATING GRPC CLIENT CONNECTION
-		var dialOpts []grpc.DialOption
-		dialOpts = []grpc.DialOption{
-			grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
-			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
-			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-				Timeout: 10 * time.Minute,
-			}),
-		}
-
-		dialOpts = append(dialOpts, grpc.WithInsecure())
-
-		conn, err := grpc.DialContext(ctx, dispatcherAddr, dialOpts...)
-		if err != nil {
-			return fmt.Errorf("creating client connection to shard dispatcher: %w", err)
-		}
-		dispatcherClient := shards.NewDispatcherClient(conn)
-		var client shards.Dispatcher_StartDispatchClient
-		client, err = dispatcherClient.StartDispatch(ctx, &grpc.EmptyCallOption{})
-		if err != nil {
-			return fmt.Errorf("starting shard dispatch: %w", err)
-		}
-		accessBuilder = func(db ethdb.Database, blockNumber uint64, accountCache, storageCache, codeCache, codeSizeCache *fastcache.Cache) (state.StateReader, state.WriterWithChangeSets) {
-			shard := shards.NewShard(db.(ethdb.HasTx).Tx(), blockNumber, client, accountCache, storageCache, codeCache, codeSizeCache, shardBits, byte(shardID))
-			return shard, shard
-		}
-		toBlock = block + 10000
+		return stagedsync.UnwindCallTraces(u, s, db, bc.Config(), bc, ch,
+			stagedsync.CallTracesStageParams{
+				ToBlock:   block,
+				CacheSize: int(cacheSize),
+				BatchSize: int(batchSize),
+			})
 	}
 
 	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, tmpdir, ch,
 		stagedsync.CallTracesStageParams{
-			AccessBuilder: accessBuilder,
-			PresetChanges: accessBuilder == nil,
-			ToBlock:       toBlock,
+			ToBlock:   block,
+			CacheSize: int(cacheSize),
+			BatchSize: int(batchSize),
 		}); err != nil {
 		return err
 	}
@@ -571,7 +530,6 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 }
 
 func stageHistory(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
@@ -589,28 +547,36 @@ func stageHistory(db ethdb.Database, ctx context.Context) error {
 		return nil
 	}
 	execStage := progress(stages.Execution)
-	stage7 := progress(stages.AccountHistoryIndex)
-	stage8 := progress(stages.StorageHistoryIndex)
-	log.Info("Stage4", "progress", execStage.BlockNumber)
-	log.Info("Stage7", "progress", stage7.BlockNumber)
-	log.Info("Stage8", "progress", stage8.BlockNumber)
+	stageAcc := progress(stages.AccountHistoryIndex)
+	stageStorage := progress(stages.StorageHistoryIndex)
+	log.Info("Stage exec", "progress", execStage.BlockNumber)
+	log.Info("Stage acc history", "progress", stageAcc.BlockNumber)
+	log.Info("Stage storage history", "progress", stageStorage.BlockNumber)
 	ch := ctx.Done()
 
 	if unwind > 0 { //nolint:staticcheck
-		// TODO
+		u := &stagedsync.UnwindState{Stage: stages.StorageHistoryIndex, UnwindPoint: stageStorage.BlockNumber - unwind}
+		s := progress(stages.StorageHistoryIndex)
+		if err := stagedsync.UnwindStorageHistoryIndex(u, s, db, ch); err != nil {
+			return err
+		}
+		u = &stagedsync.UnwindState{Stage: stages.AccountHistoryIndex, UnwindPoint: stageAcc.BlockNumber - unwind}
+		s = progress(stages.AccountHistoryIndex)
+		if err := stagedsync.UnwindAccountHistoryIndex(u, s, db, ch); err != nil {
+			return err
+		}
+		return nil
 	}
-
-	if err := stagedsync.SpawnAccountHistoryIndex(stage7, db, tmpdir, ch); err != nil {
+	if err := stagedsync.SpawnAccountHistoryIndex(stageAcc, db, tmpdir, ch); err != nil {
 		return err
 	}
-	if err := stagedsync.SpawnStorageHistoryIndex(stage8, db, tmpdir, ch); err != nil {
+	if err := stagedsync.SpawnStorageHistoryIndex(stageStorage, db, tmpdir, ch); err != nil {
 		return err
 	}
 	return nil
 }
 
 func stageTxLookup(db ethdb.Database, ctx context.Context) error {
-	core.UsePlainStateExecution = true
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
@@ -640,7 +606,7 @@ func stageTxLookup(db ethdb.Database, ctx context.Context) error {
 	return stagedsync.SpawnTxLookup(stage9, db, tmpdir, ch)
 }
 
-func printAllStages(db rawdb.DatabaseReader, _ context.Context) error {
+func printAllStages(db ethdb.Getter, _ context.Context) error {
 	return printStages(db)
 }
 
@@ -667,126 +633,15 @@ func removeMigration(db rawdb.DatabaseDeleter, _ context.Context) error {
 	return nil
 }
 
-func shardDispatcher(ctx context.Context) error {
-	// STARTING GRPC SERVER
-	log.Info("Starting Shard Dispatcher", "on", dispatcherAddr)
-	listenConfig := net.ListenConfig{
-		Control: func(network, address string, _ syscall.RawConn) error {
-			log.Info("Shard Dispatcher received connection", "via", network, "from", address)
-			return nil
-		},
-	}
-	lis, err := listenConfig.Listen(ctx, "tcp", dispatcherAddr)
-	if err != nil {
-		return fmt.Errorf("could not create Shard Dispatcher listener: %w, addr=%s", err, dispatcherAddr)
-	}
-	var (
-		streamInterceptors []grpc.StreamServerInterceptor
-		unaryInterceptors  []grpc.UnaryServerInterceptor
-	)
-	if metrics.Enabled {
-		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	}
-	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
-	var grpcServer *grpc.Server
-	cpus := uint32(runtime.GOMAXPROCS(-1))
-	opts := []grpc.ServerOption{
-		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
-		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
-		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(100), // to force clients reduce concurrency level
-		grpc.KeepaliveParams(keepalive.ServerParameters{
-			Time: 10 * time.Minute,
-		}),
-		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
-	}
-	grpcServer = grpc.NewServer(opts...)
-	dispatcherServer := NewDispatcherServerImpl(1 << shardBits)
-	shards.RegisterDispatcherServer(grpcServer, dispatcherServer)
-	if metrics.Enabled {
-		grpc_prometheus.Register(grpcServer)
-	}
-
-	go func() {
-		if err1 := grpcServer.Serve(lis); err1 != nil {
-			log.Error("Shard Dispatcher failed", "err", err1)
-		}
-	}()
-	<-ctx.Done()
-	return nil
-}
-
-type DispatcherServerImpl struct {
-	shards.UnimplementedDispatcherServer
-	connMutex           sync.RWMutex
-	expectedConnections int
-	connections         map[int]shards.Dispatcher_StartDispatchServer
-	nextConnID          int
-}
-
-func NewDispatcherServerImpl(expectedConnections int) *DispatcherServerImpl {
-	return &DispatcherServerImpl{
-		expectedConnections: expectedConnections,
-		connections:         make(map[int]shards.Dispatcher_StartDispatchServer),
-	}
-}
-
-func (ds *DispatcherServerImpl) addConnection(connection shards.Dispatcher_StartDispatchServer) int {
-	ds.connMutex.Lock()
-	defer ds.connMutex.Unlock()
-	connID := ds.nextConnID
-	ds.nextConnID++
-	ds.connections[connID] = connection
-	return connID
-}
-
-func (ds *DispatcherServerImpl) removeConnection(connID int) {
-	ds.connMutex.Lock()
-	defer ds.connMutex.Unlock()
-	delete(ds.connections, connID)
-}
-
-func (ds *DispatcherServerImpl) makeBroadcastList(connID int) []shards.Dispatcher_StartDispatchServer {
-	ds.connMutex.RLock()
-	defer ds.connMutex.RUnlock()
-	var list []shards.Dispatcher_StartDispatchServer
-	for id, conn := range ds.connections {
-		if id != connID {
-			list = append(list, conn)
-		}
-	}
-	return list
-}
-
-func (ds *DispatcherServerImpl) StartDispatch(connection shards.Dispatcher_StartDispatchServer) error {
-	connID := ds.addConnection(connection)
-	defer ds.removeConnection(connID)
-	for stateRead, recvErr := connection.Recv(); recvErr == nil; stateRead, recvErr = connection.Recv() {
-		// Get list of connections to broadcast to
-		var broadcastList []shards.Dispatcher_StartDispatchServer
-		for broadcastList = ds.makeBroadcastList(connID); len(broadcastList) < ds.expectedConnections-1; broadcastList = ds.makeBroadcastList(connID) {
-			log.Info("Waiting for more connections before broadcasting", "connections left", ds.expectedConnections-len(broadcastList)-1)
-			time.Sleep(5 * time.Second)
-		}
-		if dispatcherLatency > 0 {
-			time.Sleep(time.Duration(dispatcherLatency) * time.Millisecond)
-		}
-		for _, conn := range broadcastList {
-			if err := conn.Send(stateRead); err != nil {
-				return fmt.Errorf("could not send broadcas for connection id %d: %w", connID, err)
-			}
-		}
-	}
-	return nil
-}
-
 type progressFunc func(stage stages.SyncStage) *stagedsync.StageState
 
 func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook stagedsync.ChangeSetHook) (*core.TinyChainContext, *core.BlockChain, *stagedsync.State, progressFunc) {
-	chainConfig, bc, err := newBlockChain(db)
+	sm, err := ethdb.GetStorageModeFromDB(db)
+	if err != nil {
+		panic(err)
+	}
+
+	chainConfig, bc, err := newBlockChain(db, sm)
 	if err != nil {
 		panic(err)
 	}
@@ -794,17 +649,15 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	cc := &core.TinyChainContext{}
 	cc.SetDB(tx)
 	cc.SetEngine(ethash.NewFaker())
-	sm, err := ethdb.GetStorageModeFromDB(db)
-	if err != nil {
-		panic(err)
-	}
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 	st, err := stagedsync.New(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
-		stagedsync.OptionalParameters{},
-	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), int(batchSize), quitCh, nil, nil, func() error { return nil }, hook)
+		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), int(cacheSize), int(batchSize), quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}
@@ -827,8 +680,10 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	return cc, bc, st, progress
 }
 
-func newBlockChain(db ethdb.Database) (*params.ChainConfig, *core.BlockChain, error) {
-	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, nil)
+func newBlockChain(db ethdb.Database, sm ethdb.StorageMode) (*params.ChainConfig, *core.BlockChain, error) {
+	blockchain, err1 := core.NewBlockChain(db, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{
+		NoReceipts: !sm.Receipts,
+	}, nil, nil)
 	if err1 != nil {
 		return nil, nil, err1
 	}

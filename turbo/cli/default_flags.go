@@ -27,6 +27,7 @@ var DefaultFlags = []cli.Flag{
 	SnapshotModeFlag,
 	SeedSnapshotsFlag,
 	ExternalSnapshotDownloaderAddrFlag,
+	CacheSizeFlag,
 	BatchSizeFlag,
 	DatabaseFlag,
 	PrivateApiAddr,
@@ -48,7 +49,7 @@ var DefaultFlags = []cli.Flag{
 	utils.RopstenFlag,
 	utils.RinkebyFlag,
 	utils.GoerliFlag,
-	utils.YoloV1Flag,
+	utils.YoloV2Flag,
 	utils.VMEnableDebugFlag,
 	utils.NetworkIdFlag,
 	utils.FakePoWFlag,
@@ -62,4 +63,5 @@ var DefaultFlags = []cli.Flag{
 	utils.MetricsHTTPFlag,
 	utils.MetricsPortFlag,
 	utils.IdentityFlag,
+	SilkwormFlag,
 }
