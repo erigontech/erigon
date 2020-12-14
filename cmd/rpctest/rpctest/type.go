@@ -100,16 +100,16 @@ type TraceCallTrace struct {
 
 // TraceCallAction is superset of all possible action types
 type TraceCallAction struct {
-	CallType      string         `json:"callType"`
 	From          common.Address `json:"from"`
-	Gas           hexutil.Big    `json:"gas"`
-	Input         hexutil.Bytes  `json:"input"`
 	To            common.Address `json:"to"`
-	Value         hexutil.Big    `json:"value"`
-	Init          hexutil.Bytes  `json:"init"`
 	Address       common.Address `json:"address"`
 	RefundAddress common.Address `json:"refundAddress"`
+	Gas           hexutil.Big    `json:"gas"`
+	Value         hexutil.Big    `json:"value"`
 	Balance       hexutil.Big    `json:"balance"`
+	Init          hexutil.Bytes  `json:"init"`
+	Input         hexutil.Bytes  `json:"input"`
+	CallType      string         `json:"callType"`
 }
 
 type TraceCallTraceResult struct {
