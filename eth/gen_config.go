@@ -21,7 +21,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Genesis                 *core.Genesis `toml:",omitempty"`
 		NetworkID               uint64
 		SyncMode                downloader.SyncMode
-		DiscoveryURLs           []string
+		EthDiscoveryURLs           []string
 		Pruning                 bool
 		NoPrefetch              bool
 		TxLookupLimit           uint64                 `toml:",omitempty"`
@@ -61,7 +61,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Genesis = c.Genesis
 	enc.NetworkID = c.NetworkID
 	enc.SyncMode = c.SyncMode
-	enc.DiscoveryURLs = c.DiscoveryURLs
+	enc.DiscoveryURLs = c.EthDiscoveryURLs
 	enc.Pruning = c.Pruning
 	enc.NoPrefetch = c.NoPrefetch
 	enc.TxLookupLimit = c.TxLookupLimit
@@ -104,7 +104,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Genesis                 *core.Genesis `toml:",omitempty"`
 		NetworkID               *uint64
 		SyncMode                *downloader.SyncMode
-		DiscoveryURLs           []string
+		EthDiscoveryURLs           []string
 		Pruning                 *bool
 		NoPrefetch              *bool
 		TxLookupLimit           *uint64                `toml:",omitempty"`
@@ -153,8 +153,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.SyncMode != nil {
 		c.SyncMode = *dec.SyncMode
 	}
-	if dec.DiscoveryURLs != nil {
-		c.DiscoveryURLs = dec.DiscoveryURLs
+	if dec.EthDiscoveryURLs != nil {
+		c.EthDiscoveryURLs = dec.EthDiscoveryURLs
 	}
 	if dec.Pruning != nil {
 		c.Pruning = *dec.Pruning

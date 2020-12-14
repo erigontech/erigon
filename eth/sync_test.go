@@ -37,30 +37,44 @@ func testFastSyncDisabling(t *testing.T, protocol int) {
 	// Create a pristine protocol manager, check that fast sync is left enabled
 	pmEmpty, clear := newTestProtocolManagerMust(t, downloader.FastSync, 0, nil, nil)
 	defer clear()
-	if atomic.LoadUint32(&pmEmpty.fastSync) == 0 {
+	if atomic.LoadUint32(&empty.handler.fastSync) == 0 {
 		t.Fatalf("fast sync disabled on pristine blockchain")
 	}
+	defer empty.close()
+
 	// Create a full protocol manager, check that fast sync gets disabled
 	pmFull, clearFull := newTestProtocolManagerMust(t, downloader.FastSync, 1024, nil, nil)
 	defer clearFull()
-	if atomic.LoadUint32(&pmFull.fastSync) == 1 {
+	if atomic.LoadUint32(&full.handler.fastSync) == 1 {
 		t.Fatalf("fast sync not disabled on non-empty blockchain")
 	}
+	defer full.close()
 
-	// Sync up the two peers
-	io1, io2 := p2p.MsgPipe()
+	// Sync up the two handlers
+	emptyPipe, fullPipe := p2p.MsgPipe()
+	defer emptyPipe.Close()
+	defer fullPipe.Close()
 
 	go pmFull.handle(pmFull.newPeer(protocol, p2p.NewPeer(enode.ID{}, "empty", nil), io2, pmFull.txpool.Get))   //nolint:errcheck
 	go pmEmpty.handle(pmEmpty.newPeer(protocol, p2p.NewPeer(enode.ID{}, "full", nil), io1, pmEmpty.txpool.Get)) //nolint:errcheck
+	defer emptyPeer.Close()
+	defer fullPeer.Close()
 
+	go empty.handler.runEthPeer(emptyPeer, func(peer *eth.Peer) error {
+		return eth.Handle((*ethHandler)(empty.handler), peer)
+	})
+	go full.handler.runEthPeer(fullPeer, func(peer *eth.Peer) error {
+		return eth.Handle((*ethHandler)(full.handler), peer)
+	})
+	// Wait a bit for the above handlers to start
 	time.Sleep(250 * time.Millisecond)
-	op := peerToSyncOp(downloader.FastSync, pmEmpty.peers.BestPeer())
-	if err := pmEmpty.doSync(op); err != nil {
-		t.Fatal("sync failed:", err)
-	}
 
 	// Check that fast sync was disabled
-	if atomic.LoadUint32(&pmEmpty.fastSync) == 1 {
+	op := peerToSyncOp(downloader.FastSync, empty.handler.peers.ethPeerWithHighestTD())
+	if err := empty.handler.doSync(op); err != nil {
+		t.Fatal("sync failed:", err)
+	}
+	if atomic.LoadUint32(&empty.handler.fastSync) == 1 {
 		t.Fatalf("fast sync not disabled after successful synchronisation")
 	}
 }

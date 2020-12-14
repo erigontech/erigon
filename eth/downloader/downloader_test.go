@@ -415,7 +415,7 @@ func (dl *downloadTester) Rollback(hashes []common.Hash) {
 func (dl *downloadTester) NotifyHeightKnownBlock(_ uint64) {}
 
 // newPeer registers a new block download source into the downloader.
-func (dl *downloadTester) newPeer(id string, version int, chain *testChain) error {
+func (dl *downloadTester) newPeer(id string, version uint, chain *testChain) error {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
 
@@ -542,7 +542,7 @@ func assertOwnForkedChain(t *testing.T, tester *downloadTester, common int, leng
 func TestCanonicalSynchronisation64Full(t *testing.T) { testCanonicalSynchronisation(t, 64, FullSync) }
 func TestCanonicalSynchronisation65Full(t *testing.T) { testCanonicalSynchronisation(t, 65, FullSync) }
 
-func testCanonicalSynchronisation(t *testing.T, protocol int, mode SyncMode) {
+func testCanonicalSynchronisation(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 	defer tester.terminate()
 	defer tester.peerDb.Close()
@@ -563,7 +563,7 @@ func testCanonicalSynchronisation(t *testing.T, protocol int, mode SyncMode) {
 func TestThrottling64Full(t *testing.T) { testThrottling(t, 64, FullSync) }
 func TestThrottling65Full(t *testing.T) { testThrottling(t, 65, FullSync) }
 
-func testThrottling(t *testing.T, protocol int, mode SyncMode) {
+func testThrottling(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 
 	// Create a long block chain to download and the tester
@@ -733,7 +733,7 @@ func testBoundedForkedSync(t *testing.T, protocol int, mode SyncMode) {
 func TestBoundedHeavyForkedSync64Full(t *testing.T) { testBoundedHeavyForkedSync(t, 64, FullSync) }
 func TestBoundedHeavyForkedSync65Full(t *testing.T) { testBoundedHeavyForkedSync(t, 65, FullSync) }
 
-func testBoundedHeavyForkedSync(t *testing.T, protocol int, mode SyncMode) {
+func testBoundedHeavyForkedSync(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester()
 
 	// Create a long enough forked chain
@@ -1071,6 +1071,9 @@ func testHighTDStarvationAttack(t *testing.T, protocol int, mode SyncMode) {
 func TestBlockHeaderAttackerDropping64(t *testing.T) { testBlockHeaderAttackerDropping(t, 64) }
 func TestBlockHeaderAttackerDropping65(t *testing.T) { testBlockHeaderAttackerDropping(t, 65) }
 
+func testBlockHeaderAttackerDropping(t *testing.T, protocol uint) {
+	t.Parallel()
+
 func testBlockHeaderAttackerDropping(t *testing.T, protocol int) {
 	// Define the disconnection requirement for individual hash fetch errors
 	tests := []struct {
@@ -1407,22 +1410,19 @@ func testFakedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 
 // This test reproduces an issue where unexpected deliveries would
 // block indefinitely if they arrived at the right time.
-func TestDeliverHeadersHang(t *testing.T) {
+func TestDeliverHeadersHang64Full(t *testing.T)  { testDeliverHeadersHang(t, 64, FullSync) }
 	testCases := []struct {
 		protocol int
 		syncMode SyncMode
 	}{
 		{64, FullSync},
-		{65, FullSync},
+func TestDeliverHeadersHang64Fast(t *testing.T)  { testDeliverHeadersHang(t, 64, FastSync) }
 	}
-	for _, tc := range testCases {
-		t.Run(fmt.Sprintf("protocol %d mode %v", tc.protocol, tc.syncMode), func(t *testing.T) {
-			testDeliverHeadersHang(t, tc.protocol, tc.syncMode)
-		})
-	}
-}
+func TestDeliverHeadersHang65Full(t *testing.T)  { testDeliverHeadersHang(t, 65, FullSync) }
+func TestDeliverHeadersHang65Fast(t *testing.T)  { testDeliverHeadersHang(t, 65, FastSync) }
+func testDeliverHeadersHang(t *testing.T, protocol uint, mode SyncMode) {
+	t.Parallel()
 
-func testDeliverHeadersHang(t *testing.T, protocol int, mode SyncMode) {
 	master := newTester()
 	defer master.terminate()
 	defer master.peerDb.Close()

@@ -81,6 +81,7 @@ func NewIDFromForks(forks []uint64, genesis common.Hash) ID {
 		hash = checksumUpdate(hash, fork)
 	}
 	return ID{Hash: checksumToBytes(hash), Next: 0}
+	)
 }
 
 // NewFilter creates a filter that returns if a fork ID should be rejected or not
