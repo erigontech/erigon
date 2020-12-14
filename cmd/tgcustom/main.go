@@ -79,9 +79,9 @@ func runTurboGeth(ctx *cli.Context) {
 		syncStages(ctx),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{
-			StateReaderBuilder: func(getter ethdb.Getter) state.StateReader {
+			StateReaderBuilder: func(db ethdb.Database) state.StateReader {
 				// put your custom caching code here
-				return state.NewPlainStateReader(getter)
+				return state.NewPlainStateReader(db)
 			},
 			StateWriterBuilder: func(db ethdb.Database, changeSetsDB ethdb.Database, blockNumber uint64) state.WriterWithChangeSets {
 				// put your custom cache update code here

@@ -15,7 +15,7 @@ type TraceAPI interface {
 	// Ad-hoc (see ./trace_adhoc.go)
 	ReplayBlockTransactions(ctx context.Context, blockNr rpc.BlockNumber, traceTypes []string) ([]interface{}, error)
 	ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error)
-	Call(ctx context.Context, call TraceCallParam, types []string, blockNr *rpc.BlockNumberOrHash) ([]interface{}, error)
+	Call(ctx context.Context, call TraceCallParam, types []string, blockNr *rpc.BlockNumberOrHash) (*TraceCallResult, error)
 	CallMany(ctx context.Context, calls []interface{}, blockNr *rpc.BlockNumberOrHash) ([]interface{}, error)
 	RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error)
 
@@ -31,6 +31,7 @@ type TraceAPIImpl struct {
 	dbReader  ethdb.Database
 	maxTraces uint64
 	traceType string
+	gasCap    uint64
 }
 
 // NewTraceAPI returns NewTraceAPI instance
@@ -39,5 +40,6 @@ func NewTraceAPI(dbReader ethdb.Database, cfg *cli.Flags) *TraceAPIImpl {
 		dbReader:  dbReader,
 		maxTraces: cfg.MaxTraces,
 		traceType: cfg.TraceType,
+		gasCap:    cfg.Gascap,
 	}
 }

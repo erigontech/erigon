@@ -67,7 +67,6 @@ var (
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
 	database   *ethdb.ObjectDatabase // In memory database to store our testing data
-	kv         ethdb.KV              // Same as database, but different interface
 	engine     consensus.Engine
 	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
 
@@ -105,7 +104,6 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
-		kv:           database.KV(),
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
@@ -133,7 +131,6 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
-		kv:           database.KV(),
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
@@ -150,8 +147,8 @@ func NewSimulatedBackend(alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBac
 	return NewSimulatedBackendWithDatabase(ethdb.NewMemDatabase(), alloc, gasLimit)
 }
 
-func (b *SimulatedBackend) KV() ethdb.KV {
-	return b.kv
+func (b *SimulatedBackend) DB() ethdb.Database {
+	return b.database
 }
 
 // Close terminates the underlying blockchain's update loop.
@@ -200,11 +197,11 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
-func (b *SimulatedBackend) stateByBlockNumber(tx ethdb.Tx, blockNumber *big.Int) *state.IntraBlockState {
+func (b *SimulatedBackend) stateByBlockNumber(db ethdb.Database, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(state.NewPlainDBState(tx, b.pendingBlock.NumberU64()))
+		return state.New(state.NewPlainDBState(db, b.pendingBlock.NumberU64()))
 	}
-	return state.New(state.NewPlainDBState(tx, uint64(blockNumber.Int64())))
+	return state.New(state.NewPlainDBState(db, uint64(blockNumber.Int64())))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -212,7 +209,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	dbtx, err1 := b.kv.Begin(ctx, nil, ethdb.RO)
+	dbtx, err1 := b.database.Begin(ctx, ethdb.RO)
 	if err1 != nil {
 		return nil, err1
 	}
@@ -226,7 +223,7 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	dbtx, err1 := b.kv.Begin(ctx, nil, ethdb.RO)
+	dbtx, err1 := b.database.Begin(ctx, ethdb.RO)
 	if err1 != nil {
 		return nil, err1
 	}
@@ -240,7 +237,7 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	dbtx, err1 := b.kv.Begin(ctx, nil, ethdb.RO)
+	dbtx, err1 := b.database.Begin(ctx, ethdb.RO)
 	if err1 != nil {
 		return 0, err1
 	}
@@ -254,7 +251,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	dbtx, err1 := b.kv.Begin(ctx, nil, ethdb.RO)
+	dbtx, err1 := b.database.Begin(ctx, ethdb.RO)
 	if err1 != nil {
 		return nil, err1
 	}

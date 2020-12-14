@@ -125,7 +125,7 @@ type blockTxs struct {
 	Txs      slicePtrTx
 }
 
-func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 
 	// When a CaptureStart is called, a Tx is starting. Create its entry in our list and initialize it with the partial data available
@@ -342,8 +342,7 @@ func (ot *opcodeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	return e
 }
 
-func (ot *opcodeTracer) CaptureCreate(creator common.Address, creation common.Address) error {
-	return nil
+func (ot *opcodeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
 }
 func (ot *opcodeTracer) CaptureAccountRead(account common.Address) error {
 	return nil
@@ -378,7 +377,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	chainDb := ethdb.MustOpen(chaindata)
 	defer chainDb.Close()
 	historyDb := chainDb
-	historyTx, err1 := historyDb.KV().Begin(context.Background(), nil, ethdb.RO)
+	historyTx, err1 := historyDb.Begin(context.Background(), ethdb.RO)
 	if err1 != nil {
 		return err1
 	}

@@ -437,27 +437,13 @@ func (bc *BlockChain) SetHead(head uint64) error {
 
 	// Rewind the header chain, deleting all block bodies until then
 	delFn := func(db ethdb.Database, hash common.Hash, num uint64) {
-		// Ignore the error here since light client won't hit this path
-		frozen, _ := bc.db.Ancients()
-		if num+1 <= frozen {
-			// Truncate all relative data(header, total difficulty, body, receipt
-			// and canonical hash) from ancient store.
-			if err := bc.db.TruncateAncients(num); err != nil {
-				log.Crit("Failed to truncate ancient data", "number", num, "err", err)
-			}
-
-			// Remove the hash <-> number mapping from the active store.
-			rawdb.DeleteHeaderNumber(db, hash)
-		} else {
-			// Remove relative body and receipts from the active store.
-			// The header, total difficulty and canonical hash will be
-			// removed in the hc.SetHead function.
-			rawdb.DeleteBody(db, hash, num)
-			if err := rawdb.DeleteReceipts(db, num); err != nil {
-				panic(err)
-			}
+		// Remove relative body and receipts from the active store.
+		// The header, total difficulty and canonical hash will be
+		// removed in the hc.SetHead function.
+		rawdb.DeleteBody(db, hash, num)
+		if err := rawdb.DeleteReceipts(db, num); err != nil {
+			panic(err)
 		}
-		// Todo(rjl493456442) txlookup, bloombits, etc
 	}
 
 	// If SetHead was only called as a chain reparation method, try to skip
@@ -820,30 +806,6 @@ const (
 	CanonStatTy
 	SideStatTy
 )
-
-// truncateAncient rewinds the blockchain to the specified header and deletes all
-// data in the ancient store that exceeds the specified header.
-func (bc *BlockChain) truncateAncient(head uint64) error {
-	frozen, err := bc.db.Ancients()
-	if err != nil {
-		return err
-	}
-	// Short circuit if there is no data to truncate in ancient store.
-	if frozen <= head+1 {
-		return nil
-	}
-	// Truncate all the data in the freezer beyond the specified head
-	if err := bc.db.TruncateAncients(head + 1); err != nil {
-		return err
-	}
-
-	// Clear out any stale content from the caches
-	bc.receiptsCache.Purge()
-	bc.futureBlocks.Purge()
-
-	log.Info("Rewind ancient data", "number", head)
-	return nil
-}
 
 // numberHash is just a container for a number and a hash, to represent a block
 type numberHash struct {

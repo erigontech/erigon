@@ -42,7 +42,7 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 	return l
 }
 
-func (l *JSONLogger) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (l *JSONLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
 
@@ -96,8 +96,7 @@ func (l *JSONLogger) CaptureEnd(depth int, output []byte, gasUsed uint64, t time
 	return l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), t, ""})
 }
 
-func (l *JSONLogger) CaptureCreate(creator common.Address, creation common.Address) error {
-	return nil
+func (l *JSONLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
 }
 
 func (l *JSONLogger) CaptureAccountRead(account common.Address) error {

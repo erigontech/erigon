@@ -105,17 +105,28 @@ func (s *StructLog) ErrorString() string {
 	return ""
 }
 
+type CallType int
+
+const (
+	CALLT CallType = iota
+	CALLCODET
+	DELEGATECALLT
+	STATICCALLT
+	CREATET
+	CREATE2T
+)
+
 // Tracer is used to collect execution traces from an EVM transaction
 // execution. CaptureState is called for each step of the VM with the
 // current VM state.
 // Note that reference types are actual VM data structures; make copies
 // if you need to retain them beyond the current call.
 type Tracer interface {
-	CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error
+	CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *big.Int) error
 	CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, rData []byte, contract *Contract, depth int, err error) error
 	CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, contract *Contract, depth int, err error) error
 	CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error
-	CaptureCreate(creator common.Address, creation common.Address) error
+	CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int)
 	CaptureAccountRead(account common.Address) error
 	CaptureAccountWrite(account common.Address) error
 }
@@ -146,7 +157,7 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *StructLogger) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (l *StructLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
 
@@ -238,8 +249,7 @@ func (l *StructLogger) CaptureEnd(depth int, output []byte, gasUsed uint64, t ti
 	return nil
 }
 
-func (l *StructLogger) CaptureCreate(creator common.Address, creation common.Address) error {
-	return nil
+func (l *StructLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
 }
 
 func (l *StructLogger) CaptureAccountRead(account common.Address) error {
@@ -327,7 +337,7 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 	return l
 }
 
-func (t *mdLogger) CaptureStart(_ int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error { //nolint:interfacer
+func (t *mdLogger) CaptureStart(_ int, from common.Address, to common.Address, preimage bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int) error { //nolint:interfacer
 	if !create {
 		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
 			from.String(), to.String(),
@@ -386,8 +396,7 @@ func (t *mdLogger) CaptureEnd(_ int, output []byte, gasUsed uint64, tm time.Dura
 	return nil
 }
 
-func (t *mdLogger) CaptureCreate(creator common.Address, creation common.Address) error {
-	return nil
+func (t *mdLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
 }
 
 func (t *mdLogger) CaptureAccountRead(account common.Address) error {

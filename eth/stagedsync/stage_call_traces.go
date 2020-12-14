@@ -149,7 +149,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.Database, startBlock, endBlock
 
 		var stateReader state.StateReader
 		var stateWriter state.WriterWithChangeSets
-		reader := state.NewPlainDBState(tx.(ethdb.HasTx).Tx(), blockNum-1)
+		reader := state.NewPlainDBState(tx, blockNum-1)
 		stateReader = state.NewCachedReader(reader, cache)
 		stateWriter = state.NewCachedWriter(state.NewNoopWriter(), cache)
 		tracer := NewCallTracer()
@@ -274,7 +274,6 @@ func UnwindCallTraces(u *UnwindState, s *StageState, db ethdb.Database, chainCon
 func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chainConfig *params.ChainConfig, chainContext core.ChainContext, quitCh <-chan struct{}, params CallTracesStageParams) error {
 	froms := map[string]struct{}{}
 	tos := map[string]struct{}{}
-	tx := db.(ethdb.HasTx).Tx()
 	engine := chainContext.Engine()
 
 	tracer := NewCallTracer()
@@ -296,7 +295,7 @@ func unwindCallTraces(logPrefix string, db ethdb.Database, from, to uint64, chai
 		senders := rawdb.ReadSenders(db, blockHash, blockNum)
 		block.Body().SendersToTxs(senders)
 
-		stateReader := state.NewCachedReader(state.NewPlainDBState(tx, blockNum-1), cache)
+		stateReader := state.NewCachedReader(state.NewPlainDBState(db, blockNum-1), cache)
 		stateWriter := state.NewCachedWriter(state.NewNoopWriter(), cache)
 
 		if _, err = core.ExecuteBlockEphemerally(chainConfig, vmConfig, chainContext, engine, block, stateReader, stateWriter); err != nil {
@@ -341,7 +340,7 @@ func NewCallTracer() *CallTracer {
 	}
 }
 
-func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
+func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
 func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
@@ -354,8 +353,7 @@ func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, co
 func (ct *CallTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
 	return nil
 }
-func (ct *CallTracer) CaptureCreate(creator common.Address, creation common.Address) error {
-	return nil
+func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
 }
 func (ct *CallTracer) CaptureAccountRead(account common.Address) error {
 	return nil
