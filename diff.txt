@@ -2142,16 +2142,3 @@ Date:   Tue Dec 15 18:52:51 2020 +0100
 
     eth, core: speed up some tests (#22000)
 
-commit 0fe66f8ae41d2ca773f6b01080ddda10bec24377
-Author: Mr-Leshiy <leshiy12345678@gmail.com>
-Date:   Mon Dec 14 15:31:23 2020 +0200
-
-    eth/protocols/eth: remove magic numbers in test (#21999)
-
-commit 485992979827596d92e622fec25ce68fe1bfd35b
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Mon Dec 14 14:08:53 2020 +0100
-
-    cmd/geth: fixed parallelization flaw in account import test (#22002)
-
-
