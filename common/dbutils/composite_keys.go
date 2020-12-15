@@ -3,6 +3,8 @@ package dbutils
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 )
@@ -12,6 +14,15 @@ func EncodeBlockNumber(number uint64) []byte {
 	enc := make([]byte, 8)
 	binary.BigEndian.PutUint64(enc, number)
 	return enc
+}
+
+var ErrInvalidSize = errors.New("bit endian number has an invalid size")
+
+func DecodeBlockNumber(number []byte) (uint64, error) {
+	if len(number) != 8 {
+		return 0, fmt.Errorf("%w: %d", ErrInvalidSize, len(number))
+	}
+	return binary.BigEndian.Uint64(number), nil
 }
 
 // headerKey = headerPrefix + num (uint64 big endian) + hash
@@ -55,6 +66,19 @@ func IsHeaderHashKey(k []byte) bool {
 // blockBodyKey = blockBodyPrefix + num (uint64 big endian) + hash
 func BlockBodyKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
+}
+
+func DecodeBlockBodyKey(key []byte) (uint64, common.Hash, error) {
+	if len(key) != 8+32 {
+		return 0, common.Hash{}, fmt.Errorf("%w: %d", ErrInvalidSize, len(key))
+	}
+
+	number, err := DecodeBlockNumber(key[:8])
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+
+	return number, common.BytesToHash(key[8:]), nil
 }
 
 // blockReceiptsKey = blockReceiptsPrefix + num (uint64 big endian) + hash

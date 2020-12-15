@@ -1,6 +1,8 @@
 package consensus
 
 import (
+	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -113,6 +115,7 @@ func (p *API) CacheHeader(header *types.Header) {
 	if header == nil {
 		return
 	}
+
 	p.VerifiedBlocksMu.Lock()
 	defer p.VerifiedBlocksMu.Unlock()
 
@@ -120,21 +123,26 @@ func (p *API) CacheHeader(header *types.Header) {
 	blocksContainer, ok := p.VerifiedBlocks.Get(blockNum)
 	blocks, blocksOk := blocksContainer.([]*types.Header)
 	if !ok || !blocksOk || len(blocks) == 0 {
+		// single header by a block number case
+		fmt.Println("XXX-CacheHeader-1", header.Number.Uint64(), header.Hash().String())
 		p.VerifiedBlocks.Add(blockNum, []*types.Header{header})
 		return
 	}
 
 	for _, h := range blocks {
+		// the block is already stored
 		if h.Hash() == header.Hash() {
 			return
 		}
 	}
 
 	blocks = append(blocks, header)
+
+	fmt.Println("XXX-CacheHeader-2", header.Number.Uint64(), header.Hash().String())
 	p.VerifiedBlocks.Add(blockNum, blocks)
 }
 
-func (p *API) GetCachedHeader(parentHash common.Hash, blockNum uint64) *types.Header {
+func (p *API) GetCachedHeader(hash common.Hash, blockNum uint64) *types.Header {
 	p.VerifiedBlocksMu.RLock()
 	defer p.VerifiedBlocksMu.RUnlock()
 
@@ -149,11 +157,55 @@ func (p *API) GetCachedHeader(parentHash common.Hash, blockNum uint64) *types.He
 	}
 
 	for _, h := range headers {
-		if h.Hash() == parentHash {
+		if h.Hash() == hash {
 			return h
 		}
 	}
 	return nil
+}
+
+func (p *API) PrintProcessingRequests() {
+	p.ProcessingRequestsMu.RLock()
+	defer p.ProcessingRequestsMu.RUnlock()
+
+	ids := make([]uint64, 0, len(p.ProcessingRequests))
+	for id := range p.ProcessingRequests {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		return ids[i] < ids[j]
+	})
+
+	// reqID->blockNumber->VerifyRequest
+	res := "\n***** ProcessingRequests *****\n"
+
+	for _, id := range ids {
+		reqMap := p.ProcessingRequests[id]
+		res += fmt.Sprintf("request %d\n", id)
+
+		nums := make([]uint64, 0, len(reqMap))
+		for num := range reqMap {
+			nums = append(nums, num)
+		}
+		sort.Slice(nums, func(i, j int) bool {
+			return nums[i] < nums[j]
+		})
+
+		for _, num := range nums {
+			req := reqMap[num]
+			res += fmt.Sprintf("\tblock num=%d\n", num)
+
+			nums := fmt.Sprintf("\t\tblocks(%d):", req.ParentsExpected)
+			for _, known := range req.KnownParents {
+				nums += fmt.Sprintf(" %d", known.Number.Uint64())
+			}
+			nums += "\n"
+
+			res += nums
+		}
+	}
+
+	fmt.Println(res)
 }
 
 type configGetter struct {

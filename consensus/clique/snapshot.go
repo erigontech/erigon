@@ -133,23 +133,28 @@ func hasSnapshotData(db ethdb.Database, num uint64, hash common.Hash) (bool, err
 
 func hasSnapshotByBlock(db ethdb.Database, num uint64) (bool, error) {
 	enc := dbutils.EncodeBlockNumber(num)
-	ok, err := db.Has(dbutils.HeaderNumberPrefix, enc)
-	if err != nil {
-		return false, err
-	}
-	return ok, nil
+	return db.Has(dbutils.HeaderHashPrefix, enc)
 }
 
-func addSnapshotByBlock(db ethdb.Database, num uint64, hash common.Hash) error {
+var zeroValue [8]byte
+
+func addSnapshotByBlock(db ethdb.Database, num uint64) error {
 	enc := dbutils.EncodeBlockNumber(num)
-	return db.Put(dbutils.HeaderNumberPrefix, enc, hash[:])
+	return db.Put(dbutils.HeaderHashPrefix, enc, zeroValue[:])
 }
 
 // store inserts the snapshot into the database.
-func (s *Snapshot) store(db ethdb.Database) error {
+func (s *Snapshot) store(db ethdb.Database, force bool) error {
 	t := time.Now()
+	ok, err := hasSnapshotData(db, s.Number, s.Hash)
+	if ok && err == nil {
+		return nil
+	}
+	fmt.Println("+++store-0.0", s.Number, s.Hash.String(), time.Since(t))
+
+	t = time.Now()
 	blob, err := json.Marshal(s)
-	fmt.Println("+++store-0", time.Since(t))
+	fmt.Println("+++store-0", s.Number, s.Hash.String(), time.Since(t), len(blob), "bytes")
 	t = time.Now()
 	if err != nil {
 		//fmt.Printf("Snapshot.store ERROR snap %d(%s): %v\n", s.Number, s.Hash.String(), err)
@@ -158,67 +163,9 @@ func (s *Snapshot) store(db ethdb.Database) error {
 
 	//fmt.Printf("Snapshot.store snap %d(%s): %v\n", s.Number, s.Hash.String(), spew.Sdump(s.Signers))
 
-	s.snapStorage.save(db, s.Number, s.Hash, blob)
-	fmt.Println("+++store-1", time.Since(t), len(blob))
+	s.snapStorage.save(db, s.Number, s.Hash, blob, force)
+	fmt.Println("+++store-1", s.Number, s.Hash.String(), time.Since(t), len(blob), "bytes")
 	return err
-}
-
-type storage struct {
-	ch chan snapObj
-	db ethdb.Database
-	sync.Once
-}
-
-type snapObj struct {
-	number uint64
-	hash   common.Hash
-	blob   []byte
-}
-
-func (st *storage) save(db ethdb.Database, number uint64, hash common.Hash, blob []byte) {
-	st.Once.Do(func() {
-		if st.db == nil {
-			st.db = db
-		}
-
-		st.ch = make(chan snapObj, 1024)
-
-		go func() {
-			var snap snapObj
-			for {
-				snap = <-st.ch
-				_ = st.db.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob)
-			}
-		}()
-	})
-
-	st.ch <- snapObj{number, hash, blob}
-}
-
-// copy creates a deep copy of the snapshot, though not the individual votes.
-func (s *Snapshot) copy() *Snapshot {
-	cpy := &Snapshot{
-		config:   s.config,
-		sigcache: s.sigcache,
-		Number:   s.Number,
-		Hash:     s.Hash,
-		Signers:  make(map[common.Address]struct{}),
-		Recents:  make(map[uint64]common.Address),
-		Votes:    make([]*Vote, len(s.Votes)),
-		Tally:    make(map[common.Address]Tally),
-	}
-	for signer := range s.Signers {
-		cpy.Signers[signer] = struct{}{}
-	}
-	for block, signer := range s.Recents {
-		cpy.Recents[block] = signer
-	}
-	for address, tally := range s.Tally {
-		cpy.Tally[address] = tally
-	}
-	copy(cpy.Votes, s.Votes)
-
-	return cpy
 }
 
 // validVote returns whether it makes sense to cast the specified vote in the
@@ -267,27 +214,24 @@ func (s *Snapshot) uncast(address common.Address, authorize bool) bool {
 
 // apply creates a new authorization snapshot by applying the given headers to
 // the original one.
-func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
+func (s *Snapshot) apply(headers []*types.Header) error {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
-		return s, nil
+		return nil
 	}
 
 	// Sanity check that the headers can be applied
 	for i := 0; i < len(headers)-1; i++ {
 		if headers[i+1].Number.Uint64() != headers[i].Number.Uint64()+1 {
 			//fmt.Println("errInvalidVotingChain1")
-			return nil, errInvalidVotingChain
+			return errInvalidVotingChain
 		}
 	}
 
 	if headers[0].Number.Uint64() != s.Number+1 {
 		//fmt.Println("errInvalidVotingChain2", headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), s.Number+1)
-		return nil, errInvalidVotingChain
+		return errInvalidVotingChain
 	}
-	// fixme it looks like we don't need .copy()
-	// Iterate through the headers and create a new snapshot
-	snap := s.copy()
 
 	var (
 		start  = time.Now()
@@ -310,38 +254,38 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
 		if number%s.config.Epoch == 0 {
-			snap.Votes = nil
-			snap.Tally = make(map[common.Address]Tally)
+			s.Votes = nil
+			s.Tally = make(map[common.Address]Tally)
 		}
 		// Delete the oldest signer from the recent list to allow it signing again
-		if limit := uint64(len(snap.Signers)/2 + 1); number >= limit {
-			delete(snap.Recents, number-limit)
+		if limit := uint64(len(s.Signers)/2 + 1); number >= limit {
+			delete(s.Recents, number-limit)
 		}
 		// Resolve the authorization key and check against signers
 		signer, err := ecrecover(header, s.sigcache)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if _, ok := snap.Signers[signer]; !ok {
+		if _, ok := s.Signers[signer]; !ok {
 			//fmt.Printf("errUnauthorizedSigner-3 for block %d\n", number)
-			return nil, errUnauthorizedSigner
+			return errUnauthorizedSigner
 		}
-		for _, recent := range snap.Recents {
+		for _, recent := range s.Recents {
 			if recent == signer {
 				//fmt.Println("recently signed2", number, b, recent.String())
-				return nil, errRecentlySigned
+				return errRecentlySigned
 			}
 		}
-		snap.Recents[number] = signer
+		s.Recents[number] = signer
 
 		// Header authorized, discard any previous votes from the signer
-		for voteIdx, vote := range snap.Votes {
+		for voteIdx, vote := range s.Votes {
 			if vote.Signer == signer && vote.Address == header.Coinbase {
 				// Uncast the vote from the cached tally
-				snap.uncast(vote.Address, vote.Authorize)
+				s.uncast(vote.Address, vote.Authorize)
 
 				// Uncast the vote from the chronological list
-				snap.Votes = append(snap.Votes[:voteIdx], snap.Votes[voteIdx+1:]...)
+				s.Votes = append(s.Votes[:voteIdx], s.Votes[voteIdx+1:]...)
 				break // only one vote allowed
 			}
 		}
@@ -353,10 +297,10 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		case bytes.Equal(header.Nonce[:], nonceDropVote):
 			authorize = false
 		default:
-			return nil, errInvalidVote
+			return errInvalidVote
 		}
-		if snap.cast(header.Coinbase, authorize) {
-			snap.Votes = append(snap.Votes, &Vote{
+		if s.cast(header.Coinbase, authorize) {
+			s.Votes = append(s.Votes, &Vote{
 				Signer:    signer,
 				Block:     number,
 				Address:   header.Coinbase,
@@ -364,37 +308,37 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			})
 		}
 		// If the vote passed, update the list of signers
-		if tally := snap.Tally[header.Coinbase]; tally.Votes > len(snap.Signers)/2 {
+		if tally := s.Tally[header.Coinbase]; tally.Votes > len(s.Signers)/2 {
 			if tally.Authorize {
-				snap.Signers[header.Coinbase] = struct{}{}
+				s.Signers[header.Coinbase] = struct{}{}
 			} else {
-				delete(snap.Signers, header.Coinbase)
+				delete(s.Signers, header.Coinbase)
 
 				// Signer list shrunk, delete any leftover recent caches
-				if limit := uint64(len(snap.Signers)/2 + 1); number >= limit {
-					delete(snap.Recents, number-limit)
+				if limit := uint64(len(s.Signers)/2 + 1); number >= limit {
+					delete(s.Recents, number-limit)
 				}
 				// Discard any previous votes the deauthorized signer cast
-				for voteIdx := 0; voteIdx < len(snap.Votes); voteIdx++ {
-					if snap.Votes[voteIdx].Signer == header.Coinbase {
+				for voteIdx := 0; voteIdx < len(s.Votes); voteIdx++ {
+					if s.Votes[voteIdx].Signer == header.Coinbase {
 						// Uncast the vote from the cached tally
-						snap.uncast(snap.Votes[voteIdx].Address, snap.Votes[voteIdx].Authorize)
+						s.uncast(s.Votes[voteIdx].Address, s.Votes[voteIdx].Authorize)
 
 						// Uncast the vote from the chronological list
-						snap.Votes = append(snap.Votes[:voteIdx], snap.Votes[voteIdx+1:]...)
+						s.Votes = append(s.Votes[:voteIdx], s.Votes[voteIdx+1:]...)
 
 						voteIdx--
 					}
 				}
 			}
 			// Discard any previous votes around the just changed account
-			for voteIdx := 0; voteIdx < len(snap.Votes); voteIdx++ {
-				if snap.Votes[voteIdx].Address == header.Coinbase {
-					snap.Votes = append(snap.Votes[:voteIdx], snap.Votes[voteIdx+1:]...)
+			for voteIdx := 0; voteIdx < len(s.Votes); voteIdx++ {
+				if s.Votes[voteIdx].Address == header.Coinbase {
+					s.Votes = append(s.Votes[:voteIdx], s.Votes[voteIdx+1:]...)
 					voteIdx--
 				}
 			}
-			delete(snap.Tally, header.Coinbase)
+			delete(s.Tally, header.Coinbase)
 		}
 		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
@@ -405,10 +349,10 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 	if time.Since(start) > 8*time.Second {
 		log.Info("Reconstructed voting history", "processed", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 	}
-	snap.Number += uint64(len(headers))
-	snap.Hash = headers[len(headers)-1].Hash()
+	s.Number += uint64(len(headers))
+	s.Hash = headers[len(headers)-1].Hash()
 
-	return snap, nil
+	return nil
 }
 
 // signers retrieves the list of authorized signers in ascending order.
@@ -428,4 +372,66 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 		offset++
 	}
 	return (number % uint64(len(signers))) == uint64(offset)
+}
+
+type storage struct {
+	ch chan snapObj
+	db ethdb.Database
+	sync.Once
+}
+
+type snapObj struct {
+	number uint64
+	hash   common.Hash
+	blob   []byte
+}
+
+func (st *storage) save(db ethdb.Database, number uint64, hash common.Hash, blob []byte, force bool) {
+	force = true
+	st.Once.Do(func() {
+		st.db = db
+
+		st.ch = make(chan snapObj, 16384)
+
+		go func() {
+			// fixme add an exit condition
+			for snap := range st.ch {
+				st.saveSnap(snap)
+			}
+		}()
+	})
+
+	t := time.Now()
+	ok, err := hasSnapshotData(st.db, number, hash)
+	fmt.Println("+++snapshot-7.HAS", number, hash.String(), time.Since(t), "ok", ok, "err", err)
+	if !ok || err != nil {
+		fmt.Println("+++snapshot-XXX Going to send", number, hash.String())
+		snap := snapObj{number, hash, blob}
+		if !force {
+			st.ch <- snap
+		} else {
+			st.saveSnap(snap)
+		}
+
+	} else {
+		fmt.Println("+++snapshot-XXX NOT Going to send", number, hash.String())
+	}
+}
+
+func (st *storage) saveSnap(snap snapObj) {
+	t := time.Now()
+	err := addSnapshotByBlock(st.db, snap.number)
+	if err != nil {
+		log.Error("can't store snapshot index", "db", st.db != nil, "block", snap.number, "hash", snap.hash, "err", err)
+		return
+	}
+
+	fmt.Println("+++snapshot-7.2", snap.number, snap.hash.String(), time.Since(t))
+	t = time.Now()
+	err = st.db.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob)
+	if err != nil {
+		log.Error("can't store snapshot", "block", snap.number, "hash", snap.hash, "err", err)
+		return
+	}
+	fmt.Println("+++snapshot-7.3", snap.number, snap.hash.String(), time.Since(t))
 }

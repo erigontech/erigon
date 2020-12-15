@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -15,6 +16,8 @@ import (
 type Consensus struct {
 	Server         consensus.Verifier
 	*consensus.API // remote Engine
+
+	cleanupStatus *uint32
 }
 
 const ttl = time.Minute
@@ -26,8 +29,9 @@ var (
 
 func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit chan struct{}) *Consensus {
 	c := &Consensus{
-		Server: v,
-		API:    consensus.NewAPI(config),
+		Server:        v,
+		API:           consensus.NewAPI(config),
+		cleanupStatus: new(uint32),
 	}
 
 	go func() {
@@ -65,10 +69,12 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 
 					knownParentsSlice, parentsToValidate, ancestorsReq := c.requestParentHeaders(req.ID, header, req.Headers)
 
+					// FIXME где-то тут теряется 1 из knownParentsSlice
 					if ancestorsReq != nil {
 						ancestorsReqs = append(ancestorsReqs, *ancestorsReq)
 					}
 
+					fmt.Println("DEBUG-1", req.ID, header.Number.Int64(), parentsToValidate, len(knownParentsSlice))
 					err := c.verifyByRequest(req.ID, header, req.Seal[i], parentsToValidate, knownParentsSlice)
 					if errors.Is(err, errNotAllParents) {
 						fmt.Println("not all parents")
@@ -87,7 +93,6 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 				c.API.HeadersRequests <- ancestorsReq
 
 			case parentResp := <-c.API.HeaderResponses:
-				fmt.Println("parentResp", parentResp.ID, len(parentResp.Headers), parentResp.Err)
 				if parentResp.Err != nil {
 					c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{parentResp.ID, parentResp.Hash, parentResp.Err}
 
@@ -100,23 +105,9 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 					continue
 				}
 
-				fmt.Println("VerifyRequestsCommonAncestor-1")
 				c.VerifyRequestsCommonAncestor(parentResp.ID, parentResp.Headers)
-				fmt.Println("VerifyRequestsCommonAncestor-2")
 			case <-c.API.CleanupTicker.C:
-				c.API.ProcessingRequestsMu.Lock()
-
-				for reqID, reqBlocks := range c.API.ProcessingRequests {
-					for _, req := range reqBlocks {
-						if req.Deadline.Before(time.Now()) {
-							c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), errors.New("timeout")}
-
-							delete(c.API.ProcessingRequests, reqID)
-						}
-					}
-				}
-
-				c.API.ProcessingRequestsMu.Unlock()
+				c.cleanup()
 
 			case <-exit:
 				return
@@ -127,12 +118,31 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 	return c
 }
 
+func (c *Consensus) cleanup() {
+	if atomic.CompareAndSwapUint32(c.cleanupStatus, 0, 1) {
+		go func() {
+			c.API.ProcessingRequestsMu.Lock()
+
+			for reqID, reqBlocks := range c.API.ProcessingRequests {
+				for _, req := range reqBlocks {
+					if req.Deadline.Before(time.Now()) {
+						c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), errors.New("timeout")}
+
+						delete(c.API.ProcessingRequests, reqID)
+					}
+				}
+			}
+
+			atomic.StoreUint32(c.cleanupStatus, 0)
+			c.API.ProcessingRequestsMu.Unlock()
+		}()
+	}
+}
+
 func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.Header) {
 	if len(headers) == 0 {
 		return
 	}
-
-	fmt.Println("PARENTS!!!", len(headers))
 
 	c.API.ProcessingRequestsMu.Lock()
 	reqHeaders, ok := c.API.ProcessingRequests[reqID]
@@ -151,71 +161,75 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 	sort.Slice(nums, func(i, j int) bool {
 		return nums[i] < nums[j]
 	})
-	fmt.Println("sent-0", reqID, time.Since(t))
+	fmt.Println("sent-0", reqID, len(headers), time.Since(t))
 
 	t = time.Now()
 	for _, header := range headers {
+		fmt.Println("XXX-caching-parents", header.Number.Uint64(), header.Hash().String())
 		c.API.CacheHeader(header)
 	}
 
 	fmt.Println("sent-0.1", reqID, time.Since(t))
 
-	fmt.Println("00000-0", reqID, nums[0], nums[len(nums)-1])
+	knownByRequests := make(map[uint64]map[common.Hash]map[uint64]struct{}) // reqID -> parenthash -> blockToValidate
 
 	for _, num := range nums {
 		t = time.Now()
 		c.API.ProcessingRequestsMu.Lock()
 		req := reqHeaders[num]
 		c.API.ProcessingRequestsMu.Unlock()
+
 		fmt.Println("sent-1", req.ID, req.Header.Number.Int64(), time.Since(t))
 		t = time.Now()
 
-		appendParents(req, headers)
+		appendAncestors(req, headers, knownByRequests)
 		fmt.Println("sent-2", req.ID, req.Header.Number.Int64(), time.Since(t))
 		t = time.Now()
 
 		err := c.verifyByRequest(req.ID, req.Header, req.Seal, req.ParentsExpected, req.KnownParents)
 		if err == nil {
 			headers = append(headers, req.Header)
-		} else {
-			fmt.Println("VerifyRequestsCommonAncestor", req.ID, req.Header.Number.Int64(), err)
 		}
+
 		fmt.Println("sent-3", req.ID, req.Header.Number.Int64(), time.Since(t))
-		t = time.Now()
 	}
 }
 
 func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal bool, parentsExpected int, knownParents []*types.Header) error {
-	fmt.Println("verifyByRequest", len(knownParents), parentsExpected)
 	if len(knownParents) != parentsExpected {
-		fmt.Println("err", len(knownParents), parentsExpected)
 		return errNotAllParents
 	}
 
+	t := time.Now()
 	err := c.Server.Verify(c.API.Chain, header, knownParents, false, seal)
-	fmt.Println("sending!!!!!!!!!!!!!!!!!!!!", len(knownParents), parentsExpected)
+	fmt.Println("verifyByRequest-2", time.Since(t), len(knownParents), parentsExpected, err)
+	t = time.Now()
+
 	c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, header.Hash(), err}
 	if err == nil {
 		c.API.CacheHeader(header)
 	}
 
+	fmt.Println("verifyByRequest-3", time.Since(t))
+
 	// remove finished request
-	c.API.ProcessingRequestsMu.Lock()
-	reqBlocks, ok := c.API.ProcessingRequests[reqID]
-	if ok {
-		delete(reqBlocks, header.Number.Uint64())
-		if len(reqBlocks) == 0 {
-			delete(c.API.ProcessingRequests, reqID)
+	// fixme extract goroutine
+	go func() {
+		c.API.ProcessingRequestsMu.Lock()
+		reqBlocks, ok := c.API.ProcessingRequests[reqID]
+		if ok {
+			delete(reqBlocks, header.Number.Uint64())
+			if len(reqBlocks) == 0 {
+				delete(c.API.ProcessingRequests, reqID)
+			}
 		}
-	}
-	c.API.ProcessingRequestsMu.Unlock()
+		c.API.ProcessingRequestsMu.Unlock()
+	}()
 
 	return nil
 }
 
 func toVerifyRequest(reqID uint64, header *types.Header, seal bool, deadline *time.Time, knownParents []*types.Header, parentsToValidate int) *consensus.VerifyRequest {
-	fmt.Println("99999", header.Number.Uint64(), uint64(parentsToValidate))
-
 	request := &consensus.VerifyRequest{
 		reqID,
 		header,
@@ -233,38 +247,58 @@ func toVerifyRequest(reqID uint64, header *types.Header, seal bool, deadline *ti
 func (c *Consensus) addVerifyHeaderRequest(reqID uint64, header *types.Header, seal bool, deadline *time.Time, knownParentsSlice []*types.Header, parentsToValidate int) {
 	request := toVerifyRequest(reqID, header, seal, deadline, knownParentsSlice, parentsToValidate)
 
-	//appendParents(request, knownParents)
-
 	c.API.ProcessingRequestsMu.Lock()
 	blocks, ok := c.API.ProcessingRequests[reqID]
 	if !ok {
 		blocks = make(map[uint64]*consensus.VerifyRequest)
 	}
+
 	blocks[header.Number.Uint64()] = request
 	c.API.ProcessingRequests[reqID] = blocks
 	c.API.ProcessingRequestsMu.Unlock()
 }
 
-func appendParents(request *consensus.VerifyRequest, parents []*types.Header) {
-	// fixme extract above !!!!!!!!!!!!!!!!!!
+func appendAncestors(request *consensus.VerifyRequest, ancestors []*types.Header, knownByRequests map[uint64]map[common.Hash]map[uint64]struct{}) {
 	t := time.Now()
-	m := make(map[common.Hash]*types.Header)
-	for _, p := range request.KnownParents {
-		m[p.Hash()] = p
+
+	blockNumber := request.Header.Number.Uint64()
+
+	ancestorsMap, ok := knownByRequests[request.ID]
+	if !ok {
+		ancestorsMap = make(map[common.Hash]map[uint64]struct{}, len(request.KnownParents)+len(ancestors))
+		for _, p := range request.KnownParents {
+			ancestorsMap[p.Hash()] = map[uint64]struct{}{
+				blockNumber: {},
+			}
+		}
+		knownByRequests[request.ID] = ancestorsMap
 	}
-	fmt.Println("appendParents-1", time.Since(t), len(request.KnownParents))
+
 	t = time.Now()
 
-	for _, parent := range parents {
+	for _, parent := range ancestors {
 		if parent.Number.Uint64() >= request.From && parent.Number.Uint64() <= request.To {
-			_, has := m[parent.Hash()]
+			parentMap, has := ancestorsMap[parent.Hash()]
 			if !has {
-				m[parent.Hash()] = parent
+				ancestorsMap[parent.Hash()] = map[uint64]struct{}{
+					blockNumber: {},
+				}
+
 				request.KnownParents = append(request.KnownParents, parent)
+			} else {
+				_, has = parentMap[blockNumber]
+				if !has {
+					ancestorsMap[parent.Hash()] = map[uint64]struct{}{
+						blockNumber: {},
+					}
+					request.KnownParents = append(request.KnownParents, parent)
+				}
 			}
 		}
 	}
-	fmt.Println("appendParents-2", time.Since(t), len(parents))
+
+	fmt.Printf("appendParents-2 took=%v reqID=%d ancestors=%d ancestorsMap=%d KnownParents=%d knownByRequests[request.ID]=%d\n",
+		time.Since(t), request.ID, len(ancestors), len(ancestorsMap), len(request.KnownParents), len(knownByRequests[request.ID]))
 }
 
 func (c *Consensus) HeaderVerification() chan<- consensus.VerifyHeaderRequest {
@@ -329,8 +363,10 @@ func (c *Consensus) requestHeadersNotFromRange(reqID uint64, highestBlock uint64
 	known := make([]*types.Header, 0, highestBlock-minHeader)
 
 	for parentBlockNum := highestBlock; parentBlockNum >= minHeader; parentBlockNum-- {
+		fmt.Println("XXX-i", parentBlockNum)
 		parentBlock := c.API.GetCachedHeader(highestKnown, parentBlockNum)
 		if parentBlock == nil {
+			fmt.Println("XXX-i-nil!!!", highestKnown.String(), parentBlockNum)
 			break
 		}
 
@@ -343,8 +379,6 @@ func (c *Consensus) requestHeadersNotFromRange(reqID uint64, highestBlock uint64
 			highestParentHash = parentBlock.Hash()
 		}
 	}
-
-	fmt.Println("parent-XXX-0", highestBlock, parentsToGet, len(known), parentsToGet-uint64(len(known)))
 
 	return known, consensus.HeadersRequest{
 		reqID,
@@ -381,8 +415,6 @@ func sumHeadersRequestsInRange(reqID uint64, from uint64, reqs ...consensus.Head
 			minBlockToGet = req.HighestBlockNumber - req.Number + 1
 		}
 	}
-
-	fmt.Println("parent-XXX-1", len(reqs), minBlockToGet+1, maxBlockNumber, maxBlockNumber-minBlockToGet+1)
 
 	return consensus.HeadersRequest{
 		reqID,

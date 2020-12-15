@@ -222,6 +222,7 @@ var Buckets = []string{
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
 	CliqueBucket,
+	HeaderHashPrefix,
 	SyncStageProgress,
 	SyncStageUnwind,
 	PlainStateBucket,
