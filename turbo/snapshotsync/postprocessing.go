@@ -24,15 +24,23 @@ var (
 	HeaderCanonical = stages.SyncStage("snapshot_canonical")
 )
 
-func PostProcessing(db ethdb.Database, mode SnapshotMode) error {
+func PostProcessing(db ethdb.Database, mode SnapshotMode, downloadedSnapshots map[SnapshotType]*SnapshotsInfo) error {
 	if mode.Headers {
 		err := GenerateHeaderIndexes(context.Background(), db)
 		if err != nil {
 			return err
 		}
 	}
+
 	if mode.Bodies {
 		err := PostProcessBodies(db)
+		if err != nil {
+			return err
+		}
+	}
+
+	if mode.State {
+		err := PostProcessState(db, downloadedSnapshots[SnapshotType_state])
 		if err != nil {
 			return err
 		}
@@ -61,6 +69,23 @@ func PostProcessBodies(db ethdb.Database) error {
 
 	number := binary.BigEndian.Uint64(k[:8])
 	err = stages.SaveStageProgress(db, stages.Bodies, number, nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func PostProcessState(db ethdb.Database, info *SnapshotsInfo) error {
+	v, _, err := stages.GetStageProgress(db, stages.Execution)
+	if err != nil {
+		return err
+	}
+
+	if v > 0 {
+		return nil
+	}
+
+	err = stages.SaveStageProgress(db, stages.Execution, info.SnapshotBlock, nil)
 	if err != nil {
 		return err
 	}

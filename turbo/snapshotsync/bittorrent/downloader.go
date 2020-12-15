@@ -216,6 +216,7 @@ func (cli *Client) Download() {
 	for _, t := range cli.Cli.Torrents() {
 		log.Info("Snapshot seeding", "name", t.Name(), "seeding", t.Seeding())
 	}
+	return
 }
 
 func getTorrentSpec(db ethdb.Database, snapshotName string, networkID uint64) ([]byte, []byte, error) {
