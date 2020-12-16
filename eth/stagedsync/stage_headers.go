@@ -292,8 +292,12 @@ func VerifyHeaders(db rawdb.DatabaseReader, engine consensus.EngineAPI, headers 
 
 	reqResponses := make(map[common.Hash]struct{}, len(headers))
 
+	t := time.Now()
+
 	defer func() {
-		fmt.Printf("DONE. reqID = %d. %d out of %d\n\n", id, len(reqResponses), toVerify)
+		total := time.Since(t)
+		fmt.Printf("DONE. reqID = %d. Max block %d. %d out of %d. Took %v, %v s/block\n\n",
+			id, headers[len(headers)-1].Number.Uint64(), len(reqResponses), toVerify, total, total/time.Duration(toVerify))
 	}()
 
 	for {

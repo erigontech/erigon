@@ -434,10 +434,6 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 
 	c.recents.Add(snap.Hash, snap)
 	c.snapshotBlocks.Add(snap.Number, snap.Hash)
-	err = addSnapshotByBlock(c.db, snap.Number)
-	if err != nil {
-		return nil, err
-	}
 	fmt.Println("+++snapshot-1")
 
 	// If we've generated a new checkpoint snapshot, save to disk

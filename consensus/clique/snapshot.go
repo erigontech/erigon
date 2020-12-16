@@ -131,18 +131,6 @@ func hasSnapshotData(db ethdb.Database, num uint64, hash common.Hash) (bool, err
 	return db.Has(dbutils.CliqueBucket, dbutils.BlockBodyKey(num, hash))
 }
 
-func hasSnapshotByBlock(db ethdb.Database, num uint64) (bool, error) {
-	enc := dbutils.EncodeBlockNumber(num)
-	return db.Has(dbutils.HeaderHashPrefix, enc)
-}
-
-var zeroValue [8]byte
-
-func addSnapshotByBlock(db ethdb.Database, num uint64) error {
-	enc := dbutils.EncodeBlockNumber(num)
-	return db.Put(dbutils.HeaderHashPrefix, enc, zeroValue[:])
-}
-
 // store inserts the snapshot into the database.
 func (s *Snapshot) store(db ethdb.Database, force bool) error {
 	t := time.Now()
@@ -387,7 +375,6 @@ type snapObj struct {
 }
 
 func (st *storage) save(db ethdb.Database, number uint64, hash common.Hash, blob []byte, force bool) {
-	force = true
 	st.Once.Do(func() {
 		st.db = db
 
@@ -420,18 +407,10 @@ func (st *storage) save(db ethdb.Database, number uint64, hash common.Hash, blob
 
 func (st *storage) saveSnap(snap snapObj) {
 	t := time.Now()
-	err := addSnapshotByBlock(st.db, snap.number)
-	if err != nil {
-		log.Error("can't store snapshot index", "db", st.db != nil, "block", snap.number, "hash", snap.hash, "err", err)
-		return
-	}
-
-	fmt.Println("+++snapshot-7.2", snap.number, snap.hash.String(), time.Since(t))
-	t = time.Now()
-	err = st.db.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob)
+	err := st.db.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob)
 	if err != nil {
 		log.Error("can't store snapshot", "block", snap.number, "hash", snap.hash, "err", err)
 		return
 	}
-	fmt.Println("+++snapshot-7.3", snap.number, snap.hash.String(), time.Since(t))
+	fmt.Println("+++snapshot-7.2", snap.number, snap.hash.String(), time.Since(t))
 }

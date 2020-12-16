@@ -411,38 +411,39 @@ func (c *CliqueVerifier) checkSnapshot(num uint64) bool {
 			// If an on-disk checkpoint snapshot can be found, use that
 			ok, err = hasSnapshotData(c.db, num, snapHash)
 			if err != nil {
-				//fmt.Println("====checkSnapshot-1.1", num)
+				log.Error("while getting a shapshot", "block", num, "snapHash", snapHash, "err", err)
 				ok = false
 			}
 
 			if ok {
 				fmt.Printf("checkSnapshot for %d for snap in db %v %v\n", num, ok, err)
-				//fmt.Println("====checkSnapshot-1.2", num)
 				return true
 			}
 		}
 	}
-	//fmt.Println("====checkSnapshot-2")
 
 	if !ok {
-		//fmt.Println("====checkSnapshot-3")
-		c.db.Walk(dbutils.CliqueBucket, dbutils.EncodeBlockNumber(num), 8*8, func(k, v []byte) (bool, error) {
-			//fmt.Println("====checkSnapshot-3.1")
+		err = c.db.Walk(dbutils.CliqueBucket, dbutils.EncodeBlockNumber(num), 8*8, func(k, v []byte) (bool, error) {
 			number, hash, err := dbutils.DecodeBlockBodyKey(k)
-			fmt.Println("=====", number, hash, err)
-			return true, nil
+			if err != nil{
+				return false, err
+			}
+
+			fmt.Println("====checkSnapshot-3.1", number, hash.String())
+
+			ok = true
+			return false, nil
 		})
+
+		if err != nil {
+			log.Error("while getting a shapshot", "block", num, "err", err)
+			return false
+		}
 	}
 
-	// If an on-disk checkpoint snapshot can be found, use that
-	// fixme remove
-	ok, err = hasSnapshotByBlock(c.db, num)
-	if ok {
-		//fmt.Println("====checkSnapshot-4")
-		fmt.Printf("checkSnapshot for %d for snap in db %v %v\n", num, ok, err)
-	}
-	//fmt.Println("====checkSnapshot-5")
-	return ok && err == nil
+	fmt.Println("====checkSnapshot-4", ok)
+
+	return ok
 }
 
 func isSnapshot(number uint64, epoch uint64) bool {
