@@ -182,7 +182,7 @@ func compareBuckets(ctx context.Context, tx ethdb.Tx, b string, refTx ethdb.Tx, 
 	}
 	for k != nil || refK != nil {
 		count++
-		if count%100_000 == 0 {
+		if count%10_000_000 == 0 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

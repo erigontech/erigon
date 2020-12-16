@@ -335,6 +335,10 @@ func stageSenders(db ethdb.Database, ctx context.Context) error {
 		ReadChLen:       4,
 		Now:             time.Now(),
 	}
+	if unwind > 0 {
+		u := &stagedsync.UnwindState{Stage: stages.Senders, UnwindPoint: stage3.BlockNumber - unwind}
+		return stagedsync.UnwindSendersStage(u, stage3, db)
+	}
 
 	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, tmpdir, ch)
 }

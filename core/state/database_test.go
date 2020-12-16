@@ -1506,3 +1506,193 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 }
+
+func TestRecreateAndRewind(t *testing.T) {
+	// Configure and generate a sample block chain
+	var (
+		db      = ethdb.NewMemDatabase()
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(1000000000)
+		gspec   = &core.Genesis{
+			Config: params.AllEthashProtocolChanges,
+			Alloc: core.GenesisAlloc{
+				address: {Balance: funds},
+			},
+		}
+		genesis = gspec.MustCommit(db)
+		//signer  = types.HomesteadSigner{}
+	)
+
+	engine := ethash.NewFaker()
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts := bind.NewKeyedTransactor(key)
+	transactOpts.GasLimit = 1000000
+	var revive *contracts.Revive2
+	var phoenix *contracts.Phoenix
+	var reviveAddress common.Address
+	var phoenixAddress common.Address
+	var err error
+
+	blocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
+		var tx *types.Transaction
+
+		switch i {
+		case 0:
+			// Deploy phoenix factory
+			reviveAddress, tx, revive, err = contracts.DeployRevive2(transactOpts, contractBackend)
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 1:
+			// Calculate the address of the Phoenix and create handle to phoenix contract
+			var codeHash common.Hash
+			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
+				panic(err)
+			}
+			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
+			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackend); err != nil {
+				panic(err)
+			}
+			// Deploy phoenix
+			if tx, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+			// Modify phoenix storage
+			if tx, err = phoenix.Increment(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+			if tx, err = phoenix.Increment(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 2:
+			// Destruct the phoenix
+			if tx, err = phoenix.Die(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 3:
+			// Recreate the phoenix, and change the storage
+			if tx, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+			if tx, err = phoenix.Increment(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		}
+		contractBackend.Commit()
+	}, false /* intermediateHashes */)
+	if err1 != nil {
+		t.Fatalf("generate blocks: %v", err1)
+	}
+
+	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOptsLonger := bind.NewKeyedTransactor(key)
+	transactOptsLonger.GasLimit = 1000000
+	longerBlocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 5, func(i int, block *core.BlockGen) {
+		var tx *types.Transaction
+
+		switch i {
+		case 0:
+			// Deploy phoenix factory
+			reviveAddress, tx, revive, err = contracts.DeployRevive2(transactOptsLonger, contractBackendLonger)
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 1:
+			// Calculate the address of the Phoenix and create handle to phoenix contract
+			var codeHash common.Hash
+			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
+				panic(err)
+			}
+			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
+			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackendLonger); err != nil {
+				panic(err)
+			}
+			// Deploy phoenix
+			if tx, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+			// Modify phoenix storage
+			if tx, err = phoenix.Increment(transactOptsLonger); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+			if tx, err = phoenix.Increment(transactOptsLonger); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 2:
+			// Destruct the phoenix
+			if tx, err = phoenix.Die(transactOptsLonger); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 3:
+			// Recreate the phoenix, but now with the empty storage
+			if tx, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		}
+		contractBackendLonger.Commit()
+	}, false /* intermediateHashes */)
+	if err1 != nil {
+		t.Fatalf("generate longer blocks: %v", err1)
+	}
+
+	// BLOCKS 1 and 2
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {
+		t.Fatal(err)
+	}
+
+	st := state.New(state.NewDbStateReader(db))
+	if !st.Exist(phoenixAddress) {
+		t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
+	}
+
+	var key0 common.Hash
+	var check0 uint256.Int
+	st.GetState(phoenixAddress, &key0, &check0)
+	if check0.Cmp(uint256.NewInt().SetUint64(2)) != 0 {
+		t.Errorf("expected 0x02 in position 0, got: 0x%x", check0.Bytes())
+	}
+
+	// Block 3 and 4
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[2:], true /* checkRoot */); err != nil {
+		t.Fatal(err)
+	}
+
+	st = state.New(state.NewDbStateReader(db))
+	if !st.Exist(phoenixAddress) {
+		t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
+	}
+
+	st.GetState(phoenixAddress, &key0, &check0)
+	if check0.Cmp(uint256.NewInt().SetUint64(1)) != 0 {
+		t.Errorf("expected 0x01 in position 0, got: 0x%x", check0.Bytes())
+	}
+
+	// Reorg
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerBlocks, true /* checkRoot */); err != nil {
+		t.Fatal(err)
+	}
+
+	st = state.New(state.NewPlainStateReader(db))
+	if !st.Exist(phoenixAddress) {
+		t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
+	}
+
+	st.GetState(phoenixAddress, &key0, &check0)
+	if check0.Cmp(uint256.NewInt().SetUint64(0)) != 0 {
+		t.Errorf("expected 0x00 in position 0, got: 0x%x", check0.Bytes())
+	}
+}
