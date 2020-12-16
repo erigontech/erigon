@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 7386e70918ee962c2a528e023183881d607461e5e1740d95d04df9cbb3f63c56_v0_9_1_138_g6d2914c9
+#define MDBX_BUILD_SOURCERY c1093570bfda5167ead9bb41f20b8282177e878ac3b4469758458fe5994a1c60_v0_9_2_14_g166ed1c7
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -680,6 +680,7 @@ __extern_C key_t ftok(const char *, int);
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#include <excpt.h>
 #include <tlhelp32.h>
 #include <windows.h>
 #include <winnt.h>
@@ -714,7 +715,8 @@ static inline void *mdbx_calloc(size_t nelem, size_t size) {
 
 #ifndef mdbx_realloc
 static inline void *mdbx_realloc(void *ptr, size_t bytes) {
-  return LocalReAlloc(ptr, bytes, LMEM_MOVEABLE);
+  return ptr ? LocalReAlloc(ptr, bytes, LMEM_MOVEABLE)
+             : LocalAlloc(LMEM_FIXED, bytes);
 }
 #endif /* mdbx_realloc */
 
@@ -4343,20 +4345,18 @@ txn_managed::~txn_managed() noexcept {
 
 void txn_managed::abort() {
   const error err = static_cast<MDBX_error_t>(::mdbx_txn_abort(handle_));
-  if (MDBX_UNLIKELY(err.code() != MDBX_SUCCESS)) {
-    if (err.code() != MDBX_THREAD_MISMATCH)
-      handle_ = nullptr;
+  if (MDBX_LIKELY(err.code() != MDBX_THREAD_MISMATCH))
+    handle_ = nullptr;
+  if (MDBX_UNLIKELY(err.code() != MDBX_SUCCESS))
     err.throw_exception();
-  }
 }
 
 void txn_managed::commit() {
   const error err = static_cast<MDBX_error_t>(::mdbx_txn_commit(handle_));
-  if (MDBX_UNLIKELY(err.code() != MDBX_SUCCESS)) {
-    if (err.code() != MDBX_THREAD_MISMATCH)
-      handle_ = nullptr;
+  if (MDBX_LIKELY(err.code() != MDBX_THREAD_MISMATCH))
+    handle_ = nullptr;
+  if (MDBX_UNLIKELY(err.code() != MDBX_SUCCESS))
     err.throw_exception();
-  }
 }
 
 //------------------------------------------------------------------------------

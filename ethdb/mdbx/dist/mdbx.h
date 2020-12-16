@@ -306,7 +306,7 @@ typedef mode_t mdbx_mode_t;
 #define MDBX_NOTHROW_CONST_FUNCTION [[const]]
 #else
 #define MDBX_NOTHROW_CONST_FUNCTION MDBX_NOTHROW_PURE_FUNCTION
-#endif /* MDBX_NOTHROW_PURE_FUNCTION */
+#endif /* MDBX_NOTHROW_CONST_FUNCTION */
 
 #ifndef MDBX_DEPRECATED /* may be predefined to avoid warnings "deprecated" */
 #ifdef __deprecated
@@ -375,8 +375,8 @@ typedef mode_t mdbx_mode_t;
 #endif
 #endif /* bool without __cplusplus */
 
-#if !defined(__cpp_noexcept_function_type) ||                                  \
-    __cpp_noexcept_function_type < 201510L
+#if !defined(DOXYGEN) && (!defined(__cpp_noexcept_function_type) ||            \
+                          __cpp_noexcept_function_type < 201510L)
 #define MDBX_CXX17_NOEXCEPT
 #else
 #define MDBX_CXX17_NOEXCEPT noexcept
@@ -386,12 +386,13 @@ typedef mode_t mdbx_mode_t;
 #if !defined(__cplusplus)
 #define MDBX_CXX01_CONSTEXPR __inline
 #define MDBX_CXX01_CONSTEXPR_VAR const
-#elif !defined(__cpp_constexpr) || __cpp_constexpr < 200704L ||                \
-    (defined(__LCC__) && __LCC__ < 124) ||                                     \
-    (defined(__GNUC__) && (__GNUC__ * 100 + __GNUC_MINOR__ < 407) &&           \
-     !defined(__clang__) && !defined(__LCC__)) ||                              \
-    (defined(_MSC_VER) && _MSC_VER < 1910) ||                                  \
-    (defined(__clang__) && __clang_major__ < 4)
+#elif !defined(DOXYGEN) &&                                                     \
+    (!defined(__cpp_constexpr) || __cpp_constexpr < 200704L ||                 \
+     (defined(__LCC__) && __LCC__ < 124) ||                                    \
+     (defined(__GNUC__) && (__GNUC__ * 100 + __GNUC_MINOR__ < 407) &&          \
+      !defined(__clang__) && !defined(__LCC__)) ||                             \
+     (defined(_MSC_VER) && _MSC_VER < 1910) ||                                 \
+     (defined(__clang__) && __clang_major__ < 4))
 #define MDBX_CXX01_CONSTEXPR inline
 #define MDBX_CXX01_CONSTEXPR_VAR const
 #else
@@ -402,12 +403,13 @@ typedef mode_t mdbx_mode_t;
 #if !defined(__cplusplus)
 #define MDBX_CXX11_CONSTEXPR __inline
 #define MDBX_CXX11_CONSTEXPR_VAR const
-#elif !defined(__cpp_constexpr) || __cpp_constexpr < 201304 ||                 \
-    (defined(__LCC__) && __LCC__ < 124) ||                                     \
-    (defined(__GNUC__) && __GNUC__ < 6 && !defined(__clang__) &&               \
-     !defined(__LCC__)) ||                                                     \
-    (defined(_MSC_VER) && _MSC_VER < 1910) ||                                  \
-    (defined(__clang__) && __clang_major__ < 5)
+#elif !defined(DOXYGEN) &&                                                     \
+    (!defined(__cpp_constexpr) || __cpp_constexpr < 201304 ||                  \
+     (defined(__LCC__) && __LCC__ < 124) ||                                    \
+     (defined(__GNUC__) && __GNUC__ < 6 && !defined(__clang__) &&              \
+      !defined(__LCC__)) ||                                                    \
+     (defined(_MSC_VER) && _MSC_VER < 1910) ||                                 \
+     (defined(__clang__) && __clang_major__ < 5))
 #define MDBX_CXX11_CONSTEXPR inline
 #define MDBX_CXX11_CONSTEXPR_VAR const
 #else
@@ -418,11 +420,12 @@ typedef mode_t mdbx_mode_t;
 #if !defined(__cplusplus)
 #define MDBX_CXX14_CONSTEXPR __inline
 #define MDBX_CXX14_CONSTEXPR_VAR const
-#elif defined(__cpp_constexpr) && __cpp_constexpr >= 201304L &&                \
-    ((defined(_MSC_VER) && _MSC_VER >= 1910) ||                                \
-     (defined(__clang__) && __clang_major__ > 4) ||                            \
-     (defined(__GNUC__) && __GNUC__ > 6) ||                                    \
-     (!defined(__GNUC__) && !defined(__clang__) && !defined(_MSC_VER)))
+#elif defined(DOXYGEN) ||                                                      \
+    defined(__cpp_constexpr) && __cpp_constexpr >= 201304L &&                  \
+        ((defined(_MSC_VER) && _MSC_VER >= 1910) ||                            \
+         (defined(__clang__) && __clang_major__ > 4) ||                        \
+         (defined(__GNUC__) && __GNUC__ > 6) ||                                \
+         (!defined(__GNUC__) && !defined(__clang__) && !defined(_MSC_VER)))
 #define MDBX_CXX14_CONSTEXPR constexpr
 #define MDBX_CXX14_CONSTEXPR_VAR constexpr
 #else
@@ -477,27 +480,25 @@ typedef mode_t mdbx_mode_t;
 #define DEFINE_ENUM_FLAG_OPERATORS(ENUM)                                       \
   extern "C++" {                                                               \
   MDBX_CXX01_CONSTEXPR ENUM operator|(ENUM a, ENUM b) {                        \
-    return ENUM(std::size_t(a) | std::size_t(b));                              \
+    return ENUM(unsigned(a) | unsigned(b));                                    \
   }                                                                            \
   MDBX_CXX14_CONSTEXPR ENUM &operator|=(ENUM &a, ENUM b) { return a = a | b; } \
   MDBX_CXX01_CONSTEXPR ENUM operator&(ENUM a, ENUM b) {                        \
-    return ENUM(std::size_t(a) & std::size_t(b));                              \
+    return ENUM(unsigned(a) & unsigned(b));                                    \
   }                                                                            \
-  MDBX_CXX01_CONSTEXPR ENUM operator&(ENUM a, size_t b) {                      \
-    return ENUM(std::size_t(a) & b);                                           \
+  MDBX_CXX01_CONSTEXPR ENUM operator&(ENUM a, unsigned b) {                    \
+    return ENUM(unsigned(a) & b);                                              \
   }                                                                            \
-  MDBX_CXX01_CONSTEXPR ENUM operator&(size_t a, ENUM b) {                      \
-    return ENUM(a & std::size_t(b));                                           \
+  MDBX_CXX01_CONSTEXPR ENUM operator&(unsigned a, ENUM b) {                    \
+    return ENUM(a & unsigned(b));                                              \
   }                                                                            \
   MDBX_CXX14_CONSTEXPR ENUM &operator&=(ENUM &a, ENUM b) { return a = a & b; } \
-  MDBX_CXX14_CONSTEXPR ENUM &operator&=(ENUM &a, size_t b) {                   \
+  MDBX_CXX14_CONSTEXPR ENUM &operator&=(ENUM &a, unsigned b) {                 \
     return a = a & b;                                                          \
   }                                                                            \
-  MDBX_CXX01_CONSTEXPR std::size_t operator~(ENUM a) {                         \
-    return ~std::size_t(a);                                                    \
-  }                                                                            \
+  MDBX_CXX01_CONSTEXPR unsigned operator~(ENUM a) { return ~unsigned(a); }     \
   MDBX_CXX01_CONSTEXPR ENUM operator^(ENUM a, ENUM b) {                        \
-    return ENUM(std::size_t(a) ^ std::size_t(b));                              \
+    return ENUM(unsigned(a) ^ unsigned(b));                                    \
   }                                                                            \
   MDBX_CXX14_CONSTEXPR ENUM &operator^=(ENUM &a, ENUM b) { return a = a ^ b; } \
   }
@@ -3289,7 +3290,7 @@ LIBMDBX_API int mdbx_dbi_open(MDBX_txn *txn, const char *name,
  * \param [in] datacmp Optional custom data comparison function for a database.
  * \param [out] dbi    Address where the new MDBX_dbi handle will be stored.
  * \returns A non-zero error value on failure and 0 on success. */
-LIBMDBX_API int
+MDBX_DEPRECATED LIBMDBX_API int
 mdbx_dbi_open_ex(MDBX_txn *txn, const char *name, MDBX_db_flags_t flags,
                  MDBX_dbi *dbi, MDBX_cmp_func *keycmp, MDBX_cmp_func *datacmp);
 
