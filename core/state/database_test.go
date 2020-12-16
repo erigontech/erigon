@@ -1662,6 +1662,10 @@ func TestRecreateAndRewind(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
+	fmt.Printf("=============================\n")
+	fmt.Printf("=============================\n")
+	fmt.Printf("=============================\n")
+
 	// BLOCKS 1 and 2
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
@@ -1695,7 +1699,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	// Reorg
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerBlocks, false /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerBlocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
