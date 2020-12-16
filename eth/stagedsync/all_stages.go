@@ -373,18 +373,26 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
 		return false, err
 	}
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", db, headers)
+	tx, err1 := db.Begin(context.Background(), ethdb.RW)
+	if err1 != nil {
+		return false, fmt.Errorf("starting transaction for importing the blocks: %v", err1)
+	}
+	defer tx.Rollback()
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers)
 	if err != nil {
 		return false, err
 	}
 	if !newCanonical {
-		if _, err = core.InsertBodyChain("Bodies", context.Background(), db, blocks, false /* newCanonical */); err != nil {
+		if _, err = core.InsertBodyChain("Bodies", context.Background(), tx, blocks, false /* newCanonical */); err != nil {
 			return false, fmt.Errorf("inserting block bodies chain for non-canonical chain")
+		}
+		if _, err1 = tx.Commit(); err1 != nil {
+			return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
 		}
 		return false, nil // No change of the chain
 	}
 	blockNum := blocks[len(blocks)-1].Number().Uint64()
-	if err = stages.SaveStageProgress(db, stages.Headers, blockNum, nil); err != nil {
+	if err = stages.SaveStageProgress(tx, stages.Headers, blockNum, nil); err != nil {
 		return false, err
 	}
 	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)
@@ -397,8 +405,8 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		config,
 		cc,
 		vmConfig,
-		db,
-		db,
+		tx,
+		tx,
 		"1",
 		storageMode,
 		"",
@@ -414,12 +422,15 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		return false, err2
 	}
 	if reorg {
-		if err = syncState.UnwindTo(forkblocknumber, db); err != nil {
+		if err = syncState.UnwindTo(forkblocknumber, tx); err != nil {
 			return false, err
 		}
 	}
-	if err = syncState.Run(db, nil); err != nil {
+	if err = syncState.Run(tx, tx); err != nil {
 		return false, err
+	}
+	if _, err1 = tx.Commit(); err1 != nil {
+		return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
 	}
 	return true, nil
 }

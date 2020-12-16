@@ -6,6 +6,7 @@ import "C"
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -276,14 +277,18 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(fileInfo.Size()), nil
 }
 
-func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (Tx, error) {
+func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
 	isSubTx := parent != nil
 	if !isSubTx {
 		runtime.LockOSThread()
-		db.wg.Add(1)
+		defer func() {
+			if err == nil {
+				db.wg.Add(1)
+			}
+		}()
 	}
 
 	nativeFlags := uint(0)
@@ -391,7 +396,32 @@ func (tx *MdbxTx) DCmp(bucket string, a, b []byte) int {
 }
 
 func (tx *MdbxTx) Sequence(bucket string, amount uint64) (uint64, error) {
-	return tx.tx.Sequence(mdbx.DBI(tx.db.buckets[bucket].DBI), amount)
+	// non-native for now
+	// return tx.tx.Sequence(mdbx.DBI(tx.db.buckets[bucket].DBI), amount)
+
+	c := tx.Cursor(dbutils.Sequence)
+	defer c.Close()
+	_, v, err := c.SeekExact([]byte(bucket))
+	if err != nil && !mdbx.IsNotFound(err) {
+		return 0, err
+	}
+
+	var currentV uint64 = 0
+	if len(v) > 0 {
+		currentV = binary.BigEndian.Uint64(v)
+	}
+
+	if amount == 0 {
+		return currentV, nil
+	}
+
+	newVBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
+	err = c.Put([]byte(bucket), newVBytes)
+	if err != nil {
+		return 0, err
+	}
+	return currentV, nil
 }
 
 // All buckets stored as keys of un-named bucket

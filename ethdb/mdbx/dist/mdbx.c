@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 7386e70918ee962c2a528e023183881d607461e5e1740d95d04df9cbb3f63c56_v0_9_1_138_g6d2914c9
+#define MDBX_BUILD_SOURCERY c1093570bfda5167ead9bb41f20b8282177e878ac3b4469758458fe5994a1c60_v0_9_2_14_g166ed1c7
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -680,6 +680,7 @@ __extern_C key_t ftok(const char *, int);
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#include <excpt.h>
 #include <tlhelp32.h>
 #include <windows.h>
 #include <winnt.h>
@@ -714,7 +715,8 @@ static inline void *mdbx_calloc(size_t nelem, size_t size) {
 
 #ifndef mdbx_realloc
 static inline void *mdbx_realloc(void *ptr, size_t bytes) {
-  return LocalReAlloc(ptr, bytes, LMEM_MOVEABLE);
+  return ptr ? LocalReAlloc(ptr, bytes, LMEM_MOVEABLE)
+             : LocalAlloc(LMEM_FIXED, bytes);
 }
 #endif /* mdbx_realloc */
 
@@ -14865,7 +14867,7 @@ static int mdbx_cursor_sibling(MDBX_cursor *mc, int dir) {
     }
   } else {
     assert((dir - 1) == -1 || (dir - 1) == 1);
-    mc->mc_ki[mc->mc_top] += dir - 1;
+    mc->mc_ki[mc->mc_top] += (indx_t)(dir - 1);
     mdbx_debug("just moving to %s index key %u",
                (dir == SIBLING_RIGHT) ? "right" : "left",
                mc->mc_ki[mc->mc_top]);
@@ -14940,7 +14942,7 @@ static int mdbx_cursor_next(MDBX_cursor *mc, MDBX_val *key, MDBX_val *data,
   const int numkeys = page_numkeys(mp);
   if (unlikely(ki >= numkeys)) {
     mdbx_debug("%s", "=====> move to next sibling page");
-    mc->mc_ki[mc->mc_top] = numkeys - 1;
+    mc->mc_ki[mc->mc_top] = (indx_t)(numkeys - 1);
     if (unlikely((rc = mdbx_cursor_sibling(mc, SIBLING_RIGHT)) !=
                  MDBX_SUCCESS)) {
       mc->mc_flags |= C_EOF;
@@ -17304,16 +17306,19 @@ again:
 }
 
 void mdbx_cursor_close(MDBX_cursor *mc) {
-  if (mc) {
+  if (likely(mc)) {
     mdbx_ensure(NULL, mc->mc_signature == MDBX_MC_LIVE ||
                           mc->mc_signature == MDBX_MC_READY4CLOSE);
+    MDBX_txn *const txn = mc->mc_txn;
+    MDBX_env *const env = txn ? txn->mt_env : NULL;
     if (!mc->mc_backup) {
+      mc->mc_txn = NULL;
       /* Remove from txn, if tracked.
        * A read-only txn (!C_UNTRACK) may have been freed already,
        * so do not peek inside it.  Only write txns track cursors. */
       if (mc->mc_flags & C_UNTRACK) {
-        mdbx_cassert(mc, !(mc->mc_txn->mt_flags & MDBX_TXN_RDONLY));
-        MDBX_cursor **prev = &mc->mc_txn->tw.cursors[mc->mc_dbi];
+        mdbx_ensure(env, check_txn_rw(txn, 0) == MDBX_SUCCESS);
+        MDBX_cursor **prev = &txn->tw.cursors[mc->mc_dbi];
         while (*prev && *prev != mc)
           prev = &(*prev)->mc_next;
         mdbx_cassert(mc, *prev == mc);
@@ -17325,6 +17330,7 @@ void mdbx_cursor_close(MDBX_cursor *mc) {
     } else {
       /* Cursor closed before nested txn ends */
       mdbx_cassert(mc, mc->mc_signature == MDBX_MC_LIVE);
+      mdbx_ensure(env, check_txn_rw(txn, 0) == MDBX_SUCCESS);
       mc->mc_signature = MDBX_MC_WAIT4EOT;
     }
   }
@@ -23566,7 +23572,15 @@ MDBX_INTERNAL_FUNC int mdbx_fastmutex_destroy(mdbx_fastmutex_t *fastmutex) {
 
 MDBX_INTERNAL_FUNC int mdbx_fastmutex_acquire(mdbx_fastmutex_t *fastmutex) {
 #if defined(_WIN32) || defined(_WIN64)
-  EnterCriticalSection(fastmutex);
+  __try {
+    EnterCriticalSection(fastmutex);
+  } __except (
+      (GetExceptionCode() ==
+       0xC0000194 /* STATUS_POSSIBLE_DEADLOCK / EXCEPTION_POSSIBLE_DEADLOCK */)
+          ? EXCEPTION_EXECUTE_HANDLER
+          : EXCEPTION_CONTINUE_SEARCH) {
+    return ERROR_POSSIBLE_DEADLOCK;
+  }
   return MDBX_SUCCESS;
 #else
   return pthread_mutex_lock(fastmutex);
@@ -25412,10 +25426,10 @@ __dll_export
     const struct MDBX_version_info mdbx_version = {
         0,
         9,
-        1,
-        0,
-        {"2020-11-25T17:55:29+03:00", "f107e15d0925be4c74830eea091d547250b4edf8", "6d2914c99bf5bd672147f00fc290569b1bb33a8f",
-         "v0.9.1-138-g6d2914c9"},
+        2,
+        14,
+        {"2020-12-15T15:43:19+03:00", "07621995c7dbb4f58175bed4a7b13928915f9744", "166ed1c7d4e4b926de781a3550b1f2e2aef995ec",
+         "v0.9.2-14-g166ed1c7"},
         sourcery};
 
 __dll_export
@@ -25576,7 +25590,15 @@ int mdbx_txn_lock(MDBX_env *env, bool dontwait) {
     if (!TryEnterCriticalSection(&env->me_windowsbug_lock))
       return MDBX_BUSY;
   } else {
-    EnterCriticalSection(&env->me_windowsbug_lock);
+    __try {
+      EnterCriticalSection(&env->me_windowsbug_lock);
+    }
+    __except ((GetExceptionCode() ==
+                 0xC0000194 /* STATUS_POSSIBLE_DEADLOCK / EXCEPTION_POSSIBLE_DEADLOCK */)
+                    ? EXCEPTION_EXECUTE_HANDLER
+                    : EXCEPTION_CONTINUE_SEARCH) {
+      return ERROR_POSSIBLE_DEADLOCK;
+    }
   }
 
   if ((env->me_flags & MDBX_EXCLUSIVE) ||

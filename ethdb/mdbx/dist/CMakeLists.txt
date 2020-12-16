@@ -340,12 +340,14 @@ if(NOT DEFINED MDBX_CXX_STANDARD)
     set(MDBX_CXX_STANDARD 98)
   endif()
 endif()
-# MSVC >= 19.28 (Microsoft Visual Studio 16.8) is mad!
-#               It unable process Windows SDK headers in the C11 mode!
-if(HAS_C11 LESS 0 OR (MSVC AND MSVC_VERSION GREATER 1927))
-  set(MDBX_C_STANDARD 99)
-else()
-  set(MDBX_C_STANDARD 11)
+if(NOT DEFINED MDBX_C_STANDARD)
+  # MSVC >= 19.28 (Microsoft Visual Studio 16.8) is mad!
+  #               It unable process Windows SDK headers in the C11 mode!
+  if(HAS_C11 LESS 0 OR (MSVC AND MSVC_VERSION GREATER 1927))
+    set(MDBX_C_STANDARD 99)
+  else()
+    set(MDBX_C_STANDARD 11)
+  endif()
 endif()
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows" AND EXISTS "${MDBX_SOURCE_DIR}/ntdll.def")

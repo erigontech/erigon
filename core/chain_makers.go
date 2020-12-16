@@ -212,7 +212,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	}
 	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &fakeChainReader{config: config}
-	tx, errBegin := db.Begin(context.Background(), ethdb.RW)
+	dbCopy := db.MemCopy()
+	defer dbCopy.Close()
+	tx, errBegin := dbCopy.Begin(context.Background(), ethdb.RW)
 	if errBegin != nil {
 		return nil, nil, errBegin
 	}
@@ -250,6 +252,12 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			//}
 			if err := ibs.CommitBlock(ctx, plainStateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
+			}
+
+			if err := tx.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
+				return true, tx.Delete(dbutils.CurrentStateBucket, k, v)
+			}); err != nil {
+				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
 			}
 			c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
 			h := common.NewHasher()
@@ -324,6 +332,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		parent = block
 	}
 
+	if _, err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
 	return blocks, receipts, nil
 }
 
