@@ -855,7 +855,8 @@ func (s *Ethereum) Stop() error {
 			s.privateAPI.GracefulStop()
 		}()
 		select {
-		case <-time.After(2 * time.Second): // shutdown deadline
+		case <-time.After(1 * time.Second): // shutdown deadline
+			s.privateAPI.Stop()
 		case <-shutdownDone:
 		}
 	}
