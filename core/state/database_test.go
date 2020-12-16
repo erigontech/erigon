@@ -1547,48 +1547,41 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(tx)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
-			codeHash, err := common.HashData(common.FromHex(contracts.PhoenixBin))
-			if err != nil {
+			var codeHash common.Hash
+			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
 			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
-			phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackend)
-			if err != nil {
+			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackend); err != nil {
 				panic(err)
 			}
 			// Deploy phoenix
-			tx, err = revive.Deploy(transactOpts, [32]byte{})
-			if err != nil {
+			if tx, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
 			// Modify phoenix storage
-			tx, err = phoenix.Increment(transactOpts)
-			if err != nil {
+			if tx, err = phoenix.Increment(transactOpts); err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
-			tx, err = phoenix.Increment(transactOpts)
-			if err != nil {
+			if tx, err = phoenix.Increment(transactOpts); err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
 		case 2:
 			// Destruct the phoenix
-			tx, err = phoenix.Die(transactOpts)
-			if err != nil {
+			if tx, err = phoenix.Die(transactOpts); err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
 		case 3:
 			// Recreate the phoenix, and change the storage
-			tx, err = revive.Deploy(transactOpts, [32]byte{})
-			if err != nil {
+			if tx, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
-			tx, err = phoenix.Increment(transactOpts)
-			if err != nil {
+			if tx, err = phoenix.Increment(transactOpts); err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
@@ -1615,43 +1608,37 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(tx)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
-			codeHash, err := common.HashData(common.FromHex(contracts.PhoenixBin))
-			if err != nil {
+			var codeHash common.Hash
+			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
 			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
-			phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackendLonger)
-			if err != nil {
+			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackendLonger); err != nil {
 				panic(err)
 			}
 			// Deploy phoenix
-			tx, err = revive.Deploy(transactOptsLonger, [32]byte{})
-			if err != nil {
+			if tx, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
 			// Modify phoenix storage
-			tx, err = phoenix.Increment(transactOptsLonger)
-			if err != nil {
+			if tx, err = phoenix.Increment(transactOptsLonger); err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
-			tx, err = phoenix.Increment(transactOptsLonger)
-			if err != nil {
+			if tx, err = phoenix.Increment(transactOptsLonger); err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
 		case 2:
 			// Destruct the phoenix
-			tx, err = phoenix.Die(transactOptsLonger)
-			if err != nil {
+			if tx, err = phoenix.Die(transactOptsLonger); err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
 		case 3:
 			// Recreate the phoenix, but now with the empty storage
-			tx, err = revive.Deploy(transactOptsLonger, [32]byte{})
-			if err != nil {
+			if tx, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
 				panic(err)
 			}
 			block.AddTx(tx)
