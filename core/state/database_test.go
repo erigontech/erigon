@@ -1534,7 +1534,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	var phoenixAddress common.Address
 	var err error
 
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
+	blocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -1595,14 +1595,14 @@ func TestRecreateAndRewind(t *testing.T) {
 		}
 		contractBackend.Commit()
 	}, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
+	if err1 != nil {
+		t.Fatalf("generate blocks: %v", err1)
 	}
 
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 5, func(i int, block *core.BlockGen) {
+	longerBlocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 5, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -1658,13 +1658,9 @@ func TestRecreateAndRewind(t *testing.T) {
 		}
 		contractBackendLonger.Commit()
 	}, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate longer blocks: %v", err)
+	if err1 != nil {
+		t.Fatalf("generate longer blocks: %v", err1)
 	}
-
-	fmt.Printf("=============================\n")
-	fmt.Printf("=============================\n")
-	fmt.Printf("=============================\n")
 
 	// BLOCKS 1 and 2
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {
