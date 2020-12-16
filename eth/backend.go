@@ -849,7 +849,15 @@ func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.protocolManager.Stop()
 	if s.privateAPI != nil {
-		s.privateAPI.GracefulStop()
+		shutdownDone := make(chan bool)
+		go func() {
+			defer close(shutdownDone)
+			s.privateAPI.GracefulStop()
+		}()
+		select {
+		case <-time.After(2 * time.Second): // shutdown deadline
+		case <-shutdownDone:
+		}
 	}
 
 	// Then stop everything else.
