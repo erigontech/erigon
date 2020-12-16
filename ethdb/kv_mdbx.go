@@ -19,19 +19,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
-)
-
-var (
-	mdbxPutNoOverwriteTimer = metrics.NewRegisteredTimer("mdbx/put/no_overwrite", nil)
-	mdbxPutCurrentTimer     = metrics.NewRegisteredTimer("mdbx/put/direct", nil)
-	mdbxGetBothRangeTimer   = metrics.NewRegisteredTimer("mdbx/get/both_range", nil)
-	mdbxPutUpsertTimer      = metrics.NewRegisteredTimer("mdbx/put/upsert", nil)
-	mdbxPutCurrent2Timer    = metrics.NewRegisteredTimer("mdbx/put/current2", nil)
-	mdbxPutUpsert2Timer     = metrics.NewRegisteredTimer("mdbx/put/upsert2", nil)
-	mdbxDelCurrentTimer     = metrics.NewRegisteredTimer("mdbx/del/current", nil)
-	mdbxSeekExactTimer      = metrics.NewRegisteredTimer("mdbx/seek/exact", nil)
-	mdbxSeekExact2Timer     = metrics.NewRegisteredTimer("mdbx/seek/exact2", nil)
 )
 
 var _ DbCopier = &MdbxKV{}
@@ -98,7 +85,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAudit, env.StderrLogger()) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
+	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 
 	err = env.SetMaxDBs(100)
 	if err != nil {
@@ -466,16 +453,38 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *MdbxTx) CreateBucket(name string) error {
-	var flags = tx.db.buckets[name].Flags
-	var nativeFlags uint
-	if tx.db.opts.flags&mdbx.Readonly == 0 {
-		nativeFlags |= mdbx.Create
-	}
 	cnfCopy := tx.db.buckets[name]
+
 	var dcmp mdbx.CmpFunc
 	switch cnfCopy.CustomDupComparator {
 	case dbutils.DupCmpSuffix32:
 		dcmp = tx.tx.GetCmpExcludeSuffix32()
+	}
+
+	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
+	if err != nil && !mdbx.IsNotFound(err) {
+		return err
+	}
+	if err == nil {
+		fmt.Printf("open with accede: %s\n", name)
+		cnfCopy.DBI = dbutils.DBI(dbi)
+		var flags uint
+		flags, err = tx.tx.Flags(dbi)
+		if err != nil {
+			return err
+		}
+		cnfCopy.Flags = dbutils.BucketFlags(flags)
+
+		tx.db.buckets[name] = cnfCopy
+		return nil
+	}
+
+	// if bucket doesn't exists - create it
+
+	var flags = tx.db.buckets[name].Flags
+	var nativeFlags uint
+	if tx.db.opts.flags&mdbx.Readonly == 0 {
+		nativeFlags |= mdbx.Create
 	}
 
 	if flags&dbutils.DupSort != 0 {
@@ -490,14 +499,13 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		return fmt.Errorf("some not supported flag provided for bucket")
 	}
 
-	dbi, err := tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
+	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
 	if err != nil {
 		return err
 	}
 	cnfCopy.DBI = dbutils.DBI(dbi)
 
 	tx.db.buckets[name] = cnfCopy
-
 	return nil
 }
 
@@ -514,61 +522,6 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 			return err
 		}
 		dbi = dbutils.DBI(nativeDBI)
-	}
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	for {
-		s, err := tx.BucketStat(name)
-		if err != nil {
-			return err
-		}
-		if s.Entries == 0 {
-			break
-		}
-		c := tx.Cursor(name)
-		i := 0
-		var k []byte
-		for k, _, err = c.First(); k != nil; k, _, err = c.First() {
-			if err != nil {
-				return err
-			}
-			select {
-			default:
-			case <-logEvery.C:
-				log.Info("dropping bucket", "name", name, "current key", fmt.Sprintf("%x", k))
-			}
-
-			i++
-			if casted, ok := c.(CursorDupSort); ok {
-				err = casted.DeleteCurrentDuplicates()
-				if err != nil {
-					return err
-				}
-				if i == 10_000 {
-					break
-				}
-			} else {
-				err = c.DeleteCurrent()
-				if err != nil {
-					return err
-				}
-				if i == 100_000 {
-					break
-				}
-			}
-		}
-
-		c.Close()
-		_, err = tx.tx.Commit()
-		if err != nil {
-			return err
-		}
-		txn, err := tx.db.env.BeginTxn(nil, mdbx.TxRW|mdbx.TxNoSync)
-		if err != nil {
-			return err
-		}
-		txn.RawRead = true
-		tx.tx = txn
 	}
 
 	if err := tx.tx.Drop(mdbx.DBI(dbi), true); err != nil {
@@ -656,6 +609,7 @@ func (tx *MdbxTx) closeCursors() {
 			c.Close()
 		}
 	}
+	//fmt.Printf("close all cursors: %p, %d\n", tx.db.env, len(tx.cursors))
 	tx.cursors = []*mdbx.Cursor{}
 }
 
@@ -838,6 +792,7 @@ func (c *MdbxCursor) initCursor() error {
 		tx.cursors = make([]*mdbx.Cursor, 0, 1)
 	}
 	tx.cursors = append(tx.cursors, c.c)
+	//fmt.Printf("open cursor: %p,%p, %s, %d\n", c.tx.db.env, c.tx, c.bucketName, len(tx.cursors))
 	return nil
 }
 
@@ -1183,13 +1138,17 @@ func (c *MdbxCursor) Put(key []byte, value []byte) error {
 			return err
 		}
 	}
-
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion {
-		return c.putDupSort(key, value)
+		if err := c.putDupSort(key, value); err != nil {
+			return err
+		}
+		return nil
 	}
-
-	return c.put(key, value)
+	if err := c.put(key, value); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
@@ -1200,69 +1159,37 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 	}
 
 	if len(key) != from {
-		t := time.Now()
 		err := c.putNoOverwrite(key, value)
-		if c.bucketName == dbutils.PlainStateBucket {
-			mdbxPutNoOverwriteTimer.UpdateSince(t)
-		}
 		if err != nil {
 			if mdbx.IsKeyExists(err) {
-				t = time.Now()
-				err = c.putCurrent(key, value)
-				if c.bucketName == dbutils.PlainStateBucket {
-					mdbxPutCurrentTimer.UpdateSince(t)
-				}
-				return err
+				return c.putCurrent(key, value)
 			}
-			return err
+			return fmt.Errorf("putNoOverwrite, bucket: %s, key: %x, val: %x, err: %w", c.bucketName, key, value, err)
 		}
 		return nil
 	}
 
 	value = append(key[to:], value...)
 	key = key[:to]
-	t := time.Now()
 	_, v, err := c.getBothRange(key, value[:from-to])
-	if c.bucketName == dbutils.PlainStateBucket {
-		mdbxGetBothRangeTimer.UpdateSince(t)
-	}
 	if err != nil { // if key not found, or found another one - then just insert
 		if mdbx.IsNotFound(err) {
-			t = time.Now()
-			err = c.put(key, value)
-			if c.bucketName == dbutils.PlainStateBucket {
-				mdbxPutUpsertTimer.UpdateSince(t)
-			}
-			return err
+			return c.put(key, value)
 		}
 		return err
 	}
 
 	if bytes.Equal(v[:from-to], value[:from-to]) {
 		if len(v) == len(value) { // in DupSort case mdbx.Current works only with values of same length
-			t = time.Now()
-			err = c.putCurrent(key, value)
-			if c.bucketName == dbutils.PlainStateBucket {
-				mdbxPutCurrent2Timer.UpdateSince(t)
-			}
-			return err
+			return c.putCurrent(key, value)
 		}
-		t = time.Now()
 		err = c.delCurrent()
-		if c.bucketName == dbutils.PlainStateBucket {
-			mdbxDelCurrentTimer.UpdateSince(t)
-		}
 		if err != nil {
 			return err
 		}
 	}
 
-	t = time.Now()
-	err = c.put(key, value)
-	if c.bucketName == dbutils.PlainStateBucket {
-		mdbxPutUpsert2Timer.UpdateSince(t)
-	}
-	return err
+	return c.put(key, value)
 }
 
 func (c *MdbxCursor) PutCurrent(key []byte, value []byte) error {
@@ -1294,11 +1221,7 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
 		from, to := b.DupFromLen, b.DupToLen
-		t := time.Now()
 		k, v, err := c.getBothRange(key[:to], key[to:])
-		if c.bucketName == dbutils.PlainStateBucket {
-			mdbxSeekExactTimer.UpdateSince(t)
-		}
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil, nil, nil
@@ -1311,11 +1234,7 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 		return k, v[from-to:], nil
 	}
 
-	t := time.Now()
 	_, v, err := c.set(key)
-	if c.bucketName == dbutils.PlainStateBucket {
-		mdbxSeekExact2Timer.UpdateSince(t)
-	}
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil

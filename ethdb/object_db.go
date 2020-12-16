@@ -362,7 +362,10 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 			name := name
 			if err := mem.kv.Update(context.Background(), func(writeTx Tx) error {
 				newBucketToWrite := writeTx.Cursor(name)
-				return ForEach(readTx.Cursor(name), func(k, v []byte) (bool, error) {
+				defer newBucketToWrite.Close()
+				readC := readTx.Cursor(name)
+				defer readC.Close()
+				return ForEach(readC, func(k, v []byte) (bool, error) {
 					if err := newBucketToWrite.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
 						return false, err
 					}

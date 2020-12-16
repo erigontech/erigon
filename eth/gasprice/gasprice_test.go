@@ -69,7 +69,10 @@ func newTestBackend(t *testing.T) *testBackend {
 	)
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
-	genesis, _, _ := gspec.Commit(db, false)
+	genesis, _, err := gspec.Commit(db, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Generate testing blocks
 	blocks, _, err := core.GenerateChain(params.TestChainConfig, genesis, engine, db, 32, func(i int, b *core.BlockGen) {
@@ -84,13 +87,11 @@ func newTestBackend(t *testing.T) *testBackend {
 		t.Error(err)
 	}
 	// Construct testing chain
-	diskdb := ethdb.NewMemDatabase()
-	gspec.Commit(diskdb, false) //nolint:errcheck
-	chain, err := core.NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{}, nil, nil)
+	chain, err := core.NewBlockChain(db, nil, params.TestChainConfig, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create local chain, %v", err)
 	}
-	if _, err = stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Error(err)
 	}
 	return &testBackend{chain: chain}
