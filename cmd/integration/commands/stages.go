@@ -364,8 +364,8 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 	cc, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
-	if reset { //nolint:staticcheck
-		// TODO
+	if reset {
+		return resetExec(db)
 	}
 
 	stage4 := progress(stages.Execution)

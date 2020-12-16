@@ -212,12 +212,7 @@ func InsertBodies(
 	db ethdb.Database,
 	newCanonical bool,
 ) (bool, error) {
-	tx, err := db.Begin(ctx, ethdb.RW)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback()
-	batch := tx.NewBatch()
+	batch := db.NewBatch()
 	defer batch.Rollback()
 	stats := InsertStats{StartTime: mclock.Now()}
 
@@ -264,9 +259,6 @@ func InsertBodies(
 		rawdb.WriteHeadBlockHash(batch, chain[len(chain)-1].Hash())
 	}
 	if _, err := batch.Commit(); err != nil {
-		return true, fmt.Errorf("commit inserting bodies: %w", err)
-	}
-	if _, err := tx.Commit(); err != nil {
 		return true, fmt.Errorf("commit inserting bodies: %w", err)
 	}
 	return false, nil

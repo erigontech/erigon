@@ -316,14 +316,18 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(fileInfo.Size()), nil
 }
 
-func (db *LmdbKV) Begin(_ context.Context, parent Tx, flags TxFlags) (Tx, error) {
+func (db *LmdbKV) Begin(_ context.Context, parent Tx, flags TxFlags) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
 	isSubTx := parent != nil
 	if !isSubTx {
 		runtime.LockOSThread()
-		db.wg.Add(1)
+		defer func() {
+			if err == nil {
+				db.wg.Add(1)
+			}
+		}()
 	}
 
 	nativeFlags := uint(0)
@@ -1229,7 +1233,7 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 		if lmdb.IsNotFound(err) {
 			return c.put(key, value)
 		}
-		return err
+		return fmt.Errorf("getBothRange bucket: %s, %w", c.bucketName, err)
 	}
 
 	if bytes.Equal(v[:from-to], value[:from-to]) {
@@ -1238,7 +1242,7 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 		}
 		err = c.delCurrent()
 		if err != nil {
-			return err
+			return fmt.Errorf("delCurrent bucket: %s, %w", c.bucketName, err)
 		}
 	}
 
