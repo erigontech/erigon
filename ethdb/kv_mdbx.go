@@ -466,7 +466,6 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		return err
 	}
 	if err == nil {
-		fmt.Printf("open with accede: %s\n", name)
 		cnfCopy.DBI = dbutils.DBI(dbi)
 		var flags uint
 		flags, err = tx.tx.Flags(dbi)
