@@ -100,11 +100,11 @@ var (
 	IntermediateTrieHashBucketOld1 = "iTh"
 
 	// DatabaseInfoBucket is used to store information about data layout.
-	DatabaseInfoBucket = "DBINFO"
-	SnapshotInfoBucket = "SNINFO"
+	DatabaseInfoBucket        = "DBINFO"
+	SnapshotInfoBucket        = "SNINFO"
 	HeadersSnapshotInfoBucket = "hSNINFO"
-	BodiesSnapshotInfoBucket = "bSNINFO"
-	StateSnapshotInfoBucket = "sSNINFO"
+	BodiesSnapshotInfoBucket  = "bSNINFO"
+	StateSnapshotInfoBucket   = "sSNINFO"
 
 	// databaseVerisionKey tracks the current database version.
 	DatabaseVerisionKey = "DatabaseVersion"

@@ -102,7 +102,7 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 			if innerErr != nil {
 				return nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
 			}
-			kv, innerErr := snapshotsync.WrapBySnapshots(db, cfg.SnapshotDir, mode)
+			kv, innerErr := snapshotsync.WrapBySnapshotsFromDir(db, cfg.SnapshotDir, mode)
 			if innerErr != nil {
 				return nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
 			}

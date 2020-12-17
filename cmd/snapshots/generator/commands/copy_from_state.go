@@ -44,7 +44,7 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 		if err != nil {
 			return err
 		}
-		kv, err = snapshotsync.WrapBySnapshots(kv, snapshotDir, mode)
+		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
 		if err != nil {
 			return err
 		}

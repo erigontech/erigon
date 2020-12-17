@@ -54,14 +54,14 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 			return err
 		}
 
-		kv, err = snapshotsync.WrapBySnapshots(kv, snapshotDir, mode)
+		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
 		if err != nil {
 			return err
 		}
 	}
 	snKV := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
+			dbutils.HeaderPrefix:              dbutils.BucketConfigItem{},
 			dbutils.HeadersSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()

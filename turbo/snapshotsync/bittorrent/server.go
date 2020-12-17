@@ -46,12 +46,12 @@ func (S *SNDownloaderServer) Load() error {
 
 func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsync.SnapshotsRequest) (*snapshotsync.SnapshotsInfoReply, error) {
 	reply := snapshotsync.SnapshotsInfoReply{}
-	resp,err:=S.t.GetSnapshots(S.db,request.NetworkId)
+	resp, err := S.t.GetSnapshots(S.db, request.NetworkId)
 	if err != nil {
 		return nil, err
 	}
-	for i:=range resp {
-		reply.Info=append(reply.Info, resp[i])
+	for i := range resp {
+		reply.Info = append(reply.Info, resp[i])
 	}
 	return &reply, nil
 }

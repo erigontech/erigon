@@ -45,7 +45,7 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 			return err
 		}
 
-		kv, err = snapshotsync.WrapBySnapshots(kv, snapshotDir, mode)
+		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
 		if err != nil {
 			return err
 		}
@@ -53,7 +53,7 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 
 	snKV := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
+			dbutils.BlockBodyPrefix:          dbutils.BucketConfigItem{},
 			dbutils.BodiesSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()

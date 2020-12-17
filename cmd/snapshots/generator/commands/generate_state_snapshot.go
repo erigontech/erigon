@@ -53,7 +53,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			return err
 		}
 
-		kv, err = snapshotsync.WrapBySnapshots(kv, snapshotDir, mode)
+		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
 		if err != nil {
 			return err
 		}
@@ -64,7 +64,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			dbutils.PlainStateBucket:        dbutils.BucketConfigItem{},
 			dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},
 			dbutils.CodeBucket:              dbutils.BucketConfigItem{},
-			dbutils.StateSnapshotInfoBucket:      dbutils.BucketConfigItem{},
+			dbutils.StateSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 

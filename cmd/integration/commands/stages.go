@@ -698,7 +698,7 @@ func SetSnapshotKV(db ethdb.Database, snapshotDir, snapshotMode string) error {
 		}
 
 		snapshotKV := db.(ethdb.HasKV).KV()
-		snapshotKV, err = snapshotsync.WrapBySnapshots(snapshotKV, snapshotDir, mode)
+		snapshotKV, err = snapshotsync.WrapBySnapshotsFromDir(snapshotKV, snapshotDir, mode)
 		if err != nil {
 			return err
 		}

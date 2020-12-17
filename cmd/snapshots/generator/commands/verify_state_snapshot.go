@@ -46,7 +46,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 		if err != nil {
 			return err
 		}
-		kv, err = snapshotsync.WrapBySnapshots(kv, snapshotDir, mode)
+		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
 		if err != nil {
 			return err
 		}

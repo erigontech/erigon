@@ -217,11 +217,10 @@ func (cli *Client) Download() {
 	for _, t := range cli.Cli.Torrents() {
 		log.Info("Snapshot seeding", "name", t.Name(), "seeding", t.Seeding())
 	}
-	return
 }
 
 func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, error) {
-	mp:=make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
+	mp := make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
 	networkIDBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(networkIDBytes, networkID)
 	err := db.Walk(dbutils.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), 8*8+16, func(k, v []byte) (bool, error) {
@@ -260,7 +259,7 @@ func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[snapsh
 		mp[snapshotsync.SnapshotType(tp)] = val
 		return true, nil
 	})
-	if err!=nil {
+	if err != nil {
 		return nil, err
 	}
 

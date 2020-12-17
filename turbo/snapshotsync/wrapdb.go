@@ -10,28 +10,28 @@ import (
 var (
 	bucketConfigs = map[SnapshotType]dbutils.BucketsCfg{
 		SnapshotType_bodies: {
-			dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
+			dbutils.BlockBodyPrefix:          dbutils.BucketConfigItem{},
 			dbutils.BodiesSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		},
 		SnapshotType_headers: {
-			dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
+			dbutils.HeaderPrefix:              dbutils.BucketConfigItem{},
 			dbutils.HeadersSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		},
 		SnapshotType_state: {
-			dbutils.PlainStateBucket:       dbutils.BucketConfigItem{
+			dbutils.PlainStateBucket: dbutils.BucketConfigItem{
 				Flags:                     dbutils.DupSort,
 				AutoDupSortKeysConversion: true,
 				DupFromLen:                60,
 				DupToLen:                  28,
 			},
 			dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},
-			dbutils.CodeBucket: dbutils.BucketConfigItem{},
+			dbutils.CodeBucket:              dbutils.BucketConfigItem{},
 			dbutils.StateSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		},
 	}
 )
 
-func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.KV, error) {
+func WrapBySnapshotsFromDir(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.KV, error) {
 	log.Info("Wrap db to snapshots", "dir", snapshotDir, "mode", mode.ToString())
 	snkv := ethdb.NewSnapshot2KV().DB(kv)
 
@@ -69,14 +69,10 @@ func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.
 			snkv.SnapshotDB([]string{dbutils.StateSnapshotInfoBucket, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snapshotKV)
 		}
 	}
-	return kv, nil
+	return snkv.MustOpen(), nil
 }
 
-func Get()  {
-	
-}
-
-func WrapBySnapshots2(kv ethdb.KV, snapshots map[SnapshotType]*SnapshotsInfo) (ethdb.KV, error) {
+func WrapBySnapshotsFromDownloader(kv ethdb.KV, snapshots map[SnapshotType]*SnapshotsInfo) (ethdb.KV, error) {
 	snKV := ethdb.NewSnapshot2KV().DB(kv)
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
@@ -89,7 +85,7 @@ func WrapBySnapshots2(kv ethdb.KV, snapshots map[SnapshotType]*SnapshotsInfo) (e
 			log.Error("Can't open snapshot", "err", err)
 			return nil, err
 		} else { //nolint
-			buckets := make([]string,0,1)
+			buckets := make([]string, 0, 1)
 			for bucket := range bucketConfigs[k] {
 				buckets = append(buckets, bucket)
 			}
