@@ -186,6 +186,8 @@ type Clique struct {
 
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
+
+	snapStorage *storage
 }
 
 // New creates a Clique proof-of-authority consensus engine with the initial
@@ -208,6 +210,7 @@ func New(config *params.CliqueConfig, db ethdb.Database) *Clique {
 		snapshotBlocks: snapshotBlocks,
 		signatures:     signatures,
 		proposals:      make(map[common.Address]bool),
+		snapStorage:    newStorage(db, conf.Epoch),
 	}
 }
 
@@ -374,7 +377,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// If an on-disk checkpoint snapshot can be found, use that
 		if isSnapshot(number, c.config.Epoch) {
 			fmt.Printf("BEFORE1 loadAndFillSnapshot for block %q - snap %d(%s): %v\n", hash.String(), snap.Number, snap.Hash.String(), spew.Sdump(snap.Signers))
-			if s, err := loadAndFillSnapshot(c.db, number, hash, c.config, c.signatures); err == nil {
+			if s, err := loadAndFillSnapshot(c.db, number, hash, c.config, c.snapStorage, c.signatures); err == nil {
 				log.Trace("Loaded voting snapshot from disk", "number", number, "hash", hash)
 				snap = s
 				break
@@ -393,7 +396,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				for i := 0; i < len(signers); i++ {
 					copy(signers[i][:], checkpoint.Extra[extraVanity+i*common.AddressLength:])
 				}
-				snap = newSnapshot(c.config, c.signatures, number, hash, signers)
+				snap = newSnapshot(c.config, c.snapStorage, c.signatures, number, hash, signers)
 				if err := snap.store(c.db, number == 0); err != nil {
 					return nil, err
 				}
@@ -710,6 +713,7 @@ func (c *Clique) SealHash(header *types.Header) common.Hash {
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *Clique) Close() error {
+	c.snapStorage.Close()
 	return nil
 }
 

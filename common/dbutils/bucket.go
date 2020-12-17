@@ -148,7 +148,7 @@ var (
 	SyncStageUnwind     = "SSU2"
 	SyncStageUnwindOld1 = "SSU"
 
-	CliqueBucket = "clique-"
+	CliqueBucket = "clique"
 
 	// this bucket stored in separated database
 	InodesBucket = "inodes"

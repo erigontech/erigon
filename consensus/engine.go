@@ -124,7 +124,6 @@ func (p *API) CacheHeader(header *types.Header) {
 	blocks, blocksOk := blocksContainer.([]*types.Header)
 	if !ok || !blocksOk || len(blocks) == 0 {
 		// single header by a block number case
-		fmt.Println("XXX-CacheHeader-1", header.Number.Uint64(), header.Hash().String())
 		p.VerifiedBlocks.Add(blockNum, []*types.Header{header})
 		return
 	}

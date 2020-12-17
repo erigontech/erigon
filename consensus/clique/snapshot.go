@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -62,7 +62,7 @@ type Snapshot struct {
 	Votes   []*Vote                     `json:"votes"`   // List of votes cast in chronological order
 	Tally   map[common.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
 
-	snapStorage storage `json:"-"`
+	snapStorage *storage `json:"-"`
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -75,15 +75,16 @@ func (s signersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent signers, so only ever use if for
 // the genesis block.
-func newSnapshot(config *params.CliqueConfig, sigcache *lru.ARCCache, number uint64, hash common.Hash, signers []common.Address) *Snapshot {
+func newSnapshot(config *params.CliqueConfig, snapStorage *storage, sigcache *lru.ARCCache, number uint64, hash common.Hash, signers []common.Address) *Snapshot {
 	snap := &Snapshot{
-		config:   config,
-		sigcache: sigcache,
-		Number:   number,
-		Hash:     hash,
-		Signers:  make(map[common.Address]struct{}),
-		Recents:  make(map[uint64]common.Address),
-		Tally:    make(map[common.Address]Tally),
+		config:      config,
+		sigcache:    sigcache,
+		Number:      number,
+		Hash:        hash,
+		Signers:     make(map[common.Address]struct{}),
+		Recents:     make(map[uint64]common.Address),
+		Tally:       make(map[common.Address]Tally),
+		snapStorage: snapStorage,
 	}
 	for _, signer := range signers {
 		snap.Signers[signer] = struct{}{}
@@ -92,7 +93,7 @@ func newSnapshot(config *params.CliqueConfig, sigcache *lru.ARCCache, number uin
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadAndFillSnapshot(db ethdb.Database, num uint64, hash common.Hash, config *params.CliqueConfig, sigcache *lru.ARCCache) (*Snapshot, error) {
+func loadAndFillSnapshot(db ethdb.Database, num uint64, hash common.Hash, config *params.CliqueConfig, snapStorage *storage, sigcache *lru.ARCCache) (*Snapshot, error) {
 	snap, err := loadSnapshot(db, num, hash)
 	if err != nil {
 		return nil, err
@@ -102,6 +103,7 @@ func loadAndFillSnapshot(db ethdb.Database, num uint64, hash common.Hash, config
 
 	snap.config = config
 	snap.sigcache = sigcache
+	snap.snapStorage = snapStorage
 
 	return snap, nil
 }
@@ -151,8 +153,8 @@ func (s *Snapshot) store(db ethdb.Database, force bool) error {
 
 	//fmt.Printf("Snapshot.store snap %d(%s): %v\n", s.Number, s.Hash.String(), spew.Sdump(s.Signers))
 
-	s.snapStorage.save(db, s.Number, s.Hash, blob, force)
-	fmt.Println("+++store-1", s.Number, s.Hash.String(), time.Since(t), len(blob), "bytes")
+	s.snapStorage.save(s.Number, s.Hash, blob, force)
+	fmt.Println("+++store-1", s.Number, s.Hash.String(), time.Since(t), len(blob), "bytes", force)
 	return err
 }
 
@@ -363,9 +365,9 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 }
 
 type storage struct {
-	ch chan snapObj
-	db ethdb.Database
-	sync.Once
+	ch   chan snapObj
+	db   ethdb.Database
+	exit chan struct{}
 }
 
 type snapObj struct {
@@ -374,43 +376,131 @@ type snapObj struct {
 	blob   []byte
 }
 
-func (st *storage) save(db ethdb.Database, number uint64, hash common.Hash, blob []byte, force bool) {
-	st.Once.Do(func() {
-		st.db = db
+var notSend uint64
 
-		st.ch = make(chan snapObj, 16384)
+func newStorage(db ethdb.Database, epoch uint64) *storage {
+	epoch = epoch / 2
+	if epoch <= 0 {
+		epoch = 16384
+	}
 
-		go func() {
-			// fixme add an exit condition
-			for snap := range st.ch {
-				st.saveSnap(snap)
+	st := &storage{
+		db:   db,
+		ch:   make(chan snapObj, epoch),
+		exit: make(chan struct{}),
+	}
+
+	const batchSize = 1024/2
+
+	go func() {
+		for {
+			select {
+			case <-st.exit:
+				return
+			case snap := <-st.ch:
+				var snaps []snapObj
+				var isBatch bool
+				if len(st.ch) >= batchSize {
+					snaps = make([]snapObj, 0, batchSize)
+					isBatch = true
+				}
+
+				ok, err := hasSnapshotData(st.db, snap.number, snap.hash)
+				if !ok || err != nil {
+					snaps = append(snaps, snap)
+				}
+
+				if !isBatch {
+					st.saveSnap(snaps[0])
+					continue
+				}
+
+				i := 0
+				for snap := range st.ch {
+					if i >= batchSize-1 {
+						break
+					}
+
+					ok, err = hasSnapshotData(st.db, snap.number, snap.hash)
+					if !ok || err != nil {
+						snaps = append(snaps, snap)
+						i++
+					}
+				}
+
+				fmt.Println("saving snap goroutine", len(snaps), len(st.ch))
+				st.saveSnaps(snaps...)
 			}
-		}()
-	})
+		}
+	}()
+
+	return st
+}
+
+func (st *storage) save(number uint64, hash common.Hash, blob []byte, force bool) {
+	t := time.Now()
+	snap := snapObj{number, hash, blob}
+	if !force {
+		st.ch <- snap
+		fmt.Println("storage.save-0", number, len(st.ch), time.Since(t))
+		return
+	}
+
+	// a forced case (genesis)
+	ok, err := hasSnapshotData(st.db, number, hash)
+	fmt.Println("storage.save-0.1", number, time.Since(t))
+	t = time.Now()
+	if !ok || err != nil {
+		st.saveSnap(snap)
+		fmt.Println("storage.save-1", number, time.Since(t))
+	} else {
+		n := atomic.AddUint64(&notSend, 1)
+		fmt.Println("+++snapshot-XXX NOT Going to send", number, hash.String(), "force", force, "n", n)
+		fmt.Println("storage.save-2", number, time.Since(t))
+	}
+
+	fmt.Println("+++snapshot-XXX Going to send", number, hash.String(), "force", force, time.Since(t))
+
+}
+
+func (st *storage) saveSnaps(snaps ...snapObj) {
+	if len(snaps) == 0 {
+		return
+	}
 
 	t := time.Now()
-	ok, err := hasSnapshotData(st.db, number, hash)
-	fmt.Println("+++snapshot-7.HAS", number, hash.String(), time.Since(t), "ok", ok, "err", err)
-	if !ok || err != nil {
-		fmt.Println("+++snapshot-XXX Going to send", number, hash.String())
-		snap := snapObj{number, hash, blob}
-		if !force {
-			st.ch <- snap
-		} else {
-			st.saveSnap(snap)
-		}
 
-	} else {
-		fmt.Println("+++snapshot-XXX NOT Going to send", number, hash.String())
+	pending := st.db.NewBatch()
+	defer pending.Rollback()
+	for _, snap := range snaps {
+		err := pending.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob)
+		if err != nil {
+			log.Error("can't store a snapshot", "block", snap.number, "hash", snap.hash, "err", err)
+		}
 	}
+
+	_, err := pending.Commit()
+	if err != nil {
+		log.Error("can't store snapshots", "blockFrom", snaps[0].number, "blockTo", snaps[len(snaps)-1].number, "err", err)
+	}
+
+	dur := time.Since(t)
+	fmt.Println("+++snapshot-7.2", len(snaps), dur, dur/time.Duration(len(snaps)))
 }
 
 func (st *storage) saveSnap(snap snapObj) {
 	t := time.Now()
+
 	err := st.db.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob)
 	if err != nil {
-		log.Error("can't store snapshot", "block", snap.number, "hash", snap.hash, "err", err)
+		log.Error("can't store a snapshot", "block", snap.number, "hash", snap.hash, "err", err)
 		return
 	}
-	fmt.Println("+++snapshot-7.2", snap.number, snap.hash.String(), time.Since(t))
+
+	dur := time.Since(t)
+	fmt.Println("+++snapshot-7.3", dur)
+}
+
+func (st *storage) Close() {
+	common.SafeClose(st.exit)
 }

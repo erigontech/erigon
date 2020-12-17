@@ -205,13 +205,13 @@ func (c *CliqueVerifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 		if isSnapshot(number, c.config.Epoch) {
 			fmt.Println("+++snapshot-2.3", number)
 			//fmt.Printf("BEFORE2 loadAndFillSnapshot for block %d(%q)\n", p.Number.Uint64(), p.Hash().String())
-			if s, err := loadAndFillSnapshot(c.db, p.Number.Uint64(), p.Hash(), c.config, c.signatures); err == nil {
+			if s, err := loadAndFillSnapshot(c.db, p.Number.Uint64(), p.Hash(), c.config, c.snapStorage, c.signatures); err == nil {
 				log.Trace("Loaded voting snapshot from disk", "number", p.Number, "hash", p.Hash())
 				snap = s
 				fmt.Println("+++snapshot-2.4", number)
 				break
 			} else {
-				log.Info("can't load and update a snapshot", "num", number, "block", p.Number.Uint64(), "hash", p.Hash().String(), "error", err)
+				log.Info("can't load and update a snapshot", "num", number, "block", p.Number.Uint64(), "hash", p.Hash().String(), "error", err, "time", time.Since(t))
 			}
 
 			fmt.Println("+++snapshot-2.5", number)
@@ -296,7 +296,7 @@ func (c *CliqueVerifier) storeGenesisSnapshot(h *types.Header) (*Snapshot, error
 		copy(signers[i][:], h.Extra[extraVanity+i*common.AddressLength:])
 	}
 
-	snap := newSnapshot(c.config, c.signatures, h.Number.Uint64(), h.Hash(), signers)
+	snap := newSnapshot(c.config, c.snapStorage, c.signatures, h.Number.Uint64(), h.Hash(), signers)
 	if err := snap.store(c.db, true); err != nil {
 		return nil, err
 	}
@@ -389,7 +389,6 @@ func (c *CliqueVerifier) findPrevCheckpoint(num uint64) int {
 }
 
 func (c *CliqueVerifier) checkSnapshot(num uint64) bool {
-	//fmt.Println("====checkSnapshot-0", num)
 	var (
 		ok       bool
 		snapHash common.Hash
@@ -397,13 +396,11 @@ func (c *CliqueVerifier) checkSnapshot(num uint64) bool {
 	)
 
 	if h, ok := c.snapshotBlocks.Get(num); ok {
-		//fmt.Println("====checkSnapshot-1", num)
 		snapHash, ok = h.(common.Hash)
 		if ok {
 			// If an in-memory snapshot was found, use that
 			_, ok = c.recents.Get(snapHash)
 			if ok {
-				//fmt.Println("====checkSnapshot-1.0", num)
 				fmt.Printf("checkSnapshot for %d for snap in memory\n", num)
 				return true
 			}
@@ -423,13 +420,13 @@ func (c *CliqueVerifier) checkSnapshot(num uint64) bool {
 	}
 
 	if !ok {
-		err = c.db.Walk(dbutils.CliqueBucket, dbutils.EncodeBlockNumber(num), 8*8, func(k, v []byte) (bool, error) {
+		err = c.db.Walk(dbutils.CliqueBucket, dbutils.EncodeBlockNumber(num), dbutils.NumberLength*8, func(k, v []byte) (bool, error) {
 			number, hash, err := dbutils.DecodeBlockBodyKey(k)
-			if err != nil{
+			if err != nil {
 				return false, err
 			}
 
-			fmt.Println("====checkSnapshot-3.1", number, hash.String())
+			fmt.Println("====checkSnapshot-7.03", num, number, hash.String(), len(k), len(v))
 
 			ok = true
 			return false, nil
@@ -440,8 +437,6 @@ func (c *CliqueVerifier) checkSnapshot(num uint64) bool {
 			return false
 		}
 	}
-
-	fmt.Println("====checkSnapshot-4", ok)
 
 	return ok
 }

@@ -2116,6 +2116,41 @@ func receiptSizes(chaindata string) error {
 	return nil
 }
 
+func snapSizes(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.KV().Begin(context.Background(), nil, false)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	c := tx.Cursor(dbutils.CliqueBucket)
+	defer c.Close()
+	sizes := make(map[int]int)
+	var total uint64
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		sizes[len(v)]++
+		total += uint64(len(v) + len(k))
+	}
+	var lens = make([]int, len(sizes))
+	i := 0
+	for l := range sizes {
+		lens[i] = l
+		i++
+	}
+	sort.Ints(lens)
+	for _, l := range lens {
+		fmt.Printf("%6d - %d\n", l, sizes[l])
+	}
+	fmt.Printf("Total size: %d bytes\n", total)
+	size, err := tx.BucketSize(dbutils.CliqueBucket)
+	fmt.Printf("Total bucket size: %d bytes: %v\n", size, err)
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -2276,6 +2311,11 @@ func main() {
 	}
 	if *action == "receiptSizes" {
 		if err := receiptSizes(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "snapSizes" {
+		if err := snapSizes(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

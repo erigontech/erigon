@@ -9,9 +9,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
+const NumberLength = 8
+
 // EncodeBlockNumber encodes a block number as big endian uint64
 func EncodeBlockNumber(number uint64) []byte {
-	enc := make([]byte, 8)
+	enc := make([]byte, NumberLength)
 	binary.BigEndian.PutUint64(enc, number)
 	return enc
 }
@@ -19,7 +21,7 @@ func EncodeBlockNumber(number uint64) []byte {
 var ErrInvalidSize = errors.New("bit endian number has an invalid size")
 
 func DecodeBlockNumber(number []byte) (uint64, error) {
-	if len(number) != 8 {
+	if len(number) != NumberLength {
 		return 0, fmt.Errorf("%w: %d", ErrInvalidSize, len(number))
 	}
 	return binary.BigEndian.Uint64(number), nil
@@ -55,7 +57,7 @@ func HeaderHashKey(number uint64) []byte {
 }
 
 func CheckCanonicalKey(k []byte) bool {
-	return len(k) == 8+len(HeaderHashSuffix) && bytes.Equal(k[8:], HeaderHashSuffix)
+	return len(k) == NumberLength+len(HeaderHashSuffix) && bytes.Equal(k[NumberLength:], HeaderHashSuffix)
 }
 
 func IsHeaderHashKey(k []byte) bool {
@@ -69,16 +71,16 @@ func BlockBodyKey(number uint64, hash common.Hash) []byte {
 }
 
 func DecodeBlockBodyKey(key []byte) (uint64, common.Hash, error) {
-	if len(key) != 8+32 {
+	if len(key) != NumberLength+32 {
 		return 0, common.Hash{}, fmt.Errorf("%w: %d", ErrInvalidSize, len(key))
 	}
 
-	number, err := DecodeBlockNumber(key[:8])
+	number, err := DecodeBlockNumber(key[:NumberLength])
 	if err != nil {
 		return 0, common.Hash{}, err
 	}
 
-	return number, common.BytesToHash(key[8:]), nil
+	return number, common.BytesToHash(key[NumberLength:]), nil
 }
 
 // blockReceiptsKey = blockReceiptsPrefix + num (uint64 big endian) + hash
@@ -151,7 +153,7 @@ func GenerateCompositeStoragePrefix(addressHash []byte, incarnation uint64, stor
 
 // address hash + incarnation prefix
 func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
-	prefix := make([]byte, common.HashLength+8)
+	prefix := make([]byte, common.HashLength+NumberLength)
 	copy(prefix, addressHash)
 	binary.BigEndian.PutUint64(prefix[common.HashLength:], incarnation)
 	return prefix
@@ -159,7 +161,7 @@ func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
 
 // address hash + incarnation prefix (for plain state)
 func PlainGenerateStoragePrefix(address []byte, incarnation uint64) []byte {
-	prefix := make([]byte, common.AddressLength+8)
+	prefix := make([]byte, common.AddressLength+NumberLength)
 	copy(prefix, address)
 	binary.BigEndian.PutUint64(prefix[common.AddressLength:], incarnation)
 	return prefix

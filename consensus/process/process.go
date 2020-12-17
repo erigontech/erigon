@@ -165,7 +165,6 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 
 	t = time.Now()
 	for _, header := range headers {
-		fmt.Println("XXX-caching-parents", header.Number.Uint64(), header.Hash().String())
 		c.API.CacheHeader(header)
 	}
 
@@ -202,7 +201,7 @@ func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal boo
 
 	t := time.Now()
 	err := c.Server.Verify(c.API.Chain, header, knownParents, false, seal)
-	fmt.Println("verifyByRequest-2", time.Since(t), len(knownParents), parentsExpected, err)
+	fmt.Println("verify in total", time.Since(t), len(knownParents), parentsExpected, err)
 	t = time.Now()
 
 	c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, header.Hash(), err}
@@ -339,8 +338,6 @@ func (c *Consensus) requestParentHeaders(reqID uint64, header *types.Header, req
 		fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 	}
 
-	fmt.Println("requestParentHeaders", parentsToAsk, parentsToValidate)
-
 	knownParents, ancestorsReq := c.requestHeadersNotFromRange(reqID, headerNumber, headerParentHash, uint64(parentsToAsk))
 	knownParentsFromRange := c.checkHeadersFromRange(header, reqHeaders, uint64(parentsToAsk), uint64(parentsToValidate))
 
@@ -363,7 +360,6 @@ func (c *Consensus) requestHeadersNotFromRange(reqID uint64, highestBlock uint64
 	known := make([]*types.Header, 0, highestBlock-minHeader)
 
 	for parentBlockNum := highestBlock; parentBlockNum >= minHeader; parentBlockNum-- {
-		fmt.Println("XXX-i", parentBlockNum)
 		parentBlock := c.API.GetCachedHeader(highestKnown, parentBlockNum)
 		if parentBlock == nil {
 			fmt.Println("XXX-i-nil!!!", highestKnown.String(), parentBlockNum)
