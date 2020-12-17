@@ -2116,29 +2116,4 @@ Date:   Mon Dec 21 18:54:39 2020 +0800
     
     * keccak read arg fix
 
-commit 3c46f5570bd674cf49c0113352ff79a4e026a5b8
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Thu Dec 17 01:20:20 2020 +0100
-
-    cmd/faucet: sort requests by newest first (#22018)
-
-commit c7f2536735a1a47ae63edb488e15ae597dbaf1d1
-Author: Zsolt Felföldi <zsfelfoldi@gmail.com>
-Date:   Tue Dec 15 20:12:14 2020 +0100
-
-    les: les/4 minimalistic version (#21909)
-    
-    * les: allow tx unindexing in les/4 light server mode
-    
-    * les: minor fixes
-    
-    * les: more small fixes
-    
-    * les: add meaningful constants for recentTxIndex handshake field
-
-commit 8cde2966af916d85805a47a4350f3567d9e51dbe
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Tue Dec 15 18:52:51 2020 +0100
-
-    eth, core: speed up some tests (#22000)
 
