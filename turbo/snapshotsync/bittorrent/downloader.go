@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	lg "github.com/anacrolix/log"
@@ -217,6 +218,53 @@ func (cli *Client) Download() {
 		log.Info("Snapshot seeding", "name", t.Name(), "seeding", t.Seeding())
 	}
 	return
+}
+
+func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, error) {
+	mp:=make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
+	networkIDBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(networkIDBytes, networkID)
+	err := db.Walk(dbutils.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), 8*8+16, func(k, v []byte) (bool, error) {
+		var hash metainfo.Hash
+		if len(v) != metainfo.HashSize {
+			return true, nil
+		}
+		copy(hash[:], v)
+		t, ok := cli.Cli.Torrent(hash)
+		if !ok {
+			return true, nil
+		}
+
+		var gotInfo bool
+		readiness := int32(0)
+		select {
+		case <-t.GotInfo():
+			gotInfo = true
+			readiness = int32(100 * (float64(t.BytesCompleted()) / float64(t.Info().TotalLength())))
+		default:
+		}
+
+		_, tpStr := ParseInfoHashKey(k)
+		tp, ok := snapshotsync.SnapshotType_value[tpStr]
+		if !ok {
+			return false, fmt.Errorf("incorrect type: %v", tpStr)
+		}
+
+		val := &snapshotsync.SnapshotsInfo{
+			Type:          snapshotsync.SnapshotType(tp),
+			GotInfoByte:   gotInfo,
+			Readiness:     readiness,
+			SnapshotBlock: SnapshotBlock,
+			Dbpath:        filepath.Join(cli.snapshotsDir, t.Files()[0].Path()),
+		}
+		mp[snapshotsync.SnapshotType(tp)] = val
+		return true, nil
+	})
+	if err!=nil {
+		return nil, err
+	}
+
+	return mp, nil
 }
 
 func getTorrentSpec(db ethdb.Database, snapshotName string, networkID uint64) ([]byte, []byte, error) {

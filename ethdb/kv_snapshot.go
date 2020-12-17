@@ -187,7 +187,7 @@ func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {
 			return nil, innerErr
 		}
 		//process only db buckets
-		if errors.Is(err, ErrUnavailableSnapshot) {
+		if errors.Is(innerErr, ErrUnavailableSnapshot) {
 			return v, nil
 		}
 		v, err = snTx.GetOne(bucket, key)

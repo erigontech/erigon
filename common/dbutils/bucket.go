@@ -102,6 +102,9 @@ var (
 	// DatabaseInfoBucket is used to store information about data layout.
 	DatabaseInfoBucket = "DBINFO"
 	SnapshotInfoBucket = "SNINFO"
+	HeadersSnapshotInfoBucket = "hSNINFO"
+	BodiesSnapshotInfoBucket = "bSNINFO"
+	StateSnapshotInfoBucket = "sSNINFO"
 
 	// databaseVerisionKey tracks the current database version.
 	DatabaseVerisionKey = "DatabaseVersion"
@@ -240,6 +243,9 @@ var Buckets = []string{
 	LogTopicIndex,
 	LogAddressIndex,
 	SnapshotInfoBucket,
+	HeadersSnapshotInfoBucket,
+	BodiesSnapshotInfoBucket,
+	StateSnapshotInfoBucket,
 	CallFromIndex,
 	CallToIndex,
 	Log,

@@ -259,15 +259,18 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			err = torrentClient.AddSnapshotsTorrents(context.Background(), chainDb, config.NetworkID, config.SnapshotMode)
 			if err == nil {
 				torrentClient.Download()
-
 				snapshotKV := chainDb.KV()
+				mp, err:=torrentClient.GetSnapshots(chainDb, config.NetworkID)
+				if err!=nil {
+					return nil, err
+				}
 
-				snapshotKV, err = snapshotsync.WrapBySnapshots2(snapshotKV, )
+				snapshotKV, err = snapshotsync.WrapBySnapshots2(snapshotKV, mp)
 				if err != nil {
 					return nil, err
 				}
 				chainDb.SetKV(snapshotKV)
-				err = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, )
+				err = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, mp)
 				if err != nil {
 					return nil, err
 				}

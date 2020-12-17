@@ -11,44 +11,66 @@ var (
 	bucketConfigs = map[SnapshotType]dbutils.BucketsCfg{
 		SnapshotType_bodies: {
 			dbutils.BlockBodyPrefix:    dbutils.BucketConfigItem{},
-			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+			dbutils.BodiesSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		},
 		SnapshotType_headers: {
 			dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
-			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+			dbutils.HeadersSnapshotInfoBucket: dbutils.BucketConfigItem{},
+		},
+		SnapshotType_state: {
+			dbutils.PlainStateBucket:       dbutils.BucketConfigItem{
+				Flags:                     dbutils.DupSort,
+				AutoDupSortKeysConversion: true,
+				DupFromLen:                60,
+				DupToLen:                  28,
+			},
+			dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},
+			dbutils.CodeBucket: dbutils.BucketConfigItem{},
+			dbutils.StateSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		},
 	}
 )
-//
-//func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.KV, error) {
-//	log.Info("Wrap db to snapshots", "dir", snapshotDir, "mode", mode.ToString())
-//	if mode.Bodies {
-//		snapshotKV, err := ethdb.NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(snapshotDir + "/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-//			return bucketConfigs[SnapshotType_bodies]
-//		}).Open()
-//		if err != nil {
-//			log.Error("Can't open body snapshot", "err", err)
-//			return nil, err
-//		} else { //nolint
-//			kv = ethdb.NewSnapshot2KV().SnapshotDB([]string{dbutils.BlockBodyPrefix, dbutils.SnapshotInfoBucket}, snapshotKV).
-//				DB(kv).MustOpen()
-//		}
-//	}
-//
-//	if mode.Headers {
-//		snapshotKV, err := ethdb.NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(snapshotDir + "/headers").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-//			return bucketConfigs[SnapshotType_headers]
-//		}).Open()
-//		if err != nil {
-//			log.Error("Can't open headers snapshot", "err", err)
-//			return nil, err
-//		} else { //nolint
-//			kv = ethdb.NewSnapshot2KV().SnapshotDB([]string{dbutils.HeaderPrefix, dbutils.SnapshotInfoBucket}, snapshotKV).
-//				DB(kv).MustOpen()
-//		}
-//	}
-//	return kv, nil
-//}
+
+func WrapBySnapshots(kv ethdb.KV, snapshotDir string, mode SnapshotMode) (ethdb.KV, error) {
+	log.Info("Wrap db to snapshots", "dir", snapshotDir, "mode", mode.ToString())
+	snkv := ethdb.NewSnapshot2KV().DB(kv)
+
+	if mode.Bodies {
+		snapshotKV, err := ethdb.NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(snapshotDir + "/bodies").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return bucketConfigs[SnapshotType_bodies]
+		}).Open()
+		if err != nil {
+			log.Error("Can't open body snapshot", "err", err)
+			return nil, err
+		} else { //nolint
+			snkv.SnapshotDB([]string{dbutils.BlockBodyPrefix, dbutils.BodiesSnapshotInfoBucket}, snapshotKV)
+		}
+	}
+
+	if mode.Headers {
+		snapshotKV, err := ethdb.NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(snapshotDir + "/headers").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return bucketConfigs[SnapshotType_headers]
+		}).Open()
+		if err != nil {
+			log.Error("Can't open headers snapshot", "err", err)
+			return nil, err
+		} else { //nolint
+			snkv.SnapshotDB([]string{dbutils.HeaderPrefix, dbutils.HeadersSnapshotInfoBucket}, snapshotKV)
+		}
+	}
+	if mode.State {
+		snapshotKV, err := ethdb.NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(snapshotDir + "/headers").WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return bucketConfigs[SnapshotType_headers]
+		}).Open()
+		if err != nil {
+			log.Error("Can't open headers snapshot", "err", err)
+			return nil, err
+		} else { //nolint
+			snkv.SnapshotDB([]string{dbutils.StateSnapshotInfoBucket, dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snapshotKV)
+		}
+	}
+	return kv, nil
+}
 
 func Get()  {
 	

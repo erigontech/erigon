@@ -103,12 +103,12 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 
 	if v == 0 {
 		log.Info("Generate headers hash to number index")
-		headHashBytes, innerErr := db.Get(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash))
+		headHashBytes, innerErr := db.Get(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash))
 		if innerErr != nil {
 			return innerErr
 		}
 
-		headNumberBytes, innerErr := db.Get(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber))
+		headNumberBytes, innerErr := db.Get(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber))
 		if innerErr != nil {
 			return innerErr
 		}
