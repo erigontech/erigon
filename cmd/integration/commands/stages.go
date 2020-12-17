@@ -237,15 +237,6 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageExec)
 
-	withChaindata(cmdStageIHash)
-	withLmdbFlags(cmdStageIHash)
-	withReset(cmdStageIHash)
-	withBlock(cmdStageIHash)
-	withUnwind(cmdStageIHash)
-	withDatadir(cmdStageIHash)
-
-	rootCmd.AddCommand(cmdStageIHash)
-
 	withChaindata(cmdStageHashState)
 	withLmdbFlags(cmdStageHashState)
 	withReset(cmdStageHashState)
@@ -254,6 +245,15 @@ func init() {
 	withDatadir(cmdStageHashState)
 
 	rootCmd.AddCommand(cmdStageHashState)
+	
+	withChaindata(cmdStageIHash)
+	withLmdbFlags(cmdStageIHash)
+	withReset(cmdStageIHash)
+	withBlock(cmdStageIHash)
+	withUnwind(cmdStageIHash)
+	withDatadir(cmdStageIHash)
+
+	rootCmd.AddCommand(cmdStageIHash)
 
 	withChaindata(cmdStageHistory)
 	withLmdbFlags(cmdStageHistory)
