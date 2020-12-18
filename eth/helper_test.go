@@ -87,7 +87,10 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 		return nil, nil, fmt.Errorf("generate chain: %w", err)
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain, true /* checkRoot */); err != nil {
+	exit := make(chan struct{})
+	engAPI := process.NewConsensusProcess(eng, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engAPI, chain, true /* checkRoot */); err != nil {
 		return nil, nil, err
 	}
 	cht := &params.TrustedCheckpoint{}

@@ -2220,43 +2220,46 @@ func fixUnwind(chaindata string) error {
 func snapSizes(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+
 	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
 	c := tx.Cursor(dbutils.CliqueBucket)
 	defer c.Close()
+
 	sizes := make(map[int]int)
 	differentValues := make(map[string]struct{})
-	var total uint64
-	var i int
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+
+	var (
+		total uint64
+		k, v  []byte
+	)
+
+	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
 		sizes[len(v)]++
 		differentValues[string(v)] = struct{}{}
 		total += uint64(len(v) + len(k))
-
-		if len(v) == 698 {
-			if i > 20 {
-				break
-			}
-			fmt.Println(v)
-			i++
-		}
 	}
+
 	var lens = make([]int, len(sizes))
-	i = 0
+
+	i := 0
 	for l := range sizes {
 		lens[i] = l
 		i++
 	}
 	sort.Ints(lens)
+
 	for _, l := range lens {
 		fmt.Printf("%6d - %d\n", l, sizes[l])
 	}
+
 	fmt.Printf("Different keys %d\n", len(differentValues))
 	fmt.Printf("Total size: %d bytes\n", total)
 

@@ -62,7 +62,7 @@ type Snapshot struct {
 	Votes   []*Vote                     `json:"votes"`   // List of votes cast in chronological order
 	Tally   map[common.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
 
-	snapStorage *storage `json:"-"`
+	snapStorage *storage
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -390,7 +390,7 @@ func newStorage(db ethdb.Database, epoch uint64) *storage {
 		exit: make(chan struct{}),
 	}
 
-	const batchSize = 1024/2
+	const batchSize = 1024 / 2
 
 	go func() {
 		for {

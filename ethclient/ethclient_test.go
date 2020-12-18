@@ -28,6 +28,7 @@ import (
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -206,7 +207,13 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	if err := n.Start(); err != nil {
 		t.Fatalf("can't start test node: %v", err)
 	}
-	if _, err := stagedsync.InsertBlocksInStages(ethservice.BlockChain().ChainDb(), ethdb.DefaultStorageMode, ethservice.BlockChain().Config(), &vm.Config{}, ethservice.BlockChain().Engine(), blocks[1:], true /* checkRoot */); err != nil {
+
+	eng, ok := ethservice.Engine().(*process.RemoteEngine)
+	if !ok {
+		t.Fatal("can't create new ethereum RemoteEngine")
+	}
+
+	if _, err := stagedsync.InsertBlocksInStages(ethservice.BlockChain().ChainDb(), ethdb.DefaultStorageMode, ethservice.BlockChain().Config(), &vm.Config{}, eng, blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatalf("can't import test blocks: %v", err)
 	}
 	return n, blocks

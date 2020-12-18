@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -69,6 +70,10 @@ func newTestBackend(t *testing.T) *testBackend {
 	)
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+
 	genesis, _, err := gspec.Commit(db, false)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +96,7 @@ func newTestBackend(t *testing.T) *testBackend {
 	if err != nil {
 		t.Fatalf("Failed to create local chain, %v", err)
 	}
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, eng, blocks, true /* checkRoot */); err != nil {
 		t.Error(err)
 	}
 	return &testBackend{chain: chain}

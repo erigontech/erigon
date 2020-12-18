@@ -24,6 +24,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -132,7 +133,10 @@ func TestSetupGenesis(t *testing.T) {
 				if err != nil {
 					return nil, common.Hash{}, nil, err
 				}
-				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, ethash.NewFullFaker(), blocks, true /* checkRoot */); err != nil {
+				exit := make(chan struct{})
+				eng := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit)
+				defer common.SafeClose(exit)
+				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, eng, blocks, true /* checkRoot */); err != nil {
 					return nil, common.Hash{}, nil, err
 				}
 				// This should return a compatibility error.

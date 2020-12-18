@@ -6,12 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 func TestBlockHashStage(t *testing.T) {
@@ -30,10 +27,7 @@ func TestBlockHashStage(t *testing.T) {
 		panic(err)
 	}
 
-	eng := process.NewRemoteEngine(ethash.NewFaker(), params.AllEthashProtocolChanges)
-	defer eng.Close()
-
-	_, _, _, err := InsertHeaderChain("logPrefix", db, headers, eng)
+	_, _, _, err := InsertHeaderChain("logPrefix", db, headers)
 	assert.NoError(t, err)
 	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, db, "", nil)
 	assert.NoError(t, err)

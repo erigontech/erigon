@@ -55,11 +55,12 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 				ancestorsReqs := make([]consensus.HeadersRequest, 0, len(req.Headers))
 
 				for i, header := range req.Headers {
-					fmt.Printf("\n\nBlock %d\n", header.Number.Uint64())
 					if header == nil {
 						c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, common.Hash{}, errEmptyHeader}
 						continue eventLoop
 					}
+
+					fmt.Printf("\n\nBlock %d\n", header.Number.Uint64())
 
 					// Short circuit if the header is known
 					if h := c.API.GetCachedHeader(header.Hash(), header.Number.Uint64()); h != nil {
@@ -273,6 +274,7 @@ func appendAncestors(request *consensus.VerifyRequest, ancestors []*types.Header
 		knownByRequests[request.ID] = ancestorsMap
 	}
 
+	fmt.Printf("appendParents-2.0 took=%v reqID=%d\n", time.Since(t), request.ID)
 	t = time.Now()
 
 	for _, parent := range ancestors {

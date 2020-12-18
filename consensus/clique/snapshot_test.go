@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -417,6 +418,10 @@ func TestClique(t *testing.T) {
 		engine := New(config.Clique, db)
 		engine.fakeDiff = true
 
+		exit := make(chan struct{})
+		eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+		defer common.SafeClose(exit)
+
 		txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, txCacher)
 		if err != nil {
@@ -466,7 +471,7 @@ func TestClique(t *testing.T) {
 		// Pass all the headers through clique and ensure tallying succeeds
 		failed := false
 		for j := 0; j < len(batches)-1; j++ {
-			if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[j], true /* checkRoot */); err != nil {
+			if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, eng, batches[j], true /* checkRoot */); err != nil {
 				t.Errorf("test %d: failed to import batch %d, %v", i, j, err)
 				failed = true
 				break
@@ -475,7 +480,7 @@ func TestClique(t *testing.T) {
 		if failed {
 			continue
 		}
-		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[len(batches)-1], true /* checkRoot */); !errors.Is(err, tt.failure) {
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, eng, batches[len(batches)-1], true /* checkRoot */); !errors.Is(err, tt.failure) {
 			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 		}
 		if tt.failure != nil {

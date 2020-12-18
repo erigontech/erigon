@@ -15,21 +15,21 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-type CliqueVerifier struct {
+type Verifier struct {
 	*Clique
 }
 
-func NewCliqueVerifier(c *Clique) *CliqueVerifier {
-	return &CliqueVerifier{c}
+func NewCliqueVerifier(c *Clique) *Verifier {
+	return &Verifier{c}
 }
 
-func (c *CliqueVerifier) Verify(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, _ bool, _ bool) error {
+func (c *Verifier) Verify(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, _ bool, _ bool) error {
 	err := c.verifyHeader(header, parents, chain.Config())
 	fmt.Println("XXX-Verify-DONE", header.Number.Uint64(), len(parents), err)
 	return err
 }
 
-func (c *CliqueVerifier) NeededForVerification(header *types.Header) int {
+func (c *Verifier) NeededForVerification(header *types.Header) int {
 	n := c.findPrevCheckpoint(header.Number.Uint64())
 	fmt.Printf("-----NeededForVerification %d %d\n", header.Number.Uint64(), n)
 	return n
@@ -39,7 +39,7 @@ func (c *CliqueVerifier) NeededForVerification(header *types.Header) int {
 // caller may optionally pass in a batch of parents (ascending order) to avoid
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
-func (c *CliqueVerifier) verifyHeader(header *types.Header, parents []*types.Header, config *params.ChainConfig) error {
+func (c *Verifier) verifyHeader(header *types.Header, parents []*types.Header, config *params.ChainConfig) error {
 	fmt.Println("===verifyHeader-1", header.Number.Uint64(), len(parents))
 	t := time.Now()
 	if header.Number == nil {
@@ -114,7 +114,7 @@ func (c *CliqueVerifier) verifyHeader(header *types.Header, parents []*types.Hea
 // rather depend on a batch of previous headers. The caller may optionally pass
 // in a batch of parents (ascending order) to avoid looking those up from the
 // database. This is useful for concurrently verifying a batch of new headers.
-func (c *CliqueVerifier) verifyCascadingFields(header *types.Header, parents []*types.Header) error {
+func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.Header) error {
 	t := time.Now()
 	// The genesis block is the always valid dead-end
 	number := header.Number.Uint64()
@@ -173,7 +173,7 @@ func headersSortFunc(headers []*types.Header) func(i, j int) bool {
 
 // Search for a snapshot in memory or on disk for checkpoints
 // snapshot retrieves the authorization snapshot at a given point in time.
-func (c *CliqueVerifier) snapshot(parents []*types.Header) (*Snapshot, error) {
+func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 	fmt.Println("+++snapshot-0")
 	var snap *Snapshot
 	var err error
@@ -187,6 +187,7 @@ func (c *CliqueVerifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 	fmt.Println("+++snapshot-1", time.Since(t), "from", 0, "to", len(parents)-1)
 
 	var i int
+	var s *Snapshot
 	for i = len(parents) - 1; i >= 0; i-- {
 		p := parents[i]
 		number := parents[i].Number.Uint64()
@@ -205,7 +206,7 @@ func (c *CliqueVerifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 		if isSnapshot(number, c.config.Epoch) {
 			fmt.Println("+++snapshot-2.3", number)
 			//fmt.Printf("BEFORE2 loadAndFillSnapshot for block %d(%q)\n", p.Number.Uint64(), p.Hash().String())
-			if s, err := loadAndFillSnapshot(c.db, p.Number.Uint64(), p.Hash(), c.config, c.snapStorage, c.signatures); err == nil {
+			if s, err = loadAndFillSnapshot(c.db, p.Number.Uint64(), p.Hash(), c.config, c.snapStorage, c.signatures); err == nil {
 				log.Trace("Loaded voting snapshot from disk", "number", p.Number, "hash", p.Hash())
 				snap = s
 				fmt.Println("+++snapshot-2.4", number)
@@ -243,7 +244,7 @@ func (c *CliqueVerifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 		for _, p := range parents {
 			_, ok := m[p.Number.Int64()]
 			if ok {
-				//fmt.Println("snapshot-ERR: got duplicate on", p.Number.Int64())
+				continue
 			}
 			m[p.Number.Int64()] = struct{}{}
 		}
@@ -290,7 +291,7 @@ func (c *CliqueVerifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 	return snap, err
 }
 
-func (c *CliqueVerifier) storeGenesisSnapshot(h *types.Header) (*Snapshot, error) {
+func (c *Verifier) storeGenesisSnapshot(h *types.Header) (*Snapshot, error) {
 	signers := make([]common.Address, (len(h.Extra)-extraVanity-extraSeal)/common.AddressLength)
 	for i := 0; i < len(signers); i++ {
 		copy(signers[i][:], h.Extra[extraVanity+i*common.AddressLength:])
@@ -308,7 +309,7 @@ func (c *CliqueVerifier) storeGenesisSnapshot(h *types.Header) (*Snapshot, error
 // consensus protocol requirements. The method accepts an optional list of parent
 // headers that aren't yet part of the local blockchain to generate the snapshots
 // from.
-func (c *CliqueVerifier) verifySeal(header *types.Header, snap *Snapshot) error {
+func (c *Verifier) verifySeal(header *types.Header, snap *Snapshot) error {
 	// Verifying the genesis block is not supported
 	number := header.Number.Uint64()
 	if number == 0 {
@@ -357,7 +358,7 @@ func (c *CliqueVerifier) verifySeal(header *types.Header, snap *Snapshot) error 
 	return nil
 }
 
-func (c *CliqueVerifier) findPrevCheckpoint(num uint64) int {
+func (c *Verifier) findPrevCheckpoint(num uint64) int {
 	// If we're at the genesis, snapshot the initial state.
 	if num == 0 {
 		fmt.Printf("NeededForVerification-0 num=%d\n", num)
@@ -388,14 +389,15 @@ func (c *CliqueVerifier) findPrevCheckpoint(num uint64) int {
 	return ancestors
 }
 
-func (c *CliqueVerifier) checkSnapshot(num uint64) bool {
+func (c *Verifier) checkSnapshot(num uint64) bool {
 	var (
+		h        interface{}
 		ok       bool
 		snapHash common.Hash
 		err      error
 	)
 
-	if h, ok := c.snapshotBlocks.Get(num); ok {
+	if h, ok = c.snapshotBlocks.Get(num); ok {
 		snapHash, ok = h.(common.Hash)
 		if ok {
 			// If an in-memory snapshot was found, use that
@@ -419,9 +421,14 @@ func (c *CliqueVerifier) checkSnapshot(num uint64) bool {
 		}
 	}
 
+	var (
+		number uint64
+		hash   common.Hash
+	)
+
 	if !ok {
 		err = c.db.Walk(dbutils.CliqueBucket, dbutils.EncodeBlockNumber(num), dbutils.NumberLength*8, func(k, v []byte) (bool, error) {
-			number, hash, err := dbutils.DecodeBlockBodyKey(k)
+			number, hash, err = dbutils.DecodeBlockBodyKey(k)
 			if err != nil {
 				return false, err
 			}
