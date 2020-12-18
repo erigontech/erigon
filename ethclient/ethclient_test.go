@@ -213,7 +213,7 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 		t.Fatal("can't create new ethereum RemoteEngine")
 	}
 
-	if _, err := stagedsync.InsertBlocksInStages(ethservice.BlockChain().ChainDb(), ethdb.DefaultStorageMode, ethservice.BlockChain().Config(), &vm.Config{}, eng, blocks[1:], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(ethservice.BlockChain().ChainDb(), ethdb.DefaultStorageMode, ethservice.BlockChain().Config(), &vm.Config{}, ethservice.Engine(), eng, blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatalf("can't import test blocks: %v", err)
 	}
 	return n, blocks

@@ -61,7 +61,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	eng := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
 
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -77,7 +77,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	}
 	defer clear()
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, eng, blocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -130,7 +130,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	exit := make(chan struct{})
 	eng := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -146,7 +146,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	}
 	defer clear()
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, eng, blocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -194,7 +194,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	eng := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
 
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -210,7 +210,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	}
 	defer clear()
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, eng, blocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -257,7 +257,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	exit := make(chan struct{})
 	eng := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -273,7 +273,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	}
 	defer clear()
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, eng, blocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -319,7 +319,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	exit := make(chan struct{})
 	eng := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -335,7 +335,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	}
 	defer clear()
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, eng, blocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -380,7 +380,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	exit := make(chan struct{})
 	eng := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -398,7 +398,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[1].Transactions(), blocks[1].Uncles(), receipts[1])
 
 	// BLOCK 2 - INCORRECT
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -412,7 +412,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2 - CORRECT
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -458,7 +458,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	exit := make(chan struct{})
 	eng := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -472,7 +472,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -490,12 +490,12 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[2].Transactions(), blocks[2].Uncles(), receipts[2])
 
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -536,7 +536,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	exit := make(chan struct{})
 	eng := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -550,7 +550,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -564,7 +564,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -573,12 +573,12 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[3].Transactions(), blocks[3].Uncles(), receipts[3])
 
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[3], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -619,7 +619,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	exit := make(chan struct{})
 	eng := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -633,7 +633,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -647,7 +647,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -656,12 +656,12 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[3].Transactions(), blocks[3].Uncles(), receipts[3])
 
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, incorrectBlock, true /* checkRoot */); err == nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, incorrectBlock, true /* checkRoot */); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, eng, blocks[3], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng, blocks[3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 }

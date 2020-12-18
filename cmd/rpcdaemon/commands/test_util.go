@@ -180,7 +180,7 @@ func createTestDb() (ethdb.Database, error) {
 		return nil, err
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, blocks, true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks, true /* rootCheck */); err != nil {
 		return nil, err
 	}
 

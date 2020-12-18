@@ -2183,10 +2183,11 @@ func applyBlock(chaindata string, hash common.Hash) error {
 	fmt.Printf("Formed block %d %x\n", block.NumberU64(), block.Hash())
 
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit)
+	cons := ethash.NewFaker()
+	eng := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
 
-	if _, err = stagedsync.InsertBlockInStages(db, params.MainnetChainConfig, &vm.Config{}, eng, block, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, params.MainnetChainConfig, &vm.Config{}, cons, eng, block, true /* checkRoot */); err != nil {
 		return err
 	}
 	if err = rawdb.WriteCanonicalHash(db, hash, block.NumberU64()); err != nil {

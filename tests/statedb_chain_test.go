@@ -119,12 +119,12 @@ func TestSelfDestructReceive(t *testing.T) {
 	exit := make(chan struct{})
 	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database

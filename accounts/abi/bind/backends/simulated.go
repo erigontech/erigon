@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -68,6 +69,7 @@ var (
 type SimulatedBackend struct {
 	database   *ethdb.ObjectDatabase // In memory database to store our testing data
 	engine     *process.Consensus
+	cons       consensus.Engine
 	exit       chan struct{}
 	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
 
@@ -110,6 +112,7 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 		prependBlock: genesisBlock,
 		database:     database,
 		engine:       eng,
+		cons:         engine,
 		exit:         exit,
 		blockchain:   blockchain,
 		config:       genesis.Config,
@@ -175,7 +178,7 @@ func (b *SimulatedBackend) Commit() {
 	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.engine, b.pendingBlock, false /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.cons, b.engine, b.pendingBlock, false /* checkRoot */); err != nil {
 		panic(err)
 	}
 	//nolint:prealloc

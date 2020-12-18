@@ -503,7 +503,7 @@ func initialState1() error {
 	eng := process.NewConsensusProcess(engine, gspec.Config, exit)
 	defer close(exit)
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[0], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -517,7 +517,7 @@ func initialState1() error {
 
 	// BLOCK 2
 	snapshotDB = db.MemCopy()
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[1], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[1], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -531,7 +531,7 @@ func initialState1() error {
 	// BLOCK 3
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[2], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[2], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -553,7 +553,7 @@ func initialState1() error {
 	// BLOCK 4
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[3], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[3], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -568,7 +568,7 @@ func initialState1() error {
 	// BLOCK 5
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[4], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[4], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -585,7 +585,7 @@ func initialState1() error {
 	// BLOCK 6
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[5], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[5], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -606,7 +606,7 @@ func initialState1() error {
 	// BLOCK 7
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[6], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[6], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -623,7 +623,7 @@ func initialState1() error {
 	// BLOCK 8
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[7], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[7], true /* rootCheck */); err != nil {
 		return err
 	}
 

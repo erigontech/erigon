@@ -361,7 +361,7 @@ func InsertHeadersInStages(db ethdb.Database, engine consensus.EngineAPI, header
 	return newCanonical, reorg, forkblocknumber, nil
 }
 
-func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.EngineAPI, blocks []*types.Block, checkRoot bool) (bool, error) {
+func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, config *params.ChainConfig, vmConfig *vm.Config, cons consensus.Engine, engine consensus.EngineAPI, blocks []*types.Block, checkRoot bool) (bool, error) {
 	if len(blocks) == 0 {
 		return false, nil
 	}
@@ -398,7 +398,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)
 	cc := &core.TinyChainContext{}
 	cc.SetDB(nil)
-	cc.SetEngine(nil)
+	cc.SetEngine(cons)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
 	syncState, err2 := stagedSync.Prepare(
 		nil,
@@ -437,6 +437,6 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	return true, nil
 }
 
-func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.EngineAPI, block *types.Block, checkRoot bool) (bool, error) {
-	return InsertBlocksInStages(db, ethdb.DefaultStorageMode, config, vmConfig, engine, []*types.Block{block}, checkRoot)
+func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, cons consensus.Engine, engine consensus.EngineAPI, block *types.Block, checkRoot bool) (bool, error) {
+	return InsertBlocksInStages(db, ethdb.DefaultStorageMode, config, vmConfig, cons, engine, []*types.Block{block}, checkRoot)
 }

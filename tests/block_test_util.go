@@ -135,7 +135,7 @@ func (t *BlockTest) Run(_ bool) error {
 	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
 	defer common.SafeClose(exit)
 
-	validBlocks, err := t.insertBlocks(db, config, eng)
+	validBlocks, err := t.insertBlocks(db, config, engine, eng)
 	if err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
    expected we are expected to ignore it and continue processing and then validate the
    post state.
 */
-func (t *BlockTest) insertBlocks(db ethdb.Database, config *params.ChainConfig, engine consensus.EngineAPI) ([]btBlock, error) {
+func (t *BlockTest) insertBlocks(db ethdb.Database, config *params.ChainConfig, cons consensus.Engine, engine consensus.EngineAPI) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
 	for _, b := range t.json.Blocks {
@@ -197,7 +197,7 @@ func (t *BlockTest) insertBlocks(db ethdb.Database, config *params.ChainConfig, 
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		if newCanonical, err1 := stagedsync.InsertBlockInStages(db, config, &vm.Config{}, engine, cb, true /* checkRoot */); err1 != nil {
+		if newCanonical, err1 := stagedsync.InsertBlockInStages(db, config, &vm.Config{}, cons, engine, cb, true /* checkRoot */); err1 != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {

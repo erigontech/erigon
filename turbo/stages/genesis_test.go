@@ -134,9 +134,10 @@ func TestSetupGenesis(t *testing.T) {
 					return nil, common.Hash{}, nil, err
 				}
 				exit := make(chan struct{})
-				eng := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit)
+				cons := ethash.NewFaker()
+				eng := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit)
 				defer common.SafeClose(exit)
-				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, eng, blocks, true /* checkRoot */); err != nil {
+				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, cons, eng, blocks, true /* checkRoot */); err != nil {
 					return nil, common.Hash{}, nil, err
 				}
 				// This should return a compatibility error.

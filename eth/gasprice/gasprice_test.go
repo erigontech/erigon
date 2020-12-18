@@ -96,7 +96,7 @@ func newTestBackend(t *testing.T) *testBackend {
 	if err != nil {
 		t.Fatalf("Failed to create local chain, %v", err)
 	}
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, eng, blocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, eng, blocks, true /* checkRoot */); err != nil {
 		t.Error(err)
 	}
 	return &testBackend{chain: chain}
