@@ -100,8 +100,8 @@ type EVMInterpreter struct {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
-	case evm.chainRules.IsYoloV1:
-		jt = &yoloV1InstructionSet
+	case evm.chainRules.IsYoloV2:
+		jt = &yoloV2InstructionSet
 	case evm.chainRules.IsIstanbul:
 		jt = &istanbulInstructionSet
 	case evm.chainRules.IsConstantinople:
@@ -118,15 +118,13 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		jt = &frontierInstructionSet
 	}
 	if len(cfg.ExtraEips) > 0 {
-		jtCopy := *jt
 		for i, eip := range cfg.ExtraEips {
-			if err := EnableEIP(eip, &jtCopy); err != nil {
+			if err := EnableEIP(eip, jt); err != nil {
 				// Disable it, so caller can check if it's activated or not
 				cfg.ExtraEips = append(cfg.ExtraEips[:i], cfg.ExtraEips[i+1:]...)
 				log.Error("EIP activation failed", "eip", eip, "error", err)
 			}
 		}
-		jt = &jtCopy
 	}
 
 	return &EVMInterpreter{

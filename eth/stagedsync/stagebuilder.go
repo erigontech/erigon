@@ -4,14 +4,21 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
+
+type ChainEventNotifier interface {
+	OnNewHeader(*types.Header)
+}
 
 // StageParameters contains the stage that stages receives at runtime when initializes.
 // Then the stage can use it to receive different useful functions.
@@ -25,19 +32,22 @@ type StageParameters struct {
 	// It can be used for both reading and writing.
 	TX          ethdb.Database
 	pid         string
-	hdd         bool
+	batchSize   int // Batch size for the execution stage
+	cacheSize   int // Cache size for the execution stage
 	storageMode ethdb.StorageMode
-	datadir     string
+	tmpdir      string
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
 	// the stage can take significant time and gracefully shutdown at Ctrl+C.
-	QuitCh             <-chan struct{}
-	headersFetchers    []func() error
-	txPool             *core.TxPool
-	poolStart          func() error
-	changeSetHook      ChangeSetHook
-	prefetchedBlocks   *PrefetchedBlocks
-	stateReaderBuilder StateReaderBuilder
-	stateWriterBuilder StateWriterBuilder
+	QuitCh                <-chan struct{}
+	headersFetchers       []func() error
+	txPool                *core.TxPool
+	poolStart             func() error
+	changeSetHook         ChangeSetHook
+	prefetchedBlocks      *PrefetchedBlocks
+	stateReaderBuilder    StateReaderBuilder
+	stateWriterBuilder    StateWriterBuilder
+	notifier              ChainEventNotifier
+	silkwormExecutionFunc unsafe.Pointer
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -108,7 +118,7 @@ func DefaultStages() StageBuilders {
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.db, world.datadir, world.QuitCh)
+						return SpawnBlockHashStage(s, world.db, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return u.Done(world.db)
@@ -146,16 +156,14 @@ func DefaultStages() StageBuilders {
 							BatchSize:       batchSize,
 							BlockSize:       blockSize,
 							BufferSize:      (blockSize * 10 / 20) * 10000, // 20*4096
-							StartTrace:      false,
-							Prof:            false,
 							NumOfGoroutines: n,
 							ReadChLen:       4,
 							Now:             time.Now(),
 						}
-						return SpawnRecoverSendersStage(cfg, s, world.TX, world.chainConfig, 0, world.datadir, world.QuitCh)
+						return SpawnRecoverSendersStage(cfg, s, world.TX, world.chainConfig, 0, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindSendersStage(u, world.TX)
+						return UnwindSendersStage(u, s, world.TX)
 					},
 				}
 			},
@@ -171,11 +179,13 @@ func DefaultStages() StageBuilders {
 							world.chainConfig, world.chainContext, world.vmConfig,
 							world.QuitCh,
 							ExecuteBlockStageParams{
-								WriteReceipts: world.storageMode.Receipts,
-								Hdd:           world.hdd,
-								ChangeSetHook: world.changeSetHook,
-								ReaderBuilder: world.stateReaderBuilder,
-								WriterBuilder: world.stateWriterBuilder,
+								WriteReceipts:         world.storageMode.Receipts,
+								CacheSize:             world.cacheSize,
+								BatchSize:             world.batchSize,
+								ChangeSetHook:         world.changeSetHook,
+								ReaderBuilder:         world.stateReaderBuilder,
+								WriterBuilder:         world.stateWriterBuilder,
+								SilkwormExecutionFunc: world.silkwormExecutionFunc,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
@@ -191,10 +201,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnHashStateStage(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, world.datadir, world.QuitCh)
+						return UnwindHashStateStage(u, s, world.TX, world.tmpdir, world.QuitCh)
 					},
 				}
 			},
@@ -206,10 +216,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnIntermediateHashesStage(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnIntermediateHashesStage(s, world.TX, true /* checkRoot */, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, world.datadir, world.QuitCh)
+						return UnwindIntermediateHashesStage(u, s, world.TX, world.tmpdir, world.QuitCh)
 					},
 				}
 			},
@@ -223,10 +233,10 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnAccountHistoryIndex(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnAccountHistoryIndex(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindAccountHistoryIndex(u, world.TX, world.QuitCh)
+						return UnwindAccountHistoryIndex(u, s, world.TX, world.QuitCh)
 					},
 				}
 			},
@@ -240,10 +250,10 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnStorageHistoryIndex(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnStorageHistoryIndex(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindStorageHistoryIndex(u, world.TX, world.QuitCh)
+						return UnwindStorageHistoryIndex(u, s, world.TX, world.QuitCh)
 					},
 				}
 			},
@@ -257,7 +267,7 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.Receipts,
 					DisabledDescription: "Enable by adding `r` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnLogIndex(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnLogIndex(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindLogIndex(u, s, world.TX, world.QuitCh)
@@ -274,10 +284,18 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.datadir, world.QuitCh)
+						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.tmpdir, world.QuitCh,
+							CallTracesStageParams{
+								CacheSize: world.cacheSize,
+								BatchSize: world.batchSize,
+							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh)
+						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh,
+							CallTracesStageParams{
+								CacheSize: world.cacheSize,
+								BatchSize: world.batchSize,
+							})
 					},
 				}
 			},
@@ -291,10 +309,10 @@ func DefaultStages() StageBuilders {
 					Disabled:            !world.storageMode.TxIndex,
 					DisabledDescription: "Enable by adding `t` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnTxLookup(s, world.TX, world.datadir, world.QuitCh)
+						return SpawnTxLookup(s, world.TX, world.tmpdir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxLookup(u, s, world.TX, world.datadir, world.QuitCh)
+						return UnwindTxLookup(u, s, world.TX, world.tmpdir, world.QuitCh)
 					},
 				}
 			},
@@ -326,6 +344,14 @@ func DefaultStages() StageBuilders {
 						if executionAt, err = s.ExecutionAt(world.TX); err != nil {
 							return err
 						}
+						logPrefix := s.state.LogPrefix()
+						log.Info(fmt.Sprintf("[%s] Update current block for the RPC API", logPrefix), "to", executionAt)
+
+						err = NotifyRpcDaemon(s.BlockNumber+1, executionAt, world.notifier, world.TX)
+						if err != nil {
+							return err
+						}
+
 						return s.DoneAndUpdate(world.TX, executionAt)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {

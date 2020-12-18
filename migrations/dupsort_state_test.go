@@ -50,7 +50,7 @@ func TestDupSortHashState(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{2}, v)
 
-	tx, err := db.Begin(context.Background())
+	tx, err := db.Begin(context.Background(), ethdb.RW)
 	require.NoError(err)
 	defer tx.Rollback()
 
@@ -58,7 +58,7 @@ func TestDupSortHashState(t *testing.T) {
 	// test low-level data layout
 	require.NoError(err)
 
-	v, err = c.SeekExact([]byte(accKey))
+	_, v, err = c.SeekExact([]byte(accKey))
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
@@ -109,12 +109,12 @@ func TestDupSortPlainState(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{2}, v)
 
-	tx, err := db.Begin(context.Background())
+	tx, err := db.Begin(context.Background(), ethdb.RW)
 	require.NoError(err)
 	defer tx.Rollback()
 
 	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.PlainStateBucket)
-	v, err = c.SeekExact([]byte(accKey))
+	_, v, err = c.SeekExact([]byte(accKey))
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 

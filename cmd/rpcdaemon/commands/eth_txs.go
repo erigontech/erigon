@@ -7,12 +7,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
-// GetTransactionByHash returns the transaction for the given hash
+// GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
@@ -26,16 +27,19 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	return newRPCTransaction(txn, blockHash, blockNumber, txIndex), nil
 }
 
-// GetTransactionByBlockHashAndIndex returns the transaction for the given block hash and index.
+// GetTransactionByBlockHashAndIndex implements eth_getTransactionByBlockHashAndIndex. Returns information about a transaction given the block's hash and a transaction index.
 func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
-	block := rawdb.ReadBlockByHash(tx, blockHash)
+	block, err := rawdb.ReadBlockByHash(tx, blockHash)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, fmt.Errorf("block %#x not found", blockHash)
 	}
@@ -48,9 +52,9 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex)), nil
 }
 
-// GetTransactionByBlockNumberAndIndex returns the transaction for the given block number and index.
+// GetTransactionByBlockNumberAndIndex implements eth_getTransactionByBlockNumberAndIndex. Returns information about a transaction given a block number and transaction index.
 func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +66,10 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	block := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, fmt.Errorf("block %d not found", blockNum)
 	}

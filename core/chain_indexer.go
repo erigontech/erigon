@@ -92,7 +92,7 @@ type ChainIndexer struct {
 	throttling time.Duration // Disk throttling to prevent a heavy upgrade from hogging resources
 
 	log  log.Logger
-	lock sync.RWMutex
+	lock sync.Mutex
 }
 
 // NewChainIndexer creates a new chain indexer to do background processing on
@@ -490,7 +490,7 @@ func (c *ChainIndexer) setValidSections(sections uint64) {
 	// Set the current number of valid sections in the database
 	var data [8]byte
 	binary.BigEndian.PutUint64(data[:], sections)
-	c.chainDb.Put(c.bucket, []byte("count"), data[:])
+	_ = c.chainDb.Put(c.bucket, []byte("count"), data[:])
 
 	// Remove any reorged sections, caching the valids in the mean time
 	for c.storedSections > sections {
@@ -519,7 +519,7 @@ func (c *ChainIndexer) setSectionHead(section uint64, hash common.Hash) {
 	var data [8]byte
 	binary.BigEndian.PutUint64(data[:], section)
 
-	c.chainDb.Put(c.sectionHeadBucket, data[:], hash.Bytes())
+	_ = c.chainDb.Put(c.sectionHeadBucket, data[:], hash.Bytes())
 }
 
 // removeSectionHead removes the reference to a processed section from the index
@@ -528,5 +528,5 @@ func (c *ChainIndexer) removeSectionHead(section uint64) {
 	var data [8]byte
 	binary.BigEndian.PutUint64(data[:], section)
 
-	c.chainDb.Delete(c.sectionHeadBucket, data[:])
+	_ = c.chainDb.Delete(c.sectionHeadBucket, data[:], nil)
 }

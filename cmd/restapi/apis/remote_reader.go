@@ -165,14 +165,14 @@ func (r *RemoteReader) ReadAccountStorage(address common.Address, incarnation ui
 	return enc, nil
 }
 
-func (r *RemoteReader) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
+func (r *RemoteReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	r.codeReads[address] = struct{}{}
 	if bytes.Equal(codeHash[:], crypto.Keccak256(nil)) {
 		return nil, nil
 	}
 	var val []byte
 	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
-		v, err := tx.Get(dbutils.CodeBucket, codeHash[:])
+		v, err := tx.GetOne(dbutils.CodeBucket, codeHash[:])
 		val = v
 		return err
 	})
@@ -182,8 +182,8 @@ func (r *RemoteReader) ReadAccountCode(address common.Address, codeHash common.H
 	return val, nil
 }
 
-func (r *RemoteReader) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
-	code, err := r.ReadAccountCode(address, codeHash)
+func (r *RemoteReader) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	code, err := r.ReadAccountCode(address, incarnation, codeHash)
 	if err != nil {
 		return 0, err
 	}

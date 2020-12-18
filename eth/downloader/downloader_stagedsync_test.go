@@ -40,12 +40,17 @@ func newStagedSyncTester() (*stagedSyncTester, func()) {
 	tester.db = ethdb.NewMemDatabase()
 	// This needs to match the genesis in the file testchain_test.go
 	tester.genesis = core.GenesisBlockForTesting(tester.db, testAddress, big.NewInt(1000000000))
-	rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty())
-	rawdb.WriteBlock(context.Background(), tester.db, testGenesis)
+	if err := rawdb.WriteTd(tester.db, tester.genesis.Hash(), tester.genesis.NumberU64(), tester.genesis.Difficulty()); err != nil {
+		panic(err)
+	}
+	if err := rawdb.WriteBlock(context.Background(), tester.db, testGenesis); err != nil {
+		panic(err)
+	}
 
 	eng := process.NewRemoteEngine(ethash.NewFaker(), params.TestChainConfig)
 
 	tester.downloader = New(uint64(StagedSync), tester.db, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode, eng)
+	tester.downloader.SetBatchSize(32*1024 /* cacheSize */, 16*1024 /* batchSize */)
 	tester.downloader.SetStagedSync(
 		stagedsync.New(
 			stagedsync.DefaultStages(),
@@ -136,7 +141,11 @@ func (st *stagedSyncTester) GetHeaderByHash(hash common.Hash) *types.Header {
 func (st *stagedSyncTester) GetTd(hash common.Hash, number uint64) *big.Int {
 	st.lock.RLock()
 	defer st.lock.RUnlock()
-	return rawdb.ReadTd(st.db, hash, number)
+	td, err := rawdb.ReadTd(st.db, hash, number)
+	if err != nil {
+		log.Error("failed ReadTd: %w", err)
+	}
+	return td
 }
 
 // HasBlock is part of the implementation of BlockChain interface defined in downloader.go
@@ -155,11 +164,13 @@ func (st *stagedSyncTester) HasHeader(hash common.Hash, number uint64) bool {
 }
 
 // InsertBodyChain is part of the implementation of BlockChain interface defined in downloader.go
-func (st *stagedSyncTester) InsertBodyChain(_ context.Context, blocks types.Blocks) (bool, error) {
+func (st *stagedSyncTester) InsertBodyChain(_ string, _ context.Context, db ethdb.Database, blocks types.Blocks) (bool, error) {
 	st.lock.Lock()
 	defer st.lock.Unlock()
 	for _, block := range blocks {
-		rawdb.WriteBlock(context.Background(), st.db, block)
+		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
+			panic(err)
+		}
 	}
 	return false, nil
 }
@@ -271,7 +282,6 @@ func (stp *stagedSyncTesterPeer) RequestReceipts(hashes []common.Hash) error {
 }
 
 func TestStagedBase(t *testing.T) {
-	core.UsePlainStateExecution = true // Stage5 unwinds do not support hashed state
 	// Same as testChainForkLightA but much shorter
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	tester, clear := newStagedSyncTester()
@@ -293,7 +303,6 @@ func TestStagedBase(t *testing.T) {
 }
 
 func TestUnwind(t *testing.T) {
-	core.UsePlainStateExecution = true // Stage5 unwinds do not support hashed state
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	tester, clear := newStagedSyncTester()
 	defer clear()

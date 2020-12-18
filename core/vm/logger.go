@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 var errTraceLimitReached = errors.New("the number of logs reached the specified limit")
@@ -55,6 +56,8 @@ type LogConfig struct {
 	DisableReturnData bool // disable return data capture
 	Debug             bool // print output during capture end
 	Limit             int  // maximum length of output, but zero means unlimited
+	// Chain overrides, can be used to execute a trace using future fork rules
+	Overrides *params.ChainConfig `json:"overrides,omitempty"`
 }
 
 //go:generate gencodec -type StructLog -field-override structLogMarshaling -out gen_structlog.go
@@ -70,6 +73,7 @@ type StructLog struct {
 	MemorySize    int                         `json:"memSize"`
 	Stack         []*big.Int                  `json:"stack"`
 	ReturnStack   []uint32                    `json:"returnStack"`
+	ReturnData    []byte                      `json:"returnData"`
 	Storage       map[common.Hash]common.Hash `json:"-"`
 	Depth         int                         `json:"depth"`
 	RefundCounter uint64                      `json:"refund"`
@@ -83,6 +87,7 @@ type structLogMarshaling struct {
 	Gas         math.HexOrDecimal64
 	GasCost     math.HexOrDecimal64
 	Memory      hexutil.Bytes
+	ReturnData  hexutil.Bytes
 	OpName      string `json:"opName"` // adds call to OpName() in MarshalJSON
 	ErrorString string `json:"error"`  // adds call to ErrorString() in MarshalJSON
 }
@@ -100,17 +105,28 @@ func (s *StructLog) ErrorString() string {
 	return ""
 }
 
+type CallType int
+
+const (
+	CALLT CallType = iota
+	CALLCODET
+	DELEGATECALLT
+	STATICCALLT
+	CREATET
+	CREATE2T
+)
+
 // Tracer is used to collect execution traces from an EVM transaction
 // execution. CaptureState is called for each step of the VM with the
 // current VM state.
 // Note that reference types are actual VM data structures; make copies
 // if you need to retain them beyond the current call.
 type Tracer interface {
-	CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error
+	CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *big.Int) error
 	CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, rData []byte, contract *Contract, depth int, err error) error
 	CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, contract *Contract, depth int, err error) error
 	CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error
-	CaptureCreate(creator common.Address, creation common.Address) error
+	CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int)
 	CaptureAccountRead(account common.Address) error
 	CaptureAccountWrite(account common.Address) error
 }
@@ -141,7 +157,7 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *StructLogger) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (l *StructLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
 
@@ -206,7 +222,7 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 		copy(rdata, rData)
 	}
 	// create a new snapshot of the EVM.
-	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, rstack, storage, depth, env.IntraBlockState.GetRefund(), err}
+	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, rstack, rdata, storage, depth, env.IntraBlockState.GetRefund(), err}
 	l.logs = append(l.logs, log)
 	return nil
 }
@@ -233,8 +249,7 @@ func (l *StructLogger) CaptureEnd(depth int, output []byte, gasUsed uint64, t ti
 	return nil
 }
 
-func (l *StructLogger) CaptureCreate(creator common.Address, creation common.Address) error {
-	return nil
+func (l *StructLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
 }
 
 func (l *StructLogger) CaptureAccountRead(account common.Address) error {
@@ -285,6 +300,10 @@ func WriteTrace(writer io.Writer, logs []StructLog) {
 				fmt.Fprintf(writer, "%x: %x\n", h, item)
 			}
 		}
+		if len(log.ReturnData) > 0 {
+			fmt.Fprintln(writer, "ReturnData:")
+			fmt.Fprint(writer, hex.Dump(log.ReturnData))
+		}
 		fmt.Fprintln(writer)
 	}
 }
@@ -318,7 +337,7 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 	return l
 }
 
-func (t *mdLogger) CaptureStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error { //nolint:interfacer
+func (t *mdLogger) CaptureStart(_ int, from common.Address, to common.Address, preimage bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int) error { //nolint:interfacer
 	if !create {
 		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
 			from.String(), to.String(),
@@ -330,8 +349,8 @@ func (t *mdLogger) CaptureStart(from common.Address, to common.Address, create b
 	}
 
 	fmt.Fprintf(t.out, `
-|  Pc   |      Op     | Cost |   Stack   |   RStack  |
-|-------|-------------|------|-----------|-----------|
+|  Pc   |      Op     | Cost |   Stack   |   RStack  |  Refund |
+|-------|-------------|------|-----------|-----------|---------|
 `)
 	return nil
 }
@@ -339,22 +358,24 @@ func (t *mdLogger) CaptureStart(from common.Address, to common.Address, create b
 func (t *mdLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rStack *stack.ReturnStack, rData []byte, contract *Contract, depth int, err error) error {
 	fmt.Fprintf(t.out, "| %4d  | %10v  |  %3d |", pc, op, cost)
 
-	if !t.cfg.DisableStack { // format stack
+	if !t.cfg.DisableStack {
+		// format stack
 		var a []string
 		for _, elem := range stack.Data {
-			a = append(a, fmt.Sprintf("%d", elem))
+			a = append(a, fmt.Sprintf("%v", elem.String()))
 		}
 		b := fmt.Sprintf("[%v]", strings.Join(a, ","))
 		fmt.Fprintf(t.out, "%10v |", b)
-	}
-	if !t.cfg.DisableStack { // format return stack
-		var a []string
+
+		// format return stack
+		a = a[:0]
 		for _, elem := range rStack.Data() {
 			a = append(a, fmt.Sprintf("%2d", elem))
 		}
-		b := fmt.Sprintf("[%v]", strings.Join(a, ","))
+		b = fmt.Sprintf("[%v]", strings.Join(a, ","))
 		fmt.Fprintf(t.out, "%10v |", b)
 	}
+	fmt.Fprintf(t.out, "%10v |", env.IntraBlockState.GetRefund())
 	fmt.Fprintln(t.out, "")
 	if err != nil {
 		fmt.Fprintf(t.out, "Error: %v\n", err)
@@ -369,12 +390,19 @@ func (t *mdLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64
 	return nil
 }
 
-func (t *mdLogger) CaptureEnd(output []byte, gasUsed uint64, tm time.Duration, err error) error {
-	fmt.Fprintf(t.out, `
-Output: 0x%x
-Consumed gas: %d
-Error: %v
-`,
+func (t *mdLogger) CaptureEnd(_ int, output []byte, gasUsed uint64, tm time.Duration, err error) error {
+	fmt.Fprintf(t.out, "\nOutput: `0x%x`\nConsumed gas: `%d`\nError: `%v`\n",
 		output, gasUsed, err)
+	return nil
+}
+
+func (t *mdLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+}
+
+func (t *mdLogger) CaptureAccountRead(account common.Address) error {
+	return nil
+}
+
+func (t *mdLogger) CaptureAccountWrite(account common.Address) error {
 	return nil
 }

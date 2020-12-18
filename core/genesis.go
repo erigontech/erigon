@@ -43,13 +43,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-var UsePlainStateExecution = false // FIXME: when we can move the hashed state forward.
-//  ^--- will be overridden when parsing flags anyway
-
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
 
-var errGenesisNoConfig = errors.New("genesis has no chain configuration")
+var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 
 // Genesis specifies the header fields, state of a genesis block. It also defines hard
 // fork switch-over blocks through the chain configuration.
@@ -161,7 +158,7 @@ func (e *GenesisMismatchError) Error() string {
 func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwrite bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 	var stateDB *state.IntraBlockState
 	if genesis != nil && genesis.Config == nil {
-		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, errGenesisNoConfig
+		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, ErrGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
 	stored, err := rawdb.ReadCanonicalHash(db, 0)
@@ -199,10 +196,16 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
 		return newcfg, common.Hash{}, nil, err
 	}
-	storedcfg := rawdb.ReadChainConfig(db, stored)
+	storedcfg, err := rawdb.ReadChainConfig(db, stored)
+	if err != nil {
+		return newcfg, common.Hash{}, nil, err
+	}
 	if overwrite || storedcfg == nil {
 		log.Warn("Found genesis block without chain config")
-		rawdb.WriteChainConfig(db, stored, newcfg)
+		err1 := rawdb.WriteChainConfig(db, stored, newcfg)
+		if err1 != nil {
+			return newcfg, common.Hash{}, nil, err1
+		}
 		return newcfg, stored, stateDB, nil
 	}
 	// Special case: don't change the existing config of a non-mainnet chain if no new
@@ -222,7 +225,9 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 	if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
 		return newcfg, stored, stateDB, compatErr
 	}
-	rawdb.WriteChainConfig(db, stored, newcfg)
+	if err := rawdb.WriteChainConfig(db, stored, newcfg); err != nil {
+		return newcfg, common.Hash{}, nil, err
+	}
 	return newcfg, stored, stateDB, nil
 }
 
@@ -238,8 +243,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.RinkebyChainConfig
 	case ghash == params.GoerliGenesisHash:
 		return params.GoerliChainConfig
-	case ghash == params.YoloV1GenesisHash:
-		return params.YoloV1ChainConfig
+	case ghash == params.YoloV2GenesisHash:
+		return params.YoloV2ChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -338,12 +343,6 @@ func (g *Genesis) CommitGenesisState(db ethdb.Database, history bool) (*types.Bl
 			return nil, statedb, fmt.Errorf("cannot write history: %v", err)
 		}
 	}
-	if !UsePlainStateExecution {
-		blockWriter = tds.DbStateWriter()
-		if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
-			return nil, statedb, fmt.Errorf("cannot write state: %v", err)
-		}
-	}
 
 	if _, err := batch.Commit(); err != nil {
 		return nil, nil, err
@@ -365,14 +364,24 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 	if err := config.CheckConfigForkOrder(); err != nil {
 		return nil, nil, err
 	}
-	rawdb.WriteTd(db, block.Hash(), block.NumberU64(), g.Difficulty)
-	rawdb.WriteBlock(context.Background(), db, block)
-	rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), nil)
-	rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
+	if err := rawdb.WriteTd(db, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
+		return nil, nil, err
+	}
+	if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
+		return nil, nil, err
+	}
+	if err := rawdb.WriteReceipts(db, block.NumberU64(), nil); err != nil {
+		return nil, nil, err
+	}
+	if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
+		return nil, nil, err
+	}
 	rawdb.WriteHeadBlockHash(db, block.Hash())
 	rawdb.WriteHeadFastBlockHash(db, block.Hash())
 	rawdb.WriteHeadHeaderHash(db, block.Hash())
-	rawdb.WriteChainConfig(db, block.Hash(), config)
+	if err := rawdb.WriteChainConfig(db, block.Hash(), config); err != nil {
+		return nil, nil, err
+	}
 	return block, statedb, nil
 }
 
@@ -457,10 +466,11 @@ func DefaultGoerliGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultYoloV1GenesisBlock() *Genesis {
+func DefaultYoloV2GenesisBlock() *Genesis {
+	// TODO: Update with yolov2 values + regenerate alloc data
 	return &Genesis{
-		Config:     params.YoloV1ChainConfig,
-		Timestamp:  0x5ed754f1,
+		Config:     params.YoloV2ChainConfig,
+		Timestamp:  0x5f91b932,
 		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000008a37866fd3627c9205a37c8685666f32ec07bb1b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x47b760,
 		Difficulty: big.NewInt(1),

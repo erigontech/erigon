@@ -155,7 +155,7 @@ type Downloader struct {
 	cancelWg   sync.WaitGroup // Make sure all fetcher goroutines have exited.
 
 	quitCh   chan struct{} // Quit channel to signal termination
-	quitLock sync.RWMutex  // Lock to prevent double closes
+	quitLock sync.Mutex    // Lock to prevent double closes
 
 	// Testing hooks
 	syncInitHook     func(uint64, uint64)  // Method to call upon initiating a new sync run
@@ -164,8 +164,9 @@ type Downloader struct {
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
 
 	storageMode ethdb.StorageMode
-	datadir     string
-	hdd         bool
+	tmpdir      string
+	cacheSize   int
+	batchSize   int
 
 	headersState    *stagedsync.StageState
 	headersUnwinder stagedsync.Unwinder
@@ -223,9 +224,6 @@ type BlockChain interface {
 
 	// InsertChain inserts a batch of blocks into the local chain.
 	InsertChain(context.Context, types.Blocks) (int, error)
-
-	// InsertBodyChain inserts a batch of blocks into the local chain, without executing them.
-	InsertBodyChain(context.Context, types.Blocks) (bool, error)
 
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []types.Receipts, uint64) (int, error)
@@ -285,12 +283,13 @@ func (d *Downloader) SetStagedSync(stagedSync *stagedsync.StagedSync) {
 }
 
 // DataDir sets the directory where download is allowed to create temporary files
-func (d *Downloader) SetDataDir(datadir string) {
-	d.datadir = datadir
+func (d *Downloader) SetTmpDir(tmpdir string) {
+	d.tmpdir = tmpdir
 }
 
-func (d *Downloader) SetHdd(hdd bool) {
-	d.hdd = hdd
+func (d *Downloader) SetBatchSize(cacheSize, batchSize int) {
+	d.cacheSize = cacheSize
+	d.batchSize = batchSize
 }
 
 func (d *Downloader) SetChainConfig(chainConfig *params.ChainConfig) {
@@ -541,7 +540,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		// but call .Begin() after hearer/body download stages
 		var tx ethdb.DbWithPendingMutations
 		if canRunCycleInOneTransaction {
-			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB)
+			tx = ethdb.NewTxDbWithoutTransaction(d.stateDB, ethdb.RW)
 			defer tx.Rollback()
 			writeDB = tx
 		} else {
@@ -560,8 +559,9 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			writeDB,
 			p.id,
 			d.storageMode,
-			d.datadir,
-			d.hdd,
+			d.tmpdir,
+			d.cacheSize,
+			d.batchSize,
 			d.quitCh,
 			fetchers,
 			txPool,
@@ -581,7 +581,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 
 			var errTx error
 			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background())
+			tx, errTx = tx.Begin(context.Background(), ethdb.RW)
 			return errTx
 		})
 		d.stagedSyncState.OnBeforeUnwind(func(id stages.SyncStage) error {
@@ -596,7 +596,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			}
 			var errTx error
 			log.Debug("Begin tx")
-			tx, errTx = tx.Begin(context.Background())
+			tx, errTx = tx.Begin(context.Background(), ethdb.RW)
 			return errTx
 		})
 		d.stagedSyncState.BeforeStageUnwind(stages.Bodies, func() error {
@@ -606,7 +606,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
 				return nil
 			}
-			log.Info("Commit blocks")
+			log.Info("Commit cycle")
 			_, errCommit := tx.Commit()
 			return errCommit
 		})
@@ -623,7 +623,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			commitStart := time.Now()
 			_, errTx := tx.Commit()
 			if errTx == nil {
-				log.Info("Commit blocks", "in", time.Since(commitStart))
+				log.Info("Commit cycle", "in", time.Since(commitStart))
 			}
 			return errTx
 		}
@@ -1695,25 +1695,31 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					}
 					var n int
 					var err error
+					var newCanonical bool
 					if mode == StagedSync {
+						if err = stagedsync.VerifyHeaders(d.stateDB, chunk, d.consensusProcess, frequency); err != nil {
+							log.Warn("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
+							return fmt.Errorf("%w: %v", errInvalidChain, err)
+						}
 						var reorg bool
 						var forkBlockNumber uint64
-						reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(d.stateDB, chunk, d.consensusProcess, frequency)
+						logPrefix := d.stagedSyncState.LogPrefix()
+						newCanonical, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
-								return fmt.Errorf("unwinding all stages to %d: %v", forkBlockNumber, err1)
+								return fmt.Errorf("%s: unwinding all stages to %d: %v", logPrefix, forkBlockNumber, err1)
 							}
 						}
 					} else {
 						n, err = d.lightchain.InsertHeaderChain(chunk, frequency)
 					}
-					if err == nil && mode == StagedSync && d.headersState != nil {
+					if err == nil && mode == StagedSync && newCanonical && d.headersState != nil {
 						if err1 := d.headersState.Update(d.stateDB, chunk[len(chunk)-1].Number.Uint64()); err1 != nil {
 							return fmt.Errorf("saving SyncStage Headers progress: %v", err1)
 						}
 					}
-					if mode != StagedSync && err != nil {
+					if mode != StagedSync || err != nil {
 						// If some headers were inserted, add them too to the rollback list
 						if (mode == FastSync || frequency > 1) && n > 0 && rollback == 0 {
 							rollback = chunk[0].Number.Uint64()
@@ -1772,20 +1778,20 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 // processFullSyncContent takes fetch results from the queue and imports them into the chain.
 func (d *Downloader) processFullSyncContent() error {
 	for {
-		results := d.queue.Results(true)
+		results := d.queue.Results("logPrefix", true)
 		if len(results) == 0 {
 			return nil
 		}
 		if d.chainInsertHook != nil {
 			d.chainInsertHook(results)
 		}
-		if _, err := d.importBlockResults(results, true /* execute */); err != nil {
+		if _, err := d.importBlockResults("logPrefix", results, true /* execute */); err != nil {
 			return err
 		}
 	}
 }
 
-func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (uint64, error) {
+func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult, execute bool) (uint64, error) {
 	// Check for any early termination requests
 	if len(results) == 0 {
 		return 0, nil
@@ -1809,11 +1815,23 @@ func (d *Downloader) importBlockResults(results []*fetchResult, execute bool) (u
 	if execute {
 		index, err = d.blockchain.InsertChain(context.Background(), blocks)
 	} else {
-		stopped, err = d.blockchain.InsertBodyChain(context.Background(), blocks)
+		tx, err2 := d.stateDB.Begin(context.Background(), ethdb.RW)
+		if err2 != nil {
+			return 0, err2
+		}
+		defer tx.Rollback()
+		stopped, err = core.InsertBodyChain(logPrefix, context.Background(), tx, blocks, true /* newCanonical */)
 		if stopped {
 			index = 0
 		} else {
 			index = len(results)
+		}
+		if err == nil {
+			if _, err1 := tx.Commit(); err1 != nil {
+				return 0, err1
+			}
+		} else {
+			tx.Rollback()
 		}
 	}
 	if err != nil {

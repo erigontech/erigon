@@ -45,11 +45,26 @@ type (
 	GetHashFunc func(uint64) common.Hash
 )
 
+// ActivePrecompiles returns the addresses of the precompiles enabled with the current
+// configuration
+func (evm *EVM) ActivePrecompiles() []common.Address {
+	switch {
+	case evm.chainRules.IsYoloV2:
+		return PrecompiledAddressesYoloV2
+	case evm.chainRules.IsIstanbul:
+		return PrecompiledAddressesIstanbul
+	case evm.chainRules.IsByzantium:
+		return PrecompiledAddressesByzantium
+	default:
+		return PrecompiledAddressesHomestead
+	}
+}
+
 func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 	var precompiles map[common.Address]PrecompiledContract
 	switch {
-	case evm.chainRules.IsYoloV1:
-		precompiles = PrecompiledContractsYoloV1
+	case evm.chainRules.IsYoloV2:
+		precompiles = PrecompiledContractsYoloV2
 	case evm.chainRules.IsIstanbul:
 		precompiles = PrecompiledContractsIstanbul
 	case evm.chainRules.IsByzantium:
@@ -222,13 +237,10 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		if !isPrecompile && evm.chainRules.IsEIP158 && value.Sign() == 0 {
 			// Calling a non existing account, don't do anything, but ping the tracer
 			if evm.vmConfig.Debug {
-				_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, false, input, gas, value.ToBig())
+				_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLT, input, gas, value.ToBig())
 				_ = evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, 0, 0, nil)
 			}
 			return nil, gas, nil
-		}
-		if evm.vmConfig.Debug {
-			evm.vmConfig.Tracer.CaptureCreate(caller.Address(), addr)
 		}
 		evm.IntraBlockState.CreateAccount(addr, false)
 	}
@@ -236,7 +248,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 
 	// Capture the tracer start/end events in debug mode
 	if evm.vmConfig.Debug {
-		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, false, input, gas, value.ToBig())
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLT, input, gas, value.ToBig())
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 			evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
@@ -301,8 +313,17 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		snapshot = evm.IntraBlockState.Snapshot()
 	)
 
+	p, isPrecompile := evm.precompile(addr)
+	// Capture the tracer start/end events in debug mode
+	if evm.vmConfig.Debug {
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLCODET, input, gas, value.ToBig())
+		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
+			evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
+		}(gas, time.Now())
+	}
+
 	// It is allowed to call precompiles, even via delegatecall
-	if p, isPrecompile := evm.precompile(addr); isPrecompile {
+	if isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
 	} else {
 		addrCopy := addr
@@ -337,8 +358,17 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	}
 	snapshot := evm.IntraBlockState.Snapshot()
 
+	p, isPrecompile := evm.precompile(addr)
+	// Capture the tracer start/end events in debug mode
+	if evm.vmConfig.Debug {
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, DELEGATECALLT, input, gas, big.NewInt(-1))
+		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
+			evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
+		}(gas, time.Now())
+	}
+
 	// It is allowed to call precompiles, even via delegatecall
-	if p, isPrecompile := evm.precompile(addr); isPrecompile {
+	if isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
 	} else {
 		addrCopy := addr
@@ -382,7 +412,16 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	// future scenarios
 	evm.IntraBlockState.AddBalance(addr, u256.Num0)
 
-	if p, isPrecompile := evm.precompile(addr); isPrecompile {
+	p, isPrecompile := evm.precompile(addr)
+	// Capture the tracer start/end events in debug mode
+	if evm.vmConfig.Debug {
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false, STATICCALLT, input, gas, big.NewInt(-2))
+		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
+			evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
+		}(gas, time.Now())
+	}
+
+	if isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
 	} else {
 		// At this point, we use a copy of address. If we don't, the go compiler will
@@ -421,7 +460,7 @@ func (c *codeAndHash) Hash() common.Hash {
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address common.Address) ([]byte, common.Address, uint64, error) {
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address common.Address, calltype CallType) ([]byte, common.Address, uint64, error) {
 	// Depth check execution. Fail if we're trying to execute above the
 	// limit.
 	if evm.depth > int(params.CallCreateDepth) {
@@ -432,7 +471,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	}
 	nonce := evm.IntraBlockState.GetNonce(caller.Address())
 	evm.IntraBlockState.SetNonce(caller.Address(), nonce+1)
-
+	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
+	// the access-list change should not be rolled back
+	if evm.chainRules.IsYoloV2 {
+		evm.IntraBlockState.AddAddressToAccessList(address)
+	}
 	// Ensure there's no existing contract already at the designated address
 	contractHash := evm.IntraBlockState.GetCodeHash(address)
 	if evm.IntraBlockState.GetNonce(address) != 0 || (contractHash != (common.Hash{}) && contractHash != emptyCodeHash) {
@@ -456,7 +499,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	}
 
 	if evm.vmConfig.Debug {
-		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), address, true, codeAndHash.code, gas, value.ToBig())
+		_ = evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value.ToBig())
 	}
 	start := time.Now()
 
@@ -501,10 +544,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.IntraBlockState.GetNonce(caller.Address()))
-	if evm.vmConfig.Debug {
-		evm.vmConfig.Tracer.CaptureCreate(caller.Address(), contractAddr)
-	}
-	return evm.create(caller, &codeAndHash{code: code}, gas, value, contractAddr)
+	return evm.create(caller, &codeAndHash{code: code}, gas, value, contractAddr, CREATET)
 }
 
 // Create2 creates a new contract using code as deployment code.
@@ -515,7 +555,7 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, value *uint2
 func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), common.Hash(salt.Bytes32()), codeAndHash.Hash().Bytes())
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr)
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2T)
 }
 
 // ChainConfig returns the environment's chain configuration

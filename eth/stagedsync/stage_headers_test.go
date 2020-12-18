@@ -5,14 +5,13 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/stretchr/testify/assert"
 )
 
 func generateFakeBlocks(from, to int) (*types.Header, []*types.Header) {
@@ -82,39 +81,36 @@ func TestInsertHeaderChainTotalDifficulty(t *testing.T) {
 
 	// prepare db so it works with our test
 	rawdb.WriteHeaderNumber(db, origin.Hash(), 0)
-	rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty)
+	if err := rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty); err != nil {
+		panic(err)
+	}
 	rawdb.WriteHeader(context.TODO(), db, origin)
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
-	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
+	err := rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
+	assert.NoError(t, err)
 
-	exit1 := make(chan struct{})
-	eng1 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit1)
-	defer common.SafeClose(exit1)
-	reorg, _, err := InsertHeaderChain(db, headers1, eng1, 0)
+	_, reorg, _, err := InsertHeaderChain("logPrefix", db, headers1)
 	assert.NoError(t, err)
 	assert.False(t, reorg)
 
-	td := rawdb.ReadTd(db, lastHeader1.Hash(), lastHeader1.Number.Uint64())
+	td, err := rawdb.ReadTd(db, lastHeader1.Hash(), lastHeader1.Number.Uint64())
+	assert.NoError(t, err)
 	assert.Equal(t, expectedTdBlock3, td)
 
-	exit2 := make(chan struct{})
-	eng2 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit2)
-	defer common.SafeClose(exit2)
-	reorg, _, err = InsertHeaderChain(db, headers2, eng2, 0)
+	_, reorg, _, err = InsertHeaderChain("logPrefix", db, headers2)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 
-	td = rawdb.ReadTd(db, lastHeader2.Hash(), lastHeader2.Number.Uint64())
+	td, err = rawdb.ReadTd(db, lastHeader2.Hash(), lastHeader2.Number.Uint64())
+	assert.NoError(t, err)
 
 	assert.Equal(t, expectedTdBlock4, td)
 
-	exit3 := make(chan struct{})
-	eng3 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit3)
-	defer common.SafeClose(exit3)
-	reorg, _, err = InsertHeaderChain(db, headers2, eng3, 0)
+	_, reorg, _, err = InsertHeaderChain("logPrefix", db, headers2)
 	assert.False(t, reorg)
 	assert.NoError(t, err)
 
-	td = rawdb.ReadTd(db, lastHeader2.Hash(), lastHeader2.Number.Uint64())
+	td, err = rawdb.ReadTd(db, lastHeader2.Hash(), lastHeader2.Number.Uint64())
+	assert.NoError(t, err)
 	assert.Equal(t, expectedTdBlock4, td)
 }

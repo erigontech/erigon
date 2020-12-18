@@ -552,7 +552,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		c.lock.RUnlock()
 	}
 	// Set the correct difficulty
-	header.Difficulty = CalcDifficulty(snap, c.signer)
+	header.Difficulty = calcDifficulty(snap, c.signer)
 
 	// Ensure the extra data has all its components
 	if len(header.Extra) < extraVanity {
@@ -685,21 +685,19 @@ func (c *Clique) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, b
 }
 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
-// that a new block should have based on the previous blocks in the chain and the
-// current signer.
+// that a new block should have:
+// * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
+// * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
 func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _, parentNumber *big.Int, parentHash, _ common.Hash) *big.Int {
 	fmt.Println("+++CalcDifficulty")
 	snap, err := c.snapshot(chain, parentNumber.Uint64(), parentHash, nil)
 	if err != nil {
 		return nil
 	}
-	return CalcDifficulty(snap, c.signer)
+	return calcDifficulty(snap, c.signer)
 }
 
-// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
-// that a new block should have based on the previous blocks in the chain and the
-// current signer.
-func CalcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
+func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
 	if snap.inturn(snap.Number+1, signer) {
 		return new(big.Int).Set(diffInTurn)
 	}

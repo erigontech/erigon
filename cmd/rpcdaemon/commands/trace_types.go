@@ -39,16 +39,16 @@ type GethTraces []*GethTrace
 // ParityTrace A trace in the desired format (Parity/OpenEtherum) See: https://openethereum.github.io/wiki/JSONRPC-trace-module
 type ParityTrace struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Action              TraceAction `json:"action"`
-	BlockHash           common.Hash `json:"blockHash"`
-	BlockNumber         uint64      `json:"blockNumber"`
-	Error               string      `json:"error,omitempty"`
-	Result              TraceResult `json:"result"`
-	Subtraces           int         `json:"subtraces"`
-	TraceAddress        []int       `json:"traceAddress"`
-	TransactionHash     common.Hash `json:"transactionHash"`
-	TransactionPosition uint64      `json:"transactionPosition"`
-	Type                string      `json:"type"`
+	Action              interface{}  `json:"action"` // Can be either CallTraceAction or CreateTraceAction
+	BlockHash           *common.Hash `json:"blockHash,omitempty"`
+	BlockNumber         *uint64      `json:"blockNumber,omitempty"`
+	Error               string       `json:"error,omitempty"`
+	Result              *TraceResult `json:"result"`
+	Subtraces           int          `json:"subtraces"`
+	TraceAddress        []int        `json:"traceAddress"`
+	TransactionHash     *common.Hash `json:"transactionHash,omitempty"`
+	TransactionPosition *uint64      `json:"transactionPosition,omitempty"`
+	Type                string       `json:"type"`
 }
 
 // ParityTraces An array of parity traces
@@ -57,27 +57,49 @@ type ParityTraces []ParityTrace
 // TraceAction A parity formatted trace action
 type TraceAction struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Author         string `json:"author,omitempty"`
-	RewardType     string `json:"rewardType,omitempty"`
-	SelfDestructed string `json:"address,omitempty"`
-	Balance        string `json:"balance,omitempty"`
-	CallType       string `json:"callType,omitempty"`
-	From           string `json:"from,omitempty"`
-	Gas            string `json:"gas,omitempty"`
-	Init           string `json:"init,omitempty"`
-	Input          string `json:"input,omitempty"`
-	RefundAddress  string `json:"refundAddress,omitempty"`
-	To             string `json:"to,omitempty"`
-	Value          string `json:"value,omitempty"`
+	Author         string         `json:"author,omitempty"`
+	RewardType     string         `json:"rewardType,omitempty"`
+	SelfDestructed string         `json:"address,omitempty"`
+	Balance        string         `json:"balance,omitempty"`
+	CallType       string         `json:"callType,omitempty"`
+	From           common.Address `json:"from"`
+	Gas            hexutil.Big    `json:"gas"`
+	Init           hexutil.Bytes  `json:"init,omitempty"`
+	Input          hexutil.Bytes  `json:"input,omitempty"`
+	RefundAddress  string         `json:"refundAddress,omitempty"`
+	To             string         `json:"to,omitempty"`
+	Value          string         `json:"value,omitempty"`
+}
+
+type CallTraceAction struct {
+	From     common.Address `json:"from"`
+	To       common.Address `json:"to"`
+	CallType string         `json:"callType"`
+	Gas      hexutil.Big    `json:"gas"`
+	Input    hexutil.Bytes  `json:"input"`
+	Value    hexutil.Big    `json:"value"`
+}
+
+type CreateTraceAction struct {
+	From  common.Address `json:"from"`
+	Gas   hexutil.Big    `json:"gas"`
+	Init  hexutil.Bytes  `json:"init"`
+	Value hexutil.Big    `json:"value"`
+}
+
+type SuicideTraceAction struct {
+	Address       common.Address `json:"address"`
+	RefundAddress common.Address `json:"refundAddress"`
+	Balance       hexutil.Big    `json:"balance"`
 }
 
 // TraceResult A parity formatted trace result
 type TraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Address string `json:"address,omitempty"`
-	Code    string `json:"code,omitempty"`
-	GasUsed string `json:"gasUsed,omitempty"`
-	Output  string `json:"output,omitempty"`
+	Address *common.Address `json:"address,omitempty"`
+	Code    hexutil.Bytes   `json:"code,omitempty"`
+	GasUsed *hexutil.Big    `json:"gasUsed"`
+	Output  hexutil.Bytes   `json:"output,omitempty"`
 }
 
 // Allows for easy printing of a geth trace for debugging
@@ -97,16 +119,16 @@ func (p GethTrace) String() string {
 // Allows for easy printing of a parity trace for debugging
 func (t ParityTrace) String() string {
 	var ret string
-	ret += fmt.Sprintf("Action.SelfDestructed: %s\n", t.Action.SelfDestructed)
-	ret += fmt.Sprintf("Action.Balance: %s\n", t.Action.Balance)
-	ret += fmt.Sprintf("Action.CallType: %s\n", t.Action.CallType)
-	ret += fmt.Sprintf("Action.From: %s\n", t.Action.From)
-	ret += fmt.Sprintf("Action.Gas: %s\n", t.Action.Gas)
-	ret += fmt.Sprintf("Action.Init: %s\n", t.Action.Init)
-	ret += fmt.Sprintf("Action.Input: %s\n", t.Action.Input)
-	ret += fmt.Sprintf("Action.RefundAddress: %s\n", t.Action.RefundAddress)
-	ret += fmt.Sprintf("Action.To: %s\n", t.Action.To)
-	ret += fmt.Sprintf("Action.Value: %s\n", t.Action.Value)
+	//ret += fmt.Sprintf("Action.SelfDestructed: %s\n", t.Action.SelfDestructed)
+	//ret += fmt.Sprintf("Action.Balance: %s\n", t.Action.Balance)
+	//ret += fmt.Sprintf("Action.CallType: %s\n", t.Action.CallType)
+	//ret += fmt.Sprintf("Action.From: %s\n", t.Action.From)
+	//ret += fmt.Sprintf("Action.Gas: %d\n", t.Action.Gas.ToInt())
+	//ret += fmt.Sprintf("Action.Init: %s\n", t.Action.Init)
+	//ret += fmt.Sprintf("Action.Input: %s\n", t.Action.Input)
+	//ret += fmt.Sprintf("Action.RefundAddress: %s\n", t.Action.RefundAddress)
+	//ret += fmt.Sprintf("Action.To: %s\n", t.Action.To)
+	//ret += fmt.Sprintf("Action.Value: %s\n", t.Action.Value)
 	ret += fmt.Sprintf("BlockHash: %v\n", t.BlockHash)
 	ret += fmt.Sprintf("BlockNumber: %d\n", t.BlockNumber)
 	ret += fmt.Sprintf("Result.Address: %s\n", t.Result.Address)
@@ -114,7 +136,7 @@ func (t ParityTrace) String() string {
 	ret += fmt.Sprintf("Result.GasUsed: %s\n", t.Result.GasUsed)
 	ret += fmt.Sprintf("Result.Output: %s\n", t.Result.Output)
 	ret += fmt.Sprintf("Subtraces: %d\n", t.Subtraces)
-	//ret += fmt.Sprintf("TraceAddress: %s\n", t.TraceAddress)
+	ret += fmt.Sprintf("TraceAddress: %v\n", t.TraceAddress)
 	ret += fmt.Sprintf("TransactionHash: %v\n", t.TransactionHash)
 	ret += fmt.Sprintf("TransactionPosition: %d\n", t.TransactionPosition)
 	ret += fmt.Sprintf("Type: %s\n", t.Type)
@@ -129,45 +151,55 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 
 	callType := strings.ToLower(gethTrace.Type)
 	if callType == "create" {
-		pt.Action.CallType = ""
-		pt.Action.From = gethTrace.From
-		pt.Action.Init = gethTrace.Input
-		pt.Result.Address = gethTrace.To
-		pt.Result.Output = ""
-		pt.Action.Value = gethTrace.Value
-		pt.Result.Code = gethTrace.Output
-		pt.Action.Gas = gethTrace.Gas
-		pt.Result.GasUsed = gethTrace.GasUsed
+		action := TraceAction{}
+		action.CallType = ""
+		action.From = common.HexToAddress(gethTrace.From)
+		action.Init = common.FromHex(gethTrace.Input)
+		to := common.HexToAddress(gethTrace.To)
+		pt.Result.Address = &to
+		action.Value = gethTrace.Value
+		pt.Result.Code = common.FromHex(gethTrace.Output)
+		if err := action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
+			panic(err)
+		}
+		pt.Result.GasUsed = new(hexutil.Big)
+		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
+			panic(err)
+		}
+		pt.Action = action
 
 	} else if callType == "selfdestruct" {
-		pt.Action.CallType = ""
-		pt.Action.Input = gethTrace.Input
-		pt.Result.Output = gethTrace.Output
-		pt.Action.Balance = gethTrace.Value
-		pt.Action.Gas = gethTrace.Gas
-		pt.Result.GasUsed = gethTrace.GasUsed
-		pt.Action.SelfDestructed = gethTrace.From
-		pt.Action.RefundAddress = gethTrace.To
-	} else {
-		pt.Action.CallType = callType
-		pt.Action.Input = gethTrace.Input
-		pt.Action.From = gethTrace.From
-		pt.Action.To = gethTrace.To
-		pt.Result.Output = gethTrace.Output
-		pt.Action.Value = gethTrace.Value
-		pt.Result.Code = "" // gethTrace.XXX
-		pt.Action.Gas = gethTrace.Gas
-		pt.Result.GasUsed = gethTrace.GasUsed
-
-		// TODO(tjayrush): This extreme hack will be removed. It is here because it's the only way I could
-		// TODO(tjayrush): get test cases to pass. Search (gasUsedHack) for related code
-		if pt.Action.Gas == "0xdeadbeef" {
-			a, _ := hexutil.DecodeUint64(pt.Action.Gas)     // 0xdeadbeef
-			b, _ := hexutil.DecodeUint64(pt.Result.GasUsed) // the tracer returns a value too big by 0xdeadbeef - trueValue
-			c := a - b                                      // trueValue
-			pt.Action.Gas = hexutil.EncodeUint64(c)
-			pt.Result.GasUsed = hexutil.EncodeUint64(0)
+		action := TraceAction{}
+		action.CallType = ""
+		action.Input = common.FromHex(gethTrace.Input)
+		pt.Result.Output = common.FromHex(gethTrace.Output)
+		action.Balance = gethTrace.Value
+		if err := action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
+			panic(err)
 		}
+		pt.Result.GasUsed = new(hexutil.Big)
+		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
+			panic(err)
+		}
+		action.SelfDestructed = gethTrace.From
+		action.RefundAddress = gethTrace.To
+		pt.Action = &action
+	} else {
+		action := TraceAction{}
+		action.CallType = callType
+		action.Input = common.FromHex(gethTrace.Input)
+		action.From = common.HexToAddress(gethTrace.From)
+		action.To = gethTrace.To
+		pt.Result.Output = common.FromHex(gethTrace.Output)
+		action.Value = gethTrace.Value
+		if err := action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
+			panic(err)
+		}
+		pt.Result.GasUsed = new(hexutil.Big)
+		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
+			panic(err)
+		}
+		pt.Action = &action
 	}
 
 	// This ugly code is here to convert Geth error messages to Parity error message. One day, when
@@ -185,17 +217,19 @@ func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash com
 		pt.Error = gethTrace.Error
 	}
 	if pt.Error != "" {
-		pt.Result.GasUsed = "0"
+		pt.Result.GasUsed = new(hexutil.Big)
 	}
 	// This ugly code is here to convert Geth error messages to Parity error message. One day, when
 	// we figure out what we want to do, it will be removed
 
-	pt.BlockHash = blockHash
-	pt.BlockNumber = blockNumber
+	pt.BlockHash = &blockHash
+	pt.BlockNumber = &blockNumber
 	pt.Subtraces = len(gethTrace.Calls)
 	pt.TraceAddress = depth
-	pt.TransactionHash = tx.Hash()
-	pt.TransactionPosition = txIndex
+	pt.TransactionHash = &common.Hash{}
+	copy(pt.TransactionHash[:], tx.Hash().Bytes())
+	pt.TransactionPosition = new(uint64)
+	*pt.TransactionPosition = txIndex
 	pt.Type = callType
 	if pt.Type == "delegatecall" || pt.Type == "staticcall" {
 		pt.Type = "call"

@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/prometheus/tsdb/fileutil"
@@ -56,6 +57,8 @@ type Node struct {
 	ws            *httpServer //
 	ipc           *ipcServer  // Stores information about the ipc http server
 	inprocHandler *rpc.Server // In-process RPC request handler to process the API requests
+
+	rpcAllowList rpc.AllowList // list of RPC methods explicitly allowed for this RPC node
 
 	databases []ethdb.Closer
 }
@@ -122,17 +125,29 @@ func New(conf *Config) (*Node, error) {
 	node.ephemKeystore = ephemeralKeystore
 
 	// Initialize the p2p server. This creates the node key and discovery databases.
-	node.server.Config.PrivateKey = node.config.NodeKey()
+	node.server.Config.PrivateKey, err = node.config.NodeKey()
+	if err != nil {
+		return nil, err
+	}
 	node.server.Config.Name = node.config.NodeName()
 	node.server.Config.Logger = node.log
 	if node.server.Config.StaticNodes == nil {
-		node.server.Config.StaticNodes = node.config.StaticNodes()
+		node.server.Config.StaticNodes, err = node.config.StaticNodes()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if node.server.Config.TrustedNodes == nil {
-		node.server.Config.TrustedNodes = node.config.TrustedNodes()
+		node.server.Config.TrustedNodes, err = node.config.TrustedNodes()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if node.server.Config.NodeDatabase == "" {
-		node.server.Config.NodeDatabase = node.config.NodeDB()
+		node.server.Config.NodeDatabase, err = node.config.NodeDB()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Configure RPC servers.
@@ -329,6 +344,11 @@ func (n *Node) closeDataDir() {
 	}
 }
 
+// SetAllowListForRPC sets granular allow list for exposed RPC methods
+func (n *Node) SetAllowListForRPC(allowList rpc.AllowList) {
+	n.rpcAllowList = allowList
+}
+
 // configureRPC is a helper method to configure all the various RPC endpoints during node
 // startup. It's not meant to be called at any time afterwards as it makes certain
 // assumptions about the state of the node.
@@ -354,7 +374,7 @@ func (n *Node) startRPC() error {
 		if err := n.http.setListenAddr(n.config.HTTPHost, n.config.HTTPPort); err != nil {
 			return err
 		}
-		if err := n.http.enableRPC(n.rpcAPIs, config); err != nil {
+		if err := n.http.enableRPC(n.rpcAPIs, config, n.rpcAllowList); err != nil {
 			return err
 		}
 	}
@@ -369,7 +389,7 @@ func (n *Node) startRPC() error {
 		if err := server.setListenAddr(n.config.WSHost, n.config.WSPort); err != nil {
 			return err
 		}
-		if err := server.enableWS(n.rpcAPIs, config); err != nil {
+		if err := server.enableWS(n.rpcAPIs, config, n.rpcAllowList); err != nil {
 			return err
 		}
 	}
@@ -544,6 +564,35 @@ func (n *Node) OpenDatabase(name string) (*ethdb.ObjectDatabase, error) {
 	return n.OpenDatabaseWithFreezer(name, 0, 0, "", "")
 }
 
+func (n *Node) ApplyMigrations(name string, tmpdir string) error {
+	if n.config.DataDir == "" {
+		return nil
+	}
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	dbPath, err := n.config.ResolvePath(name)
+	if err != nil {
+		return err
+	}
+	var kv ethdb.KV
+
+	if n.config.MDBX {
+		kv, err = ethdb.NewMDBX().Path(dbPath).Exclusive().Open()
+		if err != nil {
+			return fmt.Errorf("failed to open kv inside stack.ApplyMigrations: %w", err)
+		}
+	} else {
+		kv, err = ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Exclusive().Open()
+		if err != nil {
+			return fmt.Errorf("failed to open kv inside stack.ApplyMigrations: %w", err)
+		}
+	}
+	defer kv.Close()
+
+	return migrations.NewMigrator().Apply(ethdb.NewObjectDatabase(kv), tmpdir)
+}
+
 // OpenDatabaseWithFreezer opens an existing database with the given name (or
 // creates one if no previous can be found) from within the node's data directory,
 // also attaching a chain freezer to it that moves ancient chain data from the
@@ -563,12 +612,29 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 		fmt.Printf("Opening In-memory Database (LMDB): %s\n", name)
 		db = ethdb.NewMemDatabase()
 	} else {
-		log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR(), "maxFreelistReuse", n.config.LMDBMaxFreelistReuse)
-		kv, err := ethdb.NewLMDB().Path(n.config.ResolvePath(name)).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Open()
-		if err != nil {
-			return nil, err
+		if n.config.MDBX {
+			log.Info("Opening Database (MDBX)", "mapSize", n.config.LMDBMapSize.HR())
+			dbPath, err := n.config.ResolvePath(name)
+			if err != nil {
+				return nil, err
+			}
+			kv, err := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize).Open()
+			if err != nil {
+				return nil, err
+			}
+			db = ethdb.NewObjectDatabase(kv)
+		} else {
+			log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR(), "maxFreelistReuse", n.config.LMDBMaxFreelistReuse)
+			dbPath, err := n.config.ResolvePath(name)
+			if err != nil {
+				return nil, err
+			}
+			kv, err := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Open()
+			if err != nil {
+				return nil, err
+			}
+			db = ethdb.NewObjectDatabase(kv)
 		}
-		db = ethdb.NewObjectDatabase(kv)
 	}
 
 	n.databases = append(n.databases, db)
@@ -576,6 +642,6 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.
-func (n *Node) ResolvePath(x string) string {
+func (n *Node) ResolvePath(x string) (string, error) {
 	return n.config.ResolvePath(x)
 }

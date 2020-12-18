@@ -1,3 +1,5 @@
+//+build mdbx
+
 package main
 
 import (
@@ -5,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -21,11 +24,16 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
+	"github.com/valyala/gozstd"
+	"github.com/wcharczuk/go-chart"
+	"github.com/wcharczuk/go-chart/util"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -33,17 +41,16 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
+	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
-	"github.com/valyala/gozstd"
-	"github.com/wcharczuk/go-chart"
-	"github.com/wcharczuk/go-chart/util"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -335,6 +342,7 @@ func accountSavings(db ethdb.KV) (int, int) {
 
 func bucketStats(chaindata string) error {
 	ethDb := ethdb.MustOpen(chaindata)
+	defer ethDb.Close()
 
 	var bucketList []string
 	if err1 := ethDb.KV().View(context.Background(), func(txa ethdb.Tx) error {
@@ -348,34 +356,49 @@ func bucketStats(chaindata string) error {
 		ethDb.Close()
 		return err1
 	}
-	ethDb.Close()
-	env, err := lmdb.NewEnv()
-	if err != nil {
-		return err
-	}
-	err = env.SetMaxDBs(100)
-	if err != nil {
-		return err
-	}
-	err = env.Open(chaindata, lmdb.Readonly, 0664)
-	if err != nil {
-		return err
-	}
+
 	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
-	return env.View(func(tx *lmdb.Txn) error {
-		for _, bucket := range bucketList {
-			dbi, bucketErr := tx.OpenDBI(bucket, 0)
-			if bucketErr != nil {
-				fmt.Printf("opening bucket %s: %v\n", bucket, bucketErr)
-				continue
-			}
-			bs, statErr := tx.Stat(dbi)
-			check(statErr)
-			fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
-				bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+	switch kv := ethDb.KV().(type) {
+	case *ethdb.LmdbKV:
+		type LmdbStat interface {
+			BucketStat(name string) (*lmdb.Stat, error)
 		}
-		return nil
-	})
+		if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
+			for _, bucket := range bucketList {
+				bs, statErr := tx.(LmdbStat).BucketStat(bucket)
+				check(statErr)
+				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
+					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			}
+
+			bs, statErr := tx.(LmdbStat).BucketStat("freelist")
+			check(statErr)
+			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	case *ethdb.MdbxKV:
+		type MdbxStat interface {
+			BucketStat(name string) (*mdbx.Stat, error)
+		}
+
+		if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
+			for _, bucket := range bucketList {
+				bs, statErr := tx.(MdbxStat).BucketStat(bucket)
+				check(statErr)
+				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
+					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			}
+			bs, statErr := tx.(MdbxStat).BucketStat("freelist")
+			check(statErr)
+			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	}
+	return nil
 }
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
@@ -866,32 +889,6 @@ func printTxHashes() {
 	}
 }
 
-func relayoutKeys() {
-	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	db := ethdb.MustOpen(node.DefaultDataDir() + "/geth/chaindata")
-	defer db.Close()
-	var accountChangeSetCount, storageChangeSetCount int
-	err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.AccountChangeSetBucket)
-		for k, _, _ := c.First(); k != nil; k, _, _ = c.Next() {
-			accountChangeSetCount++
-		}
-		return nil
-	})
-	check(err)
-	err = db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.StorageChangeSetBucket)
-		for k, _, _ := c.First(); k != nil; k, _, _ = c.Next() {
-			storageChangeSetCount++
-		}
-		return nil
-	})
-	check(err)
-	fmt.Printf("Account changeset: %d\n", accountChangeSetCount)
-	fmt.Printf("Storage changeset: %d\n", storageChangeSetCount)
-	fmt.Printf("Total: %d\n", accountChangeSetCount+storageChangeSetCount)
-}
-
 func readTrie(filename string) *trie.Trie {
 	f, err := os.Open(filename)
 	check(err)
@@ -982,23 +979,19 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 	timestamp := block
 	for i := uint64(0); i < rewind; i++ {
 		var printed bool
-		encodedTS := dbutils.EncodeTimestamp(timestamp)
-		var v []byte
-		v, _ = ethDb.Get(dbutils.StorageChangeSetBucket, encodedTS)
-		if v != nil {
-			err = changeset.StorageChangeSetBytes(v).Walk(func(key, value []byte) error {
-				if bytes.HasPrefix(key, secKey) {
-					incarnation := binary.BigEndian.Uint64(key[common.HashLength : common.HashLength+common.IncarnationLength])
-					if !printed {
-						fmt.Printf("Changes for block %d\n", timestamp)
-						printed = true
-					}
-					fmt.Printf("%d %x %x\n", incarnation, key[common.HashLength+common.IncarnationLength:], value)
+		encodedTS := dbutils.EncodeBlockNumber(timestamp)
+		err = changeset.Walk(ethDb, dbutils.StorageChangeSetBucket, encodedTS, 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+			if bytes.HasPrefix(k, secKey) {
+				incarnation := binary.BigEndian.Uint64(k[common.HashLength : common.HashLength+common.IncarnationLength])
+				if !printed {
+					fmt.Printf("Changes for block %d\n", timestamp)
+					printed = true
 				}
-				return nil
-			})
-			check(err)
-		}
+				fmt.Printf("%d %x %x\n", incarnation, k[common.HashLength+common.IncarnationLength:], v)
+			}
+			return true, nil
+		})
+		check(err)
 		timestamp--
 	}
 }
@@ -1127,7 +1120,7 @@ func ValidateTxLookups2(chaindata string) {
 	log.Info("All done", "duration", time.Since(startTime))
 }
 
-func validateTxLookups2(db rawdb.DatabaseReader, startBlock uint64, interruptCh chan bool) {
+func validateTxLookups2(db ethdb.Database, startBlock uint64, interruptCh chan bool) {
 	blockNum := startBlock
 	iterations := 0
 	var interrupt bool
@@ -1298,31 +1291,23 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 
-	ts := dbutils.EncodeTimestamp(block + 1)
+	ts := dbutils.EncodeBlockNumber(block + 1)
 	accountMap := make(map[string]*accounts.Account)
-	if err := db.Walk(dbutils.AccountChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
-		timestamp, _ := dbutils.DecodeTimestamp(k)
-		if timestamp > *headNumber {
+
+	if err := changeset.Walk(db, dbutils.AccountChangeSetBucket, ts, 0, func(blockN uint64, k, v []byte) (bool, error) {
+		if blockN > *headNumber {
 			return false, nil
 		}
-		if changeset.Len(v) > 0 {
-			walker := func(kk, vv []byte) error {
-				if _, ok := accountMap[string(kk)]; !ok {
-					if len(vv) > 0 {
-						var a accounts.Account
-						if innerErr := a.DecodeForStorage(vv); innerErr != nil {
-							return innerErr
-						}
-						accountMap[string(kk)] = &a
-					} else {
-						accountMap[string(kk)] = nil
-					}
+
+		if _, ok := accountMap[string(k)]; !ok {
+			if len(v) > 0 {
+				var a accounts.Account
+				if innerErr := a.DecodeForStorage(v); innerErr != nil {
+					return false, innerErr
 				}
-				return nil
-			}
-			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			if innerErr := changeset.AccountChangeSetBytes(v).Walk(walker); innerErr != nil {
-				return false, innerErr
+				accountMap[string(k)] = &a
+			} else {
+				accountMap[string(k)] = nil
 			}
 		}
 		return true, nil
@@ -1333,22 +1318,12 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("Constructed account map", "size", len(accountMap),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	storageMap := make(map[string][]byte)
-	if err := db.Walk(dbutils.StorageChangeSetBucket, ts, 0, func(k, v []byte) (bool, error) {
-		timestamp, _ := dbutils.DecodeTimestamp(k)
-		if timestamp > *headNumber {
+	if err := changeset.Walk(db, dbutils.StorageChangeSetBucket, ts, 0, func(blockN uint64, k, v []byte) (bool, error) {
+		if blockN > *headNumber {
 			return false, nil
 		}
-		if changeset.Len(v) > 0 {
-			walker := func(kk, vv []byte) error {
-				if _, ok := storageMap[string(kk)]; !ok {
-					storageMap[string(kk)] = vv
-				}
-				return nil
-			}
-			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			if innerErr := changeset.StorageChangeSetBytes(v).Walk(walker); innerErr != nil {
-				return false, innerErr
-			}
+		if _, ok := storageMap[string(k)]; !ok {
+			storageMap[string(k)] = v
 		}
 		return true, nil
 	}); err != nil {
@@ -1456,57 +1431,33 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	fmt.Printf("stAccounts = %d, stStorage = %d\n", stAccounts, stStorage)
 	fmt.Printf("Changeset stats from %d to %d\n", block1, block2)
 	accounts := make(map[string]struct{})
-	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.PlainAccountChangeSetBucket)
-		start := dbutils.EncodeTimestamp(block1)
-		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			timestamp, _ := dbutils.DecodeTimestamp(k)
-			if timestamp >= block2 {
-				break
-			}
-			if (timestamp-block1)%100000 == 0 {
-				fmt.Printf("at the block %d for accounts, booster size: %d\n", timestamp, len(accounts))
-			}
-			if err1 := changeset.AccountChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
-				accounts[string(common.CopyBytes(kk))] = struct{}{}
-				return nil
-			}); err1 != nil {
-				return err1
-			}
+	if err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
+		if blockN >= block2 {
+			return false, nil
 		}
-		return nil
+		if (blockN-block1)%100000 == 0 {
+			fmt.Printf("at the block %d for accounts, booster size: %d\n", blockN, len(accounts))
+		}
+		accounts[string(common.CopyBytes(k))] = struct{}{}
+		return true, nil
 	}); err != nil {
 		return err
 	}
+
 	storage := make(map[string]struct{})
-	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.PlainStorageChangeSetBucket)
-		start := dbutils.EncodeTimestamp(block1)
-		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			timestamp, _ := dbutils.DecodeTimestamp(k)
-			if timestamp >= block2 {
-				break
-			}
-			if (timestamp-block1)%100000 == 0 {
-				fmt.Printf("at the block %d for storage, booster size: %d\n", timestamp, len(storage))
-			}
-			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, _ []byte) error {
-				storage[string(common.CopyBytes(kk))] = struct{}{}
-				return nil
-			}); err1 != nil {
-				return err1
-			}
+	if err := changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
+		if blockN >= block2 {
+			return false, nil
 		}
-		return nil
+		if (blockN-block1)%100000 == 0 {
+			fmt.Printf("at the block %d for accounts, booster size: %d\n", blockN, len(accounts))
+		}
+		storage[string(common.CopyBytes(k))] = struct{}{}
+		return true, nil
 	}); err != nil {
 		return err
 	}
+
 	fmt.Printf("accounts changed: %d, storage changed: %d\n", len(accounts), len(storage))
 	return nil
 }
@@ -1515,25 +1466,11 @@ func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching changesets\n")
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.PlainAccountChangeSetBucket)
-		start := dbutils.EncodeTimestamp(block)
-		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			timestamp, _ := dbutils.DecodeTimestamp(k)
-			//fmt.Printf("timestamp: %d\n", timestamp)
-			if err1 := changeset.AccountChangeSetPlainBytes(v).Walk(func(kk, vv []byte) error {
-				if bytes.Equal(kk, key) {
-					fmt.Printf("Found in block %d with value %x\n", timestamp, vv)
-				}
-				return nil
-			}); err1 != nil {
-				return err1
-			}
+	if err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
+		if bytes.Equal(k, key) {
+			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
-		return nil
+		return true, nil
 	}); err != nil {
 		return err
 	}
@@ -1544,27 +1481,15 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching storage changesets\n")
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.PlainStorageChangeSetBucket)
-		start := dbutils.EncodeTimestamp(block)
-		for k, v, err := c.Seek(start); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			timestamp, _ := dbutils.DecodeTimestamp(k)
-			if err1 := changeset.StorageChangeSetPlainBytes(v).Walk(func(kk, vv []byte) error {
-				if bytes.Equal(kk, key) {
-					fmt.Printf("Found in block %d with value %x\n", timestamp, vv)
-				}
-				return nil
-			}); err1 != nil {
-				return err1
-			}
+	if err := changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
+		if bytes.Equal(k, key) {
+			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
-		return nil
+		return true, nil
 	}); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -1670,7 +1595,7 @@ func iterateOverCode(chaindata string) error {
 func zstd(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, errBegin := db.Begin(context.Background())
+	tx, errBegin := db.Begin(context.Background(), ethdb.RW)
 	check(errBegin)
 	defer tx.Rollback()
 
@@ -1696,7 +1621,7 @@ func zstd(chaindata string) error {
 		}
 
 		storageReceipts := types.Receipts{}
-		err = cbor.Unmarshal(&storageReceipts, v)
+		err = cbor.Unmarshal(&storageReceipts, bytes.NewReader(v))
 		check(err)
 
 		samples1 = append(samples1, v)
@@ -1862,7 +1787,7 @@ func zstd(chaindata string) error {
 func benchRlp(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.Begin(context.Background())
+	tx, err := db.Begin(context.Background(), ethdb.RW)
 	check(err)
 	defer tx.Rollback()
 
@@ -1885,7 +1810,7 @@ func benchRlp(chaindata string) error {
 	var cbor_decode3 time.Duration
 	var cbor_compress time.Duration
 
-	bufSlice := make([]byte, 0, 100_000)
+	buf := bytes.NewBuffer(make([]byte, 0, 100_000))
 	compressBuf := make([]byte, 0, 100_000)
 
 	var samplesCbor [][]byte
@@ -1902,7 +1827,7 @@ func benchRlp(chaindata string) error {
 		}
 
 		receipts := types.Receipts{}
-		err = cbor.Unmarshal(&receipts, v)
+		err = cbor.Unmarshal(&receipts, bytes.NewReader(v))
 		check(err)
 
 		select {
@@ -1925,13 +1850,14 @@ func benchRlp(chaindata string) error {
 		blockNum := binary.BigEndian.Uint64(k)
 
 		storageReceipts := types.Receipts{}
-		err = cbor.Unmarshal(&storageReceipts, v)
+		err = cbor.Unmarshal(&storageReceipts, bytes.NewReader(v))
 		check(err)
 
 		t := time.Now()
-		err = cbor.Marshal(&bufSlice, storageReceipts)
+		buf.Reset()
+		err = cbor.Marshal(buf, storageReceipts)
 		cbor_encode += time.Since(t)
-		total_cbor += len(bufSlice)
+		total_cbor += buf.Len()
 		check(err)
 
 		t = time.Now()
@@ -1941,7 +1867,7 @@ func benchRlp(chaindata string) error {
 
 		storageReceipts2 := types.Receipts{}
 		t = time.Now()
-		err = cbor.Unmarshal(&storageReceipts2, bufSlice)
+		err = cbor.Unmarshal(&storageReceipts2, bytes.NewReader(buf.Bytes()))
 		cbor_decode += time.Since(t)
 		check(err)
 
@@ -1998,7 +1924,7 @@ func mint(chaindata string, block uint64) error {
 		c = tx.Cursor(dbutils.BlockBodyPrefix)
 		var prevBlock uint64
 		var burntGas uint64
-		for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
+		for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -2011,14 +1937,7 @@ func mint(chaindata string, block uint64) error {
 				fmt.Printf("Gap [%d-%d]\n", prevBlock, blockNumber-1)
 			}
 			prevBlock = blockNumber
-			bodyRlp, err := rawdb.DecompressBlockBody(v)
-			if err != nil {
-				return err
-			}
-			body := new(types.Body)
-			if err := rlp.Decode(bytes.NewReader(bodyRlp), body); err != nil {
-				return fmt.Errorf("invalid block body RLP: %w", err)
-			}
+			body := rawdb.ReadBody(db, blockHash, blockNumber)
 			header := rawdb.ReadHeader(db, blockHash, blockNumber)
 			senders := rawdb.ReadSenders(db, blockHash, blockNumber)
 			var ethSpent uint256.Int
@@ -2081,7 +2000,10 @@ func extracHeaders(chaindata string, block uint64) error {
 	fmt.Printf("Last block is %d\n", b)
 
 	hash := rawdb.ReadHeadHeaderHash(db)
-	h := rawdb.ReadHeaderByHash(db, hash)
+	h, err := rawdb.ReadHeaderByHash(db, hash)
+	if err != nil {
+		return err
+	}
 	fmt.Printf("Latest header timestamp: %d, current time: %d\n", h.Time, uint64(time.Now().Unix()))
 	return nil
 }
@@ -2089,12 +2011,14 @@ func extracHeaders(chaindata string, block uint64) error {
 func receiptSizes(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.KV().Begin(context.Background(), nil, false)
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	c := tx.Cursor(dbutils.BlockReceiptsPrefix)
+
+	fmt.Printf("bucket: %s\n", dbutils.Log)
+	c := tx.Cursor(dbutils.Log)
 	defer c.Close()
 	sizes := make(map[int]int)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
@@ -2111,7 +2035,184 @@ func receiptSizes(chaindata string) error {
 	}
 	sort.Ints(lens)
 	for _, l := range lens {
+		if sizes[l] < 100000 {
+			continue
+		}
 		fmt.Printf("%6d - %d\n", l, sizes[l])
+	}
+	return nil
+}
+
+func dupSz(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	kv := db.KV()
+	tx, err := kv.Begin(context.Background(), nil, ethdb.RO)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	c := tx.CursorDupSort(*bucket)
+	fmt.Printf("bkt: %s\n", *bucket)
+	defer c.Close()
+	total := 0
+	for k, v, err := c.First(); k != nil; k, v, err = c.NextNoDup() {
+		check(err)
+		//fmt.Printf("%x\n", k)
+		//fmt.Printf("\t%x\n", v)
+		total += len(k) + len(v) + 8
+		for k, v, err := c.NextDup(); k != nil; k, v, err = c.NextDup() {
+			check(err)
+			total += len(v)
+			//fmt.Printf("\t%x\n", v)
+		}
+	}
+	fmt.Printf("total sz: %s\n", common.StorageSize(total))
+
+	return nil
+}
+
+func indexKeySizes(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	keySizes := make(map[int]int)
+	count := 0
+	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.AccountsHistoryBucket)
+		// This is a mapping of contractAddress + incarnation => CodeHash
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			keySizes[len(k)]++
+			count++
+			if count%1000000 == 0 {
+				log.Info("Processed", "records", count)
+			}
+		}
+		return nil
+	}); err1 != nil {
+		return err1
+	}
+	fmt.Printf("Key sizes: %v\n", keySizes)
+	return nil
+}
+
+func extractBodies(chaindata string, block uint64) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.Begin(context.Background(), ethdb.RO)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	c := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockBodyPrefix)
+	defer c.Close()
+	blockEncoded := dbutils.EncodeBlockNumber(block)
+	for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		blockNumber := binary.BigEndian.Uint64(k[:8])
+		blockHash := common.BytesToHash(k[8:])
+		body := rawdb.ReadBody(db, blockHash, blockNumber)
+		b, err := rlp.EncodeToBytes(body)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Body %d %x: %x\n", blockNumber, blockHash, b)
+		header := rawdb.ReadHeader(db, blockHash, blockNumber)
+		b, err = rlp.EncodeToBytes(header)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Header %d %x: %x\n", blockNumber, blockHash, b)
+		if blockNumber > block+5 {
+			break
+		}
+	}
+	return nil
+}
+
+func applyBlock(chaindata string, hash common.Hash) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	f, err := os.Open("out.txt")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	r := bufio.NewReader(f)
+	s := bufio.NewScanner(r)
+	s.Buffer(nil, 20000000)
+	count := 0
+	var body *types.Body
+	var header *types.Header
+	for s.Scan() {
+		fields := strings.Split(s.Text(), " ")
+		h := common.HexToHash(fields[2][:64])
+		if h != hash {
+			continue
+		}
+		switch fields[0] {
+		case "Body":
+			if err = rlp.DecodeBytes(common.FromHex(fields[3]), &body); err != nil {
+				return nil
+			}
+		case "Header":
+			if err = rlp.DecodeBytes(common.FromHex(fields[3]), &header); err != nil {
+				return nil
+			}
+		}
+		count++
+	}
+	if s.Err() != nil {
+		return s.Err()
+	}
+	fmt.Printf("Lines: %d\n", count)
+	if body == nil {
+		fmt.Printf("block body with given hash %x not found\n", hash)
+		return nil
+	}
+	if header == nil {
+		fmt.Printf("header with given hash not found\n")
+		return nil
+	}
+	block := types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
+	fmt.Printf("Formed block %d %x\n", block.NumberU64(), block.Hash())
+
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+
+	if _, err = stagedsync.InsertBlockInStages(db, params.MainnetChainConfig, &vm.Config{}, eng, block, true /* checkRoot */); err != nil {
+		return err
+	}
+	if err = rawdb.WriteCanonicalHash(db, hash, block.NumberU64()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func fixUnwind(chaindata string) error {
+	contractAddr := common.HexToAddress("0x577a32aa9c40cf4266e49fc1e44c749c356309bd")
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+	i, err := db.Get(dbutils.IncarnationMapBucket, contractAddr[:])
+	if err != nil {
+		if errors.Is(err, ethdb.ErrKeyNotFound) {
+			fmt.Print("Not found\n")
+			var b [8]byte
+			binary.BigEndian.PutUint64(b[:], 1)
+			if err = db.Put(dbutils.IncarnationMapBucket, contractAddr[:], b[:]); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	} else {
+		fmt.Printf("Inc: %x\n", i)
 	}
 	return nil
 }
@@ -2119,7 +2220,7 @@ func receiptSizes(chaindata string) error {
 func snapSizes(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.KV().Begin(context.Background(), nil, false)
+	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RO)
 	if err != nil {
 		return err
 	}
@@ -2127,16 +2228,27 @@ func snapSizes(chaindata string) error {
 	c := tx.Cursor(dbutils.CliqueBucket)
 	defer c.Close()
 	sizes := make(map[int]int)
+	differentValues := make(map[string]struct{})
 	var total uint64
+	var i int
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
 		sizes[len(v)]++
+		differentValues[string(v)] = struct{}{}
 		total += uint64(len(v) + len(k))
+
+		if len(v) == 698 {
+			if i > 20 {
+				break
+			}
+			fmt.Println(v)
+			i++
+		}
 	}
 	var lens = make([]int, len(sizes))
-	i := 0
+	i = 0
 	for l := range sizes {
 		lens[i] = l
 		i++
@@ -2145,7 +2257,9 @@ func snapSizes(chaindata string) error {
 	for _, l := range lens {
 		fmt.Printf("%6d - %d\n", l, sizes[l])
 	}
+	fmt.Printf("Different keys %d\n", len(differentValues))
 	fmt.Printf("Total size: %d bytes\n", total)
+
 	size, err := tx.BucketSize(dbutils.CliqueBucket)
 	fmt.Printf("Total bucket size: %d bytes: %v\n", size, err)
 	return nil
@@ -2311,6 +2425,42 @@ func main() {
 	}
 	if *action == "receiptSizes" {
 		if err := receiptSizes(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "dupSz" {
+		if err := dupSz(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "defrag" {
+		if err := defrag(); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "textInfo" {
+		sb := strings.Builder{}
+		if err := textInfo(*chaindata, &sb); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "indexKeySizes" {
+		if err := indexKeySizes(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "extractBodies" {
+		if err := extractBodies(*chaindata, uint64(*block)); err != nil {
+			fmt.Printf("Error:%v\n", err)
+		}
+	}
+	if *action == "applyBlock" {
+		if err := applyBlock(*chaindata, common.HexToHash(*hash)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "fixUnwind" {
+		if err := fixUnwind(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

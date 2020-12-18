@@ -11,9 +11,11 @@ Welcome to Turbo Geth's documentation!
 
    installation
    types
-   rpc/index
    rpc/tutorial
    stagedsync
+   snappy
+   etl
+   rpc/index
 
 Indices and tables
 ==================

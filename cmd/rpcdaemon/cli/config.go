@@ -12,24 +12,28 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
 
 type Flags struct {
-	PrivateApiAddr    string
-	Chaindata         string
-	HttpListenAddress string
-	TLSCertfile       string
-	TLSCACert         string
-	TLSKeyFile        string
-	HttpPort          int
-	HttpCORSDomain    []string
-	HttpVirtualHost   []string
-	API               []string
-	Gascap            uint64
-	MaxTraces         uint64
-	TraceType         string
-	WebsocketEnabled  bool
+	PrivateApiAddr       string
+	Chaindata            string
+	SnapshotDir          string
+	SnapshotMode         string
+	HttpListenAddress    string
+	TLSCertfile          string
+	TLSCACert            string
+	TLSKeyFile           string
+	HttpPort             int
+	HttpCORSDomain       []string
+	HttpVirtualHost      []string
+	API                  []string
+	Gascap               uint64
+	MaxTraces            uint64
+	TraceType            string
+	WebsocketEnabled     bool
+	RpcAllowListFilePath string
 }
 
 var rootCmd = &cobra.Command{
@@ -53,6 +57,13 @@ func RootCommand() (*cobra.Command, *Flags) {
 	cfg := &Flags{}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
+	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshotDir", "", "path to snapshot dir(only for chaindata mode)")
+	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotMode, "snapshot-mode", "", `Configures the storage mode of the app(only for chaindata mode):
+* h - use headers snapshot
+* b - use bodies snapshot
+* s - use state snapshot
+* r - use receipts snapshot
+`)
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
@@ -65,24 +76,40 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
 	rootCmd.PersistentFlags().StringVar(&cfg.TraceType, "trace.type", "parity", "Specify the type of tracing [geth|parity*] (experimental)")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets")
+	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, "rpc.accessList", "", "Specify granular (method-by-method) API allowlist")
+
+	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
+		panic(err)
+	}
 
 	return rootCmd, cfg
 }
 
 func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 	var db ethdb.KV
-	var txPool ethdb.Backend
+	var ethBackend ethdb.Backend
 	var err error
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.Chaindata != "" {
-		if database, errOpen := ethdb.Open(cfg.Chaindata); errOpen == nil {
+		if database, errOpen := ethdb.Open(cfg.Chaindata, true); errOpen == nil {
 			db = database.KV()
 		} else {
 			err = errOpen
 		}
+		if cfg.SnapshotMode != "" {
+			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
+			if innerErr != nil {
+				return nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
+			}
+			kv, innerErr := snapshotsync.WrapBySnapshots(db, cfg.SnapshotDir, mode)
+			if innerErr != nil {
+				return nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
+			}
+			db = kv
+		}
 	} else if cfg.PrivateApiAddr != "" {
-		db, txPool, err = ethdb.NewRemote2().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+		db, ethBackend, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
 		if err != nil {
 			return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
 		}
@@ -94,7 +121,7 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 		return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
 	}
 
-	return db, txPool, err
+	return db, ethBackend, err
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
@@ -102,11 +129,16 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 
 	srv := rpc.NewServer()
+
+	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
+	if err != nil {
+		return err
+	}
+	srv.SetAllowList(allowListForRPC)
+
 	if err := node.RegisterApisFromWhitelist(rpcAPI, cfg.API, srv, false); err != nil {
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
-
-	var err error
 
 	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost)
 	var wsHandler http.Handler
@@ -126,6 +158,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
 
+	// TODO(tjayrush): remove TraceType
 	if cfg.TraceType != "parity" {
 		log.Info("Tracing output type: ", cfg.TraceType)
 	}

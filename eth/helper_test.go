@@ -20,7 +20,6 @@
 package eth
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"fmt"
@@ -40,6 +39,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -87,7 +87,7 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 		return nil, nil, fmt.Errorf("generate chain: %w", err)
 	}
 
-	if _, err = blockchain.InsertChain(context.Background(), chain); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain, true /* checkRoot */); err != nil {
 		return nil, nil, err
 	}
 	cht := &params.TrustedCheckpoint{}

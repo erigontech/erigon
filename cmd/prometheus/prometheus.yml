@@ -1,31 +1,28 @@
 global:
   scrape_interval: 5s
-  scrape_timeout: 5s
+  scrape_timeout: 3s
   evaluation_interval: 5s
 
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: []
-      scheme: http
-      timeout: 5s
-
 scrape_configs:
-  - job_name: turbo-geth # example, how to connect prometheus to geth runned by docker-compose
+  - job_name: turbo-geth # example, how to connect prometheus to TG
     metrics_path: /debug/metrics/prometheus
     scheme: http
     static_configs:
       - targets:
-          - turbo-geth:6060
+          - turbo-geth:6060 # If TG runned by default docker-compose, then it's available on `turbo-geth` host.
           - turbo-geth:6061
           - turbo-geth:6062
           - host.docker.internal:6060 # this is how docker-for-mac allow to access host machine
           - host.docker.internal:6061
           - host.docker.internal:6062
+          - 192.168.255.134:6060
+          - 192.168.255.134:6061
+          - 192.168.255.134:6062
           - 192.168.255.138:6060
           - 192.168.255.138:6061
+          - 192.168.255.138:6062
 
-  - job_name: turbo-geth2
+  - job_name: turbo-geth2 # this job collecting metrics in OpenMetrics format
     metrics_path: /debug/metrics/prometheus2
     scheme: http
     static_configs:
@@ -36,5 +33,9 @@ scrape_configs:
           - host.docker.internal:6060
           - host.docker.internal:6061
           - host.docker.internal:6062
+          - 192.168.255.134:6060
+          - 192.168.255.134:6061
+          - 192.168.255.134:6062
           - 192.168.255.138:6060
           - 192.168.255.138:6061
+          - 192.168.255.138:6062

@@ -86,6 +86,7 @@ type ProtocolManager struct {
 	eventMux      *event.TypeMux
 	txsCh         chan core.NewTxsEvent
 	txsSub        event.Subscription
+	txsSubMu      sync.RWMutex
 	minedBlockSub *event.TypeMuxSubscription
 
 	whitelist map[uint64]common.Hash
@@ -102,8 +103,9 @@ type ProtocolManager struct {
 	broadcastTxAnnouncesOnly bool // Testing field, disable transaction propagation
 
 	mode          downloader.SyncMode // Sync mode passed from the command line
-	datadir       string
-	hdd           bool
+	tmpdir        string
+	cacheSize     int
+	batchSize     int
 	currentHeight uint64 // Atomic variable to contain chain height
 }
 
@@ -165,17 +167,18 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 	return manager, nil
 }
 
-func (pm *ProtocolManager) SetDataDir(datadir string) {
-	pm.datadir = datadir
+func (pm *ProtocolManager) SetTmpDir(tmpdir string) {
+	pm.tmpdir = tmpdir
 	if pm.downloader != nil {
-		pm.downloader.SetDataDir(datadir)
+		pm.downloader.SetTmpDir(tmpdir)
 	}
 }
 
-func (pm *ProtocolManager) SetHdd(hdd bool) {
-	pm.hdd = hdd
+func (pm *ProtocolManager) SetBatchSize(cacheSize, batchSize int) {
+	pm.cacheSize = cacheSize
+	pm.batchSize = batchSize
 	if pm.downloader != nil {
-		pm.downloader.SetHdd(hdd)
+		pm.downloader.SetBatchSize(cacheSize, batchSize)
 	}
 }
 
@@ -189,8 +192,8 @@ func initPm(manager *ProtocolManager, engine *process.RemoteEngine, chainConfig 
 		manager.downloader.Cancel()
 	}
 	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm, engine)
-	manager.downloader.SetDataDir(manager.datadir)
-	manager.downloader.SetHdd(manager.hdd)
+	manager.downloader.SetTmpDir(manager.tmpdir)
+	manager.downloader.SetBatchSize(manager.cacheSize, manager.batchSize)
 	manager.downloader.SetStagedSync(manager.stagedSync)
 
 	// Construct the fetcher (short sync)
@@ -342,20 +345,28 @@ func (pm *ProtocolManager) StartTxPool() error {
 	}
 	pm.txFetcher = fetcher.NewTxFetcher(pm.txpool.Has, pm.txpool.AddRemotes, fetchTx)
 
-	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
+	if pm.txsCh == nil {
+		pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
+	}
+	pm.txsSubMu.Lock()
 	pm.txsSub = pm.txpool.SubscribeNewTxsEvent(pm.txsCh)
 	if pm.txsSub != nil {
 		pm.wg.Add(1)
 		go pm.txBroadcastLoop()
 	}
+	pm.txsSubMu.Unlock()
 
 	pm.txFetcher.Start()
 	return nil
 }
 
 func (pm *ProtocolManager) StopTxPool() {
-	if pm.txsSub != nil {
+	pm.txsSubMu.RLock()
+	ok := pm.txsSub != nil
+	pm.txsSubMu.RUnlock()
+	if ok {
 		pm.txsSub.Unsubscribe() // quits txBroadcastLoop
+		pm.txFetcher.Stop()
 	}
 }
 
@@ -422,7 +433,7 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	// Register the peer locally
 	if err := pm.peers.Register(p, pm.removePeer); err != nil {
 		p.Log().Error("Ethereum peer registration failed", "err", err)
-		p.HandshakeOrderMux.Lock()
+		p.HandshakeOrderMux.Unlock()
 		return err
 	}
 	defer pm.removePeer(p.id)
@@ -443,15 +454,17 @@ func (pm *ProtocolManager) handle(p *peer) error {
 		return err
 	}
 
+	// Allow to handle transaction ordering
+	// Unlocking needs to happen before we start waiting for the response to the peer head hash
+	// Otherwise, if the peer does not response, it will eventually fill up the tx broadcast
+	// channels and the whole system will block
+	p.HandshakeOrderMux.Unlock()
+
 	// Handle one message to prevent two peers deadlocking each other
 	if err := pm.handleMsg(p); err != nil {
 		p.Log().Debug("Ethereum message handling failed", "err", err)
-		p.HandshakeOrderMux.Unlock()
 		return err
 	}
-
-	// Allow to handle transaction ordering
-	p.HandshakeOrderMux.Unlock()
 
 	pm.syncTransactions(p)
 
@@ -1131,10 +1144,16 @@ func (pm *ProtocolManager) txBroadcastLoop() {
 			pm.BroadcastTransactions(event.Txs, true)  // First propagate transactions to peers
 			pm.BroadcastTransactions(event.Txs, false) // Only then announce to the rest
 
-		case <-pm.txsSub.Err():
+		case <-pm.txsSubErr():
 			return
 		}
 	}
+}
+
+func (pm *ProtocolManager) txsSubErr() <-chan error {
+	pm.txsSubMu.RLock()
+	defer pm.txsSubMu.RUnlock()
+	return pm.txsSub.Err()
 }
 
 // NodeInfo represents a short summary of the Ethereum sub-protocol metadata

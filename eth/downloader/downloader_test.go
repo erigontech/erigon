@@ -305,7 +305,7 @@ func (dl *downloadTester) InsertHeaderChain(headers []*types.Header, checkFreq i
 	return len(headers), nil
 }
 
-func (dl *downloadTester) InsertBodyChain(_ context.Context, blocks types.Blocks) (bool, error) {
+func (dl *downloadTester) InsertBodyChain(_ string, _ context.Context, _ ethdb.Database, blocks types.Blocks) (bool, error) {
 	return false, nil
 }
 
@@ -455,7 +455,6 @@ func (dl *downloadTester) Stop() {
 type downloadTesterPeer struct {
 	dl            *downloadTester
 	id            string
-	lock          sync.RWMutex
 	chain         *testChain
 	missingStates map[common.Hash]bool // State entries that fast sync should not return
 }
@@ -1513,7 +1512,7 @@ func TestRemoteHeaderRequestSpan(t *testing.T) {
 		{15000, 13006,
 			[]int{14823, 14839, 14855, 14871, 14887, 14903, 14919, 14935, 14951, 14967, 14983, 14999},
 		},
-		//Remote is pretty close to us. We don't have to fetch as many
+		// Remote is pretty close to us. We don't have to fetch as many
 		{1200, 1150,
 			[]int{1149, 1154, 1159, 1164, 1169, 1174, 1179, 1184, 1189, 1194, 1199},
 		},

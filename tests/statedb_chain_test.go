@@ -17,9 +17,7 @@
 package tests
 
 import (
-	"context"
 	"math/big"
-	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -28,11 +26,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/tests/contracts"
@@ -48,11 +48,13 @@ func TestSelfDestructReceive(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:        big.NewInt(1),
-				HomesteadBlock: new(big.Int),
-				EIP150Block:    new(big.Int),
-				EIP155Block:    new(big.Int),
-				EIP158Block:    big.NewInt(1),
+				ChainID:             big.NewInt(1),
+				HomesteadBlock:      new(big.Int),
+				ByzantiumBlock:      new(big.Int),
+				ConstantinopleBlock: new(big.Int),
+				EIP150Block:         new(big.Int),
+				EIP155Block:         new(big.Int),
+				EIP158Block:         big.NewInt(0),
 			},
 			Alloc: core.GenesisAlloc{
 				address: {Balance: funds},
@@ -66,14 +68,6 @@ func TestSelfDestructReceive(t *testing.T) {
 	defer genesisDB.Close()
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txCacher.Close()
-
-	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -81,6 +75,7 @@ func TestSelfDestructReceive(t *testing.T) {
 
 	var contractAddress common.Address
 	var selfDestructorContract *contracts.SelfDestructor
+	var err error
 
 	// There are two blocks
 	// First block deploys a contract, then makes it self-destruct, and then sends 1 wei to the address of the contract,
@@ -112,7 +107,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -121,22 +116,15 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
-
-	// Reload blockchain from the database, then inserting an empty block (3) will cause rebuilding of the trie
-	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain1.Stop()
-
-	blockchain1.EnableReceipts(true)
 
 	// BLOCK 2
-	if _, err := blockchain1.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database

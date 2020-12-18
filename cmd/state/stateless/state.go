@@ -7,35 +7,25 @@ import (
 	"encoding/binary"
 	"encoding/csv"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"math/big"
 	"os"
-	"os/signal"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/cbor"
 	"github.com/ledgerwatch/turbo-geth/ethdb/typedcursor"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
@@ -132,7 +122,7 @@ func commit(k []byte, tx ethdb.Tx, data interface{}) {
 }
 
 func restore(k []byte, tx ethdb.Tx, data interface{}) {
-	v, err := tx.Cursor(ReportsProgressBucket).SeekExact(k)
+	_, v, err := tx.Cursor(ReportsProgressBucket).SeekExact(k)
 	if err != nil {
 		panic(err)
 	}
@@ -181,6 +171,11 @@ func (r *StateGrowth1Reporter) interrupt(ctx context.Context, i int, startTime t
 }
 
 func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
+	tx, err2 := r.remoteDB.Begin(ctx, nil, ethdb.RO)
+	if err2 != nil {
+		panic(err2)
+	}
+	defer tx.Rollback()
 	startTime := time.Now()
 
 	var i int
@@ -194,62 +189,59 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 		}
 	}
 
-	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		var lastAddress []byte
-		var lastTimestamp uint64
-		cs := tx.Cursor(dbutils.PlainStateBucket).Prefetch(CursorBatchSize)
-		sk, _, serr := cs.First()
-		if serr != nil {
-			return serr
+	var lastAddress []byte
+	_ = lastAddress
+	var lastTimestamp uint64
+	cs := tx.Cursor(dbutils.PlainStateBucket).Prefetch(CursorBatchSize)
+	sk, _, serr := cs.First()
+	if serr != nil {
+		panic(serr)
+	}
+	c := tx.Cursor(dbutils.AccountsHistoryBucket).Prefetch(CursorBatchSize)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			panic(err)
 		}
-		c := tx.Cursor(dbutils.AccountsHistoryBucket).Prefetch(CursorBatchSize)
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			address := k[:common.AddressLength]
-			hi := dbutils.WrapHistoryIndex(v)
-			blockNums, created, err1 := hi.Decode()
-			if err1 != nil {
-				return err1
-			}
-			if created[0] {
-				if bytes.Equal(address, lastAddress) {
-					r.CreationsByBlock[lastTimestamp]--
+		address := k[:common.AddressLength]
+		hi := roaring.New()
+		if _, err1 := hi.FromBuffer(v); err1 != nil {
+			panic(err1)
+		}
+		blockNums := hi.ToArray()
+		// TODO: there is no more index for creations
+		//if created[0] {
+		//	if bytes.Equal(address, lastAddress) {
+		//		r.CreationsByBlock[lastTimestamp]--
+		//	}
+		//}
+		//for i, timestamp := range blockNums {
+		//	if created[i] {
+		//		r.CreationsByBlock[timestamp]++
+		//		if i > 0 {
+		//			r.CreationsByBlock[blockNums[i-1]]--
+		//		}
+		//	}
+		//}
+		if binary.BigEndian.Uint64(k[common.AddressLength:]) == 0xffffffffffffffff {
+			for ; sk != nil && bytes.Compare(sk, address) < 0; sk, _, serr = cs.Next() {
+				if serr != nil {
+					panic(serr)
 				}
 			}
-			for i, timestamp := range blockNums {
-				if created[i] {
-					r.CreationsByBlock[timestamp]++
-					if i > 0 {
-						r.CreationsByBlock[blockNums[i-1]]--
-					}
-				}
+			if !bytes.Equal(sk, address) {
+				r.CreationsByBlock[uint64(blockNums[len(blockNums)-1])]--
 			}
-			if binary.BigEndian.Uint64(k[common.AddressLength:]) == 0xffffffffffffffff {
-				for ; sk != nil && bytes.Compare(sk, address) < 0; sk, _, serr = cs.Next() {
-					if serr != nil {
-						return serr
-					}
-				}
-				if !bytes.Equal(sk, address) {
-					r.CreationsByBlock[blockNums[len(blockNums)-1]]--
-				}
-			}
-			i++
-			if i%100000 == 0 {
-				fmt.Printf("Processed %d account history records\n", i)
-			}
-			lastAddress = address
-			lastTimestamp = blockNums[len(blockNums)-1]
+		}
+		i++
+		if i%100000 == 0 {
+			fmt.Printf("Processed %d account history records\n", i)
+		}
+		lastAddress = address
+		lastTimestamp = uint64(blockNums[len(blockNums)-1])
 
-			if lastTimestamp+1 > r.MaxTimestamp {
-				r.MaxTimestamp = lastTimestamp + 1
-			}
+		if lastTimestamp+1 > r.MaxTimestamp {
+			r.MaxTimestamp = lastTimestamp + 1
 		}
-		return nil
-	}); err != nil {
-		check(err)
 	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
@@ -276,6 +268,8 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 		cumulative += tsi.values[i]
 		fmt.Fprintf(w, "%d, %d, %d\n", tsi.timestamps[i], tsi.values[i], cumulative)
 	}
+	_ = lastAddress
+	_ = lastTimestamp
 }
 
 type StateGrowth2Reporter struct {
@@ -314,78 +308,81 @@ func (r *StateGrowth2Reporter) interrupt(ctx context.Context, i int, startTime t
 }
 
 func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
+	tx, err2 := r.remoteDB.Begin(context.Background(), nil, ethdb.RO)
+	if err2 != nil {
+		panic(err2)
+	}
+	defer tx.Rollback()
 	startTime := time.Now()
 
 	var i int
-	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		var lastAddress []byte
-		var lastLocation []byte
-		var lastTimestamp uint64
-		cs := tx.Cursor(dbutils.PlainStateBucket).Prefetch(CursorBatchSize)
-		sk, _, serr := cs.First()
-		if serr != nil {
-			return serr
+	var lastAddress []byte
+	var lastLocation []byte
+	_ = lastAddress
+	_ = lastLocation
+	var lastTimestamp uint64
+	cs := tx.Cursor(dbutils.PlainStateBucket).Prefetch(CursorBatchSize)
+	sk, _, serr := cs.First()
+	if serr != nil {
+		panic(serr)
+	}
+	c := tx.Cursor(dbutils.StorageHistoryBucket).Prefetch(CursorBatchSize)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			panic(err)
 		}
-		c := tx.Cursor(dbutils.StorageHistoryBucket).Prefetch(CursorBatchSize)
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			address := k[:common.AddressLength]
-			location := k[common.AddressLength : common.AddressLength+common.HashLength]
-			hi := dbutils.WrapHistoryIndex(v)
-			blockNums, created, err1 := hi.Decode()
-			if err1 != nil {
-				return err1
-			}
-			if created[0] {
-				if bytes.Equal(address, lastAddress) || bytes.Equal(location, lastLocation) {
-					r.CreationsByBlock[lastTimestamp]--
+		address := k[:common.AddressLength]
+		location := k[common.AddressLength : common.AddressLength+common.HashLength]
+		hi := roaring.New()
+		if _, err1 := hi.FromBuffer(v); err1 != nil {
+			panic(err1)
+		}
+		blockNums := hi.ToArray()
+		// TODO: there is no more index for creations
+		//if created[0] {
+		//	if bytes.Equal(address, lastAddress) || bytes.Equal(location, lastLocation) {
+		//		r.CreationsByBlock[lastTimestamp]--
+		//	}
+		//}
+		//for i, timestamp := range blockNums {
+		//	if created[i] {
+		//		r.CreationsByBlock[timestamp]++
+		//		if i > 0 {
+		//			r.CreationsByBlock[blockNums[i-1]]--
+		//		}
+		//	}
+		//}
+		if binary.BigEndian.Uint64(k[common.AddressLength+common.HashLength:]) == 0xffffffffffffffff {
+			var aCmp, lCmp int
+			for ; sk != nil; sk, _, serr = cs.Next() {
+				if serr != nil {
+					panic(serr)
+				}
+				sAddress := sk[:common.AddressLength]
+				var sLocation []byte
+				if len(sk) >= common.AddressLength+common.IncarnationLength {
+					sLocation = sk[common.AddressLength+common.IncarnationLength:]
+				}
+				aCmp = bytes.Compare(sAddress, address)
+				lCmp = bytes.Compare(sLocation, location)
+				if aCmp > 0 || (aCmp == 0 && lCmp >= 0) {
+					break
 				}
 			}
-			for i, timestamp := range blockNums {
-				if created[i] {
-					r.CreationsByBlock[timestamp]++
-					if i > 0 {
-						r.CreationsByBlock[blockNums[i-1]]--
-					}
-				}
-			}
-			if binary.BigEndian.Uint64(k[common.AddressLength+common.HashLength:]) == 0xffffffffffffffff {
-				var aCmp, lCmp int
-				for ; sk != nil; sk, _, serr = cs.Next() {
-					if serr != nil {
-						return serr
-					}
-					sAddress := sk[:common.AddressLength]
-					var sLocation []byte
-					if len(sk) >= common.AddressLength+common.IncarnationLength {
-						sLocation = sk[common.AddressLength+common.IncarnationLength:]
-					}
-					aCmp = bytes.Compare(sAddress, address)
-					lCmp = bytes.Compare(sLocation, location)
-					if aCmp > 0 || (aCmp == 0 && lCmp >= 0) {
-						break
-					}
-				}
-				if aCmp != 0 || lCmp != 0 {
-					r.CreationsByBlock[blockNums[len(blockNums)-1]]--
-				}
-			}
-			i++
-			if i%100000 == 0 {
-				fmt.Printf("Processed %d storage history records\n", i)
-			}
-			lastAddress = address
-			lastLocation = location
-			lastTimestamp = blockNums[len(blockNums)-1]
-			if lastTimestamp+1 > r.MaxTimestamp {
-				r.MaxTimestamp = lastTimestamp + 1
+			if aCmp != 0 || lCmp != 0 {
+				r.CreationsByBlock[uint64(blockNums[len(blockNums)-1])]--
 			}
 		}
-		return nil
-	}); err != nil {
-		check(err)
+		i++
+		if i%100000 == 0 {
+			fmt.Printf("Processed %d storage history records\n", i)
+		}
+		lastAddress = address
+		lastLocation = location
+		lastTimestamp = uint64(blockNums[len(blockNums)-1])
+		if lastTimestamp+1 > r.MaxTimestamp {
+			r.MaxTimestamp = lastTimestamp + 1
+		}
 	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
@@ -414,6 +411,8 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	}
 
 	debug.PrintMemStats(true)
+	_ = lastAddress
+	_ = lastLocation
 }
 
 type GasLimitReporter struct {
@@ -435,7 +434,7 @@ func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB ethdb.K
 	var err error
 	var localTx ethdb.Tx
 
-	if localTx, err = localDB.Begin(ctx, nil, true); err != nil {
+	if localTx, err = localDB.Begin(ctx, nil, ethdb.RW); err != nil {
 		panic(err)
 	}
 
@@ -450,7 +449,7 @@ func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB ethdb.K
 		if err = localTx.Commit(ctx); err != nil {
 			panic(err)
 		}
-		if localTx, err = localDB.Begin(ctx, nil, true); err != nil {
+		if localTx, err = localDB.Begin(ctx, nil, ethdb.RW); err != nil {
 			panic(err)
 		}
 
@@ -1067,100 +1066,6 @@ func stateGrowthChart5() {
 	check(err)
 }
 
-type CreationTracer struct {
-	w io.Writer
-}
-
-func NewCreationTracer(w io.Writer) CreationTracer {
-	return CreationTracer{w: w}
-}
-
-func (ct CreationTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
-	return nil
-}
-func (ct CreationTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
-	return nil
-}
-func (ct CreationTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, _ *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
-	return nil
-}
-func (ct CreationTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
-	return nil
-}
-func (ct CreationTracer) CaptureCreate(creator common.Address, creation common.Address) error {
-	_, err := fmt.Fprintf(ct.w, "%x,%x\n", creation, creator)
-	return err
-}
-func (ct CreationTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-func (ct CreationTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}
-
-//nolint:deadcode,unused
-func makeCreators(blockNum uint64) {
-	sigs := make(chan os.Signal, 1)
-	interruptCh := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigs
-		interruptCh <- true
-	}()
-
-	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb := ethdb.MustOpen("/Volumes/tb41/turbo-geth/geth/chaindata")
-	//ethDb := ethdb.MustOpen("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	defer ethDb.Close()
-	ethTx, err1 := ethDb.KV().Begin(context.Background(), nil, false)
-	check(err1)
-	defer ethTx.Rollback()
-	f, err := os.OpenFile("/Volumes/tb41/turbo-geth/creators.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	check(err)
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	defer w.Flush()
-	ct := NewCreationTracer(w)
-	chainConfig := params.MainnetChainConfig
-	vmConfig := vm.Config{Tracer: ct, Debug: true}
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil, txCacher)
-	check(err)
-	defer bc.Stop()
-	interrupt := false
-	for !interrupt {
-		block := bc.GetBlockByNumber(blockNum)
-		if block == nil {
-			break
-		}
-		dbstate := state.NewPlainDBState(ethTx, block.NumberU64()-1)
-		statedb := state.New(dbstate)
-		signer := types.MakeSigner(chainConfig, block.Number())
-		for _, tx := range block.Transactions() {
-			// Assemble the transaction call message and return if the requested offset
-			msg, _ := tx.AsMessage(signer)
-			context := core.NewEVMContext(msg, block.Header(), bc, nil)
-			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-			if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
-				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
-			}
-		}
-		blockNum++
-		if blockNum%1000 == 0 {
-			fmt.Printf("Processed %dK blocks\n", blockNum/1000)
-		}
-		// Check for interrupts
-		select {
-		case interrupt = <-interruptCh:
-			fmt.Println("interrupted, please wait for cleanup...")
-		default:
-		}
-	}
-	fmt.Printf("Next time specify -block %d\n", blockNum)
-}
-
 func storageUsage() {
 	startTime := time.Now()
 	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
@@ -1205,7 +1110,7 @@ func storageUsage() {
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
-				vv, err := tx.Get(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
+				vv, err := tx.GetOne(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
 				if err != nil {
 					return err
 				}

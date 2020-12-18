@@ -98,7 +98,7 @@ func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation
 	return enc, nil
 }
 
-func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
+func (dbr *DbStateReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
@@ -119,7 +119,7 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, codeHash commo
 	return code, err
 }
 
-func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (codeSize int, err error) {
+func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (codeSize int, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return 0, nil
 	}

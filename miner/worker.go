@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -656,7 +657,7 @@ func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt tim
 		log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealHash, "hash", block.Hash(),
 			"elapsed", common.PrettyDuration(time.Since(createdAt)), "difficulty", block.Difficulty())
 	} else {
-		if err := stagedsync.InsertBlockInStages(w.chain.ChainDb(), w.chain.Config(), w.engine, block, w.chain); err != nil {
+		if _, err := stagedsync.InsertBlockInStages(w.chain.ChainDb(), w.chain.Config(), &vm.Config{}, w.engine, block, true /* checkRoot */); err != nil {
 			log.Error("Failed writing block to chain", "err", err)
 			return
 		}

@@ -17,29 +17,13 @@
 package rawdb
 
 import (
-	"fmt"
-	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
-func DecompressBlockBody(compressed []byte) ([]byte, error) {
-	if !debug.IsBlockCompressionEnabled() || len(compressed) == 0 {
-		return compressed, nil
-	}
-
-	var err error
-	bodyRlp, err := snappy.Decode(nil, compressed)
-	if err != nil {
-		return nil, fmt.Errorf("err on decode block: %w", err)
-	}
-	return bodyRlp, nil
-}
-
 // ReadAccount reading account object from multiple buckets of db
-func ReadAccount(db DatabaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
+func ReadAccount(db databaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
 	addrHashBytes := addrHash[:]
 	enc, err := db.Get(dbutils.CurrentStateBucket, addrHashBytes)
 	if err != nil {
@@ -60,10 +44,10 @@ func WriteAccount(db DatabaseWriter, addrHash common.Hash, acc accounts.Account)
 }
 
 func DeleteAccount(db DatabaseDeleter, addrHash common.Hash) error {
-	return db.Delete(dbutils.CurrentStateBucket, addrHash[:])
+	return db.Delete(dbutils.CurrentStateBucket, addrHash[:], nil)
 }
 
-func PlainReadAccount(db DatabaseReader, address common.Address, acc *accounts.Account) (bool, error) {
+func PlainReadAccount(db databaseReader, address common.Address, acc *accounts.Account) (bool, error) {
 	enc, err := db.Get(dbutils.PlainStateBucket, address[:])
 	if err != nil {
 		return false, err
@@ -82,5 +66,5 @@ func PlainWriteAccount(db DatabaseWriter, address common.Address, acc accounts.A
 }
 
 func PlainDeleteAccount(db DatabaseDeleter, address common.Address) error {
-	return db.Delete(dbutils.PlainStateBucket, address[:])
+	return db.Delete(dbutils.PlainStateBucket, address[:], nil)
 }

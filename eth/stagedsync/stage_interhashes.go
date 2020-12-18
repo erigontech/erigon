@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
-func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bool, tmpdir string, quit <-chan struct{}) error {
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -39,7 +39,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background())
+		tx, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
 			return err
 		}
@@ -53,13 +53,14 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 	syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
 	expectedRootHash := syncHeadHeader.Root
 
-	log.Info("Generating intermediate hashes", "from", s.BlockNumber, "to", to)
+	logPrefix := s.state.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 {
-		if err := regenerateIntermediateHashes(tx, datadir, expectedRootHash, quit); err != nil {
+		if err := regenerateIntermediateHashes(logPrefix, tx, checkRoot, tmpdir, expectedRootHash, quit); err != nil {
 			return err
 		}
 	} else {
-		if err := incrementIntermediateHashes(s, tx, to, datadir, expectedRootHash, quit); err != nil {
+		if err := incrementIntermediateHashes(logPrefix, s, tx, to, checkRoot, tmpdir, expectedRootHash, quit); err != nil {
 			return err
 		}
 	}
@@ -77,12 +78,23 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, datadir stri
 	return nil
 }
 
-func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
-	log.Info("Regeneration intermediate hashes started")
+func regenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot bool, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+	log.Info(fmt.Sprintf("[%s] Regeneration intermediate hashes started", logPrefix))
+	// Clear IH bucket
+	c := db.(ethdb.HasTx).Tx().Cursor(dbutils.IntermediateTrieHashBucket)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err = c.Delete(k, v); err != nil {
+			return err
+		}
+	}
+	c.Close()
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
 	buf.SetComparator(comparator)
-	collector := etl.NewCollector(datadir, buf)
+	collector := etl.NewCollector(tmpdir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
@@ -92,15 +104,15 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 		}
 		return collector.Collect(keyHex, hash)
 	}
-	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+	loader := trie.NewFlatDBTrieLoader(logPrefix, dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	if err := loader.Reset(trie.NewRetainList(0), hashCollector /* HashCollector */, false); err != nil {
 		return err
 	}
 	t := time.Now()
 	if hash, err := loader.CalcTrieRoot(db, quit); err == nil {
 		generationIHTook := time.Since(t)
-		if hash != expectedRootHash {
-			return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
+		if checkRoot && hash != expectedRootHash {
+			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
 		log.Debug("Collection finished",
 			"root hash", hash.Hex(),
@@ -109,13 +121,13 @@ func regenerateIntermediateHashes(db ethdb.Database, datadir string, expectedRoo
 	} else {
 		return err
 	}
-	if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+	if err := collector.Load(logPrefix, db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:       quit,
 		Comparator: comparator,
 	}); err != nil {
-		return fmt.Errorf("gen ih stage: fail load data to bucket: %w", err)
+		return fmt.Errorf("%s: fail load data to bucket: %w", logPrefix, err)
 	}
-	log.Info("Regeneration ended")
+	log.Info(fmt.Sprintf("[%s] Regeneration ended", logPrefix))
 	return nil
 }
 
@@ -135,32 +147,32 @@ func NewHashPromoter(db ethdb.Database, quitCh <-chan struct{}) *HashPromoter {
 	}
 }
 
-func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, load etl.LoadFunc) error {
+func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, load etl.LoadFunc) error {
 	var changeSetBucket string
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Debug("Incremental state promotion of intermediate hashes", "from", from, "to", to, "csbucket", changeSetBucket)
+	log.Debug(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
-	startkey := dbutils.EncodeTimestamp(from + 1)
+	startkey := dbutils.EncodeBlockNumber(from + 1)
 
-	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
-	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			newK, err := transformPlainStateKey(k)
-			if err != nil {
-				return err
-			}
-			return next(k, newK, nil)
-		})
+	decode := changeset.Mapper[changeSetBucket].Decode
+	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
+		_, k, _ := decode(dbKey, dbValue)
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
+		return next(dbKey, newK, nil)
 	}
 
 	var l OldestAppearedLoad
 	l.innerLoadFunc = load
 
 	if err := etl.Transform(
+		logPrefix,
 		p.db,
 		changeSetBucket,
 		"",
@@ -178,7 +190,7 @@ func (p *HashPromoter) Promote(s *StageState, from, to uint64, storage bool, loa
 	return nil
 }
 
-func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, load etl.LoadFunc) error {
+func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, load etl.LoadFunc) error {
 	to := u.UnwindPoint
 	var changeSetBucket string
 	if storage {
@@ -186,25 +198,25 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, load 
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info("Unwinding of intermediate hashes", "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
+	log.Info(fmt.Sprintf("[%s] Unwinding of intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
-	startkey := dbutils.EncodeTimestamp(to + 1)
+	startkey := dbutils.EncodeBlockNumber(to + 1)
 
-	walkerAdapter := changeset.Mapper[changeSetBucket].WalkerAdapter
-	extract := func(_, changesetBytes []byte, next etl.ExtractNextFunc) error {
-		return walkerAdapter(changesetBytes).Walk(func(k, v []byte) error {
-			newK, err := transformPlainStateKey(k)
-			if err != nil {
-				return err
-			}
-			return next(k, newK, nil)
-		})
+	decode := changeset.Mapper[changeSetBucket].Decode
+	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
+		_, k, _ := decode(dbKey, dbValue)
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
+		return next(k, newK, nil)
 	}
 
 	var l OldestAppearedLoad
 	l.innerLoadFunc = load
 
 	if err := etl.Transform(
+		logPrefix,
 		p.db,
 		changeSetBucket,
 		"",
@@ -222,9 +234,9 @@ func (p *HashPromoter) Unwind(s *StageState, u *UnwindState, storage bool, load 
 	return nil
 }
 
-func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Database, to uint64, checkRoot bool, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
-	p.TempDir = datadir
+	p.TempDir = tmpdir
 	var exclude [][]byte
 	//ihFilter := trie.NewPrefixFilter()
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
@@ -233,10 +245,10 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		return nil
 	}
 
-	if err := p.Promote(s, s.BlockNumber, to, false /* storage */, collect); err != nil {
+	if err := p.Promote(logPrefix, s, s.BlockNumber, to, false /* storage */, collect); err != nil {
 		return err
 	}
-	if err := p.Promote(s, s.BlockNumber, to, true /* storage */, collect); err != nil {
+	if err := p.Promote(logPrefix, s, s.BlockNumber, to, true /* storage */, collect); err != nil {
 		return err
 	}
 	sort.Slice(exclude, func(i, j int) bool { return bytes.Compare(exclude[i], exclude[j]) < 0 })
@@ -248,7 +260,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
 	buf.SetComparator(comparator)
-	collector := etl.NewCollector(datadir, buf)
+	collector := etl.NewCollector(tmpdir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
@@ -259,7 +271,7 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 
 		return collector.Collect(keyHex, hash)
 	}
-	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+	loader := trie.NewFlatDBTrieLoader(logPrefix, dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
 	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 		return err
@@ -270,14 +282,14 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 		return err
 	}
 	generationIHTook := time.Since(t)
-	if hash != expectedRootHash {
-		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
+	if checkRoot && hash != expectedRootHash {
+		return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 	}
-	log.Info("Collection finished",
+	log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
 		"root hash", hash.Hex(),
 		"gen IH", generationIHTook,
 	)
-	if err := collector.Load(db,
+	if err := collector.Load(logPrefix, db,
 		dbutils.IntermediateTrieHashBucket,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
@@ -290,10 +302,10 @@ func incrementIntermediateHashes(s *StageState, db ethdb.Database, to uint64, da
 	return nil
 }
 
-func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, datadir string, quit <-chan struct{}) error {
+func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
 	hash, err := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	if err != nil {
-		return err
+		return fmt.Errorf("read canonical hash: %w", err)
 	}
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
@@ -305,18 +317,19 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 		useExternalTx = true
 	} else {
 		var err error
-		tx, err = db.Begin(context.Background())
+		tx, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
-			return err
+			return fmt.Errorf("open transcation: %w", err)
 		}
 		defer tx.Rollback()
 	}
 
-	if err := unwindIntermediateHashesStageImpl(u, s, tx, datadir, expectedRootHash, quit); err != nil {
+	logPrefix := s.state.LogPrefix()
+	if err := unwindIntermediateHashesStageImpl(logPrefix, u, s, tx, tmpdir, expectedRootHash, quit); err != nil {
 		return err
 	}
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("unwind IntermediateHashes: reset: %w", err)
+		return fmt.Errorf("%s: reset: %w", logPrefix, err)
 	}
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
@@ -326,18 +339,18 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 	return nil
 }
 
-func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.Database, datadir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
+func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *StageState, db ethdb.Database, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
-	p.TempDir = datadir
+	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		exclude = append(exclude, k)
 		return nil
 	}
-	if err := p.Unwind(s, u, false /* storage */, collect); err != nil {
+	if err := p.Unwind(logPrefix, s, u, false /* storage */, collect); err != nil {
 		return err
 	}
-	if err := p.Unwind(s, u, true /* storage */, collect); err != nil {
+	if err := p.Unwind(logPrefix, s, u, true /* storage */, collect); err != nil {
 		return err
 	}
 	sort.Slice(exclude, func(i, j int) bool { return bytes.Compare(exclude[i], exclude[j]) < 0 })
@@ -349,7 +362,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	comparator := db.(ethdb.HasTx).Tx().Comparator(dbutils.IntermediateTrieHashBucket)
 	buf.SetComparator(comparator)
-	collector := etl.NewCollector(datadir, buf)
+	collector := etl.NewCollector(tmpdir, buf)
 	hashCollector := func(keyHex []byte, hash []byte) error {
 		if len(keyHex) == 0 {
 			return nil
@@ -359,7 +372,7 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 		}
 		return collector.Collect(keyHex, hash)
 	}
-	loader := trie.NewFlatDBTrieLoader(dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
+	loader := trie.NewFlatDBTrieLoader(logPrefix, dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
 	// hashCollector in the line below will collect deletes
 	if err := loader.Reset(unfurl, hashCollector, false); err != nil {
 		return err
@@ -367,17 +380,17 @@ func unwindIntermediateHashesStageImpl(u *UnwindState, s *StageState, db ethdb.D
 	t := time.Now()
 	hash, err := loader.CalcTrieRoot(db, quit)
 	if err != nil {
-		return err
+		return fmt.Errorf("calcTrieRoot: %w", err)
 	}
 	generationIHTook := time.Since(t)
 	if hash != expectedRootHash {
-		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
+		return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 	}
-	log.Info("Collection finished",
+	log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
 		"root hash", hash.Hex(),
 		"gen IH", generationIHTook,
 	)
-	if err := collector.Load(db,
+	if err := collector.Load(logPrefix, db,
 		dbutils.IntermediateTrieHashBucket,
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{

@@ -73,6 +73,7 @@ Then delete this account (SELFDESTRUCT).
 //
 // Each intermediate hash key firstly pass to RetainDecider, only if it returns "false" - such IH can be used.
 type FlatDBTrieLoader struct {
+	logPrefix                string
 	trace                    bool
 	itemPresent              bool
 	itemType                 StreamItem
@@ -126,8 +127,9 @@ func NewRootHashAggregator() *RootHashAggregator {
 	}
 }
 
-func NewFlatDBTrieLoader(stateBucket, intermediateHashesBucket string) *FlatDBTrieLoader {
+func NewFlatDBTrieLoader(logPrefix, stateBucket, intermediateHashesBucket string) *FlatDBTrieLoader {
 	return &FlatDBTrieLoader{
+		logPrefix:                logPrefix,
 		defaultReceiver:          NewRootHashAggregator(),
 		stateBucket:              stateBucket,
 		intermediateHashesBucket: intermediateHashesBucket,
@@ -370,7 +372,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{})
 		useExternalTx = true
 	} else {
 		var err error
-		txDB, err = db.Begin(context.Background())
+		txDB, err = db.Begin(context.Background(), ethdb.RW)
 		if err != nil {
 			return EmptyRoot, err
 		}
@@ -383,7 +385,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, quit <-chan struct{})
 	var filter = func(k []byte) bool {
 		return !l.rd.Retain(k)
 	}
-	ih := IH(filter, tx.CursorDupSort(l.intermediateHashesBucket), tx.CursorDupSort(l.intermediateHashesBucket))
+	ih := IH(filter, tx.CursorDupSort(l.intermediateHashesBucket))
 	if err := l.iteration(c, ih, true /* first */); err != nil {
 		return EmptyRoot, err
 	}
@@ -432,7 +434,7 @@ func (l *FlatDBTrieLoader) logProgress() {
 	} else if l.ihK != nil {
 		k = makeCurrentKeyStr(l.ihK)
 	}
-	log.Info("Calculating Merkle root", "current key", k)
+	log.Info(fmt.Sprintf("[%s] Calculating Merkle root", l.logPrefix), "current key", k)
 }
 
 func (r *RootHashAggregator) RetainNothing(_ []byte) bool {
@@ -731,13 +733,12 @@ const IHDupKeyLen = 2 * (common.HashLength + common.IncarnationLength)
 
 // IHCursor - holds logic related to iteration over IH bucket
 type IHCursor struct {
-	c          ethdb.CursorDupSort
-	cForDelete ethdb.CursorDupSort
-	filter     Filter
+	c      ethdb.CursorDupSort
+	filter Filter
 }
 
-func IH(f Filter, c ethdb.CursorDupSort, cForDelete ethdb.CursorDupSort) *IHCursor {
-	return &IHCursor{c: c, filter: f, cForDelete: cForDelete}
+func IH(f Filter, c ethdb.CursorDupSort) *IHCursor {
+	return &IHCursor{c: c, filter: f}
 }
 
 func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
@@ -762,21 +763,17 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 		return nil, nil, nil
 	}
 
-	kCopy, vCopy := common.CopyBytes(k), common.CopyBytes(v)
 	if len(v) > common.HashLength {
 		keyPart := len(v) - common.HashLength
 		k = append(k, v[:keyPart]...)
 		v = v[keyPart:]
 	}
+
 	if c.filter(k) { // if filter allow us, return. otherwise delete and go ahead.
 		return k, v, nil
 	}
 
-	_, _, err = c.cForDelete.SeekBothExact(kCopy, vCopy)
-	if err != nil {
-		return []byte{}, nil, err
-	}
-	err = c.cForDelete.DeleteCurrent()
+	err = c.c.DeleteCurrent()
 	if err != nil {
 		return []byte{}, nil, err
 	}
@@ -794,7 +791,6 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return nil, nil, nil
 		}
 
-		kCopy, vCopy := common.CopyBytes(k), common.CopyBytes(v)
 		if len(v) > common.HashLength {
 			keyPart := len(v) - common.HashLength
 			k = append(k, v[:keyPart]...)
@@ -805,11 +801,7 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return k, v, nil
 		}
 
-		_, _, err = c.cForDelete.SeekBothExact(kCopy, vCopy)
-		if err != nil {
-			return []byte{}, nil, err
-		}
-		err = c.cForDelete.DeleteCurrent()
+		err = c.c.DeleteCurrent()
 		if err != nil {
 			return []byte{}, nil, err
 		}

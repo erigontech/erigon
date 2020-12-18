@@ -9,28 +9,7 @@ option java_outer_classname = "KV";
 
 // Provides methods to access key-value data
 service KV {
-  // open a cursor on given position of given bucket
-  // if streaming requested - streams all data: stops if client's buffer is full, resumes when client read enough from buffer
-  // if streaming not requested - streams next data only when clients sends message to bi-directional channel
-  // no full consistency guarantee - server implementation can close/open underlying db transaction at any time
-  rpc Seek(stream SeekRequest) returns (stream Pair);
-}
-
-service KV2 {
-  rpc Tx(stream Cursor) returns (stream Pair2);
-}
-
-message SeekRequest {
-  string bucketName = 1;
-  bytes seekKey = 2; // streaming start from this key
-  bytes prefix = 3;  // streaming stops when see first key without given prefix
-  bool startSreaming = 4;
-  bytes seekValue = 5; // streaming start from this value (DupSort)
-}
-
-message Pair {
-  bytes key = 1;
-  bytes value = 2;
+  rpc Tx(stream Cursor) returns (stream Pair);
 }
 
 enum Op {
@@ -64,7 +43,7 @@ message Cursor {
   bytes v = 5;
 }
 
-message Pair2 {
+message Pair {
   bytes k = 1;
   bytes v = 2;
   uint32 cursorID = 3;

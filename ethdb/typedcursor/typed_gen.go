@@ -18,7 +18,7 @@ func NewUint64(b ethdb.Cursor) *Uint64 {
 }
 
 func (b *Uint64) Get(key []byte) (uint64, bool) {
-	value, _ := b.Cursor.SeekExact(key)
+	_, value, _ := b.Cursor.SeekExact(key)
 	if value == nil {
 		return 0, false
 	}
@@ -93,7 +93,7 @@ func NewInt(b ethdb.Cursor) *Int {
 }
 
 func (b *Int) Get(key []byte) (int, bool) {
-	value, _ := b.Cursor.SeekExact(key)
+	_, value, _ := b.Cursor.SeekExact(key)
 	if value == nil {
 		return 0, false
 	}

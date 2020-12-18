@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -35,7 +36,7 @@ type TxLookupEntry struct {
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
-func ReadTxLookupEntry(db DatabaseReader, hash common.Hash) *uint64 {
+func ReadTxLookupEntry(db databaseReader, hash common.Hash) *uint64 {
 	data, _ := db.Get(dbutils.TxLookupPrefix, hash.Bytes())
 	if len(data) == 0 {
 		return nil
@@ -57,12 +58,12 @@ func WriteTxLookupEntries(db DatabaseWriter, block *types.Block) {
 
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
 func DeleteTxLookupEntry(db DatabaseDeleter, hash common.Hash) error {
-	return db.Delete(dbutils.TxLookupPrefix, hash.Bytes())
+	return db.Delete(dbutils.TxLookupPrefix, hash.Bytes(), nil)
 }
 
 // ReadTransaction retrieves a specific transaction from the database, along with
 // its added positional metadata.
-func ReadTransaction(db DatabaseReader, hash common.Hash) (*types.Transaction, common.Hash, uint64, uint64) {
+func ReadTransaction(db ethdb.Database, hash common.Hash) (*types.Transaction, common.Hash, uint64, uint64) {
 	blockNumber := ReadTxLookupEntry(db, hash)
 	if blockNumber == nil {
 		return nil, common.Hash{}, 0, 0
@@ -91,7 +92,7 @@ func ReadTransaction(db DatabaseReader, hash common.Hash) (*types.Transaction, c
 
 // ReadReceipt retrieves a specific transaction receipt from the database, along with
 // its added positional metadata.
-func ReadReceipt(db DatabaseReader, hash common.Hash) (*types.Receipt, common.Hash, uint64, uint64) {
+func ReadReceipt(db ethdb.Database, hash common.Hash) (*types.Receipt, common.Hash, uint64, uint64) {
 	// Retrieve the context of the receipt based on the transaction hash
 	blockNumber := ReadTxLookupEntry(db, hash)
 	if blockNumber == nil {
@@ -118,7 +119,7 @@ func ReadReceipt(db DatabaseReader, hash common.Hash) (*types.Receipt, common.Ha
 
 // ReadBloomBits retrieves the compressed bloom bit vector belonging to the given
 // section and bit index from the.
-func ReadBloomBits(db DatabaseReader, bit uint, section uint64, head common.Hash) ([]byte, error) {
+func ReadBloomBits(db databaseReader, bit uint, section uint64, head common.Hash) ([]byte, error) {
 	return db.Get(dbutils.BloomBitsPrefix, dbutils.BloomBitsKey(bit, section, head))
 }
 

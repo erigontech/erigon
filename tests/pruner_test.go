@@ -688,34 +688,31 @@ func getStat(db ethdb.Database) (stateStats, error) {
 		AccountSuffixRecordsByTimestamp: make(map[uint64]uint32),
 		StorageSuffixRecordsByTimestamp: make(map[uint64]uint32),
 	}
+	dec := changeset.Mapper[dbutils.AccountChangeSetBucket].Decode
 	err := db.Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
-		timestamp, _ := dbutils.DecodeTimestamp(common.CopyBytes(key))
+		timestamp, parsedK, _ := dec(key, v)
 		if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
 			panic("multiple account suffix records")
 		}
 		stat.AccountSuffixRecordsByTimestamp[timestamp] = uint32(changeset.Len(v))
 
-		innerErr := changeset.AccountChangeSetBytes(v).Walk(func(k, _ []byte) error {
-			compKey, _ := dbutils.CompositeKeySuffix(common.CopyBytes(k), timestamp)
-			_, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
-			if err != nil {
-				stat.ErrAccountsInHistory++
-				return nil
-			}
-			stat.NumOfChangesInAccountsHistory++
-			return nil
-		})
-		if innerErr != nil {
-			return false, innerErr
+		compKey, _ := dbutils.CompositeKeySuffix(common.CopyBytes(parsedK), timestamp)
+		_, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
+		if err != nil {
+			stat.ErrAccountsInHistory++
+			return false, err
 		}
+		stat.NumOfChangesInAccountsHistory++
 
 		return true, nil
 	})
 	if err != nil {
 		return stateStats{}, err
 	}
+
+	dec = changeset.Mapper[dbutils.StorageChangeSetBucket].Decode
 	err = db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
-		timestamp, _ := dbutils.DecodeTimestamp(key)
+		timestamp, _, _ := dec(key, v)
 		if _, ok := stat.StorageSuffixRecordsByTimestamp[timestamp]; ok {
 			panic("multiple storage suffix records")
 		}

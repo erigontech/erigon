@@ -24,7 +24,7 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 		MemorySize    int                         `json:"memSize"`
 		Stack         []*math.HexOrDecimal256     `json:"stack"`
 		ReturnStack   []math.HexOrDecimal64       `json:"returnStack"`
-		ReturnData    []byte                      `json:"returnData"`
+		ReturnData    hexutil.Bytes               `json:"returnData"`
 		Storage       map[common.Hash]common.Hash `json:"-"`
 		Depth         int                         `json:"depth"`
 		RefundCounter uint64                      `json:"refund"`
@@ -71,7 +71,7 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		MemorySize    *int                        `json:"memSize"`
 		Stack         []*math.HexOrDecimal256     `json:"stack"`
 		ReturnStack   []math.HexOrDecimal64       `json:"returnStack"`
-		ReturnData    []byte                      `json:"returnData"`
+		ReturnData    *hexutil.Bytes              `json:"returnData"`
 		Storage       map[common.Hash]common.Hash `json:"-"`
 		Depth         *int                        `json:"depth"`
 		RefundCounter *uint64                     `json:"refund"`
@@ -110,6 +110,9 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		for k, v := range dec.ReturnStack {
 			s.ReturnStack[k] = uint32(v)
 		}
+	}
+	if dec.ReturnData != nil {
+		s.ReturnData = *dec.ReturnData
 	}
 	if dec.Storage != nil {
 		s.Storage = dec.Storage

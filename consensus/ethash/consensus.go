@@ -138,7 +138,11 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 			defer wg.Done()
 			for index := range inputs {
 				errors[index] = ethash.verifyHeaderWorker(chain, headers, seals, index)
-				done <- index
+				select {
+				case done <- index:
+				case <-abort:
+					return
+				}
 			}
 		}()
 	}

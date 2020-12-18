@@ -7,15 +7,14 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter/ethapi"
 )
 
-// GetBlockByNumber see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber
-// see internal/ethapi.PublicBlockChainAPI.GetBlockByNumber
+// GetBlockByNumber implements eth_getBlockByNumber. Returns information about a block given the block's number.
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
@@ -27,12 +26,19 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	additionalFields := make(map[string]interface{})
 
-	block := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
 
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(rawdb.ReadTd(tx, block.Hash(), blockNum))
+	td, err := rawdb.ReadTd(tx, block.Hash(), blockNum)
+	if err != nil {
+		return nil, err
+	}
+	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
@@ -44,10 +50,20 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	return response, err
 }
 
-// GetBlockByHash see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbyhash
-// see internal/ethapi.PublicBlockChainAPI.GetBlockByHash
-func (api *APIImpl) GetBlockByHash(ctx context.Context, hash common.Hash, fullTx bool) (map[string]interface{}, error) {
-	tx, err := api.dbReader.Begin(ctx)
+// GetBlockByHash implements eth_getBlockByHash. Returns information about a block given the block's hash.
+func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNumberOrHash, fullTx bool) (map[string]interface{}, error) {
+	if numberOrHash.BlockHash == nil {
+		// some web3.js based apps (like ethstats client) for some reason call
+		// eth_getBlockByHash with a block number as a parameter
+		// so no matter how weird that is, we would love to support that.
+		if numberOrHash.BlockNumber != nil {
+			return api.GetBlockByNumber(ctx, *numberOrHash.BlockNumber, fullTx)
+		}
+		return nil, fmt.Errorf("block not found")
+	}
+
+	hash := *numberOrHash.BlockHash
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
@@ -55,13 +71,20 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, hash common.Hash, fullTx
 
 	additionalFields := make(map[string]interface{})
 
-	block := rawdb.ReadBlockByHash(tx, hash)
+	block, err := rawdb.ReadBlockByHash(tx, hash)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %x", hash)
 	}
 	number := block.NumberU64()
 
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(rawdb.ReadTd(tx, hash, number))
+	td, err := rawdb.ReadTd(tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
 
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
@@ -73,41 +96,9 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, hash common.Hash, fullTx
 	return response, err
 }
 
-// GetHeaderByNumber returns a block's header by number
-func (api *APIImpl) GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	tx, err := api.dbReader.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	header := rawdb.ReadHeaderByNumber(tx, uint64(number.Int64()))
-	if header == nil {
-		return nil, fmt.Errorf("block header not found: %d", number.Int64())
-	}
-
-	return header, nil
-}
-
-// GetHeaderByHash returns a block's header by hash
-func (api *APIImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
-	tx, err := api.dbReader.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	header := rawdb.ReadHeaderByHash(tx, hash)
-	if header == nil {
-		return nil, fmt.Errorf("block header not found: %s", hash.String())
-	}
-
-	return header, nil
-}
-
-// GetBlockTransactionCountByNumber returns the number of transactions in the block
+// GetBlockTransactionCountByNumber implements eth_getBlockTransactionCountByNumber. Returns the number of transactions in a block given the block's block number.
 func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +109,10 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	block := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
@@ -126,15 +120,18 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	return &n, nil
 }
 
-// GetBlockTransactionCountByHash returns the number of transactions in the block
+// GetBlockTransactionCountByHash implements eth_getBlockTransactionCountByHash. Returns the number of transactions in a block given the block's block hash.
 func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
-	tx, err := api.dbReader.Begin(ctx)
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	block := rawdb.ReadBlockByHash(tx, blockHash)
+	block, err := rawdb.ReadBlockByHash(tx, blockHash)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %x", blockHash)
 	}

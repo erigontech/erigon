@@ -170,11 +170,11 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				if len(k) != 32 {
 					continue
 				}
-				vv, err := c.SeekExact(k)
+				_, vv, err := c.SeekExact(k)
 				if err != nil {
 					return err
 				}
-				p, err := preimage.SeekExact(k)
+				_, p, err := preimage.SeekExact(k)
 				if err != nil {
 					return err
 				}
@@ -195,7 +195,7 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				if len(k) == 32 {
 					continue
 				}
-				vv, err := c.SeekExact(k)
+				_, vv, err := c.SeekExact(k)
 				if err != nil {
 					return err
 				}
@@ -217,11 +217,11 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				if len(k) != 32 {
 					continue
 				}
-				vv, err := cDisk.SeekExact(k)
+				_, vv, err := cDisk.SeekExact(k)
 				if err != nil {
 					return err
 				}
-				p, err := preimage.SeekExact(k)
+				_, p, err := preimage.SeekExact(k)
 				if err != nil {
 					return err
 				}
@@ -241,11 +241,11 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				if len(k) == 32 {
 					continue
 				}
-				vv, err := cDisk.SeekExact(k)
+				_, vv, err := cDisk.SeekExact(k)
 				if err != nil {
 					return err
 				}
-				p, err := preimage.SeekExact(k)
+				_, p, err := preimage.SeekExact(k)
 				if err != nil {
 					return err
 				}

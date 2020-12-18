@@ -1696,7 +1696,7 @@ func TestGolangBindings(t *testing.T) {
 		t.Skip("go sdk not found for testing")
 	}
 	// Create a temporary workspace for the test suite
-	ws, err := ioutil.TempDir("./", "")
+	ws, err := ioutil.TempDir("./", "binding-test")
 	if err != nil {
 		t.Fatalf("failed to create temporary workspace: %v", err)
 	}
@@ -1752,7 +1752,7 @@ func TestGolangBindings(t *testing.T) {
 		t.Fatalf("failed to replace binding test dependency to current source tree: %v\n%s", err, out)
 	}
 	// Test the entire package and report any failures
-	cmd := exec.Command(gocmd, "test", "-v", "-count", "1")
+	cmd := exec.Command(gocmd, "test", "-v", "-count", "1", "-tags", "mdbx")
 	cmd.Dir = pkg
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to run binding test: %v\n%s", err, out)

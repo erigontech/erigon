@@ -18,6 +18,7 @@
 package eth
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -25,20 +26,22 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"path"
 	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
-
-	"github.com/ledgerwatch/turbo-geth/turbo/torrent"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	ethereum "github.com/ledgerwatch/turbo-geth"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 	"github.com/ledgerwatch/turbo-geth/consensus/process"
-
 	"github.com/ledgerwatch/turbo-geth/accounts"
+	ethereum "github.com/ledgerwatch/turbo-geth"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -52,12 +55,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -101,7 +104,7 @@ type Ethereum struct {
 	p2pServer     *p2p.Server
 	txPoolStarted bool
 
-	torrentClient *torrent.Client
+	torrentClient *bittorrent.Client
 
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 }
@@ -130,6 +133,8 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		config.TrieDirtyCache = 0
 	}
 
+	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
+
 	// Assemble the Ethereum object
 	var chainDb *ethdb.ObjectDatabase
 	var err error
@@ -139,15 +144,15 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		}
 		chainDb = ethdb.MustOpen("simulator")
 	} else {
+		err = stack.ApplyMigrations("chaindata", tmpdir)
+		if err != nil {
+			return nil, fmt.Errorf("failed stack.ApplyMigrations: %w", err)
+		}
+
 		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", 0, 0, "", "")
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	err = migrations.NewMigrator().Apply(chainDb, stack.Config().DataDir)
-	if err != nil {
-		return nil, err
 	}
 
 	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History, false /* overwrite */)
@@ -157,24 +162,116 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
-	var torrentClient *torrent.Client
-	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (torrent.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
-		config.SnapshotSeeding = true
-		torrentClient = torrent.New(stack.Config().ResolvePath("snapshots"), config.SnapshotMode, config.SnapshotSeeding)
-		err = torrentClient.Run(chainDb)
-		if err != nil {
-			return nil, err
-		}
+	var torrentClient *bittorrent.Client
+	if config.SyncMode == downloader.StagedSync && config.SnapshotMode != (snapshotsync.SnapshotMode{}) && config.NetworkID == params.MainnetChainConfig.ChainID.Uint64() {
+		if config.ExternalSnapshotDownloaderAddr != "" {
+			cli, cl, innerErr := snapshotsync.NewClient(config.ExternalSnapshotDownloaderAddr)
+			if innerErr != nil {
+				return nil, innerErr
+			}
+			defer cl() //nolint
 
-		snapshotKV := chainDb.KV()
-		snapshotKV, err = torrent.WrapBySnapshots(snapshotKV, stack.Config().ResolvePath("snapshots"), config.SnapshotMode)
-		if err != nil {
-			return nil, err
-		}
-		chainDb.SetKV(snapshotKV)
-		err = torrent.PostProcessing(chainDb, config.SnapshotMode)
-		if err != nil {
-			return nil, err
+			_, innerErr = cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
+				NetworkId: config.NetworkID,
+				Type:      config.SnapshotMode.ToSnapshotTypes(),
+			})
+			if innerErr != nil {
+				return nil, innerErr
+			}
+
+			waitDownload := func() (map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, error) {
+				snapshotReadinessCheck := func(mp map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, tp snapshotsync.SnapshotType) bool {
+					if mp[tp].Readiness != int32(100) {
+						log.Info("Downloading", "snapshot", tp, "%", mp[tp].Readiness)
+						return false
+					}
+					return true
+				}
+				for {
+					mp := make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
+					snapshots, err1 := cli.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{NetworkId: config.NetworkID})
+					if err1 != nil {
+						return nil, err1
+					}
+					for i := range snapshots.Info {
+						if mp[snapshots.Info[i].Type].SnapshotBlock < snapshots.Info[i].SnapshotBlock && snapshots.Info[i] != nil {
+							mp[snapshots.Info[i].Type] = snapshots.Info[i]
+						}
+					}
+
+					downloaded := true
+					if config.SnapshotMode.Headers {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_headers) {
+							downloaded = false
+						}
+					}
+					if config.SnapshotMode.Bodies {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_bodies) {
+							downloaded = false
+						}
+					}
+					if config.SnapshotMode.State {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_state) {
+							downloaded = false
+						}
+					}
+					if config.SnapshotMode.Receipts {
+						if !snapshotReadinessCheck(mp, snapshotsync.SnapshotType_receipts) {
+							downloaded = false
+						}
+					}
+					if downloaded {
+						return mp, nil
+					}
+					time.Sleep(time.Second * 10)
+				}
+			}
+			downloadedSnapshots, innerErr := waitDownload()
+			if innerErr != nil {
+				return nil, innerErr
+			}
+			snapshotKV := chainDb.KV()
+
+			snapshotKV, innerErr = snapshotsync.WrapBySnapshots2(snapshotKV, downloadedSnapshots)
+			if innerErr != nil {
+				return nil, innerErr
+			}
+			chainDb.SetKV(snapshotKV)
+			innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
+			if innerErr != nil {
+				return nil, innerErr
+			}
+		} else {
+			var dbPath string
+			dbPath, err = stack.Config().ResolvePath("snapshots")
+			if err != nil {
+				return nil, err
+			}
+			torrentClient, err = bittorrent.New(dbPath, config.SnapshotSeeding)
+			if err != nil {
+				return nil, err
+			}
+			err = torrentClient.Load(chainDb)
+			if err != nil {
+				return nil, err
+			}
+			err = torrentClient.AddSnapshotsTorrents(context.Background(), chainDb, config.NetworkID, config.SnapshotMode)
+			if err == nil {
+				torrentClient.Download()
+
+				snapshotKV := chainDb.KV()
+				snapshotKV, err = snapshotsync.WrapBySnapshots(snapshotKV, dbPath, config.SnapshotMode)
+				if err != nil {
+					return nil, err
+				}
+				chainDb.SetKV(snapshotKV)
+				err = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				log.Error("There was an error in snapshot init. Swithing to regular sync", "err", err)
+			}
 		}
 	}
 
@@ -207,7 +304,9 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			return nil, fmt.Errorf("database version is v%d, Geth %s only supports v%d", *bcVersion, params.VersionWithMeta, core.BlockChainVersion)
 		} else if bcVersion == nil || *bcVersion < core.BlockChainVersion {
 			log.Warn("Upgrade blockchain database version", "from", dbVer, "to", core.BlockChainVersion)
-			rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion)
+			if err2 := rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion); err2 != nil {
+				return nil, err2
+			}
 		}
 	}
 
@@ -244,14 +343,34 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
 		eth.blockchain.SetHead(compat.RewindTo)
-		rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
+		err = rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if config.TxPool.Journal != "" {
-		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
+		config.TxPool.Journal, err = stack.ResolvePath(config.TxPool.Journal)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
+
+	stagedSync := config.StagedSync
+
+	// setting notifier to support streaming events to rpc daemon
+	remoteEvents := remotedbserver.NewEvents()
+	if stagedSync == nil {
+		// if there is not stagedsync, we create one with the custom notifier
+		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: remoteEvents})
+	} else {
+		// otherwise we add one if needed
+		if stagedSync.Notifier == nil {
+			stagedSync.Notifier = remoteEvents
+		}
+	}
 
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
@@ -285,12 +404,12 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds, remoteEvents)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil, remoteEvents)
 			if err != nil {
 				return nil, err
 			}
@@ -301,12 +420,13 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	if checkpoint == nil {
 		//checkpoint = params.TrustedCheckpoints[genesisHash]
 	}
-	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist, config.StagedSync); err != nil {
+
+	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist, stagedSync); err != nil {
 		return nil, err
 	}
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-	eth.protocolManager.SetDataDir(stack.Config().DataDir)
-	eth.protocolManager.SetHdd(config.Hdd)
+	eth.protocolManager.SetTmpDir(tmpdir)
+	eth.protocolManager.SetBatchSize(int(config.CacheSize), int(config.BatchSize))
 
 	if config.SyncMode != downloader.StagedSync {
 		if err = eth.StartTxPool(); err != nil {
@@ -360,6 +480,7 @@ func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig) {
 			EnablePreimageRecording: config.EnablePreimageRecording,
 			EWASMInterpreter:        config.EWASMInterpreter,
 			EVMInterpreter:          config.EVMInterpreter,
+			NoReceipts:              !config.StorageMode.Receipts,
 		}
 		cacheConfig = &core.CacheConfig{
 			Pruning:             config.Pruning,
@@ -732,7 +853,16 @@ func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.protocolManager.Stop()
 	if s.privateAPI != nil {
-		s.privateAPI.GracefulStop()
+		shutdownDone := make(chan bool)
+		go func() {
+			defer close(shutdownDone)
+			s.privateAPI.GracefulStop()
+		}()
+		select {
+		case <-time.After(1 * time.Second): // shutdown deadline
+			s.privateAPI.Stop()
+		case <-shutdownDone:
+		}
 	}
 
 	// Then stop everything else.

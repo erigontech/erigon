@@ -21,20 +21,14 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"math/big"
-
-	"github.com/VictoriaMetrics/fastcache"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
 	"github.com/holiman/uint256"
-	"github.com/petar/GoLLRB/llrb"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/petar/GoLLRB/llrb"
 )
 
 type storageItem struct {
@@ -49,37 +43,17 @@ func (a *storageItem) Less(b llrb.Item) bool {
 
 // Implements StateReader by wrapping database only, without trie
 type PlainDBState struct {
-	tx            ethdb.Tx
-	blockNr       uint64
-	storage       map[common.Address]*llrb.LLRB
-	accountCache  *fastcache.Cache
-	storageCache  *fastcache.Cache
-	codeCache     *fastcache.Cache
-	codeSizeCache *fastcache.Cache
+	db      ethdb.Database
+	blockNr uint64
+	storage map[common.Address]*llrb.LLRB
 }
 
-func NewPlainDBState(tx ethdb.Tx, blockNr uint64) *PlainDBState {
+func NewPlainDBState(db ethdb.Database, blockNr uint64) *PlainDBState {
 	return &PlainDBState{
-		tx:      tx,
+		db:      db,
 		blockNr: blockNr,
 		storage: make(map[common.Address]*llrb.LLRB),
 	}
-}
-
-func (dbs *PlainDBState) SetAccountCache(accountCache *fastcache.Cache) {
-	dbs.accountCache = accountCache
-}
-
-func (dbs *PlainDBState) SetStorageCache(storageCache *fastcache.Cache) {
-	dbs.storageCache = storageCache
-}
-
-func (dbs *PlainDBState) SetCodeCache(codeCache *fastcache.Cache) {
-	dbs.codeCache = codeCache
-}
-
-func (dbs *PlainDBState) SetCodeSizeCache(codeSizeCache *fastcache.Cache) {
-	dbs.codeSizeCache = codeSizeCache
 }
 
 func (dbs *PlainDBState) SetBlockNr(blockNr uint64) {
@@ -90,21 +64,32 @@ func (dbs *PlainDBState) GetBlockNr() uint64 {
 	return dbs.blockNr
 }
 
-func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
+func (dbs *PlainDBState) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
+	var tx ethdb.Tx
+	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		if err != nil {
+			return err
+		}
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
+	}
 	st := llrb.New()
 	var s [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addr[:])
-	accData, _ := GetAsOf(dbs.tx, false /* storage */, addr[:], dbs.blockNr+1)
+	accData, _ := GetAsOf(tx, false /* storage */, addr[:], dbs.blockNr+1)
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)
 		return err
 	}
 	binary.BigEndian.PutUint64(s[common.AddressLength:], acc.Incarnation)
-	copy(s[common.AddressLength+common.IncarnationLength:], start)
+	copy(s[common.AddressLength+common.IncarnationLength:], startLocation[:])
 	var lastKey common.Hash
 	overrideCounter := 0
-	min := &storageItem{key: common.BytesToHash(start)}
+	min := &storageItem{key: startLocation}
 	if t, ok := dbs.storage[addr]; ok {
 		t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 			item := i.(*storageItem)
@@ -118,33 +103,28 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	if err := WalkAsOf(dbs.tx, dbutils.PlainStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.AddressLength+common.IncarnationLength), dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
-		if !bytes.HasPrefix(ks, addr[:]) {
+	if err := WalkAsOfStorage(tx, addr, acc.Incarnation, startLocation, dbs.blockNr+1, func(kAddr, kLoc, vs []byte) (bool, error) {
+		if !bytes.Equal(kAddr, addr[:]) {
 			return false, nil
 		}
 		if len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
 		}
-		if len(ks) < common.AddressLength+common.IncarnationLength+common.HashLength {
-			// Skip non storage items
-			return true, nil
-		}
-		key := ks[common.AddressLength+common.IncarnationLength:]
-		keyHash, err1 := common.HashData(key)
+		keyHash, err1 := common.HashData(kLoc)
 		if err1 != nil {
 			return false, err1
 		}
 		//fmt.Printf("seckey: %x\n", seckey)
 		si := storageItem{}
-		copy(si.key[:], key)
+		copy(si.key[:], kLoc)
 		copy(si.seckey[:], keyHash[:])
 		if st.Has(&si) {
 			return true, nil
 		}
 		si.value.SetBytes(vs)
 		st.InsertNoReplace(&si)
-		if bytes.Compare(key[:], lastKey[:]) > 0 {
+		if bytes.Compare(kLoc[:], lastKey[:]) > 0 {
 			// Beyond overrides
 			return st.Len() < maxResults+numDeletes, nil
 		}
@@ -167,80 +147,58 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, start []byte, cb fu
 	return innerErr
 }
 
-func (dbs *PlainDBState) ForEachAccount(start []byte, cb func(address *common.Address, addrHash common.Hash), maxResults int) {
-	results := 0
-	err := WalkAsOf(dbs.tx, dbutils.PlainStateBucket, dbutils.AccountsHistoryBucket, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
-		if len(vs) == 0 {
-			// Skip deleted entries
-			return true, nil
-		}
-
-		if len(ks) > 20 {
-			return true, nil
-		}
-		addr := common.BytesToAddress(ks)
-		addrHash, err1 := common.HashData(ks)
-		if err1 != nil {
-			return false, err1
-		}
-		cb(&addr, addrHash)
-		results++
-		return results < maxResults, nil
-	})
-	if err != nil {
-		log.Error("ForEachAccount walk error", "err", err)
-	}
-}
-
 func (dbs *PlainDBState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	var enc []byte
-	var ok bool
-	if dbs.accountCache != nil {
-		enc, ok = dbs.accountCache.HasGet(nil, address[:])
-	}
-	if !ok {
-		var err error
-		enc, err = GetAsOf(dbs.tx, false /* storage */, address[:], dbs.blockNr+1)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	var tx ethdb.Tx
+	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		if err != nil {
 			return nil, err
 		}
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
 	}
-	if !ok && dbs.accountCache != nil {
-		dbs.accountCache.Set(address[:], enc)
+	enc, err := GetAsOf(tx, false /* storage */, address[:], dbs.blockNr+1)
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		return nil, err
 	}
 	if len(enc) == 0 {
 		return nil, nil
 	}
-	var acc accounts.Account
-	if err := acc.DecodeForStorage(enc); err != nil {
+	var a accounts.Account
+	if err = a.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
 	//restore codehash
-	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		codeHash, err := dbs.tx.Get(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation))
-		if err != nil {
-			return nil, err
-		}
-		if len(codeHash) > 0 {
-			acc.CodeHash = common.BytesToHash(codeHash)
+	if a.Incarnation > 0 && a.IsEmptyCodeHash() {
+		if codeHash, err1 := tx.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
+			if len(codeHash) > 0 {
+				a.CodeHash = common.BytesToHash(codeHash)
+			}
+		} else {
+			return nil, err1
 		}
 	}
-	return &acc, nil
+	return &a, nil
 }
 
 func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address, incarnation, *key)
-	if dbs.storageCache != nil {
-		if enc, ok := dbs.storageCache.HasGet(nil, compositeKey); ok {
-			return enc, nil
+	var tx ethdb.Tx
+	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		if err != nil {
+			return nil, err
 		}
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
 	}
-	enc, err := GetAsOf(dbs.tx, true /* storage */, compositeKey, dbs.blockNr+1)
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	enc, err := GetAsOf(tx, true /* storage */, compositeKey, dbs.blockNr+1)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
-	}
-	if dbs.storageCache != nil {
-		dbs.storageCache.Set(compositeKey, enc)
 	}
 	if len(enc) == 0 {
 		return nil, nil
@@ -248,50 +206,46 @@ func (dbs *PlainDBState) ReadAccountStorage(address common.Address, incarnation 
 	return enc, nil
 }
 
-func (dbs *PlainDBState) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
+func (dbs *PlainDBState) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	var tx ethdb.Tx
+	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		if err != nil {
+			return nil, err
+		}
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
+	}
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	if dbs.codeCache != nil {
-		if code, ok := dbs.codeCache.HasGet(nil, address[:]); ok {
-			return code, nil
-		}
-	}
-	code, err := ethdb.Get(dbs.tx, dbutils.CodeBucket, codeHash[:])
-	if dbs.codeCache != nil && len(code) <= 1024 {
-		dbs.codeCache.Set(address[:], code)
-	}
-	if dbs.codeSizeCache != nil {
-		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
-		dbs.codeSizeCache.Set(address[:], b[:])
+	code, err := tx.GetOne(dbutils.CodeBucket, codeHash[:])
+	if len(code) == 0 {
+		return nil, nil
 	}
 	return code, err
 }
 
-func (dbs *PlainDBState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
-	if bytes.Equal(codeHash[:], emptyCodeHash) {
-		return 0, nil
-	}
-	if dbs.codeSizeCache != nil {
-		if b, ok := dbs.codeSizeCache.HasGet(nil, address[:]); ok {
-			return int(binary.BigEndian.Uint32(b)), nil
-		}
-	}
-	code, err := ethdb.Get(dbs.tx, dbutils.CodeBucket, codeHash[:])
-	if err != nil {
-		return 0, err
-	}
-	if dbs.codeSizeCache != nil {
-		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], uint32(len(code)))
-		dbs.codeSizeCache.Set(address[:], b[:])
-	}
-	return len(code), nil
+func (dbs *PlainDBState) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	code, err := dbs.ReadAccountCode(address, incarnation, codeHash)
+	return len(code), err
 }
 
 func (dbs *PlainDBState) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc, err := GetAsOf(dbs.tx, false /* storage */, address[:], dbs.blockNr+2)
+	var tx ethdb.Tx
+	if hasTx, ok := dbs.db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		dbtx, err := dbs.db.Begin(context.Background(), ethdb.RO)
+		if err != nil {
+			return 0, err
+		}
+		defer dbtx.Rollback()
+		tx = dbtx.(ethdb.HasTx).Tx()
+	}
+	enc, err := GetAsOf(tx, false /* storage */, address[:], dbs.blockNr+2)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return 0, err
 	}
@@ -346,72 +300,4 @@ func (dbs *PlainDBState) WriteAccountStorage(_ context.Context, address common.A
 func (dbs *PlainDBState) CreateContract(address common.Address) error {
 	delete(dbs.storage, address)
 	return nil
-}
-
-// WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
-// for no more than maxItems.
-// Returns whether all matching storage items were traversed (provided there was no error).
-func (dbs *PlainDBState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
-	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	copy(startkey, addrHash[:])
-
-	binary.BigEndian.PutUint64(startkey[common.HashLength:], changeset.DefaultIncarnation)
-	copy(startkey[common.HashLength+common.IncarnationLength:], prefix.Data)
-
-	fixedbits := (common.HashLength + common.IncarnationLength + len(prefix.Data)) * 8
-	if prefix.Odd {
-		fixedbits -= 4
-	}
-
-	i := 0
-
-	err := WalkAsOf(dbs.tx, dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
-		func(key []byte, value []byte) (bool, error) {
-			val := new(big.Int).SetBytes(value)
-
-			if i < maxItems {
-				walker(common.BytesToHash(key), *val)
-			}
-			i++
-			return i <= maxItems, nil
-		},
-	)
-
-	return i <= maxItems, err
-}
-
-// WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix,
-// for no more than maxItems.
-// Returns whether all matching accounts were traversed (provided there was no error).
-func (dbs *PlainDBState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, walker func(common.Hash, *accounts.Account)) (bool, error) {
-	startkey := make([]byte, common.HashLength)
-	copy(startkey, prefix.Data)
-
-	fixedbits := len(prefix.Data) * 8
-	if prefix.Odd {
-		fixedbits -= 4
-	}
-
-	i := 0
-
-	var acc accounts.Account
-	err := WalkAsOf(dbs.tx, dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
-		func(key []byte, value []byte) (bool, error) {
-			if len(key) > 32 {
-				return true, nil
-			}
-			if len(value) > 0 {
-				if err := acc.DecodeForStorage(value); err != nil {
-					return false, err
-				}
-				if i < maxItems {
-					walker(common.BytesToHash(key), &acc)
-				}
-				i++
-			}
-			return i <= maxItems, nil
-		},
-	)
-
-	return i <= maxItems, err
 }

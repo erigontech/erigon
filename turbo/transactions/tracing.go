@@ -27,7 +27,7 @@ const (
 
 type BlockGetter interface {
 	// GetBlockByHash retrieves a block from the database by hash, caching it if found.
-	GetBlockByHash(hash common.Hash) *types.Block
+	GetBlockByHash(hash common.Hash) (*types.Block, error)
 	// GetBlock retrieves a block from the database by hash and number,
 	// caching it if found.
 	GetBlock(hash common.Hash, number uint64) *types.Block
@@ -36,7 +36,10 @@ type BlockGetter interface {
 // computeTxEnv returns the execution environment of a certain transaction.
 func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, tx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.Context, *state.IntraBlockState, *state2.StateReader, error) {
 	// Create the parent state database
-	block := blockGetter.GetBlockByHash(blockHash)
+	block, err := blockGetter.GetBlockByHash(blockHash)
+	if err != nil {
+		return nil, vm.Context{}, nil, nil, err
+	}
 	if block == nil {
 		return nil, vm.Context{}, nil, nil, fmt.Errorf("block %x not found", blockHash)
 	}
@@ -69,7 +72,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		}
 		// Not yet the searched for transaction, execute on top of the current state
 		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{})
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas()), true /* refunds */); err != nil {
 			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
@@ -82,7 +85,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 // TraceTx configures a new tracer according to the provided configuration, and
 // executes the given message in the provided environment. The return value will
 // be tracer dependent.
-func TraceTx(ctx context.Context, message core.Message, vmctx vm.Context, ibs vm.IntraBlockState, config *eth.TraceConfig) (interface{}, error) {
+func TraceTx(ctx context.Context, message core.Message, vmctx vm.Context, ibs vm.IntraBlockState, config *eth.TraceConfig, chainConfig *params.ChainConfig) (interface{}, error) {
 	// Assemble the structured logger or the JavaScript tracer
 	var (
 		tracer vm.Tracer
@@ -116,9 +119,13 @@ func TraceTx(ctx context.Context, message core.Message, vmctx vm.Context, ibs vm
 		tracer = vm.NewStructLogger(config.LogConfig)
 	}
 	// Run the transaction with tracing enabled.
-	vmenv := vm.NewEVM(vmctx, ibs, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer})
+	vmenv := vm.NewEVM(vmctx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
 
-	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()))
+	var refunds bool = true
+	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
+		refunds = false
+	}
+	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds)
 	if err != nil {
 		return nil, fmt.Errorf("tracing failed: %v", err)
 	}

@@ -70,6 +70,21 @@ func BlockBodyKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }
 
+// ReceiptsKey = blockN (uint64 big endian)
+func ReceiptsKey(blockNumber uint64) []byte {
+	newK := make([]byte, 8)
+	binary.BigEndian.PutUint64(newK, blockNumber)
+	return newK
+}
+
+// LogKey = blockN (uint64 big endian) + txId (uint32 big endian)
+func LogKey(blockNumber uint64, txId uint32) []byte {
+	newK := make([]byte, 8+4)
+	binary.BigEndian.PutUint64(newK, blockNumber)
+	binary.BigEndian.PutUint32(newK[8:], txId)
+	return newK
+}
+
 func DecodeBlockBodyKey(key []byte) (uint64, common.Hash, error) {
 	if len(key) != NumberLength+32 {
 		return 0, common.Hash{}, fmt.Errorf("%w: %d", ErrInvalidSize, len(key))
@@ -81,11 +96,6 @@ func DecodeBlockBodyKey(key []byte) (uint64, common.Hash, error) {
 	}
 
 	return number, common.BytesToHash(key[NumberLength:]), nil
-}
-
-// blockReceiptsKey = blockReceiptsPrefix + num (uint64 big endian) + hash
-func BlockReceiptsKey(number uint64, hash common.Hash) []byte {
-	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }
 
 // bloomBitsKey = bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash
@@ -126,11 +136,11 @@ func ParseCompositeStorageKey(compositeKey []byte) (common.Hash, uint64, common.
 
 // AddrHash + incarnation + KeyHash
 // For contract storage (for plain state)
-func PlainGenerateCompositeStorageKey(address common.Address, incarnation uint64, key common.Hash) []byte {
+func PlainGenerateCompositeStorageKey(address []byte, incarnation uint64, key []byte) []byte {
 	compositeKey := make([]byte, common.AddressLength+common.IncarnationLength+common.HashLength)
-	copy(compositeKey, address[:])
+	copy(compositeKey, address)
 	binary.BigEndian.PutUint64(compositeKey[common.AddressLength:], incarnation)
-	copy(compositeKey[common.AddressLength+common.IncarnationLength:], key[:])
+	copy(compositeKey[common.AddressLength+common.IncarnationLength:], key)
 	return compositeKey
 }
 

@@ -179,11 +179,6 @@ func CurrentChunkKey(key []byte) []byte {
 func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 	var blockNumBytes []byte // make([]byte, len(key)+8)
 	switch len(key) {
-	//plain state, accounts
-	case common.AddressLength:
-		blockNumBytes = make([]byte, common.AddressLength+8)
-		copy(blockNumBytes, key)
-		binary.BigEndian.PutUint64(blockNumBytes[common.AddressLength:], blockNumber)
 	//hashed state, accounts
 	case common.HashLength:
 		blockNumBytes = make([]byte, common.HashLength+8)
@@ -195,7 +190,11 @@ func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 		blockNumBytes = make([]byte, common.HashLength*2+8)
 		copy(blockNumBytes, key[:common.HashLength])
 		copy(blockNumBytes[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
-		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength*2:], blockNumber)
+		binary.BigEndian.PutUint64(blockNumBytes[common.HashLength*2:], blockNumber) //plain state, accounts
+	case common.AddressLength:
+		blockNumBytes = make([]byte, common.AddressLength+8)
+		copy(blockNumBytes, key)
+		binary.BigEndian.PutUint64(blockNumBytes[common.AddressLength:], blockNumber)
 	//plain state storage
 	case common.AddressLength + common.HashLength + common.IncarnationLength:
 		//remove incarnation and add block number
@@ -203,6 +202,40 @@ func IndexChunkKey(key []byte, blockNumber uint64) []byte {
 		copy(blockNumBytes, key[:common.AddressLength])
 		copy(blockNumBytes[common.AddressLength:], key[common.AddressLength+common.IncarnationLength:])
 		binary.BigEndian.PutUint64(blockNumBytes[common.AddressLength+common.HashLength:], blockNumber)
+	default:
+		panic("unexpected length " + strconv.Itoa(len(key)))
+	}
+
+	return blockNumBytes
+}
+
+func IndexChunkKey32(key []byte, blockNumber uint32) []byte {
+	var blockNumBytes []byte // make([]byte, len(key)+4)
+	switch len(key) {
+	//plain state, accounts
+	case common.AddressLength:
+		blockNumBytes = make([]byte, common.AddressLength+4)
+		copy(blockNumBytes, key)
+		binary.BigEndian.PutUint32(blockNumBytes[common.AddressLength:], blockNumber)
+	//hashed state, accounts
+	case common.HashLength:
+		blockNumBytes = make([]byte, common.HashLength+4)
+		copy(blockNumBytes, key)
+		binary.BigEndian.PutUint32(blockNumBytes[common.HashLength:], blockNumber)
+	//hashed state storage
+	case common.HashLength*2 + common.IncarnationLength:
+		//remove incarnation and add block number
+		blockNumBytes = make([]byte, common.HashLength*2+4)
+		copy(blockNumBytes, key[:common.HashLength])
+		copy(blockNumBytes[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+		binary.BigEndian.PutUint32(blockNumBytes[common.HashLength*2:], blockNumber)
+	//plain state storage
+	case common.AddressLength + common.HashLength + common.IncarnationLength:
+		//remove incarnation and add block number
+		blockNumBytes = make([]byte, common.AddressLength+common.HashLength+4)
+		copy(blockNumBytes, key[:common.AddressLength])
+		copy(blockNumBytes[common.AddressLength:], key[common.AddressLength+common.IncarnationLength:])
+		binary.BigEndian.PutUint32(blockNumBytes[common.AddressLength+common.HashLength:], blockNumber)
 	default:
 		panic("unexpected length " + strconv.Itoa(len(key)))
 	}

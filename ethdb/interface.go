@@ -62,7 +62,7 @@ type GetterPutter interface {
 // Deleter wraps the database delete operations.
 type Deleter interface {
 	// Delete removes a single entry.
-	Delete(bucket string, key []byte) error
+	Delete(bucket string, k, v []byte) error
 }
 
 type Closer interface {
@@ -90,8 +90,8 @@ type Database interface {
 	// ... some calculations on `batch`
 	// batch.Commit()
 	//
-	NewBatch() DbWithPendingMutations                          //
-	Begin(ctx context.Context) (DbWithPendingMutations, error) // starts db transaction
+	NewBatch() DbWithPendingMutations                                         //
+	Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) // starts db transaction
 	Last(bucket string) ([]byte, []byte, error)
 
 	// IdealBatchSize defines the size of the data batches should ideally add in one write.
@@ -99,18 +99,16 @@ type Database interface {
 
 	Keys() ([][]byte, error)
 
-	// [TURBO-GETH] Freezer support (minimum amount that is actually used)
-	// FIXME: implement support if needed
-	Ancients() (uint64, error)
-	TruncateAncients(items uint64) error
 	Append(bucket string, key, value []byte) error
+	AppendDup(bucket string, key, value []byte) error
+	Sequence(bucket string, amount uint64) (uint64, error)
 }
 
 // MinDatabase is a minimalistic version of the Database interface.
 type MinDatabase interface {
 	Get(bucket string, key []byte) ([]byte, error)
 	Put(bucket string, key, value []byte) error
-	Delete(bucket string, key []byte) error
+	Delete(bucket string, k, v []byte) error
 }
 
 // DbWithPendingMutations is an extended version of the Database,
@@ -153,6 +151,7 @@ type DbWithPendingMutations interface {
 
 type HasKV interface {
 	KV() KV
+	SetKV(kv KV)
 }
 
 type HasTx interface {
@@ -165,13 +164,8 @@ type HasNetInterface interface {
 
 type BucketsMigrator interface {
 	BucketExists(bucket string) (bool, error) // makes them empty
-	// freelist-friendly methods
-	DropBucketsAndCommitEvery(deleteKeysPerTx uint64, buckets ...string) error
-	ClearBucketsAndCommitEvery(deleteKeysPerTx uint64, buckets ...string) error
-
-	// _Deprecated: freelist-unfriendly methods
-	ClearBuckets(buckets ...string) error // makes them empty
-	DropBuckets(buckets ...string) error  // drops them, use of them after drop will panic
+	ClearBuckets(buckets ...string) error     // makes them empty
+	DropBuckets(buckets ...string) error      // drops them, use of them after drop will panic
 }
 
 var errNotSupported = errors.New("not supported")

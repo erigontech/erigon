@@ -149,9 +149,19 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		vmContext.Origin = msg.From()
 
 		evm := vm.NewEVM(vmContext, ibs, chainConfig, vmConfig)
+		if chainConfig.IsYoloV2(vmContext.BlockNumber) {
+			ibs.AddAddressToAccessList(msg.From())
+			if dst := msg.To(); dst != nil {
+				ibs.AddAddressToAccessList(*dst)
+				// If it's a create-tx, the destination will be added inside evm.create
+			}
+			for _, addr := range evm.ActivePrecompiles() {
+				ibs.AddAddressToAccessList(addr)
+			}
+		}
 		snapshot := ibs.Snapshot()
 		// (ret []byte, usedGas uint64, failed bool, err error)
-		msgResult, err := core.ApplyMessage(evm, msg, gaspool)
+		msgResult, err := core.ApplyMessage(evm, msg, gaspool, true /* refunds */)
 		if err != nil {
 			ibs.RevertToSnapshot(snapshot)
 			log.Info("rejected tx", "index", i, "hash", tx.Hash(), "from", msg.From(), "error", err)

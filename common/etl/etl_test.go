@@ -87,7 +87,7 @@ func TestFileDataProviders(t *testing.T) {
 
 	collector := NewCollector("", NewSortableBuffer(1))
 
-	err := extractBucketIntoFiles(db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
+	err := extractBucketIntoFiles("logPrefix", db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 10, len(collector.dataProviders))
@@ -99,7 +99,7 @@ func TestFileDataProviders(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	disposeProviders(collector.dataProviders)
+	disposeProviders("logPrefix", collector.dataProviders)
 
 	for _, p := range collector.dataProviders {
 		fp, ok := p.(*fileDataProvider)
@@ -116,7 +116,7 @@ func TestRAMDataProviders(t *testing.T) {
 	generateTestData(t, db, sourceBucket, 10)
 
 	collector := NewCollector("", NewSortableBuffer(BufferOptimalSize))
-	err := extractBucketIntoFiles(db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
+	err := extractBucketIntoFiles("logPrefix", db, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(collector.dataProviders))
@@ -135,6 +135,7 @@ func TestTransformRAMOnly(t *testing.T) {
 	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 20)
 	err := Transform(
+		"logPrefix",
 		db,
 		sourceBucket,
 		destBucket,
@@ -158,6 +159,7 @@ func TestTransformOnLoadCommitCustomBatchSize(t *testing.T) {
 	finalized := false
 
 	err := Transform(
+		"logPrefix",
 		db,
 		sourceBucket,
 		destBucket,
@@ -193,6 +195,7 @@ func TestTransformOnLoadCommitDefaultBatchSize(t *testing.T) {
 	finalized := false
 
 	err := Transform(
+		"logPrefix",
 		db,
 		sourceBucket,
 		destBucket,
@@ -221,6 +224,7 @@ func TestEmptySourceBucket(t *testing.T) {
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
 	err := Transform(
+		"logPrefix",
 		db,
 		sourceBucket,
 		destBucket,
@@ -240,6 +244,7 @@ func TestTransformExtractStartKey(t *testing.T) {
 	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 10)
 	err := Transform(
+		"logPrefix",
 		db,
 		sourceBucket,
 		destBucket,
@@ -259,6 +264,7 @@ func TestTransformThroughFiles(t *testing.T) {
 	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 10)
 	err := Transform(
+		"logPrefix",
 		db,
 		sourceBucket,
 		destBucket,
@@ -280,6 +286,7 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 10)
 	err := Transform(
+		"logPrefix",
 		db,
 		sourceBucket,
 		destBucket,
@@ -299,6 +306,7 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 	destBucket := dbutils.Buckets[1]
 	generateTestData(t, db, sourceBucket, 10)
 	err := Transform(
+		"logPrefix",
 		db,
 		sourceBucket,
 		destBucket,

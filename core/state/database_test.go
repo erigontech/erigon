@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"runtime"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -34,6 +33,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -74,13 +75,6 @@ func TestCreate2Revive(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain.Stop()
-	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -89,6 +83,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	var contractAddress common.Address
 	var revive *contracts.Revive
+	var err error
 	// Change this address whenever you make any changes in the code of the revive contract in
 	// contracts/revive.sol
 	var create2address = common.HexToAddress("e70fd65144383e1189bd710b1e23b61e26315ff4")
@@ -138,7 +133,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -147,7 +142,10 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -157,7 +155,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	var it *contracts.ReviveDeployEventIterator
@@ -184,7 +182,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -193,7 +191,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	it, err = revive.FilterDeployEvent(nil)
@@ -252,13 +250,6 @@ func TestCreate2Polymorth(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain.Stop()
-	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -267,6 +258,7 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	var contractAddress common.Address
 	var poly *contracts.Poly
+	var err error
 	// Change this address whenever you make any changes in the code of the poly contract in
 	// contracts/poly.sol
 	var create2address = common.HexToAddress("c66aa74c220476f244b7f45897a124d1a01ca8a8")
@@ -350,7 +342,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -359,7 +351,10 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -369,7 +364,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	var it *contracts.PolyDeployEventIterator
@@ -395,7 +390,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -404,7 +399,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	it, err = poly.FilterDeployEvent(nil)
@@ -429,7 +424,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 5
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[4], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	it, err = poly.FilterDeployEvent(nil)
@@ -479,13 +474,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain.Stop()
-	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -494,6 +482,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
+	var err error
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
@@ -548,7 +537,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatalf("generate long blocks")
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -557,7 +546,10 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, blocks[0:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -572,7 +564,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	st.GetState(contractAddress, &key0, &correctValueX)
 
 	// BLOCKS 2 + 3
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1], blocks[2]}); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -581,9 +573,8 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Error("expected contractAddress to not exist at the block 3", contractAddress.String())
 	}
 
-	fmt.Println("-------Reorg")
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{longerBlocks[1], longerBlocks[2], longerBlocks[3]}); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, longerBlocks[1:4], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -591,13 +582,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
 	}
 
-	// Reload blockchain from the database
-	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain1.Stop()
 	st = state.New(state.NewDbStateReader(db))
 	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
@@ -631,13 +615,6 @@ func TestReorgOverStateChange(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain.Stop()
-	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -646,6 +623,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
+	var err error
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 2, func(i int, block *core.BlockGen) {
@@ -666,7 +644,6 @@ func TestReorgOverStateChange(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-		fmt.Println("commited i=", i)
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -694,7 +671,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -703,7 +680,10 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -717,15 +697,13 @@ func TestReorgOverStateChange(t *testing.T) {
 	var correctValueX uint256.Int
 	st.GetState(contractAddress, &key0, &correctValueX)
 
-	fmt.Println("Insert block 2")
 	// BLOCK 2
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
-	fmt.Println("Insert long blocks 2,3")
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{longerBlocks[1], longerBlocks[2]}); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, longerBlocks[1:3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -734,12 +712,6 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 
 	// Reload blockchain from the database
-	txCacher2 := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain2, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain2.Stop()
 	st = state.New(state.NewDbStateReader(db))
 	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
@@ -791,18 +763,12 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain.Stop()
-	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
 
 	var selfDestruct = make([]*contracts.Selfdestruct, numOfContracts)
+	var err error
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, numOfBlocks, func(i int, block *core.BlockGen) {
@@ -845,14 +811,17 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	if _, err = blockchain.InsertChain(context.Background(), blocks); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
 	stats := BucketsStats{}
 
 	fmt.Println("==========================ACCOUNT===========================")
-	err = blockchain.ChainDb().Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = db.Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		if len(k) > 32 {
 			return true, nil
 		}
@@ -869,7 +838,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	}
 
 	fmt.Println("==========================ACCOUNTHISTORY===========================")
-	err = blockchain.ChainDb().Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		stats.HAT += uint64(len(v))
 		return true, nil
 	})
@@ -878,7 +847,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	}
 
 	fmt.Println("==========================STORAGE===========================")
-	err = blockchain.ChainDb().Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = db.Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		stats.Storage += uint64(len(v))
 		return true, nil
 	})
@@ -887,7 +856,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	}
 
 	fmt.Println("==========================StorageHISTORY===========================")
-	err = blockchain.ChainDb().Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		stats.HST += uint64(len(v))
 		return true, nil
 	})
@@ -896,7 +865,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	}
 
 	fmt.Println("==========================CHANGESET===========================")
-	err = blockchain.ChainDb().Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = db.Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		stats.ChangeSetHAT += uint64(len(v))
 		return true, nil
 	})
@@ -904,7 +873,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = blockchain.ChainDb().Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		stats.ChangeSetHST += uint64(len(v))
 		return true, nil
 	})
@@ -959,13 +928,6 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain.Stop()
-	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -973,6 +935,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	transactOpts.GasLimit = 1000000
 
 	var contractAddress common.Address
+	var err error
 	// There is one block, and it ends up deploying Revive contract (could be any other contract, it does not really matter)
 	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
 	// We expect the pre-existing storage items to be removed by the deployment
@@ -993,7 +956,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -1002,11 +965,14 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -1015,7 +981,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	var check0 uint256.Int
 	st.GetState(contractAddress, &key0, &check0)
 	if !check0.IsZero() {
-		t.Errorf("expected 0x00 in position 0, got: %x", check0)
+		t.Errorf("expected 0x00 in position 0, got: %x", check0.Bytes())
 	}
 }
 
@@ -1101,14 +1067,6 @@ func TestEip2200Gas(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain.Stop()
-
-	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -1117,6 +1075,7 @@ func TestEip2200Gas(t *testing.T) {
 
 	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
+	var err error
 
 	// Here we generate 1 block with 2 transactions, first creates a contract with some initial values in the
 	// It activates the SSTORE pricing rules specific to EIP-2200 (istanbul)
@@ -1144,7 +1103,7 @@ func TestEip2200Gas(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -1154,7 +1113,10 @@ func TestEip2200Gas(t *testing.T) {
 	balanceBefore := st.GetBalance(address)
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1164,7 +1126,7 @@ func TestEip2200Gas(t *testing.T) {
 	}
 	balanceAfter := st.GetBalance(address)
 	gasSpent := big.NewInt(0).Sub(balanceBefore.ToBig(), balanceAfter.ToBig())
-	expectedGasSpent := big.NewInt(192245) // In the incorrect version, it is 179645
+	expectedGasSpent := big.NewInt(190373) //(192245) // In the incorrect version, it is 179645
 	if gasSpent.Cmp(expectedGasSpent) != 0 {
 		t.Errorf("Expected gas spent: %d, got %d", expectedGasSpent, gasSpent)
 	}
@@ -1194,13 +1156,6 @@ func TestWrongIncarnation(t *testing.T) {
 	)
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain.Stop()
-	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -1209,6 +1164,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 	var contractAddress common.Address
 	var changer *contracts.Changer
+	var err error
 
 	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 2, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
@@ -1233,7 +1189,7 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -1242,7 +1198,10 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1265,15 +1224,8 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
 
-	// Reload blockchain from the database
-	txCacher1 := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain1, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// BLOCKS 2
-	if _, err = blockchain1.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, eng, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	addrHash = crypto.Keccak256(contractAddress[:])
@@ -1326,18 +1278,12 @@ func TestWrongIncarnation2(t *testing.T) {
 	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
 	engine := ethash.NewFaker()
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, txCacher)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blockchain.Stop()
-	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
+	var err error
 
 	var contractAddress common.Address
 
@@ -1398,18 +1344,21 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCKS 2
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1431,7 +1380,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal("wrong incarnation")
 	}
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{longerBlocks[1], longerBlocks[2]}); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, longerBlocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1472,7 +1421,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 	oldCodeHash := common.BytesToHash(crypto.Keccak256(oldCode))
 
-	trieCode, err := tds.ReadAccountCode(contract, oldCodeHash)
+	trieCode, err := tds.ReadAccountCode(contract, 1, oldCodeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
@@ -1488,7 +1437,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	tds.ComputeTrieRoots()
 
 	newCodeHash := common.BytesToHash(crypto.Keccak256(newCode))
-	trieCode, err = tds.ReadAccountCode(contract, newCodeHash)
+	trieCode, err = tds.ReadAccountCode(contract, 1, newCodeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 }
@@ -1518,7 +1467,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	if _, err := tds.ResolveStateTrie(false /* extractWitness */, true /* trace */); err != nil {
+	if _, err := tds.ResolveStateTrie(false /* extractWitness */, false /* trace */); err != nil {
 		assert.NoError(t, err)
 	}
 
@@ -1527,7 +1476,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	tds.StartNewBuffer()
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := tds.ReadAccountCodeSize(contract, codeHash)
+	codeSize, err := tds.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, len(code), codeSize, "new code should be received")
 
@@ -1540,7 +1489,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 	tds.StartNewBuffer()
 
-	code2, err := tds.ReadAccountCode(contract, codeHash)
+	code2, err := tds.ReadAccountCode(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, code, code2, "new code should be received")
 
@@ -1583,7 +1532,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	tds.StartNewBuffer()
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := tds.ReadAccountCodeSize(contract, codeHash)
+	codeSize, err := tds.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
@@ -1591,9 +1540,202 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	assert.NoError(t, db.Delete(dbutils.CodeBucket, codeHash[:]))
+	assert.NoError(t, db.Delete(dbutils.CodeBucket, codeHash[:], nil), nil)
 
-	codeSize2, err := tds.ReadAccountCodeSize(contract, codeHash)
+	codeSize2, err := tds.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
+}
+
+func TestRecreateAndRewind(t *testing.T) {
+	// Configure and generate a sample block chain
+	var (
+		db      = ethdb.NewMemDatabase()
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(1000000000)
+		gspec   = &core.Genesis{
+			Config: params.AllEthashProtocolChanges,
+			Alloc: core.GenesisAlloc{
+				address: {Balance: funds},
+			},
+		}
+		genesis = gspec.MustCommit(db)
+		//signer  = types.HomesteadSigner{}
+	)
+
+	engine := ethash.NewFaker()
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts := bind.NewKeyedTransactor(key)
+	transactOpts.GasLimit = 1000000
+	var revive *contracts.Revive2
+	var phoenix *contracts.Phoenix
+	var reviveAddress common.Address
+	var phoenixAddress common.Address
+	var err error
+
+	blocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 4, func(i int, block *core.BlockGen) {
+		var tx *types.Transaction
+
+		switch i {
+		case 0:
+			// Deploy phoenix factory
+			reviveAddress, tx, revive, err = contracts.DeployRevive2(transactOpts, contractBackend)
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 1:
+			// Calculate the address of the Phoenix and create handle to phoenix contract
+			var codeHash common.Hash
+			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
+				panic(err)
+			}
+			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
+			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackend); err != nil {
+				panic(err)
+			}
+			// Deploy phoenix
+			if tx, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+			// Modify phoenix storage
+			if tx, err = phoenix.Increment(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+			if tx, err = phoenix.Increment(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 2:
+			// Destruct the phoenix
+			if tx, err = phoenix.Die(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 3:
+			// Recreate the phoenix, and change the storage
+			if tx, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+			if tx, err = phoenix.Increment(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		}
+		contractBackend.Commit()
+	}, false /* intermediateHashes */)
+	if err1 != nil {
+		t.Fatalf("generate blocks: %v", err1)
+	}
+
+	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOptsLonger := bind.NewKeyedTransactor(key)
+	transactOptsLonger.GasLimit = 1000000
+	longerBlocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 5, func(i int, block *core.BlockGen) {
+		var tx *types.Transaction
+
+		switch i {
+		case 0:
+			// Deploy phoenix factory
+			reviveAddress, tx, revive, err = contracts.DeployRevive2(transactOptsLonger, contractBackendLonger)
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 1:
+			// Calculate the address of the Phoenix and create handle to phoenix contract
+			var codeHash common.Hash
+			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
+				panic(err)
+			}
+			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
+			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackendLonger); err != nil {
+				panic(err)
+			}
+			// Deploy phoenix
+			if tx, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+			// Modify phoenix storage
+			if tx, err = phoenix.Increment(transactOptsLonger); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+			if tx, err = phoenix.Increment(transactOptsLonger); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 2:
+			// Destruct the phoenix
+			if tx, err = phoenix.Die(transactOptsLonger); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 3:
+			// Recreate the phoenix, but now with the empty storage
+			if tx, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		}
+		contractBackendLonger.Commit()
+	}, false /* intermediateHashes */)
+	if err1 != nil {
+		t.Fatalf("generate longer blocks: %v", err1)
+	}
+
+	// BLOCKS 1 and 2
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, blocks[:2], true /* checkRoot */); err != nil {
+		t.Fatal(err)
+	}
+
+	st := state.New(state.NewDbStateReader(db))
+	if !st.Exist(phoenixAddress) {
+		t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
+	}
+
+	var key0 common.Hash
+	var check0 uint256.Int
+	st.GetState(phoenixAddress, &key0, &check0)
+	if check0.Cmp(uint256.NewInt().SetUint64(2)) != 0 {
+		t.Errorf("expected 0x02 in position 0, got: 0x%x", check0.Bytes())
+	}
+
+	// Block 3 and 4
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, blocks[2:], true /* checkRoot */); err != nil {
+		t.Fatal(err)
+	}
+
+	st = state.New(state.NewDbStateReader(db))
+	if !st.Exist(phoenixAddress) {
+		t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
+	}
+
+	st.GetState(phoenixAddress, &key0, &check0)
+	if check0.Cmp(uint256.NewInt().SetUint64(1)) != 0 {
+		t.Errorf("expected 0x01 in position 0, got: 0x%x", check0.Bytes())
+	}
+
+	// Reorg
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, longerBlocks, true /* checkRoot */); err != nil {
+		t.Fatal(err)
+	}
+
+	st = state.New(state.NewPlainStateReader(db))
+	if !st.Exist(phoenixAddress) {
+		t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
+	}
+
+	st.GetState(phoenixAddress, &key0, &check0)
+	if check0.Cmp(uint256.NewInt().SetUint64(0)) != 0 {
+		t.Errorf("expected 0x00 in position 0, got: 0x%x", check0.Bytes())
+	}
 }

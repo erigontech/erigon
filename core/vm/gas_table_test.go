@@ -86,7 +86,6 @@ func TestEIP2200(t *testing.T) {
 		tt := tt
 		i := i
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			t.Parallel()
 			address := common.BytesToAddress([]byte("contract"))
 
 			db := ethdb.NewMemDatabase()

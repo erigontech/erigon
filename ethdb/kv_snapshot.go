@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"unsafe"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -31,6 +32,10 @@ func (s *snapshotTX) CursorDupSort(bucket string) CursorDupSort {
 	return s.dbTX.CursorDupSort(bucket)
 }
 
+func (s *snapshotTX) Sequence(bucket string, amount uint64) (uint64, error) {
+	return s.dbTX.Sequence(bucket, amount)
+}
+
 func (s *snapshotTX) CursorDupFixed(bucket string) CursorDupFixed {
 	return s.dbTX.CursorDupFixed(bucket)
 }
@@ -47,11 +52,19 @@ func (s *snapshotTX) DCmp(bucket string, a, b []byte) int {
 	return s.dbTX.DCmp(bucket, a, b)
 }
 
+func (s *snapshotTX) CHandle() unsafe.Pointer {
+	return s.dbTX.CHandle()
+}
+
 func (v *lazyTx) CursorDupSort(bucket string) CursorDupSort {
 	panic("implement me")
 }
 
 func (v *lazyTx) CursorDupFixed(bucket string) CursorDupFixed {
+	panic("implement me")
+}
+
+func (v *lazyTx) Sequence(bucket string, amount uint64) (uint64, error) {
 	panic("implement me")
 }
 
@@ -64,6 +77,10 @@ func (v *lazyTx) Cmp(bucket string, a, b []byte) int {
 }
 
 func (v *lazyTx) DCmp(bucket string, a, b []byte) int {
+	panic("implement me")
+}
+
+func (v *lazyTx) CHandle() unsafe.Pointer {
 	panic("implement me")
 }
 
@@ -169,7 +186,7 @@ func (opts snapshotOpts) MustOpen() KV {
 }
 
 func (s *SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
-	dbTx, err := s.db.Begin(ctx, nil, false)
+	dbTx, err := s.db.Begin(ctx, nil, RO)
 	if err != nil {
 		return err
 	}
@@ -177,7 +194,7 @@ func (s *SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
 	t := &snapshotTX{
 		dbTX: dbTx,
 		snTX: newVirtualTx(func() (Tx, error) {
-			return s.snapshotDB.Begin(ctx, nil, false)
+			return s.snapshotDB.Begin(ctx, nil, RO)
 		}, s.forBuckets),
 		forBuckets: s.forBuckets,
 	}
@@ -196,8 +213,8 @@ func (s *SnapshotKV) Close() {
 	}
 }
 
-func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx, error) {
-	dbTx, err := s.db.Begin(ctx, parentTx, writable)
+func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, flags TxFlags) (Tx, error) {
+	dbTx, err := s.db.Begin(ctx, parentTx, flags)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +222,7 @@ func (s *SnapshotKV) Begin(ctx context.Context, parentTx Tx, writable bool) (Tx,
 	t := &snapshotTX{
 		dbTX: dbTx,
 		snTX: newVirtualTx(func() (Tx, error) {
-			return s.snapshotDB.Begin(ctx, parentTx, false)
+			return s.snapshotDB.Begin(ctx, parentTx, flags)
 		}, s.forBuckets),
 		forBuckets: s.forBuckets,
 	}
@@ -254,7 +271,7 @@ func (v *lazyTx) Cursor(bucket string) Cursor {
 	return nil
 }
 
-func (v *lazyTx) Get(bucket string, key []byte) (val []byte, err error) {
+func (v *lazyTx) GetOne(bucket string, key []byte) (val []byte, err error) {
 	if _, ok := v.forBuckets[bucket]; !ok {
 		return nil, ErrNotSnapshotBucket
 	}
@@ -262,10 +279,10 @@ func (v *lazyTx) Get(bucket string, key []byte) (val []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return tx.Get(bucket, key)
+	return tx.GetOne(bucket, key)
 }
 
-func (v *lazyTx) Has(bucket string, key []byte) (bool, error) {
+func (v *lazyTx) HasOne(bucket string, key []byte) (bool, error) {
 	if _, ok := v.forBuckets[bucket]; !ok {
 		return false, ErrNotSnapshotBucket
 	}
@@ -273,7 +290,7 @@ func (v *lazyTx) Has(bucket string, key []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return tx.Has(bucket, key)
+	return tx.HasOne(bucket, key)
 }
 
 func (v *lazyTx) Commit(ctx context.Context) error {
@@ -330,34 +347,34 @@ func (s *snapshotTX) Cursor(bucket string) Cursor {
 	}
 }
 
-func (s *snapshotTX) Get(bucket string, key []byte) (val []byte, err error) {
+func (s *snapshotTX) GetOne(bucket string, key []byte) (val []byte, err error) {
 	_, ok := s.forBuckets[bucket]
 	if !ok {
-		return s.dbTX.Get(bucket, key)
+		return s.dbTX.GetOne(bucket, key)
 	}
-	v, err := s.dbTX.Get(bucket, key)
+	v, err := s.dbTX.GetOne(bucket, key)
 	switch {
 	case err == nil && v != nil:
 		return v, nil
 	case err != nil && !errors.Is(err, ErrKeyNotFound):
 		return nil, err
 	}
-	return s.snTX.Get(bucket, key)
+	return s.snTX.GetOne(bucket, key)
 }
 
-func (s *snapshotTX) Has(bucket string, key []byte) (bool, error) {
+func (s *snapshotTX) HasOne(bucket string, key []byte) (bool, error) {
 	_, ok := s.forBuckets[bucket]
 	if !ok {
-		return s.dbTX.Has(bucket, key)
+		return s.dbTX.HasOne(bucket, key)
 	}
-	v, err := s.dbTX.Has(bucket, key)
+	v, err := s.dbTX.HasOne(bucket, key)
 	switch {
 	case err == nil && v:
 		return true, nil
 	case err != nil && !errors.Is(err, ErrKeyNotFound):
 		return false, err
 	}
-	return s.snTX.Has(bucket, key)
+	return s.snTX.HasOne(bucket, key)
 }
 
 func (s *snapshotTX) BucketSize(name string) (uint64, error) {
@@ -482,23 +499,23 @@ func (s *snapshotCursor) Put(key []byte, value []byte) error {
 	return s.dbCursor.Put(key, value)
 }
 
-func (s *snapshotCursor) Delete(key []byte) error {
-	return s.dbCursor.Delete(key)
+func (s *snapshotCursor) Delete(k, v []byte) error {
+	return s.dbCursor.Delete(k, v)
 }
 
 func (s *snapshotCursor) Append(key []byte, value []byte) error {
 	return s.dbCursor.Append(key, value)
 }
 
-func (s *snapshotCursor) SeekExact(key []byte) ([]byte, error) {
-	v, err := s.dbCursor.SeekExact(key)
+func (s *snapshotCursor) SeekExact(key []byte) ([]byte, []byte, error) {
+	k, v, err := s.dbCursor.SeekExact(key)
 	if err != nil {
-		return nil, err
+		return []byte{}, nil, err
 	}
 	if v == nil {
 		return s.snCursor.SeekExact(key)
 	}
-	return v, err
+	return k, v, err
 }
 
 func (s *snapshotCursor) Last() ([]byte, []byte, error) {

@@ -25,6 +25,7 @@ import (
 	mrand "math/rand"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
@@ -243,6 +244,10 @@ loop:
 		d.logStats()
 
 		select {
+		case <-d.ctx.Done():
+			it.Close()
+			break loop
+
 		case node := <-nodesCh:
 			if err := d.checkDial(node); err != nil {
 				d.log.Trace("Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
@@ -261,7 +266,7 @@ loop:
 				d.dialPeers++
 			}
 			id := c.node.ID()
-			d.peers[id] = c.flags
+			d.peers[id] = connFlag(atomic.LoadInt32((*int32)(&c.flags)))
 			// Remove from static pool because the node is now connected.
 			task := d.static[id]
 			if task != nil && task.staticPoolIndex >= 0 {
@@ -303,9 +308,6 @@ loop:
 		case <-historyExp:
 			d.expireHistory()
 
-		case <-d.ctx.Done():
-			it.Close()
-			break loop
 		}
 	}
 

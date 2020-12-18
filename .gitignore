@@ -55,3 +55,5 @@ root_*.txt
 
 __pycache__
 docker-compose.dev.yml
+/build
+*.tmp

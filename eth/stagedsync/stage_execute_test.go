@@ -2,25 +2,24 @@ package stagedsync
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	db1 := ethdb.NewMemDatabase()
 	defer db1.Close()
-	tx1, err := db1.Begin(context.Background())
+	tx1, err := db1.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx1.Rollback()
 
 	db2 := ethdb.NewMemDatabase()
 	defer db2.Close()
-	tx2, err := db2.Begin(context.Background())
+	tx2, err := db2.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx2.Rollback()
 
@@ -53,13 +52,13 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	db1 := ethdb.NewMemDatabase()
 	defer db1.Close()
-	tx1, err := db1.Begin(context.Background())
+	tx1, err := db1.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx1.Rollback()
 
 	db2 := ethdb.NewMemDatabase()
 	defer db2.Close()
-	tx2, err := db2.Begin(context.Background())
+	tx2, err := db2.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx2.Rollback()
 
@@ -70,7 +69,6 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
-	core.UsePlainStateExecution = true
 	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
 	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
 	err = UnwindExecutionStage(u, s, tx2, true)
@@ -94,13 +92,13 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	t.Skip("not supported yet, to be restored")
 	db1 := ethdb.NewMemDatabase()
 	defer db1.Close()
-	tx1, err := db1.Begin(context.Background())
+	tx1, err := db1.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx1.Rollback()
 
 	db2 := ethdb.NewMemDatabase()
 	defer db2.Close()
-	tx2, err := db2.Begin(context.Background())
+	tx2, err := db2.Begin(context.Background(), ethdb.RW)
 	require.NoError(t, err)
 	defer tx2.Rollback()
 

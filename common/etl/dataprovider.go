@@ -6,7 +6,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
 	"runtime"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -28,21 +27,19 @@ type Encoder interface {
 	Reset(writer io.Writer)
 }
 
-func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, datadir string) (dataProvider, error) {
+func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, tmpdir string) (dataProvider, error) {
 	if b.Len() == 0 {
 		return nil, nil
 	}
 	// if we are going to create files in the system temp dir, we don't need any
 	// subfolders.
-	if datadir != "" {
-		// the folder name stays the same and shared between ETL runs, so we don't need to remove it.
-		// it actually can make debugging more tricky in case we leak some open files.
-		datadir = path.Join(datadir, "etl-temp")
-		if err := os.MkdirAll(datadir, 0755); err != nil {
+	if tmpdir != "" {
+		if err := os.MkdirAll(tmpdir, 0755); err != nil {
 			return nil, err
 		}
 	}
-	bufferFile, err := ioutil.TempFile(datadir, "tg-sync-sortable-buf")
+
+	bufferFile, err := ioutil.TempFile(tmpdir, "tg-sync-sortable-buf")
 	if err != nil {
 		return nil, err
 	}

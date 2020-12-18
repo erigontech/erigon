@@ -55,6 +55,8 @@ type Log struct {
 	Removed bool `json:"removed" codec:"-"`
 }
 
+type Logs []*Log
+
 type logMarshaling struct {
 	Data        hexutil.Bytes
 	BlockNumber hexutil.Uint64

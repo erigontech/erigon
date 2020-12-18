@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -25,8 +26,8 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 		return func(t *testing.T) {
 			db := ethdb.NewMemDatabase()
 			defer db.Close()
-			ig := NewIndexGenerator(db, make(chan struct{}))
-			csInfo, ok := changeset.Mapper[string(csBucket)]
+			ig := NewIndexGenerator("logPrefix", db, make(chan struct{}))
+			csInfo, ok := changeset.Mapper[csBucket]
 			if !ok {
 				t.Fatal("incorrect cs bucket")
 			}
@@ -66,9 +67,9 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		csbucket := buckets[i]
 		db := ethdb.NewMemDatabase()
 		hashes, expected := generateTestData(t, db, csbucket, 2100)
-		mp := changeset.Mapper[string(csbucket)]
+		mp := changeset.Mapper[csbucket]
 		indexBucket := mp.IndexBucket
-		ig := NewIndexGenerator(db, make(chan struct{}))
+		ig := NewIndexGenerator("logPrefix", db, make(chan struct{}))
 		err := ig.GenerateIndex(0, uint64(2100), csbucket, "")
 		if err != nil {
 			t.Fatal(err)
@@ -81,82 +82,82 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 			return arr[:pos]
 		}
 
-		t.Run("truncate to 2050 "+string(csbucket), func(t *testing.T) {
-			expected[string(hashes[0])][2] = reduceSlice(expected[string(hashes[0])][2], 2050)
-			expected[string(hashes[1])][1] = reduceSlice(expected[string(hashes[1])][1], 2050)
-			expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 2050)
+		//t.Run("truncate to 2050 "+csbucket, func(t *testing.T) {
+		expected[string(hashes[0])][2] = reduceSlice(expected[string(hashes[0])][2], 2050)
+		expected[string(hashes[1])][1] = reduceSlice(expected[string(hashes[1])][1], 2050)
+		expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 2050)
 
-			err = ig.Truncate(2050, csbucket)
-			if err != nil {
-				t.Fatal(err)
-			}
+		err = ig.Truncate(2050, csbucket)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-			checkIndex(t, db, indexBucket, hashes[0], 2030, expected[string(hashes[0])][2])
-			checkIndex(t, db, indexBucket, hashes[1], 2030, expected[string(hashes[1])][1])
-			checkIndex(t, db, indexBucket, hashes[2], 2030, expected[string(hashes[2])][0])
-			checkIndex(t, db, indexBucket, hashes[0], 1999, expected[string(hashes[0])][1])
-			checkIndex(t, db, indexBucket, hashes[1], 999, expected[string(hashes[1])][0])
-		})
+		checkIndex(t, db, indexBucket, hashes[0], 2030, expected[string(hashes[0])][2])
+		checkIndex(t, db, indexBucket, hashes[1], 2030, expected[string(hashes[1])][1])
+		checkIndex(t, db, indexBucket, hashes[2], 2030, expected[string(hashes[2])][0])
+		checkIndex(t, db, indexBucket, hashes[0], 1999, expected[string(hashes[0])][1])
+		checkIndex(t, db, indexBucket, hashes[1], 999, expected[string(hashes[1])][0])
+		//})
 
-		t.Run("truncate to 2000 "+string(csbucket), func(t *testing.T) {
-			expected[string(hashes[0])][2] = reduceSlice(expected[string(hashes[0])][2], 2000)
-			expected[string(hashes[1])][1] = reduceSlice(expected[string(hashes[1])][1], 2000)
-			expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 2000)
+		//t.Run("truncate to 2000 "+string(csbucket), func(t *testing.T) {
+		expected[string(hashes[0])][2] = reduceSlice(expected[string(hashes[0])][2], 2000)
+		expected[string(hashes[1])][1] = reduceSlice(expected[string(hashes[1])][1], 2000)
+		expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 2000)
 
-			err = ig.Truncate(2000, csbucket)
-			if err != nil {
-				t.Fatal(err)
-			}
+		err = ig.Truncate(2000, csbucket)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-			checkIndex(t, db, indexBucket, hashes[0], 2000, expected[string(hashes[0])][2])
-			checkIndex(t, db, indexBucket, hashes[1], 2000, expected[string(hashes[1])][1])
-			checkIndex(t, db, indexBucket, hashes[2], expected[string(hashes[2])][0][len(expected[string(hashes[2])][0])-1], expected[string(hashes[2])][0])
-		})
+		checkIndex(t, db, indexBucket, hashes[0], 2000, expected[string(hashes[0])][2])
+		checkIndex(t, db, indexBucket, hashes[1], 2000, expected[string(hashes[1])][1])
+		checkIndex(t, db, indexBucket, hashes[2], expected[string(hashes[2])][0][len(expected[string(hashes[2])][0])-1], expected[string(hashes[2])][0])
+		//})
 
-		t.Run("truncate to 1999 "+string(csbucket), func(t *testing.T) {
-			err = ig.Truncate(1999, csbucket)
-			if err != nil {
-				t.Fatal(err)
-			}
-			checkIndex(t, db, indexBucket, hashes[0], 1999, expected[string(hashes[0])][1])
-			checkIndex(t, db, indexBucket, hashes[1], 1998, expected[string(hashes[1])][0])
-			checkIndex(t, db, indexBucket, hashes[2], 1998, expected[string(hashes[2])][0])
-			_, err = db.GetIndexChunk(csbucket, hashes[0], 2000)
-			if err != ethdb.ErrKeyNotFound {
-				t.Fatal()
-			}
-			_, err = db.GetIndexChunk(csbucket, hashes[1], 2000)
-			if err != ethdb.ErrKeyNotFound {
-				t.Fatal()
-			}
-		})
+		//t.Run("truncate to 1999 "+string(csbucket), func(t *testing.T) {
+		err = ig.Truncate(1999, csbucket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkIndex(t, db, indexBucket, hashes[0], 1999, expected[string(hashes[0])][1])
+		checkIndex(t, db, indexBucket, hashes[1], 1998, expected[string(hashes[1])][0])
+		checkIndex(t, db, indexBucket, hashes[2], 1998, expected[string(hashes[2])][0])
+		_, err = db.GetIndexChunk(csbucket, hashes[0], 2000)
+		if !errors.Is(err, ethdb.ErrKeyNotFound) {
+			t.Fatal()
+		}
+		_, err = db.GetIndexChunk(csbucket, hashes[1], 2000)
+		if !errors.Is(err, ethdb.ErrKeyNotFound) {
+			t.Fatal()
+		}
+		//})
 
-		t.Run("truncate to 999 "+string(csbucket), func(t *testing.T) {
-			expected[string(hashes[1])][0] = reduceSlice(expected[string(hashes[1])][0], 999)
-			expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 999)
+		//t.Run("truncate to 999 "+string(csbucket), func(t *testing.T) {
+		expected[string(hashes[1])][0] = reduceSlice(expected[string(hashes[1])][0], 999)
+		expected[string(hashes[2])][0] = reduceSlice(expected[string(hashes[2])][0], 999)
 
-			err = ig.Truncate(999, csbucket)
-			if err != nil {
-				t.Fatal(err)
-			}
-			checkIndex(t, db, indexBucket, hashes[0], 999, expected[string(hashes[0])][0])
-			checkIndex(t, db, indexBucket, hashes[1], 998, expected[string(hashes[1])][0])
-			checkIndex(t, db, indexBucket, hashes[2], 999, expected[string(hashes[2])][0])
-			_, err = db.GetIndexChunk(csbucket, hashes[0], 1000)
-			if err != ethdb.ErrKeyNotFound {
-				t.Fatal()
-			}
-			_, err = db.GetIndexChunk(csbucket, hashes[1], 1000)
-			if err != ethdb.ErrKeyNotFound {
-				t.Fatal()
-			}
-		})
+		err = ig.Truncate(999, csbucket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkIndex(t, db, indexBucket, hashes[0], 999, expected[string(hashes[0])][0])
+		checkIndex(t, db, indexBucket, hashes[1], 998, expected[string(hashes[1])][0])
+		checkIndex(t, db, indexBucket, hashes[2], 999, expected[string(hashes[2])][0])
+		_, err = db.GetIndexChunk(csbucket, hashes[0], 1000)
+		if !errors.Is(err, ethdb.ErrKeyNotFound) {
+			t.Fatal()
+		}
+		_, err = db.GetIndexChunk(csbucket, hashes[1], 1000)
+		if !errors.Is(err, ethdb.ErrKeyNotFound) {
+			t.Fatal()
+		}
+		//})
 		db.Close()
 	}
 }
 
 func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlocks int) ([][]byte, map[string][][]uint64) { //nolint
-	csInfo, ok := changeset.Mapper[string(csBucket)]
+	csInfo, ok := changeset.Mapper[csBucket]
 	if !ok {
 		t.Fatal("incorrect cs bucket")
 	}
@@ -221,11 +222,9 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlo
 			}
 			expected3[len(expected3)-1] = expected3[len(expected3)-1].Append(uint64(i), false)
 		}
-		v, err := csInfo.Encode(cs)
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = db.Put(csBucket, dbutils.EncodeTimestamp(uint64(i)), v)
+		err = csInfo.Encode(uint64(i), cs, func(k, v []byte) error {
+			return db.Put(csBucket, k, v)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

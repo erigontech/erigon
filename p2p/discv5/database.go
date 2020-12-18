@@ -105,7 +105,7 @@ func newPersistentNodeDB(path string, version int, self NodeID) (*nodeDB, error)
 	var blob []byte
 	if err := db.Update(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbbucket)
-		if v, _ := c.SeekExact(nodeDBVersionKey); v != nil {
+		if _, v, _ := c.SeekExact(nodeDBVersionKey); v != nil {
 			// v only lives during transaction tx
 			blob = make([]byte, len(v))
 			copy(blob, v)
@@ -159,7 +159,7 @@ func (db *nodeDB) fetchInt64(key []byte) int64 {
 	var val int64
 	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbbucket)
-		blob, _ := c.SeekExact(key)
+		_, blob, _ := c.SeekExact(key)
 		if blob != nil {
 			if v, read := binary.Varint(blob); read > 0 {
 				val = v
@@ -196,7 +196,7 @@ func (db *nodeDB) fetchRLP(key []byte, val interface{}) error {
 	var blob []byte
 	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbbucket)
-		v, err := c.SeekExact(key)
+		_, v, err := c.SeekExact(key)
 		if err != nil {
 			return err
 		}
@@ -390,7 +390,7 @@ func (db *nodeDB) querySeeds(n int, maxAge time.Duration) []*Node {
 			}
 			pongKey := makeKey(n.ID, nodeDBDiscoverPong)
 			var lastPong int64
-			if blob, _ := c2.SeekExact(pongKey); blob != nil {
+			if _, blob, _ := c2.SeekExact(pongKey); blob != nil {
 				if v, read := binary.Varint(blob); read > 0 {
 					lastPong = v
 				}
@@ -417,7 +417,7 @@ func (db *nodeDB) fetchTopicRegTickets(id NodeID) (issued, used uint32) {
 	var blob []byte
 	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbbucket)
-		v, err := c.SeekExact(key)
+		_, v, err := c.SeekExact(key)
 		if err != nil {
 			return err
 		}

@@ -21,15 +21,19 @@ func TestBlockHashStage(t *testing.T) {
 
 	// prepare db so it works with our test
 	rawdb.WriteHeaderNumber(db, origin.Hash(), 0)
-	rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty)
+	if err := rawdb.WriteTd(db, origin.Hash(), 0, origin.Difficulty); err != nil {
+		panic(err)
+	}
 	rawdb.WriteHeader(context.TODO(), db, origin)
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
-	rawdb.WriteCanonicalHash(db, origin.Hash(), 0)
+	if err := rawdb.WriteCanonicalHash(db, origin.Hash(), 0); err != nil {
+		panic(err)
+	}
 
 	eng := process.NewRemoteEngine(ethash.NewFaker(), params.AllEthashProtocolChanges)
 	defer eng.Close()
 
-	_, _, err := InsertHeaderChain(db, headers, eng, 0)
+	_, _, _, err := InsertHeaderChain("logPrefix", db, headers, eng)
 	assert.NoError(t, err)
 	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, db, "", nil)
 	assert.NoError(t, err)

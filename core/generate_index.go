@@ -16,8 +16,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func NewIndexGenerator(db ethdb.Database, quitCh <-chan struct{}) *IndexGenerator {
+func NewIndexGenerator(logPrefix string, db ethdb.Database, quitCh <-chan struct{}) *IndexGenerator {
 	return &IndexGenerator{
+		logPrefix:        logPrefix,
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
 		TempDir:          os.TempDir(),
@@ -26,37 +27,37 @@ func NewIndexGenerator(db ethdb.Database, quitCh <-chan struct{}) *IndexGenerato
 }
 
 type IndexGenerator struct {
+	logPrefix        string
 	db               ethdb.Database
 	ChangeSetBufSize int
 	TempDir          string
 	quitCh           <-chan struct{}
 }
 
-func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket string, datadir string) error {
+func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBucket string, tmpdir string) error {
 	v, ok := changeset.Mapper[changeSetBucket]
 	if !ok {
 		return errors.New("unknown bucket type")
 	}
-	log.Debug("Index generation", "from", startBlock, "to", endBlock, "csbucket", changeSetBucket)
+	log.Debug(fmt.Sprintf("[%s] Index generation", ig.logPrefix), "from", startBlock, "to", endBlock, "csbucket", changeSetBucket)
 	if endBlock < startBlock && endBlock != 0 {
 		return fmt.Errorf("generateIndex %s: endBlock %d smaller than startBlock %d", changeSetBucket, endBlock, startBlock)
 	}
 	t := time.Now()
-	err := etl.Transform(ig.db, changeSetBucket,
+	err := etl.Transform(ig.logPrefix, ig.db, changeSetBucket,
 		v.IndexBucket,
-		datadir,
-		getExtractFunc(v.WalkerAdapter),
+		tmpdir,
+		getExtractFunc(changeSetBucket),
 		loadFunc,
 		etl.TransformArgs{
-			ExtractStartKey: dbutils.EncodeTimestamp(startBlock),
-			ExtractEndKey:   dbutils.EncodeTimestamp(endBlock),
+			ExtractStartKey: dbutils.EncodeBlockNumber(startBlock),
+			ExtractEndKey:   dbutils.EncodeBlockNumber(endBlock),
 			FixedBits:       0,
 			BufferType:      etl.SortableAppendBuffer,
 			BufferSize:      ig.ChangeSetBufSize,
 			Quit:            ig.quitCh,
 			LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-				blockNum, _ := dbutils.DecodeTimestamp(k)
-				return []interface{}{"block", blockNum}
+				return []interface{}{"block", binary.BigEndian.Uint64(k)}
 			},
 		},
 	)
@@ -64,7 +65,7 @@ func (ig *IndexGenerator) GenerateIndex(startBlock, endBlock uint64, changeSetBu
 		return err
 	}
 
-	log.Debug("Index generation successfully finished", "csbucket", changeSetBucket, "it took", time.Since(t))
+	log.Debug(fmt.Sprintf("[%s] Index generation successfully finished", ig.logPrefix), "csbucket", changeSetBucket, "it took", time.Since(t))
 	return nil
 }
 
@@ -74,21 +75,13 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 		return errors.New("unknown bucket type")
 	}
 
-	currentKey := dbutils.EncodeTimestamp(timestampTo)
+	currentKey := dbutils.EncodeBlockNumber(timestampTo)
 	keys := make(map[string]struct{})
-	if err := ig.db.Walk(changeSetBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
+	if err := changeset.Walk(ig.db, changeSetBucket, currentKey, 0, func(blockN uint64, k, _ []byte) (bool, error) {
 		if err := common.Stopped(ig.quitCh); err != nil {
 			return false, err
 		}
-
-		currentKey = common.CopyBytes(k)
-		err := vv.WalkerAdapter(v).Walk(func(kk []byte, _ []byte) error {
-			keys[string(common.CopyBytes(kk))] = struct{}{}
-			return nil
-		})
-		if err != nil {
-			return false, err
-		}
+		keys[string(common.CopyBytes(k))] = struct{}{}
 		return true, nil
 	}); err != nil {
 		return err
@@ -97,7 +90,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 	historyEffects := make(map[string][]byte)
 	keySize := vv.KeySize
 	if dbutils.StorageChangeSetBucket == changeSetBucket || dbutils.PlainStorageChangeSetBucket == changeSetBucket {
-		keySize -= 8
+		keySize += common.HashLength
 	}
 
 	var startKey = make([]byte, keySize+8)
@@ -108,19 +101,25 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 		binary.BigEndian.PutUint64(startKey[keySize:], timestampTo)
 		if err := ig.db.Walk(vv.IndexBucket, startKey, 8*keySize, func(k, v []byte) (bool, error) {
 			timestamp := binary.BigEndian.Uint64(k[keySize:]) // the last timestamp in the chunk
+			if timestamp <= timestampTo {
+				return true, nil
+			}
 			kStr := string(common.CopyBytes(k))
-			if timestamp > timestampTo {
+
+			// Truncated chunk becomes "the last chunk" with the timestamp 0xffff....ffff
+			// - "last but one chunk" will become "the last chunk" only if it exists.
+			// - and "the last chunk" need to be deleted only if "last but one chunk" was not converted to "the last"
+			if _, ok := historyEffects[kStr]; !ok {
 				historyEffects[kStr] = nil
-				// truncate the chunk
-				index := dbutils.WrapHistoryIndex(v)
-				index = index.TruncateGreater(timestampTo)
-				if len(index) > 8 { // If the chunk is empty after truncation, it gets simply deleted
-					// Truncated chunk becomes "the last chunk" with the timestamp 0xffff....ffff
-					lastK := make([]byte, len(k))
-					copy(lastK, k[:keySize])
-					binary.BigEndian.PutUint64(lastK[keySize:], ^uint64(0))
-					historyEffects[string(lastK)] = common.CopyBytes(index)
-				}
+			}
+			// truncate the chunk
+			index := dbutils.WrapHistoryIndex(v)
+			index = index.TruncateGreater(timestampTo)
+			if len(index) > 8 { // If the chunk is empty after truncation, it gets simply deleted
+				lastK := make([]byte, len(k))
+				copy(lastK, k[:keySize])
+				binary.BigEndian.PutUint64(lastK[keySize:], ^uint64(0))
+				historyEffects[string(lastK)] = common.CopyBytes(index)
 			}
 			return true, nil
 		}); err != nil {
@@ -132,7 +131,7 @@ func (ig *IndexGenerator) Truncate(timestampTo uint64, changeSetBucket string) e
 
 	for key, value := range historyEffects {
 		if value == nil {
-			if err := mutation.Delete(vv.IndexBucket, []byte(key)); err != nil {
+			if err := mutation.Delete(vv.IndexBucket, []byte(key), nil); err != nil {
 				return err
 			}
 		} else {
@@ -155,7 +154,7 @@ func (ig *IndexGenerator) DropIndex(bucket string) error {
 	if !ok {
 		return errors.New("imposible to drop")
 	}
-	log.Warn("Remove bucket", "bucket", bucket)
+	log.Warn(fmt.Sprintf("[%s] Remove bucket", ig.logPrefix), "bucket", bucket)
 	return casted.ClearBuckets(bucket)
 }
 
@@ -203,17 +202,16 @@ func loadFunc(k []byte, value []byte, state etl.CurrentTableReader, next etl.Loa
 	return nil
 }
 
-func getExtractFunc(bytes2walker func([]byte) changeset.Walker) etl.ExtractFunc { //nolint
+func getExtractFunc(changeSetBucket string) etl.ExtractFunc { //nolint
+	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		blockNum, _ := dbutils.DecodeTimestamp(dbKey)
-		return bytes2walker(dbValue).Walk(func(changesetKey, changesetValue []byte) error {
-			key := common.CopyBytes(changesetKey)
-			v := make([]byte, 9)
-			binary.BigEndian.PutUint64(v, blockNum)
-			if len(changesetValue) == 0 {
-				v[8] = 1
-			}
-			return next(dbKey, key, v)
-		})
+		blockNum, k, v := decode(dbKey, dbValue)
+
+		newV := make([]byte, 9)
+		binary.BigEndian.PutUint64(newV, blockNum)
+		if len(v) == 0 {
+			newV[8] = 1
+		}
+		return next(dbKey, k, newV)
 	}
 }

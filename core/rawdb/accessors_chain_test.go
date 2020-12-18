@@ -24,13 +24,15 @@ import (
 	"math/big"
 	"testing"
 
-	"golang.org/x/crypto/sha3"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/sha3"
 )
 
 // Tests block header storage and retrieval operations.
@@ -69,21 +71,36 @@ func TestHeaderStorage(t *testing.T) {
 
 // Tests block body storage and retrieval operations.
 func TestBodyStorage(t *testing.T) {
-	db := ethdb.NewMemDatabase()
+	db, require := ethdb.NewMemDatabase(), require.New(t)
 	defer db.Close()
+	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+
+	mustSign := func(tx *types.Transaction, s types.Signer) *types.Transaction {
+		r, err := types.SignTx(tx, s, testKey)
+		require.NoError(err)
+		return r
+	}
+
+	// prepare db so it works with our test
+	signer1 := types.MakeSigner(params.MainnetChainConfig, big.NewInt(int64(1)))
+	body := &types.Body{
+		Transactions: []*types.Transaction{
+			mustSign(types.NewTransaction(1, testAddr, u256.Num1, 1, u256.Num1, nil), signer1),
+			mustSign(types.NewTransaction(2, testAddr, u256.Num1, 2, u256.Num1, nil), signer1),
+		},
+		Uncles: []*types.Header{{Extra: []byte("test header")}},
+	}
 
 	// Create a test body to move around the database and make sure it's really new
-	body := &types.Body{Uncles: []*types.Header{{Extra: []byte("test header")}}}
-
 	hasher := sha3.NewLegacyKeccak256()
-	rlp.Encode(hasher, body)
+	_ = rlp.Encode(hasher, body)
 	hash := common.BytesToHash(hasher.Sum(nil))
 
 	if entry := ReadBody(db, hash, 0); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
-	// Write and verify the body in the database
-	WriteBody(context.Background(), db, hash, 0, body)
+	require.NoError(WriteBody(db, hash, 0, body))
 	if entry := ReadBody(db, hash, 0); entry == nil {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
@@ -128,7 +145,10 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 	// Write and verify the block in the database
-	WriteBlock(context.Background(), db, block)
+	err := WriteBlock(context.Background(), db, block)
+	if err != nil {
+		t.Fatalf("Could not write block: %v", err)
+	}
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored block not found")
 	} else if entry.Hash() != block.Hash() {
@@ -145,7 +165,9 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
 	}
 	// Delete the block and verify the execution
-	DeleteBlock(db, block.Hash(), block.NumberU64())
+	if err := DeleteBlock(db, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatalf("Could not delete block: %v", err)
+	}
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted block returned: %v", entry)
 	}
@@ -177,7 +199,9 @@ func TestPartialBlockStorage(t *testing.T) {
 	DeleteHeader(db, block.Hash(), block.NumberU64())
 
 	// Store a body and check that it's not recognized as a block
-	WriteBody(ctx, db, block.Hash(), block.NumberU64(), block.Body())
+	if err := WriteBody(db, block.Hash(), block.NumberU64(), block.Body()); err != nil {
+		t.Fatal(err)
+	}
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
@@ -185,7 +209,9 @@ func TestPartialBlockStorage(t *testing.T) {
 
 	// Store a header and a body separately and check reassembly
 	WriteHeader(ctx, db, block.Header())
-	WriteBody(ctx, db, block.Hash(), block.NumberU64(), block.Body())
+	if err := WriteBody(db, block.Hash(), block.NumberU64(), block.Body()); err != nil {
+		t.Fatal(err)
+	}
 
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored block not found")
@@ -201,19 +227,37 @@ func TestTdStorage(t *testing.T) {
 
 	// Create a test TD to move around the database and make sure it's really new
 	hash, td := common.Hash{}, big.NewInt(314)
-	if entry := ReadTd(db, hash, 0); entry != nil {
+	entry, err := ReadTd(db, hash, 0)
+	if err != nil {
+		t.Fatalf("ReadTd failed: %v", err)
+	}
+	if entry != nil {
 		t.Fatalf("Non existent TD returned: %v", entry)
 	}
 	// Write and verify the TD in the database
-	WriteTd(db, hash, 0, td)
-	if entry := ReadTd(db, hash, 0); entry == nil {
+	err = WriteTd(db, hash, 0, td)
+	if err != nil {
+		t.Fatalf("WriteTd failed: %v", err)
+	}
+	entry, err = ReadTd(db, hash, 0)
+	if err != nil {
+		t.Fatalf("ReadTd failed: %v", err)
+	}
+	if entry == nil {
 		t.Fatalf("Stored TD not found")
 	} else if entry.Cmp(td) != 0 {
 		t.Fatalf("Retrieved TD mismatch: have %v, want %v", entry, td)
 	}
 	// Delete the TD and verify the execution
-	DeleteTd(db, hash, 0)
-	if entry := ReadTd(db, hash, 0); entry != nil {
+	err = DeleteTd(db, hash, 0)
+	if err != nil {
+		t.Fatalf("DeleteTd failed: %v", err)
+	}
+	entry, err = ReadTd(db, hash, 0)
+	if err != nil {
+		t.Fatalf("ReadTd failed: %v", err)
+	}
+	if entry != nil {
 		t.Fatalf("Deleted TD returned: %v", entry)
 	}
 }
@@ -227,16 +271,19 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	hash, number := common.Hash{0: 0xff}, uint64(314)
 	entry, err := ReadCanonicalHash(db, number)
 	if err != nil {
-		panic(err)
+		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
 	if entry != (common.Hash{}) {
 		t.Fatalf("Non existent canonical mapping returned: %v", entry)
 	}
 	// Write and verify the TD in the database
-	WriteCanonicalHash(db, hash, number)
+	err = WriteCanonicalHash(db, hash, number)
+	if err != nil {
+		t.Fatalf("WriteCanoncalHash failed: %v", err)
+	}
 	entry, err = ReadCanonicalHash(db, number)
 	if err != nil {
-		panic(err)
+		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
 	if entry == (common.Hash{}) {
 		t.Fatalf("Stored canonical mapping not found")
@@ -244,10 +291,13 @@ func TestCanonicalMappingStorage(t *testing.T) {
 		t.Fatalf("Retrieved canonical mapping mismatch: have %v, want %v", entry, hash)
 	}
 	// Delete the TD and verify the execution
-	DeleteCanonicalHash(db, number)
+	err = DeleteCanonicalHash(db, number)
+	if err != nil {
+		t.Fatalf("DeleteCanonicalHash failed: %v", err)
+	}
 	entry, err = ReadCanonicalHash(db, number)
 	if err != nil {
-		panic(err)
+		t.Error(err)
 	}
 	if entry != (common.Hash{}) {
 		t.Fatalf("Deleted canonical mapping returned: %v", entry)
@@ -295,8 +345,6 @@ func TestBlockReceiptStorage(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	ctx := context.Background()
-
 	// Create a live block since we need metadata to reconstruct the receipt
 	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
 	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil)
@@ -337,10 +385,14 @@ func TestBlockReceiptStorage(t *testing.T) {
 		t.Fatalf("non existent receipts returned: %v", rs)
 	}
 	// Insert the body that corresponds to the receipts
-	WriteBody(ctx, db, hash, 0, body)
+	if err := WriteBody(db, hash, 0, body); err != nil {
+		t.Fatal(err)
+	}
 
 	// Insert the receipt slice into the database and check presence
-	WriteReceipts(db, hash, 0, receipts)
+	if err := WriteReceipts(db, 0, receipts); err != nil {
+		t.Fatalf("WriteReceipts failed: %v", err)
+	}
 	if rs := ReadReceipts(db, hash, 0); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
 	} else {
@@ -355,12 +407,16 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 	// Ensure that receipts without metadata can be returned without the block body too
 	if err := checkReceiptsRLP(ReadRawReceipts(db, hash, 0), receipts); err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	// Sanity check that body alone without the receipt is a full purge
-	WriteBody(ctx, db, hash, 0, body)
+	if err := WriteBody(db, hash, 0, body); err != nil {
+		t.Fatal(err)
+	}
 
-	DeleteReceipts(db, hash, 0)
+	if err := DeleteReceipts(db, 0); err != nil {
+		t.Fatalf("DeleteReceipts failed: %v", err)
+	}
 	if rs := ReadReceipts(db, hash, 0); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}
