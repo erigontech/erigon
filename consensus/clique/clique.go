@@ -27,7 +27,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	lru "github.com/hashicorp/golang-lru"
 	"golang.org/x/crypto/sha3"
 
@@ -376,7 +375,6 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		}
 		// If an on-disk checkpoint snapshot can be found, use that
 		if isSnapshot(number, c.config.Epoch) {
-			fmt.Printf("BEFORE1 loadAndFillSnapshot for block %q - snap %d(%s): %v\n", hash.String(), snap.Number, snap.Hash.String(), spew.Sdump(snap.Signers))
 			if s, err := loadAndFillSnapshot(c.db, number, hash, c.config, c.snapStorage, c.signatures); err == nil {
 				log.Trace("Loaded voting snapshot from disk", "number", number, "hash", hash)
 				snap = s
