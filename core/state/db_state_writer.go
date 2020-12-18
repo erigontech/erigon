@@ -148,9 +148,6 @@ func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 	if err := dsw.csw.CreateContract(address); err != nil {
 		return err
 	}
-	if err := dsw.db.Delete(dbutils.IncarnationMapBucket, address[:], nil); err != nil {
-		return err
-	}
 	return nil
 }
 

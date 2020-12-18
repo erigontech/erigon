@@ -108,7 +108,7 @@ func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Hea
 		number := h.Number.Uint64()
 		ch, err := rawdb.ReadCanonicalHash(db, number)
 		if err != nil {
-			return false, false, 0, err
+			return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 		if h.Hash() == ch {
 			alreadyCanonicalIndex++
@@ -139,7 +139,7 @@ Error: %v
 	}
 	parentTd, err := rawdb.ReadTd(db, headers[0].ParentHash, headers[0].Number.Uint64()-1)
 	if err != nil {
-		return false, false, 0, err
+		return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
@@ -173,7 +173,7 @@ Error: %v
 	var deepFork bool // Whether the forkBlock is outside this header chain segment
 	ch, err := rawdb.ReadCanonicalHash(db, headers[0].Number.Uint64()-1)
 	if err != nil {
-		return false, false, 0, err
+		return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 	if newCanonical && headers[0].ParentHash != ch {
 		deepFork = true
@@ -196,7 +196,7 @@ Error: %v
 		number := header.Number.Uint64()
 		ch, err := rawdb.ReadCanonicalHash(batch, number)
 		if err != nil {
-			return false, false, 0, err
+			return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 		hashesMatch := header.Hash() == ch
 		if newCanonical && !deepFork && !fork && !hashesMatch {
@@ -208,7 +208,7 @@ Error: %v
 		}
 		if newCanonical {
 			if err = rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64()); err != nil {
-				return false, false, 0, err
+				return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 			}
 		}
 		data, err := rlp.EncodeToBytes(header)
@@ -229,7 +229,7 @@ Error: %v
 		for {
 			ch, err := rawdb.ReadCanonicalHash(batch, forkBlockNumber)
 			if err != nil {
-				return false, false, 0, err
+				return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 			}
 			if forkHash == ch {
 				break
@@ -253,7 +253,7 @@ Error: %v
 		for i := lastHeader.Number.Uint64() + 1; i <= *headNumber; i++ {
 			err = rawdb.DeleteCanonicalHash(batch, i)
 			if err != nil {
-				return false, false, 0, err
+				return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 			}
 		}
 	}

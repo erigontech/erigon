@@ -29,6 +29,7 @@ const (
 	DupFixed   = C.MDBX_DUPFIXED   // Duplicate items have a fixed size (DupSort).
 	ReverseDup = C.MDBX_REVERSEDUP // Reverse duplicate values (DupSort).
 	Create     = C.MDBX_CREATE     // Create DB if not already existing.
+	DBAccede   = C.MDBX_DB_ACCEDE  // Use sorted duplicates.
 )
 
 const (

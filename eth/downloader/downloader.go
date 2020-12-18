@@ -1812,11 +1812,23 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 	if execute {
 		index, err = d.blockchain.InsertChain(context.Background(), blocks)
 	} else {
-		stopped, err = core.InsertBodyChain(logPrefix, context.Background(), d.stateDB, blocks, true /* newCanonical */)
+		tx, err2 := d.stateDB.Begin(context.Background(), ethdb.RW)
+		if err2 != nil {
+			return 0, err2
+		}
+		defer tx.Rollback()
+		stopped, err = core.InsertBodyChain(logPrefix, context.Background(), tx, blocks, true /* newCanonical */)
 		if stopped {
 			index = 0
 		} else {
 			index = len(results)
+		}
+		if err == nil {
+			if _, err1 := tx.Commit(); err1 != nil {
+				return 0, err1
+			}
+		} else {
+			tx.Rollback()
 		}
 	}
 	if err != nil {

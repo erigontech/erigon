@@ -237,15 +237,6 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageExec)
 
-	withChaindata(cmdStageIHash)
-	withLmdbFlags(cmdStageIHash)
-	withReset(cmdStageIHash)
-	withBlock(cmdStageIHash)
-	withUnwind(cmdStageIHash)
-	withDatadir(cmdStageIHash)
-
-	rootCmd.AddCommand(cmdStageIHash)
-
 	withChaindata(cmdStageHashState)
 	withLmdbFlags(cmdStageHashState)
 	withReset(cmdStageHashState)
@@ -254,6 +245,15 @@ func init() {
 	withDatadir(cmdStageHashState)
 
 	rootCmd.AddCommand(cmdStageHashState)
+	
+	withChaindata(cmdStageIHash)
+	withLmdbFlags(cmdStageIHash)
+	withReset(cmdStageIHash)
+	withBlock(cmdStageIHash)
+	withUnwind(cmdStageIHash)
+	withDatadir(cmdStageIHash)
+
+	rootCmd.AddCommand(cmdStageIHash)
 
 	withChaindata(cmdStageHistory)
 	withLmdbFlags(cmdStageHistory)
@@ -335,6 +335,10 @@ func stageSenders(db ethdb.Database, ctx context.Context) error {
 		ReadChLen:       4,
 		Now:             time.Now(),
 	}
+	if unwind > 0 {
+		u := &stagedsync.UnwindState{Stage: stages.Senders, UnwindPoint: stage3.BlockNumber - unwind}
+		return stagedsync.UnwindSendersStage(u, stage3, db)
+	}
 
 	return stagedsync.SpawnRecoverSendersStage(cfg, stage3, db, params.MainnetChainConfig, block, tmpdir, ch)
 }
@@ -360,8 +364,8 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 	cc, bc, _, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 
-	if reset { //nolint:staticcheck
-		// TODO
+	if reset {
+		return resetExec(db)
 	}
 
 	stage4 := progress(stages.Execution)

@@ -6,6 +6,7 @@ import "C"
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -85,7 +86,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAudit, env.StderrLogger()) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
+	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 
 	err = env.SetMaxDBs(100)
 	if err != nil {
@@ -276,14 +277,18 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(fileInfo.Size()), nil
 }
 
-func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (Tx, error) {
+func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
 	isSubTx := parent != nil
 	if !isSubTx {
 		runtime.LockOSThread()
-		db.wg.Add(1)
+		defer func() {
+			if err == nil {
+				db.wg.Add(1)
+			}
+		}()
 	}
 
 	nativeFlags := uint(0)
@@ -391,7 +396,32 @@ func (tx *MdbxTx) DCmp(bucket string, a, b []byte) int {
 }
 
 func (tx *MdbxTx) Sequence(bucket string, amount uint64) (uint64, error) {
-	return tx.tx.Sequence(mdbx.DBI(tx.db.buckets[bucket].DBI), amount)
+	// non-native for now
+	// return tx.tx.Sequence(mdbx.DBI(tx.db.buckets[bucket].DBI), amount)
+
+	c := tx.Cursor(dbutils.Sequence)
+	defer c.Close()
+	_, v, err := c.SeekExact([]byte(bucket))
+	if err != nil && !mdbx.IsNotFound(err) {
+		return 0, err
+	}
+
+	var currentV uint64 = 0
+	if len(v) > 0 {
+		currentV = binary.BigEndian.Uint64(v)
+	}
+
+	if amount == 0 {
+		return currentV, nil
+	}
+
+	newVBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
+	err = c.Put([]byte(bucket), newVBytes)
+	if err != nil {
+		return 0, err
+	}
+	return currentV, nil
 }
 
 // All buckets stored as keys of un-named bucket
@@ -453,16 +483,37 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (tx *MdbxTx) CreateBucket(name string) error {
-	var flags = tx.db.buckets[name].Flags
-	var nativeFlags uint
-	if tx.db.opts.flags&mdbx.Readonly == 0 {
-		nativeFlags |= mdbx.Create
-	}
 	cnfCopy := tx.db.buckets[name]
+
 	var dcmp mdbx.CmpFunc
 	switch cnfCopy.CustomDupComparator {
 	case dbutils.DupCmpSuffix32:
 		dcmp = tx.tx.GetCmpExcludeSuffix32()
+	}
+
+	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
+	if err != nil && !mdbx.IsNotFound(err) {
+		return err
+	}
+	if err == nil {
+		cnfCopy.DBI = dbutils.DBI(dbi)
+		var flags uint
+		flags, err = tx.tx.Flags(dbi)
+		if err != nil {
+			return err
+		}
+		cnfCopy.Flags = dbutils.BucketFlags(flags)
+
+		tx.db.buckets[name] = cnfCopy
+		return nil
+	}
+
+	// if bucket doesn't exists - create it
+
+	var flags = tx.db.buckets[name].Flags
+	var nativeFlags uint
+	if tx.db.opts.flags&mdbx.Readonly == 0 {
+		nativeFlags |= mdbx.Create
 	}
 
 	if flags&dbutils.DupSort != 0 {
@@ -477,14 +528,13 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		return fmt.Errorf("some not supported flag provided for bucket")
 	}
 
-	dbi, err := tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
+	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
 	if err != nil {
 		return err
 	}
 	cnfCopy.DBI = dbutils.DBI(dbi)
 
 	tx.db.buckets[name] = cnfCopy
-
 	return nil
 }
 
@@ -501,61 +551,6 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 			return err
 		}
 		dbi = dbutils.DBI(nativeDBI)
-	}
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	for {
-		s, err := tx.BucketStat(name)
-		if err != nil {
-			return err
-		}
-		if s.Entries == 0 {
-			break
-		}
-		c := tx.Cursor(name)
-		i := 0
-		var k []byte
-		for k, _, err = c.First(); k != nil; k, _, err = c.First() {
-			if err != nil {
-				return err
-			}
-			select {
-			default:
-			case <-logEvery.C:
-				log.Info("dropping bucket", "name", name, "current key", fmt.Sprintf("%x", k))
-			}
-
-			i++
-			if casted, ok := c.(CursorDupSort); ok {
-				err = casted.DeleteCurrentDuplicates()
-				if err != nil {
-					return err
-				}
-				if i == 100 {
-					break
-				}
-			} else {
-				err = c.DeleteCurrent()
-				if err != nil {
-					return err
-				}
-				if i == 10_000 {
-					break
-				}
-			}
-		}
-
-		c.Close()
-		_, err = tx.tx.Commit()
-		if err != nil {
-			return err
-		}
-		txn, err := tx.db.env.BeginTxn(nil, mdbx.TxRW|mdbx.TxNoSync)
-		if err != nil {
-			return err
-		}
-		txn.RawRead = true
-		tx.tx = txn
 	}
 
 	if err := tx.tx.Drop(mdbx.DBI(dbi), true); err != nil {
@@ -643,6 +638,7 @@ func (tx *MdbxTx) closeCursors() {
 			c.Close()
 		}
 	}
+	//fmt.Printf("close all cursors: %p, %d\n", tx.db.env, len(tx.cursors))
 	tx.cursors = []*mdbx.Cursor{}
 }
 
@@ -825,6 +821,7 @@ func (c *MdbxCursor) initCursor() error {
 		tx.cursors = make([]*mdbx.Cursor, 0, 1)
 	}
 	tx.cursors = append(tx.cursors, c.c)
+	//fmt.Printf("open cursor: %p,%p, %s, %d\n", c.tx.db.env, c.tx, c.bucketName, len(tx.cursors))
 	return nil
 }
 
@@ -1170,13 +1167,17 @@ func (c *MdbxCursor) Put(key []byte, value []byte) error {
 			return err
 		}
 	}
-
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion {
-		return c.putDupSort(key, value)
+		if err := c.putDupSort(key, value); err != nil {
+			return err
+		}
+		return nil
 	}
-
-	return c.put(key, value)
+	if err := c.put(key, value); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
@@ -1192,7 +1193,7 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 			if mdbx.IsKeyExists(err) {
 				return c.putCurrent(key, value)
 			}
-			return err
+			return fmt.Errorf("putNoOverwrite, bucket: %s, key: %x, val: %x, err: %w", c.bucketName, key, value, err)
 		}
 		return nil
 	}

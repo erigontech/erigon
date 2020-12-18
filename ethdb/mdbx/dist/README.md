@@ -155,7 +155,7 @@ transaction journal. No crash recovery needed. No maintenance is required.
 
 - **Page size**: a power of 2, maximum `65536` bytes, default `4096` bytes.
 - **Key size**: minimum 0, maximum ≈¼ pagesize (`1300` bytes for default 4K pagesize, `21780` bytes for 64K pagesize).
-- **Value size**: minimum 0, maximum `2146435072` (`0x7FF00000`) bytes for maps, ≈¼ pagesize for multimaps (`1348` bytes default 4K pagesize, `21828` bytes for 64K pagesize).
+- **Value size**: minimum 0, maximum `2146435072` (`0x7FF00000`) bytes for maps, ≈¼ pagesize for multimaps (`1348` bytes for default 4K pagesize, `21828` bytes for 64K pagesize).
 - **Write transaction size**: up to `4194301` (`0x3FFFFD`) pages (16 [GiB](https://en.wikipedia.org/wiki/Gibibyte) for default 4K pagesize, 256 [GiB](https://en.wikipedia.org/wiki/Gibibyte) for 64K pagesize).
 - **Database size**: up to `2147483648` pages (8 [TiB](https://en.wikipedia.org/wiki/Tebibyte) for default 4K pagesize, 128 [TiB](https://en.wikipedia.org/wiki/Tebibyte) for 64K pagesize).
 - **Maximum sub-databases**: `32765`.

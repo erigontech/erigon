@@ -3,6 +3,7 @@ ChangeLog
 
 ## v0.9.3 (in development)
 
+TODO:
  - Engage new terminology (https://github.com/erthink/libmdbx/issues/137).
  - Rework/speedup the implementation of the dirty page list (lazy compactification, lazy sorting via merge).
  - Resolve few TODOs (https://github.com/erthink/libmdbx/issues/123, https://github.com/erthink/libmdbx/issues/124,
@@ -11,7 +12,19 @@ ChangeLog
  - Finalize C++ API (few typos and trivia bugs are still likely for now).
  - Packages for ROSA Linux, ALT Linux, Fedora/RHEL, Debian/Ubuntu.
 
-## v0.9.2 (scheduled at 2020-11-26)
+Acknowledgements:
+ - Mahlon E. Smith (http://www.martini.nu/) for FreeBSD port of libmdbx.
+ - 장세연 (http://www.castis.com) for bug fixing and PR.
+
+Added features:
+ - Package for FreeBSD is available now by Mahlon E. Smith.
+
+Fixes:
+ - Fixed missing cleanup (null assigned) in the C++ commit/abort (https://github.com/erthink/libmdbx/pull/143).
+ - Fixed `mdbx_realloc()` for case of nullptr and `MDBX_AVOID_CRT=ON` for Windows.
+
+
+## v0.9.2 scheduled at 2020-11-27
 
 Acknowledgements:
 
@@ -58,6 +71,7 @@ Fixes:
  - Fixed large pages checking (for compatibility and to avoid false-positive errors from `mdbx_chk`).
  - Added workaround for Wine (https://github.com/miranda-ng/miranda-ng/issues/1209).
  - Fixed `ERROR_NOT_SUPPORTED` while opening DB by UNC pathnames (https://github.com/miranda-ng/miranda-ng/issues/2627).
+ - Added handling `EXCEPTION_POSSIBLE_DEADLOCK` condition for Windows.
 
 
 ## v0.9.1 2020-09-30
