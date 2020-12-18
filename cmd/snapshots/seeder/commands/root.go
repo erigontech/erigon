@@ -54,6 +54,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	Args: cobra.ExactArgs(1),
+	ArgAliases: []string{"snapshots dir"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return Seed(cmd.Context(), args[0])
 	},
