@@ -13,8 +13,8 @@ const (
 	SnapshotBlock    = 11_000_000
 	LmdbFilename     = "data.mdb"
 
-	HeadersSnapshotHash = "460da4ffbc2b77f6662a8a7c15e21f4c5981656d" //11кk block 1mb chunk
-	BlocksSnapshotHash  = "6353d013d614f1f8145d71e1479de9b4361d273f" //11кk block 1mb chunk
+	HeadersSnapshotHash  = "460da4ffbc2b77f6662a8a7c15e21f4c5981656d" //11кk block 1mb chunk
+	BlocksSnapshotHash   = "6353d013d614f1f8145d71e1479de9b4361d273f" //11кk block 1mb chunk
 	StateSnapshotHash    = "fed1ef2b4d2cd8ea32eda24559b4d7eedaeb1b78"
 	ReceiptsSnapshotHash = ""
 
@@ -27,7 +27,7 @@ var (
 		params.MainnetChainConfig.ChainID.Uint64(): {
 			snapshotsync.SnapshotType_headers: metainfo.NewHashFromHex(HeadersSnapshotHash),
 			snapshotsync.SnapshotType_bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
-			snapshotsync.SnapshotType_state:  metainfo.NewHashFromHex(StateSnapshotHash),
+			snapshotsync.SnapshotType_state:   metainfo.NewHashFromHex(StateSnapshotHash),
 		},
 	}
 	ErrInvalidSnapshot = errors.New("this snapshot for this chainID not supported ")

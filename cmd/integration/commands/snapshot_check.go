@@ -290,8 +290,8 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 	return nil
 }
 
-var  dbCopyCmd = &cobra.Command{
-	Use:   "copy_compact",
+var dbCopyCmd = &cobra.Command{
+	Use: "copy_compact",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return copyCompact()
 	},
