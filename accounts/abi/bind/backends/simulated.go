@@ -144,6 +144,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 		prependBlock: genesisBlock,
 		database:     database,
 		engine:       eng,
+		cons:         engine,
 		exit:         exit,
 		blockchain:   blockchain,
 		config:       genesis.Config,
