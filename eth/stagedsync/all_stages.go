@@ -305,7 +305,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	}
 	rawdb.WriteHeadBlockHash(db, newHeadHash)
 	rawdb.WriteHeadHeaderHash(db, newHeadHash)
-	if err = stages.SaveStageProgress(db, stages.Headers, newHead, nil); err != nil {
+	if err = stages.SaveStageProgress(db, stages.Headers, newHead); err != nil {
 		return err
 	}
 	stageBuilders := createStageBuilders([]*types.Block{}, newHead, checkRoot)
@@ -355,7 +355,7 @@ func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine
 	if !newCanonical {
 		return false, false, 0, nil
 	}
-	if err = stages.SaveStageProgress(db, stages.Headers, blockNum, nil); err != nil {
+	if err = stages.SaveStageProgress(db, stages.Headers, blockNum); err != nil {
 		return false, false, 0, err
 	}
 	return newCanonical, reorg, forkblocknumber, nil
@@ -392,7 +392,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		return false, nil // No change of the chain
 	}
 	blockNum := blocks[len(blocks)-1].Number().Uint64()
-	if err = stages.SaveStageProgress(tx, stages.Headers, blockNum, nil); err != nil {
+	if err = stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
 		return false, err
 	}
 	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)

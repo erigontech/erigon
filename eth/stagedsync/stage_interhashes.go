@@ -412,16 +412,16 @@ func ResetHashState(db ethdb.Database) error {
 		return err
 	}
 	batch := db.NewBatch()
-	if err := stages.SaveStageProgress(batch, stages.IntermediateHashes, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(batch, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(batch, stages.IntermediateHashes, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(batch, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(batch, stages.HashState, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(batch, stages.HashState, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(batch, stages.HashState, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(batch, stages.HashState, 0); err != nil {
 		return err
 	}
 	if _, err := batch.Commit(); err != nil {

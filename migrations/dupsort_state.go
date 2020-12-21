@@ -130,10 +130,10 @@ var clearIndices = Migration{
 			return err
 		}
 
-		if err := stages.SaveStageProgress(db, stages.LogIndex, 0, nil); err != nil {
+		if err := stages.SaveStageProgress(db, stages.LogIndex, 0); err != nil {
 			return err
 		}
-		if err := stages.SaveStageUnwind(db, stages.LogIndex, 0, nil); err != nil {
+		if err := stages.SaveStageUnwind(db, stages.LogIndex, 0); err != nil {
 			return err
 		}
 
@@ -147,10 +147,10 @@ var resetIHBucketToRecoverDB = Migration{
 		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.IntermediateTrieHashBucket); err != nil {
 			return err
 		}
-		if err := stages.SaveStageProgress(db, stages.IntermediateHashes, 0, nil); err != nil {
+		if err := stages.SaveStageProgress(db, stages.IntermediateHashes, 0); err != nil {
 			return err
 		}
-		if err := stages.SaveStageUnwind(db, stages.IntermediateHashes, 0, nil); err != nil {
+		if err := stages.SaveStageUnwind(db, stages.IntermediateHashes, 0); err != nil {
 			return err
 		}
 		return OnLoadCommit(db, nil, true)

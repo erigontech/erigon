@@ -53,7 +53,7 @@ func TestSenders(t *testing.T) {
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(db, common.HexToHash("03"), 3))
 
-	require.NoError(stages.SaveStageProgress(db, stages.Bodies, 3, nil))
+	require.NoError(stages.SaveStageProgress(db, stages.Bodies, 3))
 
 	cfg := Stage3Config{
 		BatchSize:       1024,

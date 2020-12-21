@@ -183,7 +183,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	// Go through the history of account first
 	if r.StartedWhenBlockNumber == 0 {
 		var err error
-		r.StartedWhenBlockNumber, _, err = stages.GetStageProgress(ethdb.NewObjectDatabase(r.remoteDB), stages.Execution)
+		r.StartedWhenBlockNumber, err = stages.GetStageProgress(ethdb.NewObjectDatabase(r.remoteDB), stages.Execution)
 		if err != nil {
 			panic(err)
 		}
