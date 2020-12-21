@@ -2098,10 +2098,4 @@ Date:   Wed Dec 23 13:43:22 2020 +0100
     This restores the net_version RPC handler as most eth2 nodes and other software
     depend on it.
 
-commit 61469cfeaf2a6d0b1598afbaf35dd2d1872604ce
-Author: ucwong <ucwong@126.com>
-Date:   Mon Dec 21 22:39:58 2020 +0800
-
-    eth/downloader: fix typo in comment (#22019)
-
 
