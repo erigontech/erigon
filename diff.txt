@@ -2104,16 +2104,4 @@ Date:   Mon Dec 21 22:39:58 2020 +0800
 
     eth/downloader: fix typo in comment (#22019)
 
-commit c5a3ffa3638c8fbcb694881efa7e89f69717cdd3
-Author: ucwong <ucwong@126.com>
-Date:   Mon Dec 21 18:54:39 2020 +0800
-
-    eth/download/statesync : optimize to avoid a copy in state sync hashing  (#22035)
-    
-    * eth/download/statesync : state hash sum optimized
-    
-    * go fmt with blank in imports
-    
-    * keccak read arg fix
-
 
