@@ -26,7 +26,7 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	generateBlocks(t, 1, 50, plainWriterGen(tx1), staticCodeStaticIncarnations)
 	generateBlocks(t, 1, 100, plainWriterGen(tx2), staticCodeStaticIncarnations)
 
-	err = stages.SaveStageProgress(tx2, stages.Execution, 100, nil)
+	err = stages.SaveStageProgress(tx2, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	generateBlocks(t, 1, 50, plainWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 100, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = stages.SaveStageProgress(tx2, stages.Execution, 100, nil)
+	err = stages.SaveStageProgress(tx2, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	generateBlocks(t, 1, 50, plainWriterGen(tx1), changeCodeIndepenentlyOfIncarnations)
 	generateBlocks(t, 1, 100, plainWriterGen(tx2), changeCodeIndepenentlyOfIncarnations)
 
-	err = stages.SaveStageProgress(tx2, stages.Execution, 100, nil)
+	err = stages.SaveStageProgress(tx2, stages.Execution, 100)
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}

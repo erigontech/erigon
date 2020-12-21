@@ -38,18 +38,11 @@ type StageState struct {
 	Stage stages.SyncStage
 	// BlockNumber is the current block number of the stage at the beginning of the state execution.
 	BlockNumber uint64
-	// StageData (optional) is the additional data for the stage execution at the beginning.
-	StageData []byte
 }
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db ethdb.Putter, newBlockNum uint64) error {
-	return stages.SaveStageProgress(db, s.Stage, newBlockNum, nil)
-}
-
-// UpdateWithStageData updates both the current block number for that stage, as well as some additional information as array of bytes: stageData.
-func (s *StageState) UpdateWithStageData(db ethdb.Putter, newBlockNum uint64, stageData []byte) error {
-	return stages.SaveStageProgress(db, s.Stage, newBlockNum, stageData)
+	return stages.SaveStageProgress(db, s.Stage, newBlockNum)
 }
 
 // Done makes sure that the stage execution is complete and proceeds to the next state.
@@ -61,13 +54,13 @@ func (s *StageState) Done() {
 
 // ExecutionAt gets the current state of the "Execution" stage, which block is currently executed.
 func (s *StageState) ExecutionAt(db ethdb.Getter) (uint64, error) {
-	execution, _, err := stages.GetStageProgress(db, stages.Execution)
+	execution, err := stages.GetStageProgress(db, stages.Execution)
 	return execution, err
 }
 
 // DoneAndUpdate a convenience method combining both `Done()` and `Update()` calls together.
 func (s *StageState) DoneAndUpdate(db ethdb.Putter, newBlockNum uint64) error {
-	err := stages.SaveStageProgress(db, s.Stage, newBlockNum, nil)
+	err := stages.SaveStageProgress(db, s.Stage, newBlockNum)
 	s.state.NextStage()
 	return err
 }

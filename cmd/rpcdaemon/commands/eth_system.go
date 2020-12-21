@@ -18,7 +18,7 @@ import (
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
 func (api *APIImpl) BlockNumber(_ context.Context) (hexutil.Uint64, error) {
-	execution, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
+	execution, err := stages.GetStageProgress(api.dbReader, stages.Finish)
 	if err != nil {
 		return 0, err
 	}
@@ -27,12 +27,12 @@ func (api *APIImpl) BlockNumber(_ context.Context) (hexutil.Uint64, error) {
 
 // Syncing implements eth_syncing. Returns a data object detaling the status of the sync process or false if not syncing.
 func (api *APIImpl) Syncing(_ context.Context) (interface{}, error) {
-	highestBlock, _, err := stages.GetStageProgress(api.dbReader, stages.Headers)
+	highestBlock, err := stages.GetStageProgress(api.dbReader, stages.Headers)
 	if err != nil {
 		return false, err
 	}
 
-	currentBlock, _, err := stages.GetStageProgress(api.dbReader, stages.Finish)
+	currentBlock, err := stages.GetStageProgress(api.dbReader, stages.Finish)
 	if err != nil {
 		return false, err
 	}

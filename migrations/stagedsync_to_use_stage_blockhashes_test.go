@@ -14,7 +14,7 @@ func TestStagedsyncToUseStageBlockhashes(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 	var expected uint64 = 12
 
-	err := stages.SaveStageProgress(db, stages.Headers, expected, nil)
+	err := stages.SaveStageProgress(db, stages.Headers, expected)
 	require.NoError(err)
 
 	migrator := NewMigrator()
@@ -22,7 +22,7 @@ func TestStagedsyncToUseStageBlockhashes(t *testing.T) {
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
-	actual, _, err := stages.GetStageProgress(db, stages.BlockHashes)
+	actual, err := stages.GetStageProgress(db, stages.BlockHashes)
 	assert.NoError(t, err)
 	assert.Equal(t, expected, actual)
 }
@@ -32,7 +32,7 @@ func TestUnwindStagedsyncToUseStageBlockhashes(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 	var expected uint64 = 12
 
-	err := stages.SaveStageUnwind(db, stages.Headers, expected, nil)
+	err := stages.SaveStageUnwind(db, stages.Headers, expected)
 	require.NoError(err)
 
 	migrator := NewMigrator()
@@ -40,7 +40,7 @@ func TestUnwindStagedsyncToUseStageBlockhashes(t *testing.T) {
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
-	actual, _, err := stages.GetStageUnwind(db, stages.BlockHashes)
+	actual, err := stages.GetStageUnwind(db, stages.BlockHashes)
 	assert.NoError(t, err)
 	assert.Equal(t, expected, actual)
 }

@@ -140,7 +140,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 func TestMarshalStages(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
-	err := stages.SaveStageProgress(db, stages.Execution, 42, []byte{})
+	err := stages.SaveStageProgress(db, stages.Execution, 42)
 	require.NoError(err)
 
 	data, err := MarshalMigrationPayload(db)

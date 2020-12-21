@@ -17,27 +17,20 @@ type UnwindState struct {
 	Stage stages.SyncStage
 	// UnwindPoint is the block to unwind to.
 	UnwindPoint uint64
-	// StageData is additional data for unwind (useful for long unwinds with ETL that can be interrupted by a user).
-	StageData []byte
 }
 
 // Done() updates the DB state of the stage.
 func (u *UnwindState) Done(db ethdb.Putter) error {
-	err := stages.SaveStageProgress(db, u.Stage, u.UnwindPoint, nil)
+	err := stages.SaveStageProgress(db, u.Stage, u.UnwindPoint)
 	if err != nil {
 		return err
 	}
-	return stages.SaveStageUnwind(db, u.Stage, 0, nil)
-}
-
-// UpdateWithStageData() sets data for stage unwind (that can later be retrieved by `UnwindState.StageData`).
-func (u *UnwindState) UpdateWithStageData(db ethdb.Putter, stageData []byte) error {
-	return stages.SaveStageUnwind(db, u.Stage, u.UnwindPoint, stageData)
+	return stages.SaveStageUnwind(db, u.Stage, 0)
 }
 
 // Skip() ignores the unwind
 func (u *UnwindState) Skip(db ethdb.Putter) error {
-	return stages.SaveStageUnwind(db, u.Stage, 0, nil)
+	return stages.SaveStageUnwind(db, u.Stage, 0)
 }
 
 type PersistentUnwindStack struct {
@@ -62,12 +55,12 @@ func (s *PersistentUnwindStack) AddFromDB(db ethdb.Getter, stageID stages.SyncSt
 }
 
 func (s *PersistentUnwindStack) LoadFromDB(db ethdb.Getter, stageID stages.SyncStage) (*UnwindState, error) {
-	unwindPoint, stageData, err := stages.GetStageUnwind(db, stageID)
+	unwindPoint, err := stages.GetStageUnwind(db, stageID)
 	if err != nil {
 		return nil, err
 	}
 	if unwindPoint > 0 {
-		return &UnwindState{stageID, unwindPoint, stageData}, nil
+		return &UnwindState{stageID, unwindPoint}, nil
 	}
 	return nil, nil
 }
@@ -77,7 +70,7 @@ func (s *PersistentUnwindStack) Empty() bool {
 }
 
 func (s *PersistentUnwindStack) Add(u UnwindState, db ethdb.GetterPutter) error {
-	currentPoint, stageData, err := stages.GetStageUnwind(db, u.Stage)
+	currentPoint, err := stages.GetStageUnwind(db, u.Stage)
 	if err != nil {
 		return err
 	}
@@ -85,7 +78,7 @@ func (s *PersistentUnwindStack) Add(u UnwindState, db ethdb.GetterPutter) error 
 		return nil
 	}
 	s.unwindStack = append(s.unwindStack, u)
-	return stages.SaveStageUnwind(db, u.Stage, u.UnwindPoint, stageData)
+	return stages.SaveStageUnwind(db, u.Stage, u.UnwindPoint)
 }
 
 func (s *PersistentUnwindStack) Pop() *UnwindState {

@@ -31,7 +31,7 @@ type Stage3Config struct {
 }
 
 func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database, config *params.ChainConfig, toBlock uint64, tmpdir string, quitCh <-chan struct{}) error {
-	prevStageProgress, _, errStart := stages.GetStageProgress(db, stages.Bodies)
+	prevStageProgress, errStart := stages.GetStageProgress(db, stages.Bodies)
 	if errStart != nil {
 		return errStart
 	}

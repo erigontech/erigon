@@ -65,11 +65,11 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	batch := chainDb.NewBatch()
 	defer batch.Rollback()
 
-	execAt, _, err1 := stages.GetStageProgress(chainDb, stages.Execution)
+	execAt, err1 := stages.GetStageProgress(chainDb, stages.Execution)
 	if err1 != nil {
 		return err1
 	}
-	historyAt, _, err1 := stages.GetStageProgress(chainDb, stages.StorageHistoryIndex)
+	historyAt, err1 := stages.GetStageProgress(chainDb, stages.StorageHistoryIndex)
 	if err1 != nil {
 		return err1
 	}

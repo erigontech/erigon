@@ -19,7 +19,7 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, dbReader ethdb.Database
 	if !ok {
 		number := *blockNrOrHash.BlockNumber
 		if number == rpc.LatestBlockNumber {
-			blockNumber, _, err = stages.GetStageProgress(dbReader, stages.Execution)
+			blockNumber, err = stages.GetStageProgress(dbReader, stages.Execution)
 			if err != nil {
 				return 0, common.Hash{}, fmt.Errorf("getting latest block number: %v", err)
 			}
