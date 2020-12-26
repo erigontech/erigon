@@ -138,7 +138,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 
 func getHashGetter(requireCanonical bool, dbReader ethdb.Database) func(uint64) common.Hash {
 	return func(n uint64) common.Hash {
-		hash, err := rpchelper.GetHashByNumber(n, requireCanonical, dbReader)
+		hash, err := rawdb.ReadCanonicalHash(dbReader, n)
 		if err != nil {
 			log.Debug("can't get block hash by number", "number", n, "only-canonical", requireCanonical)
 		}
