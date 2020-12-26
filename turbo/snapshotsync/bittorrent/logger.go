@@ -10,7 +10,7 @@ func init() {
 }
 func NewAdapterLogger() lg.Logger {
 	return lg.Logger{
-		lg.LoggerImpl(adapterLogger{}),
+		LoggerImpl: lg.LoggerImpl(adapterLogger{}),
 	}
 }
 

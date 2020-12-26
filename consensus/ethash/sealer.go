@@ -171,7 +171,7 @@ search:
 
 			// Seal and return a block (if still needed)
 			select {
-			case found <- consensus.ResultWithContext{ctx, block.WithSeal(header)}:
+			case found <- consensus.ResultWithContext{Cancel: ctx, Block: block.WithSeal(header)}:
 				logger.Trace("Ethash nonce found and reported", "attempts", nonce-seed, "nonce", nonce)
 			case <-ctx.Done():
 				logger.Trace("Ethash nonce found but discarded", "attempts", nonce-seed, "nonce", nonce)
@@ -427,7 +427,7 @@ func (s *remoteSealer) submitWork(ctx consensus.Cancel, nonce types.BlockNonce, 
 	// The submitted solution is within the scope of acceptance.
 	if solution.NumberU64()+staleThreshold > s.currentBlock.NumberU64() {
 		select {
-		case s.results <- consensus.ResultWithContext{ctx, solution}:
+		case s.results <- consensus.ResultWithContext{Cancel: ctx, Block: solution}:
 			s.ethash.config.Log.Debug("Work submitted is acceptable", "number", solution.NumberU64(), "sealhash", sealhash, "hash", solution.Hash())
 			return true
 		default:
