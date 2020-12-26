@@ -549,16 +549,16 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 
 	block4Expected.Changes = []changeset.Change{
 		{
-			withoutInc(addrs[0], key),
-			block3Val.Bytes(),
+			Key:   withoutInc(addrs[0], key),
+			Value: block3Val.Bytes(),
 		},
 		{
-			withoutInc(addrs[2], key),
-			stateVal.Bytes(),
+			Key:   withoutInc(addrs[2], key),
+			Value: stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrs[3], key),
-			block3Val.Bytes(),
+			Key:   withoutInc(addrs[3], key),
+			Value: block3Val.Bytes(),
 		},
 	}
 	assertChangesEquals(t, block4, block4Expected)
@@ -580,16 +580,16 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 
 	block6Expected.Changes = []changeset.Change{
 		{
-			withoutInc(addrs[0], key),
-			stateVal.Bytes(),
+			Key:   withoutInc(addrs[0], key),
+			Value: stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrs[1], key),
-			stateVal.Bytes(),
+			Key:   withoutInc(addrs[1], key),
+			Value: stateVal.Bytes(),
 		},
 		{
-			withoutInc(addrs[2], key),
-			stateVal.Bytes(),
+			Key:   withoutInc(addrs[2], key),
+			Value: stateVal.Bytes(),
 		},
 	}
 	assertChangesEquals(t, block6, block6Expected)
@@ -632,63 +632,63 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 
 	writeStorageBlockData(t, tds, 3, []storageData{
 		{
-			addr1,
-			changeset.DefaultIncarnation,
-			key1,
-			emptyVal,
-			block3Val,
+			addr:   addr1,
+			inc:    changeset.DefaultIncarnation,
+			key:    key1,
+			oldVal: emptyVal,
+			newVal: block3Val,
 		},
 		{
-			addr1,
-			changeset.DefaultIncarnation,
-			key2,
-			emptyVal,
-			block3Val,
+			addr:   addr1,
+			inc:    changeset.DefaultIncarnation,
+			key:    key2,
+			oldVal: emptyVal,
+			newVal: block3Val,
 		},
 		{
-			addr1,
-			changeset.DefaultIncarnation,
-			key3,
-			emptyVal,
-			block3Val,
+			addr:   addr1,
+			inc:    changeset.DefaultIncarnation,
+			key:    key3,
+			oldVal: emptyVal,
+			newVal: block3Val,
 		},
 		{
-			addr2,
-			changeset.DefaultIncarnation,
-			key3,
-			emptyVal,
-			block3Val,
+			addr:   addr2,
+			inc:    changeset.DefaultIncarnation,
+			key:    key3,
+			oldVal: emptyVal,
+			newVal: block3Val,
 		},
 	})
 
 	writeStorageBlockData(t, tds, 5, []storageData{
 		{
-			addr1,
-			changeset.DefaultIncarnation,
-			key1,
-			block3Val,
-			stateVal,
+			addr:   addr1,
+			inc:    changeset.DefaultIncarnation,
+			key:    key1,
+			oldVal: block3Val,
+			newVal: stateVal,
 		},
 		{
-			addr1,
-			changeset.DefaultIncarnation,
-			key2,
-			block3Val,
-			stateVal,
+			addr:   addr1,
+			inc:    changeset.DefaultIncarnation,
+			key:    key2,
+			oldVal: block3Val,
+			newVal: stateVal,
 		},
 		{
-			addr1,
-			changeset.DefaultIncarnation,
-			key3,
-			block3Val,
-			emptyVal,
+			addr:   addr1,
+			inc:    changeset.DefaultIncarnation,
+			key:    key3,
+			oldVal: block3Val,
+			newVal: emptyVal,
 		},
 		{
-			addr2,
-			changeset.DefaultIncarnation,
-			key3,
-			block3Val,
-			stateVal,
+			addr:   addr2,
+			inc:    changeset.DefaultIncarnation,
+			key:    key3,
+			oldVal: block3Val,
+			newVal: stateVal,
 		},
 	})
 
@@ -732,16 +732,16 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 
 	block4Expected.Changes = []changeset.Change{
 		{
-			withoutInc(addr1, key1),
-			block3Val.Bytes(),
+			Key:   withoutInc(addr1, key1),
+			Value: block3Val.Bytes(),
 		},
 		{
-			withoutInc(addr1, key2),
-			block3Val.Bytes(),
+			Key:   withoutInc(addr1, key2),
+			Value: block3Val.Bytes(),
 		},
 		{
-			withoutInc(addr1, key3),
-			block3Val.Bytes(),
+			Key:   withoutInc(addr1, key3),
+			Value: block3Val.Bytes(),
 		},
 	}
 	assertChangesEquals(t, block4, block4Expected)
@@ -780,12 +780,12 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 
 	block6Expected.Changes = []changeset.Change{
 		{
-			withoutInc(addr1, key1),
-			stateVal.Bytes(),
+			Key:   withoutInc(addr1, key1),
+			Value: stateVal.Bytes(),
 		},
 		{
-			withoutInc(addr1, key2),
-			stateVal.Bytes(),
+			Key:   withoutInc(addr1, key2),
+			Value: stateVal.Bytes(),
 		},
 	}
 	assertChangesEquals(t, block6, block6Expected)
@@ -848,37 +848,37 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 
 	writeBlockData(t, tds, 3, []accData{
 		{
-			addrs[0],
-			&emptyValAcc,
-			block3ValAcc,
+			addr:   addrs[0],
+			oldVal: &emptyValAcc,
+			newVal: block3ValAcc,
 		},
 		{
-			addrs[2],
-			&emptyValAcc,
-			block3ValAcc,
+			addr:   addrs[2],
+			oldVal: &emptyValAcc,
+			newVal: block3ValAcc,
 		},
 		{
-			addrs[3],
-			&emptyValAcc,
-			block3ValAcc,
+			addr:   addrs[3],
+			oldVal: &emptyValAcc,
+			newVal: block3ValAcc,
 		},
 	})
 
 	writeBlockData(t, tds, 5, []accData{
 		{
-			addrs[0],
-			block3ValAcc,
-			stateValAcc,
+			addr:   addrs[0],
+			oldVal: block3ValAcc,
+			newVal: stateValAcc,
 		},
 		{
-			addrs[1],
-			&emptyValAcc,
-			stateValAcc,
+			addr:   addrs[1],
+			oldVal: &emptyValAcc,
+			newVal: stateValAcc,
 		},
 		{
-			addrs[3],
-			block3ValAcc,
-			nil,
+			addr:   addrs[3],
+			oldVal: block3ValAcc,
+			newVal: nil,
 		},
 	})
 
@@ -905,16 +905,16 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	block4Expected := &changeset.ChangeSet{
 		Changes: []changeset.Change{
 			{
-				addrs[0].Bytes(),
-				block3Val,
+				Key:   addrs[0].Bytes(),
+				Value: block3Val,
 			},
 			{
-				addrs[2].Bytes(),
-				block3Val,
+				Key:   addrs[2].Bytes(),
+				Value: block3Val,
 			},
 			{
-				addrs[3].Bytes(),
-				block3Val,
+				Key:   addrs[3].Bytes(),
+				Value: block3Val,
 			},
 		},
 	}
@@ -937,16 +937,16 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	block6Expected := &changeset.ChangeSet{
 		Changes: []changeset.Change{
 			{
-				addrs[0].Bytes(),
-				stateVal,
+				Key:   addrs[0].Bytes(),
+				Value: stateVal,
 			},
 			{
-				addrs[1].Bytes(),
-				stateVal,
+				Key:   addrs[1].Bytes(),
+				Value: stateVal,
 			},
 			{
-				addrs[2].Bytes(),
-				block3Val,
+				Key:   addrs[2].Bytes(),
+				Value: block3Val,
 			},
 		},
 	}
@@ -1006,19 +1006,19 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 
 	writeBlockData(t, tds, 1, []accData{
 		{
-			addrs[0],
-			&emptyValAcc,
-			addr1Old,
+			addr:   addrs[0],
+			oldVal: &emptyValAcc,
+			newVal: addr1Old,
 		},
 		{
-			addrs[1],
-			&emptyValAcc,
-			addr1Old,
+			addr:   addrs[1],
+			oldVal: &emptyValAcc,
+			newVal: addr1Old,
 		},
 		{
-			addrs[2],
-			&emptyValAcc,
-			addr1Old,
+			addr:   addrs[2],
+			oldVal: &emptyValAcc,
+			newVal: addr1Old,
 		},
 	})
 
@@ -1031,19 +1031,19 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		addr3New.Nonce = uint64(i)
 		writeBlockData(t, tds, uint64(i), []accData{
 			{
-				addrs[0],
-				addr1Old,
-				addr1New,
+				addr:   addrs[0],
+				oldVal: addr1Old,
+				newVal: addr1New,
 			},
 			{
-				addrs[1],
-				addr2Old,
-				addr2New,
+				addr:   addrs[1],
+				oldVal: addr2Old,
+				newVal: addr2New,
 			},
 			{
-				addrs[2],
-				addr3Old,
-				addr3New,
+				addr:   addrs[2],
+				oldVal: addr3Old,
+				newVal: addr3New,
 			},
 		})
 		addr1Old = addr1New.SelfCopy()
@@ -1060,19 +1060,19 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 
 	writeBlockData(t, tds, 1100, []accData{
 		{
-			addrs[0],
-			addr1Old,
-			addr1New,
+			addr:   addrs[0],
+			oldVal: addr1Old,
+			newVal: addr1New,
 		},
 		{
-			addrs[1],
-			addr1Old,
-			addr1New,
+			addr:   addrs[1],
+			oldVal: addr1Old,
+			newVal: addr1New,
 		},
 		{
-			addrs[2],
-			addr1Old,
-			addr1New,
+			addr:   addrs[2],
+			oldVal: addr1Old,
+			newVal: addr1New,
 		},
 	})
 
@@ -1139,25 +1139,25 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 	val := uint256.NewInt().SetBytes([]byte("block 1"))
 	writeStorageBlockData(t, tds, 1, []storageData{
 		{
-			addrs[0],
-			1,
-			key,
-			emptyVal,
-			val,
+			addr:   addrs[0],
+			inc:    1,
+			key:    key,
+			oldVal: emptyVal,
+			newVal: val,
 		},
 		{
-			addrs[1],
-			1,
-			key,
-			emptyVal,
-			val,
+			addr:   addrs[1],
+			inc:    1,
+			key:    key,
+			oldVal: emptyVal,
+			newVal: val,
 		},
 		{
-			addrs[2],
-			1,
-			key,
-			emptyVal,
-			val,
+			addr:   addrs[2],
+			inc:    1,
+			key:    key,
+			oldVal: emptyVal,
+			newVal: val,
 		},
 	})
 
@@ -1166,25 +1166,25 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 		val = uint256.NewInt().SetBytes([]byte("block " + strconv.Itoa(i)))
 		writeStorageBlockData(t, tds, uint64(i), []storageData{
 			{
-				addrs[0],
-				1,
-				key,
-				prev,
-				val,
+				addr:   addrs[0],
+				inc:    1,
+				key:    key,
+				oldVal: prev,
+				newVal: val,
 			},
 			{
-				addrs[1],
-				1,
-				key,
-				prev,
-				val,
+				addr:   addrs[1],
+				inc:    1,
+				key:    key,
+				oldVal: prev,
+				newVal: val,
 			},
 			{
-				addrs[2],
-				1,
-				key,
-				prev,
-				val,
+				addr:   addrs[2],
+				inc:    1,
+				key:    key,
+				oldVal: prev,
+				newVal: val,
 			},
 		})
 		prev = val
@@ -1194,25 +1194,25 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 
 	writeStorageBlockData(t, tds, 1100, []storageData{
 		{
-			addrs[0],
-			1,
-			key,
-			prev,
-			val,
+			addr:   addrs[0],
+			inc:    1,
+			key:    key,
+			oldVal: prev,
+			newVal: val,
 		},
 		{
-			addrs[1],
-			1,
-			key,
-			prev,
-			val,
+			addr:   addrs[1],
+			inc:    1,
+			key:    key,
+			oldVal: prev,
+			newVal: val,
 		},
 		{
-			addrs[2],
-			1,
-			key,
-			prev,
-			val,
+			addr:   addrs[2],
+			inc:    1,
+			key:    key,
+			oldVal: prev,
+			newVal: val,
 		},
 	})
 

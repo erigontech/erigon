@@ -245,7 +245,7 @@ func init() {
 	withDatadir(cmdStageHashState)
 
 	rootCmd.AddCommand(cmdStageHashState)
-	
+
 	withChaindata(cmdStageIHash)
 	withLmdbFlags(cmdStageIHash)
 	withReset(cmdStageIHash)

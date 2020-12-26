@@ -188,8 +188,6 @@ func promoteLogIndex(logPrefix string, db ethdb.Database, start uint64, bufLimit
 			}
 			return next(k, chunkKey, buf.Bytes())
 		})
-		currentBitmap.Clear()
-		return nil
 	}
 
 	if err := collectorTopics.Load(logPrefix, db, dbutils.LogTopicIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
