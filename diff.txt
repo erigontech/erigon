@@ -2074,28 +2074,3 @@ Date:   Sun Dec 27 17:56:50 2020 +0000
     having migrated to the dot-com service, which now covers open-source
     projects as well.
 
-commit b9012a039b8aaf3e68ccc3826bb17d27eaf0fa1c
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Wed Dec 23 17:44:45 2020 +0100
-
-    common,crypto: move fuzzers out of core (#22029)
-    
-    * common,crypto: move fuzzers out of core
-    
-    * fuzzers: move vm fuzzer out from core
-    
-    * fuzzing: rework cover package logic
-    
-    * fuzzers: lint
-
-commit 158f72cc0c889739f49dde42210328902073353d
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Wed Dec 23 13:43:22 2020 +0100
-
-    internal/ethapi: restore net_version RPC method (#22061)
-    
-    During the snap and eth refactor, the net_version rpc call was falsely deprecated.
-    This restores the net_version RPC handler as most eth2 nodes and other software
-    depend on it.
-
-
