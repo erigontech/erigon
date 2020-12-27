@@ -321,7 +321,7 @@ type Tracer struct {
 // New instantiates a new tracer instance. code specifies a Javascript snippet,
 // which must evaluate to an expression returning an object with 'step', 'fault'
 // and 'result' functions.
-func New(code string) (*Tracer, error) {
+func New(code string, txCtx vm.TxContext) (*Tracer, error) {
 	// Resolve any tracers by name and assemble the tracer object
 	if tracer, ok := tracer(code); ok {
 		code = tracer
@@ -340,6 +340,8 @@ func New(code string) (*Tracer, error) {
 		depthValue:      new(uint),
 		refundValue:     new(uint),
 	}
+	tracer.ctx["gasPrice"] = txCtx.GasPrice
+
 	// Set up builtins for this environment
 	tracer.vm.PushGlobalGoFunction("toHex", func(ctx *duktape.Context) int {
 		ctx.PushString(hexutil.Encode(popSlice(ctx)))
@@ -554,6 +556,18 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 		// Initialize the context if it wasn't done yet
 		if !jst.inited {
 			jst.ctx["block"] = env.Context.BlockNumber.Uint64()
+			// Compute intrinsic gas
+			isHomestead := env.ChainConfig().IsHomestead(env.Context.BlockNumber)
+			isIstanbul := env.ChainConfig().IsIstanbul(env.Context.BlockNumber)
+			var input []byte
+			if data, ok := jst.ctx["input"].([]byte); ok {
+				input = data
+			}
+			intrinsicGas, err := core.IntrinsicGas(input, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul)
+			if err != nil {
+				return err
+			}
+			jst.ctx["intrinsicGas"] = intrinsicGas
 			jst.inited = true
 		}
 		// If tracing was interrupted, set the error and stop
@@ -608,8 +622,8 @@ func (jst *Tracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.D
 		return nil
 	}
 	jst.ctx["output"] = output
-	jst.ctx["gasUsed"] = gasUsed
 	jst.ctx["time"] = t.String()
+	jst.ctx["gasUsed"] = gasUsed
 
 	if err != nil {
 		jst.ctx["error"] = err.Error()

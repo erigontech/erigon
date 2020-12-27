@@ -180,7 +180,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		t.Errorf("Could not make prestate: %v", err)
 	}
 	// Create the tracer, the EVM environment and run it
-	tracer, err := New("prestateTracer")
+	tracer, err := New("prestateTracer", txContext)
 	if err != nil {
 		t.Fatalf("failed to create call tracer: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestCallTracer(t *testing.T) {
 			}
 
 			// Create the tracer, the EVM environment and run it
-			tracer, err := New("callTracer")
+			tracer, err := New("callTracer", txContext)
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
