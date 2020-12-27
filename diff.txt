@@ -1998,27 +1998,3 @@ Author: Suriyaa Sundararuban <isc.suriyaa@gmail.com>
 Date:   Sun Dec 27 22:28:08 2020 +0100
 
     docs: replace wiki links with new doc pages in readme.md (#22065) (#22066)
-
-commit 653e8b9dd9b7a1565b0e26c71ad70a83803ad529
-Author: jk-jeongkyun <45347815+jeongkyun-oh@users.noreply.github.com>
-Date:   Mon Dec 28 06:26:42 2020 +0900
-
-    eth/downloader: remove unnecessary condition (#22052)
-
-commit ab0979f9306e87025d821b2629985e8bffe130ef
-Author: Suriyaa Sundararuban <isc.suriyaa@gmail.com>
-Date:   Sun Dec 27 22:18:57 2020 +0100
-
-    signer: docs - replace wiki links with new doc pages (#22069)
-
-commit 0a09a39325814a2acbf4486c74b9aa9e6cff04d6
-Author: Suriyaa Sundararuban <isc.suriyaa@gmail.com>
-Date:   Sun Dec 27 22:09:05 2020 +0100
-
-    eth/filters: replace wiki links with new doc pages (#22070)
-
-commit 2f8100615ad1d8335e38024221143163f09d54fe
-Author: Suriyaa Sundararuban <isc.suriyaa@gmail.com>
-Date:   Sun Dec 27 22:01:28 2020 +0100
-
-    cmd/geth: replace wiki links with new doc pages (#22071)
