@@ -22,7 +22,7 @@ func getChainConfig(db ethdb.Database) (*params.ChainConfig, error) {
 func getChainConfigWithGenesis(db ethdb.Database) (*params.ChainConfig, common.Hash, error) {
 	chainConfigLock.RLock()
 	defer chainConfigLock.RUnlock()
-	if chainConfig != nil {
+	if chainConfig == nil {
 		chainConfigLock.Lock()
 		defer chainConfigLock.Unlock()
 		genesisBlock, err := rawdb.ReadBlockByNumber(db, 0)
