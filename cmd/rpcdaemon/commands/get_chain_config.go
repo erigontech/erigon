@@ -39,5 +39,5 @@ func getChainConfigWithGenesis(db ethdb.Database) (*params.ChainConfig, *types.B
 			_chainConfig = cc
 		})
 	}
-	return _chainConfig, _genesis, nil
+	return cc, genesisBlock, nil
 }
