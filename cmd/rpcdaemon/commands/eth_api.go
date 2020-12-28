@@ -3,15 +3,18 @@ package commands
 import (
 	"context"
 	"math/big"
+	"sync"
 
 	rpcfilters "github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
@@ -83,8 +86,48 @@ type EthAPI interface {
 	CompileSerpent(ctx context.Context, _ string) (hexutil.Bytes, error)
 }
 
+type BaseAPI struct {
+	_chainConfig    *params.ChainConfig
+	_genesis        *types.Block
+	_genesisSetOnce sync.Once
+}
+
+func (api *BaseAPI) chainConfig(db ethdb.Database) (*params.ChainConfig, error) {
+	cfg, _, err := api.chainConfigWithGenesis(db)
+	return cfg, err
+}
+
+//nolint:unused
+func (api *BaseAPI) genesis(db ethdb.Database) (*types.Block, error) {
+	_, genesis, err := api.chainConfigWithGenesis(db)
+	return genesis, err
+}
+
+func (api *BaseAPI) chainConfigWithGenesis(db ethdb.Database) (*params.ChainConfig, *types.Block, error) {
+	if api._chainConfig != nil {
+		return api._chainConfig, api._genesis, nil
+	}
+
+	genesisBlock, err := rawdb.ReadBlockByNumber(db, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	cc, err := rawdb.ReadChainConfig(db, genesisBlock.Hash())
+	if err != nil {
+		return nil, nil, err
+	}
+	if cc != nil && genesisBlock != nil {
+		api._genesisSetOnce.Do(func() {
+			api._genesis = genesisBlock
+			api._chainConfig = cc
+		})
+	}
+	return cc, genesisBlock, nil
+}
+
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
+	*BaseAPI
 	db           ethdb.KV
 	ethBackend   ethdb.Backend
 	dbReader     ethdb.Database
@@ -96,6 +139,7 @@ type APIImpl struct {
 // NewEthAPI returns APIImpl instance
 func NewEthAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64, filters *rpcfilters.Filters) *APIImpl {
 	return &APIImpl{
+		BaseAPI:    &BaseAPI{},
 		db:         db,
 		dbReader:   dbReader,
 		ethBackend: eth,

@@ -22,7 +22,7 @@ func (api *TgImpl) Forks(ctx context.Context) (Forks, error) {
 	}
 	defer tx.Rollback()
 
-	chainConfig, genesis, err := getChainConfigWithGenesis(tx)
+	chainConfig, genesis, err := api.chainConfigWithGenesis(tx)
 	if err != nil {
 		return Forks{}, err
 	}

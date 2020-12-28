@@ -56,7 +56,7 @@ func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
 	}
 	defer tx.Rollback()
 
-	chainConfig, err := getChainConfig(tx)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return 0, err
 	}
@@ -127,7 +127,7 @@ func (api *APIImpl) ChainConfig() *params.ChainConfig {
 	}
 	defer tx.Rollback()
 
-	chainConfig, err := getChainConfig(tx)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		log.Warn("Could not read chain config from the db, defaulting to MainnetChainConfig", "err", err)
 		return params.MainnetChainConfig

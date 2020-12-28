@@ -28,6 +28,7 @@ type TraceAPI interface {
 
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
 type TraceAPIImpl struct {
+	*BaseAPI
 	dbReader  ethdb.Database
 	maxTraces uint64
 	traceType string
@@ -37,6 +38,7 @@ type TraceAPIImpl struct {
 // NewTraceAPI returns NewTraceAPI instance
 func NewTraceAPI(dbReader ethdb.Database, cfg *cli.Flags) *TraceAPIImpl {
 	return &TraceAPIImpl{
+		BaseAPI:   &BaseAPI{},
 		dbReader:  dbReader,
 		maxTraces: cfg.MaxTraces,
 		traceType: cfg.TraceType,

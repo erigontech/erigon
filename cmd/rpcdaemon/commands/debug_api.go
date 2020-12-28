@@ -29,6 +29,7 @@ type PrivateDebugAPI interface {
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
+	*BaseAPI
 	dbReader     ethdb.Database
 	chainContext core.ChainContext
 }
@@ -36,6 +37,7 @@ type PrivateDebugAPIImpl struct {
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
 func NewPrivateDebugAPI(dbReader ethdb.Database) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
+		BaseAPI:  &BaseAPI{},
 		dbReader: dbReader,
 	}
 }

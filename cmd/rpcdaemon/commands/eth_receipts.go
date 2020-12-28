@@ -16,11 +16,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
-func getReceipts(ctx context.Context, tx ethdb.Database, number uint64, hash common.Hash) (types.Receipts, error) {
+func getReceipts(ctx context.Context, tx ethdb.Database, chainConfig *params.ChainConfig, number uint64, hash common.Hash) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, hash, number); cached != nil {
 		return cached, nil
 	}
@@ -29,10 +30,6 @@ func getReceipts(ctx context.Context, tx ethdb.Database, number uint64, hash com
 
 	cc := adapter.NewChainContext(tx)
 	bc := adapter.NewBlockGetter(tx)
-	chainConfig, err := getChainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
 	_, _, ibs, dbstate, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, cc, tx.(ethdb.HasTx).Tx(), hash, 0)
 	if err != nil {
 		return nil, err
@@ -130,6 +127,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return returnLogs(logs), nil
 	}
 
+	cc, err := api.chainConfig(tx)
+	if err != nil {
+		return returnLogs(logs), err
+	}
 	for _, blockNToMatch := range blockNumbers.ToArray() {
 		blockHash, err := rawdb.ReadCanonicalHash(tx, uint64(blockNToMatch))
 		if err != nil {
@@ -138,7 +139,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		if blockHash == (common.Hash{}) {
 			return returnLogs(logs), fmt.Errorf("block not found %d", uint64(blockNToMatch))
 		}
-		receipts, err := getReceipts(ctx, tx, uint64(blockNToMatch), blockHash)
+		receipts, err := getReceipts(ctx, tx, cc, uint64(blockNToMatch), blockHash)
 		if err != nil {
 			return returnLogs(logs), err
 		}
@@ -205,7 +206,11 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
 
-	receipts, err := getReceipts(ctx, tx, blockNumber, blockHash)
+	cc, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := getReceipts(ctx, tx, cc, blockNumber, blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}

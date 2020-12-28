@@ -30,6 +30,7 @@ type TgAPI interface {
 
 // TgImpl is implementation of the TgAPI interface
 type TgImpl struct {
+	*BaseAPI
 	db       ethdb.KV
 	dbReader ethdb.Database
 }
@@ -37,6 +38,7 @@ type TgImpl struct {
 // NewTgAPI returns TgImpl instance
 func NewTgAPI(db ethdb.KV, dbReader ethdb.Database) *TgImpl {
 	return &TgImpl{
+		BaseAPI:  &BaseAPI{},
 		db:       db,
 		dbReader: dbReader,
 	}

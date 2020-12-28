@@ -29,7 +29,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	}
 	defer dbtx.Rollback()
 
-	chainConfig, err := getChainConfig(dbtx)
+	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blo
 		return 0, err
 	}
 
-	chainConfig, err := getChainConfig(dbtx)
+	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return 0, err
 	}

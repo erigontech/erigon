@@ -268,7 +268,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	defer dbtx.Rollback()
 
-	chainConfig, err := getChainConfig(dbtx)
+	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
 	}

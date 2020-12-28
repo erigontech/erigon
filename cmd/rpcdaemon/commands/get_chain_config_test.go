@@ -14,7 +14,8 @@ func TestGetChainConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)
 	}
-	config1, err1 := getChainConfig(db)
+
+	config1, err1 := (&APIImpl{}).chainConfig(db)
 	if err1 != nil {
 		t.Fatalf("reading chain config: %v", err1)
 	}
