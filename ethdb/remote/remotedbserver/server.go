@@ -196,7 +196,11 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			}
 			continue
 		case remote.Op_CLOSE:
-			cursors[in.Cursor].c.Close()
+			cInfo, ok := cursors[in.Cursor]
+			if !ok {
+				return fmt.Errorf("server-side error: unknown Cursor=%d, Op=%s", in.Cursor, in.Op)
+			}
+			cInfo.c.Close()
 			delete(cursors, in.Cursor)
 			if err := stream.Send(&remote.Pair{}); err != nil {
 				return fmt.Errorf("server-side error: %w", err)
