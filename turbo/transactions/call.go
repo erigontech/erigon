@@ -23,7 +23,7 @@ import (
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, dbReader ethdb.Database, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64, chainConfig *params.ChainConfig) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, GasCap uint64, chainConfig *params.ChainConfig) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -31,7 +31,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, dbRead
 			return state, block.Header(), nil
 		}
 	*/
-	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, dbReader)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, dbRead
 	}
 	state := state.New(stateReader)
 
-	header := rawdb.ReadHeader(dbReader, hash, blockNumber)
+	header := rawdb.ReadHeader(tx, hash, blockNumber)
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
@@ -97,7 +97,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, dbRead
 	// Get a new instance of the EVM.
 	msg := args.ToMessage(GasCap)
 
-	evmCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbReader)
+	evmCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
 
 	evm := vm.NewEVM(evmCtx, state, chainConfig, vm.Config{})
 
@@ -121,11 +121,11 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Database, dbRead
 	return result, nil
 }
 
-func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, dbReader ethdb.Database) vm.Context {
+func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, db ethdb.Database) vm.Context {
 	return vm.Context{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
-		GetHash:     getHashGetter(requireCanonical, dbReader),
+		GetHash:     getHashGetter(requireCanonical, db),
 		Origin:      msg.From(),
 		Coinbase:    header.Coinbase,
 		BlockNumber: new(big.Int).Set(header.Number),
@@ -136,9 +136,9 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 	}
 }
 
-func getHashGetter(requireCanonical bool, dbReader ethdb.Database) func(uint64) common.Hash {
+func getHashGetter(requireCanonical bool, db ethdb.Database) func(uint64) common.Hash {
 	return func(n uint64) common.Hash {
-		hash, err := rawdb.ReadCanonicalHash(dbReader, n)
+		hash, err := rawdb.ReadCanonicalHash(db, n)
 		if err != nil {
 			log.Debug("can't get block hash by number", "number", n, "only-canonical", requireCanonical)
 		}

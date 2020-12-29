@@ -64,7 +64,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		number := rawdb.ReadHeaderNumber(api.dbReader, *crit.BlockHash)
+		number := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
 		if number == nil {
 			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
@@ -72,7 +72,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		end = *number
 	} else {
 		// Convert the RPC block numbers into internal representations
-		latest, err := getLatestBlockNumber(api.dbReader)
+		latest, err := getLatestBlockNumber(tx)
 		if err != nil {
 			return nil, err
 		}
