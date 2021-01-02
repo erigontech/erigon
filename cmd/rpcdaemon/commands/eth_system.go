@@ -26,13 +26,18 @@ func (api *APIImpl) BlockNumber(_ context.Context) (hexutil.Uint64, error) {
 }
 
 // Syncing implements eth_syncing. Returns a data object detaling the status of the sync process or false if not syncing.
-func (api *APIImpl) Syncing(_ context.Context) (interface{}, error) {
-	highestBlock, err := stages.GetStageProgress(api.dbReader, stages.Headers)
+func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
+	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	highestBlock, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return false, err
 	}
 
-	currentBlock, err := stages.GetStageProgress(api.dbReader, stages.Finish)
+	currentBlock, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return false, err
 	}
@@ -56,7 +61,7 @@ func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
 	}
 	defer tx.Rollback()
 
-	chainConfig, err := getChainConfig(tx)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return 0, err
 	}
@@ -127,7 +132,7 @@ func (api *APIImpl) ChainConfig() *params.ChainConfig {
 	}
 	defer tx.Rollback()
 
-	chainConfig, err := getChainConfig(tx)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		log.Warn("Could not read chain config from the db, defaulting to MainnetChainConfig", "err", err)
 		return params.MainnetChainConfig

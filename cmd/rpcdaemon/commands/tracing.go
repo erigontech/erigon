@@ -28,7 +28,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	getter := adapter.NewBlockGetter(tx)
 	chainContext := adapter.NewChainContext(tx)
 
-	chainConfig, err := getChainConfig(tx)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}

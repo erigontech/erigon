@@ -16,11 +16,14 @@ type Web3API interface {
 }
 
 type Web3APIImpl struct {
+	*BaseAPI
 }
 
 // NewWeb3APIImpl returns Web3APIImpl instance
 func NewWeb3APIImpl() *Web3APIImpl {
-	return &Web3APIImpl{}
+	return &Web3APIImpl{
+		BaseAPI: &BaseAPI{},
+	}
 }
 
 // ClientVersion implements web3_clientVersion. Returns the current client version.

@@ -16,16 +16,16 @@ import (
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
-	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
-	if err != nil {
-		return nil, err
-	}
-
-	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
+	tx, err1 := api.dbReader.Begin(ctx, ethdb.RO)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx)
+	if err != nil {
+		return nil, err
+	}
+
 	acc, err := rpchelper.GetAccount(tx, blockNumber, address)
 	if err != nil {
 		return nil, fmt.Errorf("cant get a balance for account %q for block %v", address.String(), blockNumber)
@@ -40,17 +40,17 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
-	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
-	if err != nil {
-		return nil, err
-	}
-	nonce := hexutil.Uint64(0)
-	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
+	tx, err1 := api.dbReader.Begin(ctx, ethdb.RO)
 	if err1 != nil {
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
-	reader := adapter.NewStateReader(tx, blockNumber)
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx)
+	if err != nil {
+		return nil, err
+	}
+	nonce := hexutil.Uint64(0)
+	reader := adapter.NewStateReader(tx.(ethdb.HasTx).Tx(), blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return &nonce, err
@@ -60,17 +60,17 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
 func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
-	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
-	if err != nil {
-		return nil, err
-	}
-
-	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
+	tx, err1 := api.dbReader.Begin(ctx, ethdb.RO)
 	if err1 != nil {
 		return nil, fmt.Errorf("getCode cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
-	reader := adapter.NewStateReader(tx, blockNumber)
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	reader := adapter.NewStateReader(tx.(ethdb.HasTx).Tx(), blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return hexutil.Bytes(""), nil
@@ -86,17 +86,17 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
 
-	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, api.dbReader)
+	tx, err1 := api.dbReader.Begin(ctx, ethdb.RO)
+	if err1 != nil {
+		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err1
+	}
+	defer tx.Rollback()
+
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx)
 	if err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
 	}
-
-	tx, err1 := api.db.Begin(ctx, nil, ethdb.RO)
-	if err1 != nil {
-		return "", fmt.Errorf("getStorageAt cannot open tx: %v", err1)
-	}
-	defer tx.Rollback()
-	reader := adapter.NewStateReader(tx, blockNumber)
+	reader := adapter.NewStateReader(tx.(ethdb.HasTx).Tx(), blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err

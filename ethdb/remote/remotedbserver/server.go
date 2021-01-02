@@ -266,7 +266,7 @@ func handleOp(c ethdb.Cursor, stream remote.KV_TxServer, in *remote.Cursor) erro
 		return err
 	}
 
-	if err := stream.Send(&remote.Pair{K: common.CopyBytes(k), V: common.CopyBytes(v)}); err != nil {
+	if err := stream.Send(&remote.Pair{K: k, V: v}); err != nil {
 		return err
 	}
 
