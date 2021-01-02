@@ -76,7 +76,7 @@ func PostProcessBodies(db ethdb.Database) error {
 }
 
 func PostProcessState(db ethdb.GetterPutter, info *SnapshotsInfo) error {
-	v, _, err := stages.GetStageProgress(db, stages.Execution)
+	v, err := stages.GetStageProgress(db, stages.Execution)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func PostProcessState(db ethdb.GetterPutter, info *SnapshotsInfo) error {
 		return nil
 	}
 
-	err = stages.SaveStageProgress(db, stages.Execution, info.SnapshotBlock, nil)
+	err = stages.SaveStageProgress(db, stages.Execution, info.SnapshotBlock)
 	if err != nil {
 		return err
 	}
