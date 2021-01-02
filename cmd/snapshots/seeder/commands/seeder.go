@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"time"
 
@@ -20,13 +19,7 @@ import (
 func Seed(ctx context.Context, datadir string) error {
 	datadir = filepath.Dir(datadir)
 	ctx, cancel := context.WithCancel(ctx)
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-	go func() {
-		<-c
-		cancel()
-	}()
+	defer cancel()
 
 	cfg := trnt.DefaultTorrentConfig()
 	cfg.NoDHT = false
@@ -39,7 +32,7 @@ func Seed(ctx context.Context, datadir string) error {
 	pathes := []string{
 		cfg.DataDir + "/headers",
 		cfg.DataDir + "/bodies",
-		//cfg.DataDir + "/state",
+		cfg.DataDir + "/state",
 		//cfg.DataDir+"/receipts",
 	}
 
