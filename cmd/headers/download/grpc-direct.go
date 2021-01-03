@@ -47,7 +47,7 @@ func (scd *SentryClientDirect) SendMessageToAll(ctx context.Context, in *proto_s
 	return scd.server.SendMessageToAll(ctx, in)
 }
 
-// ControlClientDirect implement ControlClient interface by connecting the instance of the client directly with the correponding
+// ControlClientDirect implement ControlClient interface by connecting the instance of the client directly with the corresponding
 // instance of ControlServer
 type ControlClientDirect struct {
 	server proto_core.ControlServer
