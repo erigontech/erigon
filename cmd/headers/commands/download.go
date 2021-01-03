@@ -7,7 +7,7 @@ import (
 
 var (
 	bufferSizeStr string // Size of buffer
-	combined bool // Whether downloader also includes sentry
+	combined      bool   // Whether downloader also includes sentry
 )
 
 func init() {
