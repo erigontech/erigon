@@ -428,10 +428,30 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, staticPeers []string, discovery bool, netRestrict string) error {
-	ctx := rootContext()
+func grpcControlClient(ctx context.Context, coreAddr string) (proto_core.ControlClient, error) {
+	// CREATING GRPC CLIENT CONNECTION
+	log.Info("Starting Control client", "connecting to core", coreAddr)
+	var dialOpts []grpc.DialOption
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Timeout: 10 * time.Minute,
+		}),
+	}
+
+	dialOpts = append(dialOpts, grpc.WithInsecure())
+
+	conn, err := grpc.DialContext(ctx, coreAddr, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating client connection to core P2P: %w", err)
+	}
+	return proto_core.NewControlClient(conn), nil
+}
+
+func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl, error) {
 	// STARTING GRPC SERVER
-	log.Info("Starting Sentry P2P server", "on", sentryAddr, "connecting to core", coreAddr)
+	log.Info("Starting Sentry P2P server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
 		Control: func(network, address string, _ syscall.RawConn) error {
 			log.Info("Sentry P2P received connection", "via", network, "from", address)
@@ -440,7 +460,7 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, sta
 	}
 	lis, err := listenConfig.Listen(ctx, "tcp", sentryAddr)
 	if err != nil {
-		return fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
+		return nil, fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
 	}
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
@@ -471,30 +491,19 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, sta
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
 	}
-
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Sentry P2P server fail", "err", err1)
 		}
 	}()
-	// CREATING GRPC CLIENT CONNECTION
-	var dialOpts []grpc.DialOption
-	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Timeout: 10 * time.Minute,
-		}),
-	}
+	return sentryServer, nil
+}
 
-	dialOpts = append(dialOpts, grpc.WithInsecure())
-
-	conn, err := grpc.DialContext(ctx, coreAddr, dialOpts...)
-	if err != nil {
-		return fmt.Errorf("creating client connection to core P2P: %w", err)
-	}
-	coreClient := proto_core.NewControlClient(conn)
-
+func p2pServer(ctx context.Context,
+	coreClient proto_core.ControlClient,
+	sentryServer *SentryServerImpl,
+	natSetting string, port int, staticPeers []string, discovery bool, netRestrict string,
+) (*p2p.Server, error) {
 	server, err := makeP2PServer(
 		ctx,
 		natSetting,
@@ -506,7 +515,7 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, sta
 		coreClient,
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	enodes := make([]*enode.Node, len(staticPeers))
@@ -521,9 +530,30 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, sta
 		server.NetRestrict = new(netutil.Netlist)
 		server.NetRestrict.Add(netRestrict)
 	}
+	return server, nil
+}
+
+// Sentry creates and runs standalone sentry
+func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, staticPeers []string, discovery bool, netRestrict string) error {
+	ctx := rootContext()
+
+	coreClient, err1 := grpcControlClient(ctx, coreAddr)
+	if err1 != nil {
+		return err1
+	}
+
+	sentryServer, err2 := grpcSentryServer(ctx, sentryAddr)
+	if err2 != nil {
+		return err2
+	}
+
+	server, err3 := p2pServer(ctx, coreClient, sentryServer, natSetting, port, staticPeers, discovery, netRestrict)
+	if err3 != nil {
+		return err3
+	}
 
 	// Add protocol
-	if err = server.Start(); err != nil {
+	if err := server.Start(); err != nil {
 		return fmt.Errorf("could not start server: %w", err)
 	}
 

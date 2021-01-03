@@ -118,9 +118,29 @@ func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment
 	}
 }
 
-func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database) error {
-	ctx := rootContext()
-	log.Info("Starting Core P2P server", "on", coreAddr, "connecting to sentry", coreAddr)
+func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
+	log.Info("Starting Sentry client", "connecting to sentry", sentryAddr)
+	// CREATING GRPC CLIENT CONNECTION
+	var dialOpts []grpc.DialOption
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Timeout: 10 * time.Minute,
+		}),
+	}
+
+	dialOpts = append(dialOpts, grpc.WithInsecure())
+
+	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
+	}
+	return proto_sentry.NewSentryClient(conn), nil
+}
+
+func grpcControlServer(ctx context.Context, coreAddr string, sentryClient proto_sentry.SentryClient, filesDir string, bufferSizeStr string, db ethdb.Database) (*ControlServerImpl, error) {
+	log.Info("Starting Core P2P server", "on", coreAddr)
 
 	listenConfig := net.ListenConfig{
 		Control: func(network, address string, _ syscall.RawConn) error {
@@ -130,7 +150,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	}
 	lis, err := listenConfig.Listen(ctx, "tcp", coreAddr)
 	if err != nil {
-		return fmt.Errorf("could not create Core P2P listener: %w, addr=%s", err, coreAddr)
+		return nil, fmt.Errorf("could not create Core P2P listener: %w, addr=%s", err, coreAddr)
 	}
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
@@ -157,32 +177,14 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	}
 	grpcServer = grpc.NewServer(opts...)
 
-	// CREATING GRPC CLIENT CONNECTION
-	var dialOpts []grpc.DialOption
-	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Timeout: 10 * time.Minute,
-		}),
-	}
-
-	dialOpts = append(dialOpts, grpc.WithInsecure())
-
-	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
-	if err != nil {
-		return fmt.Errorf("creating client connection to sentry P2P: %w", err)
-	}
-	sentryClient := proto_sentry.NewSentryClient(conn)
-
 	var bufferSize datasize.ByteSize
 	if err = bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
-		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
+		return nil, fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
 	}
 	var controlServer *ControlServerImpl
 
 	if controlServer, err = NewControlServer(db, filesDir, int(bufferSize), sentryClient); err != nil {
-		return fmt.Errorf("create core P2P server: %w", err)
+		return nil, fmt.Errorf("create core P2P server: %w", err)
 	}
 	proto_core.RegisterControlServer(grpcServer, controlServer)
 	if metrics.Enabled {
@@ -194,13 +196,58 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 			log.Error("Core P2P server fail", "err", err1)
 		}
 	}()
+	return controlServer, nil
+}
 
+// Download creates and starts standalone downloader
+func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database) error {
+	ctx := rootContext()
+
+	sentryClient, err1 := grpcSentryClient(ctx, sentryAddr)
+	if err1 != nil {
+		return err1
+	}
+	controlServer, err2 := grpcControlServer(ctx, coreAddr, sentryClient, filesDir, bufferSizeStr, db)
+	if err2 != nil {
+		return err2
+	}
 	go controlServer.loop(ctx)
 
-	if err = stages.StageLoop(ctx, db, controlServer.hd); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 
+	return nil
+}
+
+// Combined creates and starts sentry and downloader in the same process
+func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, filesDir string, bufferSizeStr string, db ethdb.Database) error {
+	ctx := rootContext()
+
+	coreClient := &ControlClientDirect{}
+	sentryServer := &SentryServerImpl{}
+	server, err1 := p2pServer(ctx, coreClient, sentryServer, natSetting, port, staticPeers, discovery, netRestrict)
+	if err1 != nil {
+		return err1
+	}
+	sentryClient := &SentryClientDirect{}
+	sentryClient.SetServer(sentryServer)
+	var bufferSize datasize.ByteSize
+	if err := bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
+		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
+	}
+	controlServer, err2 := NewControlServer(db, filesDir, int(bufferSize), sentryClient)
+	if err2 != nil {
+		return fmt.Errorf("create core P2P server: %w", err2)
+	}
+	coreClient.SetServer(controlServer)
+	if err := server.Start(); err != nil {
+		return fmt.Errorf("could not start server: %w", err)
+	}
+	go controlServer.loop(ctx)
+	if err := stages.StageLoop(ctx, db, controlServer.hd); err != nil {
+		log.Error("Stage loop failure", "error", err)
+	}
 	return nil
 }
 
