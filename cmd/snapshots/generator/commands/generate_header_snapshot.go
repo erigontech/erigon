@@ -54,15 +54,15 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 			return err
 		}
 
-		kv, err = snapshotsync.WrapBySnapshots(kv, snapshotDir, mode)
+		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
 		if err != nil {
 			return err
 		}
 	}
 	snKV := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.HeaderPrefix:       dbutils.BucketConfigItem{},
-			dbutils.SnapshotInfoBucket: dbutils.BucketConfigItem{},
+			dbutils.HeaderPrefix:              dbutils.BucketConfigItem{},
+			dbutils.HeadersSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
@@ -107,12 +107,12 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 		}
 	}
 
-	err = snDB.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
+	err = snDB.Put(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
 	if err != nil {
 		log.Crit("SnapshotHeadersHeadNumber error", "err", err)
 		return err
 	}
-	err = snDB.Put(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash), hash.Bytes())
+	err = snDB.Put(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash), hash.Bytes())
 	if err != nil {
 		log.Crit("SnapshotHeadersHeadHash error", "err", err)
 		return err

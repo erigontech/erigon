@@ -22,11 +22,11 @@ func (api *TgImpl) Forks(ctx context.Context) (Forks, error) {
 	}
 	defer tx.Rollback()
 
-	chainConfig, genesisHash, err := getChainConfigWithGenesis(tx)
+	chainConfig, genesis, err := api.chainConfigWithGenesis(tx)
 	if err != nil {
 		return Forks{}, err
 	}
 	forksBlocks := forkid.GatherForks(chainConfig)
 
-	return Forks{genesisHash, forksBlocks}, nil
+	return Forks{genesis.Hash(), forksBlocks}, nil
 }

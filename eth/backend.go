@@ -232,12 +232,12 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			}
 			snapshotKV := chainDb.KV()
 
-			snapshotKV, innerErr = snapshotsync.WrapBySnapshots2(snapshotKV, downloadedSnapshots)
+			snapshotKV, innerErr = snapshotsync.WrapBySnapshotsFromDownloader(snapshotKV, downloadedSnapshots)
 			if innerErr != nil {
 				return nil, innerErr
 			}
 			chainDb.SetKV(snapshotKV)
-			innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
+			innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, downloadedSnapshots)
 			if innerErr != nil {
 				return nil, innerErr
 			}
@@ -251,6 +251,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
+
 			err = torrentClient.Load(chainDb)
 			if err != nil {
 				return nil, err
@@ -258,16 +259,20 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			err = torrentClient.AddSnapshotsTorrents(context.Background(), chainDb, config.NetworkID, config.SnapshotMode)
 			if err == nil {
 				torrentClient.Download()
-
 				snapshotKV := chainDb.KV()
-				snapshotKV, err = snapshotsync.WrapBySnapshots(snapshotKV, dbPath, config.SnapshotMode)
-				if err != nil {
-					return nil, err
+				mp, innerErr := torrentClient.GetSnapshots(chainDb, config.NetworkID)
+				if innerErr != nil {
+					return nil, innerErr
+				}
+
+				snapshotKV, innerErr = snapshotsync.WrapBySnapshotsFromDownloader(snapshotKV, mp)
+				if innerErr != nil {
+					return nil, innerErr
 				}
 				chainDb.SetKV(snapshotKV)
-				err = snapshotsync.PostProcessing(chainDb, config.SnapshotMode)
-				if err != nil {
-					return nil, err
+				innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, mp)
+				if innerErr != nil {
+					return nil, innerErr
 				}
 			} else {
 				log.Error("There was an error in snapshot init. Swithing to regular sync", "err", err)
