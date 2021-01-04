@@ -1978,23 +1978,3 @@ Author: Melvin Junhee Woo <melvin.woo@groundx.xyz>
 Date:   Mon Jan 4 17:07:43 2021 +0900
 
     core/state/snapshot: gethring -> gathering typo (#22104)
-
-commit 0a3993c558616868e35f9730e92c704ac16ee437
-Author: yumiel yoomee1313 <yumiel.ko@groundx.xyz>
-Date:   Wed Dec 30 21:10:11 2020 +0900
-
-    accounts/abi/bind: fix erroneous test (#22053)
-    
-    closes #22049
-
-commit a425a47ddcb6078e2ae6ab062bb73f2c0939fd1d
-Author: ucwong <ucwong@126.com>
-Date:   Mon Dec 28 05:38:16 2020 +0800
-
-    core/rawdb, eth/protocols : Method name typo fix (#22026)
-
-commit c17a7733df3aa7f68d4e0ff5ce9d5c2919284faa
-Author: Suriyaa Sundararuban <isc.suriyaa@gmail.com>
-Date:   Sun Dec 27 22:28:08 2020 +0100
-
-    docs: replace wiki links with new doc pages in readme.md (#22065) (#22066)
