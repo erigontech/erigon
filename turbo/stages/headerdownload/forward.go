@@ -25,7 +25,7 @@ const (
 func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte) error {
 	count := 0
 	var highest uint64
-	log.Info("Processing headers...")
+	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix))
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
