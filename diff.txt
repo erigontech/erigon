@@ -1966,15 +1966,3 @@ Author: Suriyaa Sundararuban <isc.suriyaa@gmail.com>
 Date:   Mon Jan 4 11:58:51 2021 +0100
 
     .github: Replace wiki links with new doc pages (#22065) (#22068)
-
-commit f83fc302a504919f6668060110cbb8b64c26dd07
-Author: Vie <yangchenzhong@gmail.com>
-Date:   Mon Jan 4 18:52:23 2021 +0800
-
-    cmd/geth: update copyright year (#22099)
-
-commit 167ff563d16a405a89ce449fdb34eb6d99631053
-Author: Melvin Junhee Woo <melvin.woo@groundx.xyz>
-Date:   Mon Jan 4 17:07:43 2021 +0900
-
-    core/state/snapshot: gethring -> gathering typo (#22104)
