@@ -1828,18 +1828,3 @@ Author: Péter Szilágyi <peterke@gmail.com>
 Date:   Thu Jan 7 10:23:50 2021 +0200
 
     cmd/faucet: fix websocket race regression after switching to gorilla
-
-commit 8bd8e1b24afeb5b19bc6709c7358f325c039750b
-Merge: d2e1b17f1 83d317cff
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Jan 7 09:12:20 2021 +0200
-
-    Merge pull request #22122 from karalabe/snapshot-polishes
-    
-    cmd/utils, eth/downloader: minor snap nitpicks
-
-commit d2e1b17f1828424906c9033b1dcbd3f2756a0c2c
-Author: Melvin Junhee Woo <melvin.woo@groundx.xyz>
-Date:   Thu Jan 7 15:36:21 2021 +0900
-
-    snapshot, trie: fixed typos, mostly in snapshot pkg (#22133)
