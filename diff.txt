@@ -1772,18 +1772,3 @@ Author: Gary Rong <garyrong0905@gmail.com>
 Date:   Fri Jan 8 06:39:35 2021 +0800
 
     les: remove transaction propagation limits (#22125)
-
-commit d3952898c33fe2647eed27dd86df3c7ae4c9ddcc
-Merge: 4bb5c6ca7 3c6665e7d
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Jan 7 18:45:27 2021 +0200
-
-    Merge pull request #22137 from karalabe/faucet-fb-fix
-    
-    cmd/faucet: switch Facebook auth over to mobile site
-
-commit 3c6665e7d62ed166d9f1cf4519ad23ab77c5cae3
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Jan 7 13:04:20 2021 +0200
-
-    cmd/faucet: switch Facebook auth over to mobile site
