@@ -727,7 +727,11 @@ func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 	if name == "root" {
 		return tx.tx.StatDBI(mdbx.DBI(1))
 	}
-	return tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
+	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
+	if err != nil {
+		return nil, fmt.Errorf("bucket: %s, %w", name, err)
+	}
+	return st, nil
 }
 
 func (tx *MdbxTx) Cursor(bucket string) Cursor {
@@ -1336,13 +1340,13 @@ func (c *MdbxDupSortCursor) initCursor() error {
 		return nil
 	}
 
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		return fmt.Errorf("class MdbxDupSortCursor not compatible with AutoDupSortKeysConversion buckets")
-	}
-
-	if c.bucketCfg.Flags&mdbx.DupSort == 0 {
-		return fmt.Errorf("class MdbxDupSortCursor can be used only if bucket created with flag mdbx.DupSort")
-	}
+	//if c.bucketCfg.AutoDupSortKeysConversion {
+	//	return fmt.Errorf("class MdbxDupSortCursor not compatible with AutoDupSortKeysConversion buckets")
+	//}
+	//
+	//if c.bucketCfg.Flags&mdbx.DupSort == 0 {
+	//	return fmt.Errorf("class MdbxDupSortCursor can be used only if bucket created with flag mdbx.DupSort")
+	//}
 
 	return c.MdbxCursor.initCursor()
 }

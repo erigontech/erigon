@@ -39,10 +39,12 @@ type structInfoReceiver interface {
 	branchHash(set uint16) error
 	hash(hash []byte) error
 	topHash() []byte
+	printTopHashes(prefix []byte, set uint16)
 }
 
 // hashCollector gets called whenever there might be a need to create intermediate hash record
 type HashCollector func(keyHex []byte, hash []byte) error
+type StorageHashCollector func(accWithInc []byte, keyHex []byte, hash []byte) error
 
 func calcPrecLen(groups []uint16) int {
 	if len(groups) == 0 {
@@ -186,6 +188,7 @@ func GenStructStep(
 		}
 		// Close the immediately encompassing prefix group, if needed
 		if len(succ) > 0 || precExists {
+			//e.printTopHashes(curr[:maxLen], groups[maxLen])
 			if retain(curr[:maxLen]) {
 				if err := e.branch(groups[maxLen]); err != nil {
 					return nil, err

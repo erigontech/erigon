@@ -21,13 +21,10 @@ func countDepths() {
 	var prev [32]byte
 	count := 0
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket)
+		c := tx.Cursor(dbutils.HashedAccountsBucket)
 		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
-			}
-			if len(k) != 32 {
-				continue
 			}
 			if count == 0 {
 				for i := 0; i < 64; i++ {
@@ -119,19 +116,16 @@ func countStorageDepths() {
 	var filtered int
 	count := 0
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket)
+		c := tx.Cursor(dbutils.HashedStorageBucket)
 		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
-			}
-			if len(k) == 32 {
-				continue
 			}
 			addr := k[:20]
 			sameAddr := bytes.Equal(addr, prevAddr[:])
 			if !sameAddr {
 				copy(prevAddr[:], addr)
-				v, err := tx.GetOne(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
+				v, err := tx.GetOne(dbutils.HashedStorageBucket, crypto.Keccak256(addr[:]))
 				if err != nil {
 					return err
 				}

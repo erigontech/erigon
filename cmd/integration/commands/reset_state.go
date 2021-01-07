@@ -97,6 +97,9 @@ func resetState(db ethdb.Database, _ context.Context) error {
 	if err := stagedsync.ResetHashState(db); err != nil {
 		return err
 	}
+	if err := stagedsync.ResetIH(db); err != nil {
+		return err
+	}
 	if err := resetHistory(db); err != nil {
 		return err
 	}
@@ -145,7 +148,8 @@ func resetSenders(db rawdb.DatabaseWriter) error {
 
 func resetExec(db rawdb.DatabaseWriter) error {
 	if err := db.(ethdb.BucketsMigrator).ClearBuckets(
-		dbutils.CurrentStateBucket,
+		dbutils.HashedAccountsBucket,
+		dbutils.HashedStorageBucket,
 		dbutils.AccountChangeSetBucket,
 		dbutils.StorageChangeSetBucket,
 		dbutils.ContractCodeBucket,

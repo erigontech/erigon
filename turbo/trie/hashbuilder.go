@@ -596,6 +596,17 @@ func (hb *HashBuilder) topHash() []byte {
 	return hb.hashStack[len(hb.hashStack)-hashStackStride+1:]
 }
 
+func (hb *HashBuilder) printTopHashes(prefix []byte, set uint16) {
+	digits := bits.OnesCount16(set)
+	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
+	var i int
+	for digit := uint(0); digit < 16; digit++ {
+		if ((uint16(1) << digit) & set) != 0 {
+			fmt.Printf("topHash: %x%02x, %x\n", prefix, digit, hashes[hashStackStride*i+1:hashStackStride*(i+1)])
+			i++
+		}
+	}
+}
 func (hb *HashBuilder) root() node {
 	if hb.trace && len(hb.nodeStack) > 0 {
 		fmt.Printf("len(hb.nodeStack)=%d\n", len(hb.nodeStack))

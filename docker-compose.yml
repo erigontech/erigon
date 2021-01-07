@@ -12,7 +12,7 @@ services:
       - 30303:30303
 
   prometheus:
-    image: prom/prometheus:v2.22.2
+    image: prom/prometheus:v2.23.0
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports:
       - 9090:9090
@@ -21,7 +21,7 @@ services:
       - ${XDG_DATA_HOME:-~/.local/share}/tg-prometheus:/prometheus
 
   grafana:
-    image: grafana/grafana:7.3.3
+    image: grafana/grafana:7.3.5
     ports:
       - 3000:3000
     volumes:

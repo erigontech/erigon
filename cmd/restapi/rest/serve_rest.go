@@ -71,9 +71,6 @@ func ServeREST(ctx context.Context, restHost, rpcHost string, chaindata string) 
 	if err = apis.RegisterRetraceAPI(root.Group("retrace"), e); err != nil {
 		return err
 	}
-	if err = apis.RegisterIntermediateHashAPI(root.Group("intermediate-hash"), e); err != nil {
-		return err
-	}
 	if err = apis.RegisterDBAPI(root.Group("db"), e); err != nil {
 		return err
 	}

@@ -73,7 +73,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
-	if err := dsw.db.Put(dbutils.CurrentStateBucket, addrHash[:], value); err != nil {
+	if err := dsw.db.Put(dbutils.HashedAccountsBucket, addrHash[:], value); err != nil {
 		return err
 	}
 	return nil
@@ -139,9 +139,9 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 
 	v := value.Bytes()
 	if len(v) == 0 {
-		return dsw.db.Delete(dbutils.CurrentStateBucket, compositeKey, nil)
+		return dsw.db.Delete(dbutils.HashedStorageBucket, compositeKey, nil)
 	}
-	return dsw.db.Put(dbutils.CurrentStateBucket, compositeKey, v)
+	return dsw.db.Put(dbutils.HashedStorageBucket, compositeKey, v)
 }
 
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {

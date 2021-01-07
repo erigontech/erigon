@@ -1364,14 +1364,6 @@ func (c *LmdbDupSortCursor) initCursor() error {
 		return nil
 	}
 
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		return fmt.Errorf("class LmdbDupSortCursor not compatible with AutoDupSortKeysConversion buckets")
-	}
-
-	if c.bucketCfg.Flags&lmdb.DupSort == 0 {
-		return fmt.Errorf("class LmdbDupSortCursor can be used only if bucket created with flag lmdb.DupSort")
-	}
-
 	return c.LmdbCursor.initCursor()
 }
 

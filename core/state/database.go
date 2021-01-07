@@ -851,7 +851,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
-	accountMap, storageMap, err := changeset.RewindData(tds.db, tds.blockNr, blockNr)
+	accountMap, storageMap, err := changeset.RewindDataHashed(tds.db, tds.blockNr, blockNr)
 	if err != nil {
 		return err
 	}
@@ -898,12 +898,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 		b.storageReads[storageKey] = struct{}{}
 		if len(value) > 0 {
 			m[keyHash] = value
-			if err := tds.db.Put(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
+			if err := tds.db.Put(dbutils.HashedStorageBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
 				return err
 			}
 		} else {
 			m[keyHash] = nil
-			if err := tds.db.Delete(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], nil); err != nil {
+			if err := tds.db.Delete(dbutils.HashedStorageBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], nil); err != nil {
 				return err
 			}
 		}
@@ -1045,7 +1045,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 	if !ok {
 		// Not present in the trie, try database
-		enc, err = tds.db.Get(dbutils.CurrentStateBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
+		enc, err = tds.db.Get(dbutils.HashedStorageBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 		if err != nil {
 			enc = nil
 		}

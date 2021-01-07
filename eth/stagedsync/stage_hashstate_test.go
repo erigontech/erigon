@@ -49,7 +49,7 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 		t.Errorf("error while committing state: %v", err)
 	}
 
-	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket, dbutils.ContractCodeBucket)
+	compareCurrentState(t, db1, db2, dbutils.HashedAccountsBucket, dbutils.HashedStorageBucket, dbutils.ContractCodeBucket)
 }
 
 func TestPromoteHashedStateIncremental(t *testing.T) {
@@ -84,7 +84,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	err = tx2.CommitAndBegin(context.Background())
 	require.NoError(t, err)
 
-	err = promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 50}, 50, 101, tx2, getTmpDir(), nil)
+	err = promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 50}, 50, 101, tx2, nil, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 		t.Errorf("error while committing state: %v", err)
 	}
 
-	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket)
+	compareCurrentState(t, db1, db2, dbutils.HashedAccountsBucket, dbutils.HashedStorageBucket)
 }
 
 func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
@@ -118,7 +118,7 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx2), changeCodeWithIncarnations)
 	generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = promoteHashedStateIncrementally("logPrefix", &StageState{}, 50, 101, tx2, getTmpDir(), nil)
+	err = promoteHashedStateIncrementally("logPrefix", &StageState{}, 50, 101, tx2, nil, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while committing state: %v", err)
 	}
-	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket)
+	compareCurrentState(t, db1, db2, dbutils.HashedAccountsBucket, dbutils.HashedStorageBucket)
 }
 
 func TestUnwindHashed(t *testing.T) {
@@ -156,7 +156,7 @@ func TestUnwindHashed(t *testing.T) {
 	}
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindHashStateStageImpl("logPrefix", u, s, tx2, getTmpDir(), nil)
+	err = unwindHashStateStageImpl("logPrefix", u, s, tx2, nil, getTmpDir(), nil)
 	if err != nil {
 		t.Errorf("error while unwind state: %v", err)
 	}
@@ -170,5 +170,5 @@ func TestUnwindHashed(t *testing.T) {
 		t.Errorf("error while committing state: %v", err)
 	}
 
-	compareCurrentState(t, db1, db2, dbutils.CurrentStateBucket)
+	compareCurrentState(t, db1, db2, dbutils.HashedAccountsBucket, dbutils.HashedStorageBucket)
 }

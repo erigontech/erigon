@@ -142,19 +142,19 @@ func (p *BasicPruner) WriteLastPrunedBlockNum(num uint64) {
 
 func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
 	keysToRemove := newKeysToRemove()
-	if err := db.Walk(dbutils.IntermediateTrieHashBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+	if err := db.Walk(dbutils.IntermediateTrieHashBucketOld2, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		if len(v) > 0 && len(k) != common.HashLength { // marker of self-destructed account is - empty value
 			return true, nil
 		}
 
-		if err := db.Walk(dbutils.CurrentStateBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
+		if err := db.Walk(dbutils.HashedStorageBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
 			keysToRemove.StorageKeys = append(keysToRemove.StorageKeys, common.CopyBytes(k))
 			return true, nil
 		}); err != nil {
 			return false, err
 		}
 
-		if err := db.Walk(dbutils.IntermediateTrieHashBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
+		if err := db.Walk(dbutils.IntermediateHashOfStorageBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
 			keysToRemove.IntermediateTrieHashKeys = append(keysToRemove.IntermediateTrieHashKeys, common.CopyBytes(k))
 			return true, nil
 		}); err != nil {
@@ -280,10 +280,11 @@ func LimitIterator(k *keysToRemove, limit int) *limitIterator {
 	i.batches = []Batch{
 		{bucket: dbutils.AccountsHistoryBucket, keys: i.k.AccountHistoryKeys},
 		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
-		{bucket: dbutils.CurrentStateBucket, keys: i.k.StorageKeys},
+		{bucket: dbutils.HashedStorageBucket, keys: i.k.StorageKeys},
 		{bucket: dbutils.AccountChangeSetBucket, keys: i.k.AccountChangeSet},
 		{bucket: dbutils.StorageChangeSetBucket, keys: i.k.StorageChangeSet},
-		{bucket: dbutils.IntermediateTrieHashBucket, keys: i.k.IntermediateTrieHashKeys},
+		{bucket: dbutils.IntermediateHashOfAccountBucket, keys: i.k.IntermediateTrieHashKeys},
+		{bucket: dbutils.IntermediateHashOfStorageBucket, keys: i.k.IntermediateTrieHashKeys},
 	}
 
 	return i
