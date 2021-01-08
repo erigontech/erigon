@@ -839,6 +839,10 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) (
 func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]struct{}) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	if _, err := os.Stat(hd.filesDir); os.IsNotExist(err) {
+		log.Warn("Temp file directory does not exist, will be created", "path", hd.filesDir)
+		os.MkdirAll(hd.filesDir, os.ModePerm)
+	}
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
 		return false, err

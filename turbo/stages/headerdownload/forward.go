@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -25,7 +26,13 @@ const (
 func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte) error {
 	count := 0
 	var highest uint64
-	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix))
+	var headerProgress uint64
+	var err error
+	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
+	if err != nil {
+		return err
+	}
+	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -117,6 +124,12 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte)
 		if newCanonical {
 			if err := rawdb.WriteCanonicalHash(batch, hash, blockHeight); err != nil {
 				return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, blockHeight, hash, err)
+			}
+			if blockHeight > headerProgress {
+				headerProgress = blockHeight
+				if err := stages.SaveStageProgress(batch, stages.Headers, blockHeight); err != nil {
+					return fmt.Errorf("[%s] saving Headers progress: %w", logPrefix, err)
+				}
 			}
 		}
 		data, err := rlp.EncodeToBytes(header)
