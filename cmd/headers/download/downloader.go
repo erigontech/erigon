@@ -22,6 +22,7 @@ import (
 	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -30,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -211,9 +213,10 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	if err2 != nil {
 		return err2
 	}
-	go controlServer.loop(ctx)
+	go controlServer.headerLoop(ctx)
+	go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 
@@ -244,8 +247,10 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	if err := server.Start(); err != nil {
 		return fmt.Errorf("could not start server: %w", err)
 	}
-	go controlServer.loop(ctx)
-	if err := stages.StageLoop(ctx, db, controlServer.hd); err != nil {
+	go controlServer.headerLoop(ctx)
+	go controlServer.bodyLoop(ctx, db)
+
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 	return nil
@@ -253,10 +258,12 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 
 type ControlServerImpl struct {
 	proto_core.UnimplementedControlServer
-	lock          sync.Mutex
-	hd            *headerdownload.HeaderDownload
-	sentryClient  proto_sentry.SentryClient
-	requestWakeUp chan struct{}
+	lock                 sync.Mutex
+	hd                   *headerdownload.HeaderDownload
+	bd                   *bodydownload.BodyDownload
+	sentryClient         proto_sentry.SentryClient
+	requestWakeUpHeaders chan struct{}
+	requestWakeUpBodies  chan struct{}
 }
 
 func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient) (*ControlServerImpl, error) {
@@ -323,7 +330,8 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		}
 	}
 	log.Info(hd.AnchorState())
-	return &ControlServerImpl{hd: hd, sentryClient: sentryClient, requestWakeUp: make(chan struct{})}, nil
+	bd := bodydownload.NewBodyDownload(16 * 1024 /* outstandingLimit */)
+	return &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}), requestWakeUpBodies: make(chan struct{})}, nil
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
@@ -412,7 +420,11 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_core.Inb
 func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	defer func() {
 		select {
-		case cs.requestWakeUp <- struct{}{}:
+		case cs.requestWakeUpHeaders <- struct{}{}:
+		default:
+		}
+		select {
+		case cs.requestWakeUpBodies <- struct{}{}:
 		default:
 		}
 	}()
@@ -460,7 +472,60 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 	}
 }
 
-func (cs *ControlServerImpl) loop(ctx context.Context) {
+func (cs ControlServerImpl) sendBodyRequests(ctx context.Context, reqs []*bodydownload.BodyRequest, db ethdb.Database) {
+	for _, req := range reqs {
+		log.Debug(fmt.Sprintf("Sending body request"))
+		hashes := make([]common.Hash, len(req.BlockNums))
+		var err error
+		for i, blockNum := range req.BlockNums {
+			hashes[i], err = rawdb.ReadCanonicalHash(db, blockNum)
+			if err != nil {
+				break
+			}
+		}
+		if err != nil {
+			log.Error("Could not construct body request", "error", err)
+			continue
+		}
+		var bytes []byte
+		bytes, err = rlp.EncodeToBytes(hashes)
+		if err != nil {
+			log.Error("Could not encode block bodies request", "err", err)
+			continue
+		}
+		outreq := proto_sentry.SendMessageByMinBlockRequest{
+			MinBlock: req.BlockNums[len(req.BlockNums)-1],
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.OutboundMessageId_GetBlockBodies,
+				Data: bytes,
+			},
+		}
+		_, err = cs.sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		if err != nil {
+			log.Error("Could not send block bodies request", "err", err)
+			continue
+		}
+	}
+}
+
+func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
+	reqs, timer := cs.bd.RequestMoreBodies(uint64(time.Now().Unix()))
+	cs.sendBodyRequests(ctx, reqs, db)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			log.Info("RequestQueueTime (bodies) ticked")
+		case <-cs.requestWakeUpHeaders:
+			log.Info("bodyLoop woken up by the incoming request")
+		}
+		reqs, timer = cs.bd.RequestMoreBodies(uint64(time.Now().Unix()))
+		cs.sendBodyRequests(ctx, reqs, db)
+	}
+}
+
+func (cs *ControlServerImpl) headerLoop(ctx context.Context) {
 	reqs, timer := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
 	cs.sendRequests(ctx, reqs)
 	for {
@@ -468,9 +533,9 @@ func (cs *ControlServerImpl) loop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			log.Info("RequestQueueTimer ticked")
-		case <-cs.requestWakeUp:
-			log.Info("Woken up by the incoming request")
+			log.Info("RequestQueueTimer (headers) ticked")
+		case <-cs.requestWakeUpBodies:
+			log.Info("headerLoop woken up by the incoming request")
 		}
 		reqs, timer = cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
 		cs.sendRequests(ctx, reqs)
