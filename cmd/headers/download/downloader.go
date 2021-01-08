@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -216,7 +217,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	go controlServer.headerLoop(ctx)
 	go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.requestWakeUpBodies); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 
@@ -250,7 +251,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	go controlServer.headerLoop(ctx)
 	go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.requestWakeUpBodies); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 	return nil
@@ -422,10 +423,20 @@ func (cs *ControlServerImpl) blockBodies(ctx context.Context, inreq *proto_core.
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode BlockBodies: %v", err)
 	}
+	var sb strings.Builder
+	var unrequested int
 	for _, body := range request {
-		cs.bd.DeliverBody(body)
+		if blockNum, ok := cs.bd.DeliverBody(body); ok {
+			if sb.Len() > 0 {
+				fmt.Fprintf(&sb, ",")
+			}
+			fmt.Fprintf(&sb, "%d", blockNum)
+		} else {
+			unrequested++
+		}
 	}
-	log.Info(fmt.Sprintf("BlockBodies{}"))
+	cs.bd.FeedDeliveries()
+	log.Info(fmt.Sprintf("BlockBodies{delivered=%s, unrequestedCount=%d}", sb.String(), unrequested))
 	return &empty.Empty{}, nil
 }
 

@@ -100,7 +100,7 @@ func (bd *BodyDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64) 
 }
 
 // DeliverBody takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) {
+func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 	uncleHash := types.CalcUncleHash(body.Uncles)
 	txHash := types.DeriveSha(types.Transactions(body.Transactions))
 	var doubleHash DoubleHash
@@ -111,10 +111,16 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) {
 		bd.delivered.Add(blockNum)
 		bd.requested.Remove(blockNum)
 		bd.deliveries[blockNum-bd.requestedLow] = body
+		return blockNum, true
 	}
+	return 0, false
+}
+
+func (bd *BodyDownload) FeedDeliveries() {
 	var i uint64
 	for i = 0; bd.requestedLow+i == bd.delivered.Minimum(); i++ {
-		// Skip the actual delivery for now
+		// Skip the actual delivery for now, just update required
+		bd.required.Remove(bd.requestedLow + i) // TODO: remove this
 		bd.delivered.Remove(bd.requestedLow + i)
 	}
 	// Move the deliveries back
