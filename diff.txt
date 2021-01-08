@@ -1766,9 +1766,3 @@ Date:   Fri Jan 8 11:17:15 2021 +0100
     * cmd/faucet: revert json changes
     
     * squashme
-
-commit 165f53fc6e9e904054c67462000a19fc83dcc12f
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Fri Jan 8 06:39:35 2021 +0800
-
-    les: remove transaction propagation limits (#22125)
