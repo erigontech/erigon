@@ -4,6 +4,7 @@ import (
 	//"context"
 	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
+	"container/list"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -25,6 +26,15 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	if err != nil {
 		return err
 	}
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
+	// Resetting for requesting a new range of blocks
+	bd.required.Clear()
+	bd.requested.Clear()
+	bd.delivered.Clear()
+	bd.requestQueue = list.New()
+	bd.RequestQueueTimer = time.NewTimer(time.Hour)
+	bd.requestedMap = make(map[DoubleHash]*types.Header)
 	bd.required.AddRange(bodyProgress+1, headerProgress+1)
 	bd.requestedLow = headerProgress + 1
 	bd.requestedHigh = headerProgress + 1
@@ -89,6 +99,7 @@ func (bd *BodyDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64) 
 	bd.RequestQueueTimer = time.NewTimer(time.Duration(nextTopTime-currentTime) * time.Second)
 }
 
+// DeliverBody takes the block body received from a peer and adds it to the various data structures
 func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) {
 	uncleHash := types.CalcUncleHash(body.Uncles)
 	txHash := types.DeriveSha(types.Transactions(body.Transactions))
@@ -99,5 +110,16 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) {
 		blockNum := header.Number.Uint64()
 		bd.delivered.Add(blockNum)
 		bd.requested.Remove(blockNum)
+		bd.deliveries[blockNum-bd.requestedLow] = body
+	}
+	var i uint64
+	for i = 0; bd.requestedLow+i == bd.delivered.Minimum(); i++ {
+		// Skip the actual delivery for now
+		bd.delivered.Remove(bd.requestedLow + i)
+	}
+	// Move the deliveries back
+	if i > 0 {
+		copy(bd.deliveries[:], bd.deliveries[i:])
+		bd.requestedLow += i
 	}
 }

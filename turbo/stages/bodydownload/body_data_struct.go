@@ -8,10 +8,13 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth"
 )
 
 // DoubleHash is type to be used for the mapping between TxHash and UncleHash to the block header
 type DoubleHash [2 * common.HashLength]byte
+
+const MaxBodiesInRequest = 128
 
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
@@ -19,7 +22,7 @@ type BodyDownload struct {
 	required          *roaring64.Bitmap // Bitmap of block numbers for which the block bodies are required
 	requested         *roaring64.Bitmap // Bitmap of block numbers for which block bodies were requested
 	delivered         *roaring64.Bitmap // Bitmap of block numbers that have been delivered but not yet inserted into the database
-	deliveries        []*types.Body
+	deliveries        []*eth.BlockBody
 	requestedMap      map[DoubleHash]*types.Header
 	requestedLow      uint64     // Lower bound of block number for outstanding requests
 	requestedHigh     uint64     // Higher bound of block number for outstanding requests
@@ -46,6 +49,7 @@ func NewBodyDownload(outstandingLimit int) *BodyDownload {
 		delivered:         roaring64.New(),
 		requestedMap:      make(map[DoubleHash]*types.Header),
 		outstandingLimit:  uint64(outstandingLimit),
+		deliveries:        make([]*eth.BlockBody, outstandingLimit+MaxBodiesInRequest),
 		requestQueue:      list.New(),
 		RequestQueueTimer: time.NewTimer(time.Hour),
 	}

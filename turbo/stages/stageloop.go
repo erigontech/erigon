@@ -25,6 +25,9 @@ func StageLoop(ctx context.Context, db ethdb.Database, hd *headerdownload.Header
 			if err := bd.UpdateFromDb(db); err != nil {
 				log.Error("body download update from db failed", "error", err)
 			}
+			if err := bodydownload.Forward("2/14 Bodies", db); err != nil {
+				log.Error("body download forward failes", "error", err)
+			}
 		}
 		select {
 		case <-ctx.Done():
