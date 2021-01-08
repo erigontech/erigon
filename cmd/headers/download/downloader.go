@@ -417,6 +417,18 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_core.Inb
 	return &empty.Empty{}, nil
 }
 
+func (cs *ControlServerImpl) blockBodies(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
+	var request eth.BlockBodiesData
+	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
+		return nil, fmt.Errorf("decode BlockBodies: %v", err)
+	}
+	for _, body := range request {
+		cs.bd.DeliverBody(body)
+	}
+	log.Info(fmt.Sprintf("BlockBodies{}"))
+	return &empty.Empty{}, nil
+}
+
 func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	defer func() {
 		select {
@@ -435,6 +447,8 @@ func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *p
 		return cs.blockHeaders(ctx, inreq)
 	case proto_core.InboundMessageId_NewBlock:
 		return cs.newBlock(ctx, inreq)
+	case proto_core.InboundMessageId_BlockBodies:
+		return cs.blockBodies(ctx, inreq)
 	default:
 		return nil, fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}
@@ -472,7 +486,7 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 	}
 }
 
-func (cs ControlServerImpl) sendBodyRequests(ctx context.Context, reqs []*bodydownload.BodyRequest, db ethdb.Database) {
+func (cs *ControlServerImpl) sendBodyRequests(ctx context.Context, reqs []*bodydownload.BodyRequest, db ethdb.Database) {
 	for _, req := range reqs {
 		log.Debug(fmt.Sprintf("Sending body request"))
 		hashes := make([]common.Hash, len(req.BlockNums))

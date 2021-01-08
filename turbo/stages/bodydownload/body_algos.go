@@ -6,6 +6,9 @@ import (
 
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -84,4 +87,17 @@ func (bd *BodyDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64) 
 	bd.RequestQueueTimer.Stop()
 	//fmt.Printf("Recreating RequestQueueTimer for delay %d seconds\n", nextTopTime-currentTime)
 	bd.RequestQueueTimer = time.NewTimer(time.Duration(nextTopTime-currentTime) * time.Second)
+}
+
+func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) {
+	uncleHash := types.CalcUncleHash(body.Uncles)
+	txHash := types.DeriveSha(types.Transactions(body.Transactions))
+	var doubleHash DoubleHash
+	copy(doubleHash[:], uncleHash[:])
+	copy(doubleHash[common.HashLength:], txHash[:])
+	if header, ok := bd.requestedMap[doubleHash]; ok {
+		blockNum := header.Number.Uint64()
+		bd.delivered.Add(blockNum)
+		bd.requested.Remove(blockNum)
+	}
 }
