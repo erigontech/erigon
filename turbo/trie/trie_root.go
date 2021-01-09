@@ -221,7 +221,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	//defer func(t time.Time) { fmt.Printf("trie_root.go:225: %s\n", time.Since(t)) }(time.Now())
+	defer func(t time.Time) { fmt.Printf("trie_root.go:225: %s\n", time.Since(t)) }(time.Now())
 	i1, i2, i3, i4 := 0, 0, 0, 0
 	for ihK, ihV, err := ih.Seek(prefix); ; ihK, ihV, err = ih.Next() { // no loop termination is at he end of loop
 		if err != nil {
