@@ -639,7 +639,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 		}
 		r.saveValueStorage(false, storageValue, hash)
 	case SHashStreamItem:
-		if len(storageKey) == 80 { // this is ready-to-use storage root - no reason to call GenStructStep, also GenStructStep doesn't support empty prefixes
+		if len(storageKey) == 0 { // this is ready-to-use storage root - no reason to call GenStructStep, also GenStructStep doesn't support empty prefixes
 			r.hb.hashStack = append(append(r.hb.hashStack, byte(80+common.HashLength)), hash...)
 			r.hb.nodeStack = append(r.hb.nodeStack, nil)
 			r.accData.FieldSet |= AccountFieldStorageOnly
