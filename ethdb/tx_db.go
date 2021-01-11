@@ -50,6 +50,15 @@ func (m *TxDb) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations
 	return batch, nil
 }
 
+func (m *TxDb) cursor(bucket string) Cursor {
+	c, ok := m.cursors[bucket]
+	if !ok {
+		c = m.tx.Cursor(bucket)
+		m.cursors[bucket] = c
+	}
+	return c
+}
+
 func (m *TxDb) Sequence(bucket string, amount uint64) (res uint64, err error) {
 	return m.tx.Sequence(bucket, amount)
 }
@@ -61,27 +70,27 @@ func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
 		}
 	}
 	m.len += uint64(len(key) + len(value))
-	return m.cursors[bucket].Put(key, value)
+	return m.cursor(bucket).Put(key, value)
 }
 
 func (m *TxDb) Reserve(bucket string, key []byte, i int) ([]byte, error) {
 	m.len += uint64(len(key) + i)
-	return m.cursors[bucket].Reserve(key, i)
+	return m.cursor(bucket).Reserve(key, i)
 }
 
 func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
-	return m.cursors[bucket].Append(key, value)
+	return m.cursor(bucket).Append(key, value)
 }
 
 func (m *TxDb) AppendDup(bucket string, key []byte, value []byte) error {
 	m.len += uint64(len(key) + len(value))
-	return m.cursors[bucket].(CursorDupSort).AppendDup(key, value)
+	return m.cursor(bucket).(CursorDupSort).AppendDup(key, value)
 }
 
 func (m *TxDb) Delete(bucket string, k, v []byte) error {
 	m.len += uint64(len(k))
-	return m.cursors[bucket].Delete(k, v)
+	return m.cursor(bucket).Delete(k, v)
 }
 
 func (m *TxDb) NewBatch() DbWithPendingMutations {
@@ -99,9 +108,6 @@ func (m *TxDb) begin(ctx context.Context, parent Tx, flags TxFlags) error {
 	m.tx = tx
 	m.ParentTx = parent
 	m.cursors = make(map[string]Cursor, 16)
-	for name := range m.db.(HasKV).KV().AllBuckets() {
-		m.cursors[name] = tx.Cursor(name)
-	}
 	return nil
 }
 
@@ -123,7 +129,7 @@ func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
 		defer dbGetTimer.UpdateSince(time.Now())
 	}
 
-	_, v, err := m.cursors[bucket].SeekExact(key)
+	_, v, err := m.cursor(bucket).SeekExact(key)
 	if err != nil {
 		return nil, err
 	}
