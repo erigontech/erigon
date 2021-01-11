@@ -12,11 +12,11 @@ var stagedsyncToUseStageBlockhashes = Migration{
 
 		var stageProgress uint64
 		var err error
-		if stageProgress, _, err = stages.GetStageProgress(db, stages.Headers); err != nil {
+		if stageProgress, err = stages.GetStageProgress(db, stages.Headers); err != nil {
 			return err
 		}
 
-		if err = stages.SaveStageProgress(db, stages.BlockHashes, stageProgress, nil); err != nil {
+		if err = stages.SaveStageProgress(db, stages.BlockHashes, stageProgress); err != nil {
 			return err
 		}
 
@@ -34,11 +34,11 @@ var unwindStagedsyncToUseStageBlockhashes = Migration{
 
 		var stageProgress uint64
 		var err error
-		if stageProgress, _, err = stages.GetStageUnwind(db, stages.Headers); err != nil {
+		if stageProgress, err = stages.GetStageUnwind(db, stages.Headers); err != nil {
 			return err
 		}
 
-		if err = stages.SaveStageUnwind(db, stages.BlockHashes, stageProgress, nil); err != nil {
+		if err = stages.SaveStageUnwind(db, stages.BlockHashes, stageProgress); err != nil {
 			return err
 		}
 

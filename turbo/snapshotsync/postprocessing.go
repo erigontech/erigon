@@ -24,15 +24,23 @@ var (
 	HeaderCanonical = stages.SyncStage("snapshot_canonical")
 )
 
-func PostProcessing(db ethdb.Database, mode SnapshotMode) error {
+func PostProcessing(db ethdb.Database, mode SnapshotMode, downloadedSnapshots map[SnapshotType]*SnapshotsInfo) error {
 	if mode.Headers {
 		err := GenerateHeaderIndexes(context.Background(), db)
 		if err != nil {
 			return err
 		}
 	}
+
 	if mode.Bodies {
 		err := PostProcessBodies(db)
+		if err != nil {
+			return err
+		}
+	}
+
+	if mode.State {
+		err := PostProcessState(db, downloadedSnapshots[SnapshotType_state])
 		if err != nil {
 			return err
 		}
@@ -41,7 +49,7 @@ func PostProcessing(db ethdb.Database, mode SnapshotMode) error {
 }
 
 func PostProcessBodies(db ethdb.Database) error {
-	v, _, err := stages.GetStageProgress(db, stages.Bodies)
+	v, err := stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
 		return err
 	}
@@ -60,7 +68,24 @@ func PostProcessBodies(db ethdb.Database) error {
 	}
 
 	number := binary.BigEndian.Uint64(k[:8])
-	err = stages.SaveStageProgress(db, stages.Bodies, number, nil)
+	err = stages.SaveStageProgress(db, stages.Bodies, number)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func PostProcessState(db ethdb.GetterPutter, info *SnapshotsInfo) error {
+	v, err := stages.GetStageProgress(db, stages.Execution)
+	if err != nil {
+		return err
+	}
+
+	if v > 0 {
+		return nil
+	}
+
+	err = stages.SaveStageProgress(db, stages.Execution, info.SnapshotBlock)
 	if err != nil {
 		return err
 	}
@@ -71,19 +96,19 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 	var hash common.Hash
 	var number uint64
 
-	v, _, err := stages.GetStageProgress(db, HeaderNumber)
+	v, err := stages.GetStageProgress(db, HeaderNumber)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return err
 	}
 
 	if v == 0 {
 		log.Info("Generate headers hash to number index")
-		headHashBytes, innerErr := db.Get(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash))
+		headHashBytes, innerErr := db.Get(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash))
 		if innerErr != nil {
 			return innerErr
 		}
 
-		headNumberBytes, innerErr := db.Get(dbutils.SnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber))
+		headNumberBytes, innerErr := db.Get(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber))
 		if innerErr != nil {
 			return innerErr
 		}
@@ -102,7 +127,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 				if !isDone {
 					return nil
 				}
-				return stages.SaveStageProgress(db, HeaderNumber, 1, nil)
+				return stages.SaveStageProgress(db, HeaderNumber, 1)
 			},
 			ExtractEndKey: dbutils.HeaderKey(headNumber, headHash),
 		})
@@ -111,7 +136,7 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 		}
 	}
 
-	v, _, err = stages.GetStageProgress(db, HeaderCanonical)
+	v, err = stages.GetStageProgress(db, HeaderCanonical)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return err
 	}
@@ -153,16 +178,16 @@ func GenerateHeaderIndexes(ctx context.Context, db ethdb.Database) error {
 
 				rawdb.WriteHeadHeaderHash(db, hash)
 				rawdb.WriteHeaderNumber(db, hash, number)
-				err = stages.SaveStageProgress(db, stages.Headers, number, nil)
+				err = stages.SaveStageProgress(db, stages.Headers, number)
 				if err != nil {
 					return err
 				}
-				err = stages.SaveStageProgress(db, stages.BlockHashes, number, nil)
+				err = stages.SaveStageProgress(db, stages.BlockHashes, number)
 				if err != nil {
 					return err
 				}
 				rawdb.WriteHeadBlockHash(db, hash)
-				return stages.SaveStageProgress(db, HeaderCanonical, number, nil)
+				return stages.SaveStageProgress(db, HeaderCanonical, number)
 			},
 		})
 		if err != nil {

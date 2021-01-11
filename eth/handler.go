@@ -1039,7 +1039,6 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 	default:
 		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
 	}
-	return nil
 }
 
 // BroadcastBlock will either propagate a block to a subset of its peers, or

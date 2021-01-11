@@ -29,6 +29,7 @@ type PrivateDebugAPI interface {
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
+	*BaseAPI
 	dbReader     ethdb.Database
 	chainContext core.ChainContext
 }
@@ -36,6 +37,7 @@ type PrivateDebugAPIImpl struct {
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
 func NewPrivateDebugAPI(dbReader ethdb.Database) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
+		BaseAPI:  &BaseAPI{},
 		dbReader: dbReader,
 	}
 }
@@ -83,7 +85,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		if number == rpc.LatestBlockNumber {
 			var err error
 
-			blockNumber, _, err = stages.GetStageProgress(tx, stages.Execution)
+			blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
 			if err != nil {
 				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
 			}
@@ -134,7 +136,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	}
 	defer tx.Rollback()
 
-	latestBlock, _, err := stages.GetStageProgress(tx, stages.Finish)
+	latestBlock, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return nil, err
 	}

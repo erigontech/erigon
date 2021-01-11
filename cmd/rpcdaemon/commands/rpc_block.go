@@ -26,7 +26,7 @@ func getBlockNumber(number rpc.BlockNumber, dbReader ethdb.Getter) (uint64, erro
 }
 
 func getLatestBlockNumber(dbReader ethdb.Getter) (uint64, error) {
-	blockNum, _, err := stages.GetStageProgress(dbReader, stages.Execution)
+	blockNum, err := stages.GetStageProgress(dbReader, stages.Execution)
 	if err != nil {
 		return 0, fmt.Errorf("getting latest block number: %v", err)
 	}

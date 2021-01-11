@@ -79,7 +79,7 @@ func (s *State) UnwindTo(blockNumber uint64, db ethdb.Database) error {
 		if stage.Disabled {
 			continue
 		}
-		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber, nil}, db); err != nil {
+		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber}, db); err != nil {
 			return err
 		}
 	}
@@ -140,11 +140,11 @@ func (s *State) LoadUnwindInfo(db ethdb.Getter) error {
 }
 
 func (s *State) StageState(stage stages.SyncStage, db ethdb.Getter) (*StageState, error) {
-	blockNum, stageData, err := stages.GetStageProgress(db, stage)
+	blockNum, err := stages.GetStageProgress(db, stage)
 	if err != nil {
 		return nil, err
 	}
-	return &StageState{s, stage, blockNum, stageData}, nil
+	return &StageState{s, stage, blockNum}, nil
 }
 
 func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {

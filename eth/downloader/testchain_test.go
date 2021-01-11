@@ -41,8 +41,8 @@ var (
 
 	testDb      = ethdb.NewMemDatabase()
 	testGenesis = core.GenesisWithAccounts(testDb, []core.GenAccount{
-		{testAddress,
-			big.NewInt(1000000000),
+		{Addr: testAddress,
+			Balance: big.NewInt(1000000000),
 		},
 	})
 

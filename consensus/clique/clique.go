@@ -673,7 +673,7 @@ func (c *Clique) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, b
 		}
 
 		select {
-		case results <- consensus.ResultWithContext{ctx, block.WithSeal(header)}:
+		case results <- consensus.ResultWithContext{Cancel: ctx, Block: block.WithSeal(header)}:
 		default:
 			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 		}

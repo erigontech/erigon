@@ -28,11 +28,11 @@ func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, i
 			return false, ctx.Err()
 		}
 
-		bm, innerErr := bitmapdb.Get(db, indexBucket, dbutils.CompositeKeyWithoutIncarnation(k), uint32(blockN-1), uint32(blockN+1))
+		bm, innerErr := bitmapdb.Get64(db, indexBucket, dbutils.CompositeKeyWithoutIncarnation(k), blockN-1, blockN+1)
 		if innerErr != nil {
 			return false, innerErr
 		}
-		if !bm.Contains(uint32(blockN)) {
+		if !bm.Contains(blockN) {
 			return false, fmt.Errorf("%v,%v", blockN, common.Bytes2Hex(k))
 		}
 		return true, nil

@@ -77,7 +77,7 @@ func init() {
 
 func clearUnwindStack(db rawdb.DatabaseWriter, _ context.Context) error {
 	for _, stage := range stages.AllStages {
-		if err := stages.SaveStageUnwind(db, stage, 0, nil); err != nil {
+		if err := stages.SaveStageUnwind(db, stage, 0); err != nil {
 			return err
 		}
 	}
@@ -134,10 +134,10 @@ func resetSenders(db rawdb.DatabaseWriter) error {
 	); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.Senders, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(db, stages.Senders, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.Senders, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(db, stages.Senders, 0); err != nil {
 		return err
 	}
 	return nil
@@ -160,10 +160,10 @@ func resetExec(db rawdb.DatabaseWriter) error {
 	); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.Execution, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(db, stages.Execution, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.Execution, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(db, stages.Execution, 0); err != nil {
 		return err
 	}
 	return nil
@@ -176,16 +176,16 @@ func resetHistory(db rawdb.DatabaseWriter) error {
 	); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(db, stages.AccountHistoryIndex, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(db, stages.StorageHistoryIndex, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.AccountHistoryIndex, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(db, stages.AccountHistoryIndex, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.StorageHistoryIndex, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(db, stages.StorageHistoryIndex, 0); err != nil {
 		return err
 	}
 
@@ -199,10 +199,10 @@ func resetLogIndex(db rawdb.DatabaseWriter) error {
 	); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.LogIndex, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(db, stages.LogIndex, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.LogIndex, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(db, stages.LogIndex, 0); err != nil {
 		return err
 	}
 
@@ -216,10 +216,10 @@ func resetCallTraces(db rawdb.DatabaseWriter) error {
 	); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.CallTraces, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(db, stages.CallTraces, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.CallTraces, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(db, stages.CallTraces, 0); err != nil {
 		return err
 	}
 
@@ -232,10 +232,10 @@ func resetTxLookup(db rawdb.DatabaseWriter) error {
 	); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(db, stages.TxLookup, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(db, stages.TxLookup, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.TxLookup, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(db, stages.TxLookup, 0); err != nil {
 		return err
 	}
 
@@ -243,10 +243,10 @@ func resetTxLookup(db rawdb.DatabaseWriter) error {
 }
 
 func resetTxPool(db ethdb.Putter) error {
-	if err := stages.SaveStageProgress(db, stages.TxPool, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(db, stages.TxPool, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.TxPool, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(db, stages.TxPool, 0); err != nil {
 		return err
 	}
 
@@ -254,10 +254,10 @@ func resetTxPool(db ethdb.Putter) error {
 }
 
 func resetFinish(db ethdb.Putter) error {
-	if err := stages.SaveStageProgress(db, stages.Finish, 0, nil); err != nil {
+	if err := stages.SaveStageProgress(db, stages.Finish, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(db, stages.Finish, 0, nil); err != nil {
+	if err := stages.SaveStageUnwind(db, stages.Finish, 0); err != nil {
 		return err
 	}
 
@@ -271,7 +271,7 @@ func printStages(db ethdb.Getter) error {
 	defer w.Flush()
 	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
 	for _, stage := range stages.AllStages {
-		if progress, _, err = stages.GetStageProgress(db, stage); err != nil {
+		if progress, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
 		}
 		fmt.Fprintf(w, "%s \t %d\n", string(stage), progress)

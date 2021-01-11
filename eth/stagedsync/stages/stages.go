@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -66,47 +65,47 @@ var AllStages = []SyncStage{
 }
 
 // GetStageProgress retrieves saved progress of given sync stage from the database
-func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
+func GetStageProgress(db ethdb.Getter, stage SyncStage) (uint64, error) {
 	v, err := db.Get(dbutils.SyncStageProgress, stage)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		return 0, nil, err
+		return 0, err
 	}
 	return unmarshalData(v)
 }
 
 // SaveStageProgress saves the progress of the given stage in the database
-func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64, stageData []byte) error {
-	return db.Put(dbutils.SyncStageProgress, stage, marshalData(progress, stageData))
+func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error {
+	return db.Put(dbutils.SyncStageProgress, stage, marshalData(progress))
 }
 
 // GetStageUnwind retrieves the invalidation for the given stage
 // Invalidation means that that stage needs to rollback to the invalidation
 // point and be redone
-func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, []byte, error) {
+func GetStageUnwind(db ethdb.Getter, stage SyncStage) (uint64, error) {
 	v, err := db.Get(dbutils.SyncStageUnwind, stage)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		return 0, nil, err
+		return 0, err
 	}
 	return unmarshalData(v)
 }
 
 // SaveStageUnwind saves the progress of the given stage in the database
-func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64, stageData []byte) error {
-	return db.Put(dbutils.SyncStageUnwind, []byte(stage), marshalData(invalidation, stageData))
+func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64) error {
+	return db.Put(dbutils.SyncStageUnwind, []byte(stage), marshalData(invalidation))
 }
 
-func marshalData(blockNumber uint64, stageData []byte) []byte {
-	return append(encodeBigEndian(blockNumber), stageData...)
+func marshalData(blockNumber uint64) []byte {
+	return encodeBigEndian(blockNumber)
 }
 
-func unmarshalData(data []byte) (uint64, []byte, error) {
+func unmarshalData(data []byte) (uint64, error) {
 	if len(data) == 0 {
-		return 0, nil, nil
+		return 0, nil
 	}
 	if len(data) < 8 {
-		return 0, nil, fmt.Errorf("value must be at least 8 bytes, got %d", len(data))
+		return 0, fmt.Errorf("value must be at least 8 bytes, got %d", len(data))
 	}
-	return binary.BigEndian.Uint64(data[:8]), common.CopyBytes(data[8:]), nil
+	return binary.BigEndian.Uint64(data[:8]), nil
 }
 
 func encodeBigEndian(n uint64) []byte {

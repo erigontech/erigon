@@ -62,9 +62,7 @@ type remoteTx struct {
 type remoteCursor struct {
 	initialized bool
 	id          uint32
-	prefetch    uint32
 	ctx         context.Context
-	prefix      []byte
 	stream      remote.KV_TxClient
 	tx          *remoteTx
 	bucketName  string
@@ -268,12 +266,10 @@ func (tx *remoteTx) Rollback() {
 }
 
 func (c *remoteCursor) Prefix(v []byte) Cursor {
-	c.prefix = v
 	return c
 }
 
 func (c *remoteCursor) Prefetch(v uint) Cursor {
-	c.prefetch = uint32(v)
 	return c
 }
 
@@ -598,11 +594,6 @@ func (c *remoteCursor) Close() {
 
 func (tx *remoteTx) CursorDupSort(bucket string) CursorDupSort {
 	return &remoteCursorDupSort{remoteCursor: tx.Cursor(bucket).(*remoteCursor)}
-}
-
-func (c *remoteCursorDupSort) Prefetch(v uint) Cursor {
-	c.prefetch = uint32(v)
-	return c
 }
 
 //func (c *remoteCursorDupSort) initCursor() error {
