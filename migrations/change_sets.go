@@ -26,7 +26,7 @@ var accChangeSetDupSort = Migration{
 
 		changeSetBucket := dbutils.PlainAccountChangeSetBucket
 		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket)
-		buf := etl.NewSortableBuffer(etl.BufferOptimalSize * 4)
+		buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 		buf.SetComparator(cmp)
 
 		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir)
@@ -130,7 +130,7 @@ var storageChangeSetDupSort = Migration{
 		const loadStep = "load"
 		changeSetBucket := dbutils.PlainStorageChangeSetBucket
 		cmp := db.(ethdb.HasTx).Tx().Comparator(dbutils.PlainStorageChangeSetBucket)
-		buf := etl.NewSortableBuffer(etl.BufferOptimalSize * 4)
+		buf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 		buf.SetComparator(cmp)
 
 		collectorR, err1 := etl.NewCollectorFromFiles(tmpdir)
