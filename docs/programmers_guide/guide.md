@@ -40,8 +40,8 @@ Binary 32-byte (256-bit) string.
 By root here one means the Merkle root of the smart contract storage, organised into a tree. Non-contract accounts cannot have storage,
 therefore root makes sense only for smart contract accounts. For non-contract accounts, the root field is assumed to be equal to the
 Merkle root of an empty tree, which is hard-coded in the variable `EmptyRoot` in
-[trie/trie.go](../../trie/trie.go). For contract accounts, the root is computed using member function `Hash` of
-type `Trie` [trie/trie.go](../../trie/trie.go), once the storage of the contract has been organised into the tree by calling member functions
+[turbo/trie/trie.go](../../turbo/trie/trie.go). For contract accounts, the root is computed using member function `Hash` of
+type `Trie` [turbo/trie/trie.go](../../turbo/trie/trie.go), once the storage of the contract has been organised into the tree by calling member functions
 `Update` and `Delete` on the same type.
 
 #### Code hash
@@ -112,14 +112,14 @@ Merkle Patricia tree hashing rules first remove redundant parts of each key with
 pairs so-called "leaf nodes". To produce the hash of a leaf node, one applies the hash function to the two-piece RLP (Recursive Length Prefix).
 The first piece is the representation of the non-redundant part of the key. And the second piece is the
 representation of the leaf value corresponding to the key, as shown in the member function `hashChildren` of the
-type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*shortNode` case.
+type `hasher` [turbo/trie/hasher.go](../../turbo/trie/hasher.go), under the `*shortNode` case.
 
 Hashes of the elements within a prefix group are combined into so-called "branch nodes". They correspond to the
-types `duoNode` (for prefix groups with exactly two elements) and `fullNode` in the file [trie/node.go](../../trie/node.go).
+types `duoNode` (for prefix groups with exactly two elements) and `fullNode` in the file [turbo/trie/node.go](../../turbo/trie/node.go).
 To produce the hash of a branch node, one represents it as an array of 17 elements (17-th element is for the attached leaf,
 if exists).
 The positions in the array that do not have corresponding elements in the prefix group are filled with empty strings. This is
-shown in the member function `hashChildren` of the type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*duoNode` and
+shown in the member function `hashChildren` of the type `hasher` [turbo/trie/hasher.go](../../turbo/trie/hasher.go), under the `*duoNode` and
 `*fullNode` cases.
 
 Sometimes, nested prefix groups have longer prefixes than 1-digit extension of their encompassing prefix group, as it is the case
@@ -127,7 +127,7 @@ in the group of items `12, 13` or in the group of items `29, 30, 31`. Such cases
  However, the value in an extension node is always the representation of a prefix group, rather than a leaf. To produce the hash of an extension node,
 one applies the hash function to the two-piece RLP. The first piece is the representation of the non-redundant part of the key.
 The second part is the hash of the branch node representing the prefix group. This shown in the member function `hashChildren` of the
-type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*shortNode` case.
+type `hasher` [turbo/trie/hasher.go](../../turbo/trie/hasher.go), under the `*shortNode` case.
 
 This is the illustration of resulting leaf nodes, branch nodes, and extension nodes for our example:
 
@@ -255,7 +255,7 @@ HASH 1
 BRANCH 0123
 ```
 
-These opcodes are implemented by the type `HashBuilder` (implements the interface `structInfoReceiver`) in [trie/hashbuilder.go](../../trie/hashbuilder.go)
+These opcodes are implemented by the type `HashBuilder` (implements the interface `structInfoReceiver`) in [turbo/trie/hashbuilder.go](../../turbo/trie/hashbuilder.go)
 
 ### Multiproofs
 
@@ -385,7 +385,7 @@ In the deeper recursive step, max common prefix is empty. Since the common prefi
 the common prefix with the succeeding key (they are both empty). The optional part of the step happens, opcode `BRANCH 0123`
 is emitted, and `groups` is trimmed to become empty. No recursive invocation follows.
 
-The step of this algorithm is implemented by the function `GenStructStep` in [trie/gen_struct_step.go](../../trie/gen_struct_step.go).
+The step of this algorithm is implemented by the function `GenStructStep` in [turbo/trie/gen_struct_step.go](../../turbo/trie/gen_struct_step.go).
 
 ### Converting sequence of keys and value into a multiproof
 
@@ -407,7 +407,7 @@ However, in order to make these choices efficiently, the set of keys being resol
 list. Then, at each point when the algorithm processes a key, it maintains references to two consecutive keys from
 that sorted list - one "LTE" (Less Than or Equal to the currently processed key), and another "GT" (Greater Than the
 currently processed key). If max common prefix is also prefix of either LTE or GT, then `BRANCH` opcode is emitted,
-otherwise, `BRANCHHASH` opcode is emitted. This is implemented by the type `ResolveSet` in [trie/resolve_set.go](../../trie/resolve_set.go)
+otherwise, `BRANCHHASH` opcode is emitted. This is implemented by the type `ResolveSet` in [turbo/trie/resolve_set.go](../../turbo/trie/resolve_set.go)
 
 ### Extension of the structure to support contracts with contract storage
 When it is required to construct tries containing accounts as well as contract storage, and contract code, the
@@ -501,7 +501,7 @@ Then delete this account (SELFDESTRUCT).
  will not process any incoming block that time. To protect against this attack: 
  PlainState, HashedState and IntermediateTrieHash buckets have "incarnations". Account entity has field "Incarnation" - 
  just a digit which increasing each SELFDESTRUCT or CREATE2 opcodes. Storage key formed by:
- `{account_key}{incarnation}{storage_hash}`. And [trie/trie_root.go](../../trie/trie_root.go) has logic - every time 
+ `{account_key}{incarnation}{storage_hash}`. And [turbo/trie/trie_root.go](../../turbo/trie/trie_root.go) has logic - every time 
  when Account visited - we save it to `accAddrHashWithInc` variable and skip any Storage or IntermediateTrieHashes with another incarnation.
 
 Transaction processing
