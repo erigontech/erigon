@@ -23,7 +23,6 @@ import (
 	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -332,6 +331,9 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 	}
 	log.Info(hd.AnchorState())
 	bd := bodydownload.NewBodyDownload(16 * 1024 /* outstandingLimit */)
+	if err := bd.UpdateFromDb(db); err != nil {
+		return nil, err
+	}
 	return &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}), requestWakeUpBodies: make(chan struct{})}, nil
 }
 
@@ -497,23 +499,12 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 	}
 }
 
-func (cs *ControlServerImpl) sendBodyRequests(ctx context.Context, reqs []*bodydownload.BodyRequest, db ethdb.Database) {
+func (cs *ControlServerImpl) sendBodyRequests(ctx context.Context, reqs []*bodydownload.BodyRequest) {
 	for _, req := range reqs {
 		log.Debug(fmt.Sprintf("Sending body request"))
-		hashes := make([]common.Hash, len(req.BlockNums))
-		var err error
-		for i, blockNum := range req.BlockNums {
-			hashes[i], err = rawdb.ReadCanonicalHash(db, blockNum)
-			if err != nil {
-				break
-			}
-		}
-		if err != nil {
-			log.Error("Could not construct body request", "error", err)
-			continue
-		}
 		var bytes []byte
-		bytes, err = rlp.EncodeToBytes(hashes)
+		var err error
+		bytes, err = rlp.EncodeToBytes(req.Hashes)
 		if err != nil {
 			log.Error("Could not encode block bodies request", "err", err)
 			continue
@@ -534,8 +525,8 @@ func (cs *ControlServerImpl) sendBodyRequests(ctx context.Context, reqs []*bodyd
 }
 
 func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
-	reqs, timer := cs.bd.RequestMoreBodies(uint64(time.Now().Unix()))
-	cs.sendBodyRequests(ctx, reqs, db)
+	reqs, timer := cs.bd.RequestMoreBodies(uint64(time.Now().Unix()), db)
+	cs.sendBodyRequests(ctx, reqs)
 	for {
 		select {
 		case <-ctx.Done():
@@ -545,8 +536,8 @@ func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
 		case <-cs.requestWakeUpHeaders:
 			log.Info("bodyLoop woken up by the incoming request")
 		}
-		reqs, timer = cs.bd.RequestMoreBodies(uint64(time.Now().Unix()))
-		cs.sendBodyRequests(ctx, reqs, db)
+		reqs, timer = cs.bd.RequestMoreBodies(uint64(time.Now().Unix()), db)
+		cs.sendBodyRequests(ctx, reqs)
 	}
 }
 

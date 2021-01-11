@@ -308,6 +308,19 @@ func runPeer(
 			log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}", peerID, hashesStr.String()))
 		case eth.BlockBodiesMsg:
 			log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peerID))
+			bytes := make([]byte, msg.Size)
+			_, err = io.ReadFull(msg.Payload, bytes)
+			if err != nil {
+				return fmt.Errorf("%s: reading msg into bytes: %v", peerID, err)
+			}
+			outreq := proto_core.InboundMessage{
+				PeerId: []byte(peerID),
+				Id:     proto_core.InboundMessageId_BlockBodies,
+				Data:   bytes,
+			}
+			if _, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				log.Error("Sending block bodies to core P2P failed", "error", err)
+			}
 		case eth.GetNodeDataMsg:
 			log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
@@ -573,7 +586,7 @@ func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.Pe
 	return nil, nil
 }
 
-func (ss *SentryServerImpl) findPeer(minBlock uint64, amount uint64) (string, bool) {
+func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, bool) {
 	// Choose a peer that we can send this request to
 	var peerID string
 	var found bool
@@ -584,7 +597,7 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64, amount uint64) (string, bo
 			timeRaw, _ := ss.peerTimeMap.Load(peerID)
 			t, _ := timeRaw.(int64)
 			// If request is large, we give 5 second pause to the peer before sending another request, unless it responded
-			if amount == 1 || t <= time.Now().Unix() {
+			if t <= time.Now().Unix() {
 				found = true
 				return false
 			}
@@ -599,7 +612,7 @@ func (ss *SentryServerImpl) getBlockHeaders(inreq *proto_sentry.SendMessageByMin
 	if err := rlp.DecodeBytes(inreq.Data.Data, &req); err != nil {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("parse request: %v", err)
 	}
-	peerID, found := ss.findPeer(inreq.MinBlock, req.Amount)
+	peerID, found := ss.findPeer(inreq.MinBlock)
 	if !found {
 		log.Debug("Could not find peer for request", "minBlock", inreq.MinBlock)
 		return &proto_sentry.SentPeers{}, nil
@@ -617,10 +630,36 @@ func (ss *SentryServerImpl) getBlockHeaders(inreq *proto_sentry.SendMessageByMin
 	return &proto_sentry.SentPeers{Peers: [][]byte{[]byte(peerID)}}, nil
 }
 
+func (ss *SentryServerImpl) getBlockBodies(inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
+	var req []common.Hash
+	if err := rlp.DecodeBytes(inreq.Data.Data, &req); err != nil {
+		return &proto_sentry.SentPeers{}, fmt.Errorf("parse request: %v", err)
+	}
+	peerID, found := ss.findPeer(inreq.MinBlock)
+	if !found {
+		log.Debug("Could not find peer for request", "minBlock", inreq.MinBlock)
+		return &proto_sentry.SentPeers{}, nil
+	}
+	log.Info(fmt.Sprintf("Sending body req for %d bodies to peer %s\n", len(req), peerID))
+	rwRaw, _ := ss.peerRwMap.Load(peerID)
+	rw, _ := rwRaw.(p2p.MsgReadWriter)
+	if rw == nil {
+		return &proto_sentry.SentPeers{}, fmt.Errorf("find rw for peer %s", peerID)
+	}
+	if err := p2p.Send(rw, eth.GetBlockBodiesMsg, &req); err != nil {
+		return &proto_sentry.SentPeers{}, fmt.Errorf("send to peer %s: %v", peerID, err)
+	}
+	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)
+	return &proto_sentry.SentPeers{Peers: [][]byte{[]byte(peerID)}}, nil
+}
+
 func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	switch inreq.Data.Id {
 	case proto_sentry.OutboundMessageId_GetBlockHeaders:
 		return ss.getBlockHeaders(inreq)
+	case proto_sentry.OutboundMessageId_GetBlockBodies:
+		log.Info("SendMessageByMinBlock for bodies", "minblock", inreq.MinBlock)
+		return ss.getBlockBodies(inreq)
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("not implemented for message Id: %s", inreq.Data.Id)
 	}

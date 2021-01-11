@@ -5,13 +5,16 @@ import (
 	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"container/list"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
@@ -35,18 +38,20 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	bd.requestQueue = list.New()
 	bd.RequestQueueTimer = time.NewTimer(time.Hour)
 	bd.requestedMap = make(map[DoubleHash]*types.Header)
+	fmt.Printf("UpdateFromDB =====> Resetting required to range [%d - %d]\n", bodyProgress+1, headerProgress+1)
 	bd.required.AddRange(bodyProgress+1, headerProgress+1)
-	bd.requestedLow = headerProgress + 1
-	bd.requestedHigh = headerProgress + 1
+	bd.requestedLow = bodyProgress + 1
+	bd.requestedHigh = bodyProgress + 1
 	return nil
 }
 
-func (bd *BodyDownload) RequestMoreBodies(currentTime uint64) ([]*BodyRequest, *time.Timer) {
+func (bd *BodyDownload) RequestMoreBodies(currentTime uint64, db ethdb.Database) ([]*BodyRequest, *time.Timer) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	// Give up the requests that were timed out
+	var prevTopTime uint64
 	if bd.requestQueue.Len() > 0 {
-		var prevTopTime uint64 = bd.requestQueue.Front().Value.(RequestQueueItem).waitUntil
+		prevTopTime = bd.requestQueue.Front().Value.(RequestQueueItem).waitUntil
 		for peek := bd.requestQueue.Front(); peek != nil && peek.Value.(RequestQueueItem).waitUntil <= currentTime; peek = bd.requestQueue.Front() {
 			bd.requestQueue.Remove(peek)
 			item := peek.Value.(RequestQueueItem)
@@ -56,31 +61,60 @@ func (bd *BodyDownload) RequestMoreBodies(currentTime uint64) ([]*BodyRequest, *
 				bd.required.Or(item.requested)
 			}
 		}
-		bd.resetRequestQueueTimer(prevTopTime, currentTime)
 	}
-	// Check if there are too many requests outstranding
-	if bd.requestedLow+bd.outstandingLimit >= bd.requestedHigh {
-		return nil, bd.RequestQueueTimer
+	if bd.required.IsEmpty() {
+		fmt.Printf("========> bd.required is empty\n")
+	} else {
+		fmt.Printf("==========> bd.required min %d, max %d\n", bd.required.Minimum(), bd.required.Maximum())
 	}
 	var buf [128]uint64
 	var requests []*BodyRequest
 	it := bd.required.ManyIterator()
 	for bufLen := it.NextMany(buf[:]); bufLen > 0; bufLen = it.NextMany(buf[:]) {
-		if bd.requestedLow+bd.outstandingLimit >= bd.requestedHigh {
-			break
-		}
-		bodyReq := &BodyRequest{BlockNums: make([]uint64, bufLen)}
-		copy(bodyReq.BlockNums[:], buf[:])
-		requests = append(requests, bodyReq)
 		if buf[bufLen-1] > bd.requestedHigh {
+			// Check if there are too many requests outstranding
+			if buf[bufLen-1] >= bd.requestedLow+bd.outstandingLimit {
+				fmt.Printf("=========> bd.requestedLow = %d, bd.outstadingLimit = %d, buf[bufLen-1] = %d\n", bd.requestedLow, bd.outstandingLimit, buf[bufLen-1])
+				break
+			}
 			bd.requestedHigh = buf[bufLen-1]
 		}
+		bodyReq := &BodyRequest{BlockNums: make([]uint64, 0, bufLen), Hashes: make([]common.Hash, 0, bufLen)}
 		for _, b := range buf[:bufLen] {
 			bd.required.Remove(b)
 			bd.requested.Add(b)
+			hash, err := rawdb.ReadCanonicalHash(db, b)
+			if err == nil {
+				header := rawdb.ReadHeader(db, hash, b)
+				if header == nil {
+					log.Error("Header not found", "block number", b)
+				} else if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
+					var doubleHash DoubleHash
+					copy(doubleHash[:], header.UncleHash.Bytes())
+					copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
+					bd.requestedMap[doubleHash] = header
+					bodyReq.BlockNums = append(bodyReq.BlockNums, b)
+					bodyReq.Hashes = append(bodyReq.Hashes, hash)
+				} else {
+					// Both uncleHash and txHash are empty, no need to request
+					blockNum := header.Number.Uint64()
+					bd.delivered.Add(blockNum)
+					bd.requested.Remove(blockNum)
+					bd.deliveries[blockNum-bd.requestedLow] = &eth.BlockBody{} // Empty body
+				}
+			} else {
+				log.Error("Could not find canonical header", "block number", b)
+			}
 		}
+		if len(bodyReq.BlockNums) > 0 {
+			fmt.Printf("========> Added bodies request for %v\n", bodyReq.BlockNums)
+			requests = append(requests, bodyReq)
+		}
+		// Iterator becomes invalid when bitmap is modified, so we re-create
+		it = bd.required.ManyIterator()
 	}
-	return requests, nil
+	bd.resetRequestQueueTimer(prevTopTime, currentTime)
+	return requests, bd.RequestQueueTimer
 }
 
 func (bd *BodyDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64) {
@@ -106,6 +140,8 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 	var doubleHash DoubleHash
 	copy(doubleHash[:], uncleHash[:])
 	copy(doubleHash[common.HashLength:], txHash[:])
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
 	if header, ok := bd.requestedMap[doubleHash]; ok {
 		blockNum := header.Number.Uint64()
 		bd.delivered.Add(blockNum)
@@ -117,15 +153,20 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 }
 
 func (bd *BodyDownload) FeedDeliveries() {
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
 	var i uint64
-	for i = 0; bd.requestedLow+i == bd.delivered.Minimum(); i++ {
+	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
 		// Skip the actual delivery for now, just update required
-		bd.required.Remove(bd.requestedLow + i) // TODO: remove this
+		if !bd.required.IsEmpty() && bd.required.Contains(bd.requestedLow+i) {
+			bd.required.Remove(bd.requestedLow + i) // TODO: remove this
+		}
 		bd.delivered.Remove(bd.requestedLow + i)
 	}
 	// Move the deliveries back
 	if i > 0 {
 		copy(bd.deliveries[:], bd.deliveries[i:])
+		fmt.Printf("Delivered bodies for blocks %d = %d\n", bd.requestedLow, bd.requestedLow+i)
 		bd.requestedLow += i
 	}
 }

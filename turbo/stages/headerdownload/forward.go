@@ -102,6 +102,9 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte)
 			if parentDiff, err = rawdb.ReadTd(tx, header.ParentHash, blockHeight-1); err != nil {
 				return fmt.Errorf("[%s] reading total difficulty of the parent header %d %x: %w", logPrefix, blockHeight-1, header.ParentHash, err)
 			}
+			if parentDiff == nil {
+				fmt.Printf("Could not find parentDiff for %d\n", header.Number)
+			}
 		}
 		cumulativeDiff := new(big.Int).Add(parentDiff, header.Difficulty)
 		childDiffs[hash] = cumulativeDiff

@@ -39,6 +39,7 @@ type RequestQueueItem struct {
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
 type BodyRequest struct {
 	BlockNums []uint64
+	Hashes    []common.Hash
 }
 
 // NewBodyDownload create a new body download state object
