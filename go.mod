@@ -3,6 +3,7 @@ module github.com/ledgerwatch/turbo-geth
 go 1.15
 
 require (
+    github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/JekaMas/notify v0.9.4
 	github.com/RoaringBitmap/roaring v0.5.6-0.20201124195327-6ec715d630bc
