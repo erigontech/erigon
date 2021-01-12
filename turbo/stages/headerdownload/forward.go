@@ -190,7 +190,7 @@ func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMu
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Info(fmt.Sprintf("[%s] Wrote blocks", logPrefix),
+	log.Info(fmt.Sprintf("[%s] Wrote block headers", logPrefix),
 		"number", now,
 		"blk/second", speed,
 		"batch", common.StorageSize(batch.BatchSize()),

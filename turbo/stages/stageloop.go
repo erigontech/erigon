@@ -29,7 +29,7 @@ func StageLoop(ctx context.Context, db ethdb.Database, hd *headerdownload.Header
 			case bodyWakeUp <- struct{}{}:
 			default:
 			}
-			if err := bodydownload.Forward("2/14 Bodies", db); err != nil {
+			if err := bodydownload.Forward("2/14 Bodies", db, bd.PrepareStageData()); err != nil {
 				log.Error("body download forward failes", "error", err)
 			}
 		}

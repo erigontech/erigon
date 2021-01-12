@@ -501,7 +501,7 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 
 func (cs *ControlServerImpl) sendBodyRequests(ctx context.Context, reqs []*bodydownload.BodyRequest) {
 	for _, req := range reqs {
-		log.Debug(fmt.Sprintf("Sending body request"))
+		log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 		var bytes []byte
 		var err error
 		bytes, err = rlp.EncodeToBytes(req.Hashes)
@@ -525,7 +525,7 @@ func (cs *ControlServerImpl) sendBodyRequests(ctx context.Context, reqs []*bodyd
 }
 
 func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
-	reqs, timer := cs.bd.RequestMoreBodies(uint64(time.Now().Unix()), db)
+	reqs, timer := cs.bd.RequestMoreBodies(uint64(time.Now().Unix()), 5 /*timeout*/, db)
 	cs.sendBodyRequests(ctx, reqs)
 	for {
 		select {
@@ -536,7 +536,7 @@ func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
 		case <-cs.requestWakeUpHeaders:
 			log.Info("bodyLoop woken up by the incoming request")
 		}
-		reqs, timer = cs.bd.RequestMoreBodies(uint64(time.Now().Unix()), db)
+		reqs, timer = cs.bd.RequestMoreBodies(uint64(time.Now().Unix()), 5 /*timeout*/, db)
 		cs.sendBodyRequests(ctx, reqs)
 	}
 }

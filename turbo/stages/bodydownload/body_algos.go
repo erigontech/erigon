@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -16,6 +17,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
+
+const BlockBufferSize = 128
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
@@ -31,6 +34,9 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	}
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
+	if bd.blockChannel != nil {
+		close(bd.blockChannel)
+	}
 	// Resetting for requesting a new range of blocks
 	bd.required.Clear()
 	bd.requested.Clear()
@@ -42,10 +48,12 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	bd.required.AddRange(bodyProgress+1, headerProgress+1)
 	bd.requestedLow = bodyProgress + 1
 	bd.requestedHigh = bodyProgress + 1
+	// Channel needs to be big enough to allow the producer to finish writing and unblock in any case
+	bd.blockChannel = make(chan *types.Block, BlockBufferSize+bd.outstandingLimit)
 	return nil
 }
 
-func (bd *BodyDownload) RequestMoreBodies(currentTime uint64, db ethdb.Database) ([]*BodyRequest, *time.Timer) {
+func (bd *BodyDownload) RequestMoreBodies(currentTime, timeout uint64, db ethdb.Database) ([]*BodyRequest, *time.Timer) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	// Give up the requests that were timed out
@@ -67,7 +75,7 @@ func (bd *BodyDownload) RequestMoreBodies(currentTime uint64, db ethdb.Database)
 	} else {
 		fmt.Printf("==========> bd.required min %d, max %d\n", bd.required.Minimum(), bd.required.Maximum())
 	}
-	var buf [128]uint64
+	var buf [BlockBufferSize]uint64
 	var requests []*BodyRequest
 	it := bd.required.ManyIterator()
 	for bufLen := it.NextMany(buf[:]); bufLen > 0; bufLen = it.NextMany(buf[:]) {
@@ -80,6 +88,7 @@ func (bd *BodyDownload) RequestMoreBodies(currentTime uint64, db ethdb.Database)
 			bd.requestedHigh = buf[bufLen-1]
 		}
 		bodyReq := &BodyRequest{BlockNums: make([]uint64, 0, bufLen), Hashes: make([]common.Hash, 0, bufLen)}
+		reqBitmap := roaring64.New()
 		for _, b := range buf[:bufLen] {
 			bd.required.Remove(b)
 			bd.requested.Add(b)
@@ -95,20 +104,21 @@ func (bd *BodyDownload) RequestMoreBodies(currentTime uint64, db ethdb.Database)
 					bd.requestedMap[doubleHash] = header
 					bodyReq.BlockNums = append(bodyReq.BlockNums, b)
 					bodyReq.Hashes = append(bodyReq.Hashes, hash)
+					reqBitmap.Add(b)
 				} else {
 					// Both uncleHash and txHash are empty, no need to request
 					blockNum := header.Number.Uint64()
 					bd.delivered.Add(blockNum)
 					bd.requested.Remove(blockNum)
-					bd.deliveries[blockNum-bd.requestedLow] = &eth.BlockBody{} // Empty body
+					bd.deliveries[blockNum-bd.requestedLow] = types.NewBlockWithHeader(header) // Block without uncles and transactions
 				}
 			} else {
 				log.Error("Could not find canonical header", "block number", b)
 			}
 		}
 		if len(bodyReq.BlockNums) > 0 {
-			fmt.Printf("========> Added bodies request for %v\n", bodyReq.BlockNums)
 			requests = append(requests, bodyReq)
+			bd.requestQueue.PushBack(RequestQueueItem{requested: reqBitmap, waitUntil: currentTime + timeout})
 		}
 		// Iterator becomes invalid when bitmap is modified, so we re-create
 		it = bd.required.ManyIterator()
@@ -146,7 +156,8 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 		blockNum := header.Number.Uint64()
 		bd.delivered.Add(blockNum)
 		bd.requested.Remove(blockNum)
-		bd.deliveries[blockNum-bd.requestedLow] = body
+		bd.deliveries[blockNum-bd.requestedLow] = types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
+		delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
 		return blockNum, true
 	}
 	return 0, false
@@ -157,16 +168,18 @@ func (bd *BodyDownload) FeedDeliveries() {
 	defer bd.lock.Unlock()
 	var i uint64
 	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
-		// Skip the actual delivery for now, just update required
-		if !bd.required.IsEmpty() && bd.required.Contains(bd.requestedLow+i) {
-			bd.required.Remove(bd.requestedLow + i) // TODO: remove this
-		}
+		bd.blockChannel <- bd.deliveries[i] // This is delivery
+		bd.required.Remove(bd.requestedLow + i)
 		bd.delivered.Remove(bd.requestedLow + i)
 	}
 	// Move the deliveries back
 	if i > 0 {
 		copy(bd.deliveries[:], bd.deliveries[i:])
-		fmt.Printf("Delivered bodies for blocks %d = %d\n", bd.requestedLow, bd.requestedLow+i)
+		fmt.Printf("Delivered bodies for blocks [%d - %d]\n", bd.requestedLow, bd.requestedLow+i)
 		bd.requestedLow += i
 	}
+}
+
+func (bd *BodyDownload) PrepareStageData() chan *types.Block {
+	return bd.blockChannel
 }
