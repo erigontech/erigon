@@ -258,6 +258,7 @@ func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, block *type
 // stock Ethereum ethash engine.
 // See YP section 4.3.4. "Block Header Validity"
 func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool, seal bool) error {
+	fmt.Println("FAKE-3")
 	// Ensure that the header's extra-data section is of a reasonable size
 	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params.MaximumExtraDataSize)
@@ -275,6 +276,7 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	expected := ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
 
 	if expected.Cmp(header.Difficulty) != 0 {
+		fmt.Println("FAKE-4", header.Time, parent.Number, parent.Hash().String(), parent.Time, parent.Difficulty, parent.UncleHash.String())
 		return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, expected)
 	}
 	// Verify that the gas limit is <= 2^63-1
@@ -331,14 +333,19 @@ func CalcDifficulty(config *params.ChainConfig, time, parentTime uint64, parentD
 	next := new(big.Int).Add(parentNumber, big1)
 	switch {
 	case config.IsMuirGlacier(next):
+		fmt.Println("CalcDifficulty-IsMuirGlacier", next.Uint64())
 		return calcDifficultyEip2384(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsConstantinople(next):
+		fmt.Println("CalcDifficulty-IsConstantinople", next.Uint64())
 		return calcDifficultyConstantinople(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsByzantium(next):
+		fmt.Println("CalcDifficulty-IsByzantium", next.Uint64())
 		return calcDifficultyByzantium(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsHomestead(next):
+		fmt.Println("CalcDifficulty-IsHomestead", next.Uint64())
 		return calcDifficultyHomestead(time, parentTime, parentDifficulty, parentNumber)
 	default:
+		fmt.Println("CalcDifficulty-default", next.Uint64())
 		return calcDifficultyFrontier(time, parentTime, parentDifficulty, parentNumber)
 	}
 }

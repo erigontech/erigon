@@ -253,6 +253,8 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest inte
 				if r, _ := tm.findSkip(name); r != "" {
 					t.Skip(r)
 				}
+				fmt.Println("^^^^^ START", path, name)
+				defer fmt.Println("^^^^^ FINISH", path, name)
 				runTestFunc(runTest, t, name, m, key)
 			})
 		}

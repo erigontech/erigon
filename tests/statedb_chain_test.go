@@ -117,7 +117,7 @@ func TestSelfDestructReceive(t *testing.T) {
 
 	// BLOCK 1
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, gspec.Config, exit)
 	defer common.SafeClose(exit)
 	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)

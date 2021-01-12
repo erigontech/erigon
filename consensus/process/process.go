@@ -39,18 +39,32 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 		for {
 			select {
 			case req := <-c.API.VerifyHeaderRequests:
-				if req.Deadline == nil {
-					t := time.Now().Add(ttl)
-					req.Deadline = &t
-				}
 				if len(req.Headers) == 0 {
 					c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, common.Hash{}, errEmptyHeader}
 					continue
 				}
 
-				sort.Slice(req.Headers, func(i, j int) bool {
-					return req.Headers[i].Number.Cmp(req.Headers[j].Number) == -1
+				if req.Deadline == nil {
+					t := time.Now().Add(ttl)
+					req.Deadline = &t
+				}
+
+				// copy slices and sort. had a data race with downloader
+				reqHeaders := make([]reqHeader, len(req.Headers))
+				for i := range req.Headers {
+					reqHeaders[i] = reqHeader{req.Headers[i], req.Seal[i]}
+				}
+
+				sort.Slice(reqHeaders, func(i, j int) bool {
+					return reqHeaders[i].header.Number.Cmp(reqHeaders[j].header.Number) == -1
 				})
+
+				req.Headers = make([]*types.Header, len(reqHeaders))
+				req.Seal = make([]bool, len(reqHeaders))
+				for i := range reqHeaders {
+					req.Headers[i] = reqHeaders[i].header
+					req.Seal[i] = reqHeaders[i].seal
+				}
 
 				ancestorsReqs := make([]consensus.HeadersRequest, 0, len(req.Headers))
 
@@ -69,8 +83,6 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 					}
 
 					knownParentsSlice, parentsToValidate, ancestorsReq := c.requestParentHeaders(req.ID, header, req.Headers)
-
-					// FIXME где-то тут теряется 1 из knownParentsSlice
 					if ancestorsReq != nil {
 						ancestorsReqs = append(ancestorsReqs, *ancestorsReq)
 					}
@@ -117,6 +129,11 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 	}()
 
 	return c
+}
+
+type reqHeader struct {
+	header *types.Header
+	seal   bool
 }
 
 func (c *Consensus) cleanup() {
@@ -230,7 +247,7 @@ func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal boo
 }
 
 func toVerifyRequest(reqID uint64, header *types.Header, seal bool, deadline *time.Time, knownParents []*types.Header, parentsToValidate int) *consensus.VerifyRequest {
-	request := &consensus.VerifyRequest{
+	return &consensus.VerifyRequest{
 		reqID,
 		header,
 		seal,
@@ -240,8 +257,6 @@ func toVerifyRequest(reqID uint64, header *types.Header, seal bool, deadline *ti
 		header.Number.Uint64() - uint64(parentsToValidate),
 		header.Number.Uint64() - uint64(len(knownParents)) - 1,
 	}
-
-	return request
 }
 
 func (c *Consensus) addVerifyHeaderRequest(reqID uint64, header *types.Header, seal bool, deadline *time.Time, knownParentsSlice []*types.Header, parentsToValidate int) {

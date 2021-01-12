@@ -132,7 +132,7 @@ func (t *BlockTest) Run(_ bool) error {
 		}
 	*/
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, config, exit)
 	defer common.SafeClose(exit)
 
 	validBlocks, err := t.insertBlocks(db, config, engine, eng)

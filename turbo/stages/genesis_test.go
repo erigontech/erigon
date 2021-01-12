@@ -17,6 +17,7 @@
 package stages
 
 import (
+	"fmt"
 	"math/big"
 	"reflect"
 	"testing"
@@ -63,6 +64,9 @@ func TestSetupGenesis(t *testing.T) {
 		oldcustomg = customg
 	)
 	oldcustomg.Config = &params.ChainConfig{HomesteadBlock: big.NewInt(2)}
+
+	fmt.Printf("config-new %p; config-old %p\n", customg.Config, oldcustomg.Config)
+
 	tests := []struct {
 		name       string
 		fn         func(*ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error)
@@ -129,19 +133,27 @@ func TestSetupGenesis(t *testing.T) {
 				// Advance to block #4, past the homestead transition block of customg.
 				genesis := oldcustomg.MustCommit(db)
 
+				fmt.Println("YYYYY 1")
+				fmt.Printf("YYYY 1.1 - config-new %p; config-old %p\n", customg.Config, oldcustomg.Config)
 				blocks, _, err := core.GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db, 4, nil, false /* intermediateHashes */)
 				if err != nil {
 					return nil, common.Hash{}, nil, err
 				}
+				fmt.Printf("YYYY 1.2 - config-new %p; config-old %p\n", customg.Config, oldcustomg.Config)
+				fmt.Println("YYYYY 2")
 				exit := make(chan struct{})
 				cons := ethash.NewFaker()
-				eng := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit)
+				eng := process.NewConsensusProcess(cons, oldcustomg.Config, exit)
+				fmt.Println("YYYYY 3", len(blocks), blocks[0].Number().Uint64(), "-", blocks[len(blocks)-1].Number().Uint64(), genesis.Number().Uint64())
 				defer common.SafeClose(exit)
 				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, cons, eng, blocks, true /* checkRoot */); err != nil {
 					return nil, common.Hash{}, nil, err
 				}
+				fmt.Println("YYYYY 4")
 				// This should return a compatibility error.
-				return core.SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
+				conf, hash, state, err := core.SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
+				fmt.Println("YYYYY 5")
+				return conf, hash, state, err
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
