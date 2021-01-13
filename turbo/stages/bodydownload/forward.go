@@ -77,6 +77,9 @@ func Forward(logPrefix string, db ethdb.Database, blockChannel chan *types.Block
 			logBlock = logProgress(logPrefix, logBlock, blockHeight, batch)
 		}
 		count++
+		if bodyProgress == headerProgress {
+			break
+		}
 	}
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)

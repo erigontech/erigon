@@ -658,7 +658,6 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 	case proto_sentry.OutboundMessageId_GetBlockHeaders:
 		return ss.getBlockHeaders(inreq)
 	case proto_sentry.OutboundMessageId_GetBlockBodies:
-		log.Info("SendMessageByMinBlock for bodies", "minblock", inreq.MinBlock)
 		return ss.getBlockBodies(inreq)
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("not implemented for message Id: %s", inreq.Data.Id)

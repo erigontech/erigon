@@ -330,7 +330,7 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		}
 	}
 	log.Info(hd.AnchorState())
-	bd := bodydownload.NewBodyDownload(16 * 1024 /* outstandingLimit */)
+	bd := bodydownload.NewBodyDownload(64 * 1024 /* outstandingLimit */)
 	if err := bd.UpdateFromDb(db); err != nil {
 		return nil, err
 	}
@@ -499,35 +499,40 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 	}
 }
 
-func (cs *ControlServerImpl) sendBodyRequests(ctx context.Context, reqs []*bodydownload.BodyRequest) {
-	for _, req := range reqs {
-		log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
-		var bytes []byte
-		var err error
-		bytes, err = rlp.EncodeToBytes(req.Hashes)
-		if err != nil {
-			log.Error("Could not encode block bodies request", "err", err)
-			continue
-		}
-		outreq := proto_sentry.SendMessageByMinBlockRequest{
-			MinBlock: req.BlockNums[len(req.BlockNums)-1],
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.OutboundMessageId_GetBlockBodies,
-				Data: bytes,
-			},
-		}
-		_, err = cs.sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
-		if err != nil {
-			log.Error("Could not send block bodies request", "err", err)
-			continue
-		}
+func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) bool {
+	//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
+	var bytes []byte
+	var err error
+	bytes, err = rlp.EncodeToBytes(req.Hashes)
+	if err != nil {
+		log.Error("Could not encode block bodies request", "err", err)
+		return false
 	}
+	outreq := proto_sentry.SendMessageByMinBlockRequest{
+		MinBlock: req.BlockNums[len(req.BlockNums)-1],
+		Data: &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.OutboundMessageId_GetBlockBodies,
+			Data: bytes,
+		},
+	}
+	sentPeers, err1 := cs.sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err1 != nil {
+		log.Error("Could not send block bodies request", "err", err1)
+	}
+	return sentPeers != nil && len(sentPeers.Peers) > 0
 }
 
 func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
-	reqs, timer := cs.bd.RequestMoreBodies(uint64(time.Now().Unix()), 5 /*timeout*/, db)
-	cs.sendBodyRequests(ctx, reqs)
 	for {
+		timer := cs.bd.CancelExpiredRequests(uint64(time.Now().Unix()))
+		req := cs.bd.RequestMoreBodies(db)
+		for req != nil && cs.sendBodyRequest(ctx, req) { // Don't keep producing requests and sending if there are no peers to accept it
+			timer = cs.bd.ApplyBodyRequest(uint64(time.Now().Unix()), 5 /*timeout*/, req)
+			req = cs.bd.RequestMoreBodies(db)
+		}
+		if req != nil {
+			cs.bd.CancelBodyRequest(req)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -536,15 +541,13 @@ func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
 		case <-cs.requestWakeUpHeaders:
 			log.Info("bodyLoop woken up by the incoming request")
 		}
-		reqs, timer = cs.bd.RequestMoreBodies(uint64(time.Now().Unix()), 5 /*timeout*/, db)
-		cs.sendBodyRequests(ctx, reqs)
 	}
 }
 
 func (cs *ControlServerImpl) headerLoop(ctx context.Context) {
-	reqs, timer := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-	cs.sendRequests(ctx, reqs)
 	for {
+		reqs, timer := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
+		cs.sendRequests(ctx, reqs)
 		select {
 		case <-ctx.Done():
 			return
@@ -553,7 +556,5 @@ func (cs *ControlServerImpl) headerLoop(ctx context.Context) {
 		case <-cs.requestWakeUpBodies:
 			log.Info("headerLoop woken up by the incoming request")
 		}
-		reqs, timer = cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-		cs.sendRequests(ctx, reqs)
 	}
 }

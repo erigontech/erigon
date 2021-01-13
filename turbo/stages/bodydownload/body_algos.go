@@ -43,17 +43,38 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	bd.delivered.Clear()
 	bd.requestQueue = list.New()
 	bd.RequestQueueTimer = time.NewTimer(time.Hour)
-	bd.requestedMap = make(map[DoubleHash]*types.Header)
+	bd.requestedMap = make(map[DoubleHash]uint64)
+	for i := 0; i < len(bd.deliveries); i++ {
+		bd.deliveries[i] = nil
+	}
 	fmt.Printf("UpdateFromDB =====> Resetting required to range [%d - %d]\n", bodyProgress+1, headerProgress+1)
 	bd.required.AddRange(bodyProgress+1, headerProgress+1)
 	bd.requestedLow = bodyProgress + 1
-	bd.requestedHigh = bodyProgress + 1
 	// Channel needs to be big enough to allow the producer to finish writing and unblock in any case
 	bd.blockChannel = make(chan *types.Block, BlockBufferSize+bd.outstandingLimit)
 	return nil
 }
 
-func (bd *BodyDownload) RequestMoreBodies(currentTime, timeout uint64, db ethdb.Database) ([]*BodyRequest, *time.Timer) {
+func (bd *BodyDownload) ApplyBodyRequest(currentTime, timeout uint64, bodyReq *BodyRequest) *time.Timer {
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
+	var prevTopTime uint64
+	if bd.requestQueue.Len() > 0 {
+		prevTopTime = bd.requestQueue.Front().Value.(RequestQueueItem).waitUntil
+	}
+	bd.requestQueue.PushBack(RequestQueueItem{requested: bodyReq.requested, waitUntil: currentTime + timeout})
+	bd.requested.Or(bodyReq.requested)
+	bd.resetRequestQueueTimer(prevTopTime, currentTime)
+	return bd.RequestQueueTimer
+}
+
+func (bd *BodyDownload) CancelBodyRequest(bodyReq *BodyRequest) {
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
+	bd.required.Or(bodyReq.requested)
+}
+
+func (bd *BodyDownload) CancelExpiredRequests(currentTime uint64) *time.Timer {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	// Give up the requests that were timed out
@@ -65,66 +86,97 @@ func (bd *BodyDownload) RequestMoreBodies(currentTime, timeout uint64, db ethdb.
 			item := peek.Value.(RequestQueueItem)
 			// Check if the blocks are still requested (outstanding, not delivered), and if yes, add the blocks back to required
 			if item.requested.Intersects(bd.requested) {
-				item.requested.And(bd.requested)
-				bd.required.Or(item.requested)
+				fmt.Printf("CancelExpiredRequests with item.requested.Minimum %d, bd.requested.Minimum %d\n", item.requested.Minimum(), bd.requested.Minimum())
+				item.requested.And(bd.requested)    // Compute the intersection (not delivered but timed out blocks) into item.requested
+				item.requested.AndNot(bd.delivered) // Remove delivered blocks
+				if !item.requested.IsEmpty() {
+					item.requested.RemoveRange(0, bd.requestedLow)
+				}
+				if !item.requested.IsEmpty() {
+					bd.requested.AndNot(item.requested) // Remove the intersection from the requsted
+					bd.required.Or(item.requested)      // Add the intersection back to required
+				}
 			}
 		}
+	} else {
+		fmt.Printf("=========> bd.requestQueue is empty\n")
 	}
+	bd.resetRequestQueueTimer(prevTopTime, currentTime)
+	return bd.RequestQueueTimer
+}
+
+func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database) *BodyRequest {
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
+
 	if bd.required.IsEmpty() {
 		fmt.Printf("========> bd.required is empty\n")
 	} else {
 		fmt.Printf("==========> bd.required min %d, max %d\n", bd.required.Minimum(), bd.required.Maximum())
 	}
-	var buf [BlockBufferSize]uint64
-	var requests []*BodyRequest
-	it := bd.required.ManyIterator()
-	for bufLen := it.NextMany(buf[:]); bufLen > 0; bufLen = it.NextMany(buf[:]) {
-		if buf[bufLen-1] > bd.requestedHigh {
-			// Check if there are too many requests outstranding
-			if buf[bufLen-1] >= bd.requestedLow+bd.outstandingLimit {
-				fmt.Printf("=========> bd.requestedLow = %d, bd.outstadingLimit = %d, buf[bufLen-1] = %d\n", bd.requestedLow, bd.outstandingLimit, buf[bufLen-1])
-				break
-			}
-			bd.requestedHigh = buf[bufLen-1]
+	var bodyReq *BodyRequest
+	blockNums := make([]uint64, 0, BlockBufferSize)
+	hashes := make([]common.Hash, 0, BlockBufferSize)
+	reqBitmap := roaring64.New()
+	empties := roaring64.New() // Accumulate block numbers for empty blocks so we do not modidy bd.required (this would invalidate the iterator)
+	it := bd.required.Iterator()
+	for len(blockNums) < BlockBufferSize && it.HasNext() {
+		b := it.Next()
+		if b >= bd.requestedLow+bd.outstandingLimit {
+			// Too many outstanding blocks requested
+			break
 		}
-		bodyReq := &BodyRequest{BlockNums: make([]uint64, 0, bufLen), Hashes: make([]common.Hash, 0, bufLen)}
-		reqBitmap := roaring64.New()
-		for _, b := range buf[:bufLen] {
-			bd.required.Remove(b)
-			bd.requested.Add(b)
-			hash, err := rawdb.ReadCanonicalHash(db, b)
+		var hash common.Hash
+		var header *types.Header
+		var err error
+		if b < bd.requestedLow {
+			fmt.Printf("b=%d, bd.requestedLow=%d\n", b, bd.requestedLow)
+		}
+		if bd.deliveries[b-bd.requestedLow] != nil {
+			header = bd.deliveries[b-bd.requestedLow].Header()
+			hash = header.Hash()
+		} else {
+			hash, err = rawdb.ReadCanonicalHash(db, b)
 			if err == nil {
-				header := rawdb.ReadHeader(db, hash, b)
-				if header == nil {
-					log.Error("Header not found", "block number", b)
-				} else if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
-					var doubleHash DoubleHash
-					copy(doubleHash[:], header.UncleHash.Bytes())
-					copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
-					bd.requestedMap[doubleHash] = header
-					bodyReq.BlockNums = append(bodyReq.BlockNums, b)
-					bodyReq.Hashes = append(bodyReq.Hashes, hash)
-					reqBitmap.Add(b)
-				} else {
-					// Both uncleHash and txHash are empty, no need to request
-					blockNum := header.Number.Uint64()
-					bd.delivered.Add(blockNum)
-					bd.requested.Remove(blockNum)
-					bd.deliveries[blockNum-bd.requestedLow] = types.NewBlockWithHeader(header) // Block without uncles and transactions
-				}
+				header = rawdb.ReadHeader(db, hash, b)
 			} else {
 				log.Error("Could not find canonical header", "block number", b)
 			}
+			if header != nil {
+				bd.deliveries[b-bd.requestedLow] = types.NewBlockWithHeader(header) // Block without uncles and transactions
+				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
+					var doubleHash DoubleHash
+					copy(doubleHash[:], header.UncleHash.Bytes())
+					copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
+					if b1, ok := bd.requestedMap[doubleHash]; ok {
+						fmt.Printf("Found block %d on the place of %d, doubleHash %x\n", b1, b, doubleHash)
+						panic("")
+					}
+					bd.requestedMap[doubleHash] = b
+				}
+			}
 		}
-		if len(bodyReq.BlockNums) > 0 {
-			requests = append(requests, bodyReq)
-			bd.requestQueue.PushBack(RequestQueueItem{requested: reqBitmap, waitUntil: currentTime + timeout})
+		if header == nil {
+			log.Error("Header not found", "block number", b)
+			panic("")
+		} else if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
+			blockNums = append(blockNums, b)
+			hashes = append(hashes, hash)
+			reqBitmap.Add(b)
+		} else {
+			// Both uncleHash and txHash are empty, no need to request
+			bd.delivered.Add(b)
+			empties.Add(b)
 		}
-		// Iterator becomes invalid when bitmap is modified, so we re-create
-		it = bd.required.ManyIterator()
 	}
-	bd.resetRequestQueueTimer(prevTopTime, currentTime)
-	return requests, bd.RequestQueueTimer
+	if len(blockNums) > 0 {
+		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes, requested: reqBitmap}
+		bd.required.AndNot(reqBitmap)
+	}
+	if !empties.IsEmpty() {
+		bd.required.AndNot(empties)
+	}
+	return bodyReq
 }
 
 func (bd *BodyDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64) {
@@ -148,15 +200,20 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 	uncleHash := types.CalcUncleHash(body.Uncles)
 	txHash := types.DeriveSha(types.Transactions(body.Transactions))
 	var doubleHash DoubleHash
-	copy(doubleHash[:], uncleHash[:])
-	copy(doubleHash[common.HashLength:], txHash[:])
+	copy(doubleHash[:], uncleHash.Bytes())
+	copy(doubleHash[common.HashLength:], txHash.Bytes())
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
-	if header, ok := bd.requestedMap[doubleHash]; ok {
-		blockNum := header.Number.Uint64()
+	// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requesredMap
+	// Also, block numbers can be added to bd.delivered for empty blocks, above
+	if blockNum, ok := bd.requestedMap[doubleHash]; ok {
 		bd.delivered.Add(blockNum)
 		bd.requested.Remove(blockNum)
-		bd.deliveries[blockNum-bd.requestedLow] = types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
+		bd.required.Remove(blockNum) // This is not usually required, but helps deal with the situations when old request is cancelled just before blocks delivered that contained in that request
+		if blockNum < bd.requestedLow {
+			fmt.Printf("blocknum=%d, bd.requestedLow=%d, uncleHash=%x, txHash=%x\n", blockNum, bd.requestedLow, uncleHash, txHash)
+		}
+		bd.deliveries[blockNum-bd.requestedLow] = bd.deliveries[blockNum-bd.requestedLow].WithBody(body.Transactions, body.Uncles)
 		delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
 		return blockNum, true
 	}
@@ -166,15 +223,21 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 func (bd *BodyDownload) FeedDeliveries() {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
+	if !bd.requested.IsEmpty() {
+		fmt.Printf("FeedDeliveries with bd.requested.Minimum %d\n", bd.requested.Minimum())
+	}
 	var i uint64
 	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
 		bd.blockChannel <- bd.deliveries[i] // This is delivery
-		bd.required.Remove(bd.requestedLow + i)
 		bd.delivered.Remove(bd.requestedLow + i)
 	}
 	// Move the deliveries back
+	// bd.requestedLow can only be moved forward if there are consequitive block numbers present in the bd.delivered map
 	if i > 0 {
 		copy(bd.deliveries[:], bd.deliveries[i:])
+		for j := len(bd.deliveries) - int(i); j < len(bd.deliveries); j++ {
+			bd.deliveries[j] = nil
+		}
 		fmt.Printf("Delivered bodies for blocks [%d - %d]\n", bd.requestedLow, bd.requestedLow+i)
 		bd.requestedLow += i
 	}
