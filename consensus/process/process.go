@@ -27,6 +27,8 @@ var (
 	errNothingToAsk = errors.New("nothing to ask")
 )
 
+//fixme: remove debug
+
 func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit chan struct{}) *Consensus {
 	c := &Consensus{
 		Server:        v,

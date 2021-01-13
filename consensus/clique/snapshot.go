@@ -18,7 +18,6 @@ package clique
 
 import (
 	"bytes"
-	"fmt"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -99,8 +98,6 @@ func loadAndFillSnapshot(db ethdb.Database, num uint64, hash common.Hash, config
 		return nil, err
 	}
 
-	//fmt.Printf("Snapshot.loadAndFillSnapshot for block %q - snap %d(%s): %d\n", hash.String(), snap.Number, snap.Hash.String(), len(snap.Signers))
-
 	snap.config = config
 	snap.sigcache = sigcache
 	snap.snapStorage = snapStorage
@@ -120,8 +117,6 @@ func loadSnapshot(db ethdb.Database, num uint64, hash common.Hash) (*Snapshot, e
 		return nil, err
 	}
 
-	//fmt.Printf("Snapshot.loadSnapshot for block %q - snap %d(%s): %d\n", hash.String(), snap.Number, snap.Hash.String(), len(snap.Signers))
-
 	return snap, nil
 }
 
@@ -135,27 +130,19 @@ func hasSnapshotData(db ethdb.Database, num uint64, hash common.Hash) (bool, err
 
 // store inserts the snapshot into the database.
 func (s *Snapshot) store(db ethdb.Database, force bool) error {
-	t := time.Now()
 	ok, err := hasSnapshotData(db, s.Number, s.Hash)
 	if ok && err == nil {
 		return nil
 	}
-	fmt.Println("+++store-0.0", s.Number, s.Hash.String(), time.Since(t))
 
-	t = time.Now()
 	blob, err := json.Marshal(s)
-	fmt.Println("+++store-0", s.Number, s.Hash.String(), time.Since(t), len(blob), "bytes")
-	t = time.Now()
 	if err != nil {
-		//fmt.Printf("Snapshot.store ERROR snap %d(%s): %v\n", s.Number, s.Hash.String(), err)
 		return err
 	}
 
-	//fmt.Printf("Snapshot.store snap %d(%s): %v\n", s.Number, s.Hash.String(), spew.Sdump(s.Signers))
-
 	s.snapStorage.save(s.Number, s.Hash, blob, force)
-	fmt.Println("+++store-1", s.Number, s.Hash.String(), time.Since(t), len(blob), "bytes", force)
-	return err
+
+	return nil
 }
 
 // validVote returns whether it makes sense to cast the specified vote in the
@@ -213,13 +200,11 @@ func (s *Snapshot) apply(headers []*types.Header) error {
 	// Sanity check that the headers can be applied
 	for i := 0; i < len(headers)-1; i++ {
 		if headers[i+1].Number.Uint64() != headers[i].Number.Uint64()+1 {
-			//fmt.Println("errInvalidVotingChain1")
 			return errInvalidVotingChain
 		}
 	}
 
 	if headers[0].Number.Uint64() != s.Number+1 {
-		//fmt.Println("errInvalidVotingChain2", headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), s.Number+1)
 		return errInvalidVotingChain
 	}
 
@@ -227,16 +212,6 @@ func (s *Snapshot) apply(headers []*types.Header) error {
 		start  = time.Now()
 		logged = time.Now()
 	)
-
-	/*
-		var spanStr string
-		spanStr += fmt.Sprintf("!!! snap %d with %d headers:\n", s.Number, len(headers))
-		spanStr += fmt.Sprintf("\theader:")
-		for i := len(headers) - 1; i >= 0; i-- {
-			spanStr += fmt.Sprintf(" %d,", headers[i].Number.Uint64())
-		}
-		fmt.Println(spanStr)
-	*/
 
 	for i := len(headers) - 1; i >= 0; i-- {
 		header := headers[i]
@@ -257,12 +232,10 @@ func (s *Snapshot) apply(headers []*types.Header) error {
 			return err
 		}
 		if _, ok := s.Signers[signer]; !ok {
-			//fmt.Printf("errUnauthorizedSigner-3 for block %d\n", number)
 			return errUnauthorizedSigner
 		}
 		for _, recent := range s.Recents {
 			if recent == signer {
-				//fmt.Println("recently signed2", number, b, recent.String())
 				return errRecentlySigned
 			}
 		}
@@ -428,7 +401,6 @@ func newStorage(db ethdb.Database, epoch uint64) *storage {
 					}
 				}
 
-				fmt.Println("saving snap goroutine", len(snaps), len(st.ch))
 				st.saveSnaps(snaps...)
 			}
 		}
@@ -438,37 +410,25 @@ func newStorage(db ethdb.Database, epoch uint64) *storage {
 }
 
 func (st *storage) save(number uint64, hash common.Hash, blob []byte, force bool) {
-	t := time.Now()
 	snap := snapObj{number, hash, blob}
 	if !force {
 		st.ch <- snap
-		fmt.Println("storage.save-0", number, len(st.ch), time.Since(t))
 		return
 	}
 
 	// a forced case (genesis)
 	ok, err := hasSnapshotData(st.db, number, hash)
-	fmt.Println("storage.save-0.1", number, time.Since(t))
-	t = time.Now()
 	if !ok || err != nil {
 		st.saveSnap(snap)
-		fmt.Println("storage.save-1", number, time.Since(t))
 	} else {
-		n := atomic.AddUint64(&notSend, 1)
-		fmt.Println("+++snapshot-XXX NOT Going to send", number, hash.String(), "force", force, "n", n)
-		fmt.Println("storage.save-2", number, time.Since(t))
+		atomic.AddUint64(&notSend, 1)
 	}
-
-	fmt.Println("+++snapshot-XXX Going to send", number, hash.String(), "force", force, time.Since(t))
-
 }
 
 func (st *storage) saveSnaps(snaps ...snapObj) {
 	if len(snaps) == 0 {
 		return
 	}
-
-	t := time.Now()
 
 	pending := st.db.NewBatch()
 	defer pending.Rollback()
@@ -483,22 +443,13 @@ func (st *storage) saveSnaps(snaps ...snapObj) {
 	if err != nil {
 		log.Error("can't store snapshots", "blockFrom", snaps[0].number, "blockTo", snaps[len(snaps)-1].number, "err", err)
 	}
-
-	dur := time.Since(t)
-	fmt.Println("+++snapshot-7.2", len(snaps), dur, dur/time.Duration(len(snaps)))
 }
 
 func (st *storage) saveSnap(snap snapObj) {
-	t := time.Now()
-
 	err := st.db.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob)
 	if err != nil {
 		log.Error("can't store a snapshot", "block", snap.number, "hash", snap.hash, "err", err)
-		return
 	}
-
-	dur := time.Since(t)
-	fmt.Println("+++snapshot-7.3", dur)
 }
 
 func (st *storage) Close() {

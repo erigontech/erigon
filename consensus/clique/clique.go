@@ -20,7 +20,6 @@ package clique
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
@@ -319,7 +318,6 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 // in a batch of parents (ascending order) to avoid looking those up from the
 // database. This is useful for concurrently verifying a batch of new headers.
 func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
-	fmt.Println("+++verifyCascadingFields")
 	// The genesis block is the always valid dead-end
 	number := header.Number.Uint64()
 	if number == 0 {
@@ -333,7 +331,6 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		parent = chain.GetHeader(header.ParentHash, number-1)
 	}
 	if parent == nil || parent.Number.Uint64() != number-1 || parent.Hash() != header.ParentHash {
-		fmt.Println("err4")
 		return consensus.ErrUnknownAncestor
 	}
 	if parent.Time+c.config.Period > header.Time {
@@ -361,7 +358,6 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 
 // snapshot retrieves the authorization snapshot at a given point in time.
 func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
-	fmt.Println("+++snapshot-0")
 	// Search for a snapshot in memory or on disk for checkpoints
 	var (
 		headers []*types.Header
@@ -398,7 +394,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				if err := snap.store(c.db, number == 0); err != nil {
 					return nil, err
 				}
-				log.Info("Stored checkpoint snapshot to disk2", "number", number, "hash", hash)
+				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
 				break
 			}
 		}
@@ -408,7 +404,6 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			// If we have explicit parents, pick from there (enforced)
 			header = parents[len(parents)-1]
 			if header.Hash() != hash || header.Number.Uint64() != number {
-				fmt.Println("err2")
 				return nil, consensus.ErrUnknownAncestor
 			}
 			parents = parents[:len(parents)-1]
@@ -416,7 +411,6 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			// No explicit parents (or no more left), reach out to the database
 			header = chain.GetHeader(hash, number)
 			if header == nil {
-				fmt.Println("err3")
 				return nil, consensus.ErrUnknownAncestor
 			}
 		}
@@ -435,12 +429,9 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 
 	c.recents.Add(snap.Hash, snap)
 	c.snapshotBlocks.Add(snap.Number, snap.Hash)
-	fmt.Println("+++snapshot-1")
 
 	// If we've generated a new checkpoint snapshot, save to disk
-	fmt.Println("+++snapshot-2", snap.Number%checkpointInterval == 0, len(headers) > 0)
 	if isSnapshot(snap.Number, c.config.Epoch) && len(headers) > 0 {
-		fmt.Println("+++snapshot-3")
 		if err = snap.store(c.db, snap.Number == 0); err != nil {
 			return nil, err
 		}
@@ -469,7 +460,6 @@ func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 // headers that aren't yet part of the local blockchain to generate the snapshots
 // from.
 func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
-	fmt.Println("+++verifySeal")
 	// Verifying the genesis block is not supported
 	number := header.Number.Uint64()
 	if number == 0 {
@@ -489,14 +479,12 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 		return err
 	}
 	if _, ok := snap.Signers[signer]; !ok {
-		fmt.Printf("errUnauthorizedSigner-2 for block %d\n", number)
 		return errUnauthorizedSigner
 	}
 	for seen, recent := range snap.Recents {
 		if recent == signer {
 			// Signer is among recents, only fail if the current block doesn't shift it out
 			if limit := uint64(len(snap.Signers)/2 + 1); seen > number-limit {
-				fmt.Println("recently signed1")
 				return errRecentlySigned
 			}
 		}
@@ -517,7 +505,6 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
 func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
-	fmt.Println("+++Prepare")
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	header.Coinbase = common.Address{}
 	header.Nonce = types.BlockNonce{}
@@ -571,7 +558,6 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	// Ensure the timestamp has the correct delay
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
-		fmt.Println("err1")
 		return consensus.ErrUnknownAncestor
 	}
 	header.Time = parent.Time + c.config.Period
@@ -611,7 +597,6 @@ func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
 func (c *Clique) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
-	fmt.Println("+++Seal")
 	header := block.Header()
 
 	// Sealing the genesis block is not supported
@@ -635,7 +620,6 @@ func (c *Clique) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, b
 		return err
 	}
 	if _, authorized := snap.Signers[signer]; !authorized {
-		fmt.Printf("errUnauthorizedSigner-1 for block %d\n", number)
 		return errUnauthorizedSigner
 	}
 	// If we're amongst the recent signers, wait for the next block
@@ -687,7 +671,6 @@ func (c *Clique) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, b
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
 func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _, parentNumber *big.Int, parentHash, _ common.Hash) *big.Int {
-	fmt.Println("+++CalcDifficulty")
 	snap, err := c.snapshot(chain, parentNumber.Uint64(), parentHash, nil)
 	if err != nil {
 		return nil

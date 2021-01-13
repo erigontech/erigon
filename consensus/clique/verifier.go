@@ -23,6 +23,8 @@ func NewCliqueVerifier(c *Clique) *Verifier {
 	return &Verifier{c}
 }
 
+//fixme remove debug
+
 func (c *Verifier) Verify(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, _ bool, _ bool) error {
 	err := c.verifyHeader(header, parents, chain.Config())
 	fmt.Println("XXX-Verify-DONE", header.Number.Uint64(), len(parents), err)
@@ -205,7 +207,6 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 		// If an on-disk checkpoint snapshot can be found, use that
 		if isSnapshot(number, c.config.Epoch) {
 			fmt.Println("+++snapshot-2.3", number)
-			//fmt.Printf("BEFORE2 loadAndFillSnapshot for block %d(%q)\n", p.Number.Uint64(), p.Hash().String())
 			if s, err = loadAndFillSnapshot(c.db, p.Number.Uint64(), p.Hash(), c.config, c.snapStorage, c.signatures); err == nil {
 				log.Trace("Loaded voting snapshot from disk", "number", p.Number, "hash", p.Hash())
 				snap = s
@@ -248,11 +249,8 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 			}
 			m[p.Number.Int64()] = struct{}{}
 		}
-		//fmt.Println("snapshot1", parents[0].Number.Int64(), parents[len(parents)-1].Number.Int64(), len(parents), i)
 	}
 
-	//fmt.Printf("snapshotXXX-1: first parent %v; last parent %v; parents %v, found index %v, next after snap %v\n",
-	//	parents[0].Number.Int64(), parents[len(parents)-1].Number.Int64(), len(parents), i, snap.Number+1)
 	if i+1 <= len(parents) {
 		parents = parents[i+1:]
 	} else {
@@ -327,7 +325,6 @@ func (c *Verifier) verifySeal(header *types.Header, snap *Snapshot) error {
 	t = time.Now()
 
 	if _, ok := snap.Signers[signer]; !ok {
-		//fmt.Printf("errUnauthorizedSigner-4 for block %d(%q) - snap %d(%s): %v\n", number, signer.Hash().String(), snap.Number, snap.Hash.String(), spew.Sdump(snap.Signers))
 		return errUnauthorizedSigner
 	}
 
@@ -335,7 +332,6 @@ func (c *Verifier) verifySeal(header *types.Header, snap *Snapshot) error {
 		if recent == signer {
 			// Signer is among recents, only fail if the current block doesn't shift it out
 			if limit := uint64(len(snap.Signers)/2 + 1); seen > number-limit {
-				//fmt.Println("recently signed3")
 				return errRecentlySigned
 			}
 		}

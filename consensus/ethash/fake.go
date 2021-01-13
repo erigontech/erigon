@@ -2,7 +2,6 @@ package ethash
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
@@ -180,14 +179,13 @@ func (f *FakeEthash) Verify(chain consensus.ChainHeaderReader, header *types.Hea
 	if len(parents) == 0 {
 		return errors.New("need a parent to verify the header")
 	}
+
 	err := f.verifyHeader(chain, header, parents[len(parents)-1], false, false)
 	if err != nil {
-		fmt.Println("FAKE-1", err)
 		return err
 	}
 
 	if seal {
-		fmt.Println("FAKE-2", err)
 		return f.VerifySeal(chain, header)
 	}
 
