@@ -213,7 +213,7 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 				fmt.Println("+++snapshot-2.4", number)
 				break
 			} else {
-				log.Info("can't load and update a snapshot", "num", number, "block", p.Number.Uint64(), "hash", p.Hash().String(), "error", err, "time", time.Since(t))
+				log.Trace("can't load and update a snapshot", "num", number, "block", p.Number.Uint64(), "hash", p.Hash().String(), "error", err, "time", time.Since(t))
 			}
 
 			fmt.Println("+++snapshot-2.5", number)
@@ -258,32 +258,10 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 	}
 
 	fmt.Println("+++snapshot-4", time.Since(t), snap.Number)
-	t = time.Now()
 
-	err = snap.apply(parents)
+	err = c.applyAndStoreSnapshot(snap, parents...)
 	if err != nil {
 		return nil, err
-	}
-
-	fmt.Println("+++snapshot-5", time.Since(t), snap.Number)
-	t = time.Now()
-
-	c.recents.Add(snap.Hash, snap)
-	fmt.Println("+++snapshot-6", time.Since(t), snap.Number)
-	t = time.Now()
-
-	c.snapshotBlocks.Add(snap.Number, snap.Hash)
-	fmt.Println("+++snapshot-7.1", time.Since(t), snap.Number, isSnapshot(snap.Number, c.config.Epoch), len(parents) > 0)
-	t = time.Now()
-
-	// If we've generated a new checkpoint snapshot, save to disk
-	if isSnapshot(snap.Number, c.config.Epoch) {
-		if err = snap.store(c.db, snap.Number == 0); err != nil {
-			return nil, err
-		}
-		fmt.Println("+++snapshot-8", time.Since(t), snap.Number)
-
-		log.Trace("Stored voting snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return snap, err
@@ -355,23 +333,19 @@ func (c *Verifier) verifySeal(header *types.Header, snap *Snapshot) error {
 }
 
 func (c *Verifier) findPrevCheckpoint(num uint64) int {
-	// If we're at the genesis, snapshot the initial state.
 	if num == 0 {
-		fmt.Printf("NeededForVerification-0 num=%d\n", num)
+		// If we're at the genesis, snapshot the initial state.
 		return 0
 	}
 
 	var n int
 	for n = int(num); n >= 0; n-- {
-		// fixme add hash
 		if ok := c.checkSnapshot(uint64(n)); ok {
-			fmt.Printf("NeededForVerification-0.1 GOT a SNAP num=%d\n", num)
 			break
 		}
 	}
 
 	if n < 0 {
-		fmt.Printf("NeededForVerification-0.2 NEGATIVE num=%d n=%d\n", num, n)
 		n = 0
 	}
 

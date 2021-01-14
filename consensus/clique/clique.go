@@ -20,6 +20,7 @@ package clique
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
@@ -309,15 +310,57 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	if err := misc.VerifyForkHashes(chain.Config(), header, false); err != nil {
 		return err
 	}
+
+	// Retrieve the snapshot needed to verify this header and cache it
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
+	if err != nil {
+		return err
+	}
+
 	// All basic checks passed, verify cascading fields
-	return c.verifyCascadingFields(chain, header, parents)
+	if err := c.verifyCascadingFields(chain, header, parents, snap); err != nil {
+		return err
+	}
+
+	return c.applyAndStoreSnapshot(snap, header)
+}
+
+func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, headers ...*types.Header) error {
+	t := time.Now()
+
+	if err := snap.apply(headers...); err != nil {
+		return err
+	}
+
+	fmt.Println("+++snapshot.apply-1", time.Since(t), snap.Number)
+	t = time.Now()
+
+	c.recents.Add(snap.Hash, snap)
+	fmt.Println("+++snapshot.apply-2", time.Since(t), snap.Number)
+	t = time.Now()
+
+	c.snapshotBlocks.Add(snap.Number, snap.Hash)
+	fmt.Println("+++snapshot.apply-3", time.Since(t), snap.Number)
+	t = time.Now()
+
+	// If we've generated a new checkpoint snapshot, save to disk
+	if isSnapshot(snap.Number, c.config.Epoch) {
+		if err := snap.store(c.db, snap.Number == 0); err != nil {
+			return err
+		}
+		log.Trace("Stored a snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+	}
+
+	fmt.Println("+++snapshot.apply-4", time.Since(t), snap.Number)
+
+	return nil
 }
 
 // verifyCascadingFields verifies all the header fields that are not standalone,
 // rather depend on a batch of previous headers. The caller may optionally pass
 // in a batch of parents (ascending order) to avoid looking those up from the
 // database. This is useful for concurrently verifying a batch of new headers.
-func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
+func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, snap *Snapshot) error {
 	// The genesis block is the always valid dead-end
 	number := header.Number.Uint64()
 	if number == 0 {
@@ -336,11 +379,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	if parent.Time+c.config.Period > header.Time {
 		return errInvalidTimestamp
 	}
-	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
-	if err != nil {
-		return err
-	}
+
 	// If the block is a checkpoint block, verify the signer list
 	if number%c.config.Epoch == 0 {
 		signers := make([]byte, len(snap.Signers)*common.AddressLength)
@@ -417,26 +456,17 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		headers = append(headers, header)
 		number, hash = number-1, header.ParentHash
 	}
+
 	// Previous snapshot found, apply any pending headers on top of it
 	for i := 0; i < len(headers)/2; i++ {
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
 
-	err := snap.apply(headers)
+	err := c.applyAndStoreSnapshot(snap, headers...)
 	if err != nil {
 		return nil, err
 	}
 
-	c.recents.Add(snap.Hash, snap)
-	c.snapshotBlocks.Add(snap.Number, snap.Hash)
-
-	// If we've generated a new checkpoint snapshot, save to disk
-	if isSnapshot(snap.Number, c.config.Epoch) && len(headers) > 0 {
-		if err = snap.store(c.db, snap.Number == 0); err != nil {
-			return nil, err
-		}
-		log.Trace("Stored voting snapshot to disk", "number", snap.Number, "hash", snap.Hash)
-	}
 	return snap, err
 }
 
