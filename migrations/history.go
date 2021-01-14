@@ -54,7 +54,7 @@ var historyAccBitmap = Migration{
 			goto LoadStep
 		}
 
-		collectorB = etl.NewCriticalCollector(tmpdir+"1", etl.NewSortableBuffer(etl.BufferOptimalSize*4))
+		collectorB = etl.NewCriticalCollector(tmpdir+"1", etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer func() {
 			// don't clean if error or panic happened
 			if err != nil {
@@ -171,7 +171,7 @@ var historyStorageBitmap = Migration{
 			goto LoadStep
 		}
 
-		collectorB = etl.NewCriticalCollector(tmpdir+"1", etl.NewSortableBuffer(etl.BufferOptimalSize*4))
+		collectorB = etl.NewCriticalCollector(tmpdir+"1", etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer func() {
 			// don't clean if error or panic happened
 			if err != nil {
