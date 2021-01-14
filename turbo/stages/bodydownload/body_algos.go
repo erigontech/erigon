@@ -235,6 +235,14 @@ func (bd *BodyDownload) FeedDeliveries() {
 	}
 }
 
+func (bd *BodyDownload) CloseStageData() {
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
+	if bd.blockChannel != nil {
+		close(bd.blockChannel)
+	}
+}
+
 func (bd *BodyDownload) PrepareStageData() chan *types.Block {
 	return bd.blockChannel
 }

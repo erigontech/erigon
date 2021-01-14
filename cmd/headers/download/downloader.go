@@ -420,7 +420,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_core.Inb
 	return &empty.Empty{}, nil
 }
 
-func (cs *ControlServerImpl) blockBodies(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
+func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	var request eth.BlockBodiesData
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode BlockBodies: %v", err)
@@ -461,7 +461,7 @@ func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *p
 	case proto_core.InboundMessageId_NewBlock:
 		return cs.newBlock(ctx, inreq)
 	case proto_core.InboundMessageId_BlockBodies:
-		return cs.blockBodies(ctx, inreq)
+		return cs.blockBodies(inreq)
 	default:
 		return nil, fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}
@@ -535,6 +535,7 @@ func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
 		}
 		select {
 		case <-ctx.Done():
+			cs.bd.CloseStageData()
 			return
 		case <-timer.C:
 			//log.Info("RequestQueueTime (bodies) ticked")
