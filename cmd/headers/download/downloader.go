@@ -527,7 +527,7 @@ func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
 		timer := cs.bd.CancelExpiredRequests(uint64(time.Now().Unix()))
 		req := cs.bd.RequestMoreBodies(db)
 		for req != nil && cs.sendBodyRequest(ctx, req) { // Don't keep producing requests and sending if there are no peers to accept it
-			timer = cs.bd.ApplyBodyRequest(uint64(time.Now().Unix()), 5 /*timeout*/, req)
+			timer = cs.bd.ApplyBodyRequest(uint64(time.Now().Unix()), 15 /*timeout*/, req)
 			req = cs.bd.RequestMoreBodies(db)
 		}
 		if req != nil {
@@ -537,9 +537,9 @@ func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			log.Info("RequestQueueTime (bodies) ticked")
+			//log.Info("RequestQueueTime (bodies) ticked")
 		case <-cs.requestWakeUpHeaders:
-			log.Info("bodyLoop woken up by the incoming request")
+			//log.Info("bodyLoop woken up by the incoming request")
 		}
 	}
 }
@@ -552,9 +552,9 @@ func (cs *ControlServerImpl) headerLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			log.Info("RequestQueueTimer (headers) ticked")
+			//log.Info("RequestQueueTimer (headers) ticked")
 		case <-cs.requestWakeUpBodies:
-			log.Info("headerLoop woken up by the incoming request")
+			//log.Info("headerLoop woken up by the incoming request")
 		}
 	}
 }

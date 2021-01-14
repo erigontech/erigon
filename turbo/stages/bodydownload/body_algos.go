@@ -5,7 +5,6 @@ import (
 	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"container/list"
-	"fmt"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -47,7 +46,7 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	for i := 0; i < len(bd.deliveries); i++ {
 		bd.deliveries[i] = nil
 	}
-	fmt.Printf("UpdateFromDB =====> Resetting required to range [%d - %d]\n", bodyProgress+1, headerProgress+1)
+	//fmt.Printf("UpdateFromDB =====> Resetting required to range [%d - %d]\n", bodyProgress+1, headerProgress+1)
 	bd.required.AddRange(bodyProgress+1, headerProgress+1)
 	bd.requestedLow = bodyProgress + 1
 	// Channel needs to be big enough to allow the producer to finish writing and unblock in any case
@@ -86,7 +85,7 @@ func (bd *BodyDownload) CancelExpiredRequests(currentTime uint64) *time.Timer {
 			item := peek.Value.(RequestQueueItem)
 			// Check if the blocks are still requested (outstanding, not delivered), and if yes, add the blocks back to required
 			if item.requested.Intersects(bd.requested) {
-				fmt.Printf("CancelExpiredRequests with item.requested.Minimum %d, bd.requested.Minimum %d\n", item.requested.Minimum(), bd.requested.Minimum())
+				//fmt.Printf("CancelExpiredRequests with item.requested.Minimum %d, bd.requested.Minimum %d\n", item.requested.Minimum(), bd.requested.Minimum())
 				item.requested.And(bd.requested)    // Compute the intersection (not delivered but timed out blocks) into item.requested
 				item.requested.AndNot(bd.delivered) // Remove delivered blocks
 				if !item.requested.IsEmpty() {
@@ -98,8 +97,8 @@ func (bd *BodyDownload) CancelExpiredRequests(currentTime uint64) *time.Timer {
 				}
 			}
 		}
-	} else {
-		fmt.Printf("=========> bd.requestQueue is empty\n")
+		//} else {
+		//	fmt.Printf("=========> bd.requestQueue is empty\n")
 	}
 	bd.resetRequestQueueTimer(prevTopTime, currentTime)
 	return bd.RequestQueueTimer
@@ -109,11 +108,11 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database) *BodyRequest {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 
-	if bd.required.IsEmpty() {
-		fmt.Printf("========> bd.required is empty\n")
-	} else {
-		fmt.Printf("==========> bd.required min %d, max %d\n", bd.required.Minimum(), bd.required.Maximum())
-	}
+	//if bd.required.IsEmpty() {
+	//	fmt.Printf("========> bd.required is empty\n")
+	//} else {
+	//	fmt.Printf("==========> bd.required min %d, max %d\n", bd.required.Minimum(), bd.required.Maximum())
+	//}
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]common.Hash, 0, BlockBufferSize)
@@ -129,9 +128,9 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database) *BodyRequest {
 		var hash common.Hash
 		var header *types.Header
 		var err error
-		if b < bd.requestedLow {
-			fmt.Printf("b=%d, bd.requestedLow=%d\n", b, bd.requestedLow)
-		}
+		//if b < bd.requestedLow {
+		//	fmt.Printf("b=%d, bd.requestedLow=%d\n", b, bd.requestedLow)
+		//}
 		if bd.deliveries[b-bd.requestedLow] != nil {
 			header = bd.deliveries[b-bd.requestedLow].Header()
 			hash = header.Hash()
@@ -148,10 +147,6 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database) *BodyRequest {
 					var doubleHash DoubleHash
 					copy(doubleHash[:], header.UncleHash.Bytes())
 					copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
-					if b1, ok := bd.requestedMap[doubleHash]; ok {
-						fmt.Printf("Found block %d on the place of %d, doubleHash %x\n", b1, b, doubleHash)
-						panic("")
-					}
 					bd.requestedMap[doubleHash] = b
 				}
 			}
@@ -210,9 +205,6 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 		bd.delivered.Add(blockNum)
 		bd.requested.Remove(blockNum)
 		bd.required.Remove(blockNum) // This is not usually required, but helps deal with the situations when old request is cancelled just before blocks delivered that contained in that request
-		if blockNum < bd.requestedLow {
-			fmt.Printf("blocknum=%d, bd.requestedLow=%d, uncleHash=%x, txHash=%x\n", blockNum, bd.requestedLow, uncleHash, txHash)
-		}
 		bd.deliveries[blockNum-bd.requestedLow] = bd.deliveries[blockNum-bd.requestedLow].WithBody(body.Transactions, body.Uncles)
 		delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
 		return blockNum, true
@@ -223,9 +215,9 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 func (bd *BodyDownload) FeedDeliveries() {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
-	if !bd.requested.IsEmpty() {
-		fmt.Printf("FeedDeliveries with bd.requested.Minimum %d\n", bd.requested.Minimum())
-	}
+	//if !bd.requested.IsEmpty() {
+	//	fmt.Printf("FeedDeliveries with bd.requested.Minimum %d\n", bd.requested.Minimum())
+	//}
 	var i uint64
 	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
 		bd.blockChannel <- bd.deliveries[i] // This is delivery
@@ -238,7 +230,7 @@ func (bd *BodyDownload) FeedDeliveries() {
 		for j := len(bd.deliveries) - int(i); j < len(bd.deliveries); j++ {
 			bd.deliveries[j] = nil
 		}
-		fmt.Printf("Delivered bodies for blocks [%d - %d]\n", bd.requestedLow, bd.requestedLow+i)
+		//fmt.Printf("Delivered bodies for blocks [%d - %d]\n", bd.requestedLow, bd.requestedLow+i)
 		bd.requestedLow += i
 	}
 }

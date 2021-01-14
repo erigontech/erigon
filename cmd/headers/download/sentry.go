@@ -640,7 +640,7 @@ func (ss *SentryServerImpl) getBlockBodies(inreq *proto_sentry.SendMessageByMinB
 		log.Debug("Could not find peer for request", "minBlock", inreq.MinBlock)
 		return &proto_sentry.SentPeers{}, nil
 	}
-	log.Info(fmt.Sprintf("Sending body req for %d bodies to peer %s\n", len(req), peerID))
+	//log.Info(fmt.Sprintf("Sending body req for %d bodies to peer %s\n", len(req), peerID))
 	rwRaw, _ := ss.peerRwMap.Load(peerID)
 	rw, _ := rwRaw.(p2p.MsgReadWriter)
 	if rw == nil {
