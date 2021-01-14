@@ -438,7 +438,7 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 		}
 	}
 	cs.bd.FeedDeliveries()
-	log.Info(fmt.Sprintf("BlockBodies{delivered=%s, unrequestedCount=%d}", sb.String(), unrequested))
+	//log.Info(fmt.Sprintf("BlockBodies{delivered=%s, unrequestedCount=%d}", sb.String(), unrequested))
 	return &empty.Empty{}, nil
 }
 
