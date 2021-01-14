@@ -845,7 +845,9 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 	defer hd.lock.Unlock()
 	if _, err := os.Stat(hd.filesDir); os.IsNotExist(err) {
 		log.Warn("Temp file directory does not exist, will be created", "path", hd.filesDir)
-		os.MkdirAll(hd.filesDir, os.ModePerm)
+		if err1 := os.MkdirAll(hd.filesDir, os.ModePerm); err1 != nil {
+			return false, fmt.Errorf("could not create temp directory: %w", err1)
+		}
 	}
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
