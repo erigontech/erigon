@@ -1543,18 +1543,3 @@ Date:   Sat Jan 16 06:04:38 2021 +0800
 
     les: don't drop sentTo for normal cases (#22048)
 
-commit 3944976a9adc376a9868ab41c7b4bc0b38507981
-Merge: d13c59fef c4deebbf1
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Fri Jan 15 12:54:34 2021 +0200
-
-    Merge pull request #22177 from karalabe/snapshot-storage-logs
-    
-    core/state/snapshot: add generation logs to storage too
-
-commit c4deebbf1e186e3b7e96c4e0ab395d3207cec55e
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Fri Jan 15 12:26:46 2021 +0200
-
-    core/state/snapshot: add generation logs to storage too
-
