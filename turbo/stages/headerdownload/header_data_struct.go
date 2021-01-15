@@ -220,8 +220,8 @@ func NewHeaderDownload(
 		hardTips:             make(map[common.Hash]struct{}),
 		tips:                 make(map[common.Hash]*Tip),
 		stageReadyCh:         make(chan struct{}),
+		RequestQueueTimer:    time.NewTimer(time.Hour),
 	}
-	hd.RequestQueueTimer = time.NewTimer(time.Hour)
 	return hd
 }
 

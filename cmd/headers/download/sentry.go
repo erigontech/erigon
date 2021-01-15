@@ -308,6 +308,19 @@ func runPeer(
 			log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}", peerID, hashesStr.String()))
 		case eth.BlockBodiesMsg:
 			log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peerID))
+			bytes := make([]byte, msg.Size)
+			_, err = io.ReadFull(msg.Payload, bytes)
+			if err != nil {
+				return fmt.Errorf("%s: reading msg into bytes: %v", peerID, err)
+			}
+			outreq := proto_core.InboundMessage{
+				PeerId: []byte(peerID),
+				Id:     proto_core.InboundMessageId_BlockBodies,
+				Data:   bytes,
+			}
+			if _, err = coreClient.ForwardInboundMessage(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				log.Error("Sending block bodies to core P2P failed", "error", err)
+			}
 		case eth.GetNodeDataMsg:
 			log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
@@ -428,10 +441,30 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, staticPeers []string, discovery bool, netRestrict string) error {
-	ctx := rootContext()
+func grpcControlClient(ctx context.Context, coreAddr string) (proto_core.ControlClient, error) {
+	// CREATING GRPC CLIENT CONNECTION
+	log.Info("Starting Control client", "connecting to core", coreAddr)
+	var dialOpts []grpc.DialOption
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Timeout: 10 * time.Minute,
+		}),
+	}
+
+	dialOpts = append(dialOpts, grpc.WithInsecure())
+
+	conn, err := grpc.DialContext(ctx, coreAddr, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating client connection to core P2P: %w", err)
+	}
+	return proto_core.NewControlClient(conn), nil
+}
+
+func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl, error) {
 	// STARTING GRPC SERVER
-	log.Info("Starting Sentry P2P server", "on", sentryAddr, "connecting to core", coreAddr)
+	log.Info("Starting Sentry P2P server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
 		Control: func(network, address string, _ syscall.RawConn) error {
 			log.Info("Sentry P2P received connection", "via", network, "from", address)
@@ -440,7 +473,7 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, sta
 	}
 	lis, err := listenConfig.Listen(ctx, "tcp", sentryAddr)
 	if err != nil {
-		return fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
+		return nil, fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
 	}
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
@@ -471,30 +504,19 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, sta
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
 	}
-
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Sentry P2P server fail", "err", err1)
 		}
 	}()
-	// CREATING GRPC CLIENT CONNECTION
-	var dialOpts []grpc.DialOption
-	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Timeout: 10 * time.Minute,
-		}),
-	}
+	return sentryServer, nil
+}
 
-	dialOpts = append(dialOpts, grpc.WithInsecure())
-
-	conn, err := grpc.DialContext(ctx, coreAddr, dialOpts...)
-	if err != nil {
-		return fmt.Errorf("creating client connection to core P2P: %w", err)
-	}
-	coreClient := proto_core.NewControlClient(conn)
-
+func p2pServer(ctx context.Context,
+	coreClient proto_core.ControlClient,
+	sentryServer *SentryServerImpl,
+	natSetting string, port int, staticPeers []string, discovery bool, netRestrict string,
+) (*p2p.Server, error) {
 	server, err := makeP2PServer(
 		ctx,
 		natSetting,
@@ -506,7 +528,7 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, sta
 		coreClient,
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	enodes := make([]*enode.Node, len(staticPeers))
@@ -521,9 +543,30 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, sta
 		server.NetRestrict = new(netutil.Netlist)
 		server.NetRestrict.Add(netRestrict)
 	}
+	return server, nil
+}
+
+// Sentry creates and runs standalone sentry
+func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, staticPeers []string, discovery bool, netRestrict string) error {
+	ctx := rootContext()
+
+	coreClient, err1 := grpcControlClient(ctx, coreAddr)
+	if err1 != nil {
+		return err1
+	}
+
+	sentryServer, err2 := grpcSentryServer(ctx, sentryAddr)
+	if err2 != nil {
+		return err2
+	}
+
+	server, err3 := p2pServer(ctx, coreClient, sentryServer, natSetting, port, staticPeers, discovery, netRestrict)
+	if err3 != nil {
+		return err3
+	}
 
 	// Add protocol
-	if err = server.Start(); err != nil {
+	if err := server.Start(); err != nil {
 		return fmt.Errorf("could not start server: %w", err)
 	}
 
@@ -543,7 +586,7 @@ func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.Pe
 	return nil, nil
 }
 
-func (ss *SentryServerImpl) findPeer(minBlock uint64, amount uint64) (string, bool) {
+func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, bool) {
 	// Choose a peer that we can send this request to
 	var peerID string
 	var found bool
@@ -554,7 +597,7 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64, amount uint64) (string, bo
 			timeRaw, _ := ss.peerTimeMap.Load(peerID)
 			t, _ := timeRaw.(int64)
 			// If request is large, we give 5 second pause to the peer before sending another request, unless it responded
-			if amount == 1 || t <= time.Now().Unix() {
+			if t <= time.Now().Unix() {
 				found = true
 				return false
 			}
@@ -569,7 +612,7 @@ func (ss *SentryServerImpl) getBlockHeaders(inreq *proto_sentry.SendMessageByMin
 	if err := rlp.DecodeBytes(inreq.Data.Data, &req); err != nil {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("parse request: %v", err)
 	}
-	peerID, found := ss.findPeer(inreq.MinBlock, req.Amount)
+	peerID, found := ss.findPeer(inreq.MinBlock)
 	if !found {
 		log.Debug("Could not find peer for request", "minBlock", inreq.MinBlock)
 		return &proto_sentry.SentPeers{}, nil
@@ -587,10 +630,35 @@ func (ss *SentryServerImpl) getBlockHeaders(inreq *proto_sentry.SendMessageByMin
 	return &proto_sentry.SentPeers{Peers: [][]byte{[]byte(peerID)}}, nil
 }
 
+func (ss *SentryServerImpl) getBlockBodies(inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
+	var req []common.Hash
+	if err := rlp.DecodeBytes(inreq.Data.Data, &req); err != nil {
+		return &proto_sentry.SentPeers{}, fmt.Errorf("parse request: %v", err)
+	}
+	peerID, found := ss.findPeer(inreq.MinBlock)
+	if !found {
+		log.Debug("Could not find peer for request", "minBlock", inreq.MinBlock)
+		return &proto_sentry.SentPeers{}, nil
+	}
+	//log.Info(fmt.Sprintf("Sending body req for %d bodies to peer %s\n", len(req), peerID))
+	rwRaw, _ := ss.peerRwMap.Load(peerID)
+	rw, _ := rwRaw.(p2p.MsgReadWriter)
+	if rw == nil {
+		return &proto_sentry.SentPeers{}, fmt.Errorf("find rw for peer %s", peerID)
+	}
+	if err := p2p.Send(rw, eth.GetBlockBodiesMsg, &req); err != nil {
+		return &proto_sentry.SentPeers{}, fmt.Errorf("send to peer %s: %v", peerID, err)
+	}
+	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)
+	return &proto_sentry.SentPeers{Peers: [][]byte{[]byte(peerID)}}, nil
+}
+
 func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	switch inreq.Data.Id {
 	case proto_sentry.OutboundMessageId_GetBlockHeaders:
 		return ss.getBlockHeaders(inreq)
+	case proto_sentry.OutboundMessageId_GetBlockBodies:
+		return ss.getBlockBodies(inreq)
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("not implemented for message Id: %s", inreq.Data.Id)
 	}

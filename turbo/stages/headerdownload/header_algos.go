@@ -833,12 +833,22 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) (
 		}
 		return nil
 	})
+	log.Info("Recovery from DB", "anchor == nil", anchor == nil)
+	if anchor != nil {
+		log.Info("Recovery from DB", "anchor.maxTipHeight", anchor.maxTipHeight, "anchor.blockHeight", anchor.blockHeight)
+	}
 	return anchor != nil && anchor.maxTipHeight > anchor.blockHeight, err
 }
 
 func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]struct{}) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	if _, err := os.Stat(hd.filesDir); os.IsNotExist(err) {
+		log.Warn("Temp file directory does not exist, will be created", "path", hd.filesDir)
+		if err1 := os.MkdirAll(hd.filesDir, os.ModePerm); err1 != nil {
+			return false, fmt.Errorf("could not create temp directory: %w", err1)
+		}
+	}
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
 		return false, err
