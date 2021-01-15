@@ -36,7 +36,7 @@ func TestTraceTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
 	}
-	api := NewPrivateDebugAPI(db)
+	api := NewPrivateDebugAPI(db, 0)
 	for _, tt := range debugTraceTransactionTests {
 		result, err1 := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &eth.TraceConfig{})
 		if err1 != nil {
@@ -60,7 +60,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
 	}
-	api := NewPrivateDebugAPI(db)
+	api := NewPrivateDebugAPI(db, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var norefunds bool = true
 		result, err1 := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &eth.TraceConfig{NoRefunds: &norefunds})
