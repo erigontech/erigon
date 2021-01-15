@@ -4,10 +4,10 @@ package core
 
 import (
 	context "context"
-	empty "github.com/golang/protobuf/ptypes/empty"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -18,8 +18,8 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ControlClient interface {
-	ForwardInboundMessage(ctx context.Context, in *InboundMessage, opts ...grpc.CallOption) (*empty.Empty, error)
-	GetStatus(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*StatusData, error)
+	ForwardInboundMessage(ctx context.Context, in *InboundMessage, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	GetStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*StatusData, error)
 }
 
 type controlClient struct {
@@ -30,8 +30,8 @@ func NewControlClient(cc grpc.ClientConnInterface) ControlClient {
 	return &controlClient{cc}
 }
 
-func (c *controlClient) ForwardInboundMessage(ctx context.Context, in *InboundMessage, opts ...grpc.CallOption) (*empty.Empty, error) {
-	out := new(empty.Empty)
+func (c *controlClient) ForwardInboundMessage(ctx context.Context, in *InboundMessage, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/control.Control/ForwardInboundMessage", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func (c *controlClient) ForwardInboundMessage(ctx context.Context, in *InboundMe
 	return out, nil
 }
 
-func (c *controlClient) GetStatus(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*StatusData, error) {
+func (c *controlClient) GetStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*StatusData, error) {
 	out := new(StatusData)
 	err := c.cc.Invoke(ctx, "/control.Control/GetStatus", in, out, opts...)
 	if err != nil {
@@ -52,8 +52,8 @@ func (c *controlClient) GetStatus(ctx context.Context, in *empty.Empty, opts ...
 // All implementations must embed UnimplementedControlServer
 // for forward compatibility
 type ControlServer interface {
-	ForwardInboundMessage(context.Context, *InboundMessage) (*empty.Empty, error)
-	GetStatus(context.Context, *empty.Empty) (*StatusData, error)
+	ForwardInboundMessage(context.Context, *InboundMessage) (*emptypb.Empty, error)
+	GetStatus(context.Context, *emptypb.Empty) (*StatusData, error)
 	mustEmbedUnimplementedControlServer()
 }
 
@@ -61,10 +61,10 @@ type ControlServer interface {
 type UnimplementedControlServer struct {
 }
 
-func (UnimplementedControlServer) ForwardInboundMessage(context.Context, *InboundMessage) (*empty.Empty, error) {
+func (UnimplementedControlServer) ForwardInboundMessage(context.Context, *InboundMessage) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ForwardInboundMessage not implemented")
 }
-func (UnimplementedControlServer) GetStatus(context.Context, *empty.Empty) (*StatusData, error) {
+func (UnimplementedControlServer) GetStatus(context.Context, *emptypb.Empty) (*StatusData, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetStatus not implemented")
 }
 func (UnimplementedControlServer) mustEmbedUnimplementedControlServer() {}
@@ -99,7 +99,7 @@ func _Control_ForwardInboundMessage_Handler(srv interface{}, ctx context.Context
 }
 
 func _Control_GetStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(empty.Empty)
+	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func _Control_GetStatus_Handler(srv interface{}, ctx context.Context, dec func(i
 		FullMethod: "/control.Control/GetStatus",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ControlServer).GetStatus(ctx, req.(*empty.Empty))
+		return srv.(ControlServer).GetStatus(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }

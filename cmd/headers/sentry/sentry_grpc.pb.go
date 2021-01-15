@@ -4,10 +4,10 @@ package sentry
 
 import (
 	context "context"
-	empty "github.com/golang/protobuf/ptypes/empty"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -18,7 +18,7 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SentryClient interface {
-	PenalizePeer(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*empty.Empty, error)
+	PenalizePeer(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	SendMessageByMinBlock(ctx context.Context, in *SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*SentPeers, error)
 	SendMessageById(ctx context.Context, in *SendMessageByIdRequest, opts ...grpc.CallOption) (*SentPeers, error)
 	SendMessageToRandomPeers(ctx context.Context, in *SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*SentPeers, error)
@@ -33,8 +33,8 @@ func NewSentryClient(cc grpc.ClientConnInterface) SentryClient {
 	return &sentryClient{cc}
 }
 
-func (c *sentryClient) PenalizePeer(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
-	out := new(empty.Empty)
+func (c *sentryClient) PenalizePeer(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/sentry.Sentry/PenalizePeer", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func (c *sentryClient) SendMessageToAll(ctx context.Context, in *OutboundMessage
 // All implementations must embed UnimplementedSentryServer
 // for forward compatibility
 type SentryServer interface {
-	PenalizePeer(context.Context, *PenalizePeerRequest) (*empty.Empty, error)
+	PenalizePeer(context.Context, *PenalizePeerRequest) (*emptypb.Empty, error)
 	SendMessageByMinBlock(context.Context, *SendMessageByMinBlockRequest) (*SentPeers, error)
 	SendMessageById(context.Context, *SendMessageByIdRequest) (*SentPeers, error)
 	SendMessageToRandomPeers(context.Context, *SendMessageToRandomPeersRequest) (*SentPeers, error)
@@ -94,7 +94,7 @@ type SentryServer interface {
 type UnimplementedSentryServer struct {
 }
 
-func (UnimplementedSentryServer) PenalizePeer(context.Context, *PenalizePeerRequest) (*empty.Empty, error) {
+func (UnimplementedSentryServer) PenalizePeer(context.Context, *PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PenalizePeer not implemented")
 }
 func (UnimplementedSentryServer) SendMessageByMinBlock(context.Context, *SendMessageByMinBlockRequest) (*SentPeers, error) {
