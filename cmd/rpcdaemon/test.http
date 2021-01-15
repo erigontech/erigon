@@ -11,6 +11,13 @@ Content-Type: application/json
 POST localhost:8545
 Content-Type: application/json
 
+{"jsonrpc":"2.0","method":"eth_getBalance","params": ["0xfffa4763f94f7ad191b366a343092a5d1a47ed08", "0xde84"],"id":1}
+
+###
+
+POST localhost:8545
+Content-Type: application/json
+
 { "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x1e8480", "", 256, false, false, false], "id":1}
 
 ###
