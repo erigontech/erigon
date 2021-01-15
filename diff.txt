@@ -1558,18 +1558,3 @@ Date:   Fri Jan 15 12:26:46 2021 +0200
 
     core/state/snapshot: add generation logs to storage too
 
-commit d13c59fef0926af0ef0cff0a2e793f95d46442f0
-Merge: 96157a897 12969084d
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Jan 14 12:19:57 2021 +0200
-
-    Merge pull request #22169 from karalabe/faucet-regen
-    
-    cmd/faucet: update the embedded website asset
-
-commit 12969084d17878ccb7978f24574bafacfe99f4dd
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Jan 14 12:10:52 2021 +0200
-
-    cmd/faucet: update the embedded website asset
-
