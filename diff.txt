@@ -1531,15 +1531,3 @@ Date:   Sun Jan 17 02:06:18 2021 +0800
        is successful or not. the proving failure can happen e.g. request the proving for a
        non-included entry in helper trie (unstable header).
 
-commit c76573a97b15e28c0d5c783cab3a62e9203db1c9
-Author: Dan DeGreef <dan.degreef@gmail.com>
-Date:   Sat Jan 16 11:15:18 2021 -0600
-
-    eth/protocols/eth: fix slice resize flaw (#22181)
-
-commit 8d62ee65b2d3100da0292232f8169282237f5487
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Sat Jan 16 06:04:38 2021 +0800
-
-    les: don't drop sentTo for normal cases (#22048)
-
