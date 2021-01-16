@@ -106,7 +106,7 @@ func (g *RequestGenerator) traceCall(from common.Address, to *common.Address, ga
 	if len(data) > 0 {
 		fmt.Fprintf(&sb, `,"data":"%s"`, data)
 	}
-	fmt.Fprintf(&sb, `},["trace"],"0x%x"], "id":%d}`, bn, g.reqID)
+	fmt.Fprintf(&sb, `},["trace", "stateDiff"],"0x%x"], "id":%d}`, bn, g.reqID)
 	return sb.String()
 }
 

@@ -192,6 +192,9 @@ func compareTraceCalls(trace, traceg *TraceCall) bool {
 			}
 		}
 	}
+	if len(r.StateDiff) != len(rg.StateDiff) {
+		fmt.Printf("stateDiffs have different lengths: %d / %d\n", len(r.StateDiff), len(rg.StateDiff))
+	}
 	return true
 }
 
@@ -512,6 +515,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 }
 
 func post(client *http.Client, url, request string, response interface{}) error {
+	fmt.Printf("Request=%s\n", request)
 	log.Info("Getting", "url", url, "request", request)
 	start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))

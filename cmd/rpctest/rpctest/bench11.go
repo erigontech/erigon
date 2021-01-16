@@ -4,7 +4,17 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
+
+// Transactions on which OpenEthereum reports incorrect traces
+var wrongTxs = []string{
+	"0xfbd66bcbc4cb374946f350ca6835571b09f68c5f635ff9fc533c3fa2ac0d19cb", // Block 9000004
+	"0x928b01dd36bcf142bf0d4b1e75239bec8ee68a68aa3739e4f9a1b4a17785651b", // Block 9000010
+	"0x45b60cfbcad50b24b313a40644061f36e04b4baf516a9db1a8a386863eed6070", // Block 9000023
+	"0x9d2cb4ad7851bd745a952d9e0d42e1c3d6ee1d37ce37eb05863bdce82016078b", // Block 9000027
+}
 
 // bench1 compares response of TurboGeth with Geth
 // but also can be used for comparing RPCDaemon with Geth
@@ -20,6 +30,11 @@ func Bench11(tgURL, oeURL string, needCompare bool, blockNum uint64) {
 	var res CallResult
 	reqGen := &RequestGenerator{
 		client: client,
+	}
+
+	skipTxs := make(map[common.Hash]struct{})
+	for _, txHash := range wrongTxs {
+		skipTxs[common.HexToHash(txHash)] = struct{}{}
 	}
 
 	reqGen.reqID++
@@ -68,6 +83,9 @@ func Bench11(tgURL, oeURL string, needCompare bool, blockNum uint64) {
 		}
 
 		for _, tx := range b.Result.Transactions {
+			if _, skip := skipTxs[common.HexToHash(tx.Hash)]; skip {
+				continue
+			}
 			reqGen.reqID++
 
 			var trace TraceCall

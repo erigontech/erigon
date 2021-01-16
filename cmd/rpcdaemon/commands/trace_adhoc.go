@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -14,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -24,12 +26,15 @@ import (
 )
 
 const (
-	CALL         = "call"
-	CALLCODE     = "callcode"
-	DELEGATECALL = "delegatecall"
-	STATICCALL   = "staticcall"
-	CREATE       = "create"
-	SUICIDE      = "suicide"
+	CALL               = "call"
+	CALLCODE           = "callcode"
+	DELEGATECALL       = "delegatecall"
+	STATICCALL         = "staticcall"
+	CREATE             = "create"
+	SUICIDE            = "suicide"
+	TraceTypeTrace     = "trace"
+	TraceTypeStateDiff = "stateDiff"
+	TraceTypeVmTrace   = "vmTrace"
 )
 
 // TraceCallParam (see SendTxArgs -- this allows optional prams plus don't use MixedcaseAddress
@@ -47,14 +52,38 @@ type TraceCallParams []TraceCallParam
 
 // TraceCallResult is the response to `trace_call` method
 type TraceCallResult struct {
-	Output    hexutil.Bytes       `json:"output"`
-	StateDiff *TraceCallStateDiff `json:"stateDiff"`
-	Trace     []*ParityTrace      `json:"trace"`
-	VmTrace   *TraceCallVmTrace   `json:"vmTrace"`
+	Output    hexutil.Bytes                        `json:"output"`
+	StateDiff map[common.Address]*StateDiffAccount `json:"stateDiff"`
+	Trace     []*ParityTrace                       `json:"trace"`
+	VmTrace   *TraceCallVmTrace                    `json:"vmTrace"`
 }
 
-// TraceCallStateDiff is the part of `trace_call` response that is under "stateDiff" tag
-type TraceCallStateDiff struct {
+// StateDiffAccount is the part of `trace_call` response that is under "stateDiff" tag
+type StateDiffAccount struct {
+	Balance interface{}                                  `json:"balance"` // Can be either string "=" or mapping "*" => {"from": "hex", "to": "hex"}
+	Code    interface{}                                  `json:"code"`
+	Nonce   interface{}                                  `json:"nonce"`
+	Storage map[common.Hash]map[string]*StateDiffStorage `json:"storage"`
+}
+
+type StateDiffBalance struct {
+	From *hexutil.Big `json:"from"`
+	To   *hexutil.Big `json:"to"`
+}
+
+type StateDiffCode struct {
+	From hexutil.Bytes `json:"from"`
+	To   hexutil.Bytes `json:"to"`
+}
+
+type StateDiffNonce struct {
+	From hexutil.Uint64 `json:"from"`
+	To   hexutil.Uint64 `json:"to"`
+}
+
+type StateDiffStorage struct {
+	From common.Hash `json:"from"`
+	To   common.Hash `json:"to"`
 }
 
 // TraceCallVmTrace is the part of `trace_call` response that is under "vmTrace" tag
@@ -182,9 +211,6 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		return nil
 	}
 	fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d, err %v\n", depth, output, gasUsed, err)
-	if depth == 0 {
-		ot.r.Output = common.CopyBytes(output)
-	}
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	if err != nil {
 		switch err {
@@ -258,6 +284,99 @@ func (ot *OeTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
+// Implements core/state/StateWriter to provide state diffs
+type StateDiff struct {
+	sdMap map[common.Address]*StateDiffAccount
+}
+
+func (sd *StateDiff) InsertEqualSigns() {
+	for _, accountDiff := range sd.sdMap {
+		if accountDiff.Balance == nil {
+			accountDiff.Balance = "="
+		}
+		if accountDiff.Nonce == nil {
+			accountDiff.Nonce = "="
+		}
+		if accountDiff.Code == nil {
+			accountDiff.Code = "="
+		}
+	}
+}
+
+func (sd *StateDiff) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
+	fromBalance := big.NewInt(0)
+	toBalance := big.NewInt(0)
+	fromNonce := uint64(0)
+	toNonce := uint64(0)
+	if original != nil {
+		fromBalance = original.Balance.ToBig()
+		fromNonce = original.Nonce
+	}
+	if account != nil {
+		toBalance = account.Balance.ToBig()
+		toNonce = account.Nonce
+	}
+	if fromBalance.Cmp(toBalance) == 0 && fromNonce == toNonce {
+		return nil
+	}
+	accountDiff := sd.sdMap[address]
+	if accountDiff == nil {
+		accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]*StateDiffStorage)}
+		sd.sdMap[address] = accountDiff
+	}
+	if fromBalance.Cmp(toBalance) != 0 {
+		m := make(map[string]*StateDiffBalance)
+		m["*"] = &StateDiffBalance{From: (*hexutil.Big)(fromBalance), To: (*hexutil.Big)(toBalance)}
+		accountDiff.Balance = m
+	}
+	if fromNonce != toNonce {
+		m := make(map[string]*StateDiffNonce)
+		m["*"] = &StateDiffNonce{From: hexutil.Uint64(fromNonce), To: hexutil.Uint64(toNonce)}
+		accountDiff.Nonce = m
+	}
+	return nil
+}
+
+func (sd *StateDiff) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	var fromCode []byte
+	var toCode []byte
+	if len(code) != 0 {
+		toCode = code
+	}
+	if !bytes.Equal(fromCode, toCode) {
+		accountDiff := sd.sdMap[address]
+		if accountDiff == nil {
+			accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]*StateDiffStorage)}
+			sd.sdMap[address] = accountDiff
+		}
+		accountDiff.Code = &StateDiffCode{From: fromCode, To: toCode}
+	}
+	return nil
+}
+
+func (sd *StateDiff) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
+	return nil
+}
+
+func (sd *StateDiff) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	if *original == *value {
+		return nil
+	}
+	accountDiff := sd.sdMap[address]
+	if accountDiff == nil {
+		accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]*StateDiffStorage)}
+		sd.sdMap[address] = accountDiff
+	}
+	m := make(map[string]*StateDiffStorage)
+	m["*"] = &StateDiffStorage{From: common.BytesToHash(original.Bytes()), To: common.BytesToHash(value.Bytes())}
+	accountDiff.Storage[*key] = m
+	return nil
+}
+
+func (sd *StateDiff) CreateContract(address common.Address) error {
+	return nil
+}
+
 const callTimeout = 5 * time.Minute
 
 // Call implements trace_call.
@@ -307,16 +426,32 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
+	traceResult := &TraceCallResult{}
+	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
+	for _, traceType := range traceTypes {
+		switch traceType {
+		case TraceTypeTrace:
+			traceTypeTrace = true
+		case TraceTypeStateDiff:
+			traceTypeStateDiff = true
+		case TraceTypeVmTrace:
+			traceTypeVmTrace = true
+		default:
+			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
+		}
+	}
 	var ot OeTracer
-	ot.r = &TraceCallResult{}
-	ot.traceAddr = []int{}
+	if traceTypeTrace {
+		ot.r = traceResult
+		ot.traceAddr = []int{}
+	}
 
 	// Get a new instance of the EVM.
 	msg := args.ToMessage(api.gasCap)
 
 	evmCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
 
-	evm := vm.NewEVM(evmCtx, state, chainConfig, vm.Config{Debug: true, Tracer: &ot})
+	evm := vm.NewEVM(evmCtx, state, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
@@ -326,9 +461,23 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}()
 
 	gp := new(core.GasPool).AddGas(msg.Gas())
-	_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */)
+	var execResult *core.ExecutionResult
+	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */)
 	if err != nil {
 		return nil, err
+	}
+	traceResult.Output = execResult.ReturnData
+	if traceTypeStateDiff {
+		sdMap := make(map[common.Address]*StateDiffAccount)
+		traceResult.StateDiff = sdMap
+		sd := &StateDiff{sdMap: sdMap}
+		if err = state.CommitBlock(ctx, sd); err != nil {
+			return nil, fmt.Errorf("producing stateDiffs: %w", err)
+		}
+		sd.InsertEqualSigns()
+	}
+	if traceTypeVmTrace {
+
 	}
 
 	// If the timer caused an abort, return an appropriate error message
@@ -336,7 +485,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
 	}
 
-	return ot.r, nil
+	return traceResult, nil
 }
 
 // TODO(tjayrush) - try to use a concrete type here

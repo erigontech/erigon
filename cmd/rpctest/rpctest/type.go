@@ -85,8 +85,9 @@ type TraceCall struct {
 }
 
 type TraceCallResult struct {
-	Output hexutil.Bytes    `json:"output"`
-	Trace  []TraceCallTrace `json:"trace"`
+	Output    hexutil.Bytes                         `json:"output"`
+	Trace     []TraceCallTrace                      `json:"trace"`
+	StateDiff map[common.Address]TraceCallStateDiff `json:"stateDiff"`
 }
 
 type TraceCallTrace struct {
@@ -117,6 +118,18 @@ type TraceCallTraceResult struct {
 	Output  hexutil.Bytes  `json:"output"`
 	Address common.Address `json:"address"`
 	Code    hexutil.Bytes  `json:"code"`
+}
+
+type TraceCallStateDiff struct {
+	Balance interface{}                                          `json:"balance"`
+	Nonce   interface{}                                          `json:"nonce"`
+	Code    interface{}                                          `json:"code"`
+	Storage map[common.Hash]map[string]TraceCallStateDiffStorage `json:"storage"`
+}
+
+type TraceCallStateDiffStorage struct {
+	From common.Hash `json:"from"`
+	To   common.Hash `json:"to"`
 }
 
 type DebugModifiedAccounts struct {
