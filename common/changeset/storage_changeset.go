@@ -33,10 +33,6 @@ func EncodeStorage(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error
 
 type StorageChangeSet struct{ c ethdb.CursorDupSort }
 
-func (b StorageChangeSet) WalkReverse(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
-	return walkReverse(b.c, from, to, common.HashLength, f)
-}
-
 func (b StorageChangeSet) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
 	return walk(b.c, from, to, common.HashLength, f)
 }
@@ -66,10 +62,6 @@ func EncodeStoragePlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error) 
 }
 
 type StorageChangeSetPlain struct{ c ethdb.CursorDupSort }
-
-func (b StorageChangeSetPlain) WalkReverse(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
-	return walkReverse(b.c, from, to, common.AddressLength, f)
-}
 
 func (b StorageChangeSetPlain) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
 	return walk(b.c, from, to, common.AddressLength, f)

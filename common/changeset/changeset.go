@@ -12,13 +12,7 @@ import (
 )
 
 type Walker interface {
-	Walk(func(k, v []byte) error) error
-	Find(k []byte) ([]byte, error)
-}
-
-type Walker2 interface {
 	Walk(from, to uint64, f func(blockNumber uint64, k, v []byte) error) error
-	WalkReverse(from, to uint64, f func(blockNumber uint64, k, v []byte) error) error
 	Find(blockNumber uint64, k []byte) ([]byte, error)
 }
 
@@ -182,7 +176,7 @@ func Truncate(tx ethdb.Tx, from uint64) error {
 
 var Mapper = map[string]struct {
 	IndexBucket   string
-	WalkerAdapter func(cursor ethdb.CursorDupSort) Walker2
+	WalkerAdapter func(cursor ethdb.CursorDupSort) Walker
 	KeySize       int
 	Template      string
 	New           func() *ChangeSet
@@ -191,7 +185,7 @@ var Mapper = map[string]struct {
 }{
 	dbutils.AccountChangeSetBucket: {
 		IndexBucket: dbutils.AccountsHistoryBucket,
-		WalkerAdapter: func(c ethdb.CursorDupSort) Walker2 {
+		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
 			return AccountChangeSet{c: c}
 		},
 		KeySize:  common.HashLength,
@@ -202,7 +196,7 @@ var Mapper = map[string]struct {
 	},
 	dbutils.StorageChangeSetBucket: {
 		IndexBucket: dbutils.StorageHistoryBucket,
-		WalkerAdapter: func(c ethdb.CursorDupSort) Walker2 {
+		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
 			return StorageChangeSet{c: c}
 		},
 		KeySize:  common.HashLength,
@@ -213,7 +207,7 @@ var Mapper = map[string]struct {
 	},
 	dbutils.PlainAccountChangeSetBucket: {
 		IndexBucket: dbutils.AccountsHistoryBucket,
-		WalkerAdapter: func(c ethdb.CursorDupSort) Walker2 {
+		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
 			return AccountChangeSetPlain{c: c}
 		},
 		KeySize:  common.AddressLength,
@@ -224,7 +218,7 @@ var Mapper = map[string]struct {
 	},
 	dbutils.PlainStorageChangeSetBucket: {
 		IndexBucket: dbutils.StorageHistoryBucket,
-		WalkerAdapter: func(c ethdb.CursorDupSort) Walker2 {
+		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
 			return StorageChangeSetPlain{c: c}
 		},
 		KeySize:  common.AddressLength,

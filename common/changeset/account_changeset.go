@@ -24,10 +24,6 @@ func EncodeAccounts(blockN uint64, s *ChangeSet, f func(k, v []byte) error) erro
 
 type AccountChangeSet struct{ c ethdb.CursorDupSort }
 
-func (b AccountChangeSet) WalkReverse(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
-	return walkReverse(b.c, from, to, common.HashLength, f)
-}
-
 func (b AccountChangeSet) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
 	return walk(b.c, from, to, common.HashLength, f)
 }
@@ -50,10 +46,6 @@ func EncodeAccountsPlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error)
 }
 
 type AccountChangeSetPlain struct{ c ethdb.CursorDupSort }
-
-func (b AccountChangeSetPlain) WalkReverse(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
-	return walkReverse(b.c, from, to, common.AddressLength, f)
-}
 
 func (b AccountChangeSetPlain) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
 	return walk(b.c, from, to, common.AddressLength, f)
