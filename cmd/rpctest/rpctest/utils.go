@@ -110,16 +110,16 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 		if errg != nil {
 			return fmt.Errorf("convering g val to object at prefix %s: %w", prefix, errg)
 		}
-		objg.Visit(func(key []byte, vg *fastjson.Value) {
+		objg.Visit(func(key []byte, vg1 *fastjson.Value) {
 			if err != nil {
 				return
 			}
-			v := obj.Get(string(key))
-			if v == nil && vg.Type() != fastjson.TypeNull {
+			v1 := obj.Get(string(key))
+			if v1 == nil && vg1.Type() != fastjson.TypeNull {
 				err = fmt.Errorf("tg missing value at prefix: %s", prefix+"."+string(key))
 				return
 			}
-			if e := compareJsonValues(prefix+"."+string(key), v, vg); e != nil {
+			if e := compareJsonValues(prefix+"."+string(key), v1, vg1); e != nil {
 				err = e
 			}
 		})
@@ -127,11 +127,11 @@ func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
 			return err
 		}
 		// Finding keys that are present in TG but missing in G
-		obj.Visit(func(key []byte, v *fastjson.Value) {
+		obj.Visit(func(key []byte, v1 *fastjson.Value) {
 			if err != nil {
 				return
 			}
-			if objg.Get(string(key)) == nil && v.Type() != fastjson.TypeNull {
+			if objg.Get(string(key)) == nil && v1.Type() != fastjson.TypeNull {
 				err = fmt.Errorf("g missing value at prefix: %s", prefix+"."+string(key))
 				return
 			}
