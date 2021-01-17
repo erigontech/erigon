@@ -535,7 +535,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sd.CompareStates(initialIbs, ibs)
 	}
 	if traceTypeVmTrace {
-
+		return nil, fmt.Errorf("vmTrace not implemented yet")
 	}
 
 	// If the timer caused an abort, return an appropriate error message

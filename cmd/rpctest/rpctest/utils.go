@@ -530,7 +530,7 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 		return nil, nil, fmt.Errorf("status %s", r.Status)
 	}
 	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r.Body); err != nil {
+	if _, err = buf.ReadFrom(r.Body); err != nil {
 		return nil, nil, fmt.Errorf("reading http response: %w", err)
 	}
 	var p fastjson.Parser
