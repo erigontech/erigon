@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/valyala/fastjson"
 )
 
 type CallResult struct {
@@ -17,6 +18,8 @@ type CallResult struct {
 	RequestID   int
 	Method      string
 	RequestBody string
+	Response    []byte
+	Result      *fastjson.Value
 	Err         error
 }
 type RequestGenerator struct {
@@ -144,10 +147,34 @@ func (g *RequestGenerator) call(target string, method, body string, response int
 		Err:         err,
 	}
 }
+
+func (g *RequestGenerator) call2(target string, method, body string) CallResult {
+	start := time.Now()
+	response, val, err := post2(g.client, routes[target], body)
+	return CallResult{
+		RequestBody: body,
+		Target:      target,
+		Took:        time.Since(start),
+		RequestID:   g.reqID,
+		Method:      method,
+		Response:    response,
+		Result:      val,
+		Err:         err,
+	}
+}
+
 func (g *RequestGenerator) Geth(method, body string, response interface{}) CallResult {
 	return g.call(Geth, method, body, response)
 }
 
 func (g *RequestGenerator) TurboGeth(method, body string, response interface{}) CallResult {
 	return g.call(TurboGeth, method, body, response)
+}
+
+func (g *RequestGenerator) Geth2(method, body string) CallResult {
+	return g.call2(Geth, method, body)
+}
+
+func (g *RequestGenerator) TurboGeth2(method, body string) CallResult {
+	return g.call2(TurboGeth, method, body)
 }

@@ -60,10 +60,10 @@ type TraceCallResult struct {
 
 // StateDiffAccount is the part of `trace_call` response that is under "stateDiff" tag
 type StateDiffAccount struct {
-	Balance interface{}                                  `json:"balance"` // Can be either string "=" or mapping "*" => {"from": "hex", "to": "hex"}
-	Code    interface{}                                  `json:"code"`
-	Nonce   interface{}                                  `json:"nonce"`
-	Storage map[common.Hash]map[string]*StateDiffStorage `json:"storage"`
+	Balance interface{}                            `json:"balance"` // Can be either string "=" or mapping "*" => {"from": "hex", "to": "hex"}
+	Code    interface{}                            `json:"code"`
+	Nonce   interface{}                            `json:"nonce"`
+	Storage map[common.Hash]map[string]interface{} `json:"storage"`
 }
 
 type StateDiffBalance struct {
@@ -145,14 +145,16 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	if gas > 500000000 {
 		gas = 500000001 - (0x8000000000000000 - gas)
 	}
-	fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d\n", depth, from, to, create, input, gas, value)
+	//fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d\n", depth, from, to, create, input, gas, value)
 	trace := &ParityTrace{}
-	trace.Result = &TraceResult{}
 	if create {
+		trResult := &CreateTraceResult{}
 		trace.Type = CREATE
-		trace.Result.Address = new(common.Address)
-		copy(trace.Result.Address[:], to.Bytes())
+		trResult.Address = new(common.Address)
+		copy(trResult.Address[:], to.Bytes())
+		trace.Result = trResult
 	} else {
+		trace.Result = &TraceResult{}
 		trace.Type = CALL
 	}
 	if depth > 0 {
@@ -210,7 +212,10 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		ot.precompile = false
 		return nil
 	}
-	fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d, err %v\n", depth, output, gasUsed, err)
+	//fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d, err %v\n", depth, output, gasUsed, err)
+	if depth == 0 {
+		ot.r.Output = common.CopyBytes(output)
+	}
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	if err != nil {
 		switch err {
@@ -235,13 +240,19 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		if len(output) > 0 {
 			switch topTrace.Type {
 			case CALL:
-				topTrace.Result.Output = common.CopyBytes(output)
+				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
 			case CREATE:
-				topTrace.Result.Code = common.CopyBytes(output)
+				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
 			}
 		}
-		topTrace.Result.GasUsed = new(hexutil.Big)
-		topTrace.Result.GasUsed.ToInt().SetUint64(gasUsed)
+		switch topTrace.Type {
+		case CALL:
+			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
+			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+		case CREATE:
+			topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
+			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
 	if depth > 0 {
@@ -255,7 +266,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 }
 
 func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rst *stack.ReturnStack, contract *vm.Contract, opDepth int, err error) error {
-	fmt.Printf("CaptureFault depth %d\n", opDepth)
+	//fmt.Printf("CaptureFault depth %d\n", opDepth)
 	return nil
 }
 
@@ -289,72 +300,24 @@ type StateDiff struct {
 	sdMap map[common.Address]*StateDiffAccount
 }
 
-func (sd *StateDiff) InsertEqualSigns() {
-	for _, accountDiff := range sd.sdMap {
-		if accountDiff.Balance == nil {
-			accountDiff.Balance = "="
-		}
-		if accountDiff.Nonce == nil {
-			accountDiff.Nonce = "="
-		}
-		if accountDiff.Code == nil {
-			accountDiff.Code = "="
-		}
-	}
-}
-
 func (sd *StateDiff) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	fromBalance := big.NewInt(0)
-	toBalance := big.NewInt(0)
-	fromNonce := uint64(0)
-	toNonce := uint64(0)
-	if original != nil {
-		fromBalance = original.Balance.ToBig()
-		fromNonce = original.Nonce
-	}
-	if account != nil {
-		toBalance = account.Balance.ToBig()
-		toNonce = account.Nonce
-	}
-	if fromBalance.Cmp(toBalance) == 0 && fromNonce == toNonce {
-		return nil
-	}
-	accountDiff := sd.sdMap[address]
-	if accountDiff == nil {
-		accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]*StateDiffStorage)}
-		sd.sdMap[address] = accountDiff
-	}
-	if fromBalance.Cmp(toBalance) != 0 {
-		m := make(map[string]*StateDiffBalance)
-		m["*"] = &StateDiffBalance{From: (*hexutil.Big)(fromBalance), To: (*hexutil.Big)(toBalance)}
-		accountDiff.Balance = m
-	}
-	if fromNonce != toNonce {
-		m := make(map[string]*StateDiffNonce)
-		m["*"] = &StateDiffNonce{From: hexutil.Uint64(fromNonce), To: hexutil.Uint64(toNonce)}
-		accountDiff.Nonce = m
+	if _, ok := sd.sdMap[address]; !ok {
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
 	}
 	return nil
 }
 
 func (sd *StateDiff) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	var fromCode []byte
-	var toCode []byte
-	if len(code) != 0 {
-		toCode = code
-	}
-	if !bytes.Equal(fromCode, toCode) {
-		accountDiff := sd.sdMap[address]
-		if accountDiff == nil {
-			accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]*StateDiffStorage)}
-			sd.sdMap[address] = accountDiff
-		}
-		accountDiff.Code = &StateDiffCode{From: fromCode, To: toCode}
+	if _, ok := sd.sdMap[address]; !ok {
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
 	}
 	return nil
 }
 
 func (sd *StateDiff) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
+	if _, ok := sd.sdMap[address]; !ok {
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+	}
 	return nil
 }
 
@@ -364,17 +327,110 @@ func (sd *StateDiff) WriteAccountStorage(ctx context.Context, address common.Add
 	}
 	accountDiff := sd.sdMap[address]
 	if accountDiff == nil {
-		accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]*StateDiffStorage)}
+		accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
 		sd.sdMap[address] = accountDiff
 	}
-	m := make(map[string]*StateDiffStorage)
+	m := make(map[string]interface{})
 	m["*"] = &StateDiffStorage{From: common.BytesToHash(original.Bytes()), To: common.BytesToHash(value.Bytes())}
 	accountDiff.Storage[*key] = m
 	return nil
 }
 
 func (sd *StateDiff) CreateContract(address common.Address) error {
+	if _, ok := sd.sdMap[address]; !ok {
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+	}
 	return nil
+}
+
+// CompareStates uses the addresses accumulated in the sdMap and compares balances, nonces, and codes of the accounts, and fills the rest of the sdMap
+func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
+	var toRemove []common.Address
+	for addr, accountDiff := range sd.sdMap {
+		initialExist := initialIbs.Exist(addr)
+		exist := ibs.Exist(addr)
+		if initialExist {
+			if exist {
+				var allEqual bool = len(accountDiff.Storage) == 0
+				fromBalance := initialIbs.GetBalance(addr).ToBig()
+				toBalance := ibs.GetBalance(addr).ToBig()
+				if fromBalance.Cmp(toBalance) == 0 {
+					accountDiff.Balance = "="
+				} else {
+					m := make(map[string]*StateDiffBalance)
+					m["*"] = &StateDiffBalance{From: (*hexutil.Big)(fromBalance), To: (*hexutil.Big)(toBalance)}
+					accountDiff.Balance = m
+					allEqual = false
+				}
+				fromCode := initialIbs.GetCode(addr)
+				toCode := ibs.GetCode(addr)
+				if bytes.Equal(fromCode, toCode) {
+					accountDiff.Code = "="
+				} else {
+					m := make(map[string]*StateDiffCode)
+					m["*"] = &StateDiffCode{From: fromCode, To: toCode}
+					accountDiff.Code = m
+					allEqual = false
+				}
+				fromNonce := initialIbs.GetNonce(addr)
+				toNonce := ibs.GetNonce(addr)
+				if fromNonce == toNonce {
+					accountDiff.Nonce = "="
+				} else {
+					m := make(map[string]*StateDiffNonce)
+					m["*"] = &StateDiffNonce{From: hexutil.Uint64(fromNonce), To: hexutil.Uint64(toNonce)}
+					accountDiff.Nonce = m
+					allEqual = false
+				}
+				if allEqual {
+					toRemove = append(toRemove, addr)
+				}
+			} else {
+				{
+					m := make(map[string]*hexutil.Big)
+					m["-"] = (*hexutil.Big)(initialIbs.GetBalance(addr).ToBig())
+					accountDiff.Balance = m
+				}
+				{
+					m := make(map[string]hexutil.Bytes)
+					m["-"] = initialIbs.GetCode(addr)
+					accountDiff.Code = m
+				}
+				{
+					m := make(map[string]hexutil.Uint64)
+					m["-"] = hexutil.Uint64(initialIbs.GetNonce(addr))
+					accountDiff.Nonce = m
+				}
+			}
+		} else if exist {
+			{
+				m := make(map[string]*hexutil.Big)
+				m["+"] = (*hexutil.Big)(ibs.GetBalance(addr).ToBig())
+				accountDiff.Balance = m
+			}
+			{
+				m := make(map[string]hexutil.Bytes)
+				m["+"] = ibs.GetCode(addr)
+				accountDiff.Code = m
+			}
+			{
+				m := make(map[string]hexutil.Uint64)
+				m["+"] = hexutil.Uint64(ibs.GetNonce(addr))
+				accountDiff.Nonce = m
+			}
+			// Transform storage
+			for _, sm := range accountDiff.Storage {
+				str := sm["*"].(*StateDiffStorage)
+				delete(sm, "*")
+				sm["+"] = &str.To
+			}
+		} else {
+			toRemove = append(toRemove, addr)
+		}
+	}
+	for _, addr := range toRemove {
+		delete(sd.sdMap, addr)
+	}
 }
 
 const callTimeout = 5 * time.Minute
@@ -406,7 +462,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	} else {
 		stateReader = state.NewPlainDBState(dbtx, blockNumber)
 	}
-	state := state.New(stateReader)
+	ibs := state.New(stateReader)
 
 	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
 	if header == nil {
@@ -451,7 +507,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	evmCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
 
-	evm := vm.NewEVM(evmCtx, state, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
+	evm := vm.NewEVM(evmCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
@@ -471,10 +527,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sdMap := make(map[common.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = state.CommitBlock(ctx, sd); err != nil {
-			return nil, fmt.Errorf("producing stateDiffs: %w", err)
+		if err = ibs.CommitBlock(ctx, sd); err != nil {
+			return nil, err
 		}
-		sd.InsertEqualSigns()
+		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
+		initialIbs := state.New(stateReader)
+		sd.CompareStates(initialIbs, ibs)
 	}
 	if traceTypeVmTrace {
 

@@ -88,32 +88,30 @@ func Bench11(tgURL, oeURL string, needCompare bool, blockNum uint64) {
 			}
 			reqGen.reqID++
 
-			var trace TraceCall
-			res = reqGen.TurboGeth("trace_call", reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1), &trace)
+			res = reqGen.TurboGeth2("trace_call", reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1))
 			if res.Err != nil {
 				fmt.Printf("Could not trace call (turbo-geth) %s: %v\n", tx.Hash, res.Err)
 				return
 			}
-
-			if trace.Error != nil {
-				fmt.Printf("Error tracing call (turbo-geth): %d %s\n", trace.Error.Code, trace.Error.Message)
+			if errVal := res.Result.Get("error"); errVal != nil {
+				fmt.Printf("Error tracing call (turbo-geth): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 				return
 			}
-
 			if needCompare {
-				var traceg TraceCall
-				res = reqGen.Geth("trace_call", reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1), &traceg)
-				if res.Err != nil {
-					fmt.Printf("Could not trace call (oe) %s: %v\n", tx.Hash, res.Err)
+				resg := reqGen.Geth2("trace_call", reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1))
+				if resg.Err != nil {
+					fmt.Printf("Could not trace call (oe) %s: %v\n", tx.Hash, resg.Err)
 					return
 				}
-				if traceg.Error != nil {
-					fmt.Printf("Error tracing call (oe): %d %s\n", traceg.Error.Code, traceg.Error.Message)
+				if errVal := resg.Result.Get("error"); errVal != nil {
+					fmt.Printf("Error tracing call (oe): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 					return
 				}
-				if res.Err == nil && trace.Error == nil {
-					if !compareTraceCalls(&trace, &traceg) {
-						fmt.Printf("Different traces block %d, tx %s\n", bn, tx.Hash)
+				if resg.Err == nil && resg.Result.Get("error") == nil {
+					if err := compareTraceCalls(res.Result, resg.Result); err != nil {
+						fmt.Printf("Different traces block %d, tx %s: %v\n", bn, tx.Hash, err)
+						fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
+						fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
 						return
 					}
 				}
