@@ -264,6 +264,7 @@ type ControlServerImpl struct {
 	requestWakeUpHeaders chan struct{}
 	requestWakeUpBodies  chan struct{}
 	deliveredBodies      int
+	undeliveredBodies    int
 	unrequestedBodies    int
 }
 
@@ -428,6 +429,7 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 		return nil, fmt.Errorf("decode BlockBodies: %v", err)
 	}
 	//var sb strings.Builder
+	var undelivered int
 	var unrequested int
 	var delivered int
 	for _, body := range request {
@@ -438,14 +440,18 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 			//fmt.Fprintf(&sb, "%d", blockNum)
 			delivered++
 		} else {
-			unrequested++
+			undelivered++
+			if cs.bd.Unrequested(body) {
+				unrequested++
+			}
 		}
 	}
 	cs.bd.FeedDeliveries()
 	cs.deliveredBodies += delivered
+	cs.undeliveredBodies += undelivered
 	cs.unrequestedBodies += unrequested
-	if unrequested > 0 {
-		log.Info(fmt.Sprintf("BlockBodies{delivered=%d, unrequestedCount=%d, totalDelivered=%d, totalUnrequested=%d}", delivered, unrequested, cs.deliveredBodies, cs.unrequestedBodies))
+	if undelivered > 0 {
+		log.Info(fmt.Sprintf("BlockBodies{delivered=%d, undelivered=%d, unrequestedCount=%d, totalDelivered=%d, totalUndelivered=%d, totalUnrequested=%d}", delivered, undelivered, unrequested, cs.deliveredBodies, cs.undeliveredBodies, cs.unrequestedBodies))
 	}
 	return &empty.Empty{}, nil
 }
