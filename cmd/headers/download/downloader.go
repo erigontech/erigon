@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -264,6 +263,8 @@ type ControlServerImpl struct {
 	sentryClient         proto_sentry.SentryClient
 	requestWakeUpHeaders chan struct{}
 	requestWakeUpBodies  chan struct{}
+	deliveredBodies      int
+	unrequestedBodies    int
 }
 
 func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient) (*ControlServerImpl, error) {
@@ -426,20 +427,26 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode BlockBodies: %v", err)
 	}
-	var sb strings.Builder
+	//var sb strings.Builder
 	var unrequested int
+	var delivered int
 	for _, body := range request {
-		if blockNum, ok := cs.bd.DeliverBody(body); ok {
-			if sb.Len() > 0 {
-				fmt.Fprintf(&sb, ",")
-			}
-			fmt.Fprintf(&sb, "%d", blockNum)
+		if _, ok := cs.bd.DeliverBody(body); ok {
+			//if sb.Len() > 0 {
+			//	fmt.Fprintf(&sb, ",")
+			//}
+			//fmt.Fprintf(&sb, "%d", blockNum)
+			delivered++
 		} else {
 			unrequested++
 		}
 	}
 	cs.bd.FeedDeliveries()
-	//log.Info(fmt.Sprintf("BlockBodies{delivered=%s, unrequestedCount=%d}", sb.String(), unrequested))
+	cs.deliveredBodies += delivered
+	cs.unrequestedBodies += unrequested
+	if unrequested > 0 {
+		log.Info(fmt.Sprintf("BlockBodies{delivered=%d, unrequestedCount=%d, totalDelivered=%d, totalUnrequested=%d}", delivered, unrequested, cs.deliveredBodies, cs.unrequestedBodies))
+	}
 	return &empty.Empty{}, nil
 }
 
