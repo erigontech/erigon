@@ -169,7 +169,7 @@ func generateTestData(t *testing.T, db ethdb.Database, csBucket string, numOfBlo
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dbutils.StorageChangeSetBucket == csBucket || dbutils.PlainStorageChangeSetBucket == csBucket {
+	if dbutils.PlainStorageChangeSetBucket == csBucket {
 		keys, innerErr := generateAddrs(3, false)
 		if innerErr != nil {
 			t.Fatal(innerErr)

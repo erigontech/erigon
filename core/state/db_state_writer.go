@@ -29,7 +29,7 @@ func NewDbStateWriter(db ethdb.Database, blockNr uint64) *DbStateWriter {
 		db:      db,
 		blockNr: blockNr,
 		pw:      &PreimageWriter{db: db, savePreimages: false},
-		csw:     NewChangeSetWriter(),
+		csw:     NewChangeSetWriterPlain(nil, 0),
 	}
 }
 
