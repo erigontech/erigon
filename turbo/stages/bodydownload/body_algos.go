@@ -148,7 +148,6 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database) *BodyRequest {
 					copy(doubleHash[:], header.UncleHash.Bytes())
 					copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
 					bd.requestedMap[doubleHash] = b
-					bd.allRequests[doubleHash] = struct{}{}
 				}
 			}
 		}
@@ -211,20 +210,6 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 		return blockNum, true
 	}
 	return 0, false
-}
-
-func (bd *BodyDownload) Unrequested(body *eth.BlockBody) bool {
-	uncleHash := types.CalcUncleHash(body.Uncles)
-	txHash := types.DeriveSha(types.Transactions(body.Transactions))
-	var doubleHash DoubleHash
-	copy(doubleHash[:], uncleHash.Bytes())
-	copy(doubleHash[common.HashLength:], txHash.Bytes())
-	bd.lock.Lock()
-	defer bd.lock.Unlock()
-	if _, ok := bd.allRequests[doubleHash]; ok {
-		return false
-	}
-	return true
 }
 
 func (bd *BodyDownload) FeedDeliveries() {

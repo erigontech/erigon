@@ -23,10 +23,9 @@ type BodyDownload struct {
 	delivered         *roaring64.Bitmap // Bitmap of block numbers that have been delivered but not yet inserted into the database
 	deliveries        []*types.Block
 	requestedMap      map[DoubleHash]uint64
-	allRequests       map[DoubleHash]struct{} // For debugging - all requests seen (we do not remove from this map)
-	requestedLow      uint64                  // Lower bound of block number for outstanding requests
-	outstandingLimit  uint64                  // Limit of number of outstanding blocks for body requests
-	requestQueue      *list.List              // Queue of items of type RequestQueueItem to deal with the request timeouts
+	requestedLow      uint64     // Lower bound of block number for outstanding requests
+	outstandingLimit  uint64     // Limit of number of outstanding blocks for body requests
+	requestQueue      *list.List // Queue of items of type RequestQueueItem to deal with the request timeouts
 	RequestQueueTimer *time.Timer
 	blockChannel      chan *types.Block
 }
@@ -50,7 +49,6 @@ func NewBodyDownload(outstandingLimit int) *BodyDownload {
 		requested:         roaring64.New(),
 		delivered:         roaring64.New(),
 		requestedMap:      make(map[DoubleHash]uint64),
-		allRequests:       make(map[DoubleHash]struct{}),
 		outstandingLimit:  uint64(outstandingLimit),
 		deliveries:        make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
 		requestQueue:      list.New(),

@@ -430,7 +430,6 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 	}
 	//var sb strings.Builder
 	var undelivered int
-	var unrequested int
 	var delivered int
 	for _, body := range request {
 		if _, ok := cs.bd.DeliverBody(body); ok {
@@ -441,17 +440,13 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 			delivered++
 		} else {
 			undelivered++
-			if cs.bd.Unrequested(body) {
-				unrequested++
-			}
 		}
 	}
 	cs.bd.FeedDeliveries()
 	cs.deliveredBodies += delivered
 	cs.undeliveredBodies += undelivered
-	cs.unrequestedBodies += unrequested
 	if undelivered > 0 {
-		log.Info(fmt.Sprintf("BlockBodies{delivered=%d, undelivered=%d, unrequestedCount=%d, totalDelivered=%d, totalUndelivered=%d, totalUnrequested=%d}", delivered, undelivered, unrequested, cs.deliveredBodies, cs.undeliveredBodies, cs.unrequestedBodies))
+		log.Info(fmt.Sprintf("BlockBodies{delivered=%d, undelivered=%d, totalDelivered=%d, totalUndelivered=%d}", delivered, undelivered, cs.deliveredBodies, cs.undeliveredBodies))
 	}
 	return &empty.Empty{}, nil
 }
@@ -541,7 +536,7 @@ func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
 		timer := cs.bd.CancelExpiredRequests(uint64(time.Now().Unix()))
 		req := cs.bd.RequestMoreBodies(db)
 		for req != nil && cs.sendBodyRequest(ctx, req) { // Don't keep producing requests and sending if there are no peers to accept it
-			timer = cs.bd.ApplyBodyRequest(uint64(time.Now().Unix()), 15 /*timeout*/, req)
+			timer = cs.bd.ApplyBodyRequest(uint64(time.Now().Unix()), 30 /*timeout*/, req)
 			req = cs.bd.RequestMoreBodies(db)
 		}
 		if req != nil {
