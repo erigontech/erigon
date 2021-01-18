@@ -219,9 +219,16 @@ func (bd *BodyDownload) FeedDeliveries() {
 	//	fmt.Printf("FeedDeliveries with bd.requested.Minimum %d\n", bd.requested.Minimum())
 	//}
 	var i uint64
-	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
-		bd.blockChannel <- bd.deliveries[i] // This is delivery
-		bd.delivered.Remove(bd.requestedLow + i)
+	var channelFull bool
+	for i = 0; !channelFull && !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
+		select {
+		case bd.blockChannel <- bd.deliveries[i]:
+			// This is delivery
+			bd.delivered.Remove(bd.requestedLow + i)
+		default:
+			// Delivery is not possible for now
+			channelFull = true
+		}
 	}
 	// Move the deliveries back
 	// bd.requestedLow can only be moved forward if there are consequitive block numbers present in the bd.delivered map
