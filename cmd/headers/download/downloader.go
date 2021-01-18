@@ -299,10 +299,11 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		log.Error("Recovery from DB failed", "error", err)
 	}
 	hardTips := headerdownload.InitHardCodedTips("hard-coded-headers.dat")
-	if recovered, err1 := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips); (err1 != nil && !dbRecovered) || !recovered {
-		if err1 != nil {
-			log.Error("Recovery from file failed, will start from scratch", "error", err1)
-		}
+	filesRecovered, err1 := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips)
+	if err1 != nil {
+		log.Error("Recovery from file failed, will start from scratch", "error", err1)
+	}
+	if !dbRecovered && !filesRecovered {
 		hd.SetHardCodedTips(hardTips)
 		// Insert hard-coded headers if present
 		if _, err := os.Stat("hard-coded-headers.dat"); err == nil {

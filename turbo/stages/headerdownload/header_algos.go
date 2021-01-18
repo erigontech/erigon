@@ -833,7 +833,7 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) (
 		}
 		return nil
 	})
-	log.Info("Recovery from DB", "anchor == nil", anchor == nil)
+	log.Info("Recovery from DB", "(anchor==nil)", anchor == nil)
 	if anchor != nil {
 		log.Info("Recovery from DB", "anchor.maxTipHeight", anchor.maxTipHeight, "anchor.blockHeight", anchor.blockHeight)
 	}
