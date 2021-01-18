@@ -50,6 +50,7 @@ func NewBodyDownload(outstandingLimit int) *BodyDownload {
 		requested:         roaring64.New(),
 		delivered:         roaring64.New(),
 		requestedMap:      make(map[DoubleHash]uint64),
+		allRequests:       make(map[DoubleHash]struct{}),
 		outstandingLimit:  uint64(outstandingLimit),
 		deliveries:        make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
 		requestQueue:      list.New(),
