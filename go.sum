@@ -721,6 +721,8 @@ github.com/ugorji/go/codec/codecgen v1.1.13 h1:rGpZ4Q63VcWA3DMBbIHvg+SQweUkfXBBa
 github.com/ugorji/go/codec/codecgen v1.1.13/go.mod h1:EhCxlc7Crov+HLygD4+hBCitXNrrGKRrRWj+pRsyJGg=
 github.com/urfave/cli v1.22.4 h1:u7tSpNPPswAFymm8IehJhy4uJMlUuU/GmqSkvJ1InXA=
 github.com/urfave/cli v1.22.4/go.mod h1:Gos4lmkARVdJ6EkW0WaNv/tZAAMe9V7XWyB60NtXRu0=
+github.com/valyala/fastjson v1.6.3 h1:tAKFnnwmeMGPbwJ7IwxcTPCNr3uIzoIj3/Fh90ra4xc=
+github.com/valyala/fastjson v1.6.3/go.mod h1:CLCAqky6SMuOcxStkYQvblddUtoRxhYMGLrsQns1aXY=
 github.com/wcharczuk/go-chart v2.0.1+incompatible h1:0pz39ZAycJFF7ju/1mepnk26RLVLBCWz1STcD3doU0A=
 github.com/wcharczuk/go-chart v2.0.1+incompatible/go.mod h1:PF5tmL4EIx/7Wf+hEkpCqYi5He4u90sw+0+6FhrryuE=
 github.com/willf/bitset v1.1.3/go.mod h1:RjeCKbqT1RxIR/KWY6phxZiaY1IyutSBfGjNPySAYV4=

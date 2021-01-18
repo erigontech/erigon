@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/valyala/fastjson"
 )
 
 type CallResult struct {
@@ -17,6 +18,8 @@ type CallResult struct {
 	RequestID   int
 	Method      string
 	RequestBody string
+	Response    []byte
+	Result      *fastjson.Value
 	Err         error
 }
 type RequestGenerator struct {
@@ -106,7 +109,29 @@ func (g *RequestGenerator) traceCall(from common.Address, to *common.Address, ga
 	if len(data) > 0 {
 		fmt.Fprintf(&sb, `,"data":"%s"`, data)
 	}
-	fmt.Fprintf(&sb, `},["trace"],"0x%x"], "id":%d}`, bn, g.reqID)
+	fmt.Fprintf(&sb, `},["trace", "stateDiff"],"0x%x"], "id":%d}`, bn, g.reqID)
+	return sb.String()
+}
+
+func (g *RequestGenerator) debugTraceCall(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn int) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "debug_traceCall", "params": [{"from":"0x%x"`, from)
+	if to != nil {
+		fmt.Fprintf(&sb, `,"to":"0x%x"`, *to)
+	}
+	if gas != nil {
+		fmt.Fprintf(&sb, `,"gas":"%s"`, gas)
+	}
+	if gasPrice != nil {
+		fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice)
+	}
+	if value != nil {
+		fmt.Fprintf(&sb, `,"value":"%s"`, value)
+	}
+	if len(data) > 0 {
+		fmt.Fprintf(&sb, `,"data":"%s"`, data)
+	}
+	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID)
 	return sb.String()
 }
 
@@ -122,10 +147,34 @@ func (g *RequestGenerator) call(target string, method, body string, response int
 		Err:         err,
 	}
 }
+
+func (g *RequestGenerator) call2(target string, method, body string) CallResult {
+	start := time.Now()
+	response, val, err := post2(g.client, routes[target], body)
+	return CallResult{
+		RequestBody: body,
+		Target:      target,
+		Took:        time.Since(start),
+		RequestID:   g.reqID,
+		Method:      method,
+		Response:    response,
+		Result:      val,
+		Err:         err,
+	}
+}
+
 func (g *RequestGenerator) Geth(method, body string, response interface{}) CallResult {
 	return g.call(Geth, method, body, response)
 }
 
 func (g *RequestGenerator) TurboGeth(method, body string, response interface{}) CallResult {
 	return g.call(TurboGeth, method, body, response)
+}
+
+func (g *RequestGenerator) Geth2(method, body string) CallResult {
+	return g.call2(Geth, method, body)
+}
+
+func (g *RequestGenerator) TurboGeth2(method, body string) CallResult {
+	return g.call2(TurboGeth, method, body)
 }

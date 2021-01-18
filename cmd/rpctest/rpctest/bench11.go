@@ -4,7 +4,20 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
+
+// Transactions on which OpenEthereum reports incorrect traces
+var wrongTxs = []string{
+	"0xd5a9b32b262202cda422dd5a2ccf8d7d56e9b3425ba7d350548e62a5bd26b481", // Block 8000011
+	"0x1953ad3591fa0f6f3f00dfa0f93a57e1dc7fa003e2192a18c64c71847cf64e0c", // Block 8000035
+	"0xfbd66bcbc4cb374946f350ca6835571b09f68c5f635ff9fc533c3fa2ac0d19cb", // Block 9000004
+	"0x928b01dd36bcf142bf0d4b1e75239bec8ee68a68aa3739e4f9a1b4a17785651b", // Block 9000010
+	"0x45b60cfbcad50b24b313a40644061f36e04b4baf516a9db1a8a386863eed6070", // Block 9000023
+	"0x9d2cb4ad7851bd745a952d9e0d42e1c3d6ee1d37ce37eb05863bdce82016078b", // Block 9000027
+	"0xcee0adc637910d9baa3c60e186ac0c270af89a836a5277846926b6913d5cee65", // Block 9500001
+}
 
 // bench1 compares response of TurboGeth with Geth
 // but also can be used for comparing RPCDaemon with Geth
@@ -20,6 +33,11 @@ func Bench11(tgURL, oeURL string, needCompare bool, blockNum uint64) {
 	var res CallResult
 	reqGen := &RequestGenerator{
 		client: client,
+	}
+
+	skipTxs := make(map[common.Hash]struct{})
+	for _, txHash := range wrongTxs {
+		skipTxs[common.HexToHash(txHash)] = struct{}{}
 	}
 
 	reqGen.reqID++
@@ -68,34 +86,35 @@ func Bench11(tgURL, oeURL string, needCompare bool, blockNum uint64) {
 		}
 
 		for _, tx := range b.Result.Transactions {
+			if _, skip := skipTxs[common.HexToHash(tx.Hash)]; skip {
+				continue
+			}
 			reqGen.reqID++
 
-			var trace TraceCall
-			res = reqGen.TurboGeth("trace_call", reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1), &trace)
+			res = reqGen.TurboGeth2("trace_call", reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1))
 			if res.Err != nil {
 				fmt.Printf("Could not trace call (turbo-geth) %s: %v\n", tx.Hash, res.Err)
 				return
 			}
-
-			if trace.Error != nil {
-				fmt.Printf("Error tracing call (turbo-geth): %d %s\n", trace.Error.Code, trace.Error.Message)
+			if errVal := res.Result.Get("error"); errVal != nil {
+				fmt.Printf("Error tracing call (turbo-geth): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 				return
 			}
-
 			if needCompare {
-				var traceg TraceCall
-				res = reqGen.Geth("trace_call", reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1), &traceg)
-				if res.Err != nil {
-					fmt.Printf("Could not trace call (oe) %s: %v\n", tx.Hash, res.Err)
+				resg := reqGen.Geth2("trace_call", reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1))
+				if resg.Err != nil {
+					fmt.Printf("Could not trace call (oe) %s: %v\n", tx.Hash, resg.Err)
 					return
 				}
-				if traceg.Error != nil {
-					fmt.Printf("Error tracing call (oe): %d %s\n", traceg.Error.Code, traceg.Error.Message)
+				if errVal := resg.Result.Get("error"); errVal != nil {
+					fmt.Printf("Error tracing call (oe): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 					return
 				}
-				if res.Err == nil && trace.Error == nil {
-					if !compareTraceCalls(&trace, &traceg) {
-						fmt.Printf("Different traces block %d, tx %s\n", bn, tx.Hash)
+				if resg.Err == nil && resg.Result.Get("error") == nil {
+					if err := compareTraceCalls(res.Result, resg.Result); err != nil {
+						fmt.Printf("Different traces block %d, tx %s: %v\n", bn, tx.Hash, err)
+						fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
+						fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
 						return
 					}
 				}
