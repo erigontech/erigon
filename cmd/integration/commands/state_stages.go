@@ -163,10 +163,10 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 			delete(expectedStorageChanges, blockN)
 		}
 
-		if err := checkHistory(tx, dbutils.AccountChangeSetBucket, execAtBlock); err != nil {
+		if err := checkHistory(tx, dbutils.PlainAccountChangeSetBucket, execAtBlock); err != nil {
 			return err
 		}
-		if err := checkHistory(tx, dbutils.StorageChangeSetBucket, execAtBlock); err != nil {
+		if err := checkHistory(tx, dbutils.PlainStorageChangeSetBucket, execAtBlock); err != nil {
 			return err
 		}
 
@@ -255,7 +255,12 @@ func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) er
 		return errors.New("unknown bucket type")
 	}
 
-	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, address, v []byte) (bool, error) {
+		var addrHash, err = common.HashData(address)
+		if err != nil {
+			return false, err
+		}
+		var k = addrHash[:]
 		bm, innerErr := bitmapdb.Get(db, vv.IndexBucket, k, uint32(blockN-1), uint32(blockN+1))
 		if innerErr != nil {
 			return false, innerErr
