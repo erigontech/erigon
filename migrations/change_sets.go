@@ -598,14 +598,3 @@ func encodeAccounts(s *changeset.ChangeSet) ([]byte, error) {
 }
 
 // ---- Copy-Paste of code to decode ChangeSets: End -----
-
-var clearHashedChangesets = Migration{
-	Name: "clear_hashed_changesets",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
-		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket); err != nil {
-			return err
-		}
-
-		return OnLoadCommit(db, nil, true)
-	},
-}

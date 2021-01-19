@@ -71,7 +71,6 @@ var migrations = []Migration{
 	transactionsTable,
 	historyAccBitmap,
 	historyStorageBitmap,
-	clearHashedChangesets,
 }
 
 type Migration struct {
