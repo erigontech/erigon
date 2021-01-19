@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	crand "crypto/rand"
-	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
@@ -34,6 +33,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+
+	json "github.com/json-iterator/go"
 )
 
 const (

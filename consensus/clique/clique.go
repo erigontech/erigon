@@ -20,7 +20,6 @@ package clique
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
@@ -46,9 +45,10 @@ import (
 )
 
 const (
-	checkpointInterval = 1     // Number of blocks after which to save the vote snapshot to the database
-	inmemorySnapshots  = 32768 // Number of recent vote snapshots to keep in memory
-	inmemorySignatures = 4096  // Number of recent block signatures to keep in memory
+	// todo: extract into config and flags
+	checkpointInterval = 1    // Number of blocks after which to save the vote snapshot to the database
+	inmemorySnapshots  = 1024 // Number of recent vote snapshots to keep in memory
+	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
 	wiggleTime = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
 )
@@ -149,6 +149,7 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 	if address, known := sigcache.Get(hash); known {
 		return address.(common.Address), nil
 	}
+
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < extraSeal {
 		return common.Address{}, errMissingSignature
@@ -160,10 +161,12 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 	if err != nil {
 		return common.Address{}, err
 	}
+
 	var signer common.Address
 	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
 
 	sigcache.Add(hash, signer)
+
 	return signer, nil
 }
 
@@ -209,7 +212,7 @@ func New(config *params.CliqueConfig, db ethdb.Database) *Clique {
 		snapshotBlocks: snapshotBlocks,
 		signatures:     signatures,
 		proposals:      make(map[common.Address]bool),
-		snapStorage:    newStorage(db, conf.Epoch),
+		snapStorage:    newStorage(db),
 	}
 }
 
@@ -326,22 +329,14 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 }
 
 func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, headers ...*types.Header) error {
-	t := time.Now()
-
-	if err := snap.apply(headers...); err != nil {
-		return err
+	if len(headers) > 0 {
+		if err := snap.apply(headers...); err != nil {
+			return err
+		}
 	}
 
-	fmt.Println("+++snapshot.apply-1", time.Since(t), snap.Number)
-	t = time.Now()
-
 	c.recents.Add(snap.Hash, snap)
-	fmt.Println("+++snapshot.apply-2", time.Since(t), snap.Number)
-	t = time.Now()
-
 	c.snapshotBlocks.Add(snap.Number, snap.Hash)
-	fmt.Println("+++snapshot.apply-3", time.Since(t), snap.Number)
-	t = time.Now()
 
 	// If we've generated a new checkpoint snapshot, save to disk
 	if isSnapshot(snap.Number, c.config.Epoch) {
@@ -350,8 +345,6 @@ func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, headers ...*types.Header)
 		}
 		log.Trace("Stored a snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
-
-	fmt.Println("+++snapshot.apply-4", time.Since(t), snap.Number)
 
 	return nil
 }
@@ -416,6 +409,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				break
 			}
 		}
+
 		// If we're at the genesis, snapshot the initial state. Alternatively if we're
 		// at a checkpoint block without a parent (light client CHT), or we have piled
 		// up more headers than allowed to be reorged (chain reinit from a freezer),
@@ -429,10 +423,13 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				for i := 0; i < len(signers); i++ {
 					copy(signers[i][:], checkpoint.Extra[extraVanity+i*common.AddressLength:])
 				}
+
 				snap = newSnapshot(c.config, c.snapStorage, c.signatures, number, hash, signers)
-				if err := snap.store(c.db, number == 0); err != nil {
+
+				if err := c.applyAndStoreSnapshot(snap); err != nil {
 					return nil, err
 				}
+
 				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
 				break
 			}
@@ -594,9 +591,12 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		return consensus.ErrUnknownAncestor
 	}
 	header.Time = parent.Time + c.config.Period
-	if header.Time < uint64(time.Now().Unix()) {
-		header.Time = uint64(time.Now().Unix())
+
+	now := uint64(time.Now().Unix())
+	if header.Time < now {
+		header.Time = now
 	}
+
 	return nil
 }
 

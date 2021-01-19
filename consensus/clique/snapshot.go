@@ -210,7 +210,7 @@ func (s *Snapshot) apply(headers ...*types.Header) error {
 
 	var (
 		start  = time.Now()
-		logged = time.Now()
+		logged = start
 	)
 
 	for i := len(headers) - 1; i >= 0; i-- {
@@ -338,9 +338,11 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 }
 
 type storage struct {
-	ch   chan snapObj
-	db   ethdb.Database
-	exit chan struct{}
+	ch        chan *snapObj
+	chStatus  *uint32
+	db        ethdb.Database
+	exit      chan struct{}
+	batchSize int
 }
 
 type snapObj struct {
@@ -349,59 +351,62 @@ type snapObj struct {
 	blob   []byte
 }
 
-var notSend uint64
-
-func newStorage(db ethdb.Database, epoch uint64) *storage {
-	epoch = epoch / 2
-	if epoch <= 0 {
-		epoch = 16384
-	}
+func newStorage(db ethdb.Database) *storage {
+	const batchSize = 100000
+	const syncSmallBatch = time.Minute
 
 	st := &storage{
-		db:   db,
-		ch:   make(chan snapObj, epoch),
-		exit: make(chan struct{}),
+		db:        db,
+		ch:        make(chan *snapObj, batchSize/2),
+		chStatus:  new(uint32),
+		exit:      make(chan struct{}),
+		batchSize: batchSize,
 	}
 
-	const batchSize = 1024 / 2
+	snaps := make([]*snapObj, 0, batchSize)
 
 	go func() {
+		syncSmall := time.NewTicker(syncSmallBatch)
+		defer syncSmall.Stop()
+
+		isSorted := true
+
 		for {
 			select {
-			case <-st.exit:
-				return
-			case snap := <-st.ch:
-				var snaps []snapObj
-				var isBatch bool
-				if len(st.ch) >= batchSize {
-					snaps = make([]snapObj, 0, batchSize)
-					isBatch = true
-				}
+			case snap, isOpen := <-st.ch:
+				chStatus := atomic.LoadUint32(st.chStatus)
 
-				ok, err := hasSnapshotData(st.db, snap.number, snap.hash)
-				if !ok || err != nil {
+				if st.shallAppend(snap) {
 					snaps = append(snaps, snap)
-				}
 
-				if !isBatch {
-					st.saveSnap(snaps[0])
-					continue
-				}
-
-				i := 0
-				for snap := range st.ch {
-					if i >= batchSize-1 {
-						break
-					}
-
-					ok, err = hasSnapshotData(st.db, snap.number, snap.hash)
-					if !ok || err != nil {
-						snaps = append(snaps, snap)
-						i++
+					if isSorted && len(snaps) > 1 && snaps[len(snaps)-2].number > snap.number {
+						isSorted = false
 					}
 				}
 
-				st.saveSnaps(snaps...)
+				if len(snaps) >= batchSize || (!isOpen && len(snaps) > 0) {
+					st.saveSnaps(snaps, isSorted)
+
+					snaps = snaps[:0]
+					isSorted = true
+					syncSmall.Reset(syncSmallBatch)
+				}
+
+				if chStatus == 1 && len(st.ch) == 0 {
+					return
+				}
+			case <-syncSmall.C:
+				chStatus := atomic.LoadUint32(st.chStatus)
+
+				if (chStatus == 1 && len(snaps) > 0) || (len(snaps) > 0 && len(snaps) < int(syncSmallBatch.Seconds())) {
+					st.saveSnaps(snaps, isSorted)
+					snaps = snaps[:0]
+					isSorted = true
+				}
+
+				if chStatus == 1 && len(st.ch) == 0 {
+					return
+				}
 			}
 		}
 	}()
@@ -410,48 +415,63 @@ func newStorage(db ethdb.Database, epoch uint64) *storage {
 }
 
 func (st *storage) save(number uint64, hash common.Hash, blob []byte, force bool) {
-	snap := snapObj{number, hash, blob}
+	snap := &snapObj{number, hash, blob}
+
 	if !force {
+		select {
+		case <-st.exit:
+			if atomic.CompareAndSwapUint32(st.chStatus, 0, 1) {
+				close(st.ch)
+			}
+			return
+		default:
+		}
+
 		st.ch <- snap
+
 		return
 	}
 
 	// a forced case (genesis)
 	ok, err := hasSnapshotData(st.db, number, hash)
 	if !ok || err != nil {
-		st.saveSnap(snap)
-	} else {
-		atomic.AddUint64(&notSend, 1)
+		if err := st.db.Append(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob); err != nil {
+			log.Error("can't store a snapshot", "block", snap.number, "hash", snap.hash, "err", err)
+		}
 	}
 }
 
-func (st *storage) saveSnaps(snaps ...snapObj) {
+func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 	if len(snaps) == 0 {
 		return
 	}
 
-	pending := st.db.NewBatch()
-	defer pending.Rollback()
+	if !isSorted && len(snaps) > 1 {
+		sort.SliceStable(snaps, func(i, j int) bool {
+			return snaps[i].number < snaps[j].number ||
+				(snaps[i].number == snaps[j].number && bytes.Compare(snaps[i].hash[:], snaps[j].hash[:]) == -1)
+		})
+	}
+
+	batch := st.db.NewBatch()
+	defer batch.Rollback()
+
 	for _, snap := range snaps {
-		err := pending.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob)
-		if err != nil {
+		if err := batch.Append(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob); err != nil {
 			log.Error("can't store a snapshot", "block", snap.number, "hash", snap.hash, "err", err)
 		}
 	}
 
-	_, err := pending.Commit()
-	if err != nil {
+	if _, err := batch.Commit(); err != nil {
 		log.Error("can't store snapshots", "blockFrom", snaps[0].number, "blockTo", snaps[len(snaps)-1].number, "err", err)
-	}
-}
-
-func (st *storage) saveSnap(snap snapObj) {
-	err := st.db.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), snap.blob)
-	if err != nil {
-		log.Error("can't store a snapshot", "block", snap.number, "hash", snap.hash, "err", err)
 	}
 }
 
 func (st *storage) Close() {
 	common.SafeClose(st.exit)
+}
+
+func (st *storage) shallAppend(snap *snapObj) bool {
+	ok, err := hasSnapshotData(st.db, snap.number, snap.hash)
+	return !ok || err != nil
 }
