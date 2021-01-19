@@ -231,12 +231,8 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 		if isDenseSequence(ih.prev, ihK) {
 			goto SkipAccounts
 		}
-		hexutil.CompressNibbles(ih.FirstNotCoveredPrefix(), &l.accSeek)
-		if len(ih.PrevKey()) > 0 && len(l.accSeek) == 0 {
-			break
-		}
 
-		for k, kHex, v, err1 := accs.Seek(l.accSeek); k != nil; k, kHex, v, err1 = accs.Next() {
+		for k, kHex, v, err1 := accs.Seek(ih.FirstNotCoveredPrefix()); k != nil; k, kHex, v, err1 = accs.Next() {
 			if err1 != nil {
 				return EmptyRoot, err1
 			}
@@ -271,11 +267,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					goto SkipStorage
 				}
 
-				hexutil.CompressNibbles(ihStorage.FirstNotCoveredPrefix(), &l.storageSeek)
-				if len(l.storageSeek) == 0 {
-					l.storageSeek = []byte{0}
-				}
-				for kS, vS, err3 := ss.SeekBothRange(accWithInc, l.storageSeek); kS != nil; kS, vS, err3 = ss.NextDup() {
+				for kS, vS, err3 := ss.SeekBothRange(accWithInc, ihStorage.FirstNotCoveredPrefix()); kS != nil; kS, vS, err3 = ss.NextDup() {
 					if err3 != nil {
 						return EmptyRoot, err3
 					}
@@ -893,7 +885,7 @@ type IHCursor struct {
 }
 
 func IH(filter func(prefix []byte) bool, c ethdb.Cursor) *IHCursor {
-	ih := &IHCursor{c: c, filter: filter, firstNotCoveredPrefix: make([]byte, 0, 256), next: make([]byte, 256)}
+	ih := &IHCursor{c: c, filter: filter, firstNotCoveredPrefix: make([]byte, 0, 64), next: make([]byte, 64)}
 	return ih
 }
 
@@ -904,15 +896,14 @@ func (c *IHCursor) PrevKey() []byte {
 func (c *IHCursor) FirstNotCoveredPrefix() []byte {
 	if len(c.prev) > 0 {
 		_ = dbutils.NextNibblesSubtree(c.prev, &c.firstNotCoveredPrefix)
-		if len(c.firstNotCoveredPrefix)%2 == 1 {
-			c.firstNotCoveredPrefix = append(c.firstNotCoveredPrefix, 0)
-		}
-		return c.firstNotCoveredPrefix
+	} else {
+		c.firstNotCoveredPrefix = append(c.firstNotCoveredPrefix[:0], c.seek...)
 	}
-	if len(c.seek)%2 == 1 {
-		c.seek = append(c.seek, 0)
+	if len(c.firstNotCoveredPrefix)%2 == 1 {
+		c.firstNotCoveredPrefix = append(c.firstNotCoveredPrefix, 0)
 	}
-	return c.seek
+	hexutil.CompressNibbles(c.firstNotCoveredPrefix, &c.firstNotCoveredPrefix)
+	return c.firstNotCoveredPrefix
 }
 
 func (c *IHCursor) First() (k, v []byte, err error) {
@@ -1047,9 +1038,13 @@ func (c *StorageIHCursor) PrevKey() []byte {
 
 func (c *StorageIHCursor) FirstNotCoveredPrefix() []byte {
 	_ = dbutils.NextNibblesSubtree(c.prev, &c.firstNotCoveredPrefix)
+	if len(c.firstNotCoveredPrefix) == 0 {
+		c.firstNotCoveredPrefix = append(c.firstNotCoveredPrefix, 0, 0)
+	}
 	if len(c.firstNotCoveredPrefix)%2 == 1 {
 		c.firstNotCoveredPrefix = append(c.firstNotCoveredPrefix, 0)
 	}
+	hexutil.CompressNibbles(c.firstNotCoveredPrefix, &c.firstNotCoveredPrefix)
 	return c.firstNotCoveredPrefix
 }
 
