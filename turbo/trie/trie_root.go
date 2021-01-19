@@ -201,7 +201,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 		tx = txDB.(ethdb.HasTx).Tx()
 	}
 
-	accs, storages := NewStateCursor(tx.Cursor(dbutils.HashedAccountsBucket)), NewStateCursor(tx.Cursor(dbutils.HashedStorageBucket))
+	accs := NewStateCursor(tx.Cursor(dbutils.HashedAccountsBucket))
 	ihAccC, ihStorageC := tx.Cursor(dbutils.IntermediateHashOfAccountBucket), tx.CursorDupSort(dbutils.IntermediateHashOfStorageBucket)
 	var filter = func(prefix []byte) bool {
 		if !l.rd.Retain(prefix) {
@@ -215,7 +215,6 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 
 	ih := IH(filter, ihAccC)
 	ihStorage := StorageIH(filter, ihStorageC)
-	_ = storages
 
 	ss := tx.CursorDupSort(dbutils.HashedStorageBucket)
 
