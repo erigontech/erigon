@@ -33,8 +33,8 @@ func runTestAccountEncoding(t *testing.T, New func() *ChangeSet, enc Encoder, de
 	numOfElements := 3
 	for i := 0; i < numOfElements; i++ {
 		address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
-		err := ch.Add(address[:], vals[i])
-		if err != nil {
+		err2 := ch.Add(address[:], vals[i])
+		if err2 != nil {
 			t.Fatal(err)
 		}
 	}
