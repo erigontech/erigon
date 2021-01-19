@@ -10,6 +10,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -235,10 +236,10 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 		delete(expectedStorageChanges, blockN)
 	}
 
-	if err := checkHistory(db, dbutils.AccountChangeSetBucket, execAtBlock); err != nil {
+	if err := checkHistory(db, dbutils.PlainAccountChangeSetBucket, execAtBlock); err != nil {
 		return err
 	}
-	if err := checkHistory(db, dbutils.StorageChangeSetBucket, execAtBlock); err != nil {
+	if err := checkHistory(db, dbutils.PlainStorageChangeSetBucket, execAtBlock); err != nil {
 		return err
 	}
 	return nil
@@ -371,7 +372,12 @@ func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) er
 		return errors.New("unknown bucket type")
 	}
 
-	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, address, v []byte) (bool, error) {
+		var addrHash, err = common.HashData(address)
+		if err != nil {
+			return false, err
+		}
+		var k = addrHash[:]
 		bm, innerErr := bitmapdb.Get(db, vv.IndexBucket, k, uint32(blockN-1), uint32(blockN+1))
 		if innerErr != nil {
 			return false, innerErr

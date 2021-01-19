@@ -23,24 +23,6 @@ func plainAccountKeyGen(a common.Address) ([]byte, error) {
 	return a[:], nil
 }
 
-func hashedAccountKeyGen(a common.Address) ([]byte, error) {
-	addrHash, err := common.HashData(a[:])
-	return addrHash[:], err
-}
-
-func hashedStorageKeyGen(address common.Address, incarnation uint64, key common.Hash) ([]byte, error) {
-	secKey, err := common.HashData(key[:])
-	if err != nil {
-		return nil, err
-	}
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return nil, err
-	}
-
-	return dbutils.GenerateCompositeStorageKey(addrHash, incarnation, secKey), nil
-}
-
 func plainStorageKeyGen(address common.Address, incarnation uint64, key common.Hash) ([]byte, error) {
 	return dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes()), nil
 }
@@ -63,10 +45,10 @@ func NewChangeSetWriter() *ChangeSetWriter {
 		accountChanges: make(map[common.Address][]byte),
 		storageChanged: make(map[common.Address]bool),
 		storageChanges: make(map[string][]byte),
-		storageFactory: changeset.NewStorageChangeSet,
-		accountFactory: changeset.NewAccountChangeSet,
-		accountKeyGen:  hashedAccountKeyGen,
-		storageKeyGen:  hashedStorageKeyGen,
+		storageFactory: changeset.NewStorageChangeSetPlain,
+		accountFactory: changeset.NewAccountChangeSetPlain,
+		accountKeyGen:  plainAccountKeyGen,
+		storageKeyGen:  plainStorageKeyGen,
 	}
 }
 func NewChangeSetWriterPlain(db ethdb.Database, blockNumber uint64) *ChangeSetWriter {

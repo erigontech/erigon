@@ -855,9 +855,11 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	if err != nil {
 		return err
 	}
-	for key, value := range accountMap {
-		var addrHash common.Hash
-		copy(addrHash[:], []byte(key))
+	for plainKey, value := range accountMap {
+		var addrHash, err = common.HashData([]byte(plainKey))
+		if err != nil {
+			return err
+		}
 		if len(value) > 0 {
 			var acc accounts.Account
 			if err := acc.DecodeForStorage(value); err != nil {
@@ -882,7 +884,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 		}
 		b.accountReads[addrHash] = struct{}{}
 	}
-	for key, value := range storageMap {
+	for plainKey, value := range storageMap {
+		h, hashErr := common.HashData([]byte(plainKey)[:common.HashLength])
+		if hashErr != nil {
+			return hashErr
+		}
+		var key = append(h[:], []byte(plainKey)[common.AddressLength:]...)
 		var addrHash common.Hash
 		copy(addrHash[:], []byte(key)[:common.HashLength])
 		var keyHash common.Hash
@@ -932,8 +939,8 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 
 func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 	changeSetKey := dbutils.EncodeBlockNumber(timestamp)
-	err := tds.db.Walk(dbutils.AccountChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
-		if err := tds.db.Delete(dbutils.AccountChangeSetBucket, k, v); err != nil {
+	err := tds.db.Walk(dbutils.PlainAccountChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
+		if err := tds.db.Delete(dbutils.PlainAccountChangeSetBucket, k, v); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -942,8 +949,8 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 		return err
 	}
 
-	err = tds.db.Walk(dbutils.StorageChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
-		if err2 := tds.db.Delete(dbutils.StorageChangeSetBucket, k, v); err2 != nil {
+	err = tds.db.Walk(dbutils.PlainStorageChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
+		if err2 := tds.db.Delete(dbutils.PlainStorageChangeSetBucket, k, v); err2 != nil {
 			return false, err2
 		}
 		return true, nil
