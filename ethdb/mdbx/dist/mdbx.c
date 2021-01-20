@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 45bd53b73d1f4ea08a7af515ea5a7601fab76605f8767656b865066accaaf079_v0_9_2_91_gf2e53e16
+#define MDBX_BUILD_SOURCERY e5a4c5f7a53ae18a03bd881633f116ddcc0befd9630f00226bf6a29b82e891cc_v0_9_2_95_gf4f9239c
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -5887,8 +5887,8 @@ static MDBX_PNL mdbx_spill_purge(MDBX_txn *txn) {
       sl[w] = sl[r];
       w += 1 - (sl[r] & 1);
     }
-    for (size_t r = 1; r < w; ++r)
-      mdbx_tassert(txn, (sl[r] & 1) == 0);
+    for (size_t i = 1; i < w; ++i)
+      mdbx_tassert(txn, (sl[i] & 1) == 0);
     MDBX_PNL_SIZE(sl) = w - 1;
     txn->tw.spill_least_removed = INT_MAX;
   } else {
@@ -11790,7 +11790,6 @@ static __inline void mdbx_txn_merge(MDBX_txn *const parent, MDBX_txn *const txn,
     /* from end to begin with dst extending */
     for (l = dst->sorted, s = src->length, d = dst->length; s > 0 && d > 0;) {
       if (unlikely(l <= d)) {
-        unsigned r, w;
         /* squash to get a gap of free space for merge */
         for (r = w = 1; r <= d; ++r)
           if (dst->items[r].ptr) {
@@ -11833,7 +11832,6 @@ static __inline void mdbx_txn_merge(MDBX_txn *const parent, MDBX_txn *const txn,
     /* from begin to end with dst shrinking (a lot of new overflow pages) */
     for (l = s = d = 1; s <= src->length && d <= dst->length;) {
       if (unlikely(l >= d)) {
-        unsigned r, w;
         /* squash to get a gap of free space for merge */
         for (r = w = dst->length; r >= d; --r)
           if (dst->items[r].ptr) {
@@ -17971,14 +17969,13 @@ void mdbx_cursor_close(MDBX_cursor *mc) {
     mdbx_ensure(NULL, mc->mc_signature == MDBX_MC_LIVE ||
                           mc->mc_signature == MDBX_MC_READY4CLOSE);
     MDBX_txn *const txn = mc->mc_txn;
-    MDBX_env *const env = txn ? txn->mt_env : NULL;
     if (!mc->mc_backup) {
       mc->mc_txn = NULL;
       /* Remove from txn, if tracked.
        * A read-only txn (!C_UNTRACK) may have been freed already,
        * so do not peek inside it.  Only write txns track cursors. */
       if (mc->mc_flags & C_UNTRACK) {
-        mdbx_ensure(env, check_txn_rw(txn, 0) == MDBX_SUCCESS);
+        mdbx_ensure(txn->mt_env, check_txn_rw(txn, 0) == MDBX_SUCCESS);
         MDBX_cursor **prev = &txn->tw.cursors[mc->mc_dbi];
         while (*prev && *prev != mc)
           prev = &(*prev)->mc_next;
@@ -17991,7 +17988,7 @@ void mdbx_cursor_close(MDBX_cursor *mc) {
     } else {
       /* Cursor closed before nested txn ends */
       mdbx_cassert(mc, mc->mc_signature == MDBX_MC_LIVE);
-      mdbx_ensure(env, check_txn_rw(txn, 0) == MDBX_SUCCESS);
+      mdbx_ensure(txn->mt_env, check_txn_rw(txn, 0) == MDBX_SUCCESS);
       mc->mc_signature = MDBX_MC_WAIT4EOT;
     }
   }
@@ -26307,9 +26304,9 @@ __dll_export
         0,
         9,
         2,
-        91,
-        {"2021-01-20T02:06:06+03:00", "739991bd7ba3ac11b42b6d0ea88fb67756145751", "f2e53e168baadeb7bda8b82ea9edd7524b772ee4",
-         "v0.9.2-91-gf2e53e16"},
+        95,
+        {"2021-01-20T14:50:43+07:00", "e7c2b60bc93d05633af0d93e3aebb3387e17710d", "f4f9239c0b43f0a61e925c210f612a8490b2a6ab",
+         "v0.9.2-95-gf4f9239c"},
         sourcery};
 
 __dll_export
