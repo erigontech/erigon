@@ -29,9 +29,9 @@ func CheckEnc(chaindata string) error {
 	)
 
 	//set test methods
-	chainDataStorageDecoder := changeset.Mapper[dbutils.PlainStorageChangeSetBucket].Decode
-	testStorageEncoder := changeset.EncodeStoragePlain
-	testStorageDecoder := changeset.Mapper[dbutils.PlainStorageChangeSetBucket].Decode
+	chainDataStorageDecoder := changeset.Mapper[dbutils.StorageChangeSetBucket].Decode
+	testStorageEncoder := changeset.EncodeStorage
+	testStorageDecoder := changeset.Mapper[dbutils.StorageChangeSetBucket].Decode
 
 	startTime := time.Now()
 	ch := make(chan struct {
@@ -47,7 +47,7 @@ func CheckEnc(chaindata string) error {
 				select {
 				case v := <-ch:
 					blockNum, kk, vv := chainDataStorageDecoder(v.k, v.v)
-					cs := changeset.NewStorageChangeSetPlain()
+					cs := changeset.NewStorageChangeSet()
 					_ = cs.Add(v.k, v.v)
 					atomic.AddUint64(&currentSize, uint64(len(v.v)))
 					innerErr := testStorageEncoder(blockNum, cs, func(k, v []byte) error {
@@ -80,7 +80,7 @@ func CheckEnc(chaindata string) error {
 			close(stop)
 		}()
 
-		return db.Walk(dbutils.PlainStorageChangeSetBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		return db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 			if i%100_000 == 0 {
 				blockNum := binary.BigEndian.Uint64(k)
 				fmt.Printf("Processed %dK, block number %d, current %d, new %d, time %s\n",

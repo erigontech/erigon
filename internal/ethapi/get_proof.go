@@ -37,13 +37,8 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	db := s.b.ChainDb()
 	ts := dbutils.EncodeBlockNumber(block)
 	accountMap := make(map[string]*accounts.Account)
-	if err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, ts, 0, func(blockN uint64, a, v []byte) (bool, error) {
-		a, v = common.CopyBytes(a), common.CopyBytes(v)
-		var kHash, err = common.HashData(a)
-		if err != nil {
-			return false, err
-		}
-		k := kHash[:]
+	if err := changeset.Walk(db, dbutils.AccountChangeSetBucket, ts, 0, func(blockN uint64, k, v []byte) (bool, error) {
+		k, v = common.CopyBytes(k), common.CopyBytes(v)
 		if _, ok := accountMap[string(k)]; !ok {
 			if len(v) > 0 {
 				var a accounts.Account
@@ -61,13 +56,8 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 	}
 
 	storageMap := make(map[string][]byte)
-	if err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, ts, 0, func(blockN uint64, a, v []byte) (bool, error) {
-		a, v = common.CopyBytes(a), common.CopyBytes(v)
-		var kHash, err = common.HashData(a)
-		if err != nil {
-			return true, err
-		}
-		k := kHash[:]
+	if err := changeset.Walk(db, dbutils.AccountChangeSetBucket, ts, 0, func(blockN uint64, k, v []byte) (bool, error) {
+		k, v = common.CopyBytes(k), common.CopyBytes(v)
 		if _, ok := storageMap[string(k)]; !ok {
 			storageMap[string(k)] = v
 		}

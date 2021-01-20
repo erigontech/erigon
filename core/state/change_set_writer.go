@@ -58,6 +58,17 @@ type ChangeSetWriter struct {
 	blockNumber    uint64
 }
 
+func NewChangeSetWriter() *ChangeSetWriter {
+	return &ChangeSetWriter{
+		accountChanges: make(map[common.Address][]byte),
+		storageChanged: make(map[common.Address]bool),
+		storageChanges: make(map[string][]byte),
+		storageFactory: changeset.NewStorageChangeSet,
+		accountFactory: changeset.NewAccountChangeSet,
+		accountKeyGen:  hashedAccountKeyGen,
+		storageKeyGen:  hashedStorageKeyGen,
+	}
+}
 func NewChangeSetWriterPlain(db ethdb.Database, blockNumber uint64) *ChangeSetWriter {
 	return &ChangeSetWriter{
 		db:             db,

@@ -21,6 +21,8 @@ import (
 
 var stateBuckets = []string{
 	dbutils.CurrentStateBucket,
+	dbutils.AccountChangeSetBucket,
+	dbutils.StorageChangeSetBucket,
 	dbutils.ContractCodeBucket,
 	dbutils.PlainStateBucket,
 	dbutils.PlainAccountChangeSetBucket,

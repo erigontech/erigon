@@ -974,14 +974,14 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 	for i := uint64(0); i < rewind; i++ {
 		var printed bool
 		encodedTS := dbutils.EncodeBlockNumber(timestamp)
-		err = changeset.Walk(ethDb, dbutils.PlainStorageChangeSetBucket, encodedTS, 8*8, func(blockN uint64, k, v []byte) (bool, error) {
-			if bytes.HasPrefix(k, account[:]) {
-				incarnation := binary.BigEndian.Uint64(k[common.AddressLength : common.AddressLength+common.IncarnationLength])
+		err = changeset.Walk(ethDb, dbutils.StorageChangeSetBucket, encodedTS, 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+			if bytes.HasPrefix(k, secKey) {
+				incarnation := binary.BigEndian.Uint64(k[common.HashLength : common.HashLength+common.IncarnationLength])
 				if !printed {
 					fmt.Printf("Changes for block %d\n", timestamp)
 					printed = true
 				}
-				fmt.Printf("%d %x %x\n", incarnation, k[common.AddressLength+common.IncarnationLength:], v)
+				fmt.Printf("%d %x %x\n", incarnation, k[common.HashLength+common.IncarnationLength:], v)
 			}
 			return true, nil
 		})
@@ -1288,16 +1288,10 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	ts := dbutils.EncodeBlockNumber(block + 1)
 	accountMap := make(map[string]*accounts.Account)
 
-	if err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
+	if err := changeset.Walk(db, dbutils.AccountChangeSetBucket, ts, 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN > *headNumber {
 			return false, nil
 		}
-
-		var addrHash, err = common.HashData(address)
-		if err != nil {
-			return false, err
-		}
-		k := addrHash[:]
 
 		if _, ok := accountMap[string(k)]; !ok {
 			if len(v) > 0 {
@@ -1318,15 +1312,10 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("Constructed account map", "size", len(accountMap),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	storageMap := make(map[string][]byte)
-	if err := changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
+	if err := changeset.Walk(db, dbutils.StorageChangeSetBucket, ts, 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN > *headNumber {
 			return false, nil
 		}
-		var addrHash, err = common.HashData(address)
-		if err != nil {
-			return false, err
-		}
-		k := addrHash[:]
 		if _, ok := storageMap[string(k)]; !ok {
 			storageMap[string(k)] = v
 		}
