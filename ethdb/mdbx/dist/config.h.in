@@ -12,7 +12,6 @@
 #cmakedefine MDBX_FORCE_ASSERTIONS
 
 /* Common */
-#cmakedefine01 MDBX_HUGE_TRANSACTIONS
 #cmakedefine01 MDBX_TXN_CHECKOWNER
 #cmakedefine MDBX_ENV_CHECKPID_AUTO
 #ifndef MDBX_ENV_CHECKPID_AUTO

@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY c1093570bfda5167ead9bb41f20b8282177e878ac3b4469758458fe5994a1c60_v0_9_2_14_g166ed1c7
+#define MDBX_BUILD_SOURCERY 45bd53b73d1f4ea08a7af515ea5a7601fab76605f8767656b865066accaaf079_v0_9_2_91_gf2e53e16
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -1542,11 +1542,6 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 
 #endif /* DOXYGEN */
 
-/** Enables support for huge write-transactions */
-#ifndef MDBX_HUGE_TRANSACTIONS
-#define MDBX_HUGE_TRANSACTIONS 0
-#endif /* MDBX_HUGE_TRANSACTIONS */
-
 /** Using fcntl(F_FULLFSYNC) with 5-10 times slowdown */
 #define MDBX_OSX_WANNA_DURABILITY 0
 /** Using fsync() with chance of data lost on power failure */
@@ -1595,6 +1590,14 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #else
 #define MDBX_TRUST_RTC_CONFIG STRINGIFY(MDBX_TRUST_RTC)
 #endif /* MDBX_TRUST_RTC */
+
+/** Controls online database auto-compactification during write-transactions. */
+#ifndef MDBX_ENABLE_REFUND
+#define MDBX_ENABLE_REFUND 1
+#endif
+#if !(MDBX_ENABLE_REFUND == 0 || MDBX_ENABLE_REFUND == 1)
+#error MDBX_ENABLE_REFUND must be defined as 0 or 1
+#endif /* MDBX_ENABLE_REFUND */
 
 //------------------------------------------------------------------------------
 
@@ -1917,10 +1920,10 @@ typedef struct mdbx_geo_t {
 typedef struct MDBX_meta {
   /* Stamp identifying this as an MDBX file.
    * It must be set to MDBX_MAGIC with MDBX_DATA_VERSION. */
-  uint64_t mm_magic_and_version;
+  uint32_t mm_magic_and_version[2];
 
   /* txnid that committed this page, the first of a two-phase-update pair */
-  mdbx_safe64_t mm_txnid_a;
+  uint32_t mm_txnid_a[2];
 
   uint16_t mm_extra_flags;  /* extra DB flags, zero (nothing) for now */
   uint8_t mm_validator_id;  /* ID of checksum and page validation method,
@@ -1940,17 +1943,18 @@ typedef struct MDBX_meta {
 #define MDBX_DATASIGN_NONE 0u
 #define MDBX_DATASIGN_WEAK 1u
 #define SIGN_IS_STEADY(sign) ((sign) > MDBX_DATASIGN_WEAK)
-#define META_IS_STEADY(meta) SIGN_IS_STEADY((meta)->mm_datasync_sign)
-  volatile uint64_t mm_datasync_sign;
+#define META_IS_STEADY(meta)                                                   \
+  SIGN_IS_STEADY(unaligned_peek_u64(4, (meta)->mm_datasync_sign))
+  uint32_t mm_datasync_sign[2];
 
   /* txnid that committed this page, the second of a two-phase-update pair */
-  mdbx_safe64_t mm_txnid_b;
+  uint32_t mm_txnid_b[2];
 
   /* Number of non-meta pages which were put in GC after COW. May be 0 in case
    * DB was previously handled by libmdbx without corresponding feature.
    * This value in couple with mr_snapshot_pages_retired allows fast estimation
    * of "how much reader is restraining GC recycling". */
-  uint64_t mm_pages_retired;
+  uint32_t mm_pages_retired[2];
 
   /* The analogue /proc/sys/kernel/random/boot_id or similar to determine
    * whether the system was rebooted after the last use of the database files.
@@ -2237,9 +2241,11 @@ typedef struct MDBX_lockinfo {
 #define MAX_MAPSIZE MAX_MAPSIZE64
 #define MDBX_READERS_LIMIT                                                     \
   ((65536 - sizeof(MDBX_lockinfo)) / sizeof(MDBX_reader))
+#define MDBX_PGL_LIMIT MAX_PAGENO
 #else
 #define MDBX_READERS_LIMIT 1024
 #define MAX_MAPSIZE MAX_MAPSIZE32
+#define MDBX_PGL_LIMIT (MAX_MAPSIZE32 / MIN_PAGESIZE)
 #endif /* MDBX_WORDBITS */
 
 /*----------------------------------------------------------------------------*/
@@ -2264,36 +2270,26 @@ typedef pgno_t *MDBX_PNL;
 typedef txnid_t *MDBX_TXL;
 
 /* An Dirty-Page list item is an pgno/pointer pair. */
-typedef union MDBX_DP {
-  __anonymous_struct_extension__ struct {
-    pgno_t pgno;
-    MDBX_page *ptr;
-  };
-  __anonymous_struct_extension__ struct {
-    unsigned sorted;
-    unsigned length;
-  };
-} MDBX_DP;
+typedef struct MDBX_dp {
+  pgno_t pgno;
+  MDBX_page *ptr;
+} MDBX_dp;
 
-/* An DPL (dirty-page list) is a sorted array of MDBX_DPs.
- * The first element's length member is a count of how many actual
- * elements are in the array. */
-typedef MDBX_DP *MDBX_DPL;
+/* An DPL (dirty-page list) is a sorted array of MDBX_DPs. */
+typedef struct MDBX_dpl {
+  unsigned sorted;
+  unsigned length;
+  unsigned allocated;
+#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) ||              \
+    (!defined(__cplusplus) && defined(_MSC_VER))
+  MDBX_dp items[] /* dynamic size with holes at zero and after the last */;
+#endif
+} MDBX_dpl;
 
 /* PNL sizes */
 #define MDBX_PNL_GRANULATE 1024
 #define MDBX_PNL_INITIAL                                                       \
   (MDBX_PNL_GRANULATE - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
-
-#if MDBX_HUGE_TRANSACTIONS
-#define MDBX_PNL_MAX                                                           \
-  ((1u << 26) - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
-#define MDBX_DPL_TXNFULL (MDBX_PNL_MAX / 2)
-#else
-#define MDBX_PNL_MAX                                                           \
-  ((1u << 24) - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
-#define MDBX_DPL_TXNFULL (MDBX_PNL_MAX / 4)
-#endif /* MDBX_HUGE_TRANSACTIONS */
 
 #define MDBX_TXL_GRANULATE 32
 #define MDBX_TXL_INITIAL                                                       \
@@ -2418,14 +2414,16 @@ struct MDBX_txn {
       MDBX_cursor **cursors;
       pgno_t *reclaimed_pglist; /* Reclaimed GC pages */
       txnid_t last_reclaimed;   /* ID of last used record */
+#if MDBX_ENABLE_REFUND
       pgno_t loose_refund_wl /* FIXME: describe */;
+#endif /* MDBX_ENABLE_REFUND */
       /* dirtylist room: Dirty array size - dirty pages visible to this txn.
        * Includes ancestor txns' dirty pages not hidden by other txns'
        * dirty/spilled pages. Thus commit(nested txn) has room to merge
        * dirtylist into mt_parent after freeing hidden mt_parent pages. */
       unsigned dirtyroom;
       /* For write txns: Modified pages. Sorted when not MDBX_WRITEMAP. */
-      MDBX_DPL dirtylist;
+      MDBX_dpl *dirtylist;
       /* The list of reclaimed txns from GC */
       MDBX_TXL lifo_reclaimed;
       /* The list of pages that became unused during this transaction. */
@@ -2435,26 +2433,19 @@ struct MDBX_txn {
       MDBX_page *loose_pages;
       /* Number of loose pages (tw.loose_pages) */
       unsigned loose_count;
-      /* Number of retired to parent pages (tw.retired2parent_pages) */
-      unsigned retired2parent_count;
-      /* The list of parent's txn dirty pages that retired (became unused)
-       * in this transaction, linked through `mp_next`. */
-      MDBX_page *retired2parent_pages;
       /* The sorted list of dirty pages we temporarily wrote to disk
        * because the dirty list was full. page numbers in here are
        * shifted left by 1, deleted slots have the LSB set. */
       MDBX_PNL spill_pages;
+      unsigned spill_least_removed;
     } tw;
   };
 };
 
-/* Enough space for 2^32 nodes with minimum of 2 keys per node. I.e., plenty.
- * At 4 keys per node, enough for 2^64 nodes, so there's probably no need to
- * raise this on a 64 bit machine. */
 #if MDBX_WORDBITS >= 64
-#define CURSOR_STACK 28
+#define CURSOR_STACK 32
 #else
-#define CURSOR_STACK 20
+#define CURSOR_STACK 24
 #endif
 
 struct MDBX_xcursor;
@@ -2584,11 +2575,9 @@ struct MDBX_env {
   uint16_t *me_dbflags;        /* array of flags from MDBX_db.md_flags */
   unsigned *me_dbiseqs;        /* array of dbi sequence numbers */
   volatile txnid_t *me_oldest; /* ID of oldest reader last time we looked */
-  MDBX_page *me_dpages;        /* list of malloc'd blocks for re-use */
+  MDBX_page *me_dp_reserve;    /* list of malloc'd blocks for re-use */
   /* PNL of pages that became unused in a write txn */
   MDBX_PNL me_retired_pages;
-  /* MDBX_DP of pages written during a write txn. */
-  MDBX_DPL me_dirtylist;
   /* Number of freelist items that can fit in a single overflow page */
   unsigned me_maxgc_ov1page;
   unsigned me_branch_nodemax; /* max size of a branch-node */
@@ -2601,6 +2590,13 @@ struct MDBX_env {
   volatile pgno_t *me_discarded_tail;
   volatile uint32_t *me_meta_sync_txnid;
   MDBX_hsr_func *me_hsr_callback; /* Callback for kicking laggard readers */
+  unsigned me_dp_reserve_len;
+  struct {
+    unsigned dp_reserve_limit;
+    unsigned rp_augment_limit;
+    unsigned dp_limit;
+    unsigned dp_initial;
+  } me_options;
   struct {
 #if MDBX_LOCKING > 0
     mdbx_ipclock_t wlock;

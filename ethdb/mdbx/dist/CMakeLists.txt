@@ -438,7 +438,6 @@ add_mdbx_option(MDBX_BUILD_TOOLS "Build MDBX tools (mdbx_chk/stat/dump/load/copy
 CMAKE_DEPENDENT_OPTION(MDBX_INSTALL_MANPAGES "Install man-pages for MDBX tools (mdbx_chk/stat/dump/load/copy)" ON MDBX_BUILD_TOOLS OFF)
 add_mdbx_option(MDBX_TXN_CHECKOWNER "Checking transaction matches the calling thread inside libmdbx's API" ON)
 add_mdbx_option(MDBX_ENV_CHECKPID "Paranoid checking PID inside libmdbx's API" AUTO)
-add_mdbx_option(MDBX_HUGE_TRANSACTIONS "Support for huge write-transactions" OFF)
 mark_as_advanced(MDBX_ENV_CHECKPID)
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   add_mdbx_option(MDBX_DISABLE_GNU_SOURCE "Don't use GNU/Linux libc extensions" OFF)

@@ -13,15 +13,27 @@ TODO:
  - Packages for ROSA Linux, ALT Linux, Fedora/RHEL, Debian/Ubuntu.
 
 Acknowledgements:
+
  - Mahlon E. Smith (http://www.martini.nu/) for FreeBSD port of libmdbx.
  - 장세연 (http://www.castis.com) for bug fixing and PR.
 
-Added features:
+Removed options and features:
+
+ - Drop `MDBX_HUGE_TRANSACTIONS` build-option (now no longer required).
+
+New features:
+
  - Package for FreeBSD is available now by Mahlon E. Smith.
+ - New API functions to get/set various options (https://github.com/erthink/libmdbx/issues/128).
+ - Unlimited/Dynamic size of retired and dirty page lists (https://github.com/erthink/libmdbx/issues/123).
+ - Added `-p` option (purge subDB before loading) to `mdbx_load` tool.
 
 Fixes:
+
  - Fixed missing cleanup (null assigned) in the C++ commit/abort (https://github.com/erthink/libmdbx/pull/143).
  - Fixed `mdbx_realloc()` for case of nullptr and `MDBX_AVOID_CRT=ON` for Windows.
+ - Fixed the possibility to use invalid and renewed (closed & re-opened, dropped & re-created) DBI-handles (https://github.com/erthink/libmdbx/issues/146).
+ - Fixed 4-byte aligned access to 64-bit integers, including access to the `bootid` meta-page's field (https://github.com/erthink/libmdbx/issues/153).
 
 
 ## v0.9.2 scheduled at 2020-11-27
