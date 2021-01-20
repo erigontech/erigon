@@ -9,6 +9,29 @@ import (
 type Encoder func(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error
 type Decoder func(dbKey, dbValue []byte) (blockN uint64, k, v []byte)
 
+/* Hashed changesets (key is a hash of common.Address) */
+
+func NewAccountChangeSet() *ChangeSet {
+	return &ChangeSet{
+		Changes: make([]Change, 0),
+		keyLen:  common.HashLength,
+	}
+}
+
+func EncodeAccounts(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
+	return encodeAccounts2(blockN, s, f)
+}
+
+type AccountChangeSet struct{ c ethdb.CursorDupSort }
+
+func (b AccountChangeSet) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
+	return walk(b.c, from, to, common.HashLength, f)
+}
+
+func (b AccountChangeSet) Find(blockNumber uint64, k []byte) ([]byte, error) {
+	return findInAccountChangeSet(b.c, blockNumber, k, common.HashLength)
+}
+
 /* Plain changesets (key is a common.Address) */
 
 func NewAccountChangeSetPlain() *ChangeSet {

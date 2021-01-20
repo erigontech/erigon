@@ -85,6 +85,16 @@ var (
 	//value - incarnation of account when it was last deleted
 	IncarnationMapBucket = "incarnationMap"
 
+	//AccountChangeSetBucket keeps changesets of accounts
+	// key - encoded timestamp(block number)
+	// value - encoded ChangeSet{k - addrHash v - account(encoded).
+	AccountChangeSetBucket = "ACS"
+
+	// StorageChangeSetBucket keeps changesets of storage
+	// key - encoded timestamp(block number)
+	// value - encoded ChangeSet{k - compositeKey(for storage) v - originalValue(common.Hash)}.
+	StorageChangeSetBucket = "SCS"
+
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
 	IntermediateTrieHashBucket     = "iTh2"
 	IntermediateTrieHashBucketOld1 = "iTh"
@@ -202,6 +212,8 @@ var Buckets = []string{
 	StorageHistoryBucket,
 	CodeBucket,
 	ContractCodeBucket,
+	AccountChangeSetBucket,
+	StorageChangeSetBucket,
 	IntermediateTrieHashBucket,
 	DatabaseVerisionKey,
 	HeaderPrefix,
@@ -315,6 +327,12 @@ var BucketsConfigs = BucketsCfg{
 		Flags: DupSort,
 	},
 	PlainStorageChangeSetBucket: {
+		Flags: DupSort,
+	},
+	AccountChangeSetBucket: {
+		Flags: DupSort,
+	},
+	StorageChangeSetBucket: {
 		Flags: DupSort,
 	},
 	PlainStateBucket: {

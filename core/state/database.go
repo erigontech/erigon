@@ -851,15 +851,13 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
-	accountMap, storageMap, err := changeset.RewindDataPlain(tds.db, tds.blockNr, blockNr)
+	accountMap, storageMap, err := changeset.RewindData(tds.db, tds.blockNr, blockNr)
 	if err != nil {
 		return err
 	}
 	for key, value := range accountMap {
-		var addrHash, err = common.HashData([]byte(key))
-		if err != nil {
-			return err
-		}
+		var addrHash common.Hash
+		copy(addrHash[:], []byte(key))
 		if len(value) > 0 {
 			var acc accounts.Account
 			if err := acc.DecodeForStorage(value); err != nil {
@@ -885,29 +883,27 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 		b.accountReads[addrHash] = struct{}{}
 	}
 	for key, value := range storageMap {
-		var addrHash, err = common.HashData([]byte(key)[:common.AddressLength])
-		if err != nil {
-			return err
-		}
+		var addrHash common.Hash
+		copy(addrHash[:], []byte(key)[:common.HashLength])
 		var keyHash common.Hash
-		copy(keyHash[:], []byte(key)[common.AddressLength+common.IncarnationLength:])
+		copy(keyHash[:], []byte(key)[common.HashLength+common.IncarnationLength:])
 		m, ok := b.storageUpdates[addrHash]
 		if !ok {
 			m = make(map[common.Hash][]byte)
 			b.storageUpdates[addrHash] = m
 		}
-		b.storageIncarnation[addrHash] = binary.BigEndian.Uint64([]byte(key)[common.AddressLength:])
+		b.storageIncarnation[addrHash] = binary.BigEndian.Uint64([]byte(key)[common.HashLength:])
 		var storageKey common.StorageKey
 		copy(storageKey[:], []byte(key))
 		b.storageReads[storageKey] = struct{}{}
 		if len(value) > 0 {
 			m[keyHash] = value
-			if err := tds.db.Put(dbutils.CurrentStateBucket, []byte(key)[:common.AddressLength+common.IncarnationLength+common.HashLength], value); err != nil {
+			if err := tds.db.Put(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
 				return err
 			}
 		} else {
 			m[keyHash] = nil
-			if err := tds.db.Delete(dbutils.CurrentStateBucket, []byte(key)[:common.AddressLength+common.IncarnationLength+common.HashLength], nil); err != nil {
+			if err := tds.db.Delete(dbutils.CurrentStateBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], nil); err != nil {
 				return err
 			}
 		}
@@ -936,8 +932,8 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 
 func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 	changeSetKey := dbutils.EncodeBlockNumber(timestamp)
-	err := tds.db.Walk(dbutils.PlainAccountChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
-		if err := tds.db.Delete(dbutils.PlainAccountChangeSetBucket, k, v); err != nil {
+	err := tds.db.Walk(dbutils.AccountChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
+		if err := tds.db.Delete(dbutils.AccountChangeSetBucket, k, v); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -946,8 +942,8 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 		return err
 	}
 
-	err = tds.db.Walk(dbutils.PlainStorageChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
-		if err2 := tds.db.Delete(dbutils.PlainStorageChangeSetBucket, k, v); err2 != nil {
+	err = tds.db.Walk(dbutils.StorageChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
+		if err2 := tds.db.Delete(dbutils.StorageChangeSetBucket, k, v); err2 != nil {
 			return false, err2
 		}
 		return true, nil
@@ -1237,7 +1233,7 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 
 // DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
-	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: tds.pw, csw: NewChangeSetWriterPlain(nil, 0)}
+	return &DbStateWriter{blockNr: tds.blockNr, db: tds.db, pw: tds.pw, csw: NewChangeSetWriter()}
 }
 
 // DbStateWriter creates a writer that is designed to write changes into the database batch

@@ -11,13 +11,19 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestEncodingAccountHashed(t *testing.T) {
+	bkt := dbutils.AccountChangeSetBucket
+	m := Mapper[bkt]
+	runTestAccountEncoding(t, true /*isHashed*/, m.New, m.Encode, m.Decode)
+}
+
 func TestEncodingAccountPlain(t *testing.T) {
 	bkt := dbutils.PlainAccountChangeSetBucket
 	m := Mapper[bkt]
-	runTestAccountEncoding(t, m.New, m.Encode, m.Decode)
+	runTestAccountEncoding(t, false /*isHashed*/, m.New, m.Encode, m.Decode)
 }
 
-func runTestAccountEncoding(t *testing.T, New func() *ChangeSet, enc Encoder, dec Decoder) {
+func runTestAccountEncoding(t *testing.T, isHashed bool, New func() *ChangeSet, enc Encoder, dec Decoder) {
 	ch := New()
 	// empty StorageChangeSset first
 	err := enc(1, ch, func(k, v []byte) error {
@@ -33,8 +39,13 @@ func runTestAccountEncoding(t *testing.T, New func() *ChangeSet, enc Encoder, de
 	numOfElements := 3
 	for i := 0; i < numOfElements; i++ {
 		address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
-		err2 := ch.Add(address[:], vals[i])
-		if err2 != nil {
+		if isHashed {
+			addrHash, _ := common.HashData(address[:])
+			err = ch.Add(addrHash.Bytes(), vals[i])
+		} else {
+			err = ch.Add(address[:], vals[i])
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
 	}
