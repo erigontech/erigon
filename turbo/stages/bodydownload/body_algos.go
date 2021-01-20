@@ -4,6 +4,7 @@ import (
 	//"context"
 	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
+	"container/heap"
 	"container/list"
 	"time"
 
@@ -40,7 +41,9 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	bd.required.Clear()
 	bd.requested.Clear()
 	bd.delivered.Clear()
-	bd.requestQueue = list.New()
+	bd.expirationList = list.New()
+	bd.requestQueue = bd.requestQueue[:0]
+	heap.Init(&bd.requestQueue)
 	bd.RequestQueueTimer = time.NewTimer(time.Hour)
 	bd.requestedMap = make(map[DoubleHash]uint64)
 	for i := 0; i < len(bd.deliveries); i++ {
@@ -54,17 +57,12 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	return nil
 }
 
-func (bd *BodyDownload) ApplyBodyRequest(currentTime, timeout uint64, bodyReq *BodyRequest) *time.Timer {
+func (bd *BodyDownload) ApplyBodyRequest(currentTime, timeout uint64, bodyReq *BodyRequest) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
-	var prevTopTime uint64
-	if bd.requestQueue.Len() > 0 {
-		prevTopTime = bd.requestQueue.Front().Value.(RequestQueueItem).waitUntil
-	}
-	bd.requestQueue.PushBack(RequestQueueItem{requested: bodyReq.requested, waitUntil: currentTime + timeout})
+	// Place request into the expiration list
+	bd.expirationList.PushBack(RequestQueueItem{requested: bodyReq.requested, waitUntil: currentTime + timeout, lowestBlockNum: bodyReq.BlockNums[0]})
 	bd.requested.Or(bodyReq.requested)
-	bd.resetRequestQueueTimer(prevTopTime, currentTime)
-	return bd.RequestQueueTimer
 }
 
 func (bd *BodyDownload) CancelBodyRequest(bodyReq *BodyRequest) {
@@ -73,46 +71,58 @@ func (bd *BodyDownload) CancelBodyRequest(bodyReq *BodyRequest) {
 	bd.required.Or(bodyReq.requested)
 }
 
-func (bd *BodyDownload) CancelExpiredRequests(currentTime uint64) *time.Timer {
+func (bd *BodyDownload) CancelBlockingRequests(currentTime uint64) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
-	// Give up the requests that were timed out
-	var prevTopTime uint64
-	if bd.requestQueue.Len() > 0 {
-		prevTopTime = bd.requestQueue.Front().Value.(RequestQueueItem).waitUntil
-		for peek := bd.requestQueue.Front(); peek != nil && peek.Value.(RequestQueueItem).waitUntil <= currentTime; peek = bd.requestQueue.Front() {
-			bd.requestQueue.Remove(peek)
+	// Move requests from expiration list to the request priority queue, if required
+	if bd.expirationList.Len() > 0 {
+		for peek := bd.expirationList.Front(); peek != nil && peek.Value.(RequestQueueItem).waitUntil <= currentTime; peek = bd.expirationList.Front() {
+			bd.expirationList.Remove(peek)
 			item := peek.Value.(RequestQueueItem)
-			// Check if the blocks are still requested (outstanding, not delivered), and if yes, add the blocks back to required
 			if item.requested.Intersects(bd.requested) {
-				//fmt.Printf("CancelExpiredRequests with item.requested.Minimum %d, bd.requested.Minimum %d\n", item.requested.Minimum(), bd.requested.Minimum())
-				item.requested.And(bd.requested)    // Compute the intersection (not delivered but timed out blocks) into item.requested
-				item.requested.AndNot(bd.delivered) // Remove delivered blocks
-				if !item.requested.IsEmpty() {
-					item.requested.RemoveRange(0, bd.requestedLow)
-				}
-				if !item.requested.IsEmpty() {
-					bd.requested.AndNot(item.requested) // Remove the intersection from the requsted
-					bd.required.Or(item.requested)      // Add the intersection back to required
-				}
+				heap.Push(&bd.requestQueue, item)
 			}
 		}
-		//} else {
-		//	fmt.Printf("=========> bd.requestQueue is empty\n")
 	}
-	bd.resetRequestQueueTimer(prevTopTime, currentTime)
-	return bd.RequestQueueTimer
+	var highestRequested uint64
+	if !bd.requested.IsEmpty() {
+		highestRequested = bd.requested.Maximum()
+	}
+	for bd.requestQueue.Len() > 0 && !bd.requested.IsEmpty() {
+		back := bd.requestQueue[0] // Request furthers at the back by block number
+		// This request is preventing any further progress on the download, needs to be repeated
+		// Check if the blocks are still requested (outstanding, not delivered), and if yes, add the blocks back to required
+		if back.requested.Intersects(bd.requested) {
+			if back.lowestBlockNum+bd.outstandingLimit >= highestRequested+16000 {
+				//fmt.Printf("CancelBlockingRequest: request not blocking: lowest=%d, highestRequested=%d, diff=%d\n", back.lowestBlockNum, highestRequested, back.lowestBlockNum+bd.outstandingLimit-(highestRequested+16000))
+				break
+			}
+			heap.Remove(&bd.requestQueue, 0)
+			//fmt.Printf("CancelExpiredRequests with item.requested.Minimum %d, bd.requested.Minimum %d\n", item.requested.Minimum(), bd.requested.Minimum())
+			back.requested.And(bd.requested)    // Compute the intersection (not delivered but timed out blocks) into item.requested
+			back.requested.AndNot(bd.delivered) // Remove delivered blocks
+			if !back.requested.IsEmpty() {
+				back.requested.RemoveRange(0, bd.requestedLow)
+			}
+			if !back.requested.IsEmpty() {
+				bd.requested.AndNot(back.requested) // Remove the intersection from the requsted
+				bd.required.Or(back.requested)      // Add the intersection back to required
+			}
+			if !back.requested.IsEmpty() {
+				highestRequested = bd.requested.Maximum()
+			}
+			//fmt.Printf("CancelBlockingRequest: Removed request starting from %d (proactive)\n", back.lowestBlockNum)
+		} else {
+			// Removing the request because it has been delivered already
+			heap.Remove(&bd.requestQueue, 0)
+			//fmt.Printf("CancelBlockingRequest: Removed request starting from %d (delivered)\n", back.lowestBlockNum)
+		}
+	}
 }
 
 func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database) *BodyRequest {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
-
-	//if bd.required.IsEmpty() {
-	//	fmt.Printf("========> bd.required is empty\n")
-	//} else {
-	//	fmt.Printf("==========> bd.required min %d, max %d\n", bd.required.Minimum(), bd.required.Maximum())
-	//}
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]common.Hash, 0, BlockBufferSize)
@@ -122,15 +132,13 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database) *BodyRequest {
 	for len(blockNums) < BlockBufferSize && it.HasNext() {
 		b := it.Next()
 		if b >= bd.requestedLow+bd.outstandingLimit {
+			//fmt.Printf("RequestMoreBodies too many outstanding blocks: %d >= %d + %d, blockNums so far: %d\n", b, bd.requestedLow, bd.outstandingLimit, len(blockNums))
 			// Too many outstanding blocks requested
 			break
 		}
 		var hash common.Hash
 		var header *types.Header
 		var err error
-		//if b < bd.requestedLow {
-		//	fmt.Printf("b=%d, bd.requestedLow=%d\n", b, bd.requestedLow)
-		//}
 		if bd.deliveries[b-bd.requestedLow] != nil {
 			header = bd.deliveries[b-bd.requestedLow].Header()
 			hash = header.Hash()
@@ -174,22 +182,6 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database) *BodyRequest {
 	return bodyReq
 }
 
-func (bd *BodyDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64) {
-	var nextTopTime uint64
-	if bd.requestQueue.Len() > 0 {
-		nextTopTime = bd.requestQueue.Front().Value.(RequestQueueItem).waitUntil
-	}
-	if nextTopTime == prevTopTime {
-		return // Nothing changed
-	}
-	if nextTopTime <= currentTime {
-		nextTopTime = currentTime
-	}
-	bd.RequestQueueTimer.Stop()
-	//fmt.Printf("Recreating RequestQueueTimer for delay %d seconds\n", nextTopTime-currentTime)
-	bd.RequestQueueTimer = time.NewTimer(time.Duration(nextTopTime-currentTime) * time.Second)
-}
-
 // DeliverBody takes the block body received from a peer and adds it to the various data structures
 func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 	uncleHash := types.CalcUncleHash(body.Uncles)
@@ -215,9 +207,6 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 func (bd *BodyDownload) FeedDeliveries() {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
-	//if !bd.requested.IsEmpty() {
-	//	fmt.Printf("FeedDeliveries with bd.requested.Minimum %d\n", bd.requested.Minimum())
-	//}
 	var i uint64
 	var channelFull bool
 	for i = 0; !channelFull && !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
@@ -237,7 +226,6 @@ func (bd *BodyDownload) FeedDeliveries() {
 		for j := len(bd.deliveries) - int(i); j < len(bd.deliveries); j++ {
 			bd.deliveries[j] = nil
 		}
-		//fmt.Printf("Delivered bodies for blocks [%d - %d]\n", bd.requestedLow, bd.requestedLow+i)
 		bd.requestedLow += i
 	}
 }

@@ -307,7 +307,7 @@ func runPeer(
 			}
 			log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}", peerID, hashesStr.String()))
 		case eth.BlockBodiesMsg:
-			//log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peerID))
+			log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peerID))
 			bytes := make([]byte, msg.Size)
 			_, err = io.ReadFull(msg.Payload, bytes)
 			if err != nil {
@@ -624,6 +624,9 @@ func (ss *SentryServerImpl) getBlockHeaders(inreq *proto_sentry.SendMessageByMin
 		return &proto_sentry.SentPeers{}, fmt.Errorf("find rw for peer %s", peerID)
 	}
 	if err := p2p.Send(rw, eth.GetBlockHeadersMsg, &req); err != nil {
+		ss.peerHeightMap.Delete(peerID)
+		ss.peerTimeMap.Delete(peerID)
+		ss.peerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("send to peer %s: %v", peerID, err)
 	}
 	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)
@@ -647,6 +650,9 @@ func (ss *SentryServerImpl) getBlockBodies(inreq *proto_sentry.SendMessageByMinB
 		return &proto_sentry.SentPeers{}, fmt.Errorf("find rw for peer %s", peerID)
 	}
 	if err := p2p.Send(rw, eth.GetBlockBodiesMsg, &req); err != nil {
+		ss.peerHeightMap.Delete(peerID)
+		ss.peerTimeMap.Delete(peerID)
+		ss.peerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("send to peer %s: %v", peerID, err)
 	}
 	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)

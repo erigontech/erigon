@@ -47,7 +47,7 @@ func Forward(logPrefix string, db ethdb.Database, blockChannel chan *types.Block
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	var logBlock uint64
+	var logBlock uint64 = bodyProgress
 	var count int
 	for block := range blockChannel {
 		if err = rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body()); err != nil {

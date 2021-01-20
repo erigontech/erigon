@@ -446,7 +446,7 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 	cs.deliveredBodies += delivered
 	cs.undeliveredBodies += undelivered
 	if undelivered > 0 {
-		log.Info(fmt.Sprintf("BlockBodies{delivered=%d, undelivered=%d, totalDelivered=%d, totalUndelivered=%d}", delivered, undelivered, cs.deliveredBodies, cs.undeliveredBodies))
+		//log.Info(fmt.Sprintf("BlockBodies{delivered=%d, undelivered=%d, totalDelivered=%d, totalUndelivered=%d}", delivered, undelivered, cs.deliveredBodies, cs.undeliveredBodies))
 	}
 	return &empty.Empty{}, nil
 }
@@ -527,28 +527,33 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 	sentPeers, err1 := cs.sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err1 != nil {
 		log.Error("Could not send block bodies request", "err", err1)
+		return false
 	}
 	return sentPeers != nil && len(sentPeers.Peers) > 0
 }
 
 func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
+	ticker := time.NewTicker(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	for {
-		timer := cs.bd.CancelExpiredRequests(uint64(time.Now().Unix()))
+		count := 0
+		cs.bd.CancelBlockingRequests(uint64(time.Now().Unix()))
 		req := cs.bd.RequestMoreBodies(db)
 		for req != nil && cs.sendBodyRequest(ctx, req) { // Don't keep producing requests and sending if there are no peers to accept it
-			timer = cs.bd.ApplyBodyRequest(uint64(time.Now().Unix()), 30 /*timeout*/, req)
+			cs.bd.ApplyBodyRequest(uint64(time.Now().Unix()), 5 /*timeout*/, req)
 			req = cs.bd.RequestMoreBodies(db)
+			count++
 		}
 		if req != nil {
 			cs.bd.CancelBodyRequest(req)
 		}
+		//fmt.Printf("Sent %d body requests\n", count)
 		select {
 		case <-ctx.Done():
 			cs.bd.CloseStageData()
 			return
-		case <-timer.C:
+		case <-ticker.C:
 			//log.Info("RequestQueueTime (bodies) ticked")
-		case <-cs.requestWakeUpHeaders:
+		case <-cs.requestWakeUpBodies:
 			//log.Info("bodyLoop woken up by the incoming request")
 		}
 	}
@@ -563,7 +568,7 @@ func (cs *ControlServerImpl) headerLoop(ctx context.Context) {
 			return
 		case <-timer.C:
 			//log.Info("RequestQueueTimer (headers) ticked")
-		case <-cs.requestWakeUpBodies:
+		case <-cs.requestWakeUpHeaders:
 			//log.Info("headerLoop woken up by the incoming request")
 		}
 	}
