@@ -56,6 +56,7 @@ type API struct {
 	VerifyHeaderRequests  chan VerifyHeaderRequest
 	VerifyHeaderResponses chan VerifyHeaderResponse
 	CleanupTicker         *time.Ticker
+	CleanupCh             chan FinishedRequest
 	HeadersRequests       chan HeadersRequest
 	HeaderResponses       chan HeaderResponse
 
@@ -77,6 +78,11 @@ type VerifyRequest struct {
 	To              uint64
 }
 
+type FinishedRequest struct {
+	ReqID       uint64
+	BlockNumber uint64
+}
+
 const (
 	size        = 1000
 	storageSize = 60000
@@ -90,6 +96,7 @@ func NewAPI(config *params.ChainConfig) *API {
 		VerifyHeaderRequests:  make(chan VerifyHeaderRequest, size),
 		VerifyHeaderResponses: make(chan VerifyHeaderResponse, size),
 		CleanupTicker:         time.NewTicker(retry),
+		CleanupCh:             make(chan FinishedRequest, size),
 		HeadersRequests:       make(chan HeadersRequest, size),
 		HeaderResponses:       make(chan HeaderResponse, size),
 		VerifiedBlocks:        verifiedBlocks,

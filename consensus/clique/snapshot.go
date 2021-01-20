@@ -213,7 +213,7 @@ func (s *Snapshot) apply(headers ...*types.Header) error {
 		logged = start
 	)
 
-	for i := len(headers) - 1; i >= 0; i-- {
+	for i := range headers {
 		header := headers[i]
 
 		// Remove any votes on checkpoint blocks
@@ -342,6 +342,7 @@ type storage struct {
 	chStatus  *uint32
 	db        ethdb.Database
 	exit      chan struct{}
+	exitDone  chan struct{}
 	batchSize int
 }
 
@@ -360,6 +361,7 @@ func newStorage(db ethdb.Database) *storage {
 		ch:        make(chan *snapObj, batchSize/2),
 		chStatus:  new(uint32),
 		exit:      make(chan struct{}),
+		exitDone:  make(chan struct{}),
 		batchSize: batchSize,
 	}
 
@@ -373,7 +375,7 @@ func newStorage(db ethdb.Database) *storage {
 
 		for {
 			select {
-			case snap, isOpen := <-st.ch:
+			case snap := <-st.ch:
 				chStatus := atomic.LoadUint32(st.chStatus)
 
 				if st.shallAppend(snap) {
@@ -384,7 +386,7 @@ func newStorage(db ethdb.Database) *storage {
 					}
 				}
 
-				if len(snaps) >= batchSize || (!isOpen && len(snaps) > 0) {
+				if len(snaps) >= batchSize || (chStatus == 1 && len(snaps) > 0) {
 					st.saveSnaps(snaps, isSorted)
 
 					snaps = snaps[:0]
@@ -393,6 +395,8 @@ func newStorage(db ethdb.Database) *storage {
 				}
 
 				if chStatus == 1 && len(st.ch) == 0 {
+					close(st.exitDone)
+
 					return
 				}
 			case <-syncSmall.C:
@@ -405,8 +409,31 @@ func newStorage(db ethdb.Database) *storage {
 				}
 
 				if chStatus == 1 && len(st.ch) == 0 {
+					close(st.exitDone)
+
 					return
 				}
+			case <-st.exit:
+				if len(st.ch) > 0 {
+					for snap := range st.ch {
+						if st.shallAppend(snap) {
+							snaps = append(snaps, snap)
+						}
+
+						if isSorted && len(snaps) > 1 && snaps[len(snaps)-2].number > snap.number {
+							isSorted = false
+						}
+					}
+				}
+
+				if len(snaps) > 0 {
+					st.saveSnaps(snaps, isSorted)
+					snaps = snaps[:0]
+				}
+
+				common.SafeClose(st.exitDone)
+
+				return
 			}
 		}
 	}()
@@ -469,6 +496,7 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 
 func (st *storage) Close() {
 	common.SafeClose(st.exit)
+	<-st.exitDone
 }
 
 func (st *storage) shallAppend(snap *snapObj) bool {

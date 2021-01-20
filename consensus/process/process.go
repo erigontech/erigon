@@ -3,7 +3,6 @@ package process
 import (
 	"errors"
 	"sort"
-	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -33,6 +32,7 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 		cleanupStatus: new(uint32),
 	}
 
+	// event loop
 	go func() {
 	eventLoop:
 		for {
@@ -109,9 +109,20 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 				}
 
 				c.VerifyRequestsCommonAncestor(parentResp.ID, parentResp.Headers)
+			case <-exit:
+				return
+			}
+		}
+	}()
+
+	// cleanup loop
+	go func() {
+		for {
+			select {
 			case <-c.API.CleanupTicker.C:
 				c.cleanup()
-
+			case req := <-c.API.CleanupCh:
+				c.cleanupRequest(req.ReqID, req.BlockNumber)
 			case <-exit:
 				return
 			}
@@ -127,24 +138,21 @@ type reqHeader struct {
 }
 
 func (c *Consensus) cleanup() {
-	if atomic.CompareAndSwapUint32(c.cleanupStatus, 0, 1) {
-		go func() {
-			c.API.ProcessingRequestsMu.Lock()
+	now := time.Now()
 
-			for reqID, reqBlocks := range c.API.ProcessingRequests {
-				for _, req := range reqBlocks {
-					if req.Deadline.Before(time.Now()) {
-						c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), errors.New("timeout")}
+	c.API.ProcessingRequestsMu.Lock()
 
-						delete(c.API.ProcessingRequests, reqID)
-					}
-				}
+	for reqID, reqBlocks := range c.API.ProcessingRequests {
+		for _, req := range reqBlocks {
+			if req.Deadline.Before(now) {
+				c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.Hash(), errors.New("timeout")}
+
+				delete(c.API.ProcessingRequests, reqID)
 			}
-
-			atomic.StoreUint32(c.cleanupStatus, 0)
-			c.API.ProcessingRequestsMu.Unlock()
-		}()
+		}
 	}
+
+	c.API.ProcessingRequestsMu.Unlock()
 }
 
 func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.Header) {
@@ -202,20 +210,22 @@ func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal boo
 	c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, header.Hash(), err}
 
 	// remove finished request
-	// fixme extract goroutine. do not create a new one each time
-	go func() {
-		c.API.ProcessingRequestsMu.Lock()
-		reqBlocks, ok := c.API.ProcessingRequests[reqID]
-		if ok {
-			delete(reqBlocks, header.Number.Uint64())
-			if len(reqBlocks) == 0 {
-				delete(c.API.ProcessingRequests, reqID)
-			}
-		}
-		c.API.ProcessingRequestsMu.Unlock()
-	}()
+	c.CleanupCh <- consensus.FinishedRequest{reqID, header.Number.Uint64()}
 
 	return nil
+}
+
+// remove finished request
+func (c *Consensus) cleanupRequest(reqID uint64, number uint64) {
+	c.API.ProcessingRequestsMu.Lock()
+	reqBlocks, ok := c.API.ProcessingRequests[reqID]
+	if ok {
+		delete(reqBlocks, number)
+		if len(reqBlocks) == 0 {
+			delete(c.API.ProcessingRequests, reqID)
+		}
+	}
+	c.API.ProcessingRequestsMu.Unlock()
 }
 
 func toVerifyRequest(reqID uint64, header *types.Header, seal bool, deadline *time.Time, knownParents []*types.Header, parentsToValidate int) *consensus.VerifyRequest {

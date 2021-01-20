@@ -30,8 +30,6 @@ func (c *Verifier) NeededForVerification(header *types.Header) int {
 	return c.findPrevCheckpoint(header.Number.Uint64())
 }
 
-const isDebug = true
-
 // verifyHeader checks whether a header conforms to the consensus rules.The
 // caller may optionally pass in a batch of parents (ascending order) to avoid
 // looking those up from the database. This is useful for concurrently verifying
