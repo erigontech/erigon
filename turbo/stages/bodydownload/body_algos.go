@@ -108,7 +108,7 @@ func (bd *BodyDownload) CancelBlockingRequests(currentTime uint64) {
 				bd.requested.AndNot(back.requested) // Remove the intersection from the requsted
 				bd.required.Or(back.requested)      // Add the intersection back to required
 			}
-			if !back.requested.IsEmpty() {
+			if !bd.requested.IsEmpty() {
 				highestRequested = bd.requested.Maximum()
 			}
 			//fmt.Printf("CancelBlockingRequest: Removed request starting from %d (proactive)\n", back.lowestBlockNum)
