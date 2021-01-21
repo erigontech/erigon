@@ -9,6 +9,7 @@
 #cmakedefine ENABLE_GPROF
 #cmakedefine ENABLE_GCOV
 #cmakedefine ENABLE_ASAN
+#cmakedefine ENABLE_UBSAN
 #cmakedefine MDBX_FORCE_ASSERTIONS
 
 /* Common */
