@@ -22,22 +22,26 @@ import (
 	"math/big"
 	"math/rand"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/bloombits"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rpc"
+)
 
-	ethereum "github.com/ledgerwatch/turbo-geth"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/bloombits"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+var (
+	deadline = 5 * time.Minute
+
 )
 
 type testBackend struct {
@@ -173,7 +177,7 @@ func TestBlockSubscription(t *testing.T) {
 	defer db.Close()
 	var (
 		backend     = &testBackend{db: db}
-		api         = NewPublicFilterAPI(backend, false)
+		api         = NewPublicFilterAPI(backend, false, deadline)
 		genesis     = (&core.Genesis{Config: params.TestChainConfig}).MustCommit(db)
 		chain, _, _ = core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
 		chainEvents = []core.ChainEvent{}
@@ -227,7 +231,7 @@ func TestPendingTxFilter(t *testing.T) {
 
 	var (
 		backend = &testBackend{db: db}
-		api     = NewPublicFilterAPI(backend, false)
+		api     = NewPublicFilterAPI(backend, false, deadline)
 
 		transactions = []*types.Transaction{
 			types.NewTransaction(0, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), new(uint256.Int), 0, new(uint256.Int), nil),
@@ -283,7 +287,7 @@ func TestLogFilterCreation(t *testing.T) {
 	defer db.Close()
 	var (
 		backend = &testBackend{db: db}
-		api     = NewPublicFilterAPI(backend, false)
+		api     = NewPublicFilterAPI(backend, false, deadline)
 
 		testCases = []struct {
 			crit    FilterCriteria
@@ -327,7 +331,7 @@ func TestInvalidLogFilterCreation(t *testing.T) {
 	defer db.Close()
 	var (
 		backend = &testBackend{db: db}
-		api     = NewPublicFilterAPI(backend, false)
+		api     = NewPublicFilterAPI(backend, false, deadline)
 	)
 
 	// different situations where log filter creation should fail.
@@ -350,7 +354,7 @@ func TestInvalidGetLogsRequest(t *testing.T) {
 	defer db.Close()
 	var (
 		backend   = &testBackend{db: db}
-		api       = NewPublicFilterAPI(backend, false)
+		api       = NewPublicFilterAPI(backend, false, deadline)
 		blockHash = common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
 	)
 
@@ -376,7 +380,7 @@ func TestLogFilter(t *testing.T) {
 	defer db.Close()
 	var (
 		backend = &testBackend{db: db}
-		api     = NewPublicFilterAPI(backend, false)
+		api     = NewPublicFilterAPI(backend, false, deadline)
 
 		firstAddr      = common.HexToAddress("0x1111111111111111111111111111111111111111")
 		secondAddr     = common.HexToAddress("0x2222222222222222222222222222222222222222")
@@ -491,7 +495,7 @@ func TestPendingLogsSubscription(t *testing.T) {
 	defer db.Close()
 	var (
 		backend = &testBackend{db: db}
-		api     = NewPublicFilterAPI(backend, false)
+		api     = NewPublicFilterAPI(backend, false, deadline)
 
 		firstAddr      = common.HexToAddress("0x1111111111111111111111111111111111111111")
 		secondAddr     = common.HexToAddress("0x2222222222222222222222222222222222222222")
@@ -614,6 +618,73 @@ func TestPendingLogsSubscription(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	for _, ev := range allLogs {
 		backend.pendingLogsFeed.Send(ev)
+	}
+}
+
+// TestPendingTxFilterDeadlock tests if the event loop hangs when pending
+// txes arrive at the same time that one of multiple filters is timing out.
+// Please refer to #22131 for more details.
+func TestPendingTxFilterDeadlock(t *testing.T) {
+	t.Parallel()
+	timeout := 100 * time.Millisecond
+
+	var (
+		db      = rawdb.NewMemoryDatabase()
+		backend = &testBackend{db: db}
+		api     = NewPublicFilterAPI(backend, false, timeout)
+		done    = make(chan struct{})
+	)
+
+	go func() {
+		// Bombard feed with txes until signal was received to stop
+		i := uint64(0)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+
+			tx := types.NewTransaction(i, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), new(big.Int), 0, new(big.Int), nil)
+			backend.txFeed.Send(core.NewTxsEvent{Txs: []*types.Transaction{tx}})
+			i++
+		}
+	}()
+
+	// Create a bunch of filters that will
+	// timeout either in 100ms or 200ms
+	fids := make([]rpc.ID, 20)
+	for i := 0; i < len(fids); i++ {
+		fid := api.NewPendingTransactionFilter()
+		fids[i] = fid
+		// Wait for at least one tx to arrive in filter
+		for {
+			hashes, err := api.GetFilterChanges(fid)
+			if err != nil {
+				t.Fatalf("Filter should exist: %v\n", err)
+			}
+			if len(hashes.([]common.Hash)) > 0 {
+				break
+			}
+			runtime.Gosched()
+		}
+	}
+
+	// Wait until filters have timed out
+	time.Sleep(3 * timeout)
+
+	// If tx loop doesn't consume `done` after a second
+	// it's hanging.
+	select {
+	case done <- struct{}{}:
+		// Check that all filters have been uninstalled
+		for _, fid := range fids {
+			if _, err := api.GetFilterChanges(fid); err == nil {
+				t.Errorf("Filter %s should have been uninstalled\n", fid)
+			}
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("Tx sending loop hangs")
 	}
 }
 
