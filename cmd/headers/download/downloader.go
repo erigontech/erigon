@@ -442,11 +442,11 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 			undelivered++
 		}
 	}
-	cs.bd.FeedDeliveries()
+	//cs.bd.FeedDeliveries()
 	cs.deliveredBodies += delivered
 	cs.undeliveredBodies += undelivered
 	if undelivered > 0 {
-		//log.Info(fmt.Sprintf("BlockBodies{delivered=%d, undelivered=%d, totalDelivered=%d, totalUndelivered=%d}", delivered, undelivered, cs.deliveredBodies, cs.undeliveredBodies))
+		log.Info(fmt.Sprintf("BlockBodies{delivered=%d, undelivered=%d, totalDelivered=%d, totalUndelivered=%d}", delivered, undelivered, cs.deliveredBodies, cs.undeliveredBodies))
 	}
 	return &empty.Empty{}, nil
 }
@@ -533,28 +533,30 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 }
 
 func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
-	ticker := time.NewTicker(1 * time.Second) // Check periodically even in the abseence of incoming messages
+	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
+	var blockNum uint64
+	var req *bodydownload.BodyRequest
 	for {
 		count := 0
-		cs.bd.CancelBlockingRequests(uint64(time.Now().Unix()))
-		req := cs.bd.RequestMoreBodies(db)
-		for req != nil && cs.sendBodyRequest(ctx, req) { // Don't keep producing requests and sending if there are no peers to accept it
-			cs.bd.ApplyBodyRequest(uint64(time.Now().Unix()), 5 /*timeout*/, req)
-			req = cs.bd.RequestMoreBodies(db)
+		if req == nil {
+			req, blockNum = cs.bd.RequestMoreBodies(db, blockNum)
+		}
+		for req != nil && cs.sendBodyRequest(ctx, req) {
 			count++
+			req, blockNum = cs.bd.RequestMoreBodies(db, blockNum)
 		}
-		if req != nil {
-			cs.bd.CancelBodyRequest(req)
-		}
-		//fmt.Printf("Sent %d body requests\n", count)
+		fmt.Printf("Sent %d body requests\n", count)
+		timer.Stop()
+		timer = time.NewTimer(1 * time.Second)
+		cs.bd.FeedDeliveries()
 		select {
 		case <-ctx.Done():
 			cs.bd.CloseStageData()
 			return
-		case <-ticker.C:
-			//log.Info("RequestQueueTime (bodies) ticked")
+		case <-timer.C:
+			log.Info("RequestQueueTime (bodies) ticked")
 		case <-cs.requestWakeUpBodies:
-			//log.Info("bodyLoop woken up by the incoming request")
+			log.Info("bodyLoop woken up by the incoming request")
 		}
 	}
 }

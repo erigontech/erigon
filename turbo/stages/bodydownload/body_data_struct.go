@@ -1,10 +1,7 @@
 package bodydownload
 
 import (
-	"container/heap"
-	"container/list"
 	"sync"
-	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -18,18 +15,15 @@ const MaxBodiesInRequest = 128
 
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
-	lock              sync.RWMutex
-	required          *roaring64.Bitmap // Bitmap of block numbers for which the block bodies are required
-	requested         *roaring64.Bitmap // Bitmap of block numbers for which block bodies were requested
-	delivered         *roaring64.Bitmap // Bitmap of block numbers that have been delivered but not yet inserted into the database
-	deliveries        []*types.Block
-	requestedMap      map[DoubleHash]uint64
-	requestedLow      uint64       // Lower bound of block number for outstanding requests
-	outstandingLimit  uint64       // Limit of number of outstanding blocks for body requests
-	expirationList    *list.List   // List of block body requests that have not "expired" yet. After expiry they are moved to the requestQueue
-	requestQueue      RequestQueue // Priority queue of block body requests by minimum block number. Used to proactively retry requests that will be blocking the progress soon
-	RequestQueueTimer *time.Timer
-	blockChannel      chan *types.Block
+	lock             sync.RWMutex
+	delivered        *roaring64.Bitmap
+	deliveries       []*types.Block
+	requestedMap     map[DoubleHash]uint64
+	maxProgress      uint64
+	requestedLow     uint64 // Lower bound of block number for outstanding requests
+	requestHigh      uint64
+	outstandingLimit uint64 // Limit of number of outstanding blocks for body requests
+	blockChannel     chan *types.Block
 }
 
 type RequestQueueItem struct {
@@ -76,16 +70,10 @@ type BodyRequest struct {
 // NewBodyDownload create a new body download state object
 func NewBodyDownload(outstandingLimit int) *BodyDownload {
 	bd := &BodyDownload{
-		required:          roaring64.New(),
-		requested:         roaring64.New(),
-		delivered:         roaring64.New(),
-		requestedMap:      make(map[DoubleHash]uint64),
-		outstandingLimit:  uint64(outstandingLimit),
-		deliveries:        make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
-		RequestQueueTimer: time.NewTimer(time.Hour),
-		expirationList:    list.New(),
-		requestQueue:      make([]RequestQueueItem, 0, 64),
+		requestedMap:     make(map[DoubleHash]uint64),
+		outstandingLimit: uint64(outstandingLimit),
+		delivered:        roaring64.New(),
+		deliveries:       make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
 	}
-	heap.Init(&bd.requestQueue)
 	return bd
 }
