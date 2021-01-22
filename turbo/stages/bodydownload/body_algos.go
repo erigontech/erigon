@@ -131,6 +131,28 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 	return 0, false
 }
 
+func (bd *BodyDownload) GetDeliveries() []*types.Block {
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
+	var i uint64
+	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
+		bd.delivered.Remove(bd.requestedLow + i)
+	}
+	// Move the deliveries back
+	// bd.requestedLow can only be moved forward if there are consequitive block numbers present in the bd.delivered map
+	var d []*types.Block
+	if i > 0 {
+		d = make([]*types.Block, i)
+		copy(d, bd.deliveries[:i])
+		copy(bd.deliveries[:], bd.deliveries[i:])
+		for j := len(bd.deliveries) - int(i); j < len(bd.deliveries); j++ {
+			bd.deliveries[j] = nil
+		}
+		bd.requestedLow += i
+	}
+	return d
+}
+
 func (bd *BodyDownload) feedDeliveries() {
 	var i uint64
 	var channelFull bool

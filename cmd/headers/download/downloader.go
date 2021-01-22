@@ -213,9 +213,9 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 		return err2
 	}
 	go controlServer.headerLoop(ctx)
-	go controlServer.bodyLoop(ctx, db)
+	//go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.requestWakeUpBodies); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.requestWakeUpBodies); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 
@@ -247,9 +247,9 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		return fmt.Errorf("could not start server: %w", err)
 	}
 	go controlServer.headerLoop(ctx)
-	go controlServer.bodyLoop(ctx, db)
+	//go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.requestWakeUpBodies); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.requestWakeUpBodies); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 	return nil
