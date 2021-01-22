@@ -365,73 +365,37 @@ func newStorage(db ethdb.Database) *storage {
 		batchSize: batchSize,
 	}
 
-	snaps := make([]*snapObj, 0, batchSize)
-
 	go func() {
+		snaps := make([]*snapObj, 0, batchSize)
 		syncSmall := time.NewTicker(syncSmallBatch)
-		defer syncSmall.Stop()
-
 		isSorted := true
+
+		defer func() {
+			syncSmall.Stop()
+			common.SafeClose(st.exitDone)
+		}()
 
 		for {
 			select {
 			case snap := <-st.ch:
-				chStatus := atomic.LoadUint32(st.chStatus)
+				snaps, isSorted = st.appendSnap(snap, snaps, isSorted)
 
-				if st.shallAppend(snap) {
-					snaps = append(snaps, snap)
-
-					if isSorted && len(snaps) > 1 && snaps[len(snaps)-2].number > snap.number {
-						isSorted = false
-					}
-				}
-
-				if len(snaps) >= batchSize || (chStatus == 1 && len(snaps) > 0) {
-					st.saveSnaps(snaps, isSorted)
-
-					snaps = snaps[:0]
-					isSorted = true
+				if len(snaps) >= batchSize {
+					snaps, isSorted = st.saveAndReset(snaps, isSorted)
 					syncSmall.Reset(syncSmallBatch)
 				}
-
-				if chStatus == 1 && len(st.ch) == 0 {
-					close(st.exitDone)
-
-					return
-				}
 			case <-syncSmall.C:
-				chStatus := atomic.LoadUint32(st.chStatus)
-
-				if (chStatus == 1 && len(snaps) > 0) || (len(snaps) > 0 && len(snaps) < int(syncSmallBatch.Seconds())) {
-					st.saveSnaps(snaps, isSorted)
-					snaps = snaps[:0]
-					isSorted = true
-				}
-
-				if chStatus == 1 && len(st.ch) == 0 {
-					close(st.exitDone)
-
-					return
+				if len(snaps) > 0 && len(snaps) < int(syncSmallBatch.Seconds()) {
+					snaps, isSorted = st.saveAndReset(snaps, isSorted)
 				}
 			case <-st.exit:
-				if len(st.ch) > 0 {
-					for snap := range st.ch {
-						if st.shallAppend(snap) {
-							snaps = append(snaps, snap)
-						}
-
-						if isSorted && len(snaps) > 1 && snaps[len(snaps)-2].number > snap.number {
-							isSorted = false
-						}
-					}
+				for snap := range st.ch {
+					snaps, isSorted = st.appendSnap(snap, snaps, isSorted)
 				}
 
 				if len(snaps) > 0 {
 					st.saveSnaps(snaps, isSorted)
-					snaps = snaps[:0]
 				}
-
-				common.SafeClose(st.exitDone)
 
 				return
 			}
@@ -441,20 +405,33 @@ func newStorage(db ethdb.Database) *storage {
 	return st
 }
 
+func (st *storage) saveAndReset(snaps []*snapObj, isSorted bool) ([]*snapObj, bool) {
+	st.saveSnaps(snaps, isSorted)
+	snaps = snaps[:0]
+	isSorted = true
+
+	return snaps, isSorted
+}
+
+func (st *storage) appendSnap(snap *snapObj, snaps []*snapObj, isSorted bool) ([]*snapObj, bool) {
+	if st.shallAppend(snap) {
+		snaps = append(snaps, snap)
+
+		if isSorted && len(snaps) > 1 && snaps[len(snaps)-2].number > snap.number {
+			isSorted = false
+		}
+	}
+	return snaps, isSorted
+}
+
 func (st *storage) save(number uint64, hash common.Hash, blob []byte, force bool) {
 	snap := &snapObj{number, hash, blob}
 
 	if !force {
 		select {
 		case <-st.exit:
-			if atomic.CompareAndSwapUint32(st.chStatus, 0, 1) {
-				close(st.ch)
-			}
-			return
-		default:
+		case st.ch <- snap:
 		}
-
-		st.ch <- snap
 
 		return
 	}
@@ -496,10 +473,17 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 
 func (st *storage) Close() {
 	common.SafeClose(st.exit)
+	if atomic.CompareAndSwapUint32(st.chStatus, 0, 1) {
+		close(st.ch)
+	}
+
 	<-st.exitDone
 }
 
 func (st *storage) shallAppend(snap *snapObj) bool {
+	if snap == nil {
+		return false
+	}
 	ok, err := hasSnapshotData(st.db, snap.number, snap.hash)
 	return !ok || err != nil
 }

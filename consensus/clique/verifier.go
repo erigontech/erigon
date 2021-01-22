@@ -341,7 +341,7 @@ func (c *Verifier) checkSnapshot(num uint64) bool {
 			// If an on-disk checkpoint snapshot can be found, use that
 			ok, err = hasSnapshotData(c.db, num, snapHash)
 			if err != nil {
-				log.Error("while getting a shapshot", "block", num, "snapHash", snapHash, "err", err)
+				log.Error("while getting a snapshot", "block", num, "snapHash", snapHash, "err", err)
 				ok = false
 			}
 
@@ -363,7 +363,7 @@ func (c *Verifier) checkSnapshot(num uint64) bool {
 		})
 
 		if err != nil {
-			log.Error("while getting a shapshot", "block", num, "err", err)
+			log.Error("while getting a snapshot", "block", num, "err", err)
 			return false
 		}
 	}

@@ -15,8 +15,6 @@ import (
 type Consensus struct {
 	Server         consensus.Verifier
 	*consensus.API // remote Engine
-
-	cleanupStatus *uint32
 }
 
 const ttl = time.Minute
@@ -28,9 +26,8 @@ var (
 
 func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit chan struct{}) *Consensus {
 	c := &Consensus{
-		Server:        v,
-		API:           consensus.NewAPI(config),
-		cleanupStatus: new(uint32),
+		Server: v,
+		API:    consensus.NewAPI(config),
 	}
 
 	// event loop
@@ -112,12 +109,22 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 
 				c.VerifyRequestsCommonAncestor(parentResp.ID, parentResp.Headers)
 
-			// cleanups
+			// cleanup by timeout
 			case <-c.API.CleanupTicker.C:
 				c.cleanup()
+
+			case <-exit:
+				return
+			}
+		}
+	}()
+
+	// cleanup loop
+	go func() {
+		for {
+			select {
 			case req := <-c.API.CleanupCh:
 				c.cleanupRequest(req.ReqID, req.BlockNumber)
-
 			case <-exit:
 				return
 			}
@@ -205,7 +212,12 @@ func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal boo
 	c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, header.Hash(), err}
 
 	// remove finished request
-	c.CleanupCh <- consensus.FinishedRequest{reqID, header.Number.Uint64()}
+	finishedRequest := consensus.FinishedRequest{reqID, header.Number.Uint64()}
+	select {
+	case c.CleanupCh <- finishedRequest:
+	default:
+		c.cleanupRequest(finishedRequest.ReqID, finishedRequest.BlockNumber)
+	}
 
 	return nil
 }
