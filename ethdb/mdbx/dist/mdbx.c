@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY d81131131981950f0cb1c3371bb4fbb3f5fa91e004e764db762929a34b4ad7ca_v0_9_2_101_g4331c204
+#define MDBX_BUILD_SOURCERY 1f2a9570e401ba12cb6106448de9f47493d0230a790ec4e65aa69d6243dd269d_v0_9_2_103_ge0d4eaf8
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -6870,10 +6870,14 @@ static MDBX_page *mdbx_page_malloc(MDBX_txn *txn, unsigned num) {
 
 /* Free a shadow dirty page */
 static void mdbx_dpage_free(MDBX_env *env, MDBX_page *dp, unsigned npages) {
+  VALGRIND_MAKE_MEM_UNDEFINED(dp, pgno2bytes(env, npages));
+  ASAN_UNPOISON_MEMORY_REGION(dp, pgno2bytes(env, npages));
   if (MDBX_DEBUG || unlikely(env->me_flags & MDBX_PAGEPERTURB))
     memset(dp, -1, pgno2bytes(env, npages));
   if (npages == 1 &&
       env->me_dp_reserve_len < env->me_options.dp_reserve_limit) {
+    ASAN_POISON_MEMORY_REGION((char *)dp + sizeof(dp->mp_next),
+                              pgno2bytes(env, npages) - sizeof(dp->mp_next));
     dp->mp_next = env->me_dp_reserve;
     VALGRIND_MEMPOOL_FREE(env, dp);
     env->me_dp_reserve = dp;
@@ -7363,7 +7367,7 @@ static int mdbx_page_loose(MDBX_txn *txn, MDBX_page *mp) {
             goto skip_invalidate;
         }
 
-#if !MDBX_DEBUG && defined(MDBX_USE_VALGRIND) || defined(__SANITIZE_ADDRESS__)
+#if defined(MDBX_USE_VALGRIND) || defined(__SANITIZE_ADDRESS__)
         if (MDBX_DEBUG || unlikely(txn->mt_env->me_flags & MDBX_PAGEPERTURB))
 #endif
           mdbx_kill_page(txn->mt_env, mp, pgno, npages);
@@ -10429,6 +10433,8 @@ static int mdbx_txn_end(MDBX_txn *txn, const unsigned mode) {
     txn->mt_flags = MDBX_TXN_FINISHED;
     txn->mt_owner = 0;
     env->me_txn = txn->mt_parent;
+    mdbx_pnl_free(txn->tw.spill_pages);
+    txn->tw.spill_pages = nullptr;
     if (txn == env->me_txn0) {
       mdbx_assert(env, txn->mt_parent == NULL);
       /* Export or close DBI handles created in this txn */
@@ -10473,7 +10479,6 @@ static int mdbx_txn_end(MDBX_txn *txn, const unsigned mode) {
         mdbx_dlist_free(txn);
       mdbx_dpl_free(txn);
       mdbx_pnl_free(txn->tw.reclaimed_pglist);
-      mdbx_pnl_free(txn->tw.spill_pages);
 
       if (parent->mt_geo.upper != txn->mt_geo.upper ||
           parent->mt_geo.now != txn->mt_geo.now) {
@@ -11451,6 +11456,10 @@ static int mdbx_flush_iov(MDBX_txn *const txn, struct iovec *iov,
 
   if (unlikely(rc != MDBX_SUCCESS))
     mdbx_error("Write error: %s", mdbx_strerror(rc));
+  else {
+    VALGRIND_MAKE_MEM_DEFINED(txn->mt_env->me_map + iov_off, iov_bytes);
+    ASAN_UNPOISON_MEMORY_REGION(txn->mt_env->me_map + iov_off, iov_bytes);
+  }
 
   for (unsigned i = 0; i < iov_items; i++)
     mdbx_dpage_free(env, (MDBX_page *)iov[i].iov_base,
@@ -11584,9 +11593,10 @@ static __inline void mdbx_txn_merge(MDBX_txn *const parent, MDBX_txn *const txn,
   MDBX_dpl *const dst = mdbx_dpl_sort(parent->tw.dirtylist);
   while (MDBX_ENABLE_REFUND && dst->length &&
          dst->items[dst->length].pgno >= parent->mt_next_pgno) {
-    MDBX_page *mp = dst->items[dst->length].ptr;
-    if (mp && (txn->mt_env->me_flags & MDBX_WRITEMAP) == 0)
-      mdbx_dpage_free(txn->mt_env, mp, IS_OVERFLOW(mp) ? mp->mp_pages : 1);
+    if (!(txn->mt_env->me_flags & MDBX_WRITEMAP)) {
+      MDBX_page *dp = dst->items[dst->length].ptr;
+      mdbx_dpage_free(txn->mt_env, dp, IS_OVERFLOW(dp) ? dp->mp_pages : 1);
+    }
     dst->length -= 1;
   }
   parent->tw.dirtyroom += dst->sorted - dst->length;
@@ -26314,9 +26324,9 @@ __dll_export
         0,
         9,
         2,
-        101,
-        {"2021-01-21T09:27:10+07:00", "4cb4738dabe01fda5b71b072bb2e102a320ca002", "4331c2042dc1d7cc603779cedd2734af4b8c072e",
-         "v0.9.2-101-g4331c204"},
+        103,
+        {"2021-01-21T22:45:34+03:00", "47d912e68b3e2f2a85218123b39fbd4856a835c3", "e0d4eaf819f1b9b6cef16e7f74653ff0ced9b67c",
+         "v0.9.2-103-ge0d4eaf8"},
         sourcery};
 
 __dll_export

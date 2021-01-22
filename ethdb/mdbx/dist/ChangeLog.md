@@ -1,7 +1,7 @@
 ChangeLog
 ---------
 
-## v0.9.3 (in development)
+## v0.9.3 (in development) scheduled at 2021-02-23
 
 TODO:
  - Engage new terminology (https://github.com/erthink/libmdbx/issues/137).
@@ -27,6 +27,8 @@ New features:
  - New API functions to get/set various options (https://github.com/erthink/libmdbx/issues/128).
  - Unlimited/Dynamic size of retired and dirty page lists (https://github.com/erthink/libmdbx/issues/123).
  - Added `-p` option (purge subDB before loading) to `mdbx_load` tool.
+ - Reworked spilling of large transaction and committing of nested transactions.
+ - Added `MDBX_ENABLE_REFUND` and `MDBX_PNL_ASCENDING` internal/advanced build options.
 
 Fixes:
 
@@ -34,9 +36,13 @@ Fixes:
  - Fixed `mdbx_realloc()` for case of nullptr and `MDBX_AVOID_CRT=ON` for Windows.
  - Fixed the possibility to use invalid and renewed (closed & re-opened, dropped & re-created) DBI-handles (https://github.com/erthink/libmdbx/issues/146).
  - Fixed 4-byte aligned access to 64-bit integers, including access to the `bootid` meta-page's field (https://github.com/erthink/libmdbx/issues/153).
+ - Fixed minor/potential memory leak during page flushing and unspilling.
+ - Fixed handling states of cursors's and subDBs's for nested transactions.
+ - Fixed page leak in extra rare case the list of retired pages changed during update GC on transaction commit.
+ - Fixed assertions to avoid false-positive UB detection by CLANG/LLVM (https://github.com/erthink/libmdbx/issues/153).
 
 
-## v0.9.2 scheduled at 2020-11-27
+## v0.9.2 at 2020-11-27
 
 Acknowledgements:
 
