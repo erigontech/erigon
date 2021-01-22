@@ -23,7 +23,6 @@ import (
 	"io"
 	"math/big"
 	"reflect"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -305,40 +304,6 @@ func CopyHeader(h *Header) *Header {
 		copy(cpy.Extra, h.Extra)
 	}
 	return &cpy
-}
-
-func SearchHeader(headers []*Header, hash common.Hash) bool { //nolint:interfacer
-	for _, header := range headers {
-		if header.Hash() == hash {
-			return true
-		}
-	}
-	return false
-}
-
-func SearchHeadersByNumber(headers []*Header, blockNumber uint64) ([]*Header, bool) {
-	if len(headers) == 0 {
-		return nil, false
-	}
-	// fixme: заменить на линейный поиск
-	smallestIDx := sort.Search(len(headers), func(i int) bool {
-		return headers[i].Number.Uint64() >= blockNumber
-	})
-
-	if smallestIDx < len(headers) && headers[smallestIDx].Number.Uint64() == blockNumber {
-		highestIDx := uint64(smallestIDx)
-		for i, h := range headers[smallestIDx:] {
-			if h.Number.Uint64() != blockNumber {
-				break
-			}
-
-			highestIDx = uint64(smallestIDx + i)
-		}
-
-		res := append([]*Header{}, headers[smallestIDx:highestIDx+1]...)
-		return res, true
-	}
-	return nil, false
 }
 
 // DecodeRLP decodes the Ethereum

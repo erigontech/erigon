@@ -35,10 +35,6 @@ type ChainReader struct {
 	db     ethdb.Database
 }
 
-func NewChainReader(config *params.ChainConfig, db ethdb.Database) ChainReader {
-	return ChainReader{config, db}
-}
-
 // Config retrieves the blockchain's chain configuration.
 func (cr ChainReader) Config() *params.ChainConfig {
 	return cr.config
