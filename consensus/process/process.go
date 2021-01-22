@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -92,6 +93,7 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 
 				ancestorsReq, err := sumHeadersRequestsInRange(req.ID, req.Headers[0].Number.Uint64(), ancestorsReqs...)
 				if err != nil {
+					log.Error("can't request header ancestors", "reqID", req.ID, "number", req.Headers[0].Number.Uint64(), "err", err)
 					continue
 				}
 
@@ -109,20 +111,13 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 				}
 
 				c.VerifyRequestsCommonAncestor(parentResp.ID, parentResp.Headers)
-			case <-exit:
-				return
-			}
-		}
-	}()
 
-	// cleanup loop
-	go func() {
-		for {
-			select {
+			// cleanups
 			case <-c.API.CleanupTicker.C:
 				c.cleanup()
 			case req := <-c.API.CleanupCh:
 				c.cleanupRequest(req.ReqID, req.BlockNumber)
+
 			case <-exit:
 				return
 			}
