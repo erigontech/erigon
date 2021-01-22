@@ -195,7 +195,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 				dcmp = tx.GetCmpExcludeSuffix32()
 			}
 
-			dbi, createErr := tx.OpenDBI(name, 0, nil, dcmp)
+			dbi, createErr := tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
 			if createErr != nil {
 				if mdbx.IsNotFound(createErr) {
 					cnfCopy.DBI = NonExistingDBI
