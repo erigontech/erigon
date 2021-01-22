@@ -195,7 +195,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 				dcmp = tx.GetCmpExcludeSuffix32()
 			}
 
-			dbi, createErr := tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
+			dbi, createErr := tx.OpenDBI(name, 0, nil, dcmp)
 			if createErr != nil {
 				if mdbx.IsNotFound(createErr) {
 					cnfCopy.DBI = NonExistingDBI
@@ -563,14 +563,10 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 }
 
 func (tx *MdbxTx) ClearBucket(bucket string) error {
-	dbi := tx.db.buckets[bucket].DBI
-	if err := tx.tx.Drop(mdbx.DBI(dbi), false); err != nil {
+	if err := tx.dropEvenIfBucketIsNotDeprecated(bucket); err != nil {
 		return err
 	}
-	cnfCopy := tx.db.buckets[bucket]
-	cnfCopy.DBI = NonExistingDBI
-	tx.db.buckets[bucket] = cnfCopy
-	return nil
+	return tx.CreateBucket(bucket)
 }
 
 func (tx *MdbxTx) DropBucket(bucket string) error {
