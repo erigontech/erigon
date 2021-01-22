@@ -19,6 +19,9 @@ const (
 
 // Forward progresses Bodies stage in the forward direction
 func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyDownload, bodyReqSend func(context.Context, *BodyRequest) bool, wakeUpChan chan struct{}) error {
+	if err := bd.UpdateFromDb(db); err != nil {
+		return err
+	}
 	var headerProgress, bodyProgress uint64
 	var err error
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)

@@ -32,9 +32,6 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	}
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
-	if bd.blockChannel != nil {
-		close(bd.blockChannel)
-	}
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
 	bd.requestHigh = bd.requestedLow + (bd.outstandingLimit / 2)
@@ -43,8 +40,6 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	for i := 0; i < len(bd.deliveries); i++ {
 		bd.deliveries[i] = nil
 	}
-	// Channel needs to be big enough to allow the producer to finish writing and unblock in any case
-	bd.blockChannel = make(chan *types.Block, BlockBufferSize+bd.outstandingLimit)
 	return nil
 }
 
