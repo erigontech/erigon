@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/valyala/fastjson"
 )
 
 func compareBlocks(b, bg *EthBlockByNumber) bool {
@@ -85,114 +86,101 @@ func compareTraces(trace, traceg *EthTxTrace) bool {
 	return true
 }
 
-func compareTraceCalls(trace, traceg *TraceCall) bool {
-	r := trace.Result
-	rg := traceg.Result
-	if !bytes.Equal(r.Output, rg.Output) {
-		fmt.Printf("Root output is different: %x %x\n", r.Output, rg.Output)
-		return false
+func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
+	var vType fastjson.Type = fastjson.TypeNull
+	var vgType fastjson.Type = fastjson.TypeNull
+	if v != nil {
+		vType = v.Type()
 	}
-	if len(r.Trace) != len(rg.Trace) {
-		fmt.Printf("Traces have different lengths: %d / %d\n", len(r.Trace), len(rg.Trace))
-		return false
+	if vg != nil {
+		vgType = vg.Type()
 	}
-	for i, t := range r.Trace {
-		tg := rg.Trace[i]
-		if t.Type != tg.Type {
-			fmt.Printf("Trace different Type: %d %s %s\n", i, t.Type, tg.Type)
-			return false
+	if vType != vgType {
+		return fmt.Errorf("different types for prefix %s: %s / %s", prefix, vType.String(), vgType.String())
+	}
+	switch vType {
+	case fastjson.TypeNull:
+		// Nothing to do
+	case fastjson.TypeObject:
+		obj, err := v.Object()
+		if err != nil {
+			return fmt.Errorf("convering tg val to object at prefix %s: %w", prefix, err)
 		}
-		action := t.Action
-		actiong := tg.Action
-		if action.CallType != actiong.CallType {
-			fmt.Printf("Trace different action.callType: %d %s %s\n", i, action.CallType, actiong.CallType)
-			return false
+		objg, errg := vg.Object()
+		if errg != nil {
+			return fmt.Errorf("convering g val to object at prefix %s: %w", prefix, errg)
 		}
-		if action.From != actiong.From {
-			fmt.Printf("Trace different action.from: %d %x %x\n", i, action.From, actiong.From)
-			return false
-		}
-		if action.Gas.ToInt().Cmp(actiong.Gas.ToInt()) != 0 {
-			fmt.Printf("Trace different action.gas: %d %s %s\n", i, action.Gas.String(), actiong.Gas.String())
-			return false
-		}
-		if !bytes.Equal(action.Input, actiong.Input) {
-			fmt.Printf("Trace different action.input: %d %s %s\n", i, action.Input, actiong.Input)
-			return false
-		}
-		if action.To != actiong.To {
-			fmt.Printf("Trace different action.to: %d %x %x\n", i, action.To, actiong.To)
-			return false
-		}
-		if action.Value.ToInt().Cmp(actiong.Value.ToInt()) != 0 {
-			fmt.Printf("Trace different action.value: %d %s %s\n", i, action.Value.String(), actiong.Value.String())
-			return false
-		}
-		if !bytes.Equal(action.Init, actiong.Init) {
-			fmt.Printf("Trace different action.init: %d %s %s\n", i, action.Init, actiong.Init)
-			return false
-		}
-		if action.Address != actiong.Address {
-			fmt.Printf("Trace different action.address: %d %x %x\n", i, action.Address, actiong.Address)
-			return false
-		}
-		if action.RefundAddress != actiong.RefundAddress {
-			fmt.Printf("Trace different action.refundAddress: %d %x %x\n", i, action.RefundAddress, actiong.RefundAddress)
-			return false
-		}
-		if action.Balance.ToInt().Cmp(actiong.Balance.ToInt()) != 0 {
-			fmt.Printf("Trace different action.balance: %d %s %s\n", i, action.Balance.String(), actiong.Balance.String())
-			return false
-		}
-		result := t.Result
-		resultg := tg.Result
-		if result == nil && resultg != nil {
-			fmt.Printf("Traces difference result == nil, resultg != nil: %d\n", i)
-			return false
-		}
-		if result != nil && resultg == nil {
-			fmt.Printf("Traces difference result != nil, resultg == nil: %d\n", i)
-			return false
-		}
-		if result != nil {
-			if result.GasUsed.ToInt().Cmp(resultg.GasUsed.ToInt()) != 0 {
-				fmt.Printf("Trace different result.gasUsed: %d %s %s\n", i, result.GasUsed.String(), resultg.GasUsed.String())
-				return false
+		objg.Visit(func(key []byte, vg1 *fastjson.Value) {
+			if err != nil {
+				return
 			}
-			if !bytes.Equal(result.Output, resultg.Output) {
-				fmt.Printf("Trace different result.output: %d %s %s\n", i, result.Output, resultg.Output)
-				return false
+			v1 := obj.Get(string(key))
+			if v1 == nil && vg1.Type() != fastjson.TypeNull {
+				err = fmt.Errorf("tg missing value at prefix: %s", prefix+"."+string(key))
+				return
 			}
-			if !bytes.Equal(result.Code, resultg.Code) {
-				fmt.Printf("Trace different result.code: %d %s %s\n", i, result.Code, resultg.Code)
-				return false
+			if e := compareJsonValues(prefix+"."+string(key), v1, vg1); e != nil {
+				err = e
 			}
-			if result.Address != resultg.Address {
-				fmt.Printf("Trace different result.address: %d %x %x\n", i, result.Address, resultg.Address)
-				return false
+		})
+		if err != nil {
+			return err
+		}
+		// Finding keys that are present in TG but missing in G
+		obj.Visit(func(key []byte, v1 *fastjson.Value) {
+			if err != nil {
+				return
+			}
+			if objg.Get(string(key)) == nil && v1.Type() != fastjson.TypeNull {
+				err = fmt.Errorf("g missing value at prefix: %s", prefix+"."+string(key))
+				return
+			}
+		})
+		if err != nil {
+			return err
+		}
+	case fastjson.TypeArray:
+		arr, err := v.Array()
+		if err != nil {
+			return fmt.Errorf("converting tg val to array at prefix %s: %w", prefix, err)
+		}
+		arrg, errg := vg.Array()
+		if errg != nil {
+			return fmt.Errorf("converting g val to array at prefix %s: %w", prefix, errg)
+		}
+		if len(arr) != len(arrg) {
+			return fmt.Errorf("arrays have different length at prefix %s: %d / %d", prefix, len(arr), len(arrg))
+		}
+		for i, item := range arr {
+			itemg := arrg[i]
+			if e := compareJsonValues(fmt.Sprintf("%s[%d]", prefix, i), item, itemg); e != nil {
+				return e
 			}
 		}
-		if t.Error != tg.Error {
-			fmt.Printf("Traces diffetrent error: %d %s %s\n", i, t.Error, tg.Error)
-			return false
+	case fastjson.TypeString:
+		if v.String() != vg.String() {
+			return fmt.Errorf("different string values at prefix %s: %s / %s", prefix, v.String(), vg.String())
 		}
-		if t.Subtraces != tg.Subtraces {
-			fmt.Printf("Traces different subtraces: %d %d %d\n", i, t.Subtraces, tg.Subtraces)
-			return false
+	case fastjson.TypeNumber:
+		i, err := v.Int()
+		if err != nil {
+			return fmt.Errorf("converting tg val to int at prefix %s: %w", prefix, err)
 		}
-		if len(t.TraceAddress) != len(tg.TraceAddress) {
-			fmt.Printf("Traces have traceAddress of different lengths: %d %d / %d\n", i, len(t.TraceAddress), len(tg.TraceAddress))
-			return false
+		ig, errg := vg.Int()
+		if errg != nil {
+			return fmt.Errorf("converting g val to int at prefix %s: %w", prefix, errg)
 		}
-		for j, ta := range t.TraceAddress {
-			tag := tg.TraceAddress[j]
-			if ta != tag {
-				fmt.Printf("Traces different traceAddress: %d %v %v\n", i, t.TraceAddress, tg.TraceAddress)
-				return false
-			}
+		if i != ig {
+			return fmt.Errorf("different int values at prefix %s: %d / %d", prefix, i, ig)
 		}
 	}
-	return true
+	return nil
+}
+
+func compareTraceCalls(trace, traceg *fastjson.Value) error {
+	r := trace.Get("result")
+	rg := traceg.Get("result")
+	return compareJsonValues("result", r, rg)
 }
 
 func compareBalances(balance, balanceg *EthBalance) bool {
@@ -512,6 +500,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 }
 
 func post(client *http.Client, url, request string, response interface{}) error {
+	fmt.Printf("Request=%s\n", request)
 	log.Info("Getting", "url", url, "request", request)
 	start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
@@ -526,6 +515,32 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	err = decoder.Decode(response)
 	log.Info("Got in", "time", time.Since(start).Seconds())
 	return err
+}
+
+func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, error) {
+	fmt.Printf("Request=%s\n", request)
+	log.Info("Getting", "url", url, "request", request)
+	start := time.Now()
+	r, err := client.Post(url, "application/json", strings.NewReader(request))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer r.Body.Close()
+	if r.StatusCode != 200 {
+		return nil, nil, fmt.Errorf("status %s", r.Status)
+	}
+	var buf bytes.Buffer
+	if _, err = buf.ReadFrom(r.Body); err != nil {
+		return nil, nil, fmt.Errorf("reading http response: %w", err)
+	}
+	var p fastjson.Parser
+	response := buf.Bytes()
+	v, err := p.ParseBytes(response)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing http response: %w", err)
+	}
+	log.Info("Got in", "time", time.Since(start).Seconds())
+	return response, v, nil
 }
 
 func print(client *http.Client, url, request string) {

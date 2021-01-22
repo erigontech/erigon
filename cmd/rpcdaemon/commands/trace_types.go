@@ -2,12 +2,10 @@ package commands
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 )
 
 // TODO:(tjayrush)
@@ -43,7 +41,7 @@ type ParityTrace struct {
 	BlockHash           *common.Hash `json:"blockHash,omitempty"`
 	BlockNumber         *uint64      `json:"blockNumber,omitempty"`
 	Error               string       `json:"error,omitempty"`
-	Result              *TraceResult `json:"result"`
+	Result              interface{}  `json:"result,omitempty"`
 	Subtraces           int          `json:"subtraces"`
 	TraceAddress        []int        `json:"traceAddress"`
 	TransactionHash     *common.Hash `json:"transactionHash,omitempty"`
@@ -93,13 +91,18 @@ type SuicideTraceAction struct {
 	Balance       hexutil.Big    `json:"balance"`
 }
 
+type CreateTraceResult struct {
+	// Do not change the ordering of these fields -- allows for easier comparison with other clients
+	Address *common.Address `json:"address,omitempty"`
+	Code    hexutil.Bytes   `json:"code"`
+	GasUsed *hexutil.Big    `json:"gasUsed"`
+}
+
 // TraceResult A parity formatted trace result
 type TraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Address *common.Address `json:"address,omitempty"`
-	Code    hexutil.Bytes   `json:"code,omitempty"`
-	GasUsed *hexutil.Big    `json:"gasUsed"`
-	Output  hexutil.Bytes   `json:"output,omitempty"`
+	GasUsed *hexutil.Big  `json:"gasUsed"`
+	Output  hexutil.Bytes `json:"output"`
 }
 
 // Allows for easy printing of a geth trace for debugging
@@ -131,10 +134,10 @@ func (t ParityTrace) String() string {
 	//ret += fmt.Sprintf("Action.Value: %s\n", t.Action.Value)
 	ret += fmt.Sprintf("BlockHash: %v\n", t.BlockHash)
 	ret += fmt.Sprintf("BlockNumber: %d\n", t.BlockNumber)
-	ret += fmt.Sprintf("Result.Address: %s\n", t.Result.Address)
-	ret += fmt.Sprintf("Result.Code: %s\n", t.Result.Code)
-	ret += fmt.Sprintf("Result.GasUsed: %s\n", t.Result.GasUsed)
-	ret += fmt.Sprintf("Result.Output: %s\n", t.Result.Output)
+	//ret += fmt.Sprintf("Result.Address: %s\n", t.Result.Address)
+	//ret += fmt.Sprintf("Result.Code: %s\n", t.Result.Code)
+	//ret += fmt.Sprintf("Result.GasUsed: %s\n", t.Result.GasUsed)
+	//ret += fmt.Sprintf("Result.Output: %s\n", t.Result.Output)
 	ret += fmt.Sprintf("Subtraces: %d\n", t.Subtraces)
 	ret += fmt.Sprintf("TraceAddress: %v\n", t.TraceAddress)
 	ret += fmt.Sprintf("TransactionHash: %v\n", t.TransactionHash)
@@ -147,101 +150,5 @@ func (t ParityTrace) String() string {
 // are flattened depth first and each field is put in its proper place
 func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, tx *types.Transaction, txIndex uint64, depth []int) ParityTraces {
 	var traces ParityTraces // nolint prealloc
-	var pt ParityTrace
-
-	callType := strings.ToLower(gethTrace.Type)
-	if callType == "create" {
-		action := TraceAction{}
-		action.CallType = ""
-		action.From = common.HexToAddress(gethTrace.From)
-		action.Init = common.FromHex(gethTrace.Input)
-		to := common.HexToAddress(gethTrace.To)
-		pt.Result.Address = &to
-		action.Value = gethTrace.Value
-		pt.Result.Code = common.FromHex(gethTrace.Output)
-		if err := action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
-			panic(err)
-		}
-		pt.Result.GasUsed = new(hexutil.Big)
-		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
-			panic(err)
-		}
-		pt.Action = action
-
-	} else if callType == "selfdestruct" {
-		action := TraceAction{}
-		action.CallType = ""
-		action.Input = common.FromHex(gethTrace.Input)
-		pt.Result.Output = common.FromHex(gethTrace.Output)
-		action.Balance = gethTrace.Value
-		if err := action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
-			panic(err)
-		}
-		pt.Result.GasUsed = new(hexutil.Big)
-		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
-			panic(err)
-		}
-		action.SelfDestructed = gethTrace.From
-		action.RefundAddress = gethTrace.To
-		pt.Action = &action
-	} else {
-		action := TraceAction{}
-		action.CallType = callType
-		action.Input = common.FromHex(gethTrace.Input)
-		action.From = common.HexToAddress(gethTrace.From)
-		action.To = gethTrace.To
-		pt.Result.Output = common.FromHex(gethTrace.Output)
-		action.Value = gethTrace.Value
-		if err := action.Gas.UnmarshalJSON([]byte(gethTrace.Gas)); err != nil {
-			panic(err)
-		}
-		pt.Result.GasUsed = new(hexutil.Big)
-		if err := pt.Result.GasUsed.UnmarshalJSON([]byte(gethTrace.GasUsed)); err != nil {
-			panic(err)
-		}
-		pt.Action = &action
-	}
-
-	// This ugly code is here to convert Geth error messages to Parity error message. One day, when
-	// we figure out what we want to do, it will be removed
-	var (
-		ErrInvalidJumpParity       = "Bad jump destination"
-		ErrExecutionRevertedParity = "Reverted"
-	)
-	gethError := gethTrace.Error
-	if gethError == vm.ErrInvalidJump.Error() {
-		pt.Error = ErrInvalidJumpParity
-	} else if gethError == vm.ErrExecutionReverted.Error() {
-		pt.Error = ErrExecutionRevertedParity
-	} else {
-		pt.Error = gethTrace.Error
-	}
-	if pt.Error != "" {
-		pt.Result.GasUsed = new(hexutil.Big)
-	}
-	// This ugly code is here to convert Geth error messages to Parity error message. One day, when
-	// we figure out what we want to do, it will be removed
-
-	pt.BlockHash = &blockHash
-	pt.BlockNumber = &blockNumber
-	pt.Subtraces = len(gethTrace.Calls)
-	pt.TraceAddress = depth
-	pt.TransactionHash = &common.Hash{}
-	copy(pt.TransactionHash[:], tx.Hash().Bytes())
-	pt.TransactionPosition = new(uint64)
-	*pt.TransactionPosition = txIndex
-	pt.Type = callType
-	if pt.Type == "delegatecall" || pt.Type == "staticcall" {
-		pt.Type = "call"
-	}
-
-	traces = append(traces, pt)
-
-	for i, item := range gethTrace.Calls {
-		newDepth := append(depth, i)
-		subTraces := api.convertToParityTrace(*item, blockHash, blockNumber, tx, txIndex, newDepth)
-		traces = append(traces, subTraces...)
-	}
-
 	return traces
 }

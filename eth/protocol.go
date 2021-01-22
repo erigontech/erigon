@@ -209,10 +209,10 @@ func (request *NewBlockData) sanityCheck() error {
 }
 
 // blockBody represents the data content of a single block.
-type blockBody struct {
+type BlockBody struct {
 	Transactions []*types.Transaction // Transactions contained within a block
 	Uncles       []*types.Header      // Uncles contained within a block
 }
 
 // blockBodiesData is the network packet for block content distribution.
-type blockBodiesData []*blockBody
+type BlockBodiesData []*BlockBody

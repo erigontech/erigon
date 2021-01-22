@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -118,9 +120,29 @@ func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment
 	}
 }
 
-func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database) error {
-	ctx := rootContext()
-	log.Info("Starting Core P2P server", "on", coreAddr, "connecting to sentry", coreAddr)
+func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
+	log.Info("Starting Sentry client", "connecting to sentry", sentryAddr)
+	// CREATING GRPC CLIENT CONNECTION
+	var dialOpts []grpc.DialOption
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Timeout: 10 * time.Minute,
+		}),
+	}
+
+	dialOpts = append(dialOpts, grpc.WithInsecure())
+
+	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
+	}
+	return proto_sentry.NewSentryClient(conn), nil
+}
+
+func grpcControlServer(ctx context.Context, coreAddr string, sentryClient proto_sentry.SentryClient, filesDir string, bufferSizeStr string, db ethdb.Database) (*ControlServerImpl, error) {
+	log.Info("Starting Core P2P server", "on", coreAddr)
 
 	listenConfig := net.ListenConfig{
 		Control: func(network, address string, _ syscall.RawConn) error {
@@ -130,7 +152,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	}
 	lis, err := listenConfig.Listen(ctx, "tcp", coreAddr)
 	if err != nil {
-		return fmt.Errorf("could not create Core P2P listener: %w, addr=%s", err, coreAddr)
+		return nil, fmt.Errorf("could not create Core P2P listener: %w, addr=%s", err, coreAddr)
 	}
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
@@ -157,32 +179,14 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	}
 	grpcServer = grpc.NewServer(opts...)
 
-	// CREATING GRPC CLIENT CONNECTION
-	var dialOpts []grpc.DialOption
-	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Timeout: 10 * time.Minute,
-		}),
-	}
-
-	dialOpts = append(dialOpts, grpc.WithInsecure())
-
-	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
-	if err != nil {
-		return fmt.Errorf("creating client connection to sentry P2P: %w", err)
-	}
-	sentryClient := proto_sentry.NewSentryClient(conn)
-
 	var bufferSize datasize.ByteSize
 	if err = bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
-		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
+		return nil, fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
 	}
 	var controlServer *ControlServerImpl
 
 	if controlServer, err = NewControlServer(db, filesDir, int(bufferSize), sentryClient); err != nil {
-		return fmt.Errorf("create core P2P server: %w", err)
+		return nil, fmt.Errorf("create core P2P server: %w", err)
 	}
 	proto_core.RegisterControlServer(grpcServer, controlServer)
 	if metrics.Enabled {
@@ -194,22 +198,72 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 			log.Error("Core P2P server fail", "err", err1)
 		}
 	}()
+	return controlServer, nil
+}
 
-	go controlServer.loop(ctx)
+// Download creates and starts standalone downloader
+func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database) error {
+	ctx := rootContext()
 
-	if err = stages.StageLoop(ctx, db, controlServer.hd); err != nil {
+	sentryClient, err1 := grpcSentryClient(ctx, sentryAddr)
+	if err1 != nil {
+		return err1
+	}
+	controlServer, err2 := grpcControlServer(ctx, coreAddr, sentryClient, filesDir, bufferSizeStr, db)
+	if err2 != nil {
+		return err2
+	}
+	go controlServer.headerLoop(ctx)
+	go controlServer.bodyLoop(ctx, db)
+
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.requestWakeUpBodies); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 
 	return nil
 }
 
+// Combined creates and starts sentry and downloader in the same process
+func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, filesDir string, bufferSizeStr string, db ethdb.Database) error {
+	ctx := rootContext()
+
+	coreClient := &ControlClientDirect{}
+	sentryServer := &SentryServerImpl{}
+	server, err1 := p2pServer(ctx, coreClient, sentryServer, natSetting, port, staticPeers, discovery, netRestrict)
+	if err1 != nil {
+		return err1
+	}
+	sentryClient := &SentryClientDirect{}
+	sentryClient.SetServer(sentryServer)
+	var bufferSize datasize.ByteSize
+	if err := bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
+		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
+	}
+	controlServer, err2 := NewControlServer(db, filesDir, int(bufferSize), sentryClient)
+	if err2 != nil {
+		return fmt.Errorf("create core P2P server: %w", err2)
+	}
+	coreClient.SetServer(controlServer)
+	if err := server.Start(); err != nil {
+		return fmt.Errorf("could not start server: %w", err)
+	}
+	go controlServer.headerLoop(ctx)
+	go controlServer.bodyLoop(ctx, db)
+
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.requestWakeUpBodies); err != nil {
+		log.Error("Stage loop failure", "error", err)
+	}
+	return nil
+}
+
 type ControlServerImpl struct {
 	proto_core.UnimplementedControlServer
-	lock          sync.Mutex
-	hd            *headerdownload.HeaderDownload
-	sentryClient  proto_sentry.SentryClient
-	requestWakeUp chan struct{}
+	lock                 sync.Mutex
+	hd                   *headerdownload.HeaderDownload
+	bd                   *bodydownload.BodyDownload
+	sentryClient         proto_sentry.SentryClient
+	requestWakeUpHeaders chan struct{}
+	requestWakeUpBodies  chan struct{}
 }
 
 func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient) (*ControlServerImpl, error) {
@@ -245,7 +299,7 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		log.Error("Recovery from DB failed", "error", err)
 	}
 	hardTips := headerdownload.InitHardCodedTips("hard-coded-headers.dat")
-	if recovered, err1 := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips); err1 != nil || (!recovered && !dbRecovered) {
+	if recovered, err1 := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips); (err1 != nil && !dbRecovered) || !recovered {
 		if err1 != nil {
 			log.Error("Recovery from file failed, will start from scratch", "error", err1)
 		}
@@ -276,7 +330,11 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		}
 	}
 	log.Info(hd.AnchorState())
-	return &ControlServerImpl{hd: hd, sentryClient: sentryClient, requestWakeUp: make(chan struct{})}, nil
+	bd := bodydownload.NewBodyDownload(64 * 1024 /* outstandingLimit */)
+	if err := bd.UpdateFromDb(db); err != nil {
+		return nil, err
+	}
+	return &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}), requestWakeUpBodies: make(chan struct{})}, nil
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
@@ -362,10 +420,36 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_core.Inb
 	return &empty.Empty{}, nil
 }
 
+func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*empty.Empty, error) {
+	var request eth.BlockBodiesData
+	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
+		return nil, fmt.Errorf("decode BlockBodies: %v", err)
+	}
+	var sb strings.Builder
+	var unrequested int
+	for _, body := range request {
+		if blockNum, ok := cs.bd.DeliverBody(body); ok {
+			if sb.Len() > 0 {
+				fmt.Fprintf(&sb, ",")
+			}
+			fmt.Fprintf(&sb, "%d", blockNum)
+		} else {
+			unrequested++
+		}
+	}
+	cs.bd.FeedDeliveries()
+	//log.Info(fmt.Sprintf("BlockBodies{delivered=%s, unrequestedCount=%d}", sb.String(), unrequested))
+	return &empty.Empty{}, nil
+}
+
 func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	defer func() {
 		select {
-		case cs.requestWakeUp <- struct{}{}:
+		case cs.requestWakeUpHeaders <- struct{}{}:
+		default:
+		}
+		select {
+		case cs.requestWakeUpBodies <- struct{}{}:
 		default:
 		}
 	}()
@@ -376,6 +460,8 @@ func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *p
 		return cs.blockHeaders(ctx, inreq)
 	case proto_core.InboundMessageId_NewBlock:
 		return cs.newBlock(ctx, inreq)
+	case proto_core.InboundMessageId_BlockBodies:
+		return cs.blockBodies(inreq)
 	default:
 		return nil, fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}
@@ -413,19 +499,63 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 	}
 }
 
-func (cs *ControlServerImpl) loop(ctx context.Context) {
-	reqs, timer := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-	cs.sendRequests(ctx, reqs)
+func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) bool {
+	//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
+	var bytes []byte
+	var err error
+	bytes, err = rlp.EncodeToBytes(req.Hashes)
+	if err != nil {
+		log.Error("Could not encode block bodies request", "err", err)
+		return false
+	}
+	outreq := proto_sentry.SendMessageByMinBlockRequest{
+		MinBlock: req.BlockNums[len(req.BlockNums)-1],
+		Data: &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.OutboundMessageId_GetBlockBodies,
+			Data: bytes,
+		},
+	}
+	sentPeers, err1 := cs.sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err1 != nil {
+		log.Error("Could not send block bodies request", "err", err1)
+	}
+	return sentPeers != nil && len(sentPeers.Peers) > 0
+}
+
+func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
 	for {
+		timer := cs.bd.CancelExpiredRequests(uint64(time.Now().Unix()))
+		req := cs.bd.RequestMoreBodies(db)
+		for req != nil && cs.sendBodyRequest(ctx, req) { // Don't keep producing requests and sending if there are no peers to accept it
+			timer = cs.bd.ApplyBodyRequest(uint64(time.Now().Unix()), 15 /*timeout*/, req)
+			req = cs.bd.RequestMoreBodies(db)
+		}
+		if req != nil {
+			cs.bd.CancelBodyRequest(req)
+		}
+		select {
+		case <-ctx.Done():
+			cs.bd.CloseStageData()
+			return
+		case <-timer.C:
+			//log.Info("RequestQueueTime (bodies) ticked")
+		case <-cs.requestWakeUpHeaders:
+			//log.Info("bodyLoop woken up by the incoming request")
+		}
+	}
+}
+
+func (cs *ControlServerImpl) headerLoop(ctx context.Context) {
+	for {
+		reqs, timer := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
+		cs.sendRequests(ctx, reqs)
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			log.Info("RequestQueueTimer ticked")
-		case <-cs.requestWakeUp:
-			log.Info("Woken up by the incoming request")
+			//log.Info("RequestQueueTimer (headers) ticked")
+		case <-cs.requestWakeUpBodies:
+			//log.Info("headerLoop woken up by the incoming request")
 		}
-		reqs, timer = cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-		cs.sendRequests(ctx, reqs)
 	}
 }

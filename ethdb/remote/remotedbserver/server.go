@@ -55,7 +55,7 @@ func StartGrpc(kv ethdb.KV, eth core.Backend, addr string, creds *credentials.Tr
 		grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
 		grpc.WriteBufferSize(1024),  // reduce buffers to save mem
 		grpc.ReadBufferSize(1024),
-		grpc.MaxConcurrentStreams(100), // to force clients reduce concurrency level
+		grpc.MaxConcurrentStreams(200), // to force clients reduce concurrency level
 		// Don't drop the connection, settings accordign to this comment on GitHub
 		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{

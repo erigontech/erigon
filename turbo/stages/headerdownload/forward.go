@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -25,7 +26,13 @@ const (
 func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte) error {
 	count := 0
 	var highest uint64
-	log.Info("Processing headers...")
+	var headerProgress uint64
+	var err error
+	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
+	if err != nil {
+		return err
+	}
+	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -95,6 +102,9 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte)
 			if parentDiff, err = rawdb.ReadTd(tx, header.ParentHash, blockHeight-1); err != nil {
 				return fmt.Errorf("[%s] reading total difficulty of the parent header %d %x: %w", logPrefix, blockHeight-1, header.ParentHash, err)
 			}
+			if parentDiff == nil {
+				fmt.Printf("Could not find parentDiff for %d\n", header.Number)
+			}
 		}
 		cumulativeDiff := new(big.Int).Add(parentDiff, header.Difficulty)
 		childDiffs[hash] = cumulativeDiff
@@ -117,6 +127,12 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte)
 		if newCanonical {
 			if err := rawdb.WriteCanonicalHash(batch, hash, blockHeight); err != nil {
 				return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, blockHeight, hash, err)
+			}
+			if blockHeight > headerProgress {
+				headerProgress = blockHeight
+				if err := stages.SaveStageProgress(batch, stages.Headers, blockHeight); err != nil {
+					return fmt.Errorf("[%s] saving Headers progress: %w", logPrefix, err)
+				}
 			}
 		}
 		data, err := rlp.EncodeToBytes(header)
@@ -174,7 +190,7 @@ func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMu
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Info(fmt.Sprintf("[%s] Wrote blocks", logPrefix),
+	log.Info(fmt.Sprintf("[%s] Wrote block headers", logPrefix),
 		"number", now,
 		"blk/second", speed,
 		"batch", common.StorageSize(batch.BatchSize()),
