@@ -202,7 +202,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 					db.buckets[name] = cnfCopy
 					continue // if deprecated bucket couldn't be open - then it's deleted and it's fine
 				} else {
-					return createErr
+					return fmt.Errorf("bucket: %s, %w\n", name, createErr)
 				}
 			}
 			cnfCopy.DBI = dbutils.DBI(dbi)
@@ -493,7 +493,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 
 	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
 	if err != nil && !mdbx.IsNotFound(err) {
-		return err
+		return fmt.Errorf("create bucket: %s, %w\n", name, err)
 	}
 	if err == nil {
 		cnfCopy.DBI = dbutils.DBI(dbi)
@@ -530,7 +530,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 
 	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
 	if err != nil {
-		return err
+		return fmt.Errorf("create bucket: %s, %w\n", name, err)
 	}
 	cnfCopy.DBI = dbutils.DBI(dbi)
 
@@ -548,7 +548,7 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 			if mdbx.IsNotFound(err) {
 				return nil // DBI doesn't exists means no drop needed
 			}
-			return err
+			return fmt.Errorf("bucket: %s, %w\n", name, err)
 		}
 		dbi = dbutils.DBI(nativeDBI)
 	}
