@@ -50,6 +50,8 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 	if blockNum < bd.requestedLow && currentTime >= bd.lowWaitUntil {
 		blockNum = bd.requestedLow
 		bd.lowWaitUntil = timeWithTimeout
+	} else {
+		return nil, blockNum
 	}
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
