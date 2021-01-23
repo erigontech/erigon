@@ -57,11 +57,13 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	for {
 		count := 0
 		if req == nil {
-			req, blockNum = bd.RequestMoreBodies(db, blockNum)
+			currentTime := uint64(time.Now().Unix())
+			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime, currentTime+5)
 		}
 		for req != nil && bodyReqSend(ctx, req) {
 			count++
-			req, blockNum = bd.RequestMoreBodies(db, blockNum)
+			currentTime := uint64(time.Now().Unix())
+			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime, currentTime+5)
 		}
 		fmt.Printf("Sent %d body requests\n", count)
 		d := bd.GetDeliveries()

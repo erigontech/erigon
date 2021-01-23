@@ -34,6 +34,7 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	defer bd.lock.Unlock()
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
+	bd.lowWaitUntil = 0
 	bd.requestHigh = bd.requestedLow + (bd.outstandingLimit / 2)
 	bd.requestedMap = make(map[DoubleHash]uint64)
 	bd.delivered.Clear()
@@ -43,11 +44,12 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	return nil
 }
 
-func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64) (*BodyRequest, uint64) {
+func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, currentTime, timeWithTimeout uint64) (*BodyRequest, uint64) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
-	if blockNum < bd.requestedLow {
+	if blockNum < bd.requestedLow && currentTime >= bd.lowWaitUntil {
 		blockNum = bd.requestedLow
+		bd.lowWaitUntil = timeWithTimeout
 	}
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
@@ -57,7 +59,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64) (*
 		if blockNum >= bd.requestHigh {
 			bd.requestHigh = bd.requestedLow + bd.outstandingLimit
 			//bd.feedDeliveries()
-			blockNum = bd.requestedLow
+			blockNum = 0
 			break // Avoid tight loop
 		}
 		if bd.delivered.Contains(blockNum) {

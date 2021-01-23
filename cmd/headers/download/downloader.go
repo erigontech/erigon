@@ -529,35 +529,6 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 	return sentPeers != nil && len(sentPeers.Peers) > 0
 }
 
-func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
-	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
-	var blockNum uint64
-	var req *bodydownload.BodyRequest
-	for {
-		count := 0
-		if req == nil {
-			req, blockNum = cs.bd.RequestMoreBodies(db, blockNum)
-		}
-		for req != nil && cs.sendBodyRequest(ctx, req) {
-			count++
-			req, blockNum = cs.bd.RequestMoreBodies(db, blockNum)
-		}
-		fmt.Printf("Sent %d body requests\n", count)
-		timer.Stop()
-		timer = time.NewTimer(1 * time.Second)
-		cs.bd.FeedDeliveries()
-		select {
-		case <-ctx.Done():
-			cs.bd.CloseStageData()
-			return
-		case <-timer.C:
-			log.Info("RequestQueueTime (bodies) ticked")
-		case <-cs.requestWakeUpBodies:
-			log.Info("bodyLoop woken up by the incoming request")
-		}
-	}
-}
-
 func (cs *ControlServerImpl) headerLoop(ctx context.Context) {
 	for {
 		reqs, timer := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
