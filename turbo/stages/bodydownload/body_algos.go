@@ -48,12 +48,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	if blockNum < bd.requestedLow {
-		if currentTime >= bd.lowWaitUntil {
-			blockNum = bd.requestedLow
-			bd.lowWaitUntil = timeWithTimeout
-		} else {
-			return nil, blockNum
-		}
+		blockNum = bd.requestedLow
 	}
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
@@ -61,9 +56,12 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 	for ; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
 		// Check if we reached highest allowed request block number, and turn back
 		if blockNum >= bd.requestHigh {
-			bd.requestHigh = bd.requestedLow + bd.outstandingLimit
-			//bd.feedDeliveries()
+			if currentTime < bd.lowWaitUntil {
+				return nil, blockNum
+			}
 			blockNum = 0
+			bd.lowWaitUntil = timeWithTimeout
+			bd.requestHigh = bd.requestedLow + bd.outstandingLimit
 			break // Avoid tight loop
 		}
 		if bd.delivered.Contains(blockNum) {
