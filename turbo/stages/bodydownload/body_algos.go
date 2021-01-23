@@ -47,11 +47,13 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, currentTime, timeWithTimeout uint64) (*BodyRequest, uint64) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
-	if blockNum < bd.requestedLow && currentTime >= bd.lowWaitUntil {
-		blockNum = bd.requestedLow
-		bd.lowWaitUntil = timeWithTimeout
-	} else {
-		return nil, blockNum
+	if blockNum < bd.requestedLow {
+		if currentTime >= bd.lowWaitUntil {
+			blockNum = bd.requestedLow
+			bd.lowWaitUntil = timeWithTimeout
+		} else {
+			return nil, blockNum
+		}
 	}
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
