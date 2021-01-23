@@ -55,13 +55,12 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 	hashes := make([]common.Hash, 0, BlockBufferSize)
 	for ; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
 		// Check if we reached highest allowed request block number, and turn back
-		if blockNum >= bd.requestHigh {
+		if blockNum >= bd.requestedLow+bd.outstandingLimit {
 			if currentTime < bd.lowWaitUntil {
 				return nil, blockNum
 			}
 			blockNum = 0
 			bd.lowWaitUntil = timeWithTimeout
-			bd.requestHigh = bd.requestedLow + bd.outstandingLimit
 			break // Avoid tight loop
 		}
 		if bd.delivered.Contains(blockNum) {
