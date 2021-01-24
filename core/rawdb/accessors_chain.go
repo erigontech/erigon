@@ -334,9 +334,6 @@ func WriteTransactions(db ethdb.Database, txs []*types.Transaction, baseTxId uin
 
 // WriteBodyRLP stores an RLP encoded block body into the database.
 func WriteBodyRLP(db DatabaseWriter, hash common.Hash, number uint64, rlp rlp.RawValue) {
-	if debug.IsBlockCompressionEnabled() {
-		rlp = snappy.Encode(nil, rlp)
-	}
 	if err := db.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), rlp); err != nil {
 		log.Crit("Failed to store block body", "err", err)
 	}
