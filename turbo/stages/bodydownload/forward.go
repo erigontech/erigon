@@ -52,7 +52,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	var prevDeliveredCount float64 = 0
 	var prevWastedCount float64 = 0
 	var count int
-	timer := time.NewTimer(2 * time.Second) // Check periodically even in the abseence of incoming messages
+	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var blockNum uint64
 	var req *BodyRequest
 	var peer []byte
@@ -106,7 +106,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 			break
 		}
 		timer.Stop()
-		timer = time.NewTimer(2 * time.Second)
+		timer = time.NewTimer(1 * time.Second)
 		select {
 		case <-ctx.Done():
 			break
