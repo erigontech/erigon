@@ -90,11 +90,6 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 					}
 				}
 			}
-			select {
-			default:
-			case <-logEvery.C:
-				logBlock = logProgress(logPrefix, logBlock, blockHeight, batch)
-			}
 			count++
 		}
 		if bodyProgress == headerProgress {
@@ -105,6 +100,8 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 		select {
 		case <-ctx.Done():
 			break
+		case <-logEvery.C:
+			logBlock = logProgress(logPrefix, logBlock, bodyProgress, batch)
 		case <-timer.C:
 			log.Info("RequestQueueTime (bodies) ticked")
 		case <-wakeUpChan:
