@@ -118,6 +118,9 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	for _, blockNum := range bodyReq.BlockNums {
+		if blockNum < bd.requestedLow {
+			continue
+		}
 		bd.timeouts[blockNum-bd.requestedLow] = timeWithTimeout
 		bd.peers[blockNum-bd.requestedLow] = peer
 	}
