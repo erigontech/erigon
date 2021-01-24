@@ -68,9 +68,9 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 		if currentTime < bd.timeouts[blockNum-bd.requestedLow] {
 			continue
 		}
-		if peer := bd.peers[blockNum-bd.requestedLow]; peer != nil {
-			fmt.Printf("Re-requesting block %d from peer %x\n", blockNum, peer)
-		}
+		//if peer := bd.peers[blockNum-bd.requestedLow]; peer != nil {
+		//	fmt.Printf("Re-requesting block %d from peer %s\n", blockNum, peer)
+		//}
 		var hash common.Hash
 		var header *types.Header
 		var err error
