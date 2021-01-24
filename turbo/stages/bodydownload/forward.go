@@ -76,7 +76,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 				peer = bodyReqSend(ctx, req)
 			}
 		}
-		fmt.Printf("Sent %d body requests\n", count)
+		//fmt.Printf("Sent %d body requests\n", count)
 		d := bd.GetDeliveries()
 		for _, block := range d {
 			if err = rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body()); err != nil {
@@ -116,9 +116,9 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
 		case <-timer.C:
-			log.Info("RequestQueueTime (bodies) ticked")
+			//log.Info("RequestQueueTime (bodies) ticked")
 		case <-wakeUpChan:
-			log.Info("bodyLoop woken up by the incoming request")
+			//log.Info("bodyLoop woken up by the incoming request")
 		}
 	}
 	if _, err := batch.Commit(); err != nil {

@@ -309,7 +309,7 @@ func runPeer(
 		case eth.BlockBodiesMsg:
 			// Peer responded or sent message - reset the "back off" timer
 			peerTimeMap.Store(peerID, time.Now().Unix())
-			log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peerID))
+			//log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peerID))
 			bytes := make([]byte, msg.Size)
 			_, err = io.ReadFull(msg.Payload, bytes)
 			if err != nil {

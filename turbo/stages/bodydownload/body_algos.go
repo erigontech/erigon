@@ -4,8 +4,6 @@ import (
 	//"context"
 	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
-	"fmt"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -110,7 +108,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 	}
 	if len(blockNums) > 0 {
 		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes}
-		fmt.Printf("Generated request for %d bodies [%d-%d]\n", len(blockNums), blockNums[0], blockNums[len(blockNums)-1])
+		//fmt.Printf("Generated request for %d bodies [%d-%d]\n", len(blockNums), blockNums[0], blockNums[len(blockNums)-1])
 	}
 	return bodyReq, blockNum
 }
