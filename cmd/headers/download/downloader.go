@@ -201,7 +201,7 @@ func grpcControlServer(ctx context.Context, coreAddr string, sentryClient proto_
 }
 
 // Download creates and starts standalone downloader
-func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database) error {
+func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database, timeout int) error {
 	ctx := rootContext()
 
 	sentryClient, err1 := grpcSentryClient(ctx, sentryAddr)
@@ -215,7 +215,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	go controlServer.headerLoop(ctx)
 	//go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.requestWakeUpBodies); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.requestWakeUpBodies, timeout); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 
@@ -223,7 +223,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 }
 
 // Combined creates and starts sentry and downloader in the same process
-func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, filesDir string, bufferSizeStr string, db ethdb.Database) error {
+func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, filesDir string, bufferSizeStr string, db ethdb.Database, timeout int) error {
 	ctx := rootContext()
 
 	coreClient := &ControlClientDirect{}
@@ -249,7 +249,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	go controlServer.headerLoop(ctx)
 	//go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.requestWakeUpBodies); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.requestWakeUpBodies, timeout); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 	return nil

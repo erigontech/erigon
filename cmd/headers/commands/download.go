@@ -8,6 +8,7 @@ import (
 var (
 	bufferSizeStr string // Size of buffer
 	combined      bool   // Whether downloader also includes sentry
+	timeout       int    // Timeout for delivery requests
 )
 
 func init() {
@@ -16,6 +17,7 @@ func init() {
 	downloadCmd.Flags().StringVar(&sentryAddr, "sentryAddr", "localhost:9091", "sentry address <host>:<port>")
 	downloadCmd.Flags().StringVar(&coreAddr, "coreAddr", "localhost:9092", "core address <host>:<port>")
 	downloadCmd.Flags().BoolVar(&combined, "combined", false, "run downloader and sentry in the same process")
+	downloadCmd.Flags().IntVar(&timeout, "timeout", 10, "timeout for devp2p delivery requests, in seconds")
 
 	// Options below are only used in the combined mode
 	downloadCmd.Flags().StringVar(&natSetting, "nat", "any", "NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)")
@@ -36,8 +38,8 @@ var downloadCmd = &cobra.Command{
 		db := openDatabase(chaindata)
 		defer db.Close()
 		if combined {
-			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, filesDir, bufferSizeStr, db)
+			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, filesDir, bufferSizeStr, db, timeout)
 		}
-		return download.Download(filesDir, bufferSizeStr, sentryAddr, coreAddr, db)
+		return download.Download(filesDir, bufferSizeStr, sentryAddr, coreAddr, db, timeout)
 	},
 }

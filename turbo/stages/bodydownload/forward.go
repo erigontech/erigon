@@ -18,7 +18,7 @@ const (
 )
 
 // Forward progresses Bodies stage in the forward direction
-func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyDownload, bodyReqSend func(context.Context, *BodyRequest) bool, wakeUpChan chan struct{}) error {
+func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyDownload, bodyReqSend func(context.Context, *BodyRequest) bool, wakeUpChan chan struct{}, timeout int) error {
 	if err := bd.UpdateFromDb(db); err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 		}
 		for req != nil && bodyReqSend(ctx, req) {
 			currentTime := uint64(time.Now().Unix())
-			bd.RequestSent(req, currentTime+5)
+			bd.RequestSent(req, currentTime+uint64(timeout))
 			count++
 			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
 		}
