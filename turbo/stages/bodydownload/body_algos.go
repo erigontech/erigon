@@ -41,6 +41,7 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	for i := 0; i < len(bd.deliveries); i++ {
 		bd.deliveries[i] = nil
 		bd.timeouts[i] = 0
+		bd.peers[i] = nil
 	}
 	return nil
 }
@@ -66,6 +67,9 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 		}
 		if currentTime < bd.timeouts[blockNum-bd.requestedLow] {
 			continue
+		}
+		if peer := bd.peers[blockNum-bd.requestedLow]; peer != nil {
+			fmt.Printf("Re-requesting block %d from peer %x\n", blockNum, peer)
 		}
 		var hash common.Hash
 		var header *types.Header
@@ -109,11 +113,12 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 	return bodyReq, blockNum
 }
 
-func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64) {
+func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer []byte) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	for _, blockNum := range bodyReq.BlockNums {
 		bd.timeouts[blockNum-bd.requestedLow] = timeWithTimeout
+		bd.peers[blockNum-bd.requestedLow] = peer
 	}
 }
 
@@ -152,9 +157,11 @@ func (bd *BodyDownload) GetDeliveries() []*types.Block {
 		copy(d, bd.deliveries[:i])
 		copy(bd.deliveries[:], bd.deliveries[i:])
 		copy(bd.timeouts[:], bd.timeouts[i:])
+		copy(bd.peers[:], bd.peers[i:])
 		for j := len(bd.deliveries) - int(i); j < len(bd.deliveries); j++ {
 			bd.deliveries[j] = nil
 			bd.timeouts[j] = 0
+			bd.peers[j] = nil
 		}
 		bd.requestedLow += i
 	}

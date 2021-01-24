@@ -19,6 +19,7 @@ type BodyDownload struct {
 	delivered        *roaring64.Bitmap
 	deliveries       []*types.Block
 	timeouts         []uint64
+	peers            [][]byte
 	requestedMap     map[DoubleHash]uint64
 	maxProgress      uint64
 	requestedLow     uint64 // Lower bound of block number for outstanding requests
@@ -77,6 +78,7 @@ func NewBodyDownload(outstandingLimit int) *BodyDownload {
 		delivered:        roaring64.New(),
 		deliveries:       make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
 		timeouts:         make([]uint64, outstandingLimit+MaxBodiesInRequest),
+		peers:            make([][]byte, outstandingLimit+MaxBodiesInRequest),
 	}
 	return bd
 }

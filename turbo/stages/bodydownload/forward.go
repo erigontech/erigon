@@ -18,7 +18,7 @@ const (
 )
 
 // Forward progresses Bodies stage in the forward direction
-func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyDownload, bodyReqSend func(context.Context, *BodyRequest) bool, wakeUpChan chan struct{}, timeout int) error {
+func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyDownload, bodyReqSend func(context.Context, *BodyRequest) []byte, penalise func([]byte), wakeUpChan chan struct{}, timeout int) error {
 	if err := bd.UpdateFromDb(db); err != nil {
 		return err
 	}
@@ -54,17 +54,24 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var blockNum uint64
 	var req *BodyRequest
+	var peer []byte
 	for {
 		count := 0
 		if req == nil {
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
+			if req != nil {
+				peer = bodyReqSend(ctx, req)
+			}
 		}
-		for req != nil && bodyReqSend(ctx, req) {
+		for req != nil && peer != nil {
 			currentTime := uint64(time.Now().Unix())
-			bd.RequestSent(req, currentTime+uint64(timeout))
+			bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			count++
 			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
+			if req != nil {
+				peer = bodyReqSend(ctx, req)
+			}
 		}
 		fmt.Printf("Sent %d body requests\n", count)
 		d := bd.GetDeliveries()

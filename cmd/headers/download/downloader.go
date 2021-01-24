@@ -215,7 +215,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	go controlServer.headerLoop(ctx)
 	//go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.requestWakeUpBodies, timeout); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, func([]byte) {}, controlServer.requestWakeUpBodies, timeout); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 
@@ -249,7 +249,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	go controlServer.headerLoop(ctx)
 	//go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.requestWakeUpBodies, timeout); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, func([]byte) {}, controlServer.requestWakeUpBodies, timeout); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 	return nil
@@ -505,14 +505,14 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 	}
 }
 
-func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) bool {
+func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) []byte {
 	//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 	var bytes []byte
 	var err error
 	bytes, err = rlp.EncodeToBytes(req.Hashes)
 	if err != nil {
 		log.Error("Could not encode block bodies request", "err", err)
-		return false
+		return nil
 	}
 	outreq := proto_sentry.SendMessageByMinBlockRequest{
 		MinBlock: req.BlockNums[len(req.BlockNums)-1],
@@ -524,9 +524,12 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 	sentPeers, err1 := cs.sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err1 != nil {
 		log.Error("Could not send block bodies request", "err", err1)
-		return false
+		return nil
 	}
-	return sentPeers != nil && len(sentPeers.Peers) > 0
+	if sentPeers == nil || len(sentPeers.Peers) == 0 {
+		return nil
+	}
+	return sentPeers.Peers[0]
 }
 
 func (cs *ControlServerImpl) headerLoop(ctx context.Context) {
