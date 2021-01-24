@@ -6,11 +6,6 @@ import (
 	"sync/atomic"
 )
 
-var (
-	compressBlocks    bool
-	getCompressBlocks sync.Once
-)
-
 // atomic: bit 0 is the value, bit 1 is the initialized flag
 var getNodeData uint32
 
@@ -45,13 +40,6 @@ func OverrideGetNodeData(val bool) {
 	} else {
 		atomic.StoreUint32(&getNodeData, gndInitializedFlag)
 	}
-}
-
-func IsBlockCompressionEnabled() bool {
-	getCompressBlocks.Do(func() {
-		_, compressBlocks = os.LookupEnv("COMPRESS_BLOCKS")
-	})
-	return compressBlocks
 }
 
 var (
