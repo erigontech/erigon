@@ -529,7 +529,7 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 	if sentPeers == nil || len(sentPeers.Peers) == 0 {
 		return nil
 	}
-	return sentPeers.Peers[0]
+	return common.CopyBytes(sentPeers.Peers[0])
 }
 
 func (cs *ControlServerImpl) headerLoop(ctx context.Context) {
