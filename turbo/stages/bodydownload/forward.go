@@ -49,8 +49,8 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	var prevDeliveredCount int = 0
-	var prevWastedCount int = 0
+	var prevDeliveredCount float64 = 0
+	var prevWastedCount float64 = 0
 	var count int
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var blockNum uint64
@@ -133,9 +133,9 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	return nil
 }
 
-func logProgress(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount int, batch ethdb.DbWithPendingMutations) {
-	speed := float64(deliveredCount-prevDeliveredCount) / float64(logInterval/time.Second)
-	wastedSpeed := float64(wastedCount-prevWastedCount) / float64(logInterval/time.Second)
+func logProgress(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64, batch ethdb.DbWithPendingMutations) {
+	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
+	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),

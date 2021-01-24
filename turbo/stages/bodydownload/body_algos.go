@@ -147,7 +147,7 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 	return 0, false
 }
 
-func (bd *BodyDownload) DeliverySize(delivered int, wasted int) {
+func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	bd.deliveredCount += delivered
@@ -180,7 +180,7 @@ func (bd *BodyDownload) GetDeliveries() []*types.Block {
 	return d
 }
 
-func (bd *BodyDownload) DeliveryCounts() (int, int) {
+func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	return bd.deliveredCount, bd.wastedCount

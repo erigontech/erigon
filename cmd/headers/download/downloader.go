@@ -439,11 +439,12 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 			undelivered++
 		}
 	}
-	//cs.bd.FeedDeliveries()
+	// Approximate numbers
+	cs.bd.DeliverySize(float64(len(inreq.Data))*float64(delivered)/float64(delivered+undelivered), float64(len(inreq.Data))*float64(undelivered)/float64(delivered+undelivered))
 	cs.deliveredBodies += delivered
 	cs.undeliveredBodies += undelivered
 	if undelivered > 0 {
-		log.Info(fmt.Sprintf("BlockBodies{delivered=%d, undelivered=%d, totalDelivered=%d, totalUndelivered=%d}", delivered, undelivered, cs.deliveredBodies, cs.undeliveredBodies))
+		//log.Info(fmt.Sprintf("BlockBodies{delivered=%d, undelivered=%d, totalDelivered=%d, totalUndelivered=%d}", delivered, undelivered, cs.deliveredBodies, cs.undeliveredBodies))
 	}
 	return &empty.Empty{}, nil
 }
