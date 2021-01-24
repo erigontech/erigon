@@ -175,6 +175,7 @@ func NewPromoter(db ethdb.Database, quitCh <-chan struct{}) *Promoter {
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
 		TempDir:          os.TempDir(),
+		quitCh:           quitCh,
 	}
 }
 
@@ -182,7 +183,7 @@ type Promoter struct {
 	db               ethdb.Database
 	ChangeSetBufSize uint64
 	TempDir          string
-	quitCh           chan struct{}
+	quitCh           <-chan struct{}
 }
 
 func getExtractFunc(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
