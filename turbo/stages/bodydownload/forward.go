@@ -49,7 +49,8 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	var logBlock int = 0
+	var prevDeliveredCount int = 0
+	var prevWastedCount int = 0
 	var count int
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var blockNum uint64
@@ -110,7 +111,10 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 		case <-ctx.Done():
 			break
 		case <-logEvery.C:
-			logBlock = logProgress(logPrefix, bodyProgress, logBlock, bd.DeliverCount(), batch)
+			deliveredCount, wastedCount := bd.DeliveryCounts()
+			logProgress(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, batch)
+			prevDeliveredCount = deliveredCount
+			prevWastedCount = wastedCount
 		case <-timer.C:
 			log.Info("RequestQueueTime (bodies) ticked")
 		case <-wakeUpChan:
@@ -129,16 +133,17 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	return nil
 }
 
-func logProgress(logPrefix string, committed uint64, prev, now int, batch ethdb.DbWithPendingMutations) int {
-	speed := float64(now-prev) / float64(logInterval/time.Second)
+func logProgress(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount int, batch ethdb.DbWithPendingMutations) {
+	speed := float64(deliveredCount-prevDeliveredCount) / float64(logInterval/time.Second)
+	wastedSpeed := float64(wastedCount-prevWastedCount) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),
 		"number committed", committed,
-		"delivery blk/second", speed,
+		"delivery /second", common.StorageSize(speed),
+		"wasted /second", common.StorageSize(wastedSpeed),
 		"batch", common.StorageSize(batch.BatchSize()),
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys),
 		"numGC", int(m.NumGC))
-	return now
 }

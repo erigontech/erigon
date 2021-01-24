@@ -18,7 +18,8 @@ type BodyDownload struct {
 	lock             sync.RWMutex
 	delivered        *roaring64.Bitmap
 	deliveries       []*types.Block
-	deliverCount     int
+	deliveredCount   int
+	wastedCount      int
 	timeouts         []uint64
 	peers            [][]byte
 	requestedMap     map[DoubleHash]uint64
