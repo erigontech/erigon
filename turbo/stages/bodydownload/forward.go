@@ -49,7 +49,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	var logBlock uint64 = bodyProgress
+	var logBlock uint64 = 0
 	var count int
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var blockNum uint64
@@ -110,7 +110,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 		case <-ctx.Done():
 			break
 		case <-logEvery.C:
-			logBlock = logProgress(logPrefix, logBlock, bodyProgress, batch)
+			logBlock = logProgress(logPrefix, logBlock, uint64(bd.DeliverCount()), batch)
 		case <-timer.C:
 			log.Info("RequestQueueTime (bodies) ticked")
 		case <-wakeUpChan:
@@ -134,8 +134,8 @@ func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMu
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),
-		"number", now,
-		"blk/second", speed,
+		"number committed", now,
+		"delivery blk/second", speed,
 		"batch", common.StorageSize(batch.BatchSize()),
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys),

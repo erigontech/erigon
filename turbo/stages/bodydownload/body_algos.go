@@ -38,6 +38,7 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	bd.requestHigh = bd.requestedLow + (bd.outstandingLimit / 2)
 	bd.requestedMap = make(map[DoubleHash]uint64)
 	bd.delivered.Clear()
+	bd.deliverCount = 0
 	for i := 0; i < len(bd.deliveries); i++ {
 		bd.deliveries[i] = nil
 		bd.timeouts[i] = 0
@@ -137,6 +138,7 @@ func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 		bd.delivered.Add(blockNum)
 		bd.deliveries[blockNum-bd.requestedLow] = bd.deliveries[blockNum-bd.requestedLow].WithBody(body.Transactions, body.Uncles)
 		delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
+		bd.deliverCount++
 		return blockNum, true
 	}
 	return 0, false
@@ -166,4 +168,10 @@ func (bd *BodyDownload) GetDeliveries() []*types.Block {
 		bd.requestedLow += i
 	}
 	return d
+}
+
+func (bd *BodyDownload) DeliverCount() int {
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
+	return bd.deliverCount
 }
