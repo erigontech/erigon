@@ -234,8 +234,6 @@ func runPeer(
 		if err != nil {
 			return fmt.Errorf("reading message: %v", err)
 		}
-		// Peer responded or sent message - reset the "back off" timer
-		peerTimeMap.Store(peerID, time.Now().Unix())
 		if msg.Size > eth.ProtocolMaxMsgSize {
 			msg.Discard()
 			return errResp(eth.ErrMsgTooLarge, "message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
@@ -256,6 +254,8 @@ func runPeer(
 				return fmt.Errorf("send empty headers reply: %v", err)
 			}
 		case eth.BlockHeadersMsg:
+			// Peer responded or sent message - reset the "back off" timer
+			peerTimeMap.Store(peerID, time.Now().Unix())
 			bytes := make([]byte, msg.Size)
 			_, err = io.ReadFull(msg.Payload, bytes)
 			if err != nil {
@@ -307,6 +307,8 @@ func runPeer(
 			}
 			log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}", peerID, hashesStr.String()))
 		case eth.BlockBodiesMsg:
+			// Peer responded or sent message - reset the "back off" timer
+			peerTimeMap.Store(peerID, time.Now().Unix())
 			log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peerID))
 			bytes := make([]byte, msg.Size)
 			_, err = io.ReadFull(msg.Payload, bytes)
