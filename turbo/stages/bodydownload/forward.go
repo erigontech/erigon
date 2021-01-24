@@ -60,15 +60,17 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 		if req == nil {
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
-			if req != nil {
-				peer = bodyReqSend(ctx, req)
-			}
+		}
+		peer = nil
+		if req != nil {
+			peer = bodyReqSend(ctx, req)
 		}
 		for req != nil && peer != nil {
 			currentTime := uint64(time.Now().Unix())
 			bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			count++
 			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
+			peer = nil
 			if req != nil {
 				peer = bodyReqSend(ctx, req)
 			}
