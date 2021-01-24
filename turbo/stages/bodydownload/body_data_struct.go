@@ -18,6 +18,7 @@ type BodyDownload struct {
 	lock             sync.RWMutex
 	delivered        *roaring64.Bitmap
 	deliveries       []*types.Block
+	timeouts         []uint64
 	requestedMap     map[DoubleHash]uint64
 	maxProgress      uint64
 	requestedLow     uint64 // Lower bound of block number for outstanding requests
@@ -75,6 +76,7 @@ func NewBodyDownload(outstandingLimit int) *BodyDownload {
 		outstandingLimit: uint64(outstandingLimit),
 		delivered:        roaring64.New(),
 		deliveries:       make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
+		timeouts:         make([]uint64, outstandingLimit+MaxBodiesInRequest),
 	}
 	return bd
 }

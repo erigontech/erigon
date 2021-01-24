@@ -40,11 +40,12 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	bd.delivered.Clear()
 	for i := 0; i < len(bd.deliveries); i++ {
 		bd.deliveries[i] = nil
+		bd.timeouts[i] = 0
 	}
 	return nil
 }
 
-func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, currentTime, timeWithTimeout uint64) (*BodyRequest, uint64) {
+func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, currentTime uint64) (*BodyRequest, uint64) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	if blockNum < bd.requestedLow {
@@ -56,15 +57,14 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 	for ; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
 		// Check if we reached highest allowed request block number, and turn back
 		if blockNum >= bd.requestedLow+bd.outstandingLimit {
-			if currentTime < bd.lowWaitUntil {
-				return nil, blockNum
-			}
 			blockNum = 0
-			bd.lowWaitUntil = timeWithTimeout
 			break // Avoid tight loop
 		}
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
+			continue
+		}
+		if currentTime < bd.timeouts[blockNum-bd.requestedLow] {
 			continue
 		}
 		var hash common.Hash
@@ -109,6 +109,14 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 	return bodyReq, blockNum
 }
 
+func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64) {
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
+	for _, blockNum := range bodyReq.BlockNums {
+		bd.timeouts[blockNum-bd.requestedLow] = timeWithTimeout
+	}
+}
+
 // DeliverBody takes the block body received from a peer and adds it to the various data structures
 func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
 	uncleHash := types.CalcUncleHash(body.Uncles)
@@ -143,52 +151,12 @@ func (bd *BodyDownload) GetDeliveries() []*types.Block {
 		d = make([]*types.Block, i)
 		copy(d, bd.deliveries[:i])
 		copy(bd.deliveries[:], bd.deliveries[i:])
+		copy(bd.timeouts[:], bd.timeouts[i:])
 		for j := len(bd.deliveries) - int(i); j < len(bd.deliveries); j++ {
 			bd.deliveries[j] = nil
+			bd.timeouts[j] = 0
 		}
 		bd.requestedLow += i
 	}
 	return d
-}
-
-func (bd *BodyDownload) feedDeliveries() {
-	var i uint64
-	var channelFull bool
-	for i = 0; !channelFull && !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
-		select {
-		case bd.blockChannel <- bd.deliveries[i]:
-			// This is delivery
-			bd.delivered.Remove(bd.requestedLow + i)
-		default:
-			// Delivery is not possible for now
-			channelFull = true
-		}
-	}
-	// Move the deliveries back
-	// bd.requestedLow can only be moved forward if there are consequitive block numbers present in the bd.delivered map
-	if i > 0 {
-		copy(bd.deliveries[:], bd.deliveries[i:])
-		for j := len(bd.deliveries) - int(i); j < len(bd.deliveries); j++ {
-			bd.deliveries[j] = nil
-		}
-		bd.requestedLow += i
-	}
-}
-
-func (bd *BodyDownload) FeedDeliveries() {
-	bd.lock.Lock()
-	defer bd.lock.Unlock()
-	bd.feedDeliveries()
-}
-
-func (bd *BodyDownload) CloseStageData() {
-	bd.lock.Lock()
-	defer bd.lock.Unlock()
-	if bd.blockChannel != nil {
-		close(bd.blockChannel)
-	}
-}
-
-func (bd *BodyDownload) PrepareStageData() chan *types.Block {
-	return bd.blockChannel
 }
