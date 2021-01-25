@@ -1229,11 +1229,3 @@ Author: Melvin Junhee Woo <melvin.woo@groundx.xyz>
 Date:   Mon Jan 25 22:25:55 2021 +0900
 
     snapshot: merge loops for better performance (#22160)
-
-commit 59a79137b9c8740a3623cdf35512e1eb49c8a20b
-Author: ucwong <ucwong@126.com>
-Date:   Mon Jan 25 19:46:09 2021 +0800
-
-    go.mod: upgrade github.com/huin/goupnp (#22227)
-    
-    This updates the goupnp dependency, fixing huin/goupnp#33
