@@ -115,6 +115,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 			logProgress(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, batch)
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
+			bd.PrintPeerMap()
 		case <-timer.C:
 			//log.Info("RequestQueueTime (bodies) ticked")
 			//case <-wakeUpChan:

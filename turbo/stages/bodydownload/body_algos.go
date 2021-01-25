@@ -4,6 +4,8 @@ import (
 	//"context"
 	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
+	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -68,9 +70,10 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 		if currentTime < bd.timeouts[blockNum-bd.requestedLow] {
 			continue
 		}
-		//if peer := bd.peers[blockNum-bd.requestedLow]; peer != nil {
-		//	fmt.Printf("Re-requesting block %d from peer %s\n", blockNum, peer)
-		//}
+		if peer := bd.peers[blockNum-bd.requestedLow]; peer != nil {
+			//	fmt.Printf("Re-requesting block %d from peer %s\n", blockNum, peer)
+			bd.peerMap[string(peer)]++
+		}
 		var hash common.Hash
 		var header *types.Header
 		var err error
@@ -182,4 +185,14 @@ func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	return bd.deliveredCount, bd.wastedCount
+}
+
+func (bd *BodyDownload) PrintPeerMap() {
+	bd.lock.Lock()
+	defer bd.lock.Unlock()
+	fmt.Printf("---------------------------\n")
+	for p, n := range bd.peerMap {
+		fmt.Printf("%s = %d\n", p, n)
+	}
+	fmt.Printf("---------------------------\n")
 }
