@@ -35,8 +35,8 @@ require (
 	github.com/google/btree v1.0.0
 	github.com/google/gofuzz v1.1.1-0.20200604201612-c04b05f3adfa
 	github.com/gorilla/websocket v1.4.2
-	github.com/graph-gophers/graphql-go v0.0.0-20200819123640-3b5ddcd884ae
-	github.com/grpc-ecosystem/go-grpc-middleware v1.2.2
+	github.com/graph-gophers/graphql-go v0.0.0-20201113091052-beb923fada29
+    github.com/grpc-ecosystem/go-grpc-middleware v1.2.2
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
     github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
 	github.com/holiman/uint256 v1.1.1
@@ -62,7 +62,7 @@ require (
 	github.com/shirou/gopsutil/v3 v3.21.1
 	github.com/spf13/cobra v1.1.1
 	github.com/status-im/keycard-go v0.0.0-20200402102358-957c09536969
-	github.com/stretchr/testify v1.6.1
+	github.com/stretchr/testify v1.7.0
 	github.com/tyler-smith/go-bip39 v1.0.2
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
