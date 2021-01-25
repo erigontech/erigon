@@ -233,7 +233,7 @@ func runPeer(
 
 	for {
 		if _, ok := peerRwMap.Load(peerID); !ok {
-			return fmt.Errorf("[%s] Peer has been penalized")
+			return fmt.Errorf("Peer has been penalized")
 		}
 		msg, err = rw.ReadMsg()
 		if err != nil {
@@ -589,7 +589,7 @@ type SentryServerImpl struct {
 }
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
-	log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%x", req.GetPeerId()))
+	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
 	ss.peerRwMap.Delete(string(req.PeerId))
 	ss.peerTimeMap.Delete(string(req.PeerId))
 	ss.peerHeightMap.Delete(string(req.PeerId))
