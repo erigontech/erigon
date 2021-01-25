@@ -204,7 +204,7 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 				return nil, err
 			}
 
-			log.Info("Stored checkpoint snapshot to disk1", "number", p.Number, "hash", p.Hash())
+			log.Info("Stored genesis checkpoint snapshot to disk", "number", p.Number, "hash", p.Hash())
 			break
 		}
 	}

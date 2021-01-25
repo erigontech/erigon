@@ -562,7 +562,9 @@ func CreateConsensusEngine(_ *node.Node, chainConfig *params.ChainConfig, config
 		if chainConfig.Clique != nil {
 			eng = clique.NewCliqueVerifier(clique.New(chainConfig.Clique, consensusCfg, db))
 		}
-	default:
+	}
+
+	if eng == nil {
 		panic("unknown config")
 	}
 
