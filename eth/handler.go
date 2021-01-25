@@ -560,10 +560,18 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 }
 
 func (h *handler) removePeer(id string) {
+	// Create a custom logger to avoid printing the entire id
+	var logger log.Logger
+	if len(id) < 16 {
+		// Tests use short IDs, don't choke on them
+		logger = log.New("peer", id)
+	} else {
+		logger = log.New("peer", id[:8])
+	}
 	// Remove the eth peer if it exists
 	eth := h.peers.ethPeer(id)
 	if eth != nil {
-		log.Debug("Removing Ethereum peer", "peer", id)
+		logger.Debug("Removing Ethereum peer")
 		h.downloader.UnregisterPeer(id)
 		h.txFetcher.Drop(id)
 
@@ -572,16 +580,16 @@ func (h *handler) removePeer(id string) {
 		// Decode the complex header query
 		var query GetBlockHeadersData
 		if err := h.peers.unregisterEthPeer(id); err != nil {
-			log.Error("Peer removal failed", "peer", id, "err", err)
+			logger.Error("Ethereum peer removal failed", "err", err)
 		}
 	}
 	// Remove the snap peer if it exists
 	snap := h.peers.snapPeer(id)
 	if snap != nil {
-		log.Debug("Removing Snapshot peer", "peer", id)
+		logger.Debug("Removing Snapshot peer")
 		h.downloader.SnapSyncer.Unregister(id)
 		if err := h.peers.unregisterSnapPeer(id); err != nil {
-			log.Error("Peer removal failed", "peer", id, "err", err)
+			logger.Error("Snapshot peer removel failed", "err", err)
 		}
 		return p.SendBlockHeaders(headers)
 
