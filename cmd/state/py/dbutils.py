@@ -41,7 +41,7 @@ StorageModePreImages = "smPreImages".encode()
 StorageModeIntermediateTrieHash = "smIntermediateTrieHash".encode()
 SyncStageProgress = "SSP2".encode()
 SyncStageUnwind = "SSU2".encode()
-CliqueBucket = "clique".encode()
+CliqueBucket = "clique-".encode()
 Senders = "txSenders".encode()
 
 
