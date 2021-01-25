@@ -63,5 +63,8 @@ var DefaultFlags = []cli.Flag{
 	utils.MetricsHTTPFlag,
 	utils.MetricsPortFlag,
 	utils.IdentityFlag,
+	utils.CliqueSnapshotCheckpointIntervalFlag,
+	utils.CliqueSnapshotInmemorySnapshotsFlag,
+	utils.CliqueSnapshotInmemorySignaturesFlag,
 	SilkwormFlag,
 }

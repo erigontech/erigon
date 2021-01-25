@@ -243,7 +243,7 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux) {
 		t.Fatalf("can't create new chain config: %v", err)
 	}
 	// Create consensus engine
-	engine := clique.New(chainConfig.Clique, chainDB)
+	engine := clique.New(chainConfig.Clique, params.CliqueSnapshot, chainDB)
 	// Create Ethereum backend
 	bc, err := core.NewBlockChain(chainDB, new(core.CacheConfig), chainConfig, engine, vm.Config{}, nil /*isLocalBlock*/, nil)
 	if err != nil {

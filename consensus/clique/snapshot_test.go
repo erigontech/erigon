@@ -414,7 +414,7 @@ func TestClique(t *testing.T) {
 			Period: 1,
 			Epoch:  tt.epoch,
 		}
-		engine := New(config.Clique, db)
+		engine := New(config.Clique, params.CliqueSnapshot, db)
 		engine.fakeDiff = true
 
 		exit := make(chan struct{})

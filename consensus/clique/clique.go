@@ -45,21 +45,15 @@ import (
 )
 
 const (
-	// todo: extract into config and flags
-	checkpointInterval = 1    // Number of blocks after which to save the vote snapshot to the database
-	inmemorySnapshots  = 1024 // Number of recent vote snapshots to keep in memory
-	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
+	epochLength = uint64(30000)          // Default number of blocks after which to checkpoint and reset the pending votes
+	extraVanity = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
+	extraSeal   = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
 
 	wiggleTime = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
 )
 
 // Clique proof-of-authority protocol constants.
 var (
-	epochLength = uint64(30000) // Default number of blocks after which to checkpoint and reset the pending votes
-
-	extraVanity = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
-	extraSeal   = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
-
 	nonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
 	nonceDropVote = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
 
@@ -173,11 +167,12 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 // Clique is the proof-of-authority consensus engine proposed to support the
 // Ethereum testnet following the Ropsten attacks.
 type Clique struct {
-	config *params.CliqueConfig // Consensus engine configuration parameters
-	db     ethdb.Database       // Database to store and retrieve snapshot checkpoints
+	config         *params.CliqueConfig   // Consensus engine configuration parameters
+	snapshotConfig *params.SnapshotConfig // Consensus engine configuration parameters
+	db             ethdb.Database         // Database to store and retrieve snapshot checkpoints
 
-	recents        *lru.ARCCache // Snapshots for recent block to speed up reorgs //todo remove
-	snapshotBlocks *lru.ARCCache // blockNum -> hash //todo remove
+	recents        *lru.ARCCache // Snapshots for recent block to speed up reorgs
+	snapshotBlocks *lru.ARCCache // blockNum -> hash
 	signatures     *lru.ARCCache // Signatures of recent blocks to speed up mining
 
 	proposals map[common.Address]bool // Current list of proposals we are pushing
@@ -194,19 +189,20 @@ type Clique struct {
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(config *params.CliqueConfig, db ethdb.Database) *Clique {
+func New(config *params.CliqueConfig, snapshotConfig *params.SnapshotConfig, db ethdb.Database) *Clique {
 	// Set any missing consensus parameters to their defaults
 	conf := *config
 	if conf.Epoch == 0 {
 		conf.Epoch = epochLength
 	}
 	// Allocate the snapshot caches and create the engine
-	recents, _ := lru.NewARC(inmemorySnapshots)
-	snapshotBlocks, _ := lru.NewARC(inmemorySnapshots)
-	signatures, _ := lru.NewARC(inmemorySignatures)
+	recents, _ := lru.NewARC(snapshotConfig.InmemorySnapshots)
+	snapshotBlocks, _ := lru.NewARC(snapshotConfig.InmemorySnapshots)
+	signatures, _ := lru.NewARC(snapshotConfig.InmemorySignatures)
 
 	return &Clique{
 		config:         &conf,
+		snapshotConfig: snapshotConfig,
 		db:             db,
 		recents:        recents,
 		snapshotBlocks: snapshotBlocks,
@@ -339,7 +335,7 @@ func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, headers ...*types.Header)
 	c.snapshotBlocks.Add(snap.Number, snap.Hash)
 
 	// If we've generated a new checkpoint snapshot, save to disk
-	if isSnapshot(snap.Number, c.config.Epoch) {
+	if isSnapshot(snap.Number, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
 		if err := snap.store(c.db, snap.Number == 0); err != nil {
 			return err
 		}
@@ -402,7 +398,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			break
 		}
 		// If an on-disk checkpoint snapshot can be found, use that
-		if isSnapshot(number, c.config.Epoch) {
+		if isSnapshot(number, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
 			if s, err := loadAndFillSnapshot(c.db, number, hash, c.config, c.snapStorage, c.signatures); err == nil {
 				log.Trace("Loaded voting snapshot from disk", "number", number, "hash", hash)
 				snap = s

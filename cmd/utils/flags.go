@@ -743,6 +743,22 @@ var (
 		Usage: "External EVM configuration (default = built-in interpreter)",
 		Value: "",
 	}
+
+	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
+		Name:  "clique.checkpoint",
+		Usage: "number of blocks after which to save the vote snapshot to the database",
+		Value: 1,
+	}
+	CliqueSnapshotInmemorySnapshotsFlag = cli.IntFlag{
+		Name:  "clique.snapshots",
+		Usage: "number of recent vote snapshots to keep in memory",
+		Value: 1024,
+	}
+	CliqueSnapshotInmemorySignaturesFlag = cli.IntFlag{
+		Name:  "clique.signatures",
+		Usage: "number of recent block signatures to keep in memory",
+		Value: 4096,
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -1350,6 +1366,18 @@ func setEthash(ctx *cli.Context, cfg *eth.Config) {
 	}
 }
 
+func setClique(ctx *cli.Context, cfg *eth.Config) {
+	if ctx.GlobalIsSet(CliqueSnapshotCheckpointIntervalFlag.Name) {
+		cfg.Clique.CheckpointInterval = ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name)
+	}
+	if ctx.GlobalIsSet(CliqueSnapshotInmemorySnapshotsFlag.Name) {
+		cfg.Clique.InmemorySnapshots = ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name)
+	}
+	if ctx.GlobalIsSet(CliqueSnapshotCheckpointIntervalFlag.Name) {
+		cfg.Clique.InmemorySignatures = ctx.GlobalInt(CliqueSnapshotCheckpointIntervalFlag.Name)
+	}
+}
+
 func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
@@ -1463,6 +1491,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	setGPO(ctx, &cfg.GPO, false)
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, cfg)
+	setClique(ctx, cfg)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
@@ -1747,7 +1776,13 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chainConfig *
 	}
 	var engine consensus.Engine
 	if config.Clique != nil {
-		engine = clique.New(config.Clique, chainDb)
+		snapshotConfig := &params.SnapshotConfig{
+			CheckpointInterval: ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name),
+			InmemorySnapshots:  ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name),
+			InmemorySignatures: ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name),
+		}
+
+		engine = clique.New(config.Clique, snapshotConfig, chainDb)
 	} else {
 		engine = ethash.NewFaker()
 		if !ctx.GlobalBool(FakePoWFlag.Name) {

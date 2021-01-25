@@ -294,7 +294,15 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		torrentClient:  torrentClient,
 	}
 
-	eth.engine = CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb)
+	var consensusConfig interface{}
+
+	if chainConfig.Clique != nil {
+		consensusConfig = &config.Clique
+	} else {
+		consensusConfig = &config.Ethash
+	}
+
+	eth.engine = CreateConsensusEngine(stack, chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, chainDb)
 
 	log.Info("Initialising Ethereum protocol", "versions", ProtocolVersions, "network", config.NetworkID)
 
@@ -522,34 +530,40 @@ func makeExtraData(extra []byte) []byte {
 }
 
 // CreateConsensusEngine creates the required type of consensus engine instance for an Ethereum service
-func CreateConsensusEngine(_ *node.Node, chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) *process.RemoteEngine {
+func CreateConsensusEngine(_ *node.Node, chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool, db ethdb.Database) *process.RemoteEngine {
 	var eng consensus.Engine
 	// Otherwise assume proof-of-work
-	switch config.PowMode {
-	case ethash.ModeFake:
-		log.Warn("Ethash used in fake mode")
-		eng = ethash.NewFaker()
-	case ethash.ModeTest:
-		log.Warn("Ethash used in test mode")
-		eng = ethash.NewTester(nil, noverify)
-	case ethash.ModeShared:
-		log.Warn("Ethash used in shared mode")
-		eng = ethash.NewShared()
-	default:
-		if chainConfig.Clique != nil {
-			eng = clique.NewCliqueVerifier(clique.New(chainConfig.Clique, db))
-		} else {
+
+	switch consensusCfg := config.(type) {
+	case *ethash.Config:
+		switch consensusCfg.PowMode {
+		case ethash.ModeFake:
+			log.Warn("Ethash used in fake mode")
+			eng = ethash.NewFaker()
+		case ethash.ModeTest:
+			log.Warn("Ethash used in test mode")
+			eng = ethash.NewTester(nil, noverify)
+		case ethash.ModeShared:
+			log.Warn("Ethash used in shared mode")
+			eng = ethash.NewShared()
+		default:
 			engine := ethash.New(ethash.Config{
-				CachesInMem:      config.CachesInMem,
-				CachesLockMmap:   config.CachesLockMmap,
-				DatasetDir:       config.DatasetDir,
-				DatasetsInMem:    config.DatasetsInMem,
-				DatasetsOnDisk:   config.DatasetsOnDisk,
-				DatasetsLockMmap: config.DatasetsLockMmap,
+				CachesInMem:      consensusCfg.CachesInMem,
+				CachesLockMmap:   consensusCfg.CachesLockMmap,
+				DatasetDir:       consensusCfg.DatasetDir,
+				DatasetsInMem:    consensusCfg.DatasetsInMem,
+				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
+				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
 			}, notify, noverify)
 			engine.SetThreads(-1) // Disable CPU mining
 			eng = engine
 		}
+	case *params.SnapshotConfig:
+		if chainConfig.Clique != nil {
+			eng = clique.NewCliqueVerifier(clique.New(chainConfig.Clique, consensusCfg, db))
+		}
+	default:
+		panic("unknown config")
 	}
 
 	return process.NewRemoteEngine(eng, chainConfig)

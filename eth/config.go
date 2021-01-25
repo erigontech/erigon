@@ -179,6 +179,8 @@ type Config struct {
 	// Ethash options
 	Ethash ethash.Config
 
+	Clique params.SnapshotConfig
+
 	// Transaction pool options
 	TxPool core.TxPoolConfig
 

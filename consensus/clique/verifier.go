@@ -187,7 +187,7 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 		}
 
 		// If an on-disk checkpoint snapshot can be found, use that
-		if isSnapshot(number, c.config.Epoch) {
+		if isSnapshot(number, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
 			if s, err = loadAndFillSnapshot(c.db, p.Number.Uint64(), p.Hash(), c.config, c.snapStorage, c.signatures); err == nil {
 				log.Trace("Loaded voting snapshot from disk", "number", p.Number, "hash", p.Hash())
 				snap = s
@@ -371,6 +371,6 @@ func (c *Verifier) checkSnapshot(num uint64) bool {
 	return ok
 }
 
-func isSnapshot(number uint64, epoch uint64) bool {
+func isSnapshot(number uint64, epoch, checkpointInterval uint64) bool {
 	return number == 0 || number%checkpointInterval == 0 || number%epoch == 0
 }

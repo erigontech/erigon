@@ -210,7 +210,7 @@ func testGenerateBlockAndImport(t *testing.T, isClique bool) {
 	if isClique {
 		chainConfig = params.AllCliqueProtocolChanges
 		chainConfig.Clique = &params.CliqueConfig{Period: 1, Epoch: 30000}
-		engine = clique.New(chainConfig.Clique, db)
+		engine = clique.New(chainConfig.Clique, params.CliqueSnapshot, db)
 	} else {
 		chainConfig = params.AllEthashProtocolChanges
 		engine = ethash.NewFaker()
@@ -270,7 +270,7 @@ func TestEmptyWorkEthash(t *testing.T) {
 func TestEmptyWorkClique(t *testing.T) {
 	t.Skip("should be restored. Unstable. tag: Clique")
 
-	engine := clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase())
+	engine := clique.New(cliqueChainConfig.Clique, params.CliqueSnapshot, ethdb.NewMemDatabase())
 	eng := process.NewRemoteEngine(engine, cliqueChainConfig)
 	defer eng.Close()
 
@@ -388,7 +388,7 @@ func TestRegenerateMiningBlockEthash(t *testing.T) {
 func TestRegenerateMiningBlockClique(t *testing.T) {
 	t.Skip("should be restored. works only on small values of difficulty. tag: Clique")
 
-	engine := clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase())
+	engine := clique.New(cliqueChainConfig.Clique, params.CliqueSnapshot, ethdb.NewMemDatabase())
 	eng := process.NewRemoteEngine(engine, cliqueChainConfig)
 	defer eng.Close()
 
@@ -458,7 +458,7 @@ func TestAdjustIntervalEthash(t *testing.T) {
 func TestAdjustIntervalClique(t *testing.T) {
 	t.Skip("Fix when refactoring tx pool")
 
-	engine := clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase())
+	engine := clique.New(cliqueChainConfig.Clique, params.CliqueSnapshot, ethdb.NewMemDatabase())
 	eng := process.NewRemoteEngine(engine, cliqueChainConfig)
 	defer eng.Close()
 	testAdjustInterval(t, cliqueChainConfig, eng)
