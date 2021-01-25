@@ -215,7 +215,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	go controlServer.headerLoop(ctx)
 	//go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, func([]byte) {}, controlServer.requestWakeUpBodies, timeout); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.penalise, controlServer.requestWakeUpBodies, timeout); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 
@@ -249,7 +249,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	go controlServer.headerLoop(ctx)
 	//go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, func([]byte) {}, controlServer.requestWakeUpBodies, timeout); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.penalise, controlServer.requestWakeUpBodies, timeout); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 	return nil
@@ -531,6 +531,13 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 		return nil
 	}
 	return common.CopyBytes(sentPeers.Peers[0])
+}
+
+func (cs *ControlServerImpl) penalise(ctx context.Context, peer []byte) {
+	penalizeReq := proto_sentry.PenalizePeerRequest{PeerId: peer, Penalty: proto_sentry.PenaltyKind_Kick}
+	if _, err := cs.sentryClient.PenalizePeer(ctx, &penalizeReq, &grpc.EmptyCallOption{}); err != nil {
+		log.Error("Could not penalise", "peer", peer, "error", err)
+	}
 }
 
 func (cs *ControlServerImpl) headerLoop(ctx context.Context) {

@@ -12,7 +12,7 @@ import (
 )
 
 // StageLoop runs the continuous loop of staged sync
-func StageLoop(ctx context.Context, db ethdb.Database, hd *headerdownload.HeaderDownload, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte, penalise func([]byte), wakeUpChan chan struct{}, timeout int) error {
+func StageLoop(ctx context.Context, db ethdb.Database, hd *headerdownload.HeaderDownload, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte, penalise func(context.Context, []byte), wakeUpChan chan struct{}, timeout int) error {
 	if _, _, _, err := core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false, false /* overwrite */); err != nil {
 		return fmt.Errorf("setup genesis block: %w", err)
 	}

@@ -134,6 +134,7 @@ func makeP2PServer(
 					ctx,
 					peerHeightMap,
 					peerTimeMap,
+					peerRwMap,
 					peer,
 					rw,
 					eth.ProtocolVersions[0], // version == eth65
@@ -169,6 +170,7 @@ func runPeer(
 	ctx context.Context,
 	peerHeightMap *sync.Map,
 	peerTimeMap *sync.Map,
+	peerRwMap *sync.Map,
 	peer *p2p.Peer,
 	rw p2p.MsgReadWriter,
 	version uint,
@@ -230,6 +232,9 @@ func runPeer(
 	log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 	for {
+		if _, ok := peerRwMap.Load(peerID); !ok {
+			return fmt.Errorf("[%s] Peer has been penalized")
+		}
 		msg, err = rw.ReadMsg()
 		if err != nil {
 			return fmt.Errorf("reading message: %v", err)
@@ -585,6 +590,9 @@ type SentryServerImpl struct {
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
 	log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%x", req.GetPeerId()))
+	ss.peerRwMap.Delete(string(req.PeerId))
+	ss.peerTimeMap.Delete(string(req.PeerId))
+	ss.peerHeightMap.Delete(string(req.PeerId))
 	return nil, nil
 }
 

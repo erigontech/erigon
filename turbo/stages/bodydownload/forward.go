@@ -18,7 +18,7 @@ const (
 )
 
 // Forward progresses Bodies stage in the forward direction
-func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyDownload, bodyReqSend func(context.Context, *BodyRequest) []byte, penalise func([]byte), wakeUpChan chan struct{}, timeout int) error {
+func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyDownload, bodyReqSend func(context.Context, *BodyRequest) []byte, penalise func(context.Context, []byte), wakeUpChan chan struct{}, timeout int) error {
 	if err := bd.UpdateFromDb(db); err != nil {
 		return err
 	}
@@ -58,6 +58,10 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	var peer []byte
 	for {
 		count := 0
+		penaltyPeers := bd.GetPenaltyPeers()
+		for _, penaltyPeer := range penaltyPeers {
+			penalise(ctx, penaltyPeer)
+		}
 		if req == nil {
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
