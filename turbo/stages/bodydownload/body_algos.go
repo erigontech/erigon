@@ -195,4 +195,5 @@ func (bd *BodyDownload) PrintPeerMap() {
 		fmt.Printf("%s = %d\n", p, n)
 	}
 	fmt.Printf("---------------------------\n")
+	bd.peerMap = make(map[string]int)
 }
