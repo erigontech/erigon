@@ -1223,9 +1223,3 @@ Date:   Mon Jan 25 21:29:45 2021 +0800
     core: reset to genesis when middle block is missing (#22135)
     
     When a sethead/rewind finds that the targeted block is missing, it resets to genesis instead of crashing. Closes #22129
-
-commit 04a72260c5bcca0ec7c4a63532fb29f68db03384
-Author: Melvin Junhee Woo <melvin.woo@groundx.xyz>
-Date:   Mon Jan 25 22:25:55 2021 +0900
-
-    snapshot: merge loops for better performance (#22160)
