@@ -1771,11 +1771,12 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 		engine  = ethash.NewFullFaker()
 	)
 
+	chainConfig := params.AllEthashProtocolChanges
+
 	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	eng := process.NewConsensusProcess(engine, chainConfig, exit)
 	defer common.SafeClose(exit)
 
-	chainConfig := params.AllEthashProtocolChanges
 	// If sidechain blocks are needed, make a light chain and import it
 	var sideblocks types.Blocks
 	var err error

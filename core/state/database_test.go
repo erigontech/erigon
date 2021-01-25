@@ -1566,6 +1566,7 @@ func TestRecreateAndRewind(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 	var revive *contracts.Revive2
@@ -1633,6 +1634,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 	longerBlocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 5, func(i int, block *core.BlockGen) {

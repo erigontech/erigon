@@ -58,6 +58,8 @@ func createTestDb() (ethdb.Database, error) {
 	defer common.SafeClose(exit)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
+
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts1 := bind.NewKeyedTransactor(key1)
 	transactOpts2 := bind.NewKeyedTransactor(key2)
