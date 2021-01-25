@@ -82,6 +82,7 @@ func NewBodyDownload(outstandingLimit int) *BodyDownload {
 		deliveries:       make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
 		timeouts:         make([]uint64, outstandingLimit+MaxBodiesInRequest),
 		peers:            make([][]byte, outstandingLimit+MaxBodiesInRequest),
+		peerMap:          make(map[string]int),
 	}
 	return bd
 }

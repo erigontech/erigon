@@ -45,6 +45,7 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 		bd.timeouts[i] = 0
 		bd.peers[i] = nil
 	}
+	bd.peerMap = make(map[string]int)
 	return nil
 }
 
@@ -111,7 +112,6 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 	}
 	if len(blockNums) > 0 {
 		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes}
-		//fmt.Printf("Generated request for %d bodies [%d-%d]\n", len(blockNums), blockNums[0], blockNums[len(blockNums)-1])
 	}
 	return bodyReq, blockNum
 }
