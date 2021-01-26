@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-const BlockBufferSize = 128
+const BlockBufferSize = 1024
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
@@ -126,8 +126,11 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 		if blockNum < bd.requestedLow {
 			continue
 		}
-		bd.requests[blockNum-bd.requestedLow].waitUntil = timeWithTimeout
-		bd.requests[blockNum-bd.requestedLow].peerID = peer
+		req := bd.requests[blockNum-bd.requestedLow]
+		if req != nil {
+			bd.requests[blockNum-bd.requestedLow].waitUntil = timeWithTimeout
+			bd.requests[blockNum-bd.requestedLow].peerID = peer
+		}
 	}
 }
 

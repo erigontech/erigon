@@ -11,7 +11,7 @@ import (
 // DoubleHash is type to be used for the mapping between TxHash and UncleHash to the block header
 type DoubleHash [2 * common.HashLength]byte
 
-const MaxBodiesInRequest = 128
+const MaxBodiesInRequest = 1024
 
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
