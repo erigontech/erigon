@@ -42,8 +42,7 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 	bd.wastedCount = 0
 	for i := 0; i < len(bd.deliveries); i++ {
 		bd.deliveries[i] = nil
-		bd.timeouts[i] = 0
-		bd.peers[i] = nil
+		bd.requests[i] = nil
 	}
 	bd.peerMap = make(map[string]int)
 	return nil
@@ -68,12 +67,12 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 			// Already delivered, no need to request
 			continue
 		}
-		if currentTime < bd.timeouts[blockNum-bd.requestedLow] {
-			continue
-		}
-		if peer := bd.peers[blockNum-bd.requestedLow]; peer != nil {
-			//	fmt.Printf("Re-requesting block %d from peer %s\n", blockNum, peer)
-			bd.peerMap[string(peer)]++
+		req := bd.requests[blockNum-bd.requestedLow]
+		if req != nil {
+			if currentTime < req.waitUntil {
+				continue
+			}
+			bd.peerMap[string(req.peerID)]++
 		}
 		var hash common.Hash
 		var header *types.Header
@@ -123,29 +122,45 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 		if blockNum < bd.requestedLow {
 			continue
 		}
-		bd.timeouts[blockNum-bd.requestedLow] = timeWithTimeout
-		bd.peers[blockNum-bd.requestedLow] = peer
+		bd.requests[blockNum-bd.requestedLow].waitUntil = timeWithTimeout
+		bd.requests[blockNum-bd.requestedLow].peerID = peer
 	}
 }
 
 // DeliverBody takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBody(body *eth.BlockBody) (uint64, bool) {
-	uncleHash := types.CalcUncleHash(body.Uncles)
-	txHash := types.DeriveSha(types.Transactions(body.Transactions))
-	var doubleHash DoubleHash
-	copy(doubleHash[:], uncleHash.Bytes())
-	copy(doubleHash[common.HashLength:], txHash.Bytes())
+func (bd *BodyDownload) DeliverBodies(bodies []*eth.BlockBody) (int, int) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
-	// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requesredMap
-	// Also, block numbers can be added to bd.delivered for empty blocks, above
-	if blockNum, ok := bd.requestedMap[doubleHash]; ok {
-		bd.delivered.Add(blockNum)
-		bd.deliveries[blockNum-bd.requestedLow] = bd.deliveries[blockNum-bd.requestedLow].WithBody(body.Transactions, body.Uncles)
-		delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
-		return blockNum, true
+	reqMap := make(map[uint64]*BodyRequest)
+	var delivered, undelivered int
+	for _, body := range bodies {
+		uncleHash := types.CalcUncleHash(body.Uncles)
+		txHash := types.DeriveSha(types.Transactions(body.Transactions))
+		var doubleHash DoubleHash
+		copy(doubleHash[:], uncleHash.Bytes())
+		copy(doubleHash[common.HashLength:], txHash.Bytes())
+		// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requesredMap
+		// Also, block numbers can be added to bd.delivered for empty blocks, above
+		if blockNum, ok := bd.requestedMap[doubleHash]; ok {
+			bd.delivered.Add(blockNum)
+			bd.deliveries[blockNum-bd.requestedLow] = bd.deliveries[blockNum-bd.requestedLow].WithBody(body.Transactions, body.Uncles)
+			req := bd.requests[blockNum-bd.requestedLow]
+			if _, ok := reqMap[req.BlockNums[0]]; !ok {
+				reqMap[req.BlockNums[0]] = req
+			}
+			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
+			delivered++
+		} else {
+			undelivered++
+		}
 	}
-	return 0, false
+	// Clean up the requests
+	for _, req := range reqMap {
+		for _, blockNum := range req.BlockNums {
+			bd.requests[blockNum] = nil
+		}
+	}
+	return delivered, undelivered
 }
 
 func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
@@ -169,12 +184,10 @@ func (bd *BodyDownload) GetDeliveries() []*types.Block {
 		d = make([]*types.Block, i)
 		copy(d, bd.deliveries[:i])
 		copy(bd.deliveries[:], bd.deliveries[i:])
-		copy(bd.timeouts[:], bd.timeouts[i:])
-		copy(bd.peers[:], bd.peers[i:])
+		copy(bd.requests[:], bd.requests[i:])
 		for j := len(bd.deliveries) - int(i); j < len(bd.deliveries); j++ {
 			bd.deliveries[j] = nil
-			bd.timeouts[j] = 0
-			bd.peers[j] = nil
+			bd.requests[j] = nil
 		}
 		bd.requestedLow += i
 	}

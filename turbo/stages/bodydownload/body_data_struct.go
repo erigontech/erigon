@@ -20,8 +20,7 @@ type BodyDownload struct {
 	deliveries       []*types.Block
 	deliveredCount   float64
 	wastedCount      float64
-	timeouts         []uint64
-	peers            [][]byte
+	requests         []*BodyRequest
 	requestedMap     map[DoubleHash]uint64
 	maxProgress      uint64
 	requestedLow     uint64 // Lower bound of block number for outstanding requests
@@ -32,45 +31,12 @@ type BodyDownload struct {
 	peerMap          map[string]int
 }
 
-type RequestQueueItem struct {
-	lowestBlockNum uint64
-	requested      *roaring64.Bitmap
-	waitUntil      uint64
-}
-
-type RequestQueue []RequestQueueItem
-
-func (rq RequestQueue) Len() int {
-	return len(rq)
-}
-
-func (rq RequestQueue) Less(i, j int) bool {
-	return rq[i].lowestBlockNum < rq[j].lowestBlockNum
-}
-
-func (rq RequestQueue) Swap(i, j int) {
-	rq[i], rq[j] = rq[j], rq[i]
-}
-
-func (rq *RequestQueue) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	*rq = append(*rq, x.(RequestQueueItem))
-}
-
-func (rq *RequestQueue) Pop() interface{} {
-	old := *rq
-	n := len(old)
-	x := old[n-1]
-	*rq = old[0 : n-1]
-	return x
-}
-
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
 type BodyRequest struct {
 	BlockNums []uint64
 	Hashes    []common.Hash
-	requested *roaring64.Bitmap
+	peerID    []byte
+	waitUntil uint64
 }
 
 // NewBodyDownload create a new body download state object
@@ -80,8 +46,7 @@ func NewBodyDownload(outstandingLimit int) *BodyDownload {
 		outstandingLimit: uint64(outstandingLimit),
 		delivered:        roaring64.New(),
 		deliveries:       make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
-		timeouts:         make([]uint64, outstandingLimit+MaxBodiesInRequest),
-		peers:            make([][]byte, outstandingLimit+MaxBodiesInRequest),
+		requests:         make([]*BodyRequest, outstandingLimit+MaxBodiesInRequest),
 		peerMap:          make(map[string]int),
 	}
 	return bd

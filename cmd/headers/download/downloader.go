@@ -425,20 +425,7 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode BlockBodies: %v", err)
 	}
-	//var sb strings.Builder
-	var undelivered int
-	var delivered int
-	for _, body := range request {
-		if _, ok := cs.bd.DeliverBody(body); ok {
-			//if sb.Len() > 0 {
-			//	fmt.Fprintf(&sb, ",")
-			//}
-			//fmt.Fprintf(&sb, "%d", blockNum)
-			delivered++
-		} else {
-			undelivered++
-		}
-	}
+	delivered, undelivered := cs.bd.DeliverBodies(request)
 	// Approximate numbers
 	cs.bd.DeliverySize(float64(len(inreq.Data))*float64(delivered)/float64(delivered+undelivered), float64(len(inreq.Data))*float64(undelivered)/float64(delivered+undelivered))
 	cs.deliveredBodies += delivered
