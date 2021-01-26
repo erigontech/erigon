@@ -73,6 +73,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 				continue
 			}
 			bd.peerMap[string(req.peerID)]++
+			bd.requests[blockNum-bd.requestedLow] = nil
 		}
 		var hash common.Hash
 		var header *types.Header
@@ -111,6 +112,9 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 	}
 	if len(blockNums) > 0 {
 		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes}
+		for _, blockNum := range blockNums {
+			bd.requests[blockNum-bd.requestedLow] = bodyReq
+		}
 	}
 	return bodyReq, blockNum
 }
