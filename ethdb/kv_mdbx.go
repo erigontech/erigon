@@ -758,7 +758,11 @@ func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 	if name == "root" {
 		return tx.tx.StatDBI(mdbx.DBI(1))
 	}
-	return tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
+	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
+	if err != nil {
+		return nil, fmt.Errorf("bucket: %s, %w", name, err)
+	}
+	return st, nil
 }
 
 func (tx *MdbxTx) Cursor(bucket string) Cursor {
@@ -835,7 +839,7 @@ func (c *MdbxCursor) initCursor() error {
 	var err error
 	c.c, err = tx.tx.OpenCursor(c.dbi)
 	if err != nil {
-		return err
+		return fmt.Errorf("table: %s, %w", c.bucketName, err)
 	}
 
 	// add to auto-cleanup on end of transactions
@@ -1369,14 +1373,6 @@ func (c *MdbxDupSortCursor) Internal() *mdbx.Cursor {
 func (c *MdbxDupSortCursor) initCursor() error {
 	if c.c != nil {
 		return nil
-	}
-
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		return fmt.Errorf("class MdbxDupSortCursor not compatible with AutoDupSortKeysConversion buckets")
-	}
-
-	if c.bucketCfg.Flags&mdbx.DupSort == 0 {
-		return fmt.Errorf("class MdbxDupSortCursor can be used only if bucket created with flag mdbx.DupSort")
 	}
 
 	return c.MdbxCursor.initCursor()

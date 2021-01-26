@@ -66,6 +66,7 @@ var (
 	blockInsertTimer     = metrics.NewRegisteredTimer("chain/inserts", nil)
 	blockValidationTimer = metrics.NewRegisteredTimer("chain/validation", nil)
 	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
+	blockExecutionNumber = metrics.NewRegisteredGauge("chain/execution/number", nil)
 	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
 
 	blockReorgMeter         = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
@@ -2106,6 +2107,7 @@ func ExecuteBlockEphemerally(
 	stateWriter state.WriterWithChangeSets,
 ) (types.Receipts, error) {
 	defer blockExecutionTimer.UpdateSince(time.Now())
+	defer blockExecutionNumber.Update(block.Number().Int64())
 
 	ibs := state.New(stateReader)
 	header := block.Header()

@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/spf13/cobra"
 )
 
@@ -184,7 +185,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 				stagedsync.ExecuteBlockStageParams{
 					ToBlock:       execToBlock, // limit execution to the specified block
 					WriteReceipts: sm.Receipts,
-					BatchSize:     int(batchSize),
+					BatchSize:     batchSize,
 					ChangeSetHook: changeSetHook,
 				}); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
@@ -261,6 +262,13 @@ func loopIh(db ethdb.Database, ctx context.Context) error {
 		return err
 	}
 
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
+	var cache *shards.StateCache
+	if cacheSize > 0 {
+		cache = shards.NewStateCache(32, cacheSize)
+	}
+
 	_ = clearUnwindStack(tx, context.Background())
 	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Execution, stages.AccountHistoryIndex, stages.StorageHistoryIndex, stages.TxPool, stages.TxLookup, stages.Finish)
 	if err = st.Run(db, tx); err != nil {
@@ -270,12 +278,12 @@ func loopIh(db ethdb.Database, ctx context.Context) error {
 	to := execStage.BlockNumber - 10
 	_ = st.SetCurrentStage(stages.HashState)
 	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: to}
-	if err = stagedsync.UnwindHashStateStage(u, progress(stages.HashState), tx, path.Join(datadir, etl.TmpDirName), ch); err != nil {
+	if err = stagedsync.UnwindHashStateStage(u, progress(stages.HashState), tx, cache, path.Join(datadir, etl.TmpDirName), ch); err != nil {
 		return err
 	}
 	_ = st.SetCurrentStage(stages.IntermediateHashes)
 	u = &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: to}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, progress(stages.IntermediateHashes), tx, path.Join(datadir, etl.TmpDirName), ch); err != nil {
+	if err = stagedsync.UnwindIntermediateHashesStage(u, progress(stages.IntermediateHashes), tx, cache, path.Join(datadir, etl.TmpDirName), ch); err != nil {
 		return err
 	}
 	_ = clearUnwindStack(tx, context.Background())

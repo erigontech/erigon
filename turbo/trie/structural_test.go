@@ -60,7 +60,7 @@ func TestV2HashBuilding(t *testing.T) {
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var valueTape bytes.Buffer
-	var groups []uint16
+	var groups, branches []uint16
 	for i, key := range keys {
 		curr.Reset()
 		curr.Write(succ.Bytes())
@@ -73,7 +73,7 @@ func TestV2HashBuilding(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false)
+			groups, branches, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, branches, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -88,7 +88,7 @@ func TestV2HashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, err := GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false); err != nil {
+	if _, _, err := GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, branches, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()
@@ -128,7 +128,7 @@ func TestV2Resolution(t *testing.T) {
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var valueTape bytes.Buffer
-	var groups []uint16
+	var groups, branches []uint16
 	for _, key := range keys {
 		curr.Reset()
 		curr.Write(succ.Bytes())
@@ -141,7 +141,7 @@ func TestV2Resolution(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, err = GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false)
+			groups, branches, err = GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, branches, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -152,7 +152,7 @@ func TestV2Resolution(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, err := GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false); err != nil {
+	if _, _, err := GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, branches, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	tr1 := New(common.Hash{})
@@ -207,7 +207,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	hb := NewHashBuilder(true)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
-	var groups []uint16
+	var groups, branches []uint16
 	var err error
 	for _, key := range keys {
 		curr.Reset()
@@ -220,7 +220,7 @@ func TestEmbeddedStorage(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, false)
+			groups, branches, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, branches, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -233,7 +233,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	cutoff := 2 * common.HashLength
 	succ.Write(curr.Bytes()[:cutoff-1])
 	succ.WriteByte(curr.Bytes()[cutoff-1] + 1)
-	if groups, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, false); err != nil {
+	if groups, _, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, branches, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()
@@ -242,5 +242,237 @@ func TestEmbeddedStorage(t *testing.T) {
 		fmt.Printf("Trie expected: %s\n", tr.root.fstring(""))
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
 	}
+	fmt.Printf("groups: %d\n", len(groups))
+}
+
+func TestEmbeddedStorage11(t *testing.T) {
+	keys := []struct {
+		k []byte
+		v []byte
+	}{
+
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae9800000000000000010d2f4a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"),
+			v: common.FromHex("496e7374616e6365000000000000000000000000000000000000000000000000"),
+		},
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae98000000000000000123a5384746519cbca71a22098063e5608768276f2dc212e71fd2c6c643c726c4"),
+			v: common.FromHex("65eea643e9a9d6f5f2f7e13ccdff36cf45b46aab"),
+		},
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001387a79e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
+			v: common.FromHex("01"),
+		},
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001a8dc6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
+			v: common.FromHex("53706f7265000000000000000000000000000000000000000000000000000000"),
+		},
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001dee260551c74e3b37ed31b6e5f482a3ff9342f863a5880c9090db0cc9e002750"),
+			v: common.FromHex("5067247f2214dca445bfb213277b5f19711e309f"),
+		},
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001fe59747b95e3ddbc3fd7e47a8bdf2465d2d88a030c9bd19cc3c0b7a9860c0d5f"),
+			v: common.FromHex("01"),
+		},
+	}
+	hb := NewHashBuilder(true)
+	var succ bytes.Buffer
+	var curr bytes.Buffer
+	var groups, branches []uint16
+	var err error
+	for _, key := range keys {
+		curr.Reset()
+		curr.Write(succ.Bytes())
+		succ.Reset()
+		keyBytes := key.k
+		for _, b := range keyBytes {
+			succ.WriteByte(b / 16)
+			succ.WriteByte(b % 16)
+		}
+		succ.WriteByte(16)
+		if curr.Len() > 0 {
+			groups, branches, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, branches, false)
+			if err != nil {
+				t.Errorf("Could not execute step of structGen algorithm: %v", err)
+			}
+		}
+	}
+	curr.Reset()
+	curr.Write(succ.Bytes())
+	succ.Reset()
+	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
+	cutoff := 2 * (common.HashLength + common.IncarnationLength)
+	succ.Write(curr.Bytes()[:cutoff-1])
+	succ.WriteByte(curr.Bytes()[cutoff-1] + 1)
+	if _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, branches, false); err != nil {
+		t.Errorf("Could not execute step of structGen algorithm: %v", err)
+	}
+	builtHash := hb.rootHash()
+	fmt.Printf("%d, %x, %d, %x\n", cutoff, builtHash, len(hb.hashStack), hb.hashStack)
+	//if trieHash != builtHash {
+	//	fmt.Printf("Trie built: %s\n", hb.root().fstring(""))
+	//	fmt.Printf("Trie expected: %s\n", tr.root.fstring(""))
+	//	t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
+	//}
+	fmt.Printf("groups: %d\n", len(groups))
+}
+
+func TestStorageOnly(t *testing.T) {
+	// 0f0f0f090c010a0a050808040f010103000300010f06000f09080401090b090d040201070b0c040a0b06050a020907060b04010e090a00000b0b0c0e0a0e090800000000000000000000000000000001,53754832dfdb81e5ca770a3f13a6545ad8ac58a7d1fbbc8848eb785ac02c6876
+
+	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae9800000000000000010d2f4a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c,496e7374616e6365000000000000000000000000000000000000000000000000
+	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae98000000000000000123a5384746519cbca71a22098063e5608768276f2dc212e71fd2c6c643c726c4,65eea643e9a9d6f5f2f7e13ccdff36cf45b46aab
+	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001387a79e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28,01
+	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001a8dc6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601,53706f7265000000000000000000000000000000000000000000000000000000
+	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001dee260551c74e3b37ed31b6e5f482a3ff9342f863a5880c9090db0cc9e002750,5067247f2214dca445bfb213277b5f19711e309f
+	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001fe59747b95e3ddbc3fd7e47a8bdf2465d2d88a030c9bd19cc3c0b7a9860c0d5f,01
+	keys := []struct {
+		k []byte
+		v []byte
+	}{
+		{
+			k: common.FromHex("0d2f4a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"),
+			v: common.FromHex("496e7374616e6365000000000000000000000000000000000000000000000000"),
+		},
+		{
+			k: common.FromHex("23a5384746519cbca71a22098063e5608768276f2dc212e71fd2c6c643c726c4"),
+			v: common.FromHex("65eea643e9a9d6f5f2f7e13ccdff36cf45b46aab"),
+		},
+		{
+			k: common.FromHex("387a79e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
+			v: common.FromHex("01"),
+		},
+		{
+			k: common.FromHex("a8dc6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
+			v: common.FromHex("53706f7265000000000000000000000000000000000000000000000000000000"),
+		},
+		{
+			k: common.FromHex("dee260551c74e3b37ed31b6e5f482a3ff9342f863a5880c9090db0cc9e002750"),
+			v: common.FromHex("5067247f2214dca445bfb213277b5f19711e309f"),
+		},
+		{
+			k: common.FromHex("fe59747b95e3ddbc3fd7e47a8bdf2465d2d88a030c9bd19cc3c0b7a9860c0d5f"),
+			v: common.FromHex("01"),
+		},
+	}
+	hb := NewHashBuilder(true)
+	var succ bytes.Buffer
+	var curr bytes.Buffer
+	var groups, branches []uint16
+	var err error
+	for _, key := range keys {
+		curr.Reset()
+		curr.Write(succ.Bytes())
+		succ.Reset()
+		keyBytes := key.k
+		for _, b := range keyBytes {
+			succ.WriteByte(b / 16)
+			succ.WriteByte(b % 16)
+		}
+		succ.WriteByte(16)
+		if curr.Len() > 0 {
+			groups, branches, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, branches, false)
+			if err != nil {
+				t.Errorf("Could not execute step of structGen algorithm: %v", err)
+			}
+		}
+	}
+	curr.Reset()
+	curr.Write(succ.Bytes())
+	succ.Reset()
+	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
+	if groups, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, branches, false); err != nil {
+		t.Errorf("Could not execute step of structGen algorithm: %v", err)
+	}
+	builtHash := hb.rootHash()
+	fmt.Printf("%x, %d, %x\n", builtHash, len(hb.hashStack), hb.hashStack)
+	//if trieHash != builtHash {
+	//	fmt.Printf("Trie built: %s\n", hb.root().fstring(""))
+	//	fmt.Printf("Trie expected: %s\n", tr.root.fstring(""))
+	//	t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
+	//}
+	fmt.Printf("groups: %d\n", len(groups))
+}
+
+func Test2(t *testing.T) {
+	keys := []struct {
+		k []byte
+		v []byte
+	}{
+		{
+			k: common.FromHex("000000"),
+			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+		},
+		{
+			k: common.FromHex("000001"),
+			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+		},
+		{
+			k: common.FromHex("000009"),
+			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+		},
+		{
+			k: common.FromHex("000010"),
+			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+		},
+		{
+			k: common.FromHex("000020"),
+			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+		},
+		{
+			k: common.FromHex("01"),
+			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+		},
+		{
+			k: common.FromHex("02"),
+			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+		},
+	}
+	hb := NewHashBuilder(false)
+	var succ bytes.Buffer
+	var curr bytes.Buffer
+	var groups, branches []uint16
+	var err error
+	for _, key := range keys {
+		curr.Reset()
+		curr.Write(succ.Bytes())
+		succ.Reset()
+		keyBytes := key.k
+		for _, b := range keyBytes {
+			succ.WriteByte(b / 16)
+			succ.WriteByte(b % 16)
+		}
+		//succ.WriteByte(16)
+		if curr.Len() > 0 {
+			fmt.Printf("send: %x\n", succ.Bytes())
+			groups, branches, err = GenStructStep(func(_ []byte) bool { return false },
+				curr.Bytes(), succ.Bytes(), hb,
+				func(keyHex []byte, children, branches uint16, hashes, rootHash []byte) error {
+					fmt.Printf("collect: %x, %b\n", keyHex, branches)
+					return nil
+				}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(key.v)}, groups, branches, false)
+			if err != nil {
+				t.Errorf("Could not execute step of structGen algorithm: %v", err)
+			}
+		}
+	}
+	curr.Reset()
+	curr.Write(succ.Bytes())
+	succ.Reset()
+	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
+	if groups, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, func(keyHex []byte, children, branches uint16, hashes, rootHash []byte) error {
+		fmt.Printf("collect: %x, %b\n", keyHex, branches)
+		return nil
+	}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(keys[len(keys)-1].v)}, groups, branches, false); err != nil {
+		t.Errorf("Could not execute step of structGen algorithm: %v", err)
+	}
+	builtHash := hb.rootHash()
+	fmt.Printf("%x, %d, %x\n", builtHash, len(hb.hashStack), hb.hashStack)
+	//if trieHash != builtHash {
+	//	fmt.Printf("Trie built: %s\n", hb.root().fstring(""))
+	//	fmt.Printf("Trie expected: %s\n", tr.root.fstring(""))
+	//	t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
+	//}
 	fmt.Printf("groups: %d\n", len(groups))
 }

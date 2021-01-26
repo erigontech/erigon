@@ -52,7 +52,7 @@ func (dbr *DbStateReader) ReadAccountData(address common.Address) (*accounts.Acc
 	if !ok {
 		var err error
 		if addrHash, err1 := common.HashData(address[:]); err1 == nil {
-			enc, err = dbr.db.Get(dbutils.CurrentStateBucket, addrHash[:])
+			enc, err = dbr.db.Get(dbutils.HashedAccountsBucket, addrHash[:])
 		} else {
 			return nil, err1
 		}
@@ -88,7 +88,7 @@ func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation
 			return enc, nil
 		}
 	}
-	enc, err2 := dbr.db.Get(dbutils.CurrentStateBucket, compositeKey)
+	enc, err2 := dbr.db.Get(dbutils.HashedStorageBucket, compositeKey)
 	if err2 != nil && !errors.Is(err2, ethdb.ErrKeyNotFound) {
 		return nil, err2
 	}

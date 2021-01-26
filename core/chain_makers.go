@@ -254,8 +254,13 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
 			}
 
-			if err := tx.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
-				return true, tx.Delete(dbutils.CurrentStateBucket, k, v)
+			if err := tx.Walk(dbutils.HashedAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
+				return true, tx.Delete(dbutils.HashedAccountsBucket, k, v)
+			}); err != nil {
+				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
+			}
+			if err := tx.Walk(dbutils.HashedStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
+				return true, tx.Delete(dbutils.HashedStorageBucket, k, v)
 			}); err != nil {
 				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
 			}
@@ -284,15 +289,20 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 					h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
 					//nolint:errcheck
 					h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
+					if err = tx.Put(dbutils.HashedStorageBucket, newK, common.CopyBytes(v)); err != nil {
+						return nil, nil, fmt.Errorf("insert hashed key: %w", err)
+					}
+				} else {
+					if err = tx.Put(dbutils.HashedAccountsBucket, newK, common.CopyBytes(v)); err != nil {
+						return nil, nil, fmt.Errorf("insert hashed key: %w", err)
+					}
 				}
-				if err = tx.Put(dbutils.CurrentStateBucket, newK, common.CopyBytes(v)); err != nil {
-					return nil, nil, fmt.Errorf("insert hashed key: %w", err)
-				}
+
 			}
 			c.Close()
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", i)
-				if err := tx.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
+				if err := tx.Walk(dbutils.HashedAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
 					fmt.Printf("%x: %x\n", k, v)
 					return true, nil
 				}); err != nil {
@@ -300,13 +310,14 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				}
 				fmt.Printf("===============================\n")
 			}
-			var hashCollector func(keyHex []byte, hash []byte) error
+			var hashCollector func(keyHex []byte, set uint16, branchSet uint16, hashes []byte, rootHash []byte) error
+			var storageHashCollector func(addrWithInc []byte, keyHex []byte, set uint16, branchSet uint16, hashes []byte, rootHash []byte) error
 			unfurl := trie.NewRetainList(0)
-			loader := trie.NewFlatDBTrieLoader("GenerateChain", dbutils.CurrentStateBucket, dbutils.IntermediateTrieHashBucket)
-			if err := loader.Reset(unfurl, hashCollector, false); err != nil {
+			loader := trie.NewFlatDBTrieLoader("GenerateChain")
+			if err := loader.Reset(unfurl, hashCollector, storageHashCollector, false); err != nil {
 				return nil, nil, fmt.Errorf("call to FlatDbSubTrieLoader.Reset: %w", err)
 			}
-			if hash, err := loader.CalcTrieRoot(tx, nil); err == nil {
+			if hash, err := loader.CalcTrieRoot(tx, []byte{}, nil); err == nil {
 				b.header.Root = hash
 			} else {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
