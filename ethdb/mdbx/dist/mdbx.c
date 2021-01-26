@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 7231e4e90cc692913ed8e07b8da7dfc6de974ed3c5d2405726a80cf506d0121f_v0_9_2_121_g251eda6f
+#define MDBX_BUILD_SOURCERY 42676fc08f8359c9f51f65ae02db3a7476e55040d811f772befcc70d2daedb8e_v0_9_2_122_g943bb552
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -11123,8 +11123,10 @@ retry_noaccount:
           goto bailout;
 
         if (MDBX_PNL_SIZE(txn->tw.lifo_reclaimed)) {
-          if (need_cleanup)
+          if (need_cleanup) {
             mdbx_txl_sort(txn->tw.lifo_reclaimed);
+            cleaned_gc_slot = 0;
+          }
           gc_rid = MDBX_PNL_LAST(txn->tw.lifo_reclaimed);
         } else {
           mdbx_tassert(txn, txn->tw.last_reclaimed == 0);
@@ -26437,9 +26439,9 @@ __dll_export
         0,
         9,
         2,
-        121,
-        {"2021-01-26T07:27:13+03:00", "25c7afa6b3486386d075be6270abe1e5439e6030", "251eda6fb829cd7a0eb6d2402deb3be630011742",
-         "v0.9.2-121-g251eda6f"},
+        122,
+        {"2021-01-26T10:28:39+03:00", "a9efa003c7b9252b5517d98a947dc96e2b4f04cd", "943bb552a25f7f7c6cc16db5774bd170ff001a13",
+         "v0.9.2-122-g943bb552"},
         sourcery};
 
 __dll_export
