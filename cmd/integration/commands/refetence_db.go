@@ -382,7 +382,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		dstTx.Rollback()
 	}()
 
-	commitEvery := time.NewTicker(2 * time.Second)
+	commitEvery := time.NewTicker(1 * time.Second)
 	defer commitEvery.Stop()
 
 	for name, b := range src.AllBuckets() {
