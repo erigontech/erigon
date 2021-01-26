@@ -152,8 +152,10 @@ func (bd *BodyDownload) DeliverBodies(bodies []*eth.BlockBody) (int, int) {
 			bd.delivered.Add(blockNum)
 			bd.deliveries[blockNum-bd.requestedLow] = bd.deliveries[blockNum-bd.requestedLow].WithBody(body.Transactions, body.Uncles)
 			req := bd.requests[blockNum-bd.requestedLow]
-			if _, ok := reqMap[req.BlockNums[0]]; !ok {
-				reqMap[req.BlockNums[0]] = req
+			if req != nil {
+				if _, ok := reqMap[req.BlockNums[0]]; !ok {
+					reqMap[req.BlockNums[0]] = req
+				}
 			}
 			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
 			delivered++
