@@ -10,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -158,7 +159,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor2, first 
 	var minKey []byte
 	var err error
 	if !first {
-		isIH, minKey = keyIsBeforeOrEqual(fstl.ihK, fstl.k)
+		isIH, minKey = keyIsBeforeOrEqualDeprecated(fstl.ihK, fstl.k)
 	}
 	fixedbytes := fstl.fixedbytes[fstl.rangeIdx]
 	cutoff := fstl.cutoffs[fstl.rangeIdx]
@@ -226,7 +227,7 @@ func (fstl *FlatDbSubTrieLoader) iteration(c ethdb.Cursor, ih *IHCursor2, first 
 				}
 			}
 
-			isIH, minKey = keyIsBeforeOrEqual(fstl.ihK, fstl.k)
+			isIH, minKey = keyIsBeforeOrEqualDeprecated(fstl.ihK, fstl.k)
 			if fixedbytes == 0 {
 				cmp = 0
 			}
@@ -600,7 +601,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 		defer fstl.tx.Rollback()
 	}
 	tx := fstl.tx
-	c := tx.Cursor(dbutils.CurrentStateBucket)
+	c := tx.Cursor(dbutils.CurrentStateBucketOld2)
 	var filter = func(k []byte) (bool, error) {
 
 		if fstl.rl.Retain(k) {
@@ -618,7 +619,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 
 		return true, nil
 	}
-	ih := NewIHCursor2(NewFilterCursor2(filter, tx.CursorDupSort(dbutils.IntermediateTrieHashBucket)))
+	ih := NewIHCursor2(NewFilterCursor2(filter, tx.CursorDupSort(dbutils.IntermediateTrieHashBucketOld2)))
 	if err := fstl.iteration(c, ih, true /* first */); err != nil {
 		return SubTries{}, err
 	}
@@ -736,7 +737,7 @@ func (dr *DefaultReceiver) genStructStorage() error {
 		dr.leafData.Value = rlphacks.RlpSerializableBytes(dr.valueStorage.Bytes())
 		data = &dr.leafData
 	}
-	dr.groups, err = GenStructStep(dr.rl.Retain, dr.currStorage.Bytes(), dr.succStorage.Bytes(), dr.hb, dr.hc, data, dr.groups, dr.trace)
+	dr.groups, err = GenStructStepOld(dr.rl.Retain, dr.currStorage.Bytes(), dr.succStorage.Bytes(), dr.hb, dr.hc, data, dr.groups, dr.trace)
 	if err != nil {
 		return err
 	}
@@ -798,7 +799,7 @@ func (dr *DefaultReceiver) genStructAccount() error {
 	dr.currStorage.Reset()
 	dr.succStorage.Reset()
 	var err error
-	if dr.groups, err = GenStructStep(dr.rl.Retain, dr.curr.Bytes(), dr.succ.Bytes(), dr.hb, dr.hc, data, dr.groups, dr.trace); err != nil {
+	if dr.groups, err = GenStructStepOld(dr.rl.Retain, dr.curr.Bytes(), dr.succ.Bytes(), dr.hb, nil, data, dr.groups, dr.trace); err != nil {
 		return err
 	}
 	dr.accData.FieldSet = 0
@@ -845,7 +846,7 @@ func (c *FilterCursor2) _seek(seek []byte) (err error) {
 		return nil
 	}
 
-	DecompressNibbles(c.k, &c.kHex)
+	hexutil.DecompressNibbles(c.k, &c.kHex)
 	if ok, err := c.filter(c.kHex); err != nil {
 		return err
 	} else if ok {
@@ -865,7 +866,7 @@ func (c *FilterCursor2) _next() (err error) {
 			return nil
 		}
 
-		DecompressNibbles(c.k, &c.kHex)
+		hexutil.DecompressNibbles(c.k, &c.kHex)
 		var ok bool
 		ok, err = c.filter(c.kHex)
 		if err != nil {
@@ -908,5 +909,21 @@ func (c *IHCursor2) Seek(seek []byte) ([]byte, []byte, bool, error) {
 		return k, v, false, nil
 	}
 
-	return k, v, isSequence(seek, k), nil
+	return k, v, isSequenceOld(seek, k), nil
+}
+
+func isSequenceOld(prev []byte, next []byte) bool {
+	isSequence := false
+	if bytes.HasPrefix(next, prev) {
+		tail := next[len(prev):] // if tail has only zeroes, then no state records can be between fstl.nextHex and fstl.ihK
+		isSequence = true
+		for _, n := range tail {
+			if n != 0 {
+				isSequence = false
+				break
+			}
+		}
+	}
+
+	return isSequence
 }

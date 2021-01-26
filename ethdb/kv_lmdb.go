@@ -816,7 +816,7 @@ func (c *LmdbCursor) initCursor() error {
 	var err error
 	c.c, err = tx.tx.OpenCursor(c.dbi)
 	if err != nil {
-		return err
+		return fmt.Errorf("table: %s, %w", c.bucketName, err)
 	}
 
 	// add to auto-cleanup on end of transactions
@@ -1339,14 +1339,6 @@ type LmdbDupSortCursor struct {
 func (c *LmdbDupSortCursor) initCursor() error {
 	if c.c != nil {
 		return nil
-	}
-
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		return fmt.Errorf("class LmdbDupSortCursor not compatible with AutoDupSortKeysConversion buckets")
-	}
-
-	if c.bucketCfg.Flags&lmdb.DupSort == 0 {
-		return fmt.Errorf("class LmdbDupSortCursor can be used only if bucket created with flag lmdb.DupSort")
 	}
 
 	return c.LmdbCursor.initCursor()

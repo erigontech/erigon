@@ -141,10 +141,10 @@ func TestPruneStorageOfSelfDestructedAccounts(t *testing.T) {
 		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), 1, common.HexToHash(k))
 	}
 	putCache := func(k string, v string) {
-		require.NoError(db.Put(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
+		require.NoError(db.Put(dbutils.TrieOfStorageBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
 	}
 	putStorage := func(k string, v string) {
-		require.NoError(db.Put(dbutils.CurrentStateBucket, storageKey(k), common.Hex2Bytes(v)))
+		require.NoError(db.Put(dbutils.HashedStorageBucket, storageKey(k), common.Hex2Bytes(v)))
 	}
 
 	k0 := fmt.Sprintf("%02x%062x", 0, 0)
@@ -161,11 +161,11 @@ func TestPruneStorageOfSelfDestructedAccounts(t *testing.T) {
 	err := PruneStorageOfSelfDestructedAccounts(db)
 	require.NoError(err)
 
-	v, err := db.Get(dbutils.CurrentStateBucket, storageKey(k1))
+	v, err := db.Get(dbutils.HashedStorageBucket, storageKey(k1))
 	require.True(errors.Is(err, ethdb.ErrKeyNotFound))
 	assert.Nil(v)
 
-	v, err = db.Get(dbutils.CurrentStateBucket, storageKey(k2))
+	v, err = db.Get(dbutils.HashedStorageBucket, storageKey(k2))
 	require.NoError(err)
 
 	assert.Equal("9999", common.Bytes2Hex(v))

@@ -37,6 +37,8 @@ type HashBuilder struct {
 	b         [1]byte   // Buffer for single byte
 	prefixBuf [8]byte
 	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
+
+	topHashesCopy []byte
 }
 
 // NewHashBuilder creates a new HashBuilder
@@ -56,6 +58,7 @@ func (hb *HashBuilder) Reset() {
 	if len(hb.nodeStack) > 0 {
 		hb.nodeStack = hb.nodeStack[:0]
 	}
+	hb.topHashesCopy = hb.topHashesCopy[:0]
 }
 
 func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
@@ -594,6 +597,44 @@ func (hb *HashBuilder) rootHash() common.Hash {
 
 func (hb *HashBuilder) topHash() []byte {
 	return hb.hashStack[len(hb.hashStack)-hashStackStride+1:]
+}
+
+func (hb *HashBuilder) printTopHashes(prefix []byte, _, children uint16) {
+	digits := bits.OnesCount16(children)
+	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
+	var i int
+	for digit := uint(0); digit < 16; digit++ {
+		if ((uint16(1) << digit) & children) != 0 {
+			fmt.Printf("topHash: %x%02x, %x\n", prefix, digit, hashes[hashStackStride*i+1:hashStackStride*(i+1)])
+			i++
+		}
+	}
+}
+
+func (hb *HashBuilder) topHashes(prefix []byte, branches, children uint16) []byte {
+	if (branches & children) != branches { // a & b == a - checks whether a is subset of b
+		panic(fmt.Errorf("invariant 'branches is subset of children' failed: %b, %b", branches, children))
+	}
+
+	digits := bits.OnesCount16(children)
+	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
+	hb.topHashesCopy = hb.topHashesCopy[:0]
+	expect := bits.OnesCount16(branches)
+	for i := 0; branches > 0; children, branches = children>>1, branches>>1 {
+		if 1&children == 0 {
+			continue
+		}
+
+		if 1&branches != 0 {
+			hb.topHashesCopy = append(hb.topHashesCopy, hashes[hashStackStride*i+1:hashStackStride*(i+1)]...)
+		}
+		i++
+	}
+	if expect != len(hb.topHashesCopy)/common.HashLength {
+		panic(fmt.Errorf("invariant bits.OnesCount16(branches) == len(hashes) failed: %d, %d", expect, len(hb.topHashesCopy)/common.HashLength))
+	}
+
+	return hb.topHashesCopy
 }
 
 func (hb *HashBuilder) root() node {

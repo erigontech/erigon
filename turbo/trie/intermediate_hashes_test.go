@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -28,10 +29,10 @@ func TestCompressNibbles(t *testing.T) {
 		decompressed = decompressed[:0]
 
 		in := common.Hex2Bytes(tc.in)
-		CompressNibbles(in, &compressed)
+		hexutil.CompressNibbles(in, &compressed)
 		msg := "On: " + tc.in + " Len: " + strconv.Itoa(len(compressed))
 		assert.Equal(t, tc.expect, fmt.Sprintf("%x", compressed), msg)
-		DecompressNibbles(compressed, &decompressed)
+		hexutil.DecompressNibbles(compressed, &decompressed)
 		assert.Equal(t, tc.in, fmt.Sprintf("%x", decompressed), msg)
 	}
 }

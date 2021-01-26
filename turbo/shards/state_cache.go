@@ -4,19 +4,32 @@ import (
 	"bytes"
 	"container/heap"
 	"fmt"
+	"math/bits"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 // LRU state cache consists of two structures - B-Tree and binary heap
 // Every element is marked either as Read, Updated, or Deleted via flags
 
+// Metrics
+var (
+	AccRead       = metrics.NewRegisteredCounter("cache/acc_read/total", nil)
+	AccReadHit    = metrics.NewRegisteredCounter("cache/acc_read/hits", nil)
+	StRead        = metrics.NewRegisteredCounter("cache/st_read/total", nil)
+	StReadHit     = metrics.NewRegisteredCounter("cache/st_read/hits", nil)
+	WritesRead    = metrics.NewRegisteredCounter("cache/writes/total", nil)
+	WritesReadHit = metrics.NewRegisteredCounter("cache/writes/hits", nil)
+)
+
 const (
-	ModifiedFlag    uint16 = 1 // Set when the item is different from what is last committed to the database
+	ModifiedFlag    uint16 = 1 // Set when the item is different seek what is last committed to the database
 	AbsentFlag      uint16 = 2 // Set when the item is absent in the state
 	DeletedFlag     uint16 = 4 // Set when the item is marked for deletion, even though it might have the value in it
 	UnprocessedFlag uint16 = 8 // Set when there is a modification in the item that invalidates merkle root calculated previously
@@ -24,19 +37,33 @@ const (
 
 // Sizes of B-tree items for the purposes of keeping track of the size of reads and writes
 // The sizes of the nodes of the B-tree are not accounted for, because their are private to the `btree` package
+// +16 means - each item has 2 words overhead: 1 for interface, 1 for pointer to item.
 const (
-	accountItemSize      = int(unsafe.Sizeof(AccountItem{}))
-	accountWriteItemSize = int(unsafe.Sizeof(AccountWriteItem{})) + accountItemSize
-	storageItemSize      = int(unsafe.Sizeof(StorageItem{}))
-	storageWriteItemSize = int(unsafe.Sizeof(StorageWriteItem{})) + storageItemSize
-	codeItemSize         = int(unsafe.Sizeof(CodeItem{}))
-	codeWriteItemSize    = int(unsafe.Sizeof(CodeWriteItem{})) + codeItemSize
+	accountItemSize      = int(unsafe.Sizeof(AccountItem{}) + 16)
+	accountWriteItemSize = int(unsafe.Sizeof(AccountWriteItem{})+16) + accountItemSize
+	storageItemSize      = int(unsafe.Sizeof(StorageItem{}) + 16)
+	storageWriteItemSize = int(unsafe.Sizeof(StorageWriteItem{})+16) + storageItemSize
+	codeItemSize         = int(unsafe.Sizeof(CodeItem{}) + 16)
+	codeWriteItemSize    = int(unsafe.Sizeof(CodeWriteItem{})+16) + codeItemSize
 )
 
-// AccountItem is an element in the `readWrites` B-tree representing an Ethereum account. It can mean either value just read from the database and cache (read), or value that
-// is different from what the last committed value in the DB is (write). Reads can be removed or evicted from the B-tree at any time, because this
-// does not hurt the consistency. Writes cannot be removed or evicted one by one, therefore they can either be deleted all together, or
-// committed all together and turned into reads.
+// AccountSeek allows to traverse sub-tree
+type AccountSeek struct {
+	seek []byte
+}
+
+// StorageSeek allows to traverse sub-tree
+type StorageSeek struct {
+	addrHash    common.Hash
+	incarnation uint64
+	seek        []byte
+}
+
+// AccountItem is an element in the `readWrites` B-tree representing an Ethereum account. It can mean either value
+// just read seek the database and cache (read), or value that is different seek what the last committed value
+// in the DB is (write). Reads can be removed or evicted seek the B-tree at any time, because this
+// does not hurt the consistency. Writes cannot be removed or evicted one by one, therefore they can
+// either be deleted all together, or committed all together and turned into reads.
 type AccountItem struct {
 	sequence int
 	queuePos int
@@ -45,9 +72,11 @@ type AccountItem struct {
 	account  accounts.Account
 }
 
-// AccountWriteItem is an item in the `writes` B-tree. As can be seen, it always references a corresponding `AccountItem`. There can be `AccountItem` without corresponding `AccountWriteItem`
-// (in that case `AccountItem` represents a cached read), but there cannot be `AccountWriteItem` without a corresponding `AccountItem`. Such pair represents an account that has been modified
-// in the cache, but the modification has not been committed to the database yet. The correspondence of an `ai AccountItem` and an `awi AccountWriteItem` implies that
+// AccountWriteItem is an item in the `writes` B-tree. As can be seen, it always references a corresponding
+// `AccountItem`. There can be `AccountItem` without corresponding `AccountWriteItem` (in that case `AccountItem`
+// represents a cached read), but there cannot be `AccountWriteItem` without a corresponding `AccountItem`.
+// Such pair represents an account that has been modified in the cache, but the modification has not been committed
+// to the database yet. The correspondence of an `ai AccountItem` and an `awi AccountWriteItem` implies that
 // `keccak(awi.address) == ai.addrHash`.
 type AccountWriteItem struct {
 	address common.Address
@@ -94,7 +123,7 @@ type CacheItem interface {
 	HasFlag(flag uint16) bool        // Check if specified flag is set
 	SetFlags(flags uint16)           // Set specified flags, but leaves other flags alone
 	ClearFlags(flags uint16)         // Clear specified flags, but laves other flags alone
-	CopyValueFrom(item CacheItem)    // Copy value (not key) from given item
+	CopyValueFrom(item CacheItem)    // Copy value (not key) seek given item
 	HasPrefix(prefix CacheItem) bool // Whether this item has specified item as a prefix
 }
 
@@ -103,46 +132,6 @@ type CacheWriteItem interface {
 	GetCacheItem() CacheItem
 	SetCacheItem(item CacheItem)
 	GetSize() int
-}
-
-func compare_account_account(i1 *AccountItem, i2 *AccountItem) int {
-	return bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
-}
-
-func compare_account_storage(i1 *AccountItem, i2 *StorageItem) int {
-	return bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
-}
-
-func compare_account_code(i1 *AccountItem, i2 *CodeItem) int {
-	return bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
-}
-
-func compare_storage_storage(i1 *StorageItem, i2 *StorageItem) int {
-	c := bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
-	if c != 0 {
-		return c
-	}
-	if i1.incarnation == i2.incarnation {
-		return bytes.Compare(i1.locHash.Bytes(), i2.locHash.Bytes())
-	}
-	if i1.incarnation < i2.incarnation {
-		return -1
-	}
-	return 1
-}
-
-func compare_storage_code(i1 *StorageItem, i2 *CodeItem) int {
-	c := bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
-	if c != 0 {
-		return c
-	}
-	if i1.incarnation == i2.incarnation {
-		return 0
-	}
-	if i1.incarnation < i2.incarnation {
-		return -1
-	}
-	return 1
 }
 
 func compare_code_code(i1 *CodeItem, i2 *CodeItem) int {
@@ -159,97 +148,71 @@ func compare_code_code(i1 *CodeItem, i2 *CodeItem) int {
 	return 1
 }
 
+func (r *AccountSeek) Less(than btree.Item) bool {
+	switch i := than.(type) {
+	case *AccountItem:
+		return bytes.Compare(r.seek, i.addrHash.Bytes()) < 0
+	case *AccountWriteItem:
+		return bytes.Compare(r.seek, i.ai.addrHash.Bytes()) < 0
+	default:
+		panic(fmt.Sprintf("unexpected type: %T", than))
+	}
+}
+
+func (r *StorageSeek) Less(than btree.Item) bool {
+	switch i := than.(type) {
+	case *StorageItem:
+		c := bytes.Compare(r.addrHash.Bytes(), i.addrHash.Bytes())
+		if c != 0 {
+			return c < 0
+		}
+		if r.incarnation < i.incarnation {
+			return true
+		}
+		return bytes.Compare(r.seek, i.locHash.Bytes()) < 0
+	case *StorageWriteItem:
+		c := bytes.Compare(r.addrHash.Bytes(), i.si.addrHash.Bytes())
+		if c != 0 {
+			return c < 0
+		}
+		if r.incarnation < i.si.incarnation {
+			return true
+		}
+		return bytes.Compare(r.seek, i.si.locHash.Bytes()) < 0
+	default:
+		panic(fmt.Sprintf("unexpected type: %T", than))
+	}
+}
+
 func (ai *AccountItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
 	case *AccountItem:
-		return compare_account_account(ai, i) < 0
-	case *StorageItem:
-		// Under equality the result is "true", account comes before its storage item
-		return compare_account_storage(ai, i) <= 0
-	case *CodeItem:
-		// Under equality the result is "true", code comes before its storage item
-		return compare_account_code(ai, i) <= 0
-	case *AccountHashItem:
-		// Under equality the result is "false" - account comes after hash
-		return compare_account_accountHash(ai, i) < 0
-	case *StorageHashItem:
-		// Under equality the result is "true" - account comes before any storage hashes
-		return compare_account_storageHash(ai, i) <= 0
-	default:
-		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
-	}
-}
-
-func (awi *AccountWriteItem) Less(than btree.Item) bool {
-	switch i := than.(type) {
+		return bytes.Compare(ai.addrHash.Bytes(), i.addrHash.Bytes()) < 0
 	case *AccountWriteItem:
-		return bytes.Compare(awi.address.Bytes(), i.address.Bytes()) < 0
-	case *StorageWriteItem:
-		c := bytes.Compare(awi.address.Bytes(), i.address.Bytes())
-		if c == 0 {
-			// Account comes before its storage items
-			return true
-		}
-		return c < 0
-	case *CodeWriteItem:
-		c := bytes.Compare(awi.address.Bytes(), i.address.Bytes())
-		if c == 0 {
-			// Account comes before its code
-			return true
-		}
-		return c < 0
+		return bytes.Compare(ai.addrHash.Bytes(), i.ai.addrHash.Bytes()) < 0
+	case *AccountSeek:
+		return bytes.Compare(ai.addrHash.Bytes(), i.seek) < 0
 	default:
-		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
+		panic(fmt.Sprintf("unexpected type: %T", than))
 	}
 }
 
-func (awi *AccountWriteItem) GetCacheItem() CacheItem {
-	return awi.ai
+func (awi *AccountWriteItem) GetCacheItem() CacheItem     { return awi.ai }
+func (awi *AccountWriteItem) SetCacheItem(item CacheItem) { awi.ai = item.(*AccountItem) }
+func (awi *AccountWriteItem) GetSize() int                { return accountWriteItemSize }
+func (awi *AccountWriteItem) Less(than btree.Item) bool {
+	return awi.ai.Less(than)
 }
 
-func (awi *AccountWriteItem) SetCacheItem(item CacheItem) {
-	awi.ai = item.(*AccountItem)
-}
-
-func (awi *AccountWriteItem) GetSize() int {
-	return accountWriteItemSize
-}
-
-func (ai *AccountItem) GetSequence() int {
-	return ai.sequence
-}
-
-func (ai *AccountItem) SetSequence(sequence int) {
-	ai.sequence = sequence
-}
-
-func (ai *AccountItem) GetSize() int {
-	return accountItemSize
-}
-
-func (ai *AccountItem) GetQueuePos() int {
-	return ai.queuePos
-}
-
-func (ai *AccountItem) SetQueuePos(pos int) {
-	ai.queuePos = pos
-}
-
-func (ai *AccountItem) HasFlag(flag uint16) bool {
-	return ai.flags&flag != 0
-}
-
-func (ai *AccountItem) SetFlags(flags uint16) {
-	ai.flags |= flags
-}
-
-func (ai *AccountItem) ClearFlags(flags uint16) {
-	ai.flags &^= flags
-}
-
-func (ai *AccountItem) String() string {
-	return fmt.Sprintf("AccountItem(addrHash=%x)", ai.addrHash)
-}
+func (ai *AccountItem) GetSequence() int         { return ai.sequence }
+func (ai *AccountItem) SetSequence(sequence int) { ai.sequence = sequence }
+func (ai *AccountItem) GetSize() int             { return accountItemSize }
+func (ai *AccountItem) GetQueuePos() int         { return ai.queuePos }
+func (ai *AccountItem) SetQueuePos(pos int)      { ai.queuePos = pos }
+func (ai *AccountItem) HasFlag(flag uint16) bool { return ai.flags&flag != 0 }
+func (ai *AccountItem) SetFlags(flags uint16)    { ai.flags |= flags }
+func (ai *AccountItem) ClearFlags(flags uint16)  { ai.flags &^= flags }
+func (ai *AccountItem) String() string           { return fmt.Sprintf("AccountItem(addrHash=%x)", ai.addrHash) }
 
 func (ai *AccountItem) CopyValueFrom(item CacheItem) {
 	otherAi, ok := item.(*AccountItem)
@@ -259,104 +222,54 @@ func (ai *AccountItem) CopyValueFrom(item CacheItem) {
 	ai.account.Copy(&otherAi.account)
 }
 
+func (swi *StorageWriteItem) Less(than btree.Item) bool {
+	return swi.si.Less(than.(*StorageWriteItem).si)
+}
+func (swi *StorageWriteItem) GetCacheItem() CacheItem     { return swi.si }
+func (swi *StorageWriteItem) SetCacheItem(item CacheItem) { swi.si = item.(*StorageItem) }
+func (swi *StorageWriteItem) GetSize() int                { return storageWriteItemSize }
+
 func (si *StorageItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
-	case *AccountItem:
-		// Under equality the result is "false", account comes before its storage item
-		return compare_account_storage(i, si) > 0
 	case *StorageItem:
-		return compare_storage_storage(si, i) < 0
-	case *CodeItem:
-		// Under equality the result is "false", code of account comes before its storage item
-		return compare_storage_code(si, i) < 0
-	case *AccountHashItem:
-		// Under equality the result is "false", account hash comes before storage item of the account
-		return compare_storage_accountHash(si, i) < 0
-	case *StorageHashItem:
-		// Under equality the result is "false", storage hash comes before storage item
-		return compare_storage_storageHash(si, i) < 0
-	default:
-		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
-	}
-}
-
-func (swi *StorageWriteItem) Less(than btree.Item) bool {
-	switch i := than.(type) {
-	case *AccountWriteItem:
-		c := bytes.Compare(swi.address.Bytes(), i.address.Bytes())
-		if c == 0 {
-			// Account comes before its storage items
-			return false
+		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
+		if c != 0 {
+			return c < 0
 		}
-		return c < 0
+		if si.incarnation < i.incarnation {
+			return true
+		}
+		return bytes.Compare(si.locHash.Bytes(), i.locHash.Bytes()) < 0
 	case *StorageWriteItem:
-		c := bytes.Compare(swi.address.Bytes(), i.address.Bytes())
-		if c == 0 {
-			if swi.si.incarnation == i.si.incarnation {
-				return bytes.Compare(swi.location.Bytes(), i.location.Bytes()) < 0
-			}
-			return swi.si.incarnation < i.si.incarnation
+		c := bytes.Compare(si.addrHash.Bytes(), i.si.addrHash.Bytes())
+		if c != 0 {
+			return c < 0
 		}
-		return c < 0
-	case *CodeWriteItem:
-		c := bytes.Compare(swi.address.Bytes(), i.address.Bytes())
-		if c == 0 {
-			if swi.si.incarnation == i.ci.incarnation {
-				// Code comes before storage items
-				return false
-			}
-			return swi.si.incarnation < i.ci.incarnation
+		if si.incarnation < i.si.incarnation {
+			return true
 		}
-		return c < 0
+		return bytes.Compare(si.locHash.Bytes(), i.si.locHash.Bytes()) < 0
+	case *StorageSeek:
+		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
+		if c != 0 {
+			return c < 0
+		}
+		if si.incarnation < i.incarnation {
+			return true
+		}
+		return bytes.Compare(si.locHash.Bytes(), i.seek) < 0
 	default:
-		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
+		panic(fmt.Sprintf("unexpected type: %T", than))
 	}
 }
-
-func (swi *StorageWriteItem) GetCacheItem() CacheItem {
-	return swi.si
-}
-
-func (swi *StorageWriteItem) SetCacheItem(item CacheItem) {
-	swi.si = item.(*StorageItem)
-}
-
-func (swi *StorageWriteItem) GetSize() int {
-	return storageWriteItemSize
-}
-
-func (si *StorageItem) GetSequence() int {
-	return si.sequence
-}
-
-func (si *StorageItem) SetSequence(sequence int) {
-	si.sequence = sequence
-}
-
-func (si *StorageItem) GetSize() int {
-	return storageItemSize
-}
-
-func (si *StorageItem) GetQueuePos() int {
-	return si.queuePos
-}
-
-func (si *StorageItem) SetQueuePos(pos int) {
-	si.queuePos = pos
-}
-
-func (si *StorageItem) HasFlag(flag uint16) bool {
-	return si.flags&flag != 0
-}
-
-func (si *StorageItem) SetFlags(flags uint16) {
-	si.flags |= flags
-}
-
-func (si *StorageItem) ClearFlags(flags uint16) {
-	si.flags &^= flags
-}
-
+func (si *StorageItem) GetSequence() int         { return si.sequence }
+func (si *StorageItem) SetSequence(sequence int) { si.sequence = sequence }
+func (si *StorageItem) GetSize() int             { return storageItemSize }
+func (si *StorageItem) GetQueuePos() int         { return si.queuePos }
+func (si *StorageItem) SetQueuePos(pos int)      { si.queuePos = pos }
+func (si *StorageItem) HasFlag(flag uint16) bool { return si.flags&flag != 0 }
+func (si *StorageItem) SetFlags(flags uint16)    { si.flags |= flags }
+func (si *StorageItem) ClearFlags(flags uint16)  { si.flags &^= flags }
 func (si *StorageItem) String() string {
 	return fmt.Sprintf("StorageItem(addrHash=%x,incarnation=%d,locHash=%x)", si.addrHash, si.incarnation, si.locHash)
 }
@@ -370,100 +283,29 @@ func (si *StorageItem) CopyValueFrom(item CacheItem) {
 }
 
 func (ci *CodeItem) Less(than btree.Item) bool {
-	switch i := than.(type) {
-	case *AccountItem:
-		// Under equality the result is "false" - code comes after the account itself
-		return compare_account_code(i, ci) > 0
-	case *StorageItem:
-		// Under equality the result is "true" - code comes before the storage items
-		return compare_storage_code(i, ci) >= 0
-	case *CodeItem:
-		return compare_code_code(ci, i) < 0
-	case *AccountHashItem:
-		// Under equality the result is "false" - code comes after account hash
-		return compare_code_accountHash(ci, i) < 0
-	case *StorageHashItem:
-		// Under equality the result is "true" - code comes before the storage hashes
-		return compare_code_storageHash(ci, i) <= 0
-	default:
-		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
-	}
+	return compare_code_code(ci, than.(*CodeItem)) < 0
 }
 
 func (cwi *CodeWriteItem) Less(than btree.Item) bool {
-	switch i := than.(type) {
-	case *AccountWriteItem:
-		c := bytes.Compare(cwi.address.Bytes(), i.address.Bytes())
-		if c == 0 {
-			// Account before its code
-			return false
-		}
-		return c < 0
-	case *StorageWriteItem:
-		c := bytes.Compare(cwi.address.Bytes(), i.address.Bytes())
-		if c == 0 {
-			// Code comes before storage items
-			if cwi.ci.incarnation == i.si.incarnation {
-				return true
-			}
-			return cwi.ci.incarnation < i.si.incarnation
-		}
-		return c < 0
-	case *CodeWriteItem:
-		c := bytes.Compare(cwi.address.Bytes(), i.address.Bytes())
-		if c == 0 {
-			return cwi.ci.incarnation < i.ci.incarnation
-		}
-		return c < 0
-	default:
-		panic(fmt.Sprintf("unrecognised type of cache item: %T", than))
+	i := than.(*CodeWriteItem)
+	c := bytes.Compare(cwi.address.Bytes(), i.address.Bytes())
+	if c == 0 {
+		return cwi.ci.incarnation < i.ci.incarnation
 	}
+	return c < 0
 }
 
-func (cwi *CodeWriteItem) GetCacheItem() CacheItem {
-	return cwi.ci
-}
-
-func (cwi *CodeWriteItem) SetCacheItem(item CacheItem) {
-	cwi.ci = item.(*CodeItem)
-}
-
-func (cwi *CodeWriteItem) GetSize() int {
-	return codeWriteItemSize + len(cwi.ci.code)
-}
-
-func (ci *CodeItem) GetSequence() int {
-	return ci.sequence
-}
-
-func (ci *CodeItem) SetSequence(sequence int) {
-	ci.sequence = sequence
-}
-
-func (ci *CodeItem) GetSize() int {
-	return codeItemSize + len(ci.code)
-}
-
-func (ci *CodeItem) GetQueuePos() int {
-	return ci.queuePos
-}
-
-func (ci *CodeItem) SetQueuePos(pos int) {
-	ci.queuePos = pos
-}
-
-func (ci *CodeItem) HasFlag(flag uint16) bool {
-	return ci.flags&flag != 0
-}
-
-func (ci *CodeItem) SetFlags(flags uint16) {
-	ci.flags |= flags
-}
-
-func (ci *CodeItem) ClearFlags(flags uint16) {
-	ci.flags &^= flags
-}
-
+func (cwi *CodeWriteItem) GetCacheItem() CacheItem     { return cwi.ci }
+func (cwi *CodeWriteItem) SetCacheItem(item CacheItem) { cwi.ci = item.(*CodeItem) }
+func (cwi *CodeWriteItem) GetSize() int                { return codeWriteItemSize + len(cwi.ci.code) }
+func (ci *CodeItem) GetSequence() int                  { return ci.sequence }
+func (ci *CodeItem) SetSequence(sequence int)          { ci.sequence = sequence }
+func (ci *CodeItem) GetSize() int                      { return codeItemSize + len(ci.code) }
+func (ci *CodeItem) GetQueuePos() int                  { return ci.queuePos }
+func (ci *CodeItem) SetQueuePos(pos int)               { ci.queuePos = pos }
+func (ci *CodeItem) HasFlag(flag uint16) bool          { return ci.flags&flag != 0 }
+func (ci *CodeItem) SetFlags(flags uint16)             { ci.flags |= flags }
+func (ci *CodeItem) ClearFlags(flags uint16)           { ci.flags &^= flags }
 func (ci *CodeItem) String() string {
 	return fmt.Sprintf("CodeItem(addrHash=%x,incarnation=%d)", ci.addrHash, ci.incarnation)
 }
@@ -482,14 +324,8 @@ type ReadHeap struct {
 	items []CacheItem
 }
 
-func (rh ReadHeap) Len() int {
-	return len(rh.items)
-}
-
-func (rh ReadHeap) Less(i, j int) bool {
-	return rh.items[i].GetSequence() < rh.items[j].GetSequence()
-}
-
+func (rh ReadHeap) Len() int           { return len(rh.items) }
+func (rh ReadHeap) Less(i, j int) bool { return rh.items[i].GetSequence() < rh.items[j].GetSequence() }
 func (rh ReadHeap) Swap(i, j int) {
 	// Swap queue positions in the B-tree leaves too
 	rh.items[i].SetQueuePos(j)
@@ -513,24 +349,49 @@ func (rh *ReadHeap) Pop() interface{} {
 
 // StateCache is the structure containing B-trees and priority queues for the state cache
 type StateCache struct {
-	readWrites  *btree.BTree // Mixed reads and writes
-	writes      *btree.BTree // Only writes for the effective iteration
-	readQueue   ReadHeap     // Priority queue of read elements eligible for eviction (sorted by sequence)
-	limit       int          // Total size of the readQueue (if new item causes the size to go over the limit, some existing items are evicted)
+	readWrites  [5]*btree.BTree   // Mixed reads and writes
+	writes      [5]*btree.BTree   // Only writes for the effective iteration
+	readQueue   [5]ReadHeap       // Priority queue of read elements eligible for eviction (sorted by sequence)
+	limit       datasize.ByteSize // Total size of the readQueue (if new item causes the size to go over the limit, some existing items are evicted)
 	readSize    int
 	writeSize   int
-	sequence    int             // Current sequence assigned to any item that has been "touched" (created, deleted, read). Incremented after every touch
-	unprocQueue UnprocessedHeap // Priority queue of items appeared since last root calculation processing (sorted by the keys - addrHash, incarnation, locHash)
+	sequence    int                // Current sequence assigned to any item that has been "touched" (created, deleted, read). Incremented after every touch
+	unprocQueue [5]UnprocessedHeap // Priority queue of items appeared since last root calculation processing (sorted by the keys - addrHash, incarnation, locHash)
+}
+
+func id(a interface{}) uint8 {
+	switch a.(type) {
+	case *AccountItem, *AccountWriteItem, *AccountSeek:
+		return 0
+	case *StorageItem, *StorageWriteItem, *StorageSeek:
+		return 1
+	case *CodeItem, *CodeWriteItem:
+		return 2
+	case *AccountHashItem, *AccountHashWriteItem:
+		return 3
+	case *StorageHashItem, *StorageHashWriteItem:
+		return 4
+	default:
+		panic(fmt.Sprintf("unexpected type: %T", a))
+	}
 }
 
 // NewStateCache create a new state cache based on the B-trees of specific degree. The second and the third parameters are the limit on the number of reads and writes to cache, respectively
-func NewStateCache(degree int, limit int) *StateCache {
+func NewStateCache(degree int, limit datasize.ByteSize) *StateCache {
 	var sc StateCache
-	sc.readWrites = btree.New(degree)
-	sc.writes = btree.New(degree)
 	sc.limit = limit
-	heap.Init(&sc.readQueue)
-	heap.Init(&sc.unprocQueue)
+	for i := 0; i < len(sc.readWrites); i++ {
+		sc.readWrites[i] = btree.New(degree)
+	}
+	for i := 0; i < len(sc.writes); i++ {
+		sc.writes[i] = btree.New(degree)
+	}
+	for i := 0; i < len(sc.readQueue); i++ {
+		heap.Init(&sc.readQueue[i])
+	}
+	for i := 0; i < len(sc.unprocQueue); i++ {
+		heap.Init(&sc.unprocQueue[i])
+	}
 	return &sc
 }
 
@@ -546,10 +407,12 @@ func (sc *StateCache) Clone() *StateCache {
 }
 
 func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
-	item := sc.readWrites.Get(key)
+	WritesRead.Inc(1)
+	item := sc.readWrites[id(key)].Get(key)
 	if item == nil {
 		return nil, false
 	}
+	WritesReadHit.Inc(1)
 	cacheItem := item.(CacheItem)
 	if cacheItem.HasFlag(DeletedFlag) || cacheItem.HasFlag(AbsentFlag) {
 		return nil, true
@@ -560,6 +423,7 @@ func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
 // GetAccount searches and account with given address, without modifying any structures
 // Second return value is true if such account is found
 func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
+	AccRead.Inc(1)
 	var key AccountItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
@@ -570,6 +434,7 @@ func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 	h.Sha.Read(key.addrHash[:])
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
+			AccReadHit.Inc(1)
 			return &item.(*AccountItem).account, true
 		}
 		return nil, true
@@ -577,9 +442,20 @@ func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 	return nil, false
 }
 
+func (sc *StateCache) HasAccountWithInPrefix(addrHashPrefix []byte) bool {
+	AccRead.Inc(1)
+	seek := &AccountSeek{seek: addrHashPrefix}
+	var found bool
+	sc.readWrites[id(seek)].AscendGreaterOrEqual(seek, func(i btree.Item) bool {
+		found = bytes.HasPrefix(i.(*AccountItem).addrHash.Bytes(), addrHashPrefix)
+		return false
+	})
+	return found
+}
+
 // GetDeletedAccount attempts to retrieve the last version of account before it was deleted
 func (sc *StateCache) GetDeletedAccount(address []byte) *accounts.Account {
-	var key AccountItem
+	key := &AccountItem{}
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	h.Sha.Reset()
@@ -587,7 +463,7 @@ func (sc *StateCache) GetDeletedAccount(address []byte) *accounts.Account {
 	h.Sha.Write(address)
 	//nolint:errcheck
 	h.Sha.Read(key.addrHash[:])
-	item := sc.readWrites.Get(&key)
+	item := sc.readWrites[id(key)].Get(key)
 	if item == nil {
 		return nil
 	}
@@ -601,6 +477,7 @@ func (sc *StateCache) GetDeletedAccount(address []byte) *accounts.Account {
 // GetStorage searches storage item with given address, incarnation, and location, without modifying any structures
 // Second return value is true if such item is found
 func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []byte) ([]byte, bool) {
+	StRead.Inc(1)
 	var key StorageItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
@@ -617,6 +494,7 @@ func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []
 	h.Sha.Read(key.locHash[:])
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
+			StReadHit.Inc(1)
 			return item.(*StorageItem).value.Bytes(), true
 		}
 		return nil, true
@@ -646,7 +524,13 @@ func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool)
 }
 
 func (sc *StateCache) setRead(item CacheItem, absent bool) {
-	if sc.readWrites.Get(item) != nil {
+	if ii, ok := item.(*AccountHashItem); ok {
+		if bits.OnesCount16(ii.branches) != len(ii.hashes) {
+			panic(2)
+		}
+	}
+	id := id(item)
+	if sc.readWrites[id].Get(item) != nil {
 		panic(fmt.Sprintf("item must not be present in the cache before doing setRead: %s", item))
 	}
 	item.SetSequence(sc.sequence)
@@ -657,18 +541,26 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	} else {
 		item.ClearFlags(AbsentFlag)
 	}
-	if sc.limit != 0 && sc.readSize+item.GetSize() > sc.limit {
-		for sc.readQueue.Len() > 0 && sc.readSize+item.GetSize() > sc.limit {
+
+	if sc.limit != 0 && sc.readSize+item.GetSize() > int(sc.limit) {
+		for sc.readQueuesLen() > 0 && sc.readSize+item.GetSize() > int(sc.limit) {
 			// Read queue cannot grow anymore, need to evict one element
-			cacheItem := heap.Pop(&sc.readQueue).(CacheItem)
+			cacheItem := heap.Pop(&sc.readQueue[id]).(CacheItem)
 			sc.readSize -= cacheItem.GetSize()
-			sc.readWrites.Delete(cacheItem)
+			sc.readWrites[id].Delete(cacheItem)
 		}
 	}
 	// Push new element on the read queue
-	heap.Push(&sc.readQueue, item)
-	sc.readWrites.ReplaceOrInsert(item)
+	heap.Push(&sc.readQueue[id], item)
+	sc.readWrites[id].ReplaceOrInsert(item)
 	sc.readSize += item.GetSize()
+}
+
+func (sc *StateCache) readQueuesLen() (res int) {
+	for i := 0; i < len(sc.readQueue); i++ {
+		res += sc.readQueue[i].Len()
+	}
+	return
 }
 
 // SetAccountRead adds given account to the cache, marking it as a read (not written)
@@ -685,6 +577,28 @@ func (sc *StateCache) SetAccountRead(address []byte, account *accounts.Account) 
 	sc.setRead(&ai, false /* absent */)
 }
 
+// hack to set hashed addr - we don't have another one in trie stage
+func (sc *StateCache) DeprecatedSetAccountRead(addrHash common.Hash, account *accounts.Account) {
+	var ai AccountItem
+	ai.addrHash.SetBytes(addrHash.Bytes())
+	ai.account.Copy(account)
+	sc.setRead(&ai, false /* absent */)
+}
+
+func (sc *StateCache) GetAccountByHashedAddress(addrHash common.Hash) (*accounts.Account, bool) {
+	var key AccountItem
+	key.addrHash.SetBytes(addrHash.Bytes())
+	if item, ok := sc.get(&key); ok {
+		if item != nil {
+			StReadHit.Inc(1)
+			return &item.(*AccountItem).account, true
+		}
+		return nil, true
+	}
+	return nil, false
+
+}
+
 // SetAccountRead adds given account address to the cache, marking it as a absent
 func (sc *StateCache) SetAccountAbsent(address []byte) {
 	var ai AccountItem
@@ -699,8 +613,19 @@ func (sc *StateCache) SetAccountAbsent(address []byte) {
 }
 
 func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete bool) {
+	if ii, ok := item.(*AccountHashItem); ok {
+		if bits.OnesCount16(ii.branches) != len(ii.hashes) {
+			panic(2)
+		}
+	}
+	if ii, ok := writeItem.(*AccountHashWriteItem); ok {
+		if bits.OnesCount16(ii.ai.branches) != len(ii.ai.hashes) {
+			panic(2)
+		}
+	}
+	id := id(item)
 	// Check if this is going to be modification of the existing entry
-	if existing := sc.writes.Get(writeItem); existing != nil {
+	if existing := sc.writes[id].Get(writeItem); existing != nil {
 		cacheWriteItem := existing.(CacheWriteItem)
 		cacheItem := cacheWriteItem.GetCacheItem()
 		sc.readSize += item.GetSize()
@@ -718,10 +643,12 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		return
 	}
 	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
-	if existing := sc.readWrites.Get(item); existing != nil {
+	if existing := sc.readWrites[id].Get(item); existing != nil {
 		cacheItem := existing.(CacheItem)
-		// Remove from the reads queue
-		heap.Remove(&sc.readQueue, cacheItem.GetQueuePos())
+		// Remove seek the reads queue
+		if sc.readQueue[id].Len() > 0 {
+			heap.Remove(&sc.readQueue[id], cacheItem.GetQueuePos())
+		}
 		sc.readSize += item.GetSize()
 		sc.readSize -= cacheItem.GetSize()
 		cacheItem.SetFlags(ModifiedFlag)
@@ -735,15 +662,15 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		cacheItem.SetSequence(sc.sequence)
 		sc.sequence++
 		writeItem.SetCacheItem(cacheItem)
-		sc.writes.ReplaceOrInsert(writeItem)
+		sc.writes[id].ReplaceOrInsert(writeItem)
 		sc.writeSize += writeItem.GetSize()
 		return
 	}
-	if sc.limit != 0 && sc.readSize+item.GetSize() > sc.limit {
-		for sc.readQueue.Len() > 0 && sc.readSize+item.GetSize() > sc.limit {
+	if sc.limit != 0 && sc.readSize+item.GetSize() > int(sc.limit) {
+		for sc.readQueuesLen() > 0 && sc.readSize+item.GetSize() > int(sc.limit) {
 			// There is no space available, need to evict one read element
-			cacheItem := heap.Pop(&sc.readQueue).(CacheItem)
-			sc.readWrites.Delete(cacheItem)
+			cacheItem := heap.Pop(&sc.readQueue[id]).(CacheItem)
+			sc.readWrites[id].Delete(cacheItem)
 			sc.readSize -= cacheItem.GetSize()
 		}
 	}
@@ -756,10 +683,10 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 	} else {
 		item.ClearFlags(DeletedFlag)
 	}
-	sc.readWrites.ReplaceOrInsert(item)
+	sc.readWrites[id].ReplaceOrInsert(item)
 	sc.readSize += item.GetSize()
 	writeItem.SetCacheItem(item)
-	sc.writes.ReplaceOrInsert(writeItem)
+	sc.writes[id].ReplaceOrInsert(writeItem)
 	sc.writeSize += writeItem.GetSize()
 }
 
@@ -813,6 +740,60 @@ func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, locatio
 	h.Sha.Read(si.locHash[:])
 	si.value.SetBytes(value)
 	sc.setRead(&si, false /* absent */)
+}
+
+// hack to set hashed addr - we don't have another one in trie stage
+func (sc *StateCache) DeprecatedSetStorageRead(addrHash common.Hash, incarnation uint64, locHash common.Hash, val []byte) {
+	var i StorageItem
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	copy(i.addrHash[:], addrHash.Bytes())
+	i.incarnation = incarnation
+	i.locHash.SetBytes(locHash.Bytes())
+	i.value.SetBytes(val)
+	sc.setRead(&i, false /* absent */)
+}
+
+// hack to set hashed addr - we don't have another one in trie stage
+func (sc *StateCache) DeprecatedSetAccountWrite(addrHash common.Hash, account *accounts.Account) {
+	var ai AccountItem
+	copy(ai.addrHash[:], addrHash.Bytes())
+	ai.account.Copy(account)
+	var awi AccountWriteItem
+	awi.ai = &ai
+	sc.setWrite(&ai, &awi, false /* delete */)
+}
+
+// hack to set hashed addr - we don't have another one in trie stage
+func (sc *StateCache) DeprecatedSetAccountDelete(addrHash common.Hash) {
+	var ai AccountItem
+	copy(ai.addrHash[:], addrHash.Bytes())
+	var awi AccountWriteItem
+	awi.ai = &ai
+	sc.setWrite(&ai, &awi, true /* delete */)
+}
+
+// hack to set hashed addr - we don't have another one in trie stage
+func (sc *StateCache) DeprecatedSetStorageDelete(addrHash common.Hash, incarnation uint64, locHash common.Hash) {
+	var si StorageItem
+	copy(si.addrHash[:], addrHash.Bytes())
+	si.incarnation = incarnation
+	copy(si.locHash[:], locHash.Bytes())
+	var swi StorageWriteItem
+	swi.si = &si
+	sc.setWrite(&si, &swi, true /* delete */)
+}
+
+// hack to set hashed addr - we don't have another one in trie stage
+func (sc *StateCache) DeprecatedSetStorageWrite(addrHash common.Hash, incarnation uint64, locHash common.Hash, v []byte) {
+	var si StorageItem
+	copy(si.addrHash[:], addrHash.Bytes())
+	si.incarnation = incarnation
+	copy(si.locHash[:], locHash.Bytes())
+	si.value.SetBytes(v)
+	var swi StorageWriteItem
+	swi.si = &si
+	sc.setWrite(&si, &swi, false /* delete */)
 }
 
 func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, location []byte) {
@@ -943,25 +924,28 @@ func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	sc.setWrite(&ci, &cwi, true /* delete */)
 }
 
-func (sc *StateCache) PrepareWrites() *btree.BTree {
-	sc.writes.Ascend(func(i btree.Item) bool {
-		writeItem := i.(CacheWriteItem)
-		cacheItem := writeItem.GetCacheItem()
-		cacheItem.ClearFlags(ModifiedFlag)
-		if cacheItem.HasFlag(DeletedFlag) {
-			cacheItem.ClearFlags(DeletedFlag)
-			cacheItem.SetFlags(AbsentFlag)
-		}
-		return true
-	})
-	writes := sc.writes.Clone()
-	sc.writes.Clear(true /* addNodesToFreeList */)
-	sc.writeSize = 0
+func (sc *StateCache) PrepareWrites() [5]*btree.BTree {
+	var writes [5]*btree.BTree
+	for i := 0; i < len(sc.writes); i++ {
+		sc.writes[i].Ascend(func(i btree.Item) bool {
+			writeItem := i.(CacheWriteItem)
+			cacheItem := writeItem.GetCacheItem()
+			cacheItem.ClearFlags(ModifiedFlag)
+			if cacheItem.HasFlag(DeletedFlag) {
+				cacheItem.ClearFlags(DeletedFlag)
+				cacheItem.SetFlags(AbsentFlag)
+			}
+			return true
+		})
+		writes[i] = sc.writes[i].Clone()
+		sc.writes[i].Clear(true /* addNodesToFreeList */)
+		sc.writeSize = 0
+	}
 	return writes
 }
 
 func WalkWrites(
-	writes *btree.BTree,
+	writes [5]*btree.BTree,
 	accountWrite func(address []byte, account *accounts.Account) error,
 	accountDelete func(address []byte, original *accounts.Account) error,
 	storageWrite func(address []byte, incarnation uint64, location []byte, value []byte) error,
@@ -970,68 +954,73 @@ func WalkWrites(
 	codeDelete func(address []byte, incarnation uint64) error,
 ) error {
 	var err error
-	writes.Ascend(func(i btree.Item) bool {
-		switch it := i.(type) {
-		case *AccountWriteItem:
-			if it.ai.flags&AbsentFlag != 0 {
-				if err = accountDelete(it.address.Bytes(), &it.ai.account); err != nil {
-					return false
+	for i := 0; i < len(writes); i++ {
+		writes[i].Ascend(func(i btree.Item) bool {
+			switch it := i.(type) {
+			case *AccountWriteItem:
+				if it.ai.flags&AbsentFlag != 0 {
+					if err = accountDelete(it.address.Bytes(), &it.ai.account); err != nil {
+						return false
+					}
+				} else {
+					if err = accountWrite(it.address.Bytes(), &it.ai.account); err != nil {
+						return false
+					}
 				}
-			} else {
-				if err = accountWrite(it.address.Bytes(), &it.ai.account); err != nil {
-					return false
+			case *StorageWriteItem:
+				if it.si.flags&AbsentFlag != 0 {
+					if err = storageDelete(it.address.Bytes(), it.si.incarnation, it.location.Bytes()); err != nil {
+						return false
+					}
+				} else {
+					if err = storageWrite(it.address.Bytes(), it.si.incarnation, it.location.Bytes(), it.si.value.Bytes()); err != nil {
+						return false
+					}
+				}
+			case *CodeWriteItem:
+				if it.ci.flags&AbsentFlag != 0 {
+					if err = codeDelete(it.address.Bytes(), it.ci.incarnation); err != nil {
+						return false
+					}
+				} else {
+					if err = codeWrite(it.address.Bytes(), it.ci.incarnation, it.ci.code); err != nil {
+						return false
+					}
 				}
 			}
-		case *StorageWriteItem:
-			if it.si.flags&AbsentFlag != 0 {
-				if err = storageDelete(it.address.Bytes(), it.si.incarnation, it.location.Bytes()); err != nil {
-					return false
-				}
-			} else {
-				if err = storageWrite(it.address.Bytes(), it.si.incarnation, it.location.Bytes(), it.si.value.Bytes()); err != nil {
-					return false
-				}
-			}
-		case *CodeWriteItem:
-			if it.ci.flags&AbsentFlag != 0 {
-				if err = codeDelete(it.address.Bytes(), it.ci.incarnation); err != nil {
-					return false
-				}
-			} else {
-				if err = codeWrite(it.address.Bytes(), it.ci.incarnation, it.ci.code); err != nil {
-					return false
-				}
-			}
-		}
-		return true
-	})
+			return true
+		})
+	}
+
 	return err
 }
 
-func (sc *StateCache) TurnWritesToReads(writes *btree.BTree) {
-	writes.Ascend(func(i btree.Item) bool {
-		cacheWriteItem := i.(CacheWriteItem)
-		cacheItem := cacheWriteItem.GetCacheItem()
-		if !cacheItem.HasFlag(ModifiedFlag) {
-			// Cannot touch items that have been modified since we have taken away the writes
-			heap.Push(&sc.readQueue, cacheItem)
-		}
-		return true
-	})
+func (sc *StateCache) TurnWritesToReads(writes [5]*btree.BTree) {
+	for i := 0; i < len(writes); i++ {
+		readQueue := &sc.readQueue[i]
+		writes[i].Ascend(func(it btree.Item) bool {
+			cacheWriteItem := it.(CacheWriteItem)
+			cacheItem := cacheWriteItem.GetCacheItem()
+			if !cacheItem.HasFlag(ModifiedFlag) {
+				// Cannot touch items that have been modified since we have taken away the writes
+				heap.Push(readQueue, cacheItem)
+			}
+			return true
+		})
+	}
 }
 
-func (sc *StateCache) TotalCount() int {
-	return sc.readWrites.Len()
+func (sc *StateCache) TotalCount() (res int) {
+	for i := 0; i < len(sc.readWrites); i++ {
+		res += sc.readWrites[i].Len()
+	}
+	return
 }
-
-func (sc *StateCache) WriteCount() int {
-	return sc.writes.Len()
+func (sc *StateCache) WriteCount() (res int) {
+	for i := 0; i < len(sc.readWrites); i++ {
+		res += sc.writes[i].Len()
+	}
+	return
 }
-
-func (sc *StateCache) WriteSize() int {
-	return sc.writeSize
-}
-
-func (sc *StateCache) ReadSize() int {
-	return sc.readSize
-}
+func (sc *StateCache) WriteSize() int { return sc.writeSize }
+func (sc *StateCache) ReadSize() int  { return sc.readSize }

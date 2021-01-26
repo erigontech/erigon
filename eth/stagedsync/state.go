@@ -178,7 +178,6 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 			}
 		}
 		_, stage := s.CurrentStage()
-
 		if hook, ok := s.beforeStageRun[string(stage.ID)]; ok {
 			if err := hook(); err != nil {
 				return err

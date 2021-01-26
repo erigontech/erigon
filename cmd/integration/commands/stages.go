@@ -24,8 +24,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/ledgerwatch/turbo-geth/turbo/silkworm"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/spf13/cobra"
 )
 
@@ -242,6 +244,7 @@ func init() {
 	withReset(cmdStageHashState)
 	withBlock(cmdStageHashState)
 	withUnwind(cmdStageHashState)
+	withBatchSize(cmdStageHashState)
 	withDatadir(cmdStageHashState)
 
 	rootCmd.AddCommand(cmdStageHashState)
@@ -371,22 +374,33 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 	stage4 := progress(stages.Execution)
 	log.Info("Stage4", "progress", stage4.BlockNumber)
 	ch := ctx.Done()
-	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
-		return stagedsync.UnwindExecutionStage(u, stage4, db, sm.Receipts)
-	}
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 	var cacheSize datasize.ByteSize
 	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
+	var cache *shards.StateCache
+	if cacheSize > 0 {
+		cache = shards.NewStateCache(32, cacheSize)
+	}
+	if unwind > 0 {
+		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
+		return stagedsync.UnwindExecutionStage(u, stage4, db,
+			stagedsync.ExecuteBlockStageParams{
+				ToBlock:               block, // limit execution to the specified block
+				WriteReceipts:         sm.Receipts,
+				Cache:                 cache,
+				BatchSize:             batchSize,
+				SilkwormExecutionFunc: silkwormExecutionFunc(),
+			})
+	}
 	return stagedsync.SpawnExecuteBlocksStage(stage4, db,
 		bc.Config(), cc, bc.GetVMConfig(),
 		ch,
 		stagedsync.ExecuteBlockStageParams{
 			ToBlock:               block, // limit execution to the specified block
 			WriteReceipts:         sm.Receipts,
-			CacheSize:             int(cacheSize),
-			BatchSize:             int(batchSize),
+			Cache:                 cache,
+			BatchSize:             batchSize,
 			SilkwormExecutionFunc: silkwormExecutionFunc(),
 		})
 }
@@ -407,7 +421,7 @@ func stageIHash(db ethdb.Database, ctx context.Context) error {
 	defer bc.Stop()
 
 	if reset {
-		if err := stagedsync.ResetHashState(db); err != nil {
+		if err := stagedsync.ResetIH(db); err != nil {
 			return err
 		}
 		return nil
@@ -419,11 +433,17 @@ func stageIHash(db ethdb.Database, ctx context.Context) error {
 	log.Info("Stage5", "progress", stage5.BlockNumber)
 	ch := ctx.Done()
 
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
+	var cache *shards.StateCache
+	if cacheSize > 0 {
+		cache = shards.NewStateCache(32, cacheSize)
+	}
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
-		return stagedsync.UnwindIntermediateHashesStage(u, stage5, db, tmpdir, ch)
+		return stagedsync.UnwindIntermediateHashesStage(u, stage5, db, cache, tmpdir, ch)
 	}
-	return stagedsync.SpawnIntermediateHashesStage(stage5, db, true /* checkRoot */, tmpdir, ch)
+	return stagedsync.SpawnIntermediateHashesStage(stage5, db, true /* checkRoot */, cache, tmpdir, ch)
 }
 
 func stageHashState(db ethdb.Database, ctx context.Context) error {
@@ -449,12 +469,18 @@ func stageHashState(db ethdb.Database, ctx context.Context) error {
 	log.Info("Stage5", "progress", stage5.BlockNumber)
 	log.Info("Stage6", "progress", stage6.BlockNumber)
 	ch := ctx.Done()
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
+	var cache *shards.StateCache
+	if cacheSize > 0 {
+		cache = shards.NewStateCache(32, cacheSize)
+	}
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6.BlockNumber - unwind}
-		return stagedsync.UnwindHashStateStage(u, stage6, db, tmpdir, ch)
+		return stagedsync.UnwindHashStateStage(u, stage6, db, cache, tmpdir, ch)
 	}
-	return stagedsync.SpawnHashStateStage(stage6, db, tmpdir, ch)
+	return stagedsync.SpawnHashStateStage(stage6, db, cache, tmpdir, ch)
 }
 
 func stageLogIndex(db ethdb.Database, ctx context.Context) error {
@@ -512,21 +538,26 @@ func stageCallTraces(db ethdb.Database, ctx context.Context) error {
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 	var cacheSize datasize.ByteSize
 	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
+	var cache *shards.StateCache
+	if cacheSize > 0 {
+		cache = shards.NewStateCache(32, cacheSize)
+	}
+
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.CallTraces, UnwindPoint: s.BlockNumber - unwind}
 		return stagedsync.UnwindCallTraces(u, s, db, bc.Config(), bc, ch,
 			stagedsync.CallTracesStageParams{
 				ToBlock:   block,
-				CacheSize: int(cacheSize),
-				BatchSize: int(batchSize),
+				Cache:     cache,
+				BatchSize: batchSize,
 			})
 	}
 
 	if err := stagedsync.SpawnCallTraces(s, db, bc.Config(), bc, tmpdir, ch,
 		stagedsync.CallTracesStageParams{
 			ToBlock:   block,
-			CacheSize: int(cacheSize),
-			BatchSize: int(batchSize),
+			Cache:     cache,
+			BatchSize: batchSize,
 		}); err != nil {
 		return err
 	}
@@ -657,11 +688,25 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	var cache *shards.StateCache
+	if cacheSize > 0 {
+		cache = shards.NewStateCache(32, cacheSize)
+		if err2 := db.Walk(dbutils.TrieOfAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
+			if len(k) > 2 {
+				return true, nil
+			}
+			branches, children, hashes := trie.UnmarshalIH(v)
+			cache.SetAccountHashesRead(k, branches, children, hashes)
+			return true, nil
+		}); err2 != nil {
+			panic(err2)
+		}
+	}
 	st, err := stagedsync.New(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{SilkwormExecutionFunc: silkwormExecutionFunc()},
-	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), int(cacheSize), int(batchSize), quitCh, nil, nil, func() error { return nil }, hook)
+	).Prepare(nil, chainConfig, cc, bc.GetVMConfig(), db, tx, "integration_test", sm, path.Join(datadir, etl.TmpDirName), cache, batchSize, quitCh, nil, nil, func() error { return nil }, hook)
 	if err != nil {
 		panic(err)
 	}

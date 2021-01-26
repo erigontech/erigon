@@ -1099,18 +1099,15 @@ func storageUsage() {
 	count := 0
 	var leafSize uint64
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket)
+		c := tx.Cursor(dbutils.HashedStorageBucket)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
-			if len(k) == 32 {
-				continue
-			}
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
-				vv, err := tx.GetOne(dbutils.CurrentStateBucket, crypto.Keccak256(addr[:]))
+				vv, err := tx.GetOne(dbutils.HashedStorageBucket, crypto.Keccak256(addr[:]))
 				if err != nil {
 					return err
 				}
@@ -1214,13 +1211,10 @@ func tokenUsage() {
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket)
+		c := tx.Cursor(dbutils.HashedStorageBucket)
 		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
-			}
-			if len(k) == 32 {
-				continue
 			}
 			copy(addr[:], k[:20])
 			if _, ok := tokens[addr]; ok {
@@ -1292,13 +1286,10 @@ func nonTokenUsage() {
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket)
+		c := tx.Cursor(dbutils.HashedStorageBucket)
 		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
-			}
-			if len(k) == 32 {
-				continue
 			}
 			copy(addr[:], k[:20])
 			if _, ok := tokens[addr]; !ok {
@@ -1342,81 +1333,6 @@ func nonTokenUsage() {
 	fmt.Printf("Total storage items: %d\n", cumulative)
 }
 
-func oldStorage() {
-	startTime := time.Now()
-	db := ethdb.MustOpen("/Volumes/tb4/turbo-geth/geth/chaindata").KV()
-	defer db.Close()
-	histKey := make([]byte, common.HashLength+len(ethdb.EndSuffix))
-	copy(histKey[common.HashLength:], ethdb.EndSuffix)
-	// Go through the current state
-	var addr common.Address
-	itemsByAddress := make(map[common.Address]int)
-	count := 0
-	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket)
-		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			if len(k) == 32 {
-				continue
-			}
-			copy(addr[:], k[:20])
-			itemsByAddress[addr]++
-			count++
-			if count%100000 == 0 {
-				fmt.Printf("Processed %dK storage records\n", count/1000)
-			}
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.AccountsHistoryBucket)
-		for addr := range itemsByAddress {
-			addrHash := crypto.Keccak256(addr[:])
-			copy(histKey[:], addrHash)
-			_, _, _ = c.Seek(histKey)
-			k, _, err := c.Prev()
-			if err != nil {
-				return err
-			}
-			if bytes.HasPrefix(k, addrHash[:]) {
-				timestamp, _ := dbutils.DecodeTimestamp(k[32:])
-				if timestamp > 4530000 {
-					delete(itemsByAddress, addr)
-				}
-			}
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	fmt.Printf("Processing took %s\n", time.Since(startTime))
-	iba := NewIntSorterAddr(len(itemsByAddress))
-	idx := 0
-	total := 0
-	for addrHash, items := range itemsByAddress {
-		total += items
-		iba.ints[idx] = items
-		iba.values[idx] = addrHash
-		idx++
-	}
-	sort.Sort(iba)
-	fmt.Printf("Writing dataset (total %d)...\n", total)
-	f, err := os.Create("items_by_address.csv")
-	check(err)
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	defer w.Flush()
-	cumulative := 0
-	for i := 0; i < iba.length; i++ {
-		cumulative += iba.ints[i]
-		fmt.Fprintf(w, "%d,%x,%d,%.3f\n", i, iba.values[i], iba.ints[i], float64(cumulative)/float64(total))
-	}
-}
-
 func dustEOA() {
 	startTime := time.Now()
 	//db := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
@@ -1430,13 +1346,10 @@ func dustEOA() {
 	thresholdMap := make(map[uint64]int)
 	var a accounts.Account
 	if err := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket)
+		c := tx.Cursor(dbutils.HashedAccountsBucket)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
-			}
-			if len(k) != 32 {
-				continue
 			}
 			if err1 := a.DecodeForStorage(v); err1 != nil {
 				return err1
