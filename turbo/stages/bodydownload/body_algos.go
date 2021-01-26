@@ -161,7 +161,7 @@ func (bd *BodyDownload) DeliverBodies(bodies []*eth.BlockBody) (int, int) {
 	// Clean up the requests
 	for _, req := range reqMap {
 		for _, blockNum := range req.BlockNums {
-			bd.requests[blockNum] = nil
+			bd.requests[blockNum-bd.requestedLow] = nil
 		}
 	}
 	return delivered, undelivered
