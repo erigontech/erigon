@@ -1,5 +1,5 @@
 ##
-##  Copyright 2020 Leonid Yuriev <leo@yuriev.ru>
+##  Copyright 2020-2021 Leonid Yuriev <leo@yuriev.ru>
 ##  and other libmdbx authors: please see AUTHORS file.
 ##  All rights reserved.
 ##

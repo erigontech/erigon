@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 072845a2cf95295f5a21177d8a7431718a1875a6b655e25c5cb75d1e7280402f_v0_9_2_120_g0cfb853d
+#define MDBX_BUILD_SOURCERY 7231e4e90cc692913ed8e07b8da7dfc6de974ed3c5d2405726a80cf506d0121f_v0_9_2_121_g251eda6f
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -104,7 +104,7 @@
 
 #include "mdbx.h"
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -536,7 +536,7 @@ extern "C" {
 /* https://en.wikipedia.org/wiki/Operating_system_abstraction_layer */
 
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -3043,7 +3043,7 @@ static __maybe_unused void static_checks(void) {
 }
 #endif
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>.
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>.
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -24025,7 +24025,7 @@ LIBMDBX_API __attribute__((__weak__)) const char *__asan_default_options() {
 /* https://en.wikipedia.org/wiki/Operating_system_abstraction_layer */
 
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -26437,9 +26437,9 @@ __dll_export
         0,
         9,
         2,
-        120,
-        {"2021-01-26T02:37:18+03:00", "0eceaba1c9b3cac08af1384dc0202528e6c5d28b", "0cfb853d7f51761242bbd0c1069d060043642d82",
-         "v0.9.2-120-g0cfb853d"},
+        121,
+        {"2021-01-26T07:27:13+03:00", "25c7afa6b3486386d075be6270abe1e5439e6030", "251eda6fb829cd7a0eb6d2402deb3be630011742",
+         "v0.9.2-121-g251eda6f"},
         sourcery};
 
 __dll_export
@@ -26456,7 +26456,7 @@ __dll_export
 #endif
     const char *const mdbx_sourcery_anchor = sourcery;
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -27296,7 +27296,7 @@ static void mdbx_winnt_import(void) {
 
 #endif /* Windows LCK-implementation */
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *

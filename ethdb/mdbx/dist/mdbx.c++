@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 072845a2cf95295f5a21177d8a7431718a1875a6b655e25c5cb75d1e7280402f_v0_9_2_120_g0cfb853d
+#define MDBX_BUILD_SOURCERY 7231e4e90cc692913ed8e07b8da7dfc6de974ed3c5d2405726a80cf506d0121f_v0_9_2_121_g251eda6f
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -104,7 +104,7 @@
 
 #include "mdbx.h++"
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -536,7 +536,7 @@ extern "C" {
 /* https://en.wikipedia.org/wiki/Operating_system_abstraction_layer */
 
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -3043,7 +3043,7 @@ static __maybe_unused void static_checks(void) {
 }
 #endif
 //
-// Copyright (c) 2020, Leonid Yuriev <leo@yuriev.ru>.
+// Copyright (c) 2020-2021, Leonid Yuriev <leo@yuriev.ru>.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Non-inline part of the libmdbx C++ API (preliminary)
