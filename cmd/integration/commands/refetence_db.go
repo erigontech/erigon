@@ -366,7 +366,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		return (flags | lmdb.Readonly) ^ lmdb.NoReadahead
 	}).MustOpen()
 	dst := ethdb.NewMDBX().Path(to).Flags(func(flags uint) uint {
-		return flags | mdbx.WriteMap | mdbx.NoMemInit
+		return (flags ^ mdbx.Durable) | mdbx.WriteMap | mdbx.NoMemInit | mdbx.SafeNoSync
 	}).MustOpen()
 
 	srcTx, err1 := src.Begin(ctx, nil, ethdb.RO)
@@ -374,7 +374,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		return err1
 	}
 	defer srcTx.Rollback()
-	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW|ethdb.NoSync)
+	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW)
 	if err1 != nil {
 		return err1
 	}
@@ -431,7 +431,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 				if err2 := dstTx.Commit(ctx); err2 != nil {
 					return err2
 				}
-				dstTx, err = dst.Begin(ctx, nil, ethdb.RW|ethdb.NoSync)
+				dstTx, err = dst.Begin(ctx, nil, ethdb.RW)
 				if err != nil {
 					return err
 				}
