@@ -279,6 +279,17 @@ func (s *State) DisableStages(ids ...stages.SyncStage) {
 	}
 }
 
+func (s *State) EnableStages(ids ...stages.SyncStage) {
+	for i := range s.stages {
+		for _, id := range ids {
+			if !bytes.Equal(s.stages[i].ID, id) {
+				continue
+			}
+			s.stages[i].Disabled = false
+		}
+	}
+}
+
 func (s *State) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 	for i := range s.stages {
 		if bytes.Equal(s.stages[i].ID, id) {
