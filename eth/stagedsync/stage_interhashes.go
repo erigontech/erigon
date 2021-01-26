@@ -118,10 +118,6 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 					return nil
 				}
 				newV := trie.IHTypedValue(hashes, rootHash)
-				if bits.OnesCount16(branches) != len(hashes)/common.HashLength {
-					fmt.Printf("11: %d,%d\n", bits.OnesCount16(branches), len(hashes)/common.HashLength)
-					panic(1)
-				}
 				cache.SetAccountHashWrite(keyHex, branches, children, newV)
 				return nil
 			}
@@ -205,10 +201,10 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 				return accountIHCollector.Collect(keyHex, nil)
 			}
 			if bits.OnesCount16(branches) != len(hashes)/common.HashLength {
-				panic(fmt.Errorf("invariant bits.OnesCount16(branches) == len(hashes) failed: %d, %d", bits.OnesCount16(branches), len(hashes)))
+				return fmt.Errorf("invariant bits.OnesCount16(branches) == len(hashes) failed: %d, %d", bits.OnesCount16(branches), len(hashes))
 			}
 			if (branches & children) != branches { // a & b == a - checks whether a is subset of b
-				panic(fmt.Errorf("invariant 'branches is subset of children' failed: %b, %b", branches, children))
+				return fmt.Errorf("invariant 'branches is subset of children' failed: %b, %b", branches, children)
 			}
 			newV = trie.IHValue(children, branches, hashes, rootHash, newV)
 			//fmt.Printf("collect write: %x, %016b\n", keyHex, branches)
@@ -314,7 +310,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	} else {
 		deletedAccounts = map[string]struct{}{}
 		extract = func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-			_, k, v := decode(dbKey, dbValue)
+			blk, k, v := decode(dbKey, dbValue)
 			value, err := p.db.Get(dbutils.PlainStateBucket, k)
 			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 				return err
@@ -327,6 +323,10 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 			if len(value) == 0 && len(v) > 0 { // self-destructed
 				newKS := string(newK)
 				deletedAccounts[newKS] = struct{}{}
+			}
+
+			if bytes.HasPrefix(newK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d00000000000000015e")) {
+				fmt.Printf("gogo changed: %d,%x,%t,%t\n", blk, newK, v == nil, value == nil)
 			}
 
 			return next(dbKey, newK, nil)
@@ -380,11 +380,15 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 
 	decode := changeset.Mapper[changeSetBucket].Decode
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, _ := decode(dbKey, dbValue)
+		blk, k, v := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
+		if bytes.HasPrefix(newK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d00000000000000015e")) {
+			fmt.Printf("unwind changed: %d,%x,%t\n", blk, newK, v == nil)
+		}
+
 		return next(k, newK, nil)
 	}
 
