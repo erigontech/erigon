@@ -252,7 +252,7 @@ func fToMdbx(ctx context.Context, to string) error {
 		dstTx.Rollback()
 	}()
 
-	commitEvery := time.NewTicker(30 * time.Second)
+	commitEvery := time.NewTicker(5 * time.Second)
 	defer commitEvery.Stop()
 	fileScanner := bufio.NewScanner(file)
 	endData := []byte("DATA=END")
@@ -382,8 +382,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		dstTx.Rollback()
 	}()
 
-	commitEvery := time.NewTicker(1 * time.Second)
-	defer commitEvery.Stop()
+	commitEvery, i := 10_000, 0
 
 	for name, b := range src.AllBuckets() {
 		if b.IsDeprecated {
@@ -421,7 +420,9 @@ func toMdbx(ctx context.Context, from, to string) error {
 			default:
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-commitEvery.C:
+			}
+			i++
+			if i > commitEvery {
 				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
 				if err2 := dstTx.Commit(ctx); err2 != nil {
 					return err2
