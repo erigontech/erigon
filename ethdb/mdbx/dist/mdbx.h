@@ -1849,22 +1849,34 @@ enum MDBX_option_t {
    * growth, or/and to the inability of put long values.
    *
    * The `MDBX_opt_rp_augment_limit` controls described limit for the current
-   * process. Default is 1048576, i.e. 2**20. This is sure enough for databases
-   * up to 4Gb with 4K page size. */
+   * process. Default is 262144, it is usually enough for most cases. */
   MDBX_opt_rp_augment_limit,
 
-  /** \brief Controls the in-process limit to grow a list of
-   * pre-allocated/reserved dirty pages.
+  /** \brief Controls the in-process limit to grow a cache of dirty
+   * pages for reuse in the current transaction.
+   *
+   * \details A 'dirty page' refers to a page that has been updated in memory
+   * only, the changes to a dirty page are not yet stored on disk.
+   * To reduce overhead, it is reasonable to release not all such pages
+   * immediately, but to leave some ones in cache for reuse in the current
+   * transaction.
+   *
+   * The `MDBX_opt_loose_limit` allows you to set a limit for such cache inside
+   * the current process. Should be in the range 0..255, default is 64. */
+  MDBX_opt_loose_limit,
+
+  /** \brief Controls the in-process limit of a pre-allocated memory items
+   * for dirty pages.
    *
    * \details A 'dirty page' refers to a page that has been updated in memory
    * only, the changes to a dirty page are not yet stored on disk.
    * Without \ref MDBX_WRITEMAP dirty pages are allocated from memory and
    * released when a transaction is committed. To reduce overhead, it is
-   * reasonable to release not all pages, but to leave some ones in reserve for
-   * reuse in the next transaction.
+   * reasonable to release not all ones, but to leave some allocations in
+   * reserve for reuse in the next transaction(s).
    *
-   * The `MDBX_opt_dp_reserve_limit` allows you to set a limit for such a
-   * reserve inside the current process. Default is 1024. */
+   * The `MDBX_opt_dp_reserve_limit` allows you to set a limit for such reserve
+   * inside the current process. Default is 1024. */
   MDBX_opt_dp_reserve_limit,
 
   /** \brief Controls the in-process limit of dirty pages
@@ -1878,13 +1890,67 @@ enum MDBX_option_t {
    * spill to disk instead.
    *
    * The `MDBX_opt_txn_dp_limit` controls described threshold for the current
-   * process. Default is 1048576, i.e. 2**20. This is sure enough for databases
-   * up to 4Gb with 4K page size. */
+   * process. Default is 65536, it is usually enough for most cases. */
   MDBX_opt_txn_dp_limit,
 
   /** \brief Controls the in-process initial allocation size for dirty pages
    * list of a write transaction. Default is 1024. */
   MDBX_opt_txn_dp_initial,
+
+  /** \brief Controls the in-process how maximal part of the dirty pages may be
+   * spilled when necessary.
+   *
+   * \details The `MDBX_opt_spill_max_denominator` defines the denominator for
+   * limiting from the top for part of the current dirty pages may be spilled
+   * when the free room for a new dirty pages (i.e. distance to the
+   * `MDBX_opt_txn_dp_limit` threshold) is not enough to perform requested
+   * operation.
+   * Exactly `max_pages_to_spill = dirty_pages - dirty_pages / N`,
+   * where `N` is the value set by `MDBX_opt_spill_max_denominator`.
+   *
+   * Should be in the range 0..255, where zero means no limit, i.e. all dirty
+   * pages could be spilled. Default is 8, i.e. no more than 7/8 of the current
+   * dirty pages may be spilled when reached the condition described above. */
+  MDBX_opt_spill_max_denominator,
+
+  /** \brief Controls the in-process how minimal part of the dirty pages should
+   * be spilled when necessary.
+   *
+   * \details The `MDBX_opt_spill_min_denominator` defines the denominator for
+   * limiting from the bottom for part of the current dirty pages should be
+   * spilled when the free room for a new dirty pages (i.e. distance to the
+   * `MDBX_opt_txn_dp_limit` threshold) is not enough to perform requested
+   * operation.
+   * Exactly `min_pages_to_spill = dirty_pages / N`,
+   * where `N` is the value set by `MDBX_opt_spill_min_denominator`.
+   *
+   * Should be in the range 0..255, where zero means no restriction at the
+   * bottom. Default is 8, i.e. at least the 1/8 of the current dirty pages
+   * should be spilled when reached the condition described above. */
+  MDBX_opt_spill_min_denominator,
+
+  /** \brief Controls the in-process how much of the parent transaction dirty
+   * pages will be spilled while start each child transaction.
+   *
+   * \details The `MDBX_opt_spill_parent4child_denominator` defines the
+   * denominator to determine how much of parent transaction dirty pages will be
+   * spilled explicitly while start each child transaction.
+   * Exactly `pages_to_spill = dirty_pages / N`,
+   * where `N` is the value set by `MDBX_opt_spill_parent4child_denominator`.
+   *
+   * For a stack of nested transactions each dirty page could be spilled only
+   * once, and parent's dirty pages couldn't be spilled while child
+   * transaction(s) are running. Therefore a child transaction could reach
+   * \ref MDBX_TXN_FULL when parent(s) transaction has  spilled too less (and
+   * child reach the limit of dirty pages), either when parent(s) has spilled
+   * too more (since child can't spill already spilled pages). So there is no
+   * universal golden ratio.
+   *
+   * Should be in the range 0..255, where zero means no explicit spilling will
+   * be performed during starting nested transactions.
+   * Default is 0, i.e. by default no spilling performed during starting nested
+   * transactions, that correspond historically behaviour. */
+  MDBX_opt_spill_parent4child_denominator,
 };
 #ifndef __cplusplus
 /** \ingroup c_settings */

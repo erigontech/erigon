@@ -24,10 +24,26 @@ Removed options and features:
 New features:
 
  - Package for FreeBSD is available now by Mahlon E. Smith.
- - New API functions to get/set various options (https://github.com/erthink/libmdbx/issues/128).
+ - New API functions to get/set various options (https://github.com/erthink/libmdbx/issues/128):
+    - the maximum number of named databases for the environment;
+    - the maximum number of threads/reader slots;
+    - threshold (since the last unsteady commit) to force flush the data buffers to disk;
+    - relative period (since the last unsteady commit) to force flush the data buffers to disk;
+    - limit to grow a list of reclaimed/recycled page's numbers for finding a sequence of contiguous pages for large data items;
+    - limit to grow a cache of dirty pages for reuse in the current transaction;
+    - limit of a pre-allocated memory items for dirty pages;
+    - limit of dirty pages for a write transaction;
+    - initial allocation size for dirty pages list of a write transaction;
+    - maximal part of the dirty pages may be spilled when necessary;
+    - minimal part of the dirty pages should be spilled when necessary;
+    - how much of the parent transaction dirty pages will be spilled while start each child transaction;
  - Unlimited/Dynamic size of retired and dirty page lists (https://github.com/erthink/libmdbx/issues/123).
  - Added `-p` option (purge subDB before loading) to `mdbx_load` tool.
- - Reworked spilling of large transaction and committing of nested transactions.
+ - Reworked spilling of large transaction and committing of nested transactions:
+    - page spilling code reworked to avoid the flaws and bugs inherited from LMDB;
+    - limit for number of dirty pages now is controllable at runtime;
+    - a spilled pages, including overflow/large pages, now can be reused and refunded/compactified in nested transactions;
+    - more effective refunding/compactification especially for the loosed page cache.
  - Added `MDBX_ENABLE_REFUND` and `MDBX_PNL_ASCENDING` internal/advanced build options.
 
 Fixes:
@@ -40,6 +56,7 @@ Fixes:
  - Fixed handling states of cursors's and subDBs's for nested transactions.
  - Fixed page leak in extra rare case the list of retired pages changed during update GC on transaction commit.
  - Fixed assertions to avoid false-positive UB detection by CLANG/LLVM (https://github.com/erthink/libmdbx/issues/153).
+ - Fixed `MDBX_TXN_FULL` and regressive `MDBX_KEYEXIST` during large transaction commit with `MDBX_LIFORECLAIM` (https://github.com/erthink/libmdbx/issues/123).
 
 
 ## v0.9.2 at 2020-11-27

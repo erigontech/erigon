@@ -34,7 +34,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY 4bdc1cd2c4357afc5650b31bb7d33e03b6e687ec9cf5004921ae0791551eabe6_v0_9_2_104_g0166071e_dirty
+#define MDBX_BUILD_SOURCERY 072845a2cf95295f5a21177d8a7431718a1875a6b655e25c5cb75d1e7280402f_v0_9_2_120_g0cfb853d
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -361,7 +361,7 @@
 #   if (defined(__GNUC__) || __has_builtin(__builtin_expect)) && !defined(__COVERITY__)
 #       define likely(cond) __builtin_expect(!!(cond), 1)
 #   else
-#       define likely(x) (x)
+#       define likely(x) (!!(x))
 #   endif
 #endif /* likely */
 
@@ -369,7 +369,7 @@
 #   if (defined(__GNUC__) || __has_builtin(__builtin_expect)) && !defined(__COVERITY__)
 #       define unlikely(cond) __builtin_expect(!!(cond), 0)
 #   else
-#       define unlikely(x) (x)
+#       define unlikely(x) (!!(x))
 #   endif
 #endif /* unlikely */
 
@@ -2628,6 +2628,10 @@ struct MDBX_env {
     unsigned rp_augment_limit;
     unsigned dp_limit;
     unsigned dp_initial;
+    uint8_t dp_loose_limit;
+    uint8_t spill_max_denominator;
+    uint8_t spill_min_denominator;
+    uint8_t spill_parent4child_denominator;
   } me_options;
   struct {
 #if MDBX_LOCKING > 0
@@ -4691,7 +4695,7 @@ int main(int argc, char *argv[]) {
       value = envinfo.mi_mapsize / envstat.ms_psize - alloc_pages;
       print(", remained %" PRIu64 " (%.1f%%)", value, value / percent);
 
-      value = alloc_pages - gc_pages;
+      value = dont_traversal ? alloc_pages - gc_pages : walk.pgcount;
       print(", used %" PRIu64 " (%.1f%%)", value, value / percent);
 
       print(", gc %" PRIu64 " (%.1f%%)", gc_pages, gc_pages / percent);
