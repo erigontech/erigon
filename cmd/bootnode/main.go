@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/discover"
-	"github.com/ledgerwatch/turbo-geth/p2p/discv5"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
@@ -121,17 +120,17 @@ func main() {
 
 	printNotice(&nodeKey.PublicKey, *realaddr)
 
+	db, _ := enode.OpenDB("")
+	ln := enode.NewLocalNode(db, nodeKey)
+	cfg := discover.Config{
+		PrivateKey:  nodeKey,
+		NetRestrict: restrictList,
+	}
 	if *runv5 {
-		if _, err := discv5.ListenUDP(nodeKey, conn, "", restrictList); err != nil {
+		if _, err := discover.ListenV5(conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	} else {
-		db, _ := enode.OpenDB("")
-		ln := enode.NewLocalNode(db, nodeKey)
-		cfg := discover.Config{
-			PrivateKey:  nodeKey,
-			NetRestrict: restrictList,
-		}
 		if _, err := discover.ListenUDP(conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
