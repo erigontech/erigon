@@ -333,7 +333,7 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		}
 	}
 	log.Info(hd.AnchorState())
-	bd := bodydownload.NewBodyDownload(64 * 1024 /* outstandingLimit */)
+	bd := bodydownload.NewBodyDownload(4 * 1024 /* outstandingLimit */)
 	return &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}), requestWakeUpBodies: make(chan struct{})}, nil
 }
 
