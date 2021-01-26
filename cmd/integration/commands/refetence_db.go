@@ -374,7 +374,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		return err1
 	}
 	defer srcTx.Rollback()
-	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW)
+	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW|ethdb.NoSync)
 	if err1 != nil {
 		return err1
 	}
@@ -426,7 +426,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 				if err2 := dstTx.Commit(ctx); err2 != nil {
 					return err2
 				}
-				dstTx, err = dst.Begin(ctx, nil, ethdb.RW)
+				dstTx, err = dst.Begin(ctx, nil, ethdb.RW|ethdb.NoSync)
 				if err != nil {
 					return err
 				}
