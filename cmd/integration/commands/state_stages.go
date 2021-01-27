@@ -174,7 +174,6 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 				unwind = 0
 			}
 		}
-		fmt.Printf("alex: %d\n", execToBlock)
 
 		// set block limit of execute stage
 		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {

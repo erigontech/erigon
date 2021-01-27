@@ -1550,7 +1550,6 @@ func (c *StorageIHCursor) _next() (k, v []byte, err error) {
 			c.skipState = isDenseSequence(c.prev, c.cur)
 			return nil, nil, nil
 		}
-		fmt.Printf("?? test: %x,%x\n", c.k[c.lvl], c.childID[c.lvl])
 		c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
 		if c.canUse(c.kBuf) {
 			c.cur = common.CopyBytes(c.kBuf[80:])
