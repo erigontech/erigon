@@ -58,10 +58,10 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	var peer []byte
 	for {
 		count := 0
-		//penaltyPeers := bd.GetPenaltyPeers()
-		//for _, penaltyPeer := range penaltyPeers {
-		//	penalise(ctx, penaltyPeer)
-		//}
+		penaltyPeers := bd.GetPenaltyPeers()
+		for _, penaltyPeer := range penaltyPeers {
+			penalise(ctx, penaltyPeer)
+		}
 		if req == nil {
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
@@ -123,8 +123,8 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 			prevWastedCount = wastedCount
 			bd.PrintPeerMap()
 		case <-timer.C:
-			//log.Info("RequestQueueTime (bodies) ticked")
-			//case <-wakeUpChan:
+		//log.Info("RequestQueueTime (bodies) ticked")
+		case <-wakeUpChan:
 			//log.Info("bodyLoop woken up by the incoming request")
 		}
 	}
