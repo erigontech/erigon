@@ -170,7 +170,7 @@ func (hd *HeaderDownload) FindTip(segment *ChainSegment, start int) (found bool,
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	if _, duplicate := hd.getTip(segment.Headers[start].Hash()); duplicate {
-		return true, 0, NoPenalty
+		return false, 0, NoPenalty
 	}
 	// Walk the segment from children towards parents
 	for i, header := range segment.Headers[start:] {
