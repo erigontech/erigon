@@ -17,7 +17,6 @@
 package trie
 
 import (
-	"bytes"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -208,9 +207,7 @@ func GenStructStep(
 				//}
 			}
 
-			if bytes.HasPrefix(curr[:maxLen], common.FromHex("05")) {
-				e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
-			}
+			//e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
 			if h != nil {
 				if branches[maxLen] == 0 {
 					if err := h(curr[:maxLen], 0, 0, nil, nil); err != nil {
@@ -244,9 +241,7 @@ func GenStructStep(
 					}
 				}
 			}
-			if bytes.HasPrefix(curr[:maxLen], common.FromHex("05")) {
-				fmt.Printf("--- 1: 3, %x, , %x\n", curr[:maxLen], e.topHash())
-			}
+			//fmt.Printf("--- %x, %x\n", curr[:maxLen], e.topHash())
 			branches = branches[:maxLen]
 		}
 		groups = groups[:maxLen]

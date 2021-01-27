@@ -310,7 +310,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	} else {
 		deletedAccounts = map[string]struct{}{}
 		extract = func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-			blk, k, v := decode(dbKey, dbValue)
+			_, k, v := decode(dbKey, dbValue)
 			value, err := p.db.Get(dbutils.PlainStateBucket, k)
 			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 				return err
@@ -323,10 +323,6 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 			if len(value) == 0 && len(v) > 0 { // self-destructed
 				newKS := string(newK)
 				deletedAccounts[newKS] = struct{}{}
-			}
-
-			if bytes.HasPrefix(newK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d00000000000000015e")) {
-				fmt.Printf("gogo changed: %d,%x,%t,%t\n", blk, newK, v == nil, value == nil)
 			}
 
 			return next(dbKey, newK, nil)
@@ -380,15 +376,11 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 
 	decode := changeset.Mapper[changeSetBucket].Decode
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		blk, k, v := decode(dbKey, dbValue)
+		_, k, _ := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
-		if bytes.HasPrefix(newK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d00000000000000015e")) {
-			fmt.Printf("unwind changed: %d,%x,%t\n", blk, newK, v == nil)
-		}
-
 		return next(k, newK, nil)
 	}
 
@@ -442,7 +434,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 			sort.Slice(prefix, func(i, j int) bool { return bytes.Compare(prefix[i], prefix[j]) < 0 })
 			unfurl := trie.NewRetainList(0)
 			for j := range prefix {
-				fmt.Printf("excl: %x\n", prefix[j])
+				//fmt.Printf("excl: %x\n", prefix[j])
 				unfurl.AddKey(prefix[j])
 			}
 
@@ -455,14 +447,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 					return nil
 				}
 				newV := trie.IHTypedValue(hashes, rootHash)
-				if bytes.HasPrefix(keyHex, common.FromHex("05")) {
-					fmt.Printf("55ll: %x,%b,%b, %d, %d\n", keyHex, branches, children, len(hashes)/common.HashLength, len(newV))
-				}
 				cache.SetAccountHashWrite(keyHex, branches, children, newV)
-				if bytes.HasPrefix(keyHex, common.FromHex("05")) {
-					pref, br, _, h, ok := cache.GetAccountHash(common.FromHex("05"))
-					fmt.Printf("66kll: %x,%x,%d,%t\n", pref, bits.OnesCount16(br), len(h), ok)
-				}
 				return nil
 			}
 			storageHashCollector := func(accWithInc []byte, keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
@@ -537,7 +522,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		//fmt.Printf("excl: %d\n", len(exclude))
 		for i := range exclude {
 			//fmt.Printf("excl: %x\n", exclude[i])
-			if bytes.HasPrefix(exclude[i], common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d0000000000000001")) {
+			if bytes.HasPrefix(exclude[i], common.FromHex("0c7c")) {
 				fmt.Printf("excl: %x\n", exclude[i])
 			}
 			unfurl.AddKey(exclude[i])
@@ -769,7 +754,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		//fmt.Printf("excl: %d\n", len(exclude))
 		for i := range exclude {
 			//fmt.Printf("excl: %x\n", exclude[i])
-			if bytes.HasPrefix(exclude[i], common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d0000000000000001")) {
+			if bytes.HasPrefix(exclude[i], common.FromHex("0c7c")) {
 				fmt.Printf("excl: %x\n", exclude[i])
 			}
 			unfurl.AddKey(exclude[i])

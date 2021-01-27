@@ -429,6 +429,9 @@ GotItemFromCache:
 			break
 		}
 		ihK, branches, children, hashItem = sc.AccountHashesSeek(seek)
+		for i := len(ihK); i >= lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
+			k[i], branch[i], child[i], maxID[i], hashID[i], id[i] = nil, 0, 0, 0, 0, 0
+		}
 	}
 
 	return nil

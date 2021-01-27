@@ -663,16 +663,9 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, prefix []byte, cac
 		return EmptyRoot, err
 	}
 
-	pref, br, ch, h, ook := cache.GetAccountHash(common.FromHex("05"))
-	fmt.Printf("fter a3lll post: %x,%x,%d,%d,%t\n", pref, bits.OnesCount16(br), len(h), bits.OnesCount16(ch), ook)
-
 	if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, len(prefix)); err != nil {
 		return EmptyRoot, err
 	}
-	fmt.Printf("%d,%d,%d,%d\n", i1, i2, i3, i4)
-
-	pref, br, ch, h, ook = cache.GetAccountHash(common.FromHex("05"))
-	fmt.Printf("fter a2lll post: %x,%x,%d,%d,%t\n", pref, bits.OnesCount16(br), bits.OnesCount16(ch), len(h), ook)
 
 	return EmptyRoot, nil
 }
@@ -787,14 +780,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	hash []byte,
 	cutoff int,
 ) error {
-	if bytes.HasPrefix(r.currAccK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d")) {
-		if bytes.HasPrefix(storageKey, common.FromHex("05")) {
-			fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
-		}
-		if bytes.HasPrefix(storageKey, common.FromHex("06")) {
-			fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
-		}
-	}
+	//fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
 	switch itemType {
 	case StorageStreamItem:
 		if len(r.currAccK) == 0 {
@@ -963,13 +949,11 @@ func (r *RootHashAggregator) genStructStorage() error {
 		if r.shc == nil {
 			return nil
 		}
-		if bytes.HasPrefix(r.currAccK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d")) {
-			if bytes.HasPrefix(keyHex, common.FromHex("05")) {
-				if hashes == nil {
-					fmt.Printf("collect del: %x\n", keyHex)
-				} else {
-					fmt.Printf("collect: %x,%016b,%x\n", keyHex, branches, hashes)
-				}
+		if bytes.HasPrefix(r.currAccK, common.FromHex("0c7c6a936e1b03af7e304592fde4c476e4a46c5c3c3312a805bc38b9719419e60000000000000001")) {
+			if hashes == nil {
+				fmt.Printf("collect del: %x\n", keyHex)
+			} else {
+				fmt.Printf("collect: %x,%016b,%x\n", keyHex, branches, hashes)
 			}
 		}
 		return r.shc(r.currAccK, keyHex, branches, children, hashes, rootHash)
@@ -1205,7 +1189,7 @@ func (c *IHCursor) _nextSibling() error {
 	if ok {
 		return nil
 	}
-	err := c._nextLvl1SiblingInDB()
+	err := c._nextSiblingInDB()
 	if err != nil {
 		return err
 	}
@@ -1226,6 +1210,10 @@ func (c *IHCursor) _nextSiblingInMem() bool {
 
 func (c *IHCursor) _nextSiblingOfParentInMem() bool {
 	for c.lvl > 1 {
+		fmt.Printf("has parent!! %x -> %t\n", c.k[c.lvl], c.k[c.lvl-1] != nil)
+		if c.k[c.lvl-1] == nil {
+			return false
+		}
 		c.lvl--
 		if c._nextSiblingInMem() {
 			return true
@@ -1234,8 +1222,8 @@ func (c *IHCursor) _nextSiblingOfParentInMem() bool {
 	return false
 }
 
-func (c *IHCursor) _nextLvl1SiblingInDB() error {
-	ok := dbutils.NextNibblesSubtree(c.k[1], &c.next)
+func (c *IHCursor) _nextSiblingInDB() error {
+	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
 	if !ok {
 		c.k[c.lvl] = nil
 		return nil
@@ -1249,8 +1237,12 @@ func (c *IHCursor) _nextLvl1SiblingInDB() error {
 		c.k[c.lvl] = nil
 		return nil
 	}
+	for i := len(k); i >= c.lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
+		c.k[i], c.branches[i], c.children[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
+	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
+
 	return nil
 }
 
@@ -1383,6 +1375,9 @@ func (c *StorageIHCursor) SeekToAccount(prefix []byte) (k, v []byte, err error) 
 	if err != nil {
 		return []byte{}, nil, err
 	}
+	for i := c.lvl - 1; i >= 0; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
+		c.k[i], c.branches[i], c.children[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
+	}
 	if !ok || c.k[c.lvl] == nil {
 		c.cur = nil
 		c.skipState = isDenseSequence(c.prev, c.cur)
@@ -1426,6 +1421,9 @@ func (c *StorageIHCursor) Next() (k, v []byte, err error) {
 		return nil, nil, nil
 	}
 	c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+	if bytes.HasPrefix(c.accWithInc, common.FromHex("0c7c6a936e1b03af7e304592fde4c476e4a46c5c3c3312a805bc38b9719419e60000000000000001")) {
+		fmt.Printf("cursor.next: %x, %016b\n", c.k[c.lvl], c.branches[c.lvl])
+	}
 	if c.canUse(c.kBuf) {
 		c.cur = common.CopyBytes(c.kBuf[80:])
 		c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
@@ -1491,7 +1489,7 @@ func (c *StorageIHCursor) _nextSibling() error {
 	if ok {
 		return nil
 	}
-	err := c._nextLvl1SiblingInDB()
+	err := c._nextSiblingInDB()
 	if err != nil {
 		return err
 	}
@@ -1512,6 +1510,9 @@ func (c *StorageIHCursor) _nextSiblingInMem() bool {
 
 func (c *StorageIHCursor) _nextSiblingOfParentInMem() bool {
 	for c.lvl > 0 {
+		if c.k[c.lvl-1] == nil {
+			return false
+		}
 		c.lvl--
 		if c._nextSiblingInMem() {
 			return true
@@ -1520,7 +1521,7 @@ func (c *StorageIHCursor) _nextSiblingOfParentInMem() bool {
 	return false
 }
 
-func (c *StorageIHCursor) _nextLvl1SiblingInDB() error {
+func (c *StorageIHCursor) _nextSiblingInDB() error {
 	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
 	if !ok {
 		c.k[c.lvl] = nil
@@ -1535,6 +1536,9 @@ func (c *StorageIHCursor) _nextLvl1SiblingInDB() error {
 	if k == nil || !bytes.HasPrefix(k, c.accWithInc) {
 		c.k[c.lvl] = nil
 		return nil
+	}
+	for i := len(k); i >= c.lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
+		c.k[i], c.branches[i], c.children[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
 	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
@@ -1560,6 +1564,9 @@ func (c *StorageIHCursor) _next() (k, v []byte, err error) {
 		}
 
 		c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+		if bytes.HasPrefix(c.accWithInc, common.FromHex("0c7c6a936e1b03af7e304592fde4c476e4a46c5c3c3312a805bc38b9719419e60000000000000001")) {
+			fmt.Printf("cursor._next: %x\n", c.kBuf)
+		}
 		if c.canUse(c.kBuf) {
 			c.cur = common.CopyBytes(c.kBuf[80:])
 			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
@@ -1616,10 +1623,8 @@ func (c *StorageIHCursor) _deleteCurrent() error {
 	if c.deleted[c.lvl] {
 		return nil
 	}
-	if bytes.HasPrefix(c.accWithInc, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d")) {
-		if bytes.HasPrefix(c.k[c.lvl], common.FromHex("0508")) {
-			fmt.Printf("delete IH: %x\n", c.k[c.lvl])
-		}
+	if bytes.HasPrefix(c.accWithInc, common.FromHex("0c7c6a936e1b03af7e304592fde4c476e4a46c5c3c3312a805bc38b9719419e60000000000000001")) {
+		fmt.Printf("delete IH: %x\n", c.k[c.lvl])
 	}
 	if err := c.shc(c.accWithInc, c.k[c.lvl], 0, 0, nil, nil); err != nil {
 		return err

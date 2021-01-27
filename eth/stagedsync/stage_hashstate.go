@@ -235,7 +235,7 @@ type Promoter struct {
 func getExtractFunc(db ethdb.Getter, cache *shards.StateCache, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		blk, k, v := decode(dbKey, dbValue)
+		_, k, _ := decode(dbKey, dbValue)
 		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
 		value, err := db.Get(dbutils.PlainStateBucket, k)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -287,15 +287,6 @@ func getExtractFunc(db ethdb.Getter, cache *shards.StateCache, changeSetBucket s
 			cache.TurnWritesToReads(cache.PrepareWrites())
 		}
 
-		if bytes.HasPrefix(newK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d00000000000000015e")) {
-			fmt.Printf("state put: %x,%x\n", newK, value)
-		}
-		if len(newK) == 20 {
-			if bytes.HasPrefix(newK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d")) {
-				fmt.Printf("acc: %d,sc=%x,db=%x\n", blk, v, value)
-			}
-		}
-
 		return next(dbKey, newK, value)
 	}
 }
@@ -338,13 +329,10 @@ func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		blk, k, v := decode(dbKey, dbValue)
+		_, k, v := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
-		}
-		if bytes.HasPrefix(newK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d00000000000000015e")) {
-			fmt.Printf("unwind state put: %d,%x,%x,%#v,%t\n", blk, newK, v, v, v == nil)
 		}
 		return next(dbKey, newK, v)
 	}
