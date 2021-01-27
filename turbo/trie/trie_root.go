@@ -1203,10 +1203,6 @@ func (c *IHCursor) _nextSiblingInMem() bool {
 
 func (c *IHCursor) _nextSiblingOfParentInMem() bool {
 	for c.lvl > 1 {
-		fmt.Printf("has parent!! %x -> %t\n", c.k[c.lvl], c.k[c.lvl-1] != nil)
-		if c.k[c.lvl-1] == nil {
-			return false
-		}
 		c.lvl--
 		if c._nextSiblingInMem() {
 			return true
@@ -1500,9 +1496,6 @@ func (c *StorageIHCursor) _nextSiblingInMem() bool {
 
 func (c *StorageIHCursor) _nextSiblingOfParentInMem() bool {
 	for c.lvl > 0 {
-		if c.k[c.lvl-1] == nil {
-			return false
-		}
 		c.lvl--
 		if c._nextSiblingInMem() {
 			return true
@@ -1552,7 +1545,7 @@ func (c *StorageIHCursor) _next() (k, v []byte, err error) {
 			c.skipState = isDenseSequence(c.prev, c.cur)
 			return nil, nil, nil
 		}
-
+		fmt.Printf("?? test: %x,%x\n", c.k[c.lvl], c.childID[c.lvl])
 		c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
 		if c.canUse(c.kBuf) {
 			c.cur = common.CopyBytes(c.kBuf[80:])
