@@ -107,6 +107,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 			}
 			count++
 		}
+		log.Info("Body progress", "block number", bodyProgress, "header progress", headerProgress)
 		if bodyProgress == headerProgress {
 			break
 		}
