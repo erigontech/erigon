@@ -382,7 +382,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		dstTx.Rollback()
 	}()
 
-	commitEvery, i := 1_000, 0
+	commitEvery, i := 100_000, 0
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
