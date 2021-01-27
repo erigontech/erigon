@@ -949,13 +949,6 @@ func (r *RootHashAggregator) genStructStorage() error {
 		if r.shc == nil {
 			return nil
 		}
-		if bytes.HasPrefix(r.currAccK, common.FromHex("0c7c6a936e1b03af7e304592fde4c476e4a46c5c3c3312a805bc38b9719419e60000000000000001")) {
-			if hashes == nil {
-				fmt.Printf("collect del: %x\n", keyHex)
-			} else {
-				fmt.Printf("collect: %x,%016b,%x\n", keyHex, branches, hashes)
-			}
-		}
 		return r.shc(r.currAccK, keyHex, branches, children, hashes, rootHash)
 	}, data, r.groupsStorage, r.branchSetStorage, r.trace)
 	if err != nil {
@@ -1421,9 +1414,6 @@ func (c *StorageIHCursor) Next() (k, v []byte, err error) {
 		return nil, nil, nil
 	}
 	c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-	if bytes.HasPrefix(c.accWithInc, common.FromHex("0c7c6a936e1b03af7e304592fde4c476e4a46c5c3c3312a805bc38b9719419e60000000000000001")) {
-		fmt.Printf("cursor.next: %x, %016b\n", c.k[c.lvl], c.branches[c.lvl])
-	}
 	if c.canUse(c.kBuf) {
 		c.cur = common.CopyBytes(c.kBuf[80:])
 		c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
@@ -1564,9 +1554,6 @@ func (c *StorageIHCursor) _next() (k, v []byte, err error) {
 		}
 
 		c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-		if bytes.HasPrefix(c.accWithInc, common.FromHex("0c7c6a936e1b03af7e304592fde4c476e4a46c5c3c3312a805bc38b9719419e60000000000000001")) {
-			fmt.Printf("cursor._next: %x\n", c.kBuf)
-		}
 		if c.canUse(c.kBuf) {
 			c.cur = common.CopyBytes(c.kBuf[80:])
 			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
@@ -1622,9 +1609,6 @@ func (c *StorageIHCursor) _complexSkpState() bool {
 func (c *StorageIHCursor) _deleteCurrent() error {
 	if c.deleted[c.lvl] {
 		return nil
-	}
-	if bytes.HasPrefix(c.accWithInc, common.FromHex("0c7c6a936e1b03af7e304592fde4c476e4a46c5c3c3312a805bc38b9719419e60000000000000001")) {
-		fmt.Printf("delete IH: %x\n", c.k[c.lvl])
 	}
 	if err := c.shc(c.accWithInc, c.k[c.lvl], 0, 0, nil, nil); err != nil {
 		return err
