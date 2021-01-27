@@ -47,6 +47,9 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Started", logPrefix), "from", s.BlockNumber, "to", to)
 
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
 	canonical := make([]common.Hash, to-s.BlockNumber)
 	currentHeaderIdx := uint64(0)
 
@@ -66,6 +69,13 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 
 		copy(canonical[currentHeaderIdx][:], v)
 		currentHeaderIdx++
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Preload headedrs", logPrefix), "block_number", binary.BigEndian.Uint64(k))
+		}
+
 		return true, nil
 	}); err != nil {
 		return err
@@ -84,9 +94,6 @@ func SpawnRecoverSendersStage(cfg Stage3Config, s *StageState, db ethdb.Database
 			recoverSenders(logPrefix, secp256k1.ContextForThread(threadNo), config, jobs, out, quitCh)
 		}(i)
 	}
-
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
 
 	collectorSenders := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
