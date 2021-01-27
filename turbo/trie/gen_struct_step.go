@@ -207,7 +207,7 @@ func GenStructStep(
 				//}
 			}
 
-			//e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
+			e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
 			if h != nil {
 				if branches[maxLen] == 0 {
 					if err := h(curr[:maxLen], 0, 0, nil, nil); err != nil {
@@ -241,7 +241,7 @@ func GenStructStep(
 					}
 				}
 			}
-			//fmt.Printf("--- %x, %x\n", curr[:maxLen], e.topHash())
+			fmt.Printf("--- %x, %x\n", curr[:maxLen], e.topHash())
 			branches = branches[:maxLen]
 		}
 		groups = groups[:maxLen]
