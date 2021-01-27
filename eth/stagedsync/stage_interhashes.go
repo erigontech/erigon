@@ -522,9 +522,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		//fmt.Printf("excl: %d\n", len(exclude))
 		for i := range exclude {
 			//fmt.Printf("excl: %x\n", exclude[i])
-			if bytes.HasPrefix(exclude[i], common.FromHex("0c7c")) {
-				fmt.Printf("excl: %x\n", exclude[i])
-			}
 			unfurl.AddKey(exclude[i])
 		}
 
@@ -754,9 +751,6 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		//fmt.Printf("excl: %d\n", len(exclude))
 		for i := range exclude {
 			//fmt.Printf("excl: %x\n", exclude[i])
-			if bytes.HasPrefix(exclude[i], common.FromHex("0c7c")) {
-				fmt.Printf("excl: %x\n", exclude[i])
-			}
 			unfurl.AddKey(exclude[i])
 		}
 
