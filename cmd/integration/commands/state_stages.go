@@ -120,6 +120,11 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	defer bc.Stop()
 	cc.SetDB(tx)
 
+	tx, err1 = tx.Begin(ctx, ethdb.RW)
+	if err1 != nil {
+		return err1
+	}
+
 	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 	_ = st.SetCurrentStage(stages.Execution)
 
