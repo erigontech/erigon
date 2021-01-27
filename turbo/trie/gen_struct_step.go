@@ -207,8 +207,10 @@ func GenStructStep(
 				//}
 			}
 
-			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0000")) {
-			e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
+			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("06")) {
+			if maxLen <= 3 {
+				e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
+			}
 			//}
 			if h != nil {
 				if branches[maxLen] == 0 {
@@ -240,8 +242,10 @@ func GenStructStep(
 					}
 				}
 			}
-			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0000")) {
-			fmt.Printf("--- %x, %x\n", curr[:maxLen], e.topHash())
+			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("06")) {
+			if maxLen <= 3 {
+				fmt.Printf("--- %x, %x\n", curr[:maxLen], e.topHash())
+			}
 			//}
 			branches = branches[:maxLen]
 		}

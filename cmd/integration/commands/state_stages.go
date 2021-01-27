@@ -86,6 +86,7 @@ func init() {
 }
 
 func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
+
 	sm, err1 := ethdb.GetStorageModeFromDB(db)
 	if err1 != nil {
 		panic(err1)
@@ -123,6 +124,30 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	if err1 != nil {
 		return err1
 	}
+	if err := stages.SaveStageProgress(tx, stages.Senders, 4_000_000); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(tx, stages.Bodies, 4_000_000); err != nil {
+		return err
+	}
+	tx.CommitAndBegin(nil)
+	ethTxC := tx.(ethdb.HasTx).Tx().Cursor(dbutils.EthTx)
+	for k, _, _ := ethTxC.Seek(dbutils.EncodeBlockNumber(10_000_000)); k != nil; k, _, _ = ethTxC.Next() {
+		ethTxC.DeleteCurrent()
+	}
+	fmt.Printf("alex\n")
+	bodyC := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockBodyPrefix)
+	for k, _, _ := bodyC.Seek(dbutils.EncodeBlockNumber(10_000_000)); k != nil; k, _, _ = bodyC.Next() {
+		bodyC.DeleteCurrent()
+	}
+	fmt.Printf("alex\n")
+	sendersC := tx.(ethdb.HasTx).Tx().Cursor(dbutils.Senders)
+	for k, _, _ := sendersC.Seek(dbutils.EncodeBlockNumber(9_000_000)); k != nil; k, _, _ = sendersC.Next() {
+		sendersC.DeleteCurrent()
+	}
+	fmt.Printf("alex\n")
+	tx.Commit()
+	panic(1)
 
 	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 	_ = st.SetCurrentStage(stages.Execution)
