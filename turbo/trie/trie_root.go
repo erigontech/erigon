@@ -780,7 +780,12 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	hash []byte,
 	cutoff int,
 ) error {
-	//fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
+	//if bytes.HasPrefix(accountKey, common.FromHex("0000")) {
+	//	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
+	//}
+	//if bytes.HasPrefix(r.currAccK, common.FromHex("0000")) {
+	//	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
+	//}
 	switch itemType {
 	case StorageStreamItem:
 		if len(r.currAccK) == 0 {
