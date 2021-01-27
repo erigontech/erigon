@@ -65,6 +65,10 @@ func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment
 		log.Error(fmt.Sprintf("FindTip penalty %d", penalty))
 		return
 	}
+	if end == 0 {
+		log.Info("Duplicate segment")
+		return
+	}
 	currentTime := uint64(time.Now().Unix())
 	var powDepth int
 	if powDepth1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
