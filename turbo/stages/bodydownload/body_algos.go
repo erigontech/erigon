@@ -57,9 +57,9 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, cu
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]common.Hash, 0, BlockBufferSize)
-	for ; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
+	for ; len(blockNums) < BlockBufferSize && bd.requestedLow <= bd.maxProgress; blockNum++ {
 		// Check if we reached highest allowed request block number, and turn back
-		if blockNum >= bd.requestedLow+bd.outstandingLimit {
+		if blockNum >= bd.requestedLow+bd.outstandingLimit || blockNum >= bd.maxProgress {
 			blockNum = 0
 			break // Avoid tight loop
 		}
