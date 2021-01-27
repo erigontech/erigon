@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/golang/snappy"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -23,18 +21,6 @@ var transactionsTable = Migration{
 		defer logEvery.Stop()
 		logPrefix := "tx_table"
 
-		decompressBlockBody := func(compressed []byte) ([]byte, error) {
-			if !debug.IsBlockCompressionEnabled() || len(compressed) == 0 {
-				return compressed, nil
-			}
-
-			var bodyRlp []byte
-			bodyRlp, err = snappy.Decode(nil, compressed)
-			if err != nil {
-				return nil, fmt.Errorf("err on decode block: %w", err)
-			}
-			return bodyRlp, nil
-		}
 		const loadStep = "load"
 		reader := bytes.NewReader(nil)
 		buf := bytes.NewBuffer(make([]byte, 4096))
@@ -102,13 +88,7 @@ var transactionsTable = Migration{
 			}
 			// don't need canonical check
 
-			var bodyRlp []byte
-			bodyRlp, err = decompressBlockBody(v)
-			if err != nil {
-				return false, err
-			}
-
-			reader.Reset(bodyRlp)
+			reader.Reset(v)
 			if err = rlp.Decode(reader, body); err != nil {
 				return false, fmt.Errorf("[%s]: invalid block body RLP: %w", logPrefix, err)
 			}
