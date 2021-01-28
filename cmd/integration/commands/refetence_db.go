@@ -366,7 +366,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		return (flags | lmdb.Readonly) ^ lmdb.NoReadahead
 	}).MustOpen()
 	dst := ethdb.NewMDBX().Path(to).Flags(func(flags uint) uint {
-		return (flags ^ mdbx.Durable) | mdbx.WriteMap | mdbx.NoMemInit | mdbx.SafeNoSync
+		return flags | mdbx.WriteMap
 	}).MustOpen()
 
 	srcTx, err1 := src.Begin(ctx, nil, ethdb.RO)
@@ -382,7 +382,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		dstTx.Rollback()
 	}()
 
-	commitEvery, i := 100_000, 0
+	commitEvery, i := 10_000, 0
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
