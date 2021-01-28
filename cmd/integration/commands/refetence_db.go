@@ -393,12 +393,14 @@ func toMdbx(ctx context.Context, from, to string) error {
 		c := dstTx.Cursor(name)
 		srcC := srcTx.Cursor(name)
 		var prevK []byte
+		casted, isDupsort := c.(ethdb.CursorDupSort)
+
 		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 			if err != nil {
 				return err
 			}
 
-			if casted, ok := c.(ethdb.CursorDupSort); ok {
+			if isDupsort {
 				if bytes.Equal(k, prevK) {
 					if err = casted.AppendDup(k, v); err != nil {
 						return err
