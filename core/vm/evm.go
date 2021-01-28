@@ -49,8 +49,8 @@ type (
 // configuration
 func (evm *EVM) ActivePrecompiles() []common.Address {
 	switch {
-	case evm.chainRules.IsYoloV2:
-		return PrecompiledAddressesYoloV2
+	case evm.chainRules.IsYoloV3:
+		return PrecompiledAddressesYoloV3
 	case evm.chainRules.IsIstanbul:
 		return PrecompiledAddressesIstanbul
 	case evm.chainRules.IsByzantium:
@@ -63,8 +63,8 @@ func (evm *EVM) ActivePrecompiles() []common.Address {
 func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 	var precompiles map[common.Address]PrecompiledContract
 	switch {
-	case evm.chainRules.IsYoloV2:
-		precompiles = PrecompiledContractsYoloV2
+	case evm.chainRules.IsYoloV3:
+		precompiles = PrecompiledContractsYoloV3
 	case evm.chainRules.IsIstanbul:
 		precompiles = PrecompiledContractsIstanbul
 	case evm.chainRules.IsByzantium:
@@ -117,7 +117,7 @@ type BlockContext struct {
 // All fields can change between transactions.
 type TxContext struct {
 	// Message information
-	TxHash      common.Hash
+	TxHash   common.Hash
 	Origin   common.Address // Provides information for ORIGIN
 	GasPrice *big.Int       // Provides information for GASPRICE
 }
@@ -164,8 +164,8 @@ type EVM struct {
 // only ever be used *once*.
 func NewEVM(blockCtx BlockContext, txCtx TxContext, state IntraBlockState, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
 	evm := &EVM{
-		Context:      blockCtx,
-		TxContext:    txCtx,
+		Context:         blockCtx,
+		TxContext:       txCtx,
 		IntraBlockState: state,
 		vmConfig:        vmConfig,
 		chainConfig:     chainConfig,

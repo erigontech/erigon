@@ -62,6 +62,13 @@ func TestBlockchain(t *testing.T) {
 
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcUncleHeaderValidity/incorrectUncleTimestamp5.json`, "Needs to be fixed for TG")
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
+		if test.json.Network == "Berlin" {
+			// Our current berlin-tests were generated using YOLOv2 rules, hence a lot of them
+			// fail when berlin is defined as YOLOv3. We skip those, until they've been
+			// regenerated and re-imported
+			// TODO (@holiman)
+			return
+		}
 		if err := bt.checkFailure(t, test.Run(false)); err != nil {
 			t.Error(err)
 		}

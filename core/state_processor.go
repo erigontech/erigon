@@ -221,7 +221,7 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	}
 	ctx := config.WithEIPsFlags(context.Background(), header.Number)
 	// Create a new context to be used in the EVM environment
-    context := NewEVMBlockContext(msg, header, bc, author)
+	context := NewEVMBlockContext(msg, header, bc, author)
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
 		context.TxHash = tx.Hash()
@@ -231,7 +231,7 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 	vmenv := vm.NewEVM(context, txContext, statedb, config, cfg)
 
-	if config.IsYoloV2(header.Number) {
+	if config.IsYoloV3(header.Number) {
 		statedb.AddAddressToAccessList(msg.From())
 		if dst := msg.To(); dst != nil {
 			statedb.AddAddressToAccessList(*dst)
