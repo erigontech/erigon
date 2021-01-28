@@ -116,10 +116,11 @@ type RootHashAggregator struct {
 	curr             bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ             bytes.Buffer
 	currAccK         []byte
+	currAccKNibbles  []byte
 	value            []byte   // Current value to be used as the value tape for the hash builder
 	groups           []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
 	groupsStorage    []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
-	branchSet        []uint16
+	branches         []uint16
 	branchSetStorage []uint16
 	hb               *HashBuilder
 	hashData         GenStructStepHashData
@@ -759,7 +760,7 @@ func (r *RootHashAggregator) Reset(hc HashCollector2, shc StorageHashCollector2,
 	r.succ.Reset()
 	r.value = nil
 	r.groups = r.groups[:0]
-	r.branchSet = r.branchSet[:0]
+	r.branches = r.branches[:0]
 	r.a.Reset()
 	r.hb.Reset()
 	r.wasIH = false
@@ -818,7 +819,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	case AccountStreamItem:
 		r.advanceKeysAccount(accountKey, true /* terminator */)
 		if r.curr.Len() > 0 && !r.wasIH {
-			r.cutoffKeysStorage(0)
+			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
 			if r.wasStorage || r.wasIHStorage {
 				if err := r.genStructStorage(); err != nil {
 					return err
@@ -833,6 +834,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 			}
 		}
 		r.currAccK = r.currAccK[:0]
+		r.currAccKNibbles = r.currAccKNibbles[:0]
 		if r.curr.Len() > 0 {
 			if err := r.genStructAccount(); err != nil {
 				return err
@@ -844,10 +846,22 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	case AHashStreamItem:
 		r.advanceKeysAccount(accountKey, false /* terminator */)
 		if r.curr.Len() > 0 && !r.wasIH {
-			r.cutoffKeysStorage(0)
+			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
 			if r.wasStorage || r.wasIHStorage {
 				if err := r.genStructStorage(); err != nil {
 					return err
+				}
+				if len(r.groups) >= 2*common.HashLength {
+					r.groups = r.groups[:2*common.HashLength-1]
+				}
+				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+					r.groups = r.groups[:len(r.groups)-1]
+				}
+				if len(r.branches) >= 2*common.HashLength {
+					r.branches = r.branches[:2*common.HashLength-1]
+				}
+				for len(r.branches) > 0 && r.branches[len(r.branches)-1] == 0 {
+					r.branches = r.branches[:len(r.branches)-1]
 				}
 				r.currStorage.Reset()
 				r.succStorage.Reset()
@@ -878,6 +892,18 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				if err := r.genStructStorage(); err != nil {
 					return err
 				}
+				if len(r.groups) >= 2*common.HashLength {
+					r.groups = r.groups[:2*common.HashLength-1]
+				}
+				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+					r.groups = r.groups[:len(r.groups)-1]
+				}
+				if len(r.branches) >= 2*common.HashLength {
+					r.branches = r.branches[:2*common.HashLength-1]
+				}
+				for len(r.branches) > 0 && r.branches[len(r.branches)-1] == 0 {
+					r.branches = r.branches[:len(r.branches)-1]
+				}
 				r.currStorage.Reset()
 				r.succStorage.Reset()
 				r.wasIHStorage, r.wasStorage = false, false
@@ -896,7 +922,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 			r.root = EmptyRoot
 		}
 		r.groups = r.groups[:0]
-		r.branchSet = r.branchSet[:0]
+		r.branches = r.branches[:0]
 		r.groupsStorage = r.groupsStorage[:0]
 		r.branchSetStorage = r.branchSetStorage[:0]
 		r.hb.Reset()
@@ -924,6 +950,8 @@ func (r *RootHashAggregator) advanceKeysStorage(k []byte, terminator bool) {
 	r.currStorage.Write(r.succStorage.Bytes())
 	r.succStorage.Reset()
 	// Transform k to nibbles, but skip the incarnation part in the middle
+	hexutil.DecompressNibbles(r.currAccK, &r.currAccKNibbles)
+	r.succStorage.Write(r.currAccKNibbles)
 	r.succStorage.Write(k)
 	if terminator {
 		r.succStorage.WriteByte(16)
@@ -934,10 +962,10 @@ func (r *RootHashAggregator) cutoffKeysStorage(cutoff int) {
 	r.currStorage.Reset()
 	r.currStorage.Write(r.succStorage.Bytes())
 	r.succStorage.Reset()
-	//if r.currStorage.Len() > 0 {
-	//	r.succStorage.Write(r.currStorage.Bytes()[:cutoff-1])
-	//	r.succStorage.WriteByte(r.currStorage.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
-	//}
+	if r.currStorage.Len() > 0 {
+		r.succStorage.Write(r.currStorage.Bytes()[:cutoff-1])
+		r.succStorage.WriteByte(r.currStorage.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
+	}
 }
 
 func (r *RootHashAggregator) genStructStorage() error {
@@ -1016,7 +1044,7 @@ func (r *RootHashAggregator) genStructAccount() error {
 	r.currStorage.Reset()
 	r.succStorage.Reset()
 	var err error
-	if r.groups, r.branchSet, err = GenStructStep(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, r.hc, data, r.groups, r.branchSet, r.trace); err != nil {
+	if r.groups, r.branches, err = GenStructStep(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, r.hc, data, r.groups, r.branches, r.trace); err != nil {
 		return err
 	}
 	r.accData.FieldSet = 0

@@ -107,6 +107,7 @@ func GenStructStep(
 	branches []uint16,
 	trace bool,
 ) ([]uint16, []uint16, error) {
+	fmt.Printf(":: %x,%x\n", curr, succ)
 	for precLen, buildExtensions := calcPrecLen(groups), false; precLen >= 0; precLen, buildExtensions = calcPrecLen(groups), true {
 		var precExists = len(groups) > 0
 		// Calculate the prefix of the smallest prefix group containing curr
@@ -208,7 +209,7 @@ func GenStructStep(
 			}
 
 			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("06")) {
-			if maxLen <= 3 {
+			if maxLen <= 2 {
 				//e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
 			}
 			//}
@@ -243,7 +244,7 @@ func GenStructStep(
 				}
 			}
 			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("06")) {
-			if maxLen <= 3 {
+			if maxLen <= 2 {
 				//fmt.Printf("--- %x, %x\n", curr[:maxLen], e.topHash())
 			}
 			//}
