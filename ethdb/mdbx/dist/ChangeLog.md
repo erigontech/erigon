@@ -6,16 +6,17 @@ ChangeLog
 TODO:
  - Engage new terminology (https://github.com/erthink/libmdbx/issues/137).
  - Rework/speedup the implementation of the dirty page list (lazy compactification, lazy sorting via merge).
- - Resolve few TODOs (https://github.com/erthink/libmdbx/issues/123, https://github.com/erthink/libmdbx/issues/124,
-   https://github.com/erthink/libmdbx/issues/127, https://github.com/erthink/libmdbx/issues/128,
+ - Resolve few TODOs (https://github.com/erthink/libmdbx/issues/124, https://github.com/erthink/libmdbx/issues/127,
    https://github.com/erthink/libmdbx/issues/132, https://github.com/erthink/libmdbx/issues/115).
  - Finalize C++ API (few typos and trivia bugs are still likely for now).
- - Packages for ROSA Linux, ALT Linux, Fedora/RHEL, Debian/Ubuntu.
+ - Packages for [ROSA Linux](https://www.rosalinux.ru/), [ALT Linux](https://www.altlinux.org/), Fedora/RHEL, Debian/Ubuntu.
 
 Acknowledgements:
 
- - Mahlon E. Smith (http://www.martini.nu/) for FreeBSD port of libmdbx.
- - 장세연 (http://www.castis.com) for bug fixing and PR.
+ - [Mahlon E. Smith](http://www.martini.nu/) for [FreeBSD port of libmdbx](https://svnweb.freebsd.org/ports/head/databases/mdbx/).
+ - [장세연](http://www.castis.com) for bug fixing and PR.
+ - [Clément Renault](https://github.com/Kerollmops/heed) for [Heed](https://github.com/Kerollmops/heed) fully typed Rust wrapper.
+ - [Alex Sharov](https://github.com/AskAlexSharov) for bug reporting.
 
 Removed options and features:
 

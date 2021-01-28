@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 42676fc08f8359c9f51f65ae02db3a7476e55040d811f772befcc70d2daedb8e_v0_9_2_122_g943bb552
+#define MDBX_BUILD_SOURCERY 130114f342a63c4cfc5eb14be01384813a1afb79104be27534b759ce3baa60a0_v0_9_2_128_g0a2f2e28
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -6070,7 +6070,7 @@ static int __must_check_result mdbx_txl_append(MDBX_TXL *ptl, txnid_t id) {
 /*----------------------------------------------------------------------------*/
 
 static __always_inline size_t dpl2bytes(const ptrdiff_t size) {
-  assert(size > 2 && size <= MDBX_PGL_LIMIT);
+  assert(size > 2 && (size_t)size <= MDBX_PGL_LIMIT);
   size_t bytes = ceil_powerof2(MDBX_ASSUME_MALLOC_OVERHEAD + sizeof(MDBX_dpl) +
                                    (size + 2) * sizeof(MDBX_dp),
                                MDBX_PNL_GRANULATE * sizeof(void *) * 2) -
@@ -12568,10 +12568,12 @@ static __cold int mdbx_read_header(MDBX_env *env, MDBX_meta *dest,
       continue;
 
     if ((env->me_stuck_meta < 0)
-            ? mdbx_meta_ot(prefer_steady, env, dest, meta)
+            ? mdbx_meta_ot(meta_bootid_match(meta) ? prefer_last
+                                                   : prefer_steady,
+                           env, dest, meta)
             : (meta_number == (unsigned)env->me_stuck_meta)) {
       *dest = *meta;
-      if (!META_IS_STEADY(dest))
+      if (!lck_exclusive && !META_IS_STEADY(dest))
         loop_limit += 1; /* LY: should re-read to hush race with update */
       mdbx_verbose("latch meta[%u]", meta_number);
     }
@@ -13674,7 +13676,7 @@ static __cold int mdbx_setup_dxb(MDBX_env *env, const int lck_rc) {
       break;
 
     if (lck_rc == /* lck exclusive */ MDBX_RESULT_TRUE) {
-      mdbx_assert(env, META_IS_STEADY(&meta) && !META_IS_STEADY(head));
+      mdbx_assert(env, META_IS_STEADY(steady) && !META_IS_STEADY(head));
       if (meta_bootid_match(head)) {
         MDBX_meta clone = *head;
         uint64_t filesize = env->me_dbgeo.now;
@@ -26439,9 +26441,9 @@ __dll_export
         0,
         9,
         2,
-        122,
-        {"2021-01-26T10:28:39+03:00", "a9efa003c7b9252b5517d98a947dc96e2b4f04cd", "943bb552a25f7f7c6cc16db5774bd170ff001a13",
-         "v0.9.2-122-g943bb552"},
+        128,
+        {"2021-01-27T19:23:07+03:00", "fcaaed8ba217c0781f728117dbd73735ceef278d", "0a2f2e28b48b464b482ab12d9d6dc5a6c4757688",
+         "v0.9.2-128-g0a2f2e28"},
         sourcery};
 
 __dll_export
