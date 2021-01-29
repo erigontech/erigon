@@ -775,11 +775,12 @@ func (c *IHCursor) _seek(seek []byte) (k, v []byte, err error) {
 		return k, v, nil
 	}
 
-	_, _, _ = c.c.Next() // hack to hide another existing bug
+	//_, _, _ = c.c.Prev() // hack to hide another existing bug
 	err = c.cForDelete.Delete(kCopy, vCopy)
 	if err != nil {
 		return []byte{}, nil, err
 	}
+	//_, _, _ = c.c.Next() // hack to hide another existing bug
 
 	return c._next()
 }
@@ -804,10 +805,12 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return k, v, nil
 		}
 
-		err = c.c.DeleteCurrent()
+		//_, _, _ = c.c.Prev() // hack to hide another existing bug
+		err = c.cForDelete.DeleteCurrent()
 		if err != nil {
 			return []byte{}, nil, err
 		}
+		//_, _, _ = c.c.Next() // hack to hide another existing bug
 
 		k, v, err = c.c.Next()
 		if err != nil {
