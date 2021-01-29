@@ -795,6 +795,7 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			return nil, nil, nil
 		}
 
+		kCopy, vCopy := common.CopyBytes(k), common.CopyBytes(v)
 		if len(v) > common.HashLength {
 			keyPart := len(v) - common.HashLength
 			k = append(k, v[:keyPart]...)
@@ -806,7 +807,7 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 		}
 
 		//_, _, _ = c.c.Prev() // hack to hide another existing bug
-		err = c.cForDelete.DeleteCurrent()
+		err = c.cForDelete.Delete(kCopy, vCopy)
 		if err != nil {
 			return []byte{}, nil, err
 		}
