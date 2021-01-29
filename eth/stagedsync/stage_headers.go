@@ -261,10 +261,13 @@ Error: %v
 	if _, err := batch.Commit(); err != nil {
 		return false, false, 0, fmt.Errorf("%s: write header markers into disk: %w", logPrefix, err)
 	}
+
 	// Report some public statistics so the user has a clue what's going on
+	since := time.Since(start)
 	ctx := []interface{}{
-		"count", len(headers), "elapsed", common.PrettyDuration(time.Since(start)),
+		"count", len(headers), "elapsed", common.PrettyDuration(since),
 		"number", lastHeader.Number, "hash", lastHeader.Hash(),
+		"blk", float64(len(headers)) / float64(since.Microseconds()),
 	}
 	if timestamp := time.Unix(int64(lastHeader.Time), 0); time.Since(timestamp) > time.Minute {
 		ctx = append(ctx, []interface{}{"age", common.PrettyAge(timestamp)}...)
@@ -286,16 +289,12 @@ func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*typ
 		return nil
 	}
 
-	requests := make(chan consensus.VerifyHeaderRequest, 1)
-	id := rand.Uint64()
-	requests <- consensus.VerifyHeaderRequest{id, headers, seals, nil}
+	engine.HeaderVerification() <- consensus.VerifyHeaderRequest{rand.Uint64(), headers, seals, nil}
 
 	reqResponses := make(map[common.Hash]struct{}, len(headers))
 
 	for {
 		select {
-		case req := <-requests:
-			engine.HeaderVerification() <- req
 		case result := <-engine.VerifyResults():
 			if result.Err != nil {
 				return result.Err

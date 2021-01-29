@@ -60,7 +60,7 @@ type API struct {
 	HeadersRequests       chan HeadersRequest
 	HeaderResponses       chan HeaderResponse
 
-	VerifiedBlocks   *lru.Cache // common.Hash->*types.Header
+	VerifiedBlocks   *lru.Cache // blockNumber->*types.Header
 	VerifiedBlocksMu sync.RWMutex
 
 	ProcessingRequests   map[uint64]map[uint64]*VerifyRequest // reqID->blockNumber->VerifyRequest
