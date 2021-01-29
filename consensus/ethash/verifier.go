@@ -14,10 +14,6 @@ func (ethash *Ethash) Verify(chain consensus.ChainHeaderReader, header *types.He
 	return ethash.verifyHeader(chain, header, parents[len(parents)-1], uncle, seal)
 }
 
-func (ethash *Ethash) NeededForVerification(h *types.Header) int {
-	const prev = 1
-	if h.Number.Uint64() < prev {
-		return int(h.Number.Uint64())
-	}
-	return prev
+func (ethash *Ethash) AncestorsNeededForVerification(_ *types.Header) int {
+	return 1
 }

@@ -303,7 +303,7 @@ func (c *Consensus) HeaderVerification() chan<- consensus.VerifyHeaderRequest {
 }
 
 func (c *Consensus) requestParentHeaders(reqID uint64, header *types.Header, reqHeaders []*types.Header) ([]*types.Header, int, *consensus.HeadersRequest) {
-	parentsToValidate := c.Server.NeededForVerification(header)
+	parentsToValidate := c.Server.AncestorsNeededForVerification(header)
 	if parentsToValidate == 0 {
 		return nil, 0, nil
 	}

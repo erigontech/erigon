@@ -26,7 +26,7 @@ func (c *Verifier) Verify(chain consensus.ChainHeaderReader, header *types.Heade
 	return c.verifyHeader(header, parents, chain.Config())
 }
 
-func (c *Verifier) NeededForVerification(header *types.Header) int {
+func (c *Verifier) AncestorsNeededForVerification(header *types.Header) int {
 	return c.findPrevCheckpoint(header.Number.Uint64())
 }
 

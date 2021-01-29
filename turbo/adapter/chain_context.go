@@ -74,7 +74,7 @@ func (c *powEngine) Verify(chain consensus.ChainHeaderReader, header *types.Head
 	panic("must not be called")
 }
 
-func (c *powEngine) NeededForVerification(header *types.Header) int {
+func (c *powEngine) AncestorsNeededForVerification(header *types.Header) int {
 	panic("must not be called")
 }
 

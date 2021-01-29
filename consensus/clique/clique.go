@@ -784,6 +784,6 @@ func (c *Clique) Verify(chain consensus.ChainHeaderReader, header *types.Header,
 	panic("should not be used")
 }
 
-func (c *Clique) NeededForVerification(header *types.Header) int {
+func (c *Clique) AncestorsNeededForVerification(header *types.Header) int {
 	panic("should not be used")
 }
