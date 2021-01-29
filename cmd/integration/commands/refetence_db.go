@@ -9,12 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
@@ -362,12 +360,8 @@ MainLoop:
 func toMdbx(ctx context.Context, from, to string) error {
 	_ = os.RemoveAll(to)
 
-	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint {
-		return (flags | lmdb.Readonly) ^ lmdb.NoReadahead
-	}).MustOpen()
-	dst := ethdb.NewMDBX().Path(to).Flags(func(flags uint) uint {
-		return flags | mdbx.WriteMap
-	}).MustOpen()
+	src := ethdb.NewLMDB().Path(from).MustOpen()
+	dst := ethdb.NewMDBX().Path(to).MustOpen()
 
 	srcTx, err1 := src.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
@@ -382,7 +376,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		dstTx.Rollback()
 	}()
 
-	commitEvery, i := 10_000, 0
+	commitEvery, i := 100_000, 0
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -421,13 +415,12 @@ func toMdbx(ctx context.Context, from, to string) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-logEvery.C:
-				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
 			default:
 			}
 
 			i++
 			if i > commitEvery {
+				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
 				if err2 := dstTx.Commit(ctx); err2 != nil {
 					return err2
 				}
@@ -436,6 +429,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 					return err
 				}
 				c = dstTx.Cursor(name)
+				i = 0
 			}
 		}
 		prevK = nil
