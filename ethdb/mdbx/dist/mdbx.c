@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 130114f342a63c4cfc5eb14be01384813a1afb79104be27534b759ce3baa60a0_v0_9_2_128_g0a2f2e28
+#define MDBX_BUILD_SOURCERY 6f0ebcf76f311316a7602a77998fe37ae743876905acd50625bc4b81b1b730b1_v0_9_2_130_g9c9f6faf
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -12656,6 +12656,18 @@ static MDBX_meta *__cold mdbx_init_metas(const MDBX_env *env, void *buffer) {
   return page_meta(page2);
 }
 
+static size_t mdbx_madvise_threshold(const MDBX_env *env,
+                                     const size_t largest_bytes) {
+  /* TODO: use options */
+  const unsigned factor = 9;
+  const size_t threshold = (largest_bytes < (65536ul << factor))
+                               ? 65536 /* minimal threshold */
+                               : (largest_bytes > (MEGABYTE * 4 << factor))
+                                     ? MEGABYTE * 4 /* maximal threshold */
+                                     : largest_bytes >> factor;
+  return bytes_align2os_bytes(env, threshold);
+}
+
 static int mdbx_sync_locked(MDBX_env *env, unsigned flags,
                             MDBX_meta *const pending) {
   mdbx_assert(env, ((env->me_flags ^ flags) & MDBX_WRITEMAP) == 0);
@@ -12701,11 +12713,7 @@ static int mdbx_sync_locked(MDBX_env *env, unsigned flags,
 #if defined(MADV_DONTNEED)
     const size_t largest_bytes = pgno2bytes(env, largest_pgno);
     /* threshold to avoid unreasonable frequent madvise() calls */
-    const size_t madvise_threshold = (largest_bytes < 65536 * 256)
-                                         ? 65536
-                                         : (largest_bytes > MEGABYTE * 4 * 256)
-                                               ? MEGABYTE * 4
-                                               : largest_bytes >> 10;
+    const size_t madvise_threshold = mdbx_madvise_threshold(env, largest_bytes);
     const size_t discard_edge_bytes = bytes_align2os_bytes(
         env, ((MDBX_RDONLY &
                (env->me_lck ? env->me_lck->mti_envmode : env->me_flags))
@@ -26441,9 +26449,9 @@ __dll_export
         0,
         9,
         2,
-        128,
-        {"2021-01-27T19:23:07+03:00", "fcaaed8ba217c0781f728117dbd73735ceef278d", "0a2f2e28b48b464b482ab12d9d6dc5a6c4757688",
-         "v0.9.2-128-g0a2f2e28"},
+        130,
+        {"2021-01-29T04:58:32+03:00", "e32b531a40140ccc726c28a3709f0871eb18d8b3", "9c9f6faf38dba1ba37cb83f3013c65c86691674e",
+         "v0.9.2-130-g9c9f6faf"},
         sourcery};
 
 __dll_export
