@@ -114,7 +114,6 @@ var (
 	HeaderTDSuffix     = []byte("t") // block_num_u64 + hash + headerTDSuffix -> td
 	HeaderHashSuffix   = []byte("n") // block_num_u64 + headerHashSuffix -> hash
 	HeaderNumberPrefix = "H"         // headerNumberPrefix + hash -> num (uint64 big endian)
-	HeaderHashPrefix   = "N"         // HeaderHashPrefix + num (uint64 big endian) -> hash
 
 	BlockBodyPrefix     = "b"      // block_num_u64 + hash -> block body
 	EthTx               = "eth_tx" // tbl_sequence_u64 -> rlp(tx)
@@ -229,7 +228,6 @@ var Buckets = []string{
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
 	CliqueBucket,
-	HeaderHashPrefix,
 	SyncStageProgress,
 	SyncStageUnwind,
 	PlainStateBucket,
