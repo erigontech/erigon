@@ -267,7 +267,7 @@ Error: %v
 	ctx := []interface{}{
 		"count", len(headers), "elapsed", common.PrettyDuration(since),
 		"number", lastHeader.Number, "hash", lastHeader.Hash(),
-		"blk", float64(len(headers)) / float64(since.Microseconds()),
+		"blk/sec", float64(len(headers)) / float64(since.Seconds()),
 	}
 	if timestamp := time.Unix(int64(lastHeader.Time), 0); time.Since(timestamp) > time.Minute {
 		ctx = append(ctx, []interface{}{"age", common.PrettyAge(timestamp)}...)
