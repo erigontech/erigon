@@ -418,14 +418,14 @@ func toMdbx(ctx context.Context, from, to string) error {
 				}
 			}
 
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
 			i++
 			if i > commitEvery {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+
 				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
 				if err2 := dstTx.Commit(ctx); err2 != nil {
 					return err2
