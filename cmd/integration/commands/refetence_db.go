@@ -379,7 +379,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		dstTx.Rollback()
 	}()
 
-	commitEvery, i := 1_000_000, 0
+	commitEvery, i := 10_000_000, 0
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -440,14 +440,14 @@ func toMdbx(ctx context.Context, from, to string) error {
 		prevK = nil
 
 		// migrate bucket sequences to native mdbx implementation
-		currentID, err := srcTx.Sequence(name, 0)
-		if err != nil {
-			return err
-		}
-		_, err = dstTx.Sequence(name, currentID)
-		if err != nil {
-			return err
-		}
+		//currentID, err := srcTx.Sequence(name, 0)
+		//if err != nil {
+		//	return err
+		//}
+		//_, err = dstTx.Sequence(name, currentID)
+		//if err != nil {
+		//	return err
+		//}
 	}
 	err := dstTx.Commit(context.Background())
 	if err != nil {
