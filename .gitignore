@@ -57,5 +57,3 @@ __pycache__
 docker-compose.dev.yml
 /build
 *.tmp
-
-semantics/
