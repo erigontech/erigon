@@ -432,6 +432,8 @@ func toMdbx(ctx context.Context, from, to string) error {
 					return err
 				}
 				c = dstTx.Cursor(name)
+				casted, isDupsort = c.(ethdb.CursorDupSort)
+
 				i = 0
 			}
 		}
