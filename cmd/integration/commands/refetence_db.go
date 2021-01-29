@@ -401,17 +401,17 @@ func toMdbx(ctx context.Context, from, to string) error {
 			if isDupsort {
 				if bytes.Equal(k, prevK) {
 					if err = casted.AppendDup(k, v); err != nil {
-						return err
+						panic(err)
 					}
 				} else {
 					if err = casted.Append(k, v); err != nil {
-						return err
+						panic(err)
 					}
 				}
 				prevK = k
 			} else {
 				if err = c.Append(k, v); err != nil {
-					return err
+					panic(err)
 				}
 			}
 
