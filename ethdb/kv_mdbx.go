@@ -548,7 +548,7 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 			if mdbx.IsNotFound(err) {
 				return nil // DBI doesn't exists means no drop needed
 			}
-			return fmt.Errorf("bucket: %s, %w\n", name, err)
+			return fmt.Errorf("bucket: %s, %w", name, err)
 		}
 		dbi = dbutils.DBI(nativeDBI)
 	}
@@ -638,7 +638,6 @@ func (tx *MdbxTx) closeCursors() {
 			c.Close()
 		}
 	}
-	//fmt.Printf("close all cursors: %p, %d\n", tx.db.env, len(tx.cursors))
 	tx.cursors = []*mdbx.Cursor{}
 }
 
@@ -821,7 +820,6 @@ func (c *MdbxCursor) initCursor() error {
 		tx.cursors = make([]*mdbx.Cursor, 0, 1)
 	}
 	tx.cursors = append(tx.cursors, c.c)
-	//fmt.Printf("open cursor: %p,%p, %s, %d\n", c.tx.db.env, c.tx, c.bucketName, len(tx.cursors))
 	return nil
 }
 
