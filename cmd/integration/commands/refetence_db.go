@@ -379,9 +379,8 @@ func toMdbx(ctx context.Context, from, to string) error {
 		dstTx.Rollback()
 	}()
 
-	commitEvery, i := 10_000_000, 0
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
+	commitEvery := time.NewTicker(30 * time.Second)
+	defer commitEvery.Stop()
 
 	for name, b := range src.AllBuckets() {
 		if b.IsDeprecated {
@@ -415,14 +414,10 @@ func toMdbx(ctx context.Context, from, to string) error {
 				}
 			}
 
-			i++
-			if i > commitEvery {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
-
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-commitEvery.C:
 				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
 				if err2 := dstTx.Commit(ctx); err2 != nil {
 					return err2
@@ -433,8 +428,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 				}
 				c = dstTx.Cursor(name)
 				casted, isDupsort = c.(ethdb.CursorDupSort)
-
-				i = 0
+			default:
 			}
 		}
 		prevK = nil
