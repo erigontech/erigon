@@ -2852,6 +2852,12 @@ LIBMDBX_INLINE_API(int, mdbx_env_get_maxdbs,
   return rc;
 }
 
+/** \brief Returns the default size of database page for the current system.
+ * \ingroup c_statinfo
+ * \details Default size of database page depends on the size of the system
+ * page and usually exactly match it. */
+MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API size_t mdbx_default_pagesize(void);
+
 /** \brief Get the maximum size of keys can write.
  * \ingroup c_statinfo
  *

@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define MDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 6f0ebcf76f311316a7602a77998fe37ae743876905acd50625bc4b81b1b730b1_v0_9_2_130_g9c9f6faf
+#define MDBX_BUILD_SOURCERY 01720592986717cd5eb5bfe81501f62f4ae1070510e2eb48ceda36cbe6fb1ddf_v0_9_2_135_gbc33875a
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -2251,7 +2251,7 @@ typedef struct MDBX_lockinfo {
 #if MDBX_WORDBITS >= 64
 #define MAX_MAPSIZE MAX_MAPSIZE64
 #define MDBX_READERS_LIMIT                                                     \
-  ((65536 - sizeof(MDBX_lockinfo)) / sizeof(MDBX_reader))
+  ((MAX_PAGESIZE - sizeof(MDBX_lockinfo)) / sizeof(MDBX_reader))
 #define MDBX_PGL_LIMIT MAX_PAGENO
 #else
 #define MDBX_READERS_LIMIT 1024
@@ -3389,10 +3389,18 @@ __cold int mdbx_env_get_maxkeysize_ex(const MDBX_env *env,
   return (int)mdbx_limits_keysize_max((intptr_t)env->me_psize, flags);
 }
 
+size_t mdbx_default_pagesize(void) {
+  size_t pagesize = mdbx_syspagesize();
+  mdbx_ensure(nullptr, is_powerof2(pagesize));
+  pagesize = (pagesize >= MIN_PAGESIZE) ? pagesize : MIN_PAGESIZE;
+  pagesize = (pagesize <= MAX_PAGESIZE) ? pagesize : MAX_PAGESIZE;
+  return pagesize;
+}
+
 __cold intptr_t mdbx_limits_keysize_max(intptr_t pagesize,
                                         MDBX_db_flags_t flags) {
   if (pagesize < 1)
-    pagesize = (intptr_t)mdbx_syspagesize();
+    pagesize = (intptr_t)mdbx_default_pagesize();
   if (unlikely(pagesize < (intptr_t)MIN_PAGESIZE ||
                pagesize > (intptr_t)MAX_PAGESIZE ||
                !is_powerof2((size_t)pagesize)))
@@ -3426,7 +3434,7 @@ __cold int mdbx_env_get_maxvalsize_ex(const MDBX_env *env,
 __cold intptr_t mdbx_limits_valsize_max(intptr_t pagesize,
                                         MDBX_db_flags_t flags) {
   if (pagesize < 1)
-    pagesize = (intptr_t)mdbx_syspagesize();
+    pagesize = (intptr_t)mdbx_default_pagesize();
   if (unlikely(pagesize < (intptr_t)MIN_PAGESIZE ||
                pagesize > (intptr_t)MAX_PAGESIZE ||
                !is_powerof2((size_t)pagesize)))
@@ -13047,7 +13055,8 @@ __cold int mdbx_env_create(MDBX_env **penv) {
     goto bailout;
   }
   env->me_os_psize = (unsigned)os_psize;
-  mdbx_setup_pagesize(env, env->me_os_psize);
+  mdbx_setup_pagesize(env, (env->me_os_psize < MAX_PAGESIZE) ? env->me_os_psize
+                                                             : MAX_PAGESIZE);
 
   rc = mdbx_fastmutex_init(&env->me_dbi_lock);
   if (unlikely(rc != MDBX_SUCCESS))
@@ -14012,12 +14021,14 @@ static __cold int mdbx_setup_lck(MDBX_env *env, char *lck_pathname,
 
   const size_t maxreaders =
       ((size_t)size - sizeof(MDBX_lockinfo)) / sizeof(MDBX_reader);
-  if (size > 65536 || maxreaders < 2 || maxreaders > MDBX_READERS_LIMIT) {
-    mdbx_error("lck-size too big (up to %" PRIuPTR " readers)", maxreaders);
+  if (maxreaders < 4) {
+    mdbx_error("lck-size too small (up to %" PRIuPTR " readers)", maxreaders);
     err = MDBX_PROBLEM;
     goto bailout;
   }
-  env->me_maxreaders = (unsigned)maxreaders;
+  env->me_maxreaders = (maxreaders <= MDBX_READERS_LIMIT)
+                           ? (unsigned)maxreaders
+                           : (unsigned)MDBX_READERS_LIMIT;
 
   err = mdbx_mmap((env->me_flags & MDBX_EXCLUSIVE) | MDBX_WRITEMAP,
                   &env->me_lck_mmap, (size_t)size, (size_t)size,
@@ -14431,7 +14442,8 @@ __cold int mdbx_env_delete(const char *pathname, MDBX_env_delete_mode_t mode) {
   memset(&dummy_env, 0, sizeof(dummy_env));
   dummy_env.me_flags =
       (mode == MDBX_ENV_ENSURE_UNUSED) ? MDBX_EXCLUSIVE : MDBX_ENV_DEFAULTS;
-  dummy_env.me_psize = dummy_env.me_os_psize = (unsigned)mdbx_syspagesize();
+  dummy_env.me_os_psize = (unsigned)mdbx_syspagesize();
+  dummy_env.me_psize = (unsigned)mdbx_default_pagesize();
   dummy_env.me_pathname = (char *)pathname;
 
   MDBX_handle_env_pathname env_pathname;
@@ -23162,7 +23174,7 @@ __cold MDBX_NOTHROW_CONST_FUNCTION intptr_t mdbx_limits_pgsize_max(void) {
 
 __cold intptr_t mdbx_limits_dbsize_min(intptr_t pagesize) {
   if (pagesize < 1)
-    pagesize = (intptr_t)mdbx_syspagesize();
+    pagesize = (intptr_t)mdbx_default_pagesize();
   else if (unlikely(pagesize < (intptr_t)MIN_PAGESIZE ||
                     pagesize > (intptr_t)MAX_PAGESIZE ||
                     !is_powerof2((size_t)pagesize)))
@@ -23173,7 +23185,7 @@ __cold intptr_t mdbx_limits_dbsize_min(intptr_t pagesize) {
 
 __cold intptr_t mdbx_limits_dbsize_max(intptr_t pagesize) {
   if (pagesize < 1)
-    pagesize = (intptr_t)mdbx_syspagesize();
+    pagesize = (intptr_t)mdbx_default_pagesize();
   else if (unlikely(pagesize < (intptr_t)MIN_PAGESIZE ||
                     pagesize > (intptr_t)MAX_PAGESIZE ||
                     !is_powerof2((size_t)pagesize)))
@@ -23187,7 +23199,7 @@ __cold intptr_t mdbx_limits_dbsize_max(intptr_t pagesize) {
 
 __cold intptr_t mdbx_limits_txnsize_max(intptr_t pagesize) {
   if (pagesize < 1)
-    pagesize = (intptr_t)mdbx_syspagesize();
+    pagesize = (intptr_t)mdbx_default_pagesize();
   else if (unlikely(pagesize < (intptr_t)MIN_PAGESIZE ||
                     pagesize > (intptr_t)MAX_PAGESIZE ||
                     !is_powerof2((size_t)pagesize)))
@@ -23609,7 +23621,7 @@ __cold int mdbx_env_get_option(const MDBX_env *env, const MDBX_option_t option,
   case MDBX_opt_sync_bytes:
     if (unlikely(!env->me_autosync_threshold))
       return MDBX_EPERM;
-    *value = *env->me_autosync_threshold;
+    *value = pgno2bytes(env, *env->me_autosync_threshold);
     break;
 
   case MDBX_opt_sync_period:
@@ -26449,9 +26461,9 @@ __dll_export
         0,
         9,
         2,
-        130,
-        {"2021-01-29T04:58:32+03:00", "e32b531a40140ccc726c28a3709f0871eb18d8b3", "9c9f6faf38dba1ba37cb83f3013c65c86691674e",
-         "v0.9.2-130-g9c9f6faf"},
+        135,
+        {"2021-01-30T02:28:04+03:00", "228c18d5ec227c94623088bf57d4fabef5e8f221", "bc33875a9ef35dc25a80e826c8e1483343e52b33",
+         "v0.9.2-135-gbc33875a"},
         sourcery};
 
 __dll_export
