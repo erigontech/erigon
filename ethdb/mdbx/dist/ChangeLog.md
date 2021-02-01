@@ -5,9 +5,8 @@ ChangeLog
 
 TODO:
  - Engage new terminology (https://github.com/erthink/libmdbx/issues/137).
- - Rework/speedup the implementation of the dirty page list (lazy compactification, lazy sorting via merge).
  - Resolve few TODOs (https://github.com/erthink/libmdbx/issues/124, https://github.com/erthink/libmdbx/issues/127,
-   https://github.com/erthink/libmdbx/issues/132, https://github.com/erthink/libmdbx/issues/115).
+   https://github.com/erthink/libmdbx/issues/115).
  - Finalize C++ API (few typos and trivia bugs are still likely for now).
  - Packages for [ROSA Linux](https://www.rosalinux.ru/), [ALT Linux](https://www.altlinux.org/), Fedora/RHEL, Debian/Ubuntu.
 
@@ -48,6 +47,8 @@ New features:
     - more effective refunding/compactification especially for the loosed page cache.
  - Added `MDBX_ENABLE_REFUND` and `MDBX_PNL_ASCENDING` internal/advanced build options.
  - Added `mdbx_default_pagesize()` function.
+ - Better support architectures with a weak/relaxed memory consistency model (ARM, AARCH64, PPC, MIPS, RISC-V, etc) by means [C11 atomics](https://en.cppreference.com/w/c/atomic).
+ - Speed up page number lists and dirty page lists (https://github.com/erthink/libmdbx/issues/132).
 
 Fixes:
 
