@@ -27,7 +27,6 @@ type BodyDownload struct {
 	requestHigh      uint64
 	lowWaitUntil     uint64 // Time to wait for before starting the next round request from requestedLow
 	outstandingLimit uint64 // Limit of number of outstanding blocks for body requests
-	blockChannel     chan *types.Block
 	peerMap          map[string]int
 }
 

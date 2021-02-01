@@ -51,13 +51,11 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	defer logEvery.Stop()
 	var prevDeliveredCount float64 = 0
 	var prevWastedCount float64 = 0
-	var count int
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var blockNum uint64
 	var req *BodyRequest
 	var peer []byte
 	for {
-		count := 0
 		penaltyPeers := bd.GetPenaltyPeers()
 		for _, penaltyPeer := range penaltyPeers {
 			penalise(ctx, penaltyPeer)
@@ -74,14 +72,12 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 			currentTime := uint64(time.Now().Unix())
 			bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			log.Info(fmt.Sprintf("Generated request for %d bodies [%d-%d] sent to %s", len(req.BlockNums), req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1], peer))
-			count++
 			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
 			peer = nil
 			if req != nil {
 				peer = bodyReqSend(ctx, req)
 			}
 		}
-		//fmt.Printf("Sent %d body requests\n", count)
 		d := bd.GetDeliveries()
 		for _, block := range d {
 			if err = rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body()); err != nil {
@@ -105,7 +101,6 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 					}
 				}
 			}
-			count++
 		}
 		log.Info("Body progress", "block number", bodyProgress, "header progress", headerProgress)
 		if bodyProgress == headerProgress {
@@ -136,7 +131,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 			return err
 		}
 	}
-	log.Info("Processed", "block bodies", count, "highest", bodyProgress)
+	log.Info("Processed", "highest", bodyProgress)
 	return nil
 }
 

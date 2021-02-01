@@ -267,9 +267,6 @@ type ControlServerImpl struct {
 	sentryClient         proto_sentry.SentryClient
 	requestWakeUpHeaders chan struct{}
 	requestWakeUpBodies  chan struct{}
-	deliveredBodies      int
-	undeliveredBodies    int
-	unrequestedBodies    int
 }
 
 func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient, window int) (*ControlServerImpl, error) {
@@ -432,11 +429,6 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 	delivered, undelivered := cs.bd.DeliverBodies(request)
 	// Approximate numbers
 	cs.bd.DeliverySize(float64(len(inreq.Data))*float64(delivered)/float64(delivered+undelivered), float64(len(inreq.Data))*float64(undelivered)/float64(delivered+undelivered))
-	cs.deliveredBodies += delivered
-	cs.undeliveredBodies += undelivered
-	if undelivered > 0 {
-		//log.Info(fmt.Sprintf("BlockBodies{delivered=%d, undelivered=%d, totalDelivered=%d, totalUndelivered=%d}", delivered, undelivered, cs.deliveredBodies, cs.undeliveredBodies))
-	}
 	return &empty.Empty{}, nil
 }
 
