@@ -212,9 +212,11 @@ func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
 func (bd *BodyDownload) GetPenaltyPeers() [][]byte {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
-	var peers [][]byte = make([][]byte, len(bd.peerMap))
+	peers := make([][]byte, len(bd.peerMap))
+	i := 0
 	for p := range bd.peerMap {
-		peers = append(peers, []byte(p))
+		peers[i] = []byte(p)
+		i++
 	}
 	return peers
 }
