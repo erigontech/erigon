@@ -72,11 +72,12 @@ _MithrilDB_ is a rightly relevant name.
 <!-- section-end -->
 
 [![https://t.me/libmdbx](https://raw.githubusercontent.com/wiki/erthink/libmdbx/img/telegram.png)](https://t.me/libmdbx)
-[![Build Status](https://travis-ci.org/erthink/libmdbx.svg?branch=master)](https://travis-ci.org/erthink/libmdbx)
-[![Build status](https://ci.appveyor.com/api/projects/status/ue94mlopn50dqiqg/branch/master?svg=true)](https://ci.appveyor.com/project/leo-yuriev/libmdbx/branch/master)
+[![GithubCI](https://github.com/erthink/libmdbx/workflows/CI/badge.svg)](https://github.com/erthink/libmdbx/actions?query=workflow%3ACI)
+[![TravisCI](https://travis-ci.org/erthink/libmdbx.svg?branch=master)](https://travis-ci.org/erthink/libmdbx)
+[![AppveyorCI](https://ci.appveyor.com/api/projects/status/ue94mlopn50dqiqg/branch/master?svg=true)](https://ci.appveyor.com/project/leo-yuriev/libmdbx/branch/master)
 [![CircleCI](https://circleci.com/gh/erthink/libmdbx/tree/master.svg?style=svg)](https://circleci.com/gh/erthink/libmdbx/tree/master)
+[![CirrusCI](https://api.cirrus-ci.com/github/erthink/libmdbx.svg)](https://cirrus-ci.com/github/erthink/libmdbx)
 [![Coverity Scan Status](https://scan.coverity.com/projects/12915/badge.svg)](https://scan.coverity.com/projects/reopen-libmdbx)
-[![Build Status](https://api.cirrus-ci.com/github/erthink/libmdbx.svg)](https://cirrus-ci.com/github/erthink/libmdbx)
 
 *The Future will (be) [Positive](https://www.ptsecurity.com). Всё будет хорошо.*
 
@@ -484,7 +485,7 @@ Bindings
 | Runtime | GitHub | Author |
 | ------- | ------ | ------ |
 | [Nim](https://en.wikipedia.org/wiki/Nim_(programming_language)) | [NimDBX](https://github.com/snej/nimdbx) | [Jens Alfke](https://github.com/snej)
-| Rust    | [mdbx-rs](https://github.com/Kerollmops/mdbx-rs)   | [Clément Renault](https://github.com/Kerollmops) |
+| Rust    | [heed](https://github.com/Kerollmops/heed), [mdbx-rs](https://github.com/Kerollmops/mdbx-rs)   | [Clément Renault](https://github.com/Kerollmops) |
 | Java    | [mdbxjni](https://github.com/castortech/mdbxjni)   | [Castor Technologies](https://castortech.com/) |
 | .NET    | [mdbx.NET](https://github.com/wangjia184/mdbx.NET) | [Jerry Wang](https://github.com/wangjia184) |
 

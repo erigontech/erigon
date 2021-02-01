@@ -195,14 +195,14 @@ func (opts MdbxOpts) Open() (KV, error) {
 				dcmp = tx.GetCmpExcludeSuffix32()
 			}
 
-			dbi, createErr := tx.OpenDBI(name, 0, nil, dcmp)
+			dbi, createErr := tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
 			if createErr != nil {
 				if mdbx.IsNotFound(createErr) {
 					cnfCopy.DBI = NonExistingDBI
 					db.buckets[name] = cnfCopy
 					continue // if deprecated bucket couldn't be open - then it's deleted and it's fine
 				} else {
-					return createErr
+					return fmt.Errorf("bucket: %s, %w", name, createErr)
 				}
 			}
 			cnfCopy.DBI = dbutils.DBI(dbi)
@@ -493,7 +493,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 
 	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
 	if err != nil && !mdbx.IsNotFound(err) {
-		return err
+		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
 	if err == nil {
 		cnfCopy.DBI = dbutils.DBI(dbi)
@@ -530,7 +530,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 
 	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
 	if err != nil {
-		return err
+		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
 	cnfCopy.DBI = dbutils.DBI(dbi)
 
@@ -548,7 +548,7 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 			if mdbx.IsNotFound(err) {
 				return nil // DBI doesn't exists means no drop needed
 			}
-			return err
+			return fmt.Errorf("bucket: %s, %w", name, err)
 		}
 		dbi = dbutils.DBI(nativeDBI)
 	}
@@ -638,7 +638,6 @@ func (tx *MdbxTx) closeCursors() {
 			c.Close()
 		}
 	}
-	//fmt.Printf("close all cursors: %p, %d\n", tx.db.env, len(tx.cursors))
 	tx.cursors = []*mdbx.Cursor{}
 }
 
@@ -821,7 +820,6 @@ func (c *MdbxCursor) initCursor() error {
 		tx.cursors = make([]*mdbx.Cursor, 0, 1)
 	}
 	tx.cursors = append(tx.cursors, c.c)
-	//fmt.Printf("open cursor: %p,%p, %s, %d\n", c.tx.db.env, c.tx, c.bucketName, len(tx.cursors))
 	return nil
 }
 
@@ -1300,10 +1298,16 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 	}
 
 	if b.Flags&mdbx.DupSort != 0 {
-		return c.appendDup(k, v)
+		if err := c.appendDup(k, v); err != nil {
+			return fmt.Errorf("bucket: %s, %w", c.bucketName, err)
+		}
+		return nil
 	}
 
-	return c.append(k, v)
+	if err := c.append(k, v); err != nil {
+		return fmt.Errorf("bucket: %s, %w", c.bucketName, err)
+	}
+	return nil
 }
 
 func (c *MdbxCursor) Close() {
@@ -1521,7 +1525,7 @@ func (c *MdbxDupSortCursor) Append(k []byte, v []byte) error {
 	}
 
 	if err := c.c.Put(k, v, mdbx.Append|mdbx.AppendDup); err != nil {
-		return fmt.Errorf("in Append: %w", err)
+		return fmt.Errorf("in Append: bucket=%s, %w", c.bucketName, err)
 	}
 	return nil
 }
@@ -1534,7 +1538,7 @@ func (c *MdbxDupSortCursor) AppendDup(k []byte, v []byte) error {
 	}
 
 	if err := c.appendDup(k, v); err != nil {
-		return fmt.Errorf("in AppendDup: %w", err)
+		return fmt.Errorf("in AppendDup: bucket=%s, %w", c.bucketName, err)
 	}
 	return nil
 }

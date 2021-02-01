@@ -105,7 +105,6 @@ ethdb/mdbx/dist/mdbx-static.o:
 	echo "Building mdbx"
 	cd ethdb/mdbx/dist/ \
 		&& make clean && make config.h \
-		&& echo '#define MDBX_HUGE_TRANSACTIONS 1' >> config.h \
 		&& echo '#define MDBX_TXN_CHECKOWNER 1' >> config.h \
 		&& echo '#define MDBX_DEBUG 0' >> config.h \
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
