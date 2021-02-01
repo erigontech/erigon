@@ -1,7 +1,7 @@
 ﻿/// \file mdbx.h++
 /// \brief The libmdbx C++ API header file (preliminary).
 ///
-/// \author Copyright (c) 2020, Leonid Yuriev <leo@yuriev.ru>.
+/// \author Copyright (c) 2020-2021, Leonid Yuriev <leo@yuriev.ru>.
 /// \copyright SPDX-License-Identifier: Apache-2.0
 ///
 /// Tested with:
@@ -1838,7 +1838,9 @@ public:
   bool is_empty() const;
 
   /// \brief Returns default page size for current system/platform.
-  static size_t default_pagesize() noexcept;
+  static size_t default_pagesize() noexcept {
+    return ::mdbx_default_pagesize();
+  }
 
   struct limits {
     limits() = delete;

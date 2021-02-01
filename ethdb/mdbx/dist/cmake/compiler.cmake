@@ -1,4 +1,4 @@
-##  Copyright (c) 2012-2020 Leonid Yuriev <leo@yuriev.ru>.
+##  Copyright (c) 2012-2021 Leonid Yuriev <leo@yuriev.ru>.
 ##
 ##  Licensed under the Apache License, Version 2.0 (the "License");
 ##  you may not use this file except in compliance with the License.
@@ -533,7 +533,7 @@ macro(setup_compile_flags)
     add_compile_flags("C;CXX" "-fexceptions")
   endif()
   if(CC_HAS_FCXX_EXCEPTIONS)
-    add_compile_flags("CXX" "-fcxx-exceptions -frtti")
+    add_compile_flags("CXX" "-fcxx-exceptions" "-frtti")
   endif()
   if(MSVC)
     # checks for /EHa or /clr options exists,
@@ -583,13 +583,13 @@ macro(setup_compile_flags)
   endif()
 
   if(CC_HAS_WNO_UNKNOWN_PRAGMAS AND NOT HAVE_OPENMP)
-    add_compile_flags("C;CXX" -Wno-unknown-pragmas)
+    add_compile_flags("C;CXX" "-Wno-unknown-pragmas")
   endif()
 
   if(CC_HAS_SECTIONS)
-    add_compile_flags("C;CXX" -ffunction-sections -fdata-sections)
+    add_compile_flags("C;CXX" "-ffunction-sections" "-fdata-sections")
   elseif(MSVC)
-    add_compile_flags("C;CXX" /Gy)
+    add_compile_flags("C;CXX" "/Gy")
   endif()
 
   # We must set -fno-omit-frame-pointer here, since we rely
@@ -649,11 +649,11 @@ macro(setup_compile_flags)
   endif()
 
   if(ENABLE_ASAN)
-    add_compile_flags("C;CXX" -fsanitize=address)
+    add_compile_flags("C;CXX" "-fsanitize=address")
   endif()
 
   if(ENABLE_UBSAN)
-    add_compile_flags("C;CXX" -fsanitize=undefined)
+    add_compile_flags("C;CXX" "-fsanitize=undefined" "-fsanitize-undefined-trap-on-error")
   endif()
 
   if(ENABLE_GCOV)

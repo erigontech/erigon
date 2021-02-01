@@ -9,10 +9,10 @@
 #cmakedefine ENABLE_GPROF
 #cmakedefine ENABLE_GCOV
 #cmakedefine ENABLE_ASAN
+#cmakedefine ENABLE_UBSAN
 #cmakedefine MDBX_FORCE_ASSERTIONS
 
 /* Common */
-#cmakedefine01 MDBX_HUGE_TRANSACTIONS
 #cmakedefine01 MDBX_TXN_CHECKOWNER
 #cmakedefine MDBX_ENV_CHECKPID_AUTO
 #ifndef MDBX_ENV_CHECKPID_AUTO

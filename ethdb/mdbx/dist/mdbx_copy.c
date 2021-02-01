@@ -1,7 +1,7 @@
 /* mdbx_copy.c - memory-mapped database backup tool */
 
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -22,7 +22,7 @@
 
 #define MDBX_TOOLS /* Avoid using internal mdbx_assert() */
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -34,7 +34,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY c1093570bfda5167ead9bb41f20b8282177e878ac3b4469758458fe5994a1c60_v0_9_2_14_g166ed1c7
+#define MDBX_BUILD_SOURCERY 7d4b5d74d280f883c36723899452b5cddce0f39138800e0f95dc5059668f05bb_v0_9_2_146_g2b290e08
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -126,7 +126,7 @@
 
 #include "mdbx.h"
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -361,7 +361,7 @@
 #   if (defined(__GNUC__) || __has_builtin(__builtin_expect)) && !defined(__COVERITY__)
 #       define likely(cond) __builtin_expect(!!(cond), 1)
 #   else
-#       define likely(x) (x)
+#       define likely(x) (!!(x))
 #   endif
 #endif /* likely */
 
@@ -369,7 +369,7 @@
 #   if (defined(__GNUC__) || __has_builtin(__builtin_expect)) && !defined(__COVERITY__)
 #       define unlikely(cond) __builtin_expect(!!(cond), 0)
 #   else
-#       define unlikely(x) (x)
+#       define unlikely(x) (!!(x))
 #   endif
 #endif /* unlikely */
 
@@ -558,7 +558,7 @@ extern "C" {
 /* https://en.wikipedia.org/wiki/Operating_system_abstraction_layer */
 
 /*
- * Copyright 2015-2020 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2021 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -1021,15 +1021,17 @@ extern void mdbx_osal_jitter(bool tiny);
 /*----------------------------------------------------------------------------*/
 /* Atomics */
 
-#if defined(__cplusplus) && !defined(__STDC_NO_ATOMICS__) && __has_include(<cstdatomic>)
+#if defined(__cplusplus) && !defined(__STDC_NO_ATOMICS__) && (__has_include(<cstdatomic>) || __has_extension(cxx_atomic))
 #include <cstdatomic>
-#elif !defined(__cplusplus) && (__STDC_VERSION__ >= 201112L) &&                \
+#define MDBX_HAVE_C11ATOMICS
+#elif !defined(__cplusplus) &&                                                 \
+    (__STDC_VERSION__ >= 201112L || __has_extension(c_atomic)) &&              \
     !defined(__STDC_NO_ATOMICS__) &&                                           \
     (__GNUC_PREREQ(4, 9) || __CLANG_PREREQ(3, 8) ||                            \
      !(defined(__GNUC__) || defined(__clang__)))
 #include <stdatomic.h>
+#define MDBX_HAVE_C11ATOMICS
 #elif defined(__GNUC__) || defined(__clang__)
-/* LY: nothing required */
 #elif defined(_MSC_VER)
 #pragma warning(disable : 4163) /* 'xyz': not available as an intrinsic */
 #pragma warning(disable : 4133) /* 'function': incompatible types - from       \
@@ -1065,14 +1067,6 @@ static __maybe_unused __inline void mdbx_compiler_barrier(void) {
   _ReadWriteBarrier();
 #elif defined(__INTEL_COMPILER) /* LY: Intel Compiler may mimic GCC and MSC */
   __memory_barrier();
-  if (type > MDBX_BARRIER_COMPILER)
-#if defined(__ia64__) || defined(__ia64) || defined(_M_IA64)
-    __mf();
-#elif defined(__i386__) || defined(__x86_64__)
-    _mm_mfence();
-#else
-#error "Unknown target for Intel Compiler, please report to us."
-#endif
 #elif defined(__SUNPRO_C) || defined(__sun) || defined(sun)
   __compiler_barrier();
 #elif (defined(_HPUX_SOURCE) || defined(__hpux) || defined(__HP_aCC)) &&       \
@@ -1087,21 +1081,23 @@ static __maybe_unused __inline void mdbx_compiler_barrier(void) {
 }
 
 static __maybe_unused __inline void mdbx_memory_barrier(void) {
-#if __has_extension(c_atomic) && !defined(__STDC_NO_ATOMICS__)
-  atomic_thread_fence(__ATOMIC_SEQ_CST);
+#ifdef MDBX_HAVE_C11ATOMICS
+  atomic_thread_fence(memory_order_seq_cst);
 #elif defined(__ATOMIC_SEQ_CST)
+#ifdef __clang__
+  __c11_atomic_thread_fence(__ATOMIC_SEQ_CST);
+#else
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
 #elif defined(__clang__) || defined(__GNUC__)
   __sync_synchronize();
-#elif defined(_MSC_VER)
+#elif defined(_WIN32) || defined(_WIN64)
   MemoryBarrier();
 #elif defined(__INTEL_COMPILER) /* LY: Intel Compiler may mimic GCC and MSC */
-#if defined(__ia64__) || defined(__ia64) || defined(_M_IA64)
-  __mf();
-#elif defined(__i386__) || defined(__x86_64__)
+#if defined(__ia32__)
   _mm_mfence();
 #else
-#error "Unknown target for Intel Compiler, please report to us."
+  __mf();
 #endif
 #elif defined(__SUNPRO_C) || defined(__sun) || defined(sun)
   __machine_rw_barrier();
@@ -1564,11 +1560,6 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 
 #endif /* DOXYGEN */
 
-/** Enables support for huge write-transactions */
-#ifndef MDBX_HUGE_TRANSACTIONS
-#define MDBX_HUGE_TRANSACTIONS 0
-#endif /* MDBX_HUGE_TRANSACTIONS */
-
 /** Using fcntl(F_FULLFSYNC) with 5-10 times slowdown */
 #define MDBX_OSX_WANNA_DURABILITY 0
 /** Using fsync() with chance of data lost on power failure */
@@ -1617,6 +1608,24 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #else
 #define MDBX_TRUST_RTC_CONFIG STRINGIFY(MDBX_TRUST_RTC)
 #endif /* MDBX_TRUST_RTC */
+
+/** Controls online database auto-compactification during write-transactions. */
+#ifndef MDBX_ENABLE_REFUND
+#define MDBX_ENABLE_REFUND 1
+#endif
+#if !(MDBX_ENABLE_REFUND == 0 || MDBX_ENABLE_REFUND == 1)
+#error MDBX_ENABLE_REFUND must be defined as 0 or 1
+#endif /* MDBX_ENABLE_REFUND */
+
+/** Controls sort order of internal page number lists.
+ * The database format depend on this option and libmdbx builded with different
+ * option value are incompatible. */
+#ifndef MDBX_PNL_ASCENDING
+#define MDBX_PNL_ASCENDING 0
+#endif
+#if !(MDBX_PNL_ASCENDING == 0 || MDBX_PNL_ASCENDING == 1)
+#error MDBX_PNL_ASCENDING must be defined as 0 or 1
+#endif /* MDBX_PNL_ASCENDING */
 
 //------------------------------------------------------------------------------
 
@@ -1818,6 +1827,31 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 /*----------------------------------------------------------------------------*/
 /* Basic constants and types */
 
+typedef union {
+  volatile uint32_t weak;
+#ifdef MDBX_HAVE_C11ATOMICS
+  volatile _Atomic uint32_t c11a;
+#endif /* MDBX_HAVE_C11ATOMICS */
+} MDBX_atomic_uint32_t;
+
+typedef union {
+  volatile uint64_t weak;
+#if defined(MDBX_HAVE_C11ATOMICS) && (MDBX_64BIT_CAS || MDBX_64BIT_ATOMIC)
+  volatile _Atomic uint64_t c11a;
+#endif
+#if !defined(MDBX_HAVE_C11ATOMICS) || !MDBX_64BIT_CAS || !MDBX_64BIT_ATOMIC
+  __anonymous_struct_extension__ struct {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    MDBX_atomic_uint32_t low, high;
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    MDBX_atomic_uint32_t high, low;
+#else
+#error "FIXME: Unsupported byte order"
+#endif /* __BYTE_ORDER__ */
+  };
+#endif
+} MDBX_atomic_uint64_t;
+
 /* The minimum number of keys required in a database page.
  * Setting this to a larger value will place a smaller bound on the
  * maximum size of a data item. Data items larger than this size will
@@ -1856,6 +1890,7 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
  * MDBX uses 32 bit for page numbers. This limits database
  * size up to 2^44 bytes, in case of 4K pages. */
 typedef uint32_t pgno_t;
+typedef MDBX_atomic_uint32_t atomic_pgno_t;
 #define PRIaPGNO PRIu32
 #define MAX_PAGENO UINT32_C(0x7FFFffff)
 #define MIN_PAGENO NUM_METAS
@@ -1864,6 +1899,7 @@ typedef uint32_t pgno_t;
 
 /* A transaction ID. */
 typedef uint64_t txnid_t;
+typedef MDBX_atomic_uint64_t atomic_txnid_t;
 #define PRIaTXN PRIi64
 #define MIN_TXNID UINT64_C(1)
 #define MAX_TXNID (SAFE64_INVALID_THRESHOLD - 1)
@@ -1889,24 +1925,6 @@ typedef uint16_t indx_t;
 /*----------------------------------------------------------------------------*/
 /* Core structures for database and shared memory (i.e. format definition) */
 #pragma pack(push, 1)
-
-typedef union mdbx_safe64 {
-  volatile uint64_t inconsistent;
-#if MDBX_64BIT_ATOMIC
-  volatile uint64_t atomic;
-#endif /* MDBX_64BIT_ATOMIC */
-  __anonymous_struct_extension__ struct {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    volatile uint32_t low;
-    volatile uint32_t high;
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-    volatile uint32_t high;
-    volatile uint32_t low;
-#else
-#error "FIXME: Unsupported byte order"
-#endif /* __BYTE_ORDER__ */
-  };
-} mdbx_safe64_t;
 
 /* Information about a single database in the environment. */
 typedef struct MDBX_db {
@@ -1939,10 +1957,10 @@ typedef struct mdbx_geo_t {
 typedef struct MDBX_meta {
   /* Stamp identifying this as an MDBX file.
    * It must be set to MDBX_MAGIC with MDBX_DATA_VERSION. */
-  uint64_t mm_magic_and_version;
+  uint32_t mm_magic_and_version[2];
 
   /* txnid that committed this page, the first of a two-phase-update pair */
-  mdbx_safe64_t mm_txnid_a;
+  uint32_t mm_txnid_a[2];
 
   uint16_t mm_extra_flags;  /* extra DB flags, zero (nothing) for now */
   uint8_t mm_validator_id;  /* ID of checksum and page validation method,
@@ -1962,17 +1980,18 @@ typedef struct MDBX_meta {
 #define MDBX_DATASIGN_NONE 0u
 #define MDBX_DATASIGN_WEAK 1u
 #define SIGN_IS_STEADY(sign) ((sign) > MDBX_DATASIGN_WEAK)
-#define META_IS_STEADY(meta) SIGN_IS_STEADY((meta)->mm_datasync_sign)
-  volatile uint64_t mm_datasync_sign;
+#define META_IS_STEADY(meta)                                                   \
+  SIGN_IS_STEADY(unaligned_peek_u64(4, (meta)->mm_datasync_sign))
+  uint32_t mm_datasync_sign[2];
 
   /* txnid that committed this page, the second of a two-phase-update pair */
-  mdbx_safe64_t mm_txnid_b;
+  uint32_t mm_txnid_b[2];
 
   /* Number of non-meta pages which were put in GC after COW. May be 0 in case
    * DB was previously handled by libmdbx without corresponding feature.
    * This value in couple with mr_snapshot_pages_retired allows fast estimation
    * of "how much reader is restraining GC recycling". */
-  uint64_t mm_pages_retired;
+  uint32_t mm_pages_retired[2];
 
   /* The analogue /proc/sys/kernel/random/boot_id or similar to determine
    * whether the system was rebooted after the last use of the database files.
@@ -2002,8 +2021,8 @@ typedef struct MDBX_meta {
  * in the snapshot: Either used by a database or listed in a GC record. */
 typedef struct MDBX_page {
   union {
-    struct MDBX_page *mp_next; /* for in-memory list of freed pages */
     uint64_t mp_txnid;         /* txnid that committed this page */
+    struct MDBX_page *mp_next; /* for in-memory list of freed pages */
   };
   uint16_t mp_leaf2_ksize; /* key size if this is a LEAF2 page */
 #define P_BRANCH 0x01      /* branch page */
@@ -2013,15 +2032,16 @@ typedef struct MDBX_page {
 #define P_DIRTY 0x10       /* dirty page, also set for P_SUBP pages */
 #define P_LEAF2 0x20       /* for MDBX_DUPFIXED records */
 #define P_SUBP 0x40        /* for MDBX_DUPSORT sub-pages */
+#define P_BAD 0x80         /* explicit flag for invalid/bad page */
 #define P_LOOSE 0x4000     /* page was dirtied then freed, can be reused */
 #define P_KEEP 0x8000      /* leave this page alone during spill */
   uint16_t mp_flags;
   union {
+    uint32_t mp_pages; /* number of overflow pages */
     __anonymous_struct_extension__ struct {
       indx_t mp_lower; /* lower bound of free space */
       indx_t mp_upper; /* upper bound of free space */
     };
-    uint32_t mp_pages; /* number of overflow pages */
   };
   pgno_t mp_pgno; /* page number */
 
@@ -2109,7 +2129,7 @@ typedef struct MDBX_reader {
    * anything; all we need to know is which version of the DB they
    * started from so we can avoid overwriting any data used in that
    * particular version. */
-  mdbx_safe64_t /* txnid_t */ mr_txnid;
+  MDBX_atomic_uint64_t /* txnid_t */ mr_txnid;
 
   /* The information we store in a single slot of the reader table.
    * In addition to a transaction ID, we also record the process and
@@ -2121,23 +2141,18 @@ typedef struct MDBX_reader {
    * opening the lock file. */
 
   /* The thread ID of the thread owning this txn. */
-#if MDBX_WORDBITS >= 64
-  volatile uint64_t mr_tid;
-#else
-  volatile uint32_t mr_tid;
-  volatile uint32_t mr_aba_curer; /* CSN to resolve ABA_problems on 32-bit arch,
-                                     unused for now */
-#endif
+  MDBX_atomic_uint64_t mr_tid;
+
   /* The process ID of the process owning this reader txn. */
-  volatile uint32_t mr_pid;
+  MDBX_atomic_uint32_t mr_pid;
 
   /* The number of pages used in the reader's MVCC snapshot,
    * i.e. the value of meta->mm_geo.next and txn->mt_next_pgno */
-  volatile pgno_t mr_snapshot_pages_used;
+  atomic_pgno_t mr_snapshot_pages_used;
   /* Number of retired pages at the time this reader starts transaction. So,
    * at any time the difference mm_pages_retired - mr_snapshot_pages_retired
    * will give the number of pages which this reader restraining from reuse. */
-  volatile uint64_t mr_snapshot_pages_retired;
+  MDBX_atomic_uint64_t mr_snapshot_pages_retired;
 } MDBX_reader;
 
 /* The header for the reader table (a memory-mapped lock file). */
@@ -2150,25 +2165,25 @@ typedef struct MDBX_lockinfo {
   uint32_t mti_os_and_format;
 
   /* Flags which environment was opened. */
-  volatile uint32_t mti_envmode;
+  MDBX_atomic_uint32_t mti_envmode;
 
   /* Threshold of un-synced-with-disk pages for auto-sync feature,
    * zero means no-threshold, i.e. auto-sync is disabled. */
-  volatile pgno_t mti_autosync_threshold;
+  atomic_pgno_t mti_autosync_threshold;
 
   /* Low 32-bit of txnid with which meta-pages was synced,
    * i.e. for sync-polling in the MDBX_NOMETASYNC mode. */
-  volatile uint32_t mti_meta_sync_txnid;
+  MDBX_atomic_uint32_t mti_meta_sync_txnid;
 
   /* Period for timed auto-sync feature, i.e. at the every steady checkpoint
    * the mti_unsynced_timeout sets to the current_time + mti_autosync_period.
    * The time value is represented in a suitable system-dependent form, for
    * example clock_gettime(CLOCK_BOOTTIME) or clock_gettime(CLOCK_MONOTONIC).
    * Zero means timed auto-sync is disabled. */
-  volatile uint64_t mti_autosync_period;
+  MDBX_atomic_uint64_t mti_autosync_period;
 
   /* Marker to distinguish uniqueness of DB/CLK.*/
-  volatile uint64_t mti_bait_uniqueness;
+  MDBX_atomic_uint64_t mti_bait_uniqueness;
 
   alignas(MDBX_CACHELINE_SIZE) /* cacheline ---------------------------------*/
 
@@ -2177,21 +2192,21 @@ typedef struct MDBX_lockinfo {
       mdbx_ipclock_t mti_wlock;
 #endif /* MDBX_LOCKING > 0 */
 
-  volatile txnid_t mti_oldest_reader;
+  atomic_txnid_t mti_oldest_reader;
 
   /* Timestamp of the last steady sync. Value is represented in a suitable
    * system-dependent form, for example clock_gettime(CLOCK_BOOTTIME) or
    * clock_gettime(CLOCK_MONOTONIC). */
-  volatile uint64_t mti_sync_timestamp;
+  MDBX_atomic_uint64_t mti_sync_timestamp;
 
   /* Number un-synced-with-disk pages for auto-sync feature. */
-  volatile pgno_t mti_unsynced_pages;
+  atomic_pgno_t mti_unsynced_pages;
 
   /* Number of page which was discarded last time by madvise(MADV_FREE). */
-  volatile pgno_t mti_discarded_tail;
+  atomic_pgno_t mti_discarded_tail;
 
   /* Timestamp of the last readers check. */
-  volatile uint64_t mti_reader_check_timestamp;
+  MDBX_atomic_uint64_t mti_reader_check_timestamp;
 
   alignas(MDBX_CACHELINE_SIZE) /* cacheline ---------------------------------*/
 
@@ -2203,8 +2218,8 @@ typedef struct MDBX_lockinfo {
   /* The number of slots that have been used in the reader table.
    * This always records the maximum count, it is not decremented
    * when readers release their slots. */
-  volatile unsigned mti_numreaders;
-  volatile unsigned mti_readers_refresh_flag;
+  MDBX_atomic_uint32_t mti_numreaders;
+  MDBX_atomic_uint32_t mti_readers_refresh_flag;
 
 #if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) ||              \
     (!defined(__cplusplus) && defined(_MSC_VER))
@@ -2221,7 +2236,8 @@ typedef struct MDBX_lockinfo {
    (unsigned)offsetof(MDBX_lockinfo, mti_numreaders) * 37 +                    \
    (unsigned)offsetof(MDBX_lockinfo, mti_readers) * 29)
 
-#define MDBX_DATA_MAGIC ((MDBX_MAGIC << 8) + MDBX_DATA_VERSION)
+#define MDBX_DATA_MAGIC                                                        \
+  ((MDBX_MAGIC << 8) + MDBX_PNL_ASCENDING * 64 + MDBX_DATA_VERSION)
 #define MDBX_DATA_MAGIC_DEVEL ((MDBX_MAGIC << 8) + 255)
 
 #define MDBX_LOCK_MAGIC ((MDBX_MAGIC << 8) + MDBX_LOCK_VERSION)
@@ -2258,20 +2274,21 @@ typedef struct MDBX_lockinfo {
 #if MDBX_WORDBITS >= 64
 #define MAX_MAPSIZE MAX_MAPSIZE64
 #define MDBX_READERS_LIMIT                                                     \
-  ((65536 - sizeof(MDBX_lockinfo)) / sizeof(MDBX_reader))
+  ((MAX_PAGESIZE - sizeof(MDBX_lockinfo)) / sizeof(MDBX_reader))
+#define MDBX_PGL_LIMIT MAX_PAGENO
 #else
 #define MDBX_READERS_LIMIT 1024
 #define MAX_MAPSIZE MAX_MAPSIZE32
+#define MDBX_PGL_LIMIT (MAX_MAPSIZE32 / MIN_PAGESIZE)
 #endif /* MDBX_WORDBITS */
 
 /*----------------------------------------------------------------------------*/
-/* Two kind lists of pages (aka PNL) */
 
-/* An PNL is an Page Number List, a sorted array of IDs. The first element of
- * the array is a counter for how many actual page-numbers are in the list.
- * PNLs are sorted in descending order, this allow cut off a page with lowest
- * pgno (at the tail) just truncating the list */
-#define MDBX_PNL_ASCENDING 0
+/* An PNL is an Page Number List, a sorted array of IDs.
+ * The first element of the array is a counter for how many actual page-numbers
+ * are in the list. By default PNLs are sorted in descending order, this allow
+ * cut off a page with lowest pgno (at the tail) just truncating the list. The
+ * sort order of PNLs is controlled by the MDBX_PNL_ASCENDING build option. */
 typedef pgno_t *MDBX_PNL;
 
 #if MDBX_PNL_ASCENDING
@@ -2286,36 +2303,27 @@ typedef pgno_t *MDBX_PNL;
 typedef txnid_t *MDBX_TXL;
 
 /* An Dirty-Page list item is an pgno/pointer pair. */
-typedef union MDBX_DP {
-  __anonymous_struct_extension__ struct {
-    pgno_t pgno;
-    MDBX_page *ptr;
-  };
-  __anonymous_struct_extension__ struct {
-    unsigned sorted;
-    unsigned length;
-  };
-} MDBX_DP;
+typedef struct MDBX_dp {
+  pgno_t pgno;
+  MDBX_page *ptr;
+} MDBX_dp;
 
-/* An DPL (dirty-page list) is a sorted array of MDBX_DPs.
- * The first element's length member is a count of how many actual
- * elements are in the array. */
-typedef MDBX_DP *MDBX_DPL;
+/* An DPL (dirty-page list) is a sorted array of MDBX_DPs. */
+typedef struct MDBX_dpl {
+  unsigned sorted;
+  unsigned length;
+  unsigned detent; /* allocated size excluding the MDBX_DPL_RESERVE_GAP */
+#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) ||              \
+    (!defined(__cplusplus) && defined(_MSC_VER))
+  MDBX_dp items[] /* dynamic size with holes at zero and after the last */;
+#endif
+} MDBX_dpl;
 
 /* PNL sizes */
 #define MDBX_PNL_GRANULATE 1024
+#define MDBX_PNL_RADIXSORT_THRESHOLD 1024
 #define MDBX_PNL_INITIAL                                                       \
   (MDBX_PNL_GRANULATE - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
-
-#if MDBX_HUGE_TRANSACTIONS
-#define MDBX_PNL_MAX                                                           \
-  ((1u << 26) - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
-#define MDBX_DPL_TXNFULL (MDBX_PNL_MAX / 2)
-#else
-#define MDBX_PNL_MAX                                                           \
-  ((1u << 24) - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
-#define MDBX_DPL_TXNFULL (MDBX_PNL_MAX / 4)
-#endif /* MDBX_HUGE_TRANSACTIONS */
 
 #define MDBX_TXL_GRANULATE 32
 #define MDBX_TXL_INITIAL                                                       \
@@ -2440,14 +2448,16 @@ struct MDBX_txn {
       MDBX_cursor **cursors;
       pgno_t *reclaimed_pglist; /* Reclaimed GC pages */
       txnid_t last_reclaimed;   /* ID of last used record */
+#if MDBX_ENABLE_REFUND
       pgno_t loose_refund_wl /* FIXME: describe */;
+#endif /* MDBX_ENABLE_REFUND */
       /* dirtylist room: Dirty array size - dirty pages visible to this txn.
        * Includes ancestor txns' dirty pages not hidden by other txns'
        * dirty/spilled pages. Thus commit(nested txn) has room to merge
        * dirtylist into mt_parent after freeing hidden mt_parent pages. */
       unsigned dirtyroom;
       /* For write txns: Modified pages. Sorted when not MDBX_WRITEMAP. */
-      MDBX_DPL dirtylist;
+      MDBX_dpl *dirtylist;
       /* The list of reclaimed txns from GC */
       MDBX_TXL lifo_reclaimed;
       /* The list of pages that became unused during this transaction. */
@@ -2457,26 +2467,19 @@ struct MDBX_txn {
       MDBX_page *loose_pages;
       /* Number of loose pages (tw.loose_pages) */
       unsigned loose_count;
-      /* Number of retired to parent pages (tw.retired2parent_pages) */
-      unsigned retired2parent_count;
-      /* The list of parent's txn dirty pages that retired (became unused)
-       * in this transaction, linked through `mp_next`. */
-      MDBX_page *retired2parent_pages;
       /* The sorted list of dirty pages we temporarily wrote to disk
        * because the dirty list was full. page numbers in here are
        * shifted left by 1, deleted slots have the LSB set. */
       MDBX_PNL spill_pages;
+      unsigned spill_least_removed;
     } tw;
   };
 };
 
-/* Enough space for 2^32 nodes with minimum of 2 keys per node. I.e., plenty.
- * At 4 keys per node, enough for 2^64 nodes, so there's probably no need to
- * raise this on a 64 bit machine. */
 #if MDBX_WORDBITS >= 64
-#define CURSOR_STACK 28
+#define CURSOR_STACK 32
 #else
-#define CURSOR_STACK 20
+#define CURSOR_STACK 24
 #endif
 
 struct MDBX_xcursor;
@@ -2556,7 +2559,7 @@ typedef struct MDBX_cursor_couple {
 /* The database environment. */
 struct MDBX_env {
 #define MDBX_ME_SIGNATURE UINT32_C(0x9A899641)
-  uint32_t me_signature;
+  MDBX_atomic_uint32_t me_signature;
   /* Failed to update the meta page. Probably an I/O error. */
 #define MDBX_FATAL_ERROR UINT32_C(0x80000000)
   /* Some fields are initialized. */
@@ -2602,38 +2605,47 @@ struct MDBX_env {
   mdbx_ipclock_t *me_wlock;
 #endif /* MDBX_LOCKING > 0 */
 
-  MDBX_dbx *me_dbxs;           /* array of static DB info */
-  uint16_t *me_dbflags;        /* array of flags from MDBX_db.md_flags */
-  unsigned *me_dbiseqs;        /* array of dbi sequence numbers */
-  volatile txnid_t *me_oldest; /* ID of oldest reader last time we looked */
-  MDBX_page *me_dpages;        /* list of malloc'd blocks for re-use */
+  MDBX_dbx *me_dbxs;         /* array of static DB info */
+  uint16_t *me_dbflags;      /* array of flags from MDBX_db.md_flags */
+  unsigned *me_dbiseqs;      /* array of dbi sequence numbers */
+  atomic_txnid_t *me_oldest; /* ID of oldest reader last time we looked */
+  MDBX_page *me_dp_reserve;  /* list of malloc'd blocks for re-use */
   /* PNL of pages that became unused in a write txn */
   MDBX_PNL me_retired_pages;
-  /* MDBX_DP of pages written during a write txn. */
-  MDBX_DPL me_dirtylist;
   /* Number of freelist items that can fit in a single overflow page */
   unsigned me_maxgc_ov1page;
   unsigned me_branch_nodemax; /* max size of a branch-node */
   uint32_t me_live_reader;    /* have liveness lock in reader table */
   void *me_userctx;           /* User-settable context */
-  volatile uint64_t *me_sync_timestamp;
-  volatile uint64_t *me_autosync_period;
-  volatile pgno_t *me_unsynced_pages;
-  volatile pgno_t *me_autosync_threshold;
-  volatile pgno_t *me_discarded_tail;
-  volatile uint32_t *me_meta_sync_txnid;
+  MDBX_atomic_uint64_t *me_sync_timestamp;
+  MDBX_atomic_uint64_t *me_autosync_period;
+  atomic_pgno_t *me_unsynced_pages;
+  atomic_pgno_t *me_autosync_threshold;
+  atomic_pgno_t *me_discarded_tail;
+  MDBX_atomic_uint32_t *me_meta_sync_txnid;
   MDBX_hsr_func *me_hsr_callback; /* Callback for kicking laggard readers */
+  unsigned me_dp_reserve_len;
+  struct {
+    unsigned dp_reserve_limit;
+    unsigned rp_augment_limit;
+    unsigned dp_limit;
+    unsigned dp_initial;
+    uint8_t dp_loose_limit;
+    uint8_t spill_max_denominator;
+    uint8_t spill_min_denominator;
+    uint8_t spill_parent4child_denominator;
+  } me_options;
   struct {
 #if MDBX_LOCKING > 0
     mdbx_ipclock_t wlock;
 #endif /* MDBX_LOCKING > 0 */
-    txnid_t oldest;
-    uint64_t sync_timestamp;
-    uint64_t autosync_period;
-    pgno_t autosync_pending;
-    pgno_t autosync_threshold;
-    pgno_t discarded_tail;
-    uint32_t meta_sync_txnid;
+    atomic_txnid_t oldest;
+    MDBX_atomic_uint64_t sync_timestamp;
+    MDBX_atomic_uint64_t autosync_period;
+    atomic_pgno_t autosync_pending;
+    atomic_pgno_t autosync_threshold;
+    atomic_pgno_t discarded_tail;
+    MDBX_atomic_uint32_t meta_sync_txnid;
   } me_lckless_stub;
 #if MDBX_DEBUG
   MDBX_assert_func *me_assert_func; /*  Callback for assertion failures */

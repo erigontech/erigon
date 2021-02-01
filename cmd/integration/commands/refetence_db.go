@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
@@ -252,7 +251,7 @@ func fToMdbx(ctx context.Context, to string) error {
 		dstTx.Rollback()
 	}()
 
-	commitEvery := time.NewTicker(30 * time.Second)
+	commitEvery := time.NewTicker(5 * time.Second)
 	defer commitEvery.Stop()
 	fileScanner := bufio.NewScanner(file)
 	endData := []byte("DATA=END")
@@ -365,9 +364,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint {
 		return (flags | lmdb.Readonly) ^ lmdb.NoReadahead
 	}).MustOpen()
-	dst := ethdb.NewMDBX().Path(to).Flags(func(flags uint) uint {
-		return flags | mdbx.WriteMap | mdbx.NoMemInit
-	}).MustOpen()
+	dst := ethdb.NewMDBX().Path(to).MustOpen()
 
 	srcTx, err1 := src.Begin(ctx, nil, ethdb.RO)
 	if err1 != nil {
@@ -382,7 +379,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 		dstTx.Rollback()
 	}()
 
-	commitEvery := time.NewTicker(60 * time.Second)
+	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
 	for name, b := range src.AllBuckets() {
@@ -393,30 +390,31 @@ func toMdbx(ctx context.Context, from, to string) error {
 		c := dstTx.Cursor(name)
 		srcC := srcTx.Cursor(name)
 		var prevK []byte
+		casted, isDupsort := c.(ethdb.CursorDupSort)
+
 		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 			if err != nil {
 				return err
 			}
 
-			if casted, ok := c.(ethdb.CursorDupSort); ok {
+			if isDupsort {
 				if bytes.Equal(k, prevK) {
 					if err = casted.AppendDup(k, v); err != nil {
-						return err
+						panic(err)
 					}
 				} else {
 					if err = casted.Append(k, v); err != nil {
-						return err
+						panic(err)
 					}
 				}
 				prevK = k
 			} else {
 				if err = c.Append(k, v); err != nil {
-					return err
+					panic(err)
 				}
 			}
 
 			select {
-			default:
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-commitEvery.C:
@@ -429,19 +427,21 @@ func toMdbx(ctx context.Context, from, to string) error {
 					return err
 				}
 				c = dstTx.Cursor(name)
+				casted, isDupsort = c.(ethdb.CursorDupSort)
+			default:
 			}
 		}
 		prevK = nil
 
 		// migrate bucket sequences to native mdbx implementation
-		currentID, err := srcTx.Sequence(name, 0)
-		if err != nil {
-			return err
-		}
-		_, err = dstTx.Sequence(name, currentID)
-		if err != nil {
-			return err
-		}
+		//currentID, err := srcTx.Sequence(name, 0)
+		//if err != nil {
+		//	return err
+		//}
+		//_, err = dstTx.Sequence(name, currentID)
+		//if err != nil {
+		//	return err
+		//}
 	}
 	err := dstTx.Commit(context.Background())
 	if err != nil {
