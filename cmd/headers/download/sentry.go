@@ -233,7 +233,7 @@ func runPeer(
 
 	for {
 		if _, ok := peerRwMap.Load(peerID); !ok {
-			return fmt.Errorf("Peer has been penalized")
+			return fmt.Errorf("peer has been penalized")
 		}
 		msg, err = rw.ReadMsg()
 		if err != nil {
