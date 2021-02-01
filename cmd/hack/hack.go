@@ -1682,7 +1682,7 @@ func extracHeaders(chaindata string, block uint64, name string) error {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	fmt.Fprintf(w, "package headerdownload\n")
+	fmt.Fprintf(w, "package headerdownload\n\n")
 	fmt.Fprintf(w, "var %sHardCodedHeaders = []string{\n", name)
 	var hBuffer [headerdownload.HeaderSerLength]byte
 	for {
@@ -1694,7 +1694,7 @@ func extracHeaders(chaindata string, block uint64, name string) error {
 			break
 		}
 		h := rawdb.ReadHeader(db, hash, b)
-		fmt.Fprintf(w, "\"")
+		fmt.Fprintf(w, "	\"")
 		headerdownload.SerialiseHeader(h, hBuffer[:])
 		base64writer := base64.NewEncoder(base64.RawStdEncoding, w)
 		if err = rlp.Encode(base64writer, h); err != nil {
