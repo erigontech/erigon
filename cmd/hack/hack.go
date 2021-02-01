@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -1670,31 +1671,40 @@ func mint(chaindata string, block uint64) error {
 	return nil
 }
 
-func extracHeaders(chaindata string, block uint64) error {
+func extracHeaders(chaindata string, block uint64, name string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	b := uint64(0)
-	f, err := os.Create("hard-coded-headers.dat")
+	f, err := os.Create(fmt.Sprintf("hard_coded_headers_%s.go", name))
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
+	fmt.Fprintf(w, "package headerdownload\n")
+	fmt.Fprintf(w, "var %sHardCodedHeaders = []string{\n", name)
 	var hBuffer [headerdownload.HeaderSerLength]byte
 	for {
 		hash, err := rawdb.ReadCanonicalHash(db, b)
-		check(err)
+		if err != nil {
+			return err
+		}
 		if hash == (common.Hash{}) {
 			break
 		}
 		h := rawdb.ReadHeader(db, hash, b)
+		fmt.Fprintf(w, "\"")
 		headerdownload.SerialiseHeader(h, hBuffer[:])
-		if _, err := w.Write(hBuffer[:]); err != nil {
+		base64writer := base64.NewEncoder(base64.RawStdEncoding, w)
+		if err = rlp.Encode(base64writer, h); err != nil {
 			return err
 		}
+		base64writer.Close()
+		fmt.Fprintf(w, "\",\n")
 		b += block
 	}
+	fmt.Fprintf(w, "}\n")
 	fmt.Printf("Last block is %d\n", b)
 
 	hash := rawdb.ReadHeadHeaderHash(db)
@@ -2054,7 +2064,7 @@ func main() {
 		}
 	}
 	if *action == "extractHeaders" {
-		if err := extracHeaders(*chaindata, uint64(*block)); err != nil {
+		if err := extracHeaders(*chaindata, uint64(*block), *name); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

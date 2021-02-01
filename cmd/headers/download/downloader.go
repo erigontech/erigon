@@ -2,12 +2,9 @@ package download
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net"
-	"os"
 	"runtime"
 	"sync"
 	"syscall"
@@ -301,35 +298,18 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 	if err != nil {
 		log.Error("Recovery from DB failed", "error", err)
 	}
-	hardTips := headerdownload.InitHardCodedTips("hard-coded-headers.dat")
+	hardTips := headerdownload.InitHardCodedTips("mainnet")
 	filesRecovered, err1 := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips)
 	if err1 != nil {
 		log.Error("Recovery from file failed, will start from scratch", "error", err1)
 	}
 	if !dbRecovered && !filesRecovered {
 		hd.SetHardCodedTips(hardTips)
-		// Insert hard-coded headers if present
-		if _, err := os.Stat("hard-coded-headers.dat"); err == nil {
-			if f, err1 := os.Open("hard-coded-headers.dat"); err1 == nil {
-				var hBuffer [headerdownload.HeaderSerLength]byte
-				i := 0
-				for {
-					var h types.Header
-					if _, err2 := io.ReadFull(f, hBuffer[:]); err2 == nil {
-						headerdownload.DeserialiseHeader(&h, hBuffer[:])
-					} else if errors.Is(err2, io.EOF) {
-						break
-					} else {
-						log.Error("Failed to read hard coded header", "i", i, "error", err2)
-						break
-					}
-					if err2 := hd.HardCodedHeader(&h, uint64(time.Now().Unix())); err2 != nil {
-						log.Error("Failed to insert hard coded header", "i", i, "block", h.Number.Uint64(), "error", err2)
-					} else {
-						hd.AddHeaderToBuffer(&h)
-					}
-					i++
-				}
+		for _, header := range hardTips {
+			if err2 := hd.HardCodedHeader(header, uint64(time.Now().Unix())); err2 != nil {
+				log.Error("Failed to insert hard coded header", "block number", header.Number.Uint64(), "error", err2)
+			} else {
+				hd.AddHeaderToBuffer(header)
 			}
 		}
 	}

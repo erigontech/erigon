@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"container/heap"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -649,34 +650,30 @@ func (hd *HeaderDownload) CheckFiles() error {
 	return nil
 }
 
-func InitHardCodedTips(filename string) map[common.Hash]struct{} {
+func InitHardCodedTips(network string) map[common.Hash]*types.Header {
+	hardTips := make(map[common.Hash]*types.Header)
+	var encodings []string
+	switch network {
+	case "mainnet":
+		encodings = mainnetHardCodedHeaders
+	default:
+		log.Error("Hard coded headers not found for", "network", network)
+		return hardTips
+	}
 	// Insert hard-coded headers if present
-	hardTips := make(map[common.Hash]struct{})
-	if _, err := os.Stat(filename); err == nil {
-		if f, err1 := os.Open(filename); err1 == nil {
-			var hBuffer [HeaderSerLength]byte
-			for {
-				var h types.Header
-				if _, err2 := io.ReadFull(f, hBuffer[:]); err2 == nil {
-					DeserialiseHeader(&h, hBuffer[:])
-				} else if errors.Is(err2, io.EOF) {
-					break
-				} else {
-					log.Error("Failed to read hard coded header", "error", err2)
-					break
-				}
-				hardTips[h.Hash()] = struct{}{}
-			}
+	for _, encoding := range encodings {
+		base64decoder := base64.NewDecoder(base64.RawStdEncoding, strings.NewReader(encoding))
+		var h types.Header
+		if err := rlp.Decode(base64decoder, &h); err != nil {
+			log.Error("Parsing hard coded header", "error", err)
 		} else {
-			log.Error("Failed to open hard-coded headers", "file", filename, "error", err1)
+			hardTips[h.Hash()] = &h
 		}
-	} else {
-		log.Error("Failed to stat hard-coded headers", "file", filename, "error", err)
 	}
 	return hardTips
 }
 
-func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]struct{}) {
+func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]*types.Header) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.hardTips = hardTips
@@ -840,7 +837,7 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) (
 	return anchor != nil && anchor.maxTipHeight > anchor.blockHeight, err
 }
 
-func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]struct{}) (bool, error) {
+func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]*types.Header) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if _, err := os.Stat(hd.filesDir); os.IsNotExist(err) {
@@ -934,8 +931,8 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 	for _, anchor := range lastAnchors {
 		anchor.anchorID = hd.nextAnchorID
 		hd.nextAnchorID++
-		if _, ok := hardTips[anchor.hash]; ok && anchor.maxTipHeight == anchor.blockHeight {
-			hd.hardTips[anchor.hash] = struct{}{}
+		if header, ok := hardTips[anchor.hash]; ok && anchor.maxTipHeight == anchor.blockHeight {
+			hd.hardTips[anchor.hash] = header
 			fmt.Printf("Adding %d %x to hard-coded tips\n", anchor.blockHeight, anchor.hash)
 		}
 	}
