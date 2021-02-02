@@ -40,9 +40,11 @@ type ethPeerInfo struct {
 // ethPeer is a wrapper around eth.Peer to maintain a few extra metadata.
 type ethPeer struct {
 	*eth.Peer
-	syncDrop *time.Timer  // Connection dropper if `eth` sync progress isn't validated in time
+	snapExt *snapPeer // Satellite `snap` connection
 
-	lock     sync.RWMutex // Mutex protecting the internal fields
+	syncDrop *time.Timer   // Connection dropper if `eth` sync progress isn't validated in time
+	snapWait chan struct{} // Notification channel for snap connections
+	lock     sync.RWMutex  // Mutex protecting the internal fields
 }
 
 // info gathers and returns some `eth` protocol metadata known about a peer.
