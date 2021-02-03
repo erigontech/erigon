@@ -45,7 +45,7 @@ func (h HeadersByBlockHeight) Swap(i, j int) {
 }
 
 // SplitIntoSegments converts message containing headers into a collection of chain segments
-func (hd *HeaderDownload) SplitIntoSegments(msg []*types.Header) ([]*ChainSegment, Penalty, error) {
+func (hd *HeaderDownload) SplitIntoSegments(headersRaw [][]byte, msg []*types.Header) ([]*ChainSegment, Penalty, error) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	sort.Sort(HeadersByBlockHeight(msg))
@@ -54,7 +54,7 @@ func (hd *HeaderDownload) SplitIntoSegments(msg []*types.Header) ([]*ChainSegmen
 	segmentMap := make(map[common.Hash]int)              // Mapping of the header hash to the index of the chain segment it belongs
 	childrenMap := make(map[common.Hash][]*types.Header) // Mapping parent hash to the children
 	dedupMap := make(map[common.Hash]struct{})           // Map used for detecting duplicate headers
-	for _, header := range msg {
+	for i, header := range msg {
 		headerHash := header.Hash()
 		if _, bad := hd.badHeaders[headerHash]; bad {
 			return nil, BadBlockPenalty, nil
@@ -79,6 +79,7 @@ func (hd *HeaderDownload) SplitIntoSegments(msg []*types.Header) ([]*ChainSegmen
 			segments = append(segments, &ChainSegment{})
 		}
 		segments[segmentIdx].Headers = append(segments[segmentIdx].Headers, header)
+		segments[segmentIdx].HeadersRaw = append(segments[segmentIdx].HeadersRaw, headersRaw[i])
 		segmentMap[header.ParentHash] = segmentIdx
 		siblings := childrenMap[header.ParentHash]
 		siblings = append(siblings, header)
@@ -101,14 +102,14 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 }
 
 // SingleHeaderAsSegment converts message containing 1 header into one singleton chain segment
-func (hd *HeaderDownload) SingleHeaderAsSegment(header *types.Header) ([]*ChainSegment, Penalty, error) {
+func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header) ([]*ChainSegment, Penalty, error) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	headerHash := header.Hash()
 	if _, bad := hd.badHeaders[headerHash]; bad {
 		return nil, BadBlockPenalty, nil
 	}
-	return []*ChainSegment{{Headers: []*types.Header{header}}}, NoPenalty, nil
+	return []*ChainSegment{{HeadersRaw: [][]byte{headerRaw}, Headers: []*types.Header{header}}}, NoPenalty, nil
 }
 
 // FindAnchors attempts to find anchors to which given chain segment can be attached to
@@ -483,20 +484,15 @@ func (hd *HeaderDownload) AddSegmentToBuffer(segment *ChainSegment, start, end i
 	if end > start {
 		fmt.Printf("Adding segment [%d-%d] to the buffer\n", segment.Headers[end-1].Number.Uint64(), segment.Headers[start].Number.Uint64())
 	}
-	var serBuffer [HeaderSerLength]byte
-	for _, header := range segment.Headers[start:end] {
-		SerialiseHeader(header, serBuffer[:])
-		hd.buffer = append(hd.buffer, serBuffer[:]...)
+	for i, headerRaw := range segment.HeadersRaw[start:end] {
+		hd.buffer.AddHeader(headerRaw, segment.Headers[i].Number.Uint64())
 	}
 }
 
-func (hd *HeaderDownload) AddHeaderToBuffer(header *types.Header) {
+func (hd *HeaderDownload) AddHeaderToBuffer(headerRaw []byte, blockHeight uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	fmt.Printf("Adding header %d to the buffer\n", header.Number.Uint64())
-	var serBuffer [HeaderSerLength]byte
-	SerialiseHeader(header, serBuffer[:])
-	hd.buffer = append(hd.buffer, serBuffer[:]...)
+	hd.buffer.AddHeader(headerRaw, blockHeight)
 }
 
 func (hd *HeaderDownload) AnchorState() string {
@@ -571,7 +567,7 @@ func (hd *HeaderDownload) AnchorState() string {
 // Heap element for merging together header files
 type HeapElem struct {
 	file        *os.File
-	reader      io.Reader
+	rlpStream   *rlp.Stream
 	blockHeight uint64
 	hash        common.Hash
 	header      *types.Header
@@ -610,48 +606,8 @@ func (h *Heap) Pop() interface{} {
 
 const AnchorSerLen = 32 /* ParentHash */ + 8 /* powDepth */ + 8 /* maxTipHeight */
 
-func (hd *HeaderDownload) CheckFiles() error {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-	fileInfos, err := ioutil.ReadDir(hd.filesDir)
-	if err != nil {
-		return err
-	}
-	var buffer [HeaderSerLength]byte
-	var anchorBuf [AnchorSerLen]byte
-	for _, fileInfo := range fileInfos {
-		f, err1 := os.Open(path.Join(hd.filesDir, fileInfo.Name()))
-		if err1 != nil {
-			return fmt.Errorf("open file %s: %v", fileInfo.Name(), err1)
-		}
-		r := bufio.NewReader(f)
-		if _, err = io.ReadFull(r, anchorBuf[:8]); err != nil {
-			fmt.Printf("reading anchor sequence and count from file: %v\n", err)
-			continue
-		}
-		anchorCount := int(binary.BigEndian.Uint32((anchorBuf[4:])))
-		for i := 0; i < anchorCount; i++ {
-			if _, err = io.ReadFull(r, anchorBuf[:]); err != nil {
-				fmt.Printf("reading anchor %x from file: %v\n", i, err)
-			}
-		}
-		for {
-			var header types.Header
-			if _, err = io.ReadFull(r, buffer[:]); err != nil {
-				if !errors.Is(err, io.EOF) {
-					fmt.Printf("reading header from file: %v\n", err)
-				}
-				break
-			}
-			DeserialiseHeader(&header, buffer[:])
-			fmt.Printf("Read header %d from file %s\n", header.Number.Uint64(), fileInfo.Name())
-		}
-	}
-	return nil
-}
-
-func InitHardCodedTips(network string) map[common.Hash]*types.Header {
-	hardTips := make(map[common.Hash]*types.Header)
+func InitHardCodedTips(network string) map[common.Hash]HeaderRecord {
+	hardTips := make(map[common.Hash]HeaderRecord)
 	var encodings []string
 	switch network {
 	case "mainnet":
@@ -662,28 +618,32 @@ func InitHardCodedTips(network string) map[common.Hash]*types.Header {
 	}
 	// Insert hard-coded headers if present
 	for _, encoding := range encodings {
-		base64decoder := base64.NewDecoder(base64.RawStdEncoding, strings.NewReader(encoding))
-		var h types.Header
-		if err := rlp.Decode(base64decoder, &h); err != nil {
+		b, err := base64.RawStdEncoding.DecodeString(encoding)
+		if err != nil {
 			log.Error("Parsing hard coded header", "error", err)
 		} else {
-			hardTips[h.Hash()] = &h
+			var h types.Header
+			if err := rlp.DecodeBytes(b, &h); err != nil {
+				log.Error("Parsing hard coded header", "error", err)
+			} else {
+				hardTips[h.Hash()] = HeaderRecord{Raw: b, Header: &h}
+			}
 		}
 	}
 	return hardTips
 }
 
-func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]*types.Header) {
+func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]HeaderRecord) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.hardTips = hardTips
 }
 
-func ReadFilesAndBuffer(files []string, headerBuf []byte, hf func(header *types.Header, blockHeight uint64) error) (map[common.Hash]*Anchor, uint32, error) {
+func ReadFilesAndBuffer(files []string, headerBuf *HeaderBuffer, hf func(header *types.Header, blockHeight uint64) error) (map[common.Hash]*Anchor, uint32, error) {
 	//nolint:prealloc
 	var fs []*os.File
 	//nolint:prealloc
-	var rs []io.Reader
+	var rs []*rlp.Stream
 	var anchorBuf [AnchorSerLen]byte
 	var lastAnchors map[common.Hash]*Anchor
 	var lastAnchorSequence uint32
@@ -718,7 +678,7 @@ func ReadFilesAndBuffer(files []string, headerBuf []byte, hf func(header *types.
 				pos += 8
 				anchor.maxTipHeight = binary.BigEndian.Uint64(anchorBuf[pos:])
 				anchors[anchor.hash] = anchor
-				fmt.Printf("anchor: %x, powDepth: %d, maxTipHeight %d\n", anchor.hash, anchor.powDepth, anchor.maxTipHeight)
+				//fmt.Printf("anchor: %x, powDepth: %d, maxTipHeight %d\n", anchor.hash, anchor.powDepth, anchor.maxTipHeight)
 			}
 		}
 		if anchorSequence >= lastAnchorSequence {
@@ -726,12 +686,15 @@ func ReadFilesAndBuffer(files []string, headerBuf []byte, hf func(header *types.
 			lastAnchors = anchors
 		}
 		fs = append(fs, f)
-		rs = append(rs, r)
+		//var buf [128]byte
+		//r.Read(buf[:])
+		//fmt.Printf("Buffer for file %s: %x\n", filename, buf)
+		rs = append(rs, rlp.NewStream(r, 0 /* no limit */))
 	}
 	if headerBuf != nil {
-		sort.Sort(BufferSorter(headerBuf))
+		sort.Sort(headerBuf)
 		fs = append(fs, nil)
-		rs = append(rs, bytes.NewReader(headerBuf))
+		rs = append(rs, rlp.NewStream(headerBuf, 0 /* no limit */))
 	}
 	defer func() {
 		for _, f := range fs {
@@ -743,18 +706,16 @@ func ReadFilesAndBuffer(files []string, headerBuf []byte, hf func(header *types.
 	}()
 	h := &Heap{}
 	heap.Init(h)
-	var buffer [HeaderSerLength]byte
 	for i, f := range fs {
-		r := rs[i]
+		rlpStream := rs[i]
 		var header types.Header
-		if _, err := io.ReadFull(r, buffer[:]); err != nil {
+		if err := rlpStream.Decode(&header); err != nil {
 			if !errors.Is(err, io.EOF) {
-				return nil, 0, fmt.Errorf("reading header from file: %w", err)
+				return nil, 0, fmt.Errorf("reading header from file 1: %w", err)
 			}
 			continue
 		}
-		DeserialiseHeader(&header, buffer[:])
-		he := HeapElem{file: f, reader: r, blockHeight: header.Number.Uint64(), hash: header.Hash(), header: &header}
+		he := HeapElem{file: f, rlpStream: rlpStream, blockHeight: header.Number.Uint64(), hash: header.Hash(), header: &header}
 		heap.Push(h, he)
 	}
 	for h.Len() > 0 {
@@ -763,8 +724,7 @@ func ReadFilesAndBuffer(files []string, headerBuf []byte, hf func(header *types.
 			return nil, 0, err
 		}
 		var header types.Header
-		if _, err := io.ReadFull(he.reader, buffer[:]); err == nil {
-			DeserialiseHeader(&header, buffer[:])
+		if err := he.rlpStream.Decode(&header); err == nil {
 			he.blockHeight = header.Number.Uint64()
 			he.hash = header.Hash()
 			he.header = &header
@@ -837,7 +797,7 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) (
 	return anchor != nil && anchor.maxTipHeight > anchor.blockHeight, err
 }
 
-func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]*types.Header) (bool, error) {
+func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]HeaderRecord) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if _, err := os.Stat(hd.filesDir); os.IsNotExist(err) {
@@ -931,8 +891,8 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 	for _, anchor := range lastAnchors {
 		anchor.anchorID = hd.nextAnchorID
 		hd.nextAnchorID++
-		if header, ok := hardTips[anchor.hash]; ok && anchor.maxTipHeight == anchor.blockHeight {
-			hd.hardTips[anchor.hash] = header
+		if headerRecord, ok := hardTips[anchor.hash]; ok && anchor.maxTipHeight == anchor.blockHeight {
+			hd.hardTips[anchor.hash] = headerRecord
 			fmt.Printf("Adding %d %x to hard-coded tips\n", anchor.blockHeight, anchor.hash)
 		}
 	}
@@ -980,12 +940,12 @@ func (hd *HeaderDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64
 func (hd *HeaderDownload) FlushBuffer() error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	if len(hd.buffer) < hd.bufferLimit {
+	if len(hd.buffer.buffer) < hd.bufferLimit {
 		// Not flushing the buffer unless it is full
 		return nil
 	}
 	// Sort the buffer first
-	sort.Sort(BufferSorter(hd.buffer))
+	sort.Sort(hd.buffer)
 	if bufferFile, err := ioutil.TempFile(hd.filesDir, "headers-buf"); err == nil {
 		// First write the anchors
 		var buf [AnchorSerLen]byte
@@ -1013,14 +973,13 @@ func (hd *HeaderDownload) FlushBuffer() error {
 				}
 			}
 		}
-		if _, err = bufferFile.Write(hd.buffer); err != nil {
+		if err = hd.buffer.Flush(bufferFile); err != nil {
 			bufferFile.Close()
 			return err
 		}
 		if err = bufferFile.Close(); err != nil {
 			return err
 		}
-		hd.buffer = hd.buffer[:0]
 		hd.anchorSequence++
 		hd.files = append(hd.files, bufferFile.Name())
 	} else {
@@ -1030,7 +989,7 @@ func (hd *HeaderDownload) FlushBuffer() error {
 	return nil
 }
 
-func (hd *HeaderDownload) PrepareStageData() (files []string, buffer []byte) {
+func (hd *HeaderDownload) PrepareStageData() (files []string, buffer *HeaderBuffer) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if !hd.stageReady {
@@ -1039,7 +998,8 @@ func (hd *HeaderDownload) PrepareStageData() (files []string, buffer []byte) {
 	files = hd.files
 	hd.files = nil
 	buffer = hd.buffer
-	hd.buffer, hd.anotherBuffer = hd.anotherBuffer[:0], hd.buffer
+	hd.buffer, hd.anotherBuffer = hd.anotherBuffer, hd.buffer
+	hd.buffer.Clear()
 	hd.stageReady = false
 	return
 }

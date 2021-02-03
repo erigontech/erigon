@@ -1,7 +1,6 @@
 package headerdownload
 
 import (
-	"bytes"
 	"math/big"
 	"testing"
 	"time"
@@ -436,35 +435,5 @@ func TestExtendDown(t *testing.T) {
 	var h types.Header
 	if err := hd.ExtendDown(&ChainSegment{Headers: []*types.Header{&h}}, 0, 1, 256, uint64(time.Now().Unix())); err == nil {
 		t.Errorf("extendDown without working trees - expected error")
-	}
-}
-
-func TestHeaderSerialisation(t *testing.T) {
-	var header types.Header
-	header.Number = big.NewInt(4556)
-	header.Difficulty = big.NewInt(8594358439058439583)
-	header.Difficulty.Mul(header.Difficulty, big.NewInt(443598345394))
-	header.ParentHash = common.HexToHash("0xfd58493ad432269bcc3435abc5444")
-	header.Extra = common.FromHex("0x433423234324324323243243232423aaaaaabbbbbbbcccc")
-	header.Nonce = types.EncodeNonce(34343232432)
-	header.GasLimit = 54330000004
-	header.GasUsed = 40000000000
-	header.Time = 34343242342332
-	header.Root = common.HexToHash("0xeeeeeeeefffffffbbbbbbbaaaaaa3456")
-	header.Coinbase = common.HexToAddress("0xdddd44333aaabbb555664300066555")
-	header.MixDigest = common.HexToHash("0x585859595959506968")
-	for i := 0; i < 256; i++ {
-		header.Bloom[i] = byte(i)
-	}
-	header.ReceiptHash = common.HexToHash("0x5566778")
-	header.TxHash = common.HexToHash("0x894858473765654")
-	buffer := make([]byte, HeaderSerLength)
-	SerialiseHeader(&header, buffer)
-	var newHeader types.Header
-	DeserialiseHeader(&newHeader, buffer)
-	newBuffer := make([]byte, HeaderSerLength)
-	SerialiseHeader(&newHeader, newBuffer)
-	if !bytes.Equal(buffer, newBuffer) {
-		t.Errorf("header serialistion must be the same")
 	}
 }

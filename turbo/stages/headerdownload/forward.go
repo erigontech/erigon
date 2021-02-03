@@ -23,7 +23,7 @@ const (
 )
 
 // Forward progresses Headers stage in the forward direction
-func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte) error {
+func Forward(logPrefix string, db ethdb.Database, files []string, buffer *HeaderBuffer) error {
 	count := 0
 	var highest uint64
 	var headerProgress uint64

@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
@@ -22,7 +21,7 @@ func Check(filesDir string) error {
 		3600, /* newAnchor future limit */
 		3600, /* newAnchor past limit */
 	)
-	if recovered, err := hd.RecoverFromFiles(uint64(time.Now().Unix()), make(map[common.Hash]*types.Header)); err != nil || !recovered {
+	if recovered, err := hd.RecoverFromFiles(uint64(time.Now().Unix()), make(map[common.Hash]headerdownload.HeaderRecord)); err != nil || !recovered {
 		if err != nil {
 			log.Error("Recovery from file failed, will start from scratch", "error", err)
 		} else {

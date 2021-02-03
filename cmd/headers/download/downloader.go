@@ -1,7 +1,9 @@
 package download
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -305,11 +307,11 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 	}
 	if !dbRecovered && !filesRecovered {
 		hd.SetHardCodedTips(hardTips)
-		for _, header := range hardTips {
-			if err2 := hd.HardCodedHeader(header, uint64(time.Now().Unix())); err2 != nil {
-				log.Error("Failed to insert hard coded header", "block number", header.Number.Uint64(), "error", err2)
+		for _, headerRecord := range hardTips {
+			if err2 := hd.HardCodedHeader(headerRecord.Header, uint64(time.Now().Unix())); err2 != nil {
+				log.Error("Failed to insert hard coded header", "block number", headerRecord.Header.Number.Uint64(), "error", err2)
 			} else {
-				hd.AddHeaderToBuffer(header)
+				hd.AddHeaderToBuffer(headerRecord.Raw, headerRecord.Header.Number.Uint64())
 			}
 		}
 	}
@@ -352,11 +354,29 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_co
 }
 
 func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
-	var request []*types.Header
-	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return nil, fmt.Errorf("decode BlockHeaders: %v", err)
+	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
+	_, err := rlpStream.List()
+	if err != nil {
+		return nil, fmt.Errorf("decode BlockHeaders: %w", err)
 	}
-	if segments, penalty, err := cs.hd.SplitIntoSegments(request); err == nil {
+	var headersRaw [][]byte
+	var headerRaw []byte
+	for headerRaw, err = rlpStream.Raw(); err == nil; headerRaw, err = rlpStream.Raw() {
+		headersRaw = append(headersRaw, headerRaw)
+	}
+	if err != nil && !errors.Is(err, rlp.EOL) {
+		return nil, fmt.Errorf("decode BlockHeaders: %w", err)
+	}
+	headers := make([]*types.Header, len(headersRaw))
+	var i int
+	for i, headerRaw = range headersRaw {
+		var h types.Header
+		if err = rlp.DecodeBytes(headerRaw, &h); err != nil {
+			return nil, fmt.Errorf("decode BlockHeaders: %w", err)
+		}
+		headers[i] = &h
+	}
+	if segments, penalty, err := cs.hd.SplitIntoSegments(headersRaw, headers); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			for _, segment := range segments {
 				processSegment(&cs.lock, cs.hd, segment)
@@ -378,11 +398,26 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_core
 }
 
 func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
+	// Extract header from the block
+	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
+	_, err := rlpStream.List() // Now stream is at the beggining of the block record
+	if err != nil {
+		return nil, fmt.Errorf("decode NewBlockMsg: %w", err)
+	}
+	_, err = rlpStream.List() // Now stream is at the begininng of the header
+	if err != nil {
+		return nil, fmt.Errorf("decode NewBlockMsg: %w", err)
+	}
+	var headerRaw []byte
+	if headerRaw, err = rlpStream.Raw(); err != nil {
+		return nil, fmt.Errorf("decode NewBlockMsg: %w", err)
+	}
+	// Parse the entire request from scratch
 	var request eth.NewBlockData
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode NewBlockMsg: %v", err)
 	}
-	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(request.Block.Header()); err == nil {
+	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			processSegment(&cs.lock, cs.hd, segments[0]) // There is only one segment in this case
 		} else {
