@@ -3,6 +3,7 @@ module github.com/ledgerwatch/turbo-geth
 go 1.15
 
 require (
+    github.com/consensys/gurvy v0.3.8
     github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/JekaMas/notify v0.9.4
