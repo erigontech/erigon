@@ -83,6 +83,21 @@ const (
 	DbgDoNotChange     = C.MDBX_DBG_DONTCHANGE
 )
 
+const (
+	OptMaxDB                        = C.MDBX_opt_max_db
+	OptMaxReaders                   = C.MDBX_opt_max_readers
+	OptSyncBytes                    = C.MDBX_opt_sync_bytes
+	OptSyncPeriod                   = C.MDBX_opt_sync_period
+	OptRpAugmentLimit               = C.MDBX_opt_rp_augment_limit
+	OptLooseLimit                   = C.MDBX_opt_loose_limit
+	OptDpReverseLimit               = C.MDBX_opt_dp_reserve_limit
+	OptTxnDpLimit                   = C.MDBX_opt_txn_dp_limit
+	OptTxnDpInitial                 = C.MDBX_opt_txn_dp_initial
+	OptSpillMaxDenominator          = C.MDBX_opt_spill_max_denominator
+	OptSpillMinDenominator          = C.MDBX_opt_spill_min_denominator
+	OptSpillParent4ChildDenominator = C.MDBX_opt_spill_parent4child_denominator
+)
+
 var (
 	LoggerDoNotChange = C.MDBX_LOGGER_DONTCHANGE
 )
@@ -440,6 +455,11 @@ func (env *Env) Path() (string, error) {
 //	ret := C.mdbx_env_set_mapsize(env._env, C.size_t(size))
 //	return operrno("mdbx_env_set_mapsize", ret)
 //}
+
+func (env *Env) SetOption(option uint, value uint64) error {
+	ret := C.mdbx_env_set_option(env._env, C.MDBX_option_t(option), C.uint64_t(value))
+	return operrno("mdbx_env_set_option", ret)
+}
 
 func (env *Env) SetGeometry(sizeLower int, sizeNow int, sizeUpper int, growthStep int, shrinkThreshold int, pageSize int) error {
 	ret := C.mdbx_env_set_geometry(env._env,
