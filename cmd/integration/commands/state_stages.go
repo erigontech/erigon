@@ -10,7 +10,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -373,16 +372,12 @@ func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) er
 	}
 
 	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, address, v []byte) (bool, error) {
-		var addrHash, err = common.HashData(address)
-		if err != nil {
-			return false, err
-		}
-		var k = addrHash[:]
-		bm, innerErr := bitmapdb.Get(db, vv.IndexBucket, k, uint32(blockN-1), uint32(blockN+1))
+		var k = address
+		bm, innerErr := bitmapdb.Get64(db, vv.IndexBucket, k, blockN-1, blockN+1)
 		if innerErr != nil {
 			return false, innerErr
 		}
-		if !bm.Contains(uint32(blockN)) {
+		if !bm.Contains(blockN) {
 			return false, fmt.Errorf("checkHistory failed: block=%d,addr=%x", blockN, k)
 		}
 		return true, nil
