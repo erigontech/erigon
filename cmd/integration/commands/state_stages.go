@@ -378,7 +378,7 @@ func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) er
 			return false, innerErr
 		}
 		if !bm.Contains(blockN) {
-			return false, fmt.Errorf("checkHistory failed: block=%d,addr=%x", blockN, k)
+			return false, fmt.Errorf("checkHistory failed: bucket=%s,block=%d,addr=%x", changeSetBucket, blockN, k)
 		}
 		return true, nil
 	}); err != nil {
