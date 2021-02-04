@@ -885,13 +885,11 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 		b.accountReads[addrHash] = struct{}{}
 	}
 	for plainKey, value := range storageMap {
-		h, hashErr := common.HashData([]byte(plainKey)[:common.AddressLength])
+		addrHash, hashErr := common.HashData([]byte(plainKey)[:common.AddressLength])
 		if hashErr != nil {
 			return hashErr
 		}
-		var key = append(h[:], []byte(plainKey)[common.AddressLength:]...)
-		var addrHash common.Hash
-		copy(addrHash[:], []byte(key)[:common.HashLength])
+		var key = append(addrHash[:], []byte(plainKey)[common.AddressLength:]...)
 		var keyHash common.Hash
 		copy(keyHash[:], []byte(key)[common.HashLength+common.IncarnationLength:])
 		m, ok := b.storageUpdates[addrHash]
