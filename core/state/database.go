@@ -962,13 +962,23 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 }
 
 func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[string][]byte, storageMap map[string][]byte) error {
-	for key := range accountMap {
-		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, []byte(key), timestampTo+1); err != nil {
+	for plainKey := range accountMap {
+		key, err := common.HashData([]byte(plainKey)[:])
+		if err != nil {
+			return err
+		}
+
+		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, key[:], timestampTo+1); err != nil {
 			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
 		}
 	}
-	for key := range storageMap {
-		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, dbutils.CompositeKeyWithoutIncarnation([]byte(key)), timestampTo+1); err != nil {
+	for plainKey := range storageMap {
+		key, err := common.HashData([]byte(plainKey)[:])
+		if err != nil {
+			return err
+		}
+
+		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, dbutils.CompositeKeyWithoutIncarnation(key[:]), timestampTo+1); err != nil {
 			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
 		}
 	}
