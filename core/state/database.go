@@ -885,7 +885,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 		b.accountReads[addrHash] = struct{}{}
 	}
 	for plainKey, value := range storageMap {
-		h, hashErr := common.HashData([]byte(plainKey)[:common.HashLength])
+		h, hashErr := common.HashData([]byte(plainKey)[:common.AddressLength])
 		if hashErr != nil {
 			return hashErr
 		}
