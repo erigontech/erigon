@@ -64,12 +64,12 @@ var (
 	CurrentStateBucket     = "CST2"
 	CurrentStateBucketOld1 = "CST"
 
-	//key - address hash
-	//value - list of block where it's changed
+	//key - address + shard_id_u64
+	//value - roaring bitmap  - list of block where it changed
 	AccountsHistoryBucket = "hAT"
 
-	//key - address hash
-	//value - list of block where it's changed
+	//key - address + storage_key + shard_id_u64
+	//value - roaring bitmap - list of block where it changed
 	StorageHistoryBucket = "hST"
 
 	//key - contract code hash
