@@ -69,9 +69,9 @@ func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment
 		return
 	}
 	currentTime := uint64(time.Now().Unix())
-	var powDepth int
-	if powDepth1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
-		powDepth = powDepth1
+	var hardCoded bool
+	if hardCoded1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
+		hardCoded = hardCoded1
 	} else {
 		log.Error("VerifySeals", "error", err1)
 		return
@@ -92,7 +92,7 @@ func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment
 			}
 		} else {
 			// ExtendDown
-			if err1 := hd.ExtendDown(segment, start, end, powDepth, currentTime); err1 != nil {
+			if err1 := hd.ExtendDown(segment, start, end, hardCoded, currentTime); err1 != nil {
 				log.Error("ExtendDown failed", "error", err1)
 			} else {
 				hd.AddSegmentToBuffer(segment, start, end)
@@ -296,7 +296,7 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		3600, /* newAnchor future limit */
 		3600, /* newAnchor past limit */
 	)
-	dbRecovered, err := hd.RecoverFromDb(db, uint64(time.Now().Unix()))
+	err := hd.RecoverFromDb(db, uint64(time.Now().Unix()))
 	if err != nil {
 		log.Error("Recovery from DB failed", "error", err)
 	}
@@ -305,7 +305,8 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 	if err1 != nil {
 		log.Error("Recovery from file failed, will start from scratch", "error", err1)
 	}
-	if !dbRecovered && !filesRecovered {
+	if !filesRecovered {
+		fmt.Printf("Inserting hard-coded tips\n")
 		hd.SetHardCodedTips(hardTips)
 		for _, headerRecord := range hardTips {
 			if err2 := hd.HardCodedHeader(headerRecord.Header, uint64(time.Now().Unix())); err2 != nil {

@@ -65,7 +65,7 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer *Header
 	var newCanonical bool
 	var forkNumber uint64
 	var canonicalBacktrack = make(map[common.Hash]common.Hash)
-	if _, _, err1 = ReadFilesAndBuffer(files, buffer, func(header *types.Header, blockHeight uint64) error {
+	if err1 = ReadFilesAndBuffer(files, buffer, func(header *types.Header, blockHeight uint64) error {
 		hash := header.Hash()
 		if hash == prevHash {
 			// Skip duplicates

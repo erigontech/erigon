@@ -54,7 +54,7 @@ func (atq *AnchorTipQueue) Pop() interface{} {
 }
 
 type Anchor struct {
-	powDepth     int
+	hardCoded    bool // Whether this anchor originated from a hard-coded header
 	tipQueue     *AnchorTipQueue
 	difficulty   uint256.Int
 	parentHash   common.Hash
@@ -208,23 +208,24 @@ type HeaderDownload struct {
 	bufferLimit            int
 	filesDir               string
 	files                  []string
-	anchorSequence         uint32 // Sequence number to be used for recording anchors next time the buffer is flushed
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash][]*Anchor // Mapping from parentHash to collection of anchors
 	anchorTree             *llrb.LLRB                // Balanced tree of anchors sorted by tip stretch (longest stretch first)
 	nextAnchorID           int
 	hardTips               map[common.Hash]HeaderRecord // Set of hashes for hard-coded tips
-	tips                   map[common.Hash]*Tip         // Tips by tip hash
-	tipCount               int                          // Total number of tips associated to all anchors
-	tipLimit               int                          // Maximum allowed number of tips
-	initPowDepth           int                          // powDepth assigned to the newly inserted anchor
-	newAnchorFutureLimit   uint64                       // How far in the future (relative to current time) the new anchors are allowed to be
-	newAnchorPastLimit     uint64                       // How far in the past (relative to current time) the new anchors are allowed to be
+	maxHardTipHeight       uint64
+	tips                   map[common.Hash]*Tip // Tips by tip hash
+	tipCount               int                  // Total number of tips associated to all anchors
+	tipLimit               int                  // Maximum allowed number of tips
+	initPowDepth           int                  // powDepth assigned to the newly inserted anchor
+	newAnchorFutureLimit   uint64               // How far in the future (relative to current time) the new anchors are allowed to be
+	newAnchorPastLimit     uint64               // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
 	requestQueue           *list.List
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
 	RequestQueueTimer      *time.Timer
+	highestInDb            uint64 // Height of the heighest block header in the database
 	initialHash            common.Hash
 	stageReady             bool
 	stageReadyCh           chan struct{}
