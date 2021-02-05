@@ -436,9 +436,7 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 	return nil
 }
 
-func (hd *HeaderDownload) HardCodedHeader(header *types.Header, currentTime uint64) error {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
+func (hd *HeaderDownload) hardCodedHeader(header *types.Header, currentTime uint64) error {
 	if anchor, err := hd.addHeaderAsAnchor(header, true /* hardCoded */); err == nil {
 		diff, overflow := uint256.FromBig(header.Difficulty)
 		if overflow {
@@ -631,17 +629,18 @@ func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]HeaderRecord
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	for tipHash, headerRecord := range hardTips {
-		if headerRecord.Header.Number.Uint64() < hd.highestInDb {
+		height := headerRecord.Header.Number.Uint64()
+		if height < hd.highestInDb {
 			// No need for this hard coded header anymore
 			continue
 		}
-		if headerRecord.Header.Number.Uint64() > hd.maxHardTipHeight {
-			hd.maxHardTipHeight = headerRecord.Header.Number.Uint64()
+		if height > hd.maxHardTipHeight {
+			hd.maxHardTipHeight = height
 		}
-		if err := hd.HardCodedHeader(headerRecord.Header, uint64(time.Now().Unix())); err != nil {
-			log.Error("Failed to insert hard coded header", "block number", headerRecord.Header.Number.Uint64(), "error", err)
+		if err := hd.hardCodedHeader(headerRecord.Header, uint64(time.Now().Unix())); err != nil {
+			log.Error("Failed to insert hard coded header", "block number", height, "error", err)
 		} else {
-			hd.AddHeaderToBuffer(headerRecord.Raw, headerRecord.Header.Number.Uint64())
+			hd.buffer.AddHeader(headerRecord.Raw, height)
 		}
 		hd.hardTips[tipHash] = headerRecord
 	}

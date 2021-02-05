@@ -215,10 +215,8 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	if err2 != nil {
 		return err2
 	}
-	go controlServer.headerLoop(ctx)
-	//go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.penalise, controlServer.requestWakeUpBodies, timeout); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendRequests, controlServer.sendBodyRequest, controlServer.penalise, controlServer.requestWakeUpBodies, timeout); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 
@@ -249,10 +247,8 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	if err := server.Start(); err != nil {
 		return fmt.Errorf("could not start server: %w", err)
 	}
-	go controlServer.headerLoop(ctx)
-	//go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendBodyRequest, controlServer.penalise, controlServer.requestWakeUpBodies, timeout); err != nil {
+	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendRequests, controlServer.sendBodyRequest, controlServer.penalise, controlServer.requestWakeUpBodies, timeout); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 	return nil
@@ -529,20 +525,5 @@ func (cs *ControlServerImpl) penalise(ctx context.Context, peer []byte) {
 	penalizeReq := proto_sentry.PenalizePeerRequest{PeerId: peer, Penalty: proto_sentry.PenaltyKind_Kick}
 	if _, err := cs.sentryClient.PenalizePeer(ctx, &penalizeReq, &grpc.EmptyCallOption{}); err != nil {
 		log.Error("Could not penalise", "peer", peer, "error", err)
-	}
-}
-
-func (cs *ControlServerImpl) headerLoop(ctx context.Context) {
-	for {
-		reqs, timer := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-		cs.sendRequests(ctx, reqs)
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			//log.Info("RequestQueueTimer (headers) ticked")
-		case <-cs.requestWakeUpHeaders:
-			//log.Info("headerLoop woken up by the incoming request")
-		}
 	}
 }
