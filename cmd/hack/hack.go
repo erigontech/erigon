@@ -42,7 +42,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
@@ -1684,7 +1683,6 @@ func extracHeaders(chaindata string, block uint64, name string) error {
 	defer w.Flush()
 	fmt.Fprintf(w, "package headerdownload\n\n")
 	fmt.Fprintf(w, "var %sHardCodedHeaders = []string{\n", name)
-	var hBuffer [headerdownload.HeaderSerLength]byte
 	for {
 		hash, err := rawdb.ReadCanonicalHash(db, b)
 		if err != nil {
@@ -1695,7 +1693,6 @@ func extracHeaders(chaindata string, block uint64, name string) error {
 		}
 		h := rawdb.ReadHeader(db, hash, b)
 		fmt.Fprintf(w, "	\"")
-		headerdownload.SerialiseHeader(h, hBuffer[:])
 		base64writer := base64.NewEncoder(base64.RawStdEncoding, w)
 		if err = rlp.Encode(base64writer, h); err != nil {
 			return err
