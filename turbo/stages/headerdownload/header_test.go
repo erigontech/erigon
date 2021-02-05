@@ -35,7 +35,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	// Single header
 	var h types.Header
 	h.Number = big.NewInt(5)
-	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}}, []*types.Header{&h}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{{}}, []*types.Header{&h}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -47,7 +47,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	}
 
 	// Same header repeated twice
-	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}}, []*types.Header{&h, &h}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{{}, {}}, []*types.Header{&h, &h}); err == nil {
 		if penalty != DuplicateHeaderPenalty {
 			t.Errorf("expected DuplicateHeader penalty, got %s", penalty)
 		}
@@ -60,7 +60,7 @@ func TestSplitIntoSegments(t *testing.T) {
 
 	// Single header with a bad hash
 	hd.badHeaders[h.Hash()] = struct{}{}
-	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}}, []*types.Header{&h}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{{}}, []*types.Header{&h}); err == nil {
 		if penalty != BadBlockPenalty {
 			t.Errorf("expected BadBlock penalty, got %s", penalty)
 		}
@@ -78,7 +78,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	h2.Number = big.NewInt(2)
 	h2.Difficulty = big.NewInt(1010)
 	h2.ParentHash = h1.Hash()
-	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}}, []*types.Header{&h1, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{{}, {}}, []*types.Header{&h1, &h2}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -97,7 +97,7 @@ func TestSplitIntoSegments(t *testing.T) {
 
 	// Two connected headers with wrong numbers
 	h2.Number = big.NewInt(3) // Child number 3, parent number 1
-	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}}, []*types.Header{&h1, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{{}, {}}, []*types.Header{&h1, &h2}); err == nil {
 		if penalty != WrongChildBlockHeightPenalty {
 			t.Errorf("expected WrongChildBlockHeight penalty, got %s", penalty)
 		}
@@ -111,7 +111,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	// Two connected headers with wrong difficulty
 	h2.Number = big.NewInt(2)        // Child number 2, parent number 1
 	h2.Difficulty = big.NewInt(2000) // Expected difficulty 10 + 1000 = 1010
-	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}}, []*types.Header{&h1, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{{}, {}}, []*types.Header{&h1, &h2}); err == nil {
 		if penalty != WrongChildDifficultyPenalty {
 			t.Errorf("expected WrongChildDifficulty penalty, got %s", penalty)
 		}
@@ -129,7 +129,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	h3.Difficulty = big.NewInt(1010)
 	h3.ParentHash = h1.Hash()
 	h3.Extra = []byte("I'm different") // To make sure the hash of h3 is different from the hash of h2
-	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}, []byte{}}, []*types.Header{&h1, &h2, &h3}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{{}, {}, {}}, []*types.Header{&h1, &h2, &h3}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -147,7 +147,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	}
 
 	// Same three headers, but in a reverse order
-	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}, []byte{}}, []*types.Header{&h3, &h2, &h1}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{{}, {}, {}}, []*types.Header{&h3, &h2, &h1}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -165,7 +165,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	}
 
 	// Two headers not connected to each other
-	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}}, []*types.Header{&h3, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{{}, {}}, []*types.Header{&h3, &h2}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
