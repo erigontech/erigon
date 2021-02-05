@@ -21,7 +21,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	}, nil, 60, 60)
 
 	// Empty message
-	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{}, []*types.Header{}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -35,7 +35,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	// Single header
 	var h types.Header
 	h.Number = big.NewInt(5)
-	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}}, []*types.Header{&h}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -47,7 +47,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	}
 
 	// Same header repeated twice
-	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h, &h}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}}, []*types.Header{&h, &h}); err == nil {
 		if penalty != DuplicateHeaderPenalty {
 			t.Errorf("expected DuplicateHeader penalty, got %s", penalty)
 		}
@@ -60,7 +60,7 @@ func TestSplitIntoSegments(t *testing.T) {
 
 	// Single header with a bad hash
 	hd.badHeaders[h.Hash()] = struct{}{}
-	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}}, []*types.Header{&h}); err == nil {
 		if penalty != BadBlockPenalty {
 			t.Errorf("expected BadBlock penalty, got %s", penalty)
 		}
@@ -78,7 +78,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	h2.Number = big.NewInt(2)
 	h2.Difficulty = big.NewInt(1010)
 	h2.ParentHash = h1.Hash()
-	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h1, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}}, []*types.Header{&h1, &h2}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -97,7 +97,7 @@ func TestSplitIntoSegments(t *testing.T) {
 
 	// Two connected headers with wrong numbers
 	h2.Number = big.NewInt(3) // Child number 3, parent number 1
-	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h1, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}}, []*types.Header{&h1, &h2}); err == nil {
 		if penalty != WrongChildBlockHeightPenalty {
 			t.Errorf("expected WrongChildBlockHeight penalty, got %s", penalty)
 		}
@@ -111,7 +111,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	// Two connected headers with wrong difficulty
 	h2.Number = big.NewInt(2)        // Child number 2, parent number 1
 	h2.Difficulty = big.NewInt(2000) // Expected difficulty 10 + 1000 = 1010
-	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h1, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}}, []*types.Header{&h1, &h2}); err == nil {
 		if penalty != WrongChildDifficultyPenalty {
 			t.Errorf("expected WrongChildDifficulty penalty, got %s", penalty)
 		}
@@ -129,7 +129,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	h3.Difficulty = big.NewInt(1010)
 	h3.ParentHash = h1.Hash()
 	h3.Extra = []byte("I'm different") // To make sure the hash of h3 is different from the hash of h2
-	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h1, &h2, &h3}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}, []byte{}}, []*types.Header{&h1, &h2, &h3}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -147,7 +147,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	}
 
 	// Same three headers, but in a reverse order
-	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h3, &h2, &h1}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}, []byte{}}, []*types.Header{&h3, &h2, &h1}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -165,7 +165,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	}
 
 	// Two headers not connected to each other
-	if chainSegments, penalty, err := hd.SplitIntoSegments([]*types.Header{&h3, &h2}); err == nil {
+	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{[]byte{}, []byte{}}, []*types.Header{&h3, &h2}); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -184,7 +184,7 @@ func TestSingleHeaderAsSegment(t *testing.T) {
 	}, nil, 60, 60)
 	var h types.Header
 	h.Number = big.NewInt(5)
-	if chainSegments, penalty, err := hd.SingleHeaderAsSegment(&h); err == nil {
+	if chainSegments, penalty, err := hd.SingleHeaderAsSegment([]byte{}, &h); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -203,7 +203,7 @@ func TestSingleHeaderAsSegment(t *testing.T) {
 
 	// Same header with a bad hash
 	hd.badHeaders[h.Hash()] = struct{}{}
-	if chainSegments, penalty, err := hd.SingleHeaderAsSegment(&h); err == nil {
+	if chainSegments, penalty, err := hd.SingleHeaderAsSegment([]byte{}, &h); err == nil {
 		if penalty != BadBlockPenalty {
 			t.Errorf("expected BadBlock penalty, got %s", penalty)
 		}
@@ -309,8 +309,8 @@ func TestExtendUp(t *testing.T) {
 	h2.Number = big.NewInt(2)
 	h2.Difficulty = big.NewInt(1010)
 	h2.ParentHash = h1.Hash()
-	if anchor, err := hd.addHeaderAsAnchor(&h1, 256); err == nil {
-		if err1 := hd.addHeaderAsTip(&h1, anchor, *new(uint256.Int).SetUint64(2000), currentTime); err1 != nil {
+	if anchor, err := hd.addHeaderAsAnchor(&h1, false /* hardCoded */); err == nil {
+		if err1 := hd.addHeaderAsTip(&h1, anchor, *new(uint256.Int).SetUint64(2000), currentTime, false /* hardCodedTip */); err1 != nil {
 			t.Fatalf("setting up h1 (tip): %v", err1)
 		}
 	} else {
@@ -385,8 +385,8 @@ func TestExtendUp(t *testing.T) {
 	}
 
 	// Introduce h5 as a tip and prepend h6
-	if anchor, err := hd.addHeaderAsAnchor(&h5, 256); err == nil {
-		if err1 := hd.addHeaderAsTip(&h5, anchor, *new(uint256.Int).SetUint64(10000), currentTime); err1 != nil {
+	if anchor, err := hd.addHeaderAsAnchor(&h5, false /* hardCoded */); err == nil {
+		if err1 := hd.addHeaderAsTip(&h5, anchor, *new(uint256.Int).SetUint64(10000), currentTime, false /* hardCodedTip */); err1 != nil {
 			t.Fatalf("setting up h5 (tip): %v", err1)
 		}
 	} else {
@@ -415,7 +415,7 @@ func TestExtendUp(t *testing.T) {
 	h7.Difficulty = big.NewInt(6010)
 	h7.ParentHash = common.HexToHash("0x4354543543959438594359348990345893408")
 	// Introduce hard-coded tip
-	if anchor, err := hd.addHeaderAsAnchor(&h7, 256); err == nil {
+	if anchor, err := hd.addHeaderAsAnchor(&h7, true /* hardCoded */); err == nil {
 		hd.addHardCodedTip(10, 5555, h7.Hash(), anchor, *new(uint256.Int).SetUint64(2000))
 	} else {
 		t.Fatalf("settings up h7 (anchor): %v", err)
@@ -433,7 +433,7 @@ func TestExtendDown(t *testing.T) {
 
 	// single header in the chain segment
 	var h types.Header
-	if err := hd.ExtendDown(&ChainSegment{Headers: []*types.Header{&h}}, 0, 1, 256, uint64(time.Now().Unix())); err == nil {
+	if err := hd.ExtendDown(&ChainSegment{HeadersRaw: [][]byte{}, Headers: []*types.Header{&h}}, 0, 1, false /* hardCoded */, uint64(time.Now().Unix())); err == nil {
 		t.Errorf("extendDown without working trees - expected error")
 	}
 }
