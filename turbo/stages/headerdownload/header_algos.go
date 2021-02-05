@@ -252,7 +252,7 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int, curren
 				return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 			}
 			cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, currentTime, false /* hardCodedTip */); err != nil {
+			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, false /* hardCodedTip */); err != nil {
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
@@ -336,7 +336,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, hard
 				return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 			}
 			cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, currentTime, false /* hardCodedTip */); err != nil {
+			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, false /* hardCodedTip */); err != nil {
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
@@ -399,7 +399,7 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 		}
 		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-		if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, currentTime, false /* hardCodedTip */); err != nil {
+		if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, false /* hardCodedTip */); err != nil {
 			return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
@@ -426,7 +426,7 @@ func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, curre
 			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 		}
 		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-		if err = hd.addHeaderAsTip(header, anchor, cumulativeDifficulty, currentTime, false /* hardCodeTips */); err != nil {
+		if err = hd.addHeaderAsTip(header, anchor, cumulativeDifficulty, false /* hardCodeTips */); err != nil {
 			return fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
@@ -757,7 +757,7 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) e
 					return err
 				}
 			}
-			if err = hd.addHeaderAsTip(&h, anchor, *cumulativeDiff, currentTime, false /* hardCodedTip */); err != nil {
+			if err = hd.addHeaderAsTip(&h, anchor, *cumulativeDiff, false /* hardCodedTip */); err != nil {
 				return err
 			}
 		}
@@ -837,7 +837,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 			if parentAnchor, found := parentAnchors[parentHash]; found {
 				parentDiff := parentDiffs[parentHash]
 				cumulativeDiff.Add(cumulativeDiff, parentDiff)
-				if err = hd.addHeaderAsTip(header, parentAnchor, *cumulativeDiff, currentTime, hard); err != nil {
+				if err = hd.addHeaderAsTip(header, parentAnchor, *cumulativeDiff, hard); err != nil {
 					return fmt.Errorf("add header as tip: %v", err)
 				}
 				childAnchors[hash] = parentAnchor
@@ -854,7 +854,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 				anchor.difficulty = *diff
 				anchor.timestamp = header.Time
 				anchor.blockHeight = header.Number.Uint64()
-				if err = hd.addHeaderAsTip(header, anchor, *cumulativeDiff, currentTime, hard); err != nil {
+				if err = hd.addHeaderAsTip(header, anchor, *cumulativeDiff, hard); err != nil {
 					return fmt.Errorf("add header as tip: %v", err)
 				}
 				if len(hd.anchors[parentHash]) == 0 {
@@ -1016,7 +1016,7 @@ func (hd *HeaderDownload) getTip(tipHash common.Hash) (*Tip, bool) {
 }
 
 // addHeaderAsTip adds given header as a tip belonging to a given anchorParent
-func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, cumulativeDifficulty uint256.Int, currentTime uint64, hardCodedTip bool) error {
+func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, cumulativeDifficulty uint256.Int, hardCodedTip bool) error {
 	diff, overflow := uint256.FromBig(header.Difficulty)
 	if overflow {
 		return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
