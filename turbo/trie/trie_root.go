@@ -905,9 +905,9 @@ func (c *IHCursor) _deleteCurrent() error {
 	if c.deleted[c.lvl] {
 		return nil
 	}
-	if bytes.HasPrefix(c.k[c.lvl], common.FromHex("0c0e")) {
-		fmt.Printf("delete: %x\n", c.k[c.lvl])
-	}
+	//if bytes.HasPrefix(c.k[c.lvl], common.FromHex("0c0e")) {
+	//	fmt.Printf("delete: %x\n", c.k[c.lvl])
+	//}
 
 	if err := c.hc(c.k[c.lvl], 0, 0, nil, nil); err != nil {
 		return err
