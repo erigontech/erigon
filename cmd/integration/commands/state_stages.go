@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"path"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -69,6 +71,22 @@ var loopIhCmd = &cobra.Command{
 	},
 }
 
+var preimageCmd = &cobra.Command{
+	Use: "preimage",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+
+		if err := preimage(db, common.HexToHash("53be4baab233c99b717a834218c17c06549a05131387104cea643d79c3cfa17"), ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	withChaindata(stateStags)
 	withReferenceChaindata(stateStags)
@@ -83,10 +101,13 @@ func init() {
 	withBatchSize(loopIhCmd)
 
 	rootCmd.AddCommand(loopIhCmd)
+
+	withChaindata(preimageCmd)
+
+	rootCmd.AddCommand(preimageCmd)
 }
 
 func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
-
 	sm, err1 := ethdb.GetStorageModeFromDB(db)
 	if err1 != nil {
 		panic(err1)
@@ -140,6 +161,9 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		stopAt = block
 	} else if backward {
 		stopAt = 1
+	}
+	if err := checkIH(tx); err != nil {
+		return err
 	}
 
 	var batchSize datasize.ByteSize
@@ -200,6 +224,9 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 			return err
 		}
 
+		if err := checkIH(tx); err != nil {
+			return err
+		}
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
@@ -225,6 +252,67 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func checkIH(db ethdb.Database) error {
+	//defer panic(1)
+	//return nil
+	if err := db.Walk(dbutils.TrieOfAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
+		if len(k) == 1 {
+			return true, nil
+		}
+		found := false
+		for parentK := k[:len(k)-1]; len(parentK) > 0; parentK = parentK[:len(parentK)-1] {
+			parent, err := db.Get(dbutils.TrieOfAccountsBucket, parentK)
+			if err != nil {
+				if errors.Is(err, ethdb.ErrKeyNotFound) {
+					continue
+				}
+				return false, err
+			}
+			found = true
+			branches := binary.BigEndian.Uint16(parent)
+			parentHasBit := uint16(1)<<uint16(k[len(parentK)])&branches != 0
+			if !parentHasBit {
+				return true, fmt.Errorf("for %x found parent %x, but it has no branchBit for child: %016b", k, parentK, branches)
+			}
+		}
+		if !found {
+			return true, fmt.Errorf("trie hash %x has no parent", k)
+		}
+
+		return true, nil
+	}); err != nil {
+		return err
+	}
+	return db.Walk(dbutils.TrieOfStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
+		if len(k) == 40 {
+			return true, nil
+		}
+		found := false
+		parentK := k
+		for i := len(k) - 1; i >= 40; i-- {
+			parentK = k[:i]
+			parent, err := db.Get(dbutils.TrieOfStorageBucket, parentK)
+			if err != nil {
+				if errors.Is(err, ethdb.ErrKeyNotFound) {
+					continue
+				}
+				panic(err)
+			}
+			found = true
+			branches := binary.BigEndian.Uint16(parent)
+			parentHasBit := uint16(1)<<uint16(k[len(parentK)])&branches != 0
+			if !parentHasBit {
+				panic(fmt.Errorf("for %x found parent %x, but it has no branchBit for child: %016b", k, parentK, branches))
+			}
+		}
+		if !found {
+			panic(fmt.Errorf("trie hash %x has no parent. Last checked: %x", k, parentK))
+		}
+
+		return true, nil
+	})
 }
 
 func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db ethdb.Database, expectedStorageChanges map[uint64]*changeset.ChangeSet, execAtBlock uint64, historyEnabled bool) error {
@@ -394,6 +482,31 @@ func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) er
 	}); err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func preimage(db ethdb.Database, accHash common.Hash, ctx context.Context) error {
+	txDB, err1 := db.Begin(ctx, ethdb.RO)
+	if err1 != nil {
+		return err1
+	}
+	defer txDB.Rollback()
+
+	tx := txDB.(ethdb.HasTx).Tx()
+	c := tx.Cursor(dbutils.PlainStorageChangeSetBucket)
+	for k, v, err := c.Last(); k != nil; k, v, err = c.Prev() {
+		if err != nil {
+			return err
+		}
+
+		if bytes.Equal(common.FromHex("aba7de728950c92c57d08e20d4077161f12f"), k[8:28]) {
+			//hash, _ := common.HashData(v[:20])
+			//if hash == accHash {
+			fmt.Printf("found: %d,%x,%v\n", binary.BigEndian.Uint64(k), v[:32], v[32:])
+		}
+	}
+	fmt.Printf("not found\n")
 
 	return nil
 }

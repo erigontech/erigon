@@ -83,7 +83,7 @@ type FlatDBTrieLoader struct {
 	accAddrHashWithInc [40]byte    // Concatenation of addrHash of the currently build account with its incarnation encoding
 
 	ihSeek, accSeek, storageSeek []byte
-	kHex, kHexS                  []byte
+	kHex, kHexS, buf             []byte
 	// Storage item buffer
 	storageKey   []byte
 	storageValue []byte
@@ -101,32 +101,28 @@ type FlatDBTrieLoader struct {
 
 // RootHashAggregator - calculates Merkle trie root hash from incoming data stream
 type RootHashAggregator struct {
-	trace            bool
-	wasIH            bool
-	wasIHStorage     bool
-	wasStorage       bool
-	root             common.Hash
-	hc               HashCollector2
-	shc              StorageHashCollector2
-	currStorage      bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succStorage      bytes.Buffer
-	valueStorage     []byte       // Current value to be used as the value tape for the hash builder
-	hashAccount      common.Hash  // Current value to be used as the value tape for the hash builder
-	hashStorage      common.Hash  // Current value to be used as the value tape for the hash builder
-	curr             bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succ             bytes.Buffer
-	currAccK         []byte
-	currAccKNibbles  []byte
-	value            []byte   // Current value to be used as the value tape for the hash builder
-	groups           []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
-	groupsStorage    []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
-	branches         []uint16
-	branchSetStorage []uint16
-	hb               *HashBuilder
-	hashData         GenStructStepHashData
-	a                accounts.Account
-	leafData         GenStructStepLeafData
-	accData          GenStructStepAccountData
+	trace        bool
+	wasIH        bool
+	wasIHStorage bool
+	root         common.Hash
+	hc           HashCollector2
+	shc          StorageHashCollector2
+	currStorage  bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succStorage  bytes.Buffer
+	valueStorage []byte       // Current value to be used as the value tape for the hash builder
+	hashAccount  common.Hash  // Current value to be used as the value tape for the hash builder
+	hashStorage  common.Hash  // Current value to be used as the value tape for the hash builder
+	curr         bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succ         bytes.Buffer
+	currAccK     []byte
+	value        []byte   // Current value to be used as the value tape for the hash builder
+	groups       []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
+	branches     []uint16
+	hb           *HashBuilder
+	hashData     GenStructStepHashData
+	a            accounts.Account
+	leafData     GenStructStepLeafData
+	accData      GenStructStepAccountData
 }
 
 func NewRootHashAggregator() *RootHashAggregator {
@@ -207,13 +203,12 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 		tx = txDB.(ethdb.HasTx).Tx()
 	}
 
-	accs, storages := NewStateCursor(tx.Cursor(dbutils.HashedAccountsBucket)), NewStateCursor(tx.Cursor(dbutils.HashedStorageBucket))
+	accs := NewStateCursor(tx.Cursor(dbutils.HashedAccountsBucket))
 	ihAccC, ihStorageC := tx.Cursor(dbutils.TrieOfAccountsBucket), tx.CursorDupSort(dbutils.TrieOfStorageBucket)
 
 	var canUse = func(prefix []byte) bool { return !l.rd.Retain(prefix) }
-	ih := IH(canUse, l.hc, ihAccC)
-	ihStorage := IHStorage2(canUse, l.shc, ihStorageC)
-	_ = storages
+	ih := IH(canUse, l.hc, ihAccC, quit)
+	ihStorage := IHStorage2(canUse, l.shc, ihStorageC, quit)
 
 	ss := tx.CursorDupSort(dbutils.HashedStorageBucket)
 
@@ -234,9 +229,6 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 		for k, kHex, v, err1 := accs.Seek(ih.FirstNotCoveredPrefix()); k != nil; k, kHex, v, err1 = accs.Next() {
 			if err1 != nil {
 				return EmptyRoot, err1
-			}
-			if err = common.Stopped(quit); err != nil {
-				return EmptyRoot, err
 			}
 			if keyIsBefore(ihK, kHex) || !bytes.HasPrefix(kHex, prefix) { // read all accounts until next IH
 				break
@@ -268,11 +260,13 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					if err3 != nil {
 						return EmptyRoot, err3
 					}
-					hexutil.DecompressNibbles(vS[:32], &l.kHexS)
-					if keyIsBefore(ihKS, l.kHexS) { // read until next IH
+					hexutil.DecompressNibbles(vS[:32], &l.buf)
+					if keyIsBefore(ihKS, l.buf) { // read until next IH
 						break
 					}
-					if err = l.receiver.Receive(StorageStreamItem, accWithInc, l.kHexS, nil, vS[32:], nil, 0); err != nil {
+					hexutil.DecompressNibbles(accWithInc, &l.kHexS)
+					l.kHexS = append(l.kHexS[:80], l.buf...)
+					if err = l.receiver.Receive(StorageStreamItem, nil, common.CopyBytes(l.kHexS), nil, vS[32:], nil, 0); err != nil {
 						return EmptyRoot, err
 					}
 				}
@@ -282,7 +276,9 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					break
 				}
 
-				if err = l.receiver.Receive(SHashStreamItem, accWithInc, ihKS, nil, nil, ihVS, 0); err != nil {
+				hexutil.DecompressNibbles(accWithInc, &l.kHexS)
+				l.kHexS = append(l.kHexS[:80], ihKS...)
+				if err = l.receiver.Receive(SHashStreamItem, nil, common.CopyBytes(l.kHexS), nil, nil, ihVS, 0); err != nil {
 					return EmptyRoot, err
 				}
 				if len(ihKS) == 0 { // means we just sent acc.storageRoot
@@ -319,6 +315,1198 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 	}
 	fmt.Printf("%d,%d,%d,%d\n", ih.is, i2, ihStorage.is, i4)
 	return l.receiver.Root(), nil
+}
+
+func (l *FlatDBTrieLoader) logProgress(accountKey, ihK []byte) {
+	var k string
+	if accountKey != nil {
+		k = makeCurrentKeyStr(accountKey)
+	} else if ihK != nil {
+		k = makeCurrentKeyStr(ihK)
+	}
+	log.Info(fmt.Sprintf("[%s] Calculating Merkle root", l.logPrefix), "current key", k)
+}
+
+func (r *RootHashAggregator) RetainNothing(_ []byte) bool {
+	return false
+}
+
+func (r *RootHashAggregator) Reset(hc HashCollector2, shc StorageHashCollector2, trace bool) {
+	r.hc = hc
+	r.shc = shc
+	r.curr.Reset()
+	r.succ.Reset()
+	r.value = nil
+	r.groups = r.groups[:0]
+	r.branches = r.branches[:0]
+	r.a.Reset()
+	r.hb.Reset()
+	r.wasIH = false
+	r.currStorage.Reset()
+	r.succStorage.Reset()
+	r.valueStorage = nil
+	r.wasIHStorage = false
+	r.root = common.Hash{}
+	r.trace = trace
+	r.hb.trace = trace
+}
+
+func (r *RootHashAggregator) Receive(itemType StreamItem,
+	accountKey []byte,
+	storageKey []byte,
+	accountValue *accounts.Account,
+	storageValue []byte,
+	hash []byte,
+	cutoff int,
+) error {
+	//if storageKey == nil {
+	//	if bytes.HasPrefix(accountKey, common.FromHex("0c0e")) {
+	//		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+	//	}
+	//} else {
+	//	hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
+	//	if bytes.HasPrefix(r.currAccK, common.FromHex("ce")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
+	//		fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+	//	}
+	//}
+	switch itemType {
+	case StorageStreamItem:
+		r.advanceKeysStorage(storageKey, true /* terminator */)
+		if r.currStorage.Len() > 0 {
+			if err := r.genStructStorage(); err != nil {
+				return err
+			}
+		}
+		r.saveValueStorage(false, storageValue, hash)
+	case SHashStreamItem:
+		if len(storageKey) == 0 { // this is ready-to-use storage root - no reason to call GenStructStep, also GenStructStep doesn't support empty prefixes
+			r.hb.hashStack = append(append(r.hb.hashStack, byte(80+common.HashLength)), hash...)
+			r.hb.nodeStack = append(r.hb.nodeStack, nil)
+			r.accData.FieldSet |= AccountFieldStorageOnly
+			break
+		}
+		r.advanceKeysStorage(storageKey, false /* terminator */)
+		if r.currStorage.Len() > 0 {
+			if err := r.genStructStorage(); err != nil {
+				return err
+			}
+		}
+		r.saveValueStorage(true, storageValue, hash)
+	case AccountStreamItem:
+		r.advanceKeysAccount(accountKey, true /* terminator */)
+		if r.curr.Len() > 0 && !r.wasIH {
+			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			if r.currStorage.Len() > 0 {
+				if err := r.genStructStorage(); err != nil {
+					return err
+				}
+			}
+			if r.currStorage.Len() > 0 {
+				if len(r.groups) >= 2*common.HashLength {
+					r.groups = r.groups[:2*common.HashLength-1]
+					r.branches = r.branches[:2*common.HashLength-1]
+				}
+				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+					r.groups = r.groups[:len(r.groups)-1]
+					r.branches = r.branches[:len(r.branches)-1]
+				}
+				r.currStorage.Reset()
+				r.succStorage.Reset()
+				r.wasIHStorage = false
+				// There are some storage items
+				r.accData.FieldSet |= AccountFieldStorageOnly
+			}
+		}
+		if r.curr.Len() > 0 {
+			if err := r.genStructAccount(); err != nil {
+				return err
+			}
+		}
+		if err := r.saveValueAccount(false, accountValue, hash); err != nil {
+			return err
+		}
+	case AHashStreamItem:
+		r.advanceKeysAccount(accountKey, false /* terminator */)
+		if r.curr.Len() > 0 && !r.wasIH {
+			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			if r.currStorage.Len() > 0 {
+				if err := r.genStructStorage(); err != nil {
+					return err
+				}
+			}
+			if r.currStorage.Len() > 0 {
+				if len(r.groups) >= 2*common.HashLength {
+					r.groups = r.groups[:2*common.HashLength-1]
+					r.branches = r.branches[:2*common.HashLength-1]
+				}
+				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+					r.groups = r.groups[:len(r.groups)-1]
+					r.branches = r.branches[:len(r.branches)-1]
+				}
+				r.currStorage.Reset()
+				r.succStorage.Reset()
+				r.wasIHStorage = false
+				// There are some storage items
+				r.accData.FieldSet |= AccountFieldStorageOnly
+			}
+		}
+		if r.curr.Len() > 0 {
+			if err := r.genStructAccount(); err != nil {
+				return err
+			}
+		}
+		if err := r.saveValueAccount(true, accountValue, hash); err != nil {
+			return err
+		}
+	case CutoffStreamItem:
+		if r.trace {
+			fmt.Printf("storage cuttoff %d\n", cutoff)
+		}
+		r.cutoffKeysAccount(cutoff)
+		if r.curr.Len() > 0 && !r.wasIH {
+			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			if r.currStorage.Len() > 0 {
+				if err := r.genStructStorage(); err != nil {
+					return err
+				}
+			}
+			if r.currStorage.Len() > 0 {
+				if len(r.groups) >= 2*common.HashLength {
+					r.groups = r.groups[:2*common.HashLength-1]
+					r.branches = r.branches[:2*common.HashLength-1]
+				}
+				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+					r.groups = r.groups[:len(r.groups)-1]
+					r.branches = r.branches[:len(r.branches)-1]
+				}
+				r.currStorage.Reset()
+				r.succStorage.Reset()
+				r.wasIHStorage = false
+				// There are some storage items
+				r.accData.FieldSet |= AccountFieldStorageOnly
+			}
+		}
+		if r.curr.Len() > 0 {
+			if err := r.genStructAccount(); err != nil {
+				return err
+			}
+		}
+		if r.curr.Len() > 0 {
+			if len(r.groups) > cutoff {
+				r.groups = r.groups[:cutoff]
+				r.branches = r.branches[:cutoff]
+			}
+			for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+				r.groups = r.groups[:len(r.groups)-1]
+				r.branches = r.branches[:len(r.branches)-1]
+			}
+		}
+		if r.hb.hasRoot() {
+			r.root = r.hb.rootHash()
+		} else {
+			r.root = EmptyRoot
+		}
+		r.groups = r.groups[:0]
+		r.branches = r.branches[:0]
+		r.hb.Reset()
+		r.wasIH = false
+		r.wasIHStorage = false
+		r.curr.Reset()
+		r.succ.Reset()
+		r.currStorage.Reset()
+		r.succStorage.Reset()
+	}
+	return nil
+}
+
+func (r *RootHashAggregator) Result() SubTries {
+	panic("don't call me")
+}
+
+func (r *RootHashAggregator) Root() common.Hash {
+	return r.root
+}
+
+func (r *RootHashAggregator) advanceKeysStorage(k []byte, terminator bool) {
+	r.currStorage.Reset()
+	r.currStorage.Write(r.succStorage.Bytes())
+	r.succStorage.Reset()
+	// Transform k to nibbles, but skip the incarnation part in the middle
+	r.succStorage.Write(k)
+
+	if terminator {
+		r.succStorage.WriteByte(16)
+	}
+}
+
+func (r *RootHashAggregator) cutoffKeysStorage(cutoff int) {
+	r.currStorage.Reset()
+	r.currStorage.Write(r.succStorage.Bytes())
+	r.succStorage.Reset()
+	if r.currStorage.Len() > 0 {
+		r.succStorage.Write(r.currStorage.Bytes()[:cutoff-1])
+		r.succStorage.WriteByte(r.currStorage.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
+	}
+}
+
+func (r *RootHashAggregator) genStructStorage() error {
+	var err error
+	var data GenStructStepData
+	if r.wasIHStorage {
+		r.hashData.Hash = r.hashStorage
+		data = &r.hashData
+	} else {
+		r.leafData.Value = rlphacks.RlpSerializableBytes(r.valueStorage)
+		data = &r.leafData
+	}
+	r.groups, r.branches, err = GenStructStep(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, func(keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
+		if len(keyHex) >= 80 {
+			if r.shc == nil {
+				return nil
+			}
+			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
+			//if bytes.HasPrefix(r.currAccK, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("07050a")) {
+			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], branches, hashes == nil)
+			//}
+			return r.shc(r.currAccK, keyHex[80:], branches, children, hashes, rootHash)
+		}
+		if r.hc == nil {
+			return nil
+		}
+		//if bytes.HasPrefix(keyHex, common.FromHex("0c0e")) {
+		//	fmt.Printf("collect: %x,%016b, del:%t\n", keyHex, branches, hashes == nil)
+		//}
+		return r.hc(keyHex, branches, children, hashes, rootHash)
+	}, data, r.groups, r.branches, r.trace)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *RootHashAggregator) saveValueStorage(isIH bool, v, h []byte) {
+	// Remember the current value
+	r.wasIHStorage = isIH
+	r.valueStorage = nil
+	if isIH {
+		r.hashStorage.SetBytes(h)
+	} else {
+		r.valueStorage = v
+	}
+}
+
+func (r *RootHashAggregator) advanceKeysAccount(k []byte, terminator bool) {
+	r.curr.Reset()
+	r.curr.Write(r.succ.Bytes())
+	r.succ.Reset()
+	r.succ.Write(k)
+	if terminator {
+		r.succ.WriteByte(16)
+	}
+}
+
+func (r *RootHashAggregator) cutoffKeysAccount(cutoff int) {
+	r.curr.Reset()
+	r.curr.Write(r.succ.Bytes())
+	r.succ.Reset()
+	if r.curr.Len() > 0 && cutoff > 0 {
+		r.succ.Write(r.curr.Bytes()[:cutoff-1])
+		r.succ.WriteByte(r.curr.Bytes()[cutoff-1] + 1) // Modify last nibble before the cutoff point
+	}
+}
+
+func (r *RootHashAggregator) genStructAccount() error {
+	var data GenStructStepData
+	if r.wasIH {
+		r.hashData.Hash = r.hashAccount
+		//copy(r.hashData.Hash[:], r.value)
+		data = &r.hashData
+	} else {
+		r.accData.Balance.Set(&r.a.Balance)
+		if r.a.Balance.Sign() != 0 {
+			r.accData.FieldSet |= AccountFieldBalanceOnly
+		}
+		r.accData.Nonce = r.a.Nonce
+		if r.a.Nonce != 0 {
+			r.accData.FieldSet |= AccountFieldNonceOnly
+		}
+		r.accData.Incarnation = r.a.Incarnation
+		data = &r.accData
+	}
+	r.wasIHStorage = false
+	r.currStorage.Reset()
+	r.succStorage.Reset()
+	var err error
+	if r.groups, r.branches, err = GenStructStep(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, func(keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
+		if len(keyHex) >= 80 {
+			if r.shc == nil {
+				return nil
+			}
+			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
+			//if bytes.HasPrefix(r.currAccK, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+			//fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], branches, hashes == nil)
+			//}
+			return r.shc(r.currAccK, keyHex[80:], branches, children, hashes, rootHash)
+		}
+		if r.hc == nil {
+			return nil
+		}
+		//if bytes.HasPrefix(keyHex, common.FromHex("0c0e")) {
+		//	fmt.Printf("collect: %x,%016b, del:%t\n", keyHex, branches, hashes == nil)
+		//}
+		return r.hc(keyHex, branches, children, hashes, rootHash)
+	}, data, r.groups, r.branches, r.trace); err != nil {
+		return err
+	}
+	r.accData.FieldSet = 0
+	return nil
+}
+
+func (r *RootHashAggregator) saveValueAccount(isIH bool, v *accounts.Account, h []byte) error {
+	r.wasIH = isIH
+	if isIH {
+		r.hashAccount.SetBytes(h)
+		return nil
+	}
+	r.a.Copy(v)
+	// Place code on the stack first, the storage will follow
+	if !r.a.IsEmptyCodeHash() {
+		// the first item ends up deepest on the stack, the second item - on the top
+		r.accData.FieldSet |= AccountFieldCodeOnly
+		if err := r.hb.hash(r.a.CodeHash[:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type CanUse func([]byte) bool // returns false - if element must be skipped
+
+const IHDupKeyLen = 2 * (common.HashLength + common.IncarnationLength)
+
+// IHCursor - holds logic related to iteration over IH bucket
+// has 2 main operations: goToChild and goToSibling
+// goToChild can be done only by DB operation (go to longer prefix)
+// goToSibling can be done in memory or by DB operation: nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+type IHCursor struct {
+	skipState                  bool
+	is, lvl                    int
+	k, v                       [64][]byte // store up to 64 levels of key/value pairs in nibbles format
+	branches, children         [64]uint16 // branch children set, and any children set
+	childID, maxHashID, hashID [64]int16  // meta info: current child in .children[lvl] field, max child id, current hash in .v[lvl]
+	deleted                    [64]bool   // helper to avoid multiple deletes of same key
+
+	c                     ethdb.Cursor
+	hc                    HashCollector2
+	seek, prev, cur, next []byte
+	prefix                []byte
+
+	firstNotCoveredPrefix []byte
+	canUse                func(prefix []byte) bool
+
+	kBuf []byte
+	quit <-chan struct{}
+}
+
+func IH(canUse func(prefix []byte) bool, hc HashCollector2, c ethdb.Cursor, quit <-chan struct{}) *IHCursor {
+	ih := &IHCursor{c: c, canUse: canUse,
+		firstNotCoveredPrefix: make([]byte, 0, 64),
+		next:                  make([]byte, 64),
+		hc:                    hc,
+		quit:                  quit,
+	}
+	return ih
+}
+
+func (c *IHCursor) FirstNotCoveredPrefix() []byte {
+	c.firstNotCoveredPrefix = firstNotCoveredPrefix(c.prev, c.seek, c.firstNotCoveredPrefix)
+	return c.firstNotCoveredPrefix
+}
+
+func (c *IHCursor) AtPrefix(prefix []byte) (k, v []byte, err error) {
+	c.skipState = false
+	c.prev = append(c.prev[:0], c.cur...)
+	c.prefix = prefix
+	c.seek = prefix
+	ok, err := c._seek(prefix)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	if !ok || c.k[c.lvl] == nil {
+		c.cur = nil
+		c.skipState = isDenseSequence(c.prev, c.cur)
+		return nil, nil, nil
+	}
+	c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+	if c.canUse(c.kBuf) {
+		c.cur = append(c.cur[:0], c.kBuf...)
+		c.skipState = isDenseSequence(c.prev, c.cur)
+		return c.cur, c._hash(c.hashID[c.lvl]), nil
+	}
+	err = c._deleteCurrent()
+	if err != nil {
+		return []byte{}, nil, err
+	}
+
+	return c._next()
+}
+
+func (c *IHCursor) Next() (k, v []byte, err error) {
+	if err = common.Stopped(c.quit); err != nil {
+		return []byte{}, nil, err
+	}
+
+	c.skipState = false
+	c.prev = append(c.prev[:0], c.cur...)
+	err = c._nextSibling()
+	if err != nil {
+		return []byte{}, nil, err
+	}
+
+	if c.k[c.lvl] == nil {
+		c.cur = nil
+		c.skipState = isDenseSequence(c.prev, c.cur)
+		return nil, nil, nil
+	}
+	c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+	if c.canUse(c.kBuf) {
+		c.cur = append(c.cur[:0], c.kBuf...)
+		c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
+		return c.cur, c._hash(c.hashID[c.lvl]), nil
+	}
+	err = c._deleteCurrent()
+	if err != nil {
+		return []byte{}, nil, err
+	}
+
+	return c._next()
+}
+
+func (c *IHCursor) _seek(prefix []byte) (bool, error) {
+	var k, v []byte
+	var err error
+	if len(prefix) == 0 {
+		k, v, err = c.c.First()
+	} else {
+		// optimistic .Next call, can use result in 2 cases:
+		// - no child found, means: len(k) <= c.lvl
+		// - looking for first child, means: c.childID[c.lvl] <= int16(bits.TrailingZeros16(c.branches[c.lvl]))
+		// otherwise do .Seek call
+		//k, v, err = c.c.Next()
+		//if err != nil {
+		//	return false, err
+		//}
+		//if len(k) > c.lvl && c.childID[c.lvl] > int16(bits.TrailingZeros16(c.branches[c.lvl])) {
+		//	c.is++
+		k, v, err = c.c.Seek(prefix)
+		//}
+	}
+	if err != nil {
+		return false, err
+	}
+	if k == nil || !bytes.HasPrefix(k, prefix) {
+		return false, nil
+	}
+	c._unmarshal(k, v)
+	c._nextSiblingInMem()
+	return true, nil
+}
+
+// goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+func (c *IHCursor) _nextItem(prefix []byte) error {
+	ok, err := c._seek(prefix)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+
+	return c._nextSibling()
+}
+
+// nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+func (c *IHCursor) _nextSibling() error {
+	ok := c._nextSiblingInMem() || c._nextSiblingOfParentInMem()
+	if ok {
+		return nil
+	}
+	err := c._nextSiblingInDB()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *IHCursor) _nextSiblingInMem() bool {
+	if c.hashID[c.lvl] >= c.maxHashID[c.lvl] {
+		return false
+	}
+	c.childID[c.lvl]++
+	for c.childID[c.lvl] < 16 && ((uint16(1)<<c.childID[c.lvl])&c.branches[c.lvl]) == 0 {
+		c.childID[c.lvl]++
+	}
+	c.hashID[c.lvl]++
+	return true
+}
+
+func (c *IHCursor) _nextSiblingOfParentInMem() bool {
+	for c.lvl > 1 {
+		c.lvl--
+		if c._nextSiblingInMem() {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *IHCursor) _nextSiblingInDB() error {
+	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
+	if !ok {
+		c.k[c.lvl] = nil
+		return nil
+	}
+	c.is++
+	k, v, err := c.c.Seek(c.next)
+	if err != nil {
+		return err
+	}
+	if k == nil || !bytes.HasPrefix(k, c.prefix) {
+		c.k[c.lvl] = nil
+		return nil
+	}
+	for i := len(k); i >= c.lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
+		c.k[i], c.branches[i], c.children[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
+	}
+	c._unmarshal(k, v)
+	c._nextSiblingInMem()
+
+	return nil
+}
+
+func (c *IHCursor) _unmarshal(k, v []byte) {
+	c.lvl = len(k)
+	c.k[c.lvl] = k
+	c.deleted[c.lvl] = false
+	c.branches[c.lvl], c.children[c.lvl] = binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:])
+	c.v[c.lvl] = v[4:]
+	c.hashID[c.lvl], c.maxHashID[c.lvl] = -1, int16(bits.OnesCount16(c.branches[c.lvl])-1)
+	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.branches[c.lvl]) - 1)
+	if len(c.k[c.lvl]) == 0 { // root record, firstly storing root hash
+		c.v[c.lvl] = c.v[c.lvl][32:]
+	}
+}
+
+func (c *IHCursor) _hash(i int16) []byte {
+	return c.v[c.lvl][common.HashLength*i : common.HashLength*(i+1)]
+}
+
+func (c *IHCursor) _deleteCurrent() error {
+	if c.deleted[c.lvl] {
+		return nil
+	}
+	if bytes.HasPrefix(c.k[c.lvl], common.FromHex("0c0e")) {
+		fmt.Printf("delete: %x\n", c.k[c.lvl])
+	}
+
+	if err := c.hc(c.k[c.lvl], 0, 0, nil, nil); err != nil {
+		return err
+	}
+	c.deleted[c.lvl] = true
+	return nil
+}
+
+func (c *IHCursor) _complexSkpState() bool {
+	// experimental example of - how can skip state by looking to 'children' bitmap
+	return false
+	//if len(c.prev) == len(c.cur) && bytes.Equal(c.prev[:len(c.prev)-1], c.cur[:len(c.cur)-1]) {
+	//	mask := uint16(0)
+	//	foundThings := false
+	//	for i := int16(c.prev[len(c.prev)-1]) + 1; i < c.childID[c.lvl]; i++ {
+	//		c.kBuf[len(c.kBuf)-1] = uint8(i)
+	//		if !c.canUse(c.kBuf) {
+	//			foundThings = true
+	//			break
+	//		}
+	//		mask |= uint16(1) << i
+	//	}
+	//	return !foundThings && c.children[c.lvl]&mask == 0
+	//}
+	//return false
+}
+
+func (c *IHCursor) _next() (k, v []byte, err error) {
+	c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
+	err = c._nextItem(c.next)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+
+	for {
+		if c.k[c.lvl] == nil {
+			c.cur = nil
+			c.skipState = isDenseSequence(c.prev, c.cur)
+			return nil, nil, nil
+		}
+		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+		if c.canUse(c.kBuf) {
+			c.cur = append(c.cur[:0], c.kBuf...)
+			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
+			return c.cur, c._hash(c.hashID[c.lvl]), nil
+		}
+		err = c._deleteCurrent()
+		if err != nil {
+			return []byte{}, nil, err
+		}
+
+		c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
+		err = c._nextItem(c.next)
+		if err != nil {
+			return []byte{}, nil, err
+		}
+	}
+}
+
+// IHCursor - holds logic related to iteration over IH bucket
+type StorageIHCursor struct {
+	is, lvl                    int
+	k, v                       [64][]byte
+	branches, children         [64]uint16
+	deleted                    [64]bool
+	childID, maxHashID, hashID [64]int16
+
+	c         ethdb.Cursor
+	shc       StorageHashCollector2
+	prev, cur []byte
+	seek      []byte
+	root      []byte
+
+	next                  []byte
+	firstNotCoveredPrefix []byte
+	canUse                func(prefix []byte) bool
+	skipState             bool
+
+	accWithInc []byte
+	kBuf       []byte
+	quit       <-chan struct{}
+}
+
+func IHStorage2(canUse func(prefix []byte) bool, shc StorageHashCollector2, c ethdb.Cursor, quit <-chan struct{}) *StorageIHCursor {
+	ih := &StorageIHCursor{c: c, canUse: canUse,
+		firstNotCoveredPrefix: make([]byte, 0, 64), next: make([]byte, 64),
+		shc:  shc,
+		quit: quit,
+	}
+	return ih
+}
+
+func (c *StorageIHCursor) PrevKey() []byte {
+	return c.prev
+}
+
+func (c *StorageIHCursor) FirstNotCoveredPrefix() []byte {
+	c.firstNotCoveredPrefix = firstNotCoveredPrefix(c.prev, []byte{0, 0}, c.firstNotCoveredPrefix)
+	return c.firstNotCoveredPrefix
+}
+
+func (c *StorageIHCursor) SeekToAccount(prefix []byte) (k, v []byte, err error) {
+	c.accWithInc = prefix
+	hexutil.DecompressNibbles(c.accWithInc, &c.kBuf)
+	c.seek = append(c.seek[:0], c.accWithInc...)
+	c.skipState = false
+	c.prev = c.cur
+	ok, err := c._seek(prefix)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	for i := c.lvl - 1; i >= 0; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
+		c.k[i], c.branches[i], c.children[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
+	}
+	if !ok || c.k[c.lvl] == nil {
+		err = c._nextSiblingInDB()
+		if err != nil {
+			return []byte{}, nil, err
+		}
+		if c.k[c.lvl] == nil {
+			c.cur = nil
+			c.skipState = isDenseSequence(c.prev, c.cur)
+			return nil, nil, nil
+		}
+	}
+	if c.root != nil { // check if acc.storageRoot can be used
+		root := c.root
+		c.root = nil
+		if c.canUse(c.kBuf) { // if rd allow us, return. otherwise delete and go ahead.
+			c.cur = c.k[c.lvl]
+			c.skipState = true
+			return c.cur, root, nil
+		}
+		c._nextSiblingInMem()
+	}
+
+	c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+	if c.canUse(c.kBuf) {
+		c.cur = common.CopyBytes(c.kBuf[80:])
+		c.skipState = isDenseSequence(c.prev, c.cur)
+		return c.cur, c._hash(c.hashID[c.lvl]), nil
+	}
+	//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+	//	fmt.Printf("no ih(seek): %x -> %x, %016b, %016b\n", prefix, c.kBuf, c.branches[c.lvl], c.children[c.lvl])
+	//}
+	err = c._deleteCurrent()
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	return c._next()
+}
+
+func (c *StorageIHCursor) Next() (k, v []byte, err error) {
+	if err = common.Stopped(c.quit); err != nil {
+		return []byte{}, nil, err
+	}
+
+	c.skipState = false
+	c.prev = c.cur
+	err = c._nextSibling()
+	if err != nil {
+		return []byte{}, nil, err
+	}
+
+	if c.k[c.lvl] == nil {
+		c.cur = nil
+		c.skipState = isDenseSequence(c.prev, c.cur)
+		return nil, nil, nil
+	}
+	c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+	if c.canUse(c.kBuf) {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//	fmt.Printf("can use ih(next): %x,%x\n", c.k[c.lvl], c.childID[c.lvl])
+		//}
+		c.cur = common.CopyBytes(c.kBuf[80:])
+		c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
+		return c.cur, c._hash(c.hashID[c.lvl]), nil
+	}
+	//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+	//	fmt.Printf("no ih(next): %x\n", c.cur)
+	//}
+	err = c._deleteCurrent()
+	if err != nil {
+		return []byte{}, nil, err
+	}
+
+	return c._next()
+}
+
+func (c *StorageIHCursor) _seek(prefix []byte) (bool, error) {
+	var k, v []byte
+	var err error
+	if len(prefix) == 40 {
+		c.is++
+		k, v, err = c.c.Seek(prefix)
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//	fmt.Printf("_seek1: %x -> %x\n", prefix, k)
+		//}
+	} else {
+		// optimistic .Next call, can use result in 2 cases:
+		// - no child found, means: len(k) <= c.lvl
+		// - looking for first child, means: c.childID[c.lvl] <= int16(bits.TrailingZeros16(c.branches[c.lvl]))
+		// otherwise do .Seek call
+		//k, v, err = c.c.Next()
+		//if err != nil {
+		//	return false, err
+		//}
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//fmt.Printf("_seek2: %x -> %x\n", prefix, k)
+		//}
+		//if len(k) > c.lvl && c.childID[c.lvl] > int16(bits.TrailingZeros16(c.branches[c.lvl])) {
+		c.is++
+		k, v, err = c.c.Seek(prefix)
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//	fmt.Printf("_seek3: %x -> %x\n", prefix, k)
+		//}
+		//}
+	}
+	if err != nil {
+		return false, err
+	}
+	if k == nil || !bytes.HasPrefix(k, prefix) {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//	fmt.Printf("_seek4: %x -> %x\n", prefix, k)
+		//}
+		return false, nil
+	}
+	c._unmarshal(k, v)
+	if len(c.k[c.lvl]) > 0 { // root record, firstly storing root hash
+		c._nextSiblingInMem()
+	}
+	return true, nil
+}
+
+// goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+func (c *StorageIHCursor) _nextItem(prefix []byte) error {
+	ok, err := c._seek(prefix)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+
+	return c._nextSibling()
+}
+
+// nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+func (c *StorageIHCursor) _nextSibling() error {
+	ok := c._nextSiblingInMem() || c._nextSiblingOfParentInMem()
+	if ok {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//	fmt.Printf("_nextSibling1: %d,%x,%b,%x\n", c.lvl, c.k[c.lvl], c.branches[c.lvl], c.childID[c.lvl])
+		//}
+		return nil
+	}
+	//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+	//	fmt.Printf("_nextSibling2: %d,%x\n", c.lvl, c.k[c.lvl])
+	//}
+	err := c._nextSiblingInDB()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *StorageIHCursor) _nextSiblingInMem() bool {
+	if c.hashID[c.lvl] >= c.maxHashID[c.lvl] {
+		return false
+	}
+	c.childID[c.lvl]++
+	for c.childID[c.lvl] < 16 && ((uint16(1)<<c.childID[c.lvl])&c.branches[c.lvl] == 0) {
+		c.childID[c.lvl]++
+	}
+	c.hashID[c.lvl]++
+	return true
+}
+
+func (c *StorageIHCursor) _nextSiblingOfParentInMem() bool {
+	for c.lvl > 0 {
+		c.lvl--
+		if c._nextSiblingInMem() {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *StorageIHCursor) _nextSiblingInDB() error {
+	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
+	if !ok {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//	fmt.Printf("_nextSiblingInDB, not ok\n")
+		//}
+		c.k[c.lvl] = nil
+		return nil
+	}
+	c.is++
+	c.seek = append(c.seek[:40], c.next...)
+	k, v, err := c.c.Seek(c.seek)
+	if err != nil {
+		return err
+	}
+	//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+	//	fmt.Printf("_nextSiblingInDB2: %x -> %x\n", c.seek, k)
+	//}
+	if k == nil || !bytes.HasPrefix(k, c.accWithInc) {
+		c.k[c.lvl] = nil
+		return nil
+	}
+	for i := len(k); i >= c.lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
+		c.k[i], c.branches[i], c.children[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
+	}
+	c._unmarshal(k, v)
+	c._nextSiblingInMem()
+	return nil
+}
+
+func (c *StorageIHCursor) _hash(i int16) []byte {
+	return c.v[c.lvl][common.HashLength*i : common.HashLength*(i+1)]
+}
+
+func (c *StorageIHCursor) _next() (k, v []byte, err error) {
+	c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
+	err = c._nextItem(c.seek)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+
+	for {
+		if c.k[c.lvl] == nil {
+			c.cur = nil
+			c.skipState = isDenseSequence(c.prev, c.cur)
+			return nil, nil, nil
+		}
+		c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+		if c.canUse(c.kBuf) {
+			c.cur = common.CopyBytes(c.kBuf[80:])
+			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
+			return c.cur, c._hash(c.hashID[c.lvl]), nil
+		}
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//	fmt.Printf("no ih(next): %x,%x,%016b\n", c.k[c.lvl], c.childID[c.lvl], c.branches[c.lvl])
+		//}
+		err = c._deleteCurrent()
+		if err != nil {
+			return []byte{}, nil, err
+		}
+
+		c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
+		err = c._nextItem(c.seek)
+		if err != nil {
+			return []byte{}, nil, err
+		}
+	}
+}
+
+func (c *StorageIHCursor) _unmarshal(k, v []byte) {
+	c.lvl = len(k) - 40
+	c.k[c.lvl] = k[40:]
+	c.deleted[c.lvl] = false
+	c.branches[c.lvl] = binary.BigEndian.Uint16(v)
+	c.children[c.lvl] = binary.BigEndian.Uint16(v[2:])
+	c.hashID[c.lvl] = -1
+	c.maxHashID[c.lvl] = int16(bits.OnesCount16(c.branches[c.lvl]) - 1)
+	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.branches[c.lvl]) - 1)
+	c.v[c.lvl] = v[4:]
+	if len(c.k[c.lvl]) == 0 { // root record, firstly storing root hash
+		c.root = c.v[c.lvl][:32]
+		c.v[c.lvl] = c.v[c.lvl][32:]
+	}
+}
+
+func (c *StorageIHCursor) _complexSkpState() bool {
+	return false
+	//if len(c.prev) == len(c.cur) && bytes.Equal(c.prev[:len(c.prev)-1], c.cur[:len(c.cur)-1]) {
+	//	mask := uint16(0)
+	//	foundThings := false
+	//	for i := int16(c.prev[len(c.prev)-1]) + 1; i < c.childID[c.lvl]; i++ {
+	//		c.kBuf[len(c.kBuf)-1] = uint8(i)
+	//		if !c.canUse(c.kBuf) {
+	//			foundThings = true
+	//			break
+	//		}
+	//		mask |= uint16(1) << i
+	//	}
+	//	return !foundThings && c.children[c.lvl]&mask == 0
+	//}
+	//return false
+}
+
+func (c *StorageIHCursor) _deleteCurrent() error {
+	if c.deleted[c.lvl] {
+		return nil
+	}
+	//if bytes.HasPrefix(c.accWithInc, common.FromHex("090bdc64a7e3632cde8f4689f47acfc0760e35bce43af50d4b1f5973463bde620000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+	//fmt.Printf("delete: %x,%x\n", c.accWithInc, c.k[c.lvl])
+	//}
+
+	if err := c.shc(c.accWithInc, c.k[c.lvl], 0, 0, nil, nil); err != nil {
+		return err
+	}
+	c.deleted[c.lvl] = true
+	return nil
+}
+
+/*
+	Dense Sequence - if between 2 IH records not possible insert any state record - then they form "dense sequence"
+	If 2 IH records form Dense Sequence - then no reason to iterate over state - just use IH one after another
+	Example1:
+		1234
+		1235
+	Example2:
+		12ff
+		13
+	Example3:
+		12ff
+		13000000
+	If 2 IH records form "sequence" then it can be consumed without moving StateCursor
+*/
+func isDenseSequence(prev []byte, next []byte) bool {
+	isSequence := false
+	if len(prev) == 0 && len(next) == 0 {
+		return false
+	}
+	ok := dbutils.NextNibblesSubtree(prev, &isSequenceBuf)
+	if len(prev) > 0 && !ok {
+		return true
+	}
+	if bytes.HasPrefix(next, isSequenceBuf) {
+		tail := next[len(isSequenceBuf):] // if tail has only zeroes, then no state records can be between fstl.nextHex and fstl.ihK
+		isSequence = true
+		for _, n := range tail {
+			if n != 0 {
+				isSequence = false
+				break
+			}
+		}
+	}
+
+	return isSequence
+}
+
+var isSequenceBuf = make([]byte, 256)
+
+func firstNotCoveredPrefix(prev, prefix, buf []byte) []byte {
+	if len(prev) > 0 {
+		_ = dbutils.NextNibblesSubtree(prev, &buf)
+	} else {
+		buf = append(buf[:0], prefix...)
+	}
+	if len(buf)%2 == 1 {
+		buf = append(buf, 0)
+	}
+	hexutil.CompressNibbles(buf, &buf)
+	return buf
+}
+
+type StateCursor struct {
+	c    ethdb.Cursor
+	kHex []byte
+}
+
+func NewStateCursor(c ethdb.Cursor) *StateCursor {
+	return &StateCursor{c: c}
+}
+
+func (c *StateCursor) Seek(seek []byte) ([]byte, []byte, []byte, error) {
+	k, v, err := c.c.Seek(seek)
+	if err != nil {
+		return []byte{}, nil, nil, err
+	}
+
+	hexutil.DecompressNibbles(k, &c.kHex)
+	return k, c.kHex, v, nil
+}
+
+func (c *StateCursor) Next() ([]byte, []byte, []byte, error) {
+	k, v, err := c.c.Next()
+	if err != nil {
+		return []byte{}, nil, nil, err
+	}
+
+	hexutil.DecompressNibbles(k, &c.kHex)
+	return k, c.kHex, v, nil
+}
+
+func nextAccount(in, out []byte) bool {
+	copy(out, in)
+	for i := len(out) - 1; i >= 0; i-- {
+		if out[i] != 255 {
+			out[i]++
+			return true
+		}
+		out[i] = 0
+	}
+	return false
+}
+
+func nextAccountHex(in, out []byte) bool {
+	copy(out, in)
+	for i := len(out) - 1; i >= 0; i-- {
+		if out[i] != 15 {
+			out[i]++
+			return true
+		}
+		out[i] = 0
+	}
+	return false
+}
+
+// keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
+func keyIsBeforeOrEqual(k1, k2 []byte) bool {
+	if k1 == nil {
+		return false
+	}
+	if k2 == nil {
+		return true
+	}
+	return bytes.Compare(k1, k2) <= 0
+}
+
+func keyIsBeforeOrEqualDeprecated(k1, k2 []byte) (bool, []byte) {
+	if k1 == nil {
+		return false, k2
+	}
+
+	if k2 == nil {
+		return true, k1
+	}
+
+	switch bytes.Compare(k1, k2) {
+	case -1, 0:
+		return true, k1
+	default:
+		return false, k2
+	}
+}
+
+// keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
+func keyIsBefore(k1, k2 []byte) bool {
+	if k1 == nil {
+		return false
+	}
+	if k2 == nil {
+		return true
+	}
+	return bytes.Compare(k1, k2) < 0
+}
+
+func UnmarshalIH(v []byte) (uint16, uint16, []common.Hash) {
+	branches, children := binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:])
+	v = v[4:]
+	newV := make([]common.Hash, len(v)/common.HashLength)
+	for i := 0; i < len(newV); i++ {
+		newV[i].SetBytes(v[i*common.HashLength : (i+1)*common.HashLength])
+	}
+	return branches, children, newV
+}
+
+func MarshalIH(branches, children uint16, h []common.Hash) []byte {
+	v := make([]byte, len(h)*common.HashLength+4)
+	binary.BigEndian.PutUint16(v, branches)
+	binary.BigEndian.PutUint16(v[2:], children)
+	for i := 0; i < len(h); i++ {
+		copy(v[4+i*common.HashLength:4+(i+1)*common.HashLength], h[i].Bytes())
+	}
+	return v
+}
+
+func IHStorageKey(addressHash []byte, incarnation uint64, prefix []byte) []byte {
+	return dbutils.GenerateCompositeStoragePrefix(addressHash, incarnation, prefix)
+}
+
+func IHValue(children, branches uint16, hashes []byte, rootHash []byte, buf []byte) []byte {
+	buf = buf[:len(hashes)+len(rootHash)+4]
+	binary.BigEndian.PutUint16(buf, branches)
+	binary.BigEndian.PutUint16(buf[2:], children)
+	if len(rootHash) == 0 {
+		copy(buf[4:], hashes)
+	} else {
+		copy(buf[4:], rootHash)
+		copy(buf[36:], hashes)
+	}
+	return buf
+}
+
+func IHTypedValue(hashes []byte, rootHash []byte) []common.Hash {
+	to := make([]common.Hash, len(hashes)/common.HashLength+len(rootHash)/common.HashLength)
+	i := 0
+	if len(rootHash) > 0 {
+		to[0].SetBytes(rootHash)
+		i++
+	}
+	for j := 0; j < len(hashes)/common.HashLength; j++ {
+		to[i].SetBytes(hashes[j*common.HashLength : (j+1)*common.HashLength])
+		i++
+	}
+	return to
 }
 
 func collectMissedAccIH(canUse func(prefix []byte) bool, prefix []byte, cache *shards.StateCache, quit <-chan struct{}) ([][]byte, error) {
@@ -602,6 +1790,8 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, prefix []byte, cac
 			binary.BigEndian.PutUint64(l.accAddrHashWithInc[32:], l.accountValue.Incarnation)
 			l.accAddrHash.SetBytes(addrHash.Bytes())
 			var prevIHKS []byte
+			accWithInc := l.accAddrHashWithInc[:]
+			hexutil.DecompressNibbles(accWithInc, &l.kHexS)
 			if err := cache.StorageHashes(l.accAddrHash, l.accountValue.Incarnation, func(ihKS []byte, h common.Hash) error {
 				i3++
 				if isDenseSequence(prevIHKS, ihKS) {
@@ -609,16 +1799,17 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, prefix []byte, cac
 				}
 
 				l.storageSeek = firstNotCoveredPrefix(prevIHK, prefix, l.storageSeek)
-				for kS, vS, err3 := storages.SeekBothRange(l.accAddrHashWithInc[:], l.storageSeek); kS != nil; kS, vS, err3 = storages.NextDup() {
+				for kS, vS, err3 := storages.SeekBothRange(accWithInc, l.storageSeek); kS != nil; kS, vS, err3 = storages.NextDup() {
 					if err3 != nil {
 						return err3
 					}
 					i4++
-					hexutil.DecompressNibbles(vS[:32], &l.kHexS)
-					if keyIsBefore(ihKS, l.kHexS) { // read until next IH
+					hexutil.DecompressNibbles(vS[:32], &l.buf)
+					if keyIsBefore(ihKS, l.buf) { // read until next IH
 						break
 					}
-					if err := l.receiver.Receive(StorageStreamItem, l.accAddrHashWithInc[:], l.kHexS, nil, vS[32:], nil, 0); err != nil {
+					l.kHexS = append(l.kHexS[80:], l.buf...)
+					if err := l.receiver.Receive(StorageStreamItem, accWithInc, l.kHexS, nil, vS[32:], nil, 0); err != nil {
 						return err
 					}
 				}
@@ -628,7 +1819,8 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, prefix []byte, cac
 					return nil
 				}
 
-				if err := l.receiver.Receive(SHashStreamItem, l.accAddrHashWithInc[:], ihKS, nil, nil, h.Bytes(), 0); err != nil {
+				l.kHexS = append(l.kHexS[80:], ihKS...)
+				if err := l.receiver.Receive(SHashStreamItem, accWithInc, l.kHexS, nil, nil, h.Bytes(), 0); err != nil {
 					return err
 				}
 				if len(ihKS) == 0 { // means we just sent acc.storageRoot
@@ -737,1102 +1929,4 @@ func (l *FlatDBTrieLoader) CalcTrieRootOnCache(cache *shards.StateCache) (common
 		return EmptyRoot, err
 	}
 	return l.receiver.Root(), nil
-}
-
-func (l *FlatDBTrieLoader) logProgress(accountKey, ihK []byte) {
-	var k string
-	if accountKey != nil {
-		k = makeCurrentKeyStr(accountKey)
-	} else if ihK != nil {
-		k = makeCurrentKeyStr(ihK)
-	}
-	log.Info(fmt.Sprintf("[%s] Calculating Merkle root", l.logPrefix), "current key", k)
-}
-
-func (r *RootHashAggregator) RetainNothing(_ []byte) bool {
-	return false
-}
-
-func (r *RootHashAggregator) Reset(hc HashCollector2, shc StorageHashCollector2, trace bool) {
-	r.hc = hc
-	r.shc = shc
-	r.curr.Reset()
-	r.succ.Reset()
-	r.value = nil
-	r.groups = r.groups[:0]
-	r.branches = r.branches[:0]
-	r.a.Reset()
-	r.hb.Reset()
-	r.wasIH = false
-	r.currStorage.Reset()
-	r.succStorage.Reset()
-	r.valueStorage = nil
-	r.wasIHStorage, r.wasStorage = false, false
-	r.root = common.Hash{}
-	r.trace = trace
-	r.hb.trace = trace
-}
-
-func (r *RootHashAggregator) Receive(itemType StreamItem,
-	accountKey []byte,
-	storageKey []byte,
-	accountValue *accounts.Account,
-	storageValue []byte,
-	hash []byte,
-	cutoff int,
-) error {
-	//if bytes.HasPrefix(accountKey, common.FromHex("0000")) {
-	//	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
-	//}
-	//if bytes.HasPrefix(r.currAccK, common.FromHex("0000")) {
-	//	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
-	//}
-	switch itemType {
-	case StorageStreamItem:
-		if len(r.currAccK) == 0 {
-			r.currAccK = append(r.currAccK[:0], accountKey...)
-		}
-		r.advanceKeysStorage(storageKey, true /* terminator */)
-		if r.wasStorage || r.wasIHStorage {
-			if err := r.genStructStorage(); err != nil {
-				return err
-			}
-		}
-		r.saveValueStorage(false, storageValue, hash)
-	case SHashStreamItem:
-		if len(storageKey) == 0 { // this is ready-to-use storage root - no reason to call GenStructStep, also GenStructStep doesn't support empty prefixes
-			r.hb.hashStack = append(append(r.hb.hashStack, byte(80+common.HashLength)), hash...)
-			r.hb.nodeStack = append(r.hb.nodeStack, nil)
-			r.accData.FieldSet |= AccountFieldStorageOnly
-			break
-		}
-		if len(r.currAccK) == 0 {
-			r.currAccK = append(r.currAccK[:0], accountKey...)
-		}
-		r.advanceKeysStorage(storageKey, false /* terminator */)
-		if r.wasStorage || r.wasIHStorage {
-			if err := r.genStructStorage(); err != nil {
-				return err
-			}
-		}
-		r.saveValueStorage(true, storageValue, hash)
-	case AccountStreamItem:
-		r.advanceKeysAccount(accountKey, true /* terminator */)
-		if r.curr.Len() > 0 && !r.wasIH {
-			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
-			if r.wasStorage || r.wasIHStorage {
-				if err := r.genStructStorage(); err != nil {
-					return err
-				}
-				r.currStorage.Reset()
-				r.succStorage.Reset()
-				r.wasIHStorage, r.wasStorage = false, false
-				r.branchSetStorage = r.branchSetStorage[:0]
-				r.groupsStorage = r.groupsStorage[:0]
-				// There are some storage items
-				r.accData.FieldSet |= AccountFieldStorageOnly
-			}
-		}
-		r.currAccK = r.currAccK[:0]
-		r.currAccKNibbles = r.currAccKNibbles[:0]
-		if r.curr.Len() > 0 {
-			if err := r.genStructAccount(); err != nil {
-				return err
-			}
-		}
-		if err := r.saveValueAccount(false, accountValue, hash); err != nil {
-			return err
-		}
-	case AHashStreamItem:
-		r.advanceKeysAccount(accountKey, false /* terminator */)
-		if r.curr.Len() > 0 && !r.wasIH {
-			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
-			if r.wasStorage || r.wasIHStorage {
-				if err := r.genStructStorage(); err != nil {
-					return err
-				}
-				if len(r.groups) >= 2*common.HashLength {
-					r.groups = r.groups[:2*common.HashLength-1]
-				}
-				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
-					r.groups = r.groups[:len(r.groups)-1]
-				}
-				if len(r.branches) >= 2*common.HashLength {
-					r.branches = r.branches[:2*common.HashLength-1]
-				}
-				for len(r.branches) > 0 && r.branches[len(r.branches)-1] == 0 {
-					r.branches = r.branches[:len(r.branches)-1]
-				}
-				r.currStorage.Reset()
-				r.succStorage.Reset()
-				r.branchSetStorage = r.branchSetStorage[:0]
-				r.groupsStorage = r.groupsStorage[:0]
-				r.wasIHStorage, r.wasStorage = false, false
-				// There are some storage items
-				r.accData.FieldSet |= AccountFieldStorageOnly
-			}
-		}
-		r.currAccK = r.currAccK[:0]
-		if r.curr.Len() > 0 {
-			if err := r.genStructAccount(); err != nil {
-				return err
-			}
-		}
-		if err := r.saveValueAccount(true, accountValue, hash); err != nil {
-			return err
-		}
-	case CutoffStreamItem:
-		if r.trace {
-			fmt.Printf("storage cuttoff %d\n", cutoff)
-		}
-		r.cutoffKeysAccount(cutoff)
-		if r.curr.Len() > 0 && !r.wasIH {
-			r.cutoffKeysStorage(0)
-			if r.wasStorage || r.wasIHStorage {
-				if err := r.genStructStorage(); err != nil {
-					return err
-				}
-				if len(r.groups) >= 2*common.HashLength {
-					r.groups = r.groups[:2*common.HashLength-1]
-				}
-				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
-					r.groups = r.groups[:len(r.groups)-1]
-				}
-				if len(r.branches) >= 2*common.HashLength {
-					r.branches = r.branches[:2*common.HashLength-1]
-				}
-				for len(r.branches) > 0 && r.branches[len(r.branches)-1] == 0 {
-					r.branches = r.branches[:len(r.branches)-1]
-				}
-				r.currStorage.Reset()
-				r.succStorage.Reset()
-				r.wasIHStorage, r.wasStorage = false, false
-				// There are some storage items
-				r.accData.FieldSet |= AccountFieldStorageOnly
-			}
-		}
-		if r.curr.Len() > 0 {
-			if err := r.genStructAccount(); err != nil {
-				return err
-			}
-		}
-		if r.hb.hasRoot() {
-			r.root = r.hb.rootHash()
-		} else {
-			r.root = EmptyRoot
-		}
-		r.groups = r.groups[:0]
-		r.branches = r.branches[:0]
-		r.groupsStorage = r.groupsStorage[:0]
-		r.branchSetStorage = r.branchSetStorage[:0]
-		r.hb.Reset()
-		r.wasIH = false
-		r.wasIHStorage = false
-		r.wasStorage = false
-		r.curr.Reset()
-		r.succ.Reset()
-		r.currStorage.Reset()
-		r.succStorage.Reset()
-	}
-	return nil
-}
-
-func (r *RootHashAggregator) Result() SubTries {
-	panic("don't call me")
-}
-
-func (r *RootHashAggregator) Root() common.Hash {
-	return r.root
-}
-
-func (r *RootHashAggregator) advanceKeysStorage(k []byte, terminator bool) {
-	r.currStorage.Reset()
-	r.currStorage.Write(r.succStorage.Bytes())
-	r.succStorage.Reset()
-	// Transform k to nibbles, but skip the incarnation part in the middle
-	hexutil.DecompressNibbles(r.currAccK, &r.currAccKNibbles)
-	r.succStorage.Write(r.currAccKNibbles)
-	r.succStorage.Write(k)
-	if terminator {
-		r.succStorage.WriteByte(16)
-	}
-}
-
-func (r *RootHashAggregator) cutoffKeysStorage(cutoff int) {
-	r.currStorage.Reset()
-	r.currStorage.Write(r.succStorage.Bytes())
-	r.succStorage.Reset()
-	if r.currStorage.Len() > 0 {
-		r.succStorage.Write(r.currStorage.Bytes()[:cutoff-1])
-		r.succStorage.WriteByte(r.currStorage.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
-	}
-}
-
-func (r *RootHashAggregator) genStructStorage() error {
-	var err error
-	var data GenStructStepData
-	if r.wasIHStorage {
-		r.hashData.Hash = r.hashStorage
-		data = &r.hashData
-	} else {
-		r.leafData.Value = rlphacks.RlpSerializableBytes(r.valueStorage)
-		data = &r.leafData
-	}
-	r.groupsStorage, r.branchSetStorage, err = GenStructStep(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, func(keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
-		if r.shc == nil {
-			return nil
-		}
-		return r.shc(r.currAccK, keyHex, branches, children, hashes, rootHash)
-	}, data, r.groupsStorage, r.branchSetStorage, r.trace)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (r *RootHashAggregator) saveValueStorage(isIH bool, v, h []byte) {
-	// Remember the current value
-	r.wasIHStorage = isIH
-	r.wasStorage = !isIH
-	r.valueStorage = nil
-	if isIH {
-		r.hashStorage.SetBytes(h)
-	} else {
-		r.valueStorage = v
-	}
-}
-
-func (r *RootHashAggregator) advanceKeysAccount(k []byte, terminator bool) {
-	r.curr.Reset()
-	r.curr.Write(r.succ.Bytes())
-	r.succ.Reset()
-	r.succ.Write(k)
-	if terminator {
-		r.succ.WriteByte(16)
-	}
-}
-
-func (r *RootHashAggregator) cutoffKeysAccount(cutoff int) {
-	r.curr.Reset()
-	r.curr.Write(r.succ.Bytes())
-	r.succ.Reset()
-	if r.curr.Len() > 0 && cutoff > 0 {
-		r.succ.Write(r.curr.Bytes()[:cutoff-1])
-		r.succ.WriteByte(r.curr.Bytes()[cutoff-1] + 1) // Modify last nibble before the cutoff point
-	}
-}
-
-func (r *RootHashAggregator) genStructAccount() error {
-	var data GenStructStepData
-	if r.wasIH {
-		r.hashData.Hash = r.hashAccount
-		//copy(r.hashData.Hash[:], r.value)
-		data = &r.hashData
-	} else {
-		r.accData.Balance.Set(&r.a.Balance)
-		if r.a.Balance.Sign() != 0 {
-			r.accData.FieldSet |= AccountFieldBalanceOnly
-		}
-		r.accData.Nonce = r.a.Nonce
-		if r.a.Nonce != 0 {
-			r.accData.FieldSet |= AccountFieldNonceOnly
-		}
-		r.accData.Incarnation = r.a.Incarnation
-		data = &r.accData
-	}
-	r.wasIHStorage = false
-	r.currStorage.Reset()
-	r.succStorage.Reset()
-	var err error
-	if r.groups, r.branches, err = GenStructStep(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, r.hc, data, r.groups, r.branches, r.trace); err != nil {
-		return err
-	}
-	r.accData.FieldSet = 0
-	return nil
-}
-
-func (r *RootHashAggregator) saveValueAccount(isIH bool, v *accounts.Account, h []byte) error {
-	r.wasStorage = false
-	r.wasIH = isIH
-	if isIH {
-		r.hashAccount.SetBytes(h)
-		return nil
-	}
-	r.a.Copy(v)
-	// Place code on the stack first, the storage will follow
-	if !r.a.IsEmptyCodeHash() {
-		// the first item ends up deepest on the stack, the second item - on the top
-		r.accData.FieldSet |= AccountFieldCodeOnly
-		if err := r.hb.hash(r.a.CodeHash[:]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-type CanUse func([]byte) bool // returns false - if element must be skipped
-
-const IHDupKeyLen = 2 * (common.HashLength + common.IncarnationLength)
-
-// IHCursor - holds logic related to iteration over IH bucket
-// has 2 main operations: goToChild and goToSibling
-// goToChild can be done only by DB operation (go to longer prefix)
-// goToSibling can be done in memory or by DB operation: nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-type IHCursor struct {
-	skipState                  bool
-	is, lvl                    int
-	k, v                       [64][]byte // store up to 64 levels of key/value pairs in nibbles format
-	branches, children         [64]uint16 // branch children set, and any children set
-	childID, maxHashID, hashID [64]int16  // meta info: current child in .children[lvl] field, max child id, current hash in .v[lvl]
-	deleted                    [64]bool   // helper to avoid multiple deletes of same key
-
-	c                     ethdb.Cursor
-	hc                    HashCollector2
-	seek, prev, cur, next []byte
-	prefix                []byte
-
-	firstNotCoveredPrefix []byte
-	canUse                func(prefix []byte) bool
-
-	kBuf []byte
-}
-
-func IH(canUse func(prefix []byte) bool, hc HashCollector2, c ethdb.Cursor) *IHCursor {
-	ih := &IHCursor{c: c, canUse: canUse,
-		firstNotCoveredPrefix: make([]byte, 0, 64),
-		next:                  make([]byte, 64),
-		hc:                    hc,
-	}
-	return ih
-}
-
-func (c *IHCursor) FirstNotCoveredPrefix() []byte {
-	c.firstNotCoveredPrefix = firstNotCoveredPrefix(c.prev, c.seek, c.firstNotCoveredPrefix)
-	return c.firstNotCoveredPrefix
-}
-
-func (c *IHCursor) AtPrefix(prefix []byte) (k, v []byte, err error) {
-	c.skipState = false
-	c.prev = append(c.prev[:0], c.cur...)
-	c.prefix = prefix
-	c.seek = prefix
-	ok, err := c._seek(prefix)
-	if err != nil {
-		return []byte{}, nil, err
-	}
-	if !ok || c.k[c.lvl] == nil {
-		c.cur = nil
-		c.skipState = isDenseSequence(c.prev, c.cur)
-		return nil, nil, nil
-	}
-	c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-	if c.canUse(c.kBuf) {
-		c.cur = append(c.cur[:0], c.kBuf...)
-		c.skipState = isDenseSequence(c.prev, c.cur)
-		return c.cur, c._hash(c.hashID[c.lvl]), nil
-	}
-	err = c._deleteCurrent()
-	if err != nil {
-		return []byte{}, nil, err
-	}
-
-	return c._next()
-}
-
-func (c *IHCursor) Next() (k, v []byte, err error) {
-	c.skipState = false
-	c.prev = append(c.prev[:0], c.cur...)
-	err = c._nextSibling()
-	if err != nil {
-		return []byte{}, nil, err
-	}
-
-	if c.k[c.lvl] == nil {
-		c.cur = nil
-		c.skipState = isDenseSequence(c.prev, c.cur)
-		return nil, nil, nil
-	}
-	c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-	if c.canUse(c.kBuf) {
-		c.cur = append(c.cur[:0], c.kBuf...)
-		c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
-		return c.cur, c._hash(c.hashID[c.lvl]), nil
-	}
-	err = c._deleteCurrent()
-	if err != nil {
-		return []byte{}, nil, err
-	}
-
-	return c._next()
-}
-
-func (c *IHCursor) _seek(prefix []byte) (bool, error) {
-	var k, v []byte
-	var err error
-	if len(prefix) == 0 {
-		k, v, err = c.c.First()
-	} else {
-		// optimistic .Next call, can use result in 2 cases:
-		// - no child found, means: len(k) <= c.lvl
-		// - looking for first child, means: c.childID[c.lvl] <= int16(bits.TrailingZeros16(c.branches[c.lvl]))
-		// otherwise do .Seek call
-		k, v, err = c.c.Next()
-		if err != nil {
-			return false, err
-		}
-		if len(k) > c.lvl && c.childID[c.lvl] > int16(bits.TrailingZeros16(c.branches[c.lvl])) {
-			c.is++
-			k, v, err = c.c.Seek(prefix)
-		}
-	}
-	if err != nil {
-		return false, err
-	}
-	if k == nil || !bytes.HasPrefix(k, prefix) {
-		return false, nil
-	}
-	c._unmarshal(k, v)
-	c._nextSiblingInMem()
-	return true, nil
-}
-
-// goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *IHCursor) _nextItem(prefix []byte) error {
-	ok, err := c._seek(prefix)
-	if err != nil {
-		return err
-	}
-	if ok {
-		return nil
-	}
-
-	return c._nextSibling()
-}
-
-// nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *IHCursor) _nextSibling() error {
-	ok := c._nextSiblingInMem() || c._nextSiblingOfParentInMem()
-	if ok {
-		return nil
-	}
-	err := c._nextSiblingInDB()
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *IHCursor) _nextSiblingInMem() bool {
-	if c.hashID[c.lvl] >= c.maxHashID[c.lvl] {
-		return false
-	}
-	c.childID[c.lvl]++
-	for c.childID[c.lvl] < 16 && ((uint16(1)<<c.childID[c.lvl])&c.branches[c.lvl]) == 0 {
-		c.childID[c.lvl]++
-	}
-	c.hashID[c.lvl]++
-	return true
-}
-
-func (c *IHCursor) _nextSiblingOfParentInMem() bool {
-	for c.lvl > 1 {
-		c.lvl--
-		if c._nextSiblingInMem() {
-			return true
-		}
-	}
-	return false
-}
-
-func (c *IHCursor) _nextSiblingInDB() error {
-	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
-	if !ok {
-		c.k[c.lvl] = nil
-		return nil
-	}
-	c.is++
-	k, v, err := c.c.Seek(c.next)
-	if err != nil {
-		return err
-	}
-	if k == nil || !bytes.HasPrefix(k, c.prefix) {
-		c.k[c.lvl] = nil
-		return nil
-	}
-	for i := len(k); i >= c.lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
-		c.k[i], c.branches[i], c.children[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
-	}
-	c._unmarshal(k, v)
-	c._nextSiblingInMem()
-
-	return nil
-}
-
-func (c *IHCursor) _unmarshal(k, v []byte) {
-	c.lvl = len(k)
-	c.k[c.lvl] = k
-	c.deleted[c.lvl] = false
-	c.branches[c.lvl], c.children[c.lvl] = binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:])
-	c.v[c.lvl] = v[4:]
-	c.hashID[c.lvl], c.maxHashID[c.lvl] = -1, int16(bits.OnesCount16(c.branches[c.lvl])-1)
-	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.branches[c.lvl]) - 1)
-	if len(c.k[c.lvl]) == 0 { // root record, firstly storing root hash
-		c.v[c.lvl] = c.v[c.lvl][32:]
-	}
-}
-
-func (c *IHCursor) _hash(i int16) []byte {
-	return c.v[c.lvl][common.HashLength*i : common.HashLength*(i+1)]
-}
-
-func (c *IHCursor) _deleteCurrent() error {
-	if c.deleted[c.lvl] {
-		return nil
-	}
-	if err := c.hc(c.k[c.lvl], 0, 0, nil, nil); err != nil {
-		return err
-	}
-	c.deleted[c.lvl] = true
-	return nil
-}
-
-func (c *IHCursor) _complexSkpState() bool {
-	// experimental example of - how can skip state by looking to 'children' bitmap
-	return false
-	//if len(c.prev) == len(c.cur) && bytes.Equal(c.prev[:len(c.prev)-1], c.cur[:len(c.cur)-1]) {
-	//	mask := uint16(0)
-	//	foundThings := false
-	//	for i := int16(c.prev[len(c.prev)-1]) + 1; i < c.childID[c.lvl]; i++ {
-	//		c.kBuf[len(c.kBuf)-1] = uint8(i)
-	//		if !c.canUse(c.kBuf) {
-	//			foundThings = true
-	//			break
-	//		}
-	//		mask |= uint16(1) << i
-	//	}
-	//	return !foundThings && c.children[c.lvl]&mask == 0
-	//}
-	//return false
-}
-
-func (c *IHCursor) _next() (k, v []byte, err error) {
-	c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-	err = c._nextItem(c.next)
-	if err != nil {
-		return []byte{}, nil, err
-	}
-
-	for {
-		if c.k[c.lvl] == nil {
-			c.cur = nil
-			c.skipState = isDenseSequence(c.prev, c.cur)
-			return nil, nil, nil
-		}
-		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-		if c.canUse(c.kBuf) {
-			c.cur = append(c.cur[:0], c.kBuf...)
-			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
-			return c.cur, c._hash(c.hashID[c.lvl]), nil
-		}
-		err = c._deleteCurrent()
-		if err != nil {
-			return []byte{}, nil, err
-		}
-
-		c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-		err = c._nextItem(c.next)
-		if err != nil {
-			return []byte{}, nil, err
-		}
-	}
-}
-
-// IHCursor - holds logic related to iteration over IH bucket
-type StorageIHCursor struct {
-	is, lvl                    int
-	k, v                       [64][]byte
-	branches, children         [64]uint16
-	deleted                    [64]bool
-	childID, maxHashID, hashID [64]int16
-
-	c         ethdb.Cursor
-	shc       StorageHashCollector2
-	prev, cur []byte
-	seek      []byte
-	root      []byte
-
-	next                  []byte
-	firstNotCoveredPrefix []byte
-	canUse                func(prefix []byte) bool
-	skipState             bool
-
-	accWithInc []byte
-	kBuf       []byte
-}
-
-func IHStorage2(canUse func(prefix []byte) bool, shc StorageHashCollector2, c ethdb.Cursor) *StorageIHCursor {
-	ih := &StorageIHCursor{c: c, canUse: canUse,
-		firstNotCoveredPrefix: make([]byte, 0, 64), next: make([]byte, 64),
-		shc: shc,
-	}
-	return ih
-}
-
-func (c *StorageIHCursor) PrevKey() []byte {
-	return c.prev
-}
-
-func (c *StorageIHCursor) FirstNotCoveredPrefix() []byte {
-	c.firstNotCoveredPrefix = firstNotCoveredPrefix(c.prev, []byte{0, 0}, c.firstNotCoveredPrefix)
-	return c.firstNotCoveredPrefix
-}
-
-func (c *StorageIHCursor) SeekToAccount(prefix []byte) (k, v []byte, err error) {
-	c.accWithInc = prefix
-	hexutil.DecompressNibbles(c.accWithInc, &c.kBuf)
-	c.seek = append(c.seek[:0], c.accWithInc...)
-	c.skipState = false
-	c.prev = c.cur
-	ok, err := c._seek(prefix)
-	if err != nil {
-		return []byte{}, nil, err
-	}
-	for i := c.lvl - 1; i >= 0; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
-		c.k[i], c.branches[i], c.children[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
-	}
-	if !ok || c.k[c.lvl] == nil {
-		c.cur = nil
-		c.skipState = isDenseSequence(c.prev, c.cur)
-		return nil, nil, nil
-	}
-	if c.root != nil { // check if acc.storageRoot can be used
-		root := c.root
-		c.root = nil
-		if c.canUse(c.kBuf) { // if rd allow us, return. otherwise delete and go ahead.
-			c.cur = c.k[c.lvl]
-			c.skipState = true
-			return c.cur, root, nil
-		}
-		c._nextSiblingInMem()
-	}
-
-	c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-	if c.canUse(c.kBuf) {
-		c.cur = common.CopyBytes(c.kBuf[80:])
-		c.skipState = isDenseSequence(c.prev, c.cur)
-		return c.cur, c._hash(c.hashID[c.lvl]), nil
-	}
-	err = c._deleteCurrent()
-	if err != nil {
-		return []byte{}, nil, err
-	}
-	return c._next()
-}
-
-func (c *StorageIHCursor) Next() (k, v []byte, err error) {
-	c.skipState = false
-	c.prev = c.cur
-	err = c._nextSibling()
-	if err != nil {
-		return []byte{}, nil, err
-	}
-
-	if c.k[c.lvl] == nil {
-		c.cur = nil
-		c.skipState = isDenseSequence(c.prev, c.cur)
-		return nil, nil, nil
-	}
-	c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-	if c.canUse(c.kBuf) {
-		c.cur = common.CopyBytes(c.kBuf[80:])
-		c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
-		return c.cur, c._hash(c.hashID[c.lvl]), nil
-	}
-	err = c._deleteCurrent()
-	if err != nil {
-		return []byte{}, nil, err
-	}
-
-	return c._next()
-}
-
-func (c *StorageIHCursor) _seek(prefix []byte) (bool, error) {
-	var k, v []byte
-	var err error
-	if len(prefix) == 40 {
-		c.is++
-		k, v, err = c.c.Seek(prefix)
-	} else {
-		// optimistic .Next call, can use result in 2 cases:
-		// - no child found, means: len(k) <= c.lvl
-		// - looking for first child, means: c.childID[c.lvl] <= int16(bits.TrailingZeros16(c.branches[c.lvl]))
-		// otherwise do .Seek call
-		k, v, err = c.c.Next()
-		if err != nil {
-			return false, err
-		}
-		if len(k) > c.lvl && c.childID[c.lvl] > int16(bits.TrailingZeros16(c.branches[c.lvl])) {
-			c.is++
-			k, v, err = c.c.Seek(prefix)
-		}
-	}
-	if err != nil {
-		return false, err
-	}
-	if k == nil || !bytes.HasPrefix(k, prefix) {
-		return false, nil
-	}
-	c._unmarshal(k, v)
-	if len(c.k[c.lvl]) > 0 { // root record, firstly storing root hash
-		c._nextSiblingInMem()
-	}
-	return true, nil
-}
-
-// goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *StorageIHCursor) _nextItem(prefix []byte) error {
-	ok, err := c._seek(prefix)
-	if err != nil {
-		return err
-	}
-	if ok {
-		return nil
-	}
-
-	return c._nextSibling()
-}
-
-// nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *StorageIHCursor) _nextSibling() error {
-	ok := c._nextSiblingInMem() || c._nextSiblingOfParentInMem()
-	if ok {
-		return nil
-	}
-	err := c._nextSiblingInDB()
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *StorageIHCursor) _nextSiblingInMem() bool {
-	if c.hashID[c.lvl] >= c.maxHashID[c.lvl] {
-		return false
-	}
-	c.childID[c.lvl]++
-	for c.childID[c.lvl] < 16 && ((uint16(1)<<c.childID[c.lvl])&c.branches[c.lvl] == 0) {
-		c.childID[c.lvl]++
-	}
-	c.hashID[c.lvl]++
-	return true
-}
-
-func (c *StorageIHCursor) _nextSiblingOfParentInMem() bool {
-	for c.lvl > 0 {
-		c.lvl--
-		if c._nextSiblingInMem() {
-			return true
-		}
-	}
-	return false
-}
-
-func (c *StorageIHCursor) _nextSiblingInDB() error {
-	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
-	if !ok {
-		c.k[c.lvl] = nil
-		return nil
-	}
-	c.is++
-	c.seek = append(c.seek[:40], c.next...)
-	k, v, err := c.c.Seek(c.seek)
-	if err != nil {
-		return err
-	}
-	if k == nil || !bytes.HasPrefix(k, c.accWithInc) {
-		c.k[c.lvl] = nil
-		return nil
-	}
-	for i := len(k); i >= c.lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
-		c.k[i], c.branches[i], c.children[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
-	}
-	c._unmarshal(k, v)
-	c._nextSiblingInMem()
-	return nil
-}
-
-func (c *StorageIHCursor) _hash(i int16) []byte {
-	return c.v[c.lvl][common.HashLength*i : common.HashLength*(i+1)]
-}
-
-func (c *StorageIHCursor) _next() (k, v []byte, err error) {
-	c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-	err = c._nextItem(c.seek)
-	if err != nil {
-		return []byte{}, nil, err
-	}
-
-	for {
-		if c.k[c.lvl] == nil {
-			c.cur = nil
-			c.skipState = isDenseSequence(c.prev, c.cur)
-			return nil, nil, nil
-		}
-		c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-		if c.canUse(c.kBuf) {
-			c.cur = common.CopyBytes(c.kBuf[80:])
-			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
-			return c.cur, c._hash(c.hashID[c.lvl]), nil
-		}
-		err = c._deleteCurrent()
-		if err != nil {
-			return []byte{}, nil, err
-		}
-
-		c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-		err = c._nextItem(c.seek)
-		if err != nil {
-			return []byte{}, nil, err
-		}
-	}
-}
-
-func (c *StorageIHCursor) _unmarshal(k, v []byte) {
-	c.lvl = len(k) - 40
-	c.k[c.lvl] = k[40:]
-	c.deleted[c.lvl] = false
-	c.branches[c.lvl] = binary.BigEndian.Uint16(v)
-	c.children[c.lvl] = binary.BigEndian.Uint16(v[2:])
-	c.hashID[c.lvl] = -1
-	c.maxHashID[c.lvl] = int16(bits.OnesCount16(c.branches[c.lvl]) - 1)
-	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.branches[c.lvl]) - 1)
-	c.v[c.lvl] = v[4:]
-	if len(c.k[c.lvl]) == 0 { // root record, firstly storing root hash
-		c.root = c.v[c.lvl][:32]
-		c.v[c.lvl] = c.v[c.lvl][32:]
-	}
-}
-
-func (c *StorageIHCursor) _complexSkpState() bool {
-	return false
-	//if len(c.prev) == len(c.cur) && bytes.Equal(c.prev[:len(c.prev)-1], c.cur[:len(c.cur)-1]) {
-	//	mask := uint16(0)
-	//	foundThings := false
-	//	for i := int16(c.prev[len(c.prev)-1]) + 1; i < c.childID[c.lvl]; i++ {
-	//		c.kBuf[len(c.kBuf)-1] = uint8(i)
-	//		if !c.canUse(c.kBuf) {
-	//			foundThings = true
-	//			break
-	//		}
-	//		mask |= uint16(1) << i
-	//	}
-	//	return !foundThings && c.children[c.lvl]&mask == 0
-	//}
-	//return false
-}
-
-func (c *StorageIHCursor) _deleteCurrent() error {
-	if c.deleted[c.lvl] {
-		return nil
-	}
-	if err := c.shc(c.accWithInc, c.k[c.lvl], 0, 0, nil, nil); err != nil {
-		return err
-	}
-	c.deleted[c.lvl] = true
-	return nil
-}
-
-/*
-	Dense Sequence - if between 2 IH records not possible insert any state record - then they form "dense sequence"
-	If 2 IH records form Dense Sequence - then no reason to iterate over state - just use IH one after another
-	Example1:
-		1234
-		1235
-	Example2:
-		12ff
-		13
-	Example3:
-		12ff
-		13000000
-	If 2 IH records form "sequence" then it can be consumed without moving StateCursor
-*/
-func isDenseSequence(prev []byte, next []byte) bool {
-	isSequence := false
-	if len(prev) == 0 && len(next) == 0 {
-		return false
-	}
-	ok := dbutils.NextNibblesSubtree(prev, &isSequenceBuf)
-	if len(prev) > 0 && !ok {
-		return true
-	}
-	if bytes.HasPrefix(next, isSequenceBuf) {
-		tail := next[len(isSequenceBuf):] // if tail has only zeroes, then no state records can be between fstl.nextHex and fstl.ihK
-		isSequence = true
-		for _, n := range tail {
-			if n != 0 {
-				isSequence = false
-				break
-			}
-		}
-	}
-
-	return isSequence
-}
-
-var isSequenceBuf = make([]byte, 256)
-
-func firstNotCoveredPrefix(prev, prefix, buf []byte) []byte {
-	if len(prev) > 0 {
-		_ = dbutils.NextNibblesSubtree(prev, &buf)
-	} else {
-		buf = append(buf[:0], prefix...)
-	}
-	if len(buf)%2 == 1 {
-		buf = append(buf, 0)
-	}
-	hexutil.CompressNibbles(buf, &buf)
-	return buf
-}
-
-type StateCursor struct {
-	c    ethdb.Cursor
-	kHex []byte
-}
-
-func NewStateCursor(c ethdb.Cursor) *StateCursor {
-	return &StateCursor{c: c}
-}
-
-func (c *StateCursor) Seek(seek []byte) ([]byte, []byte, []byte, error) {
-	k, v, err := c.c.Seek(seek)
-	if err != nil {
-		return []byte{}, nil, nil, err
-	}
-
-	hexutil.DecompressNibbles(k, &c.kHex)
-	return k, c.kHex, v, nil
-}
-
-func (c *StateCursor) Next() ([]byte, []byte, []byte, error) {
-	k, v, err := c.c.Next()
-	if err != nil {
-		return []byte{}, nil, nil, err
-	}
-
-	hexutil.DecompressNibbles(k, &c.kHex)
-	return k, c.kHex, v, nil
-}
-
-func nextAccount(in, out []byte) bool {
-	copy(out, in)
-	for i := len(out) - 1; i >= 0; i-- {
-		if out[i] != 255 {
-			out[i]++
-			return true
-		}
-		out[i] = 0
-	}
-	return false
-}
-
-func nextAccountHex(in, out []byte) bool {
-	copy(out, in)
-	for i := len(out) - 1; i >= 0; i-- {
-		if out[i] != 15 {
-			out[i]++
-			return true
-		}
-		out[i] = 0
-	}
-	return false
-}
-
-// keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
-func keyIsBeforeOrEqual(k1, k2 []byte) bool {
-	if k1 == nil {
-		return false
-	}
-	if k2 == nil {
-		return true
-	}
-	return bytes.Compare(k1, k2) <= 0
-}
-
-func keyIsBeforeOrEqualDeprecated(k1, k2 []byte) (bool, []byte) {
-	if k1 == nil {
-		return false, k2
-	}
-
-	if k2 == nil {
-		return true, k1
-	}
-
-	switch bytes.Compare(k1, k2) {
-	case -1, 0:
-		return true, k1
-	default:
-		return false, k2
-	}
-}
-
-// keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
-func keyIsBefore(k1, k2 []byte) bool {
-	if k1 == nil {
-		return false
-	}
-	if k2 == nil {
-		return true
-	}
-	return bytes.Compare(k1, k2) < 0
-}
-
-func UnmarshalIH(v []byte) (uint16, uint16, []common.Hash) {
-	branches, children := binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:])
-	v = v[4:]
-	newV := make([]common.Hash, len(v)/common.HashLength)
-	for i := 0; i < len(newV); i++ {
-		newV[i].SetBytes(v[i*common.HashLength : (i+1)*common.HashLength])
-	}
-	return branches, children, newV
-}
-
-func MarshalIH(branches, children uint16, h []common.Hash) []byte {
-	v := make([]byte, len(h)*common.HashLength+4)
-	binary.BigEndian.PutUint16(v, branches)
-	binary.BigEndian.PutUint16(v[2:], children)
-	for i := 0; i < len(h); i++ {
-		copy(v[4+i*common.HashLength:4+(i+1)*common.HashLength], h[i].Bytes())
-	}
-	return v
-}
-
-func IHStorageKey(addressHash []byte, incarnation uint64, prefix []byte) []byte {
-	return dbutils.GenerateCompositeStoragePrefix(addressHash, incarnation, prefix)
-}
-
-func IHValue(children, branches uint16, hashes []byte, rootHash []byte, buf []byte) []byte {
-	buf = buf[:len(hashes)+len(rootHash)+4]
-	binary.BigEndian.PutUint16(buf, branches)
-	binary.BigEndian.PutUint16(buf[2:], children)
-	if len(rootHash) == 0 {
-		copy(buf[4:], hashes)
-	} else {
-		copy(buf[4:], rootHash)
-		copy(buf[36:], hashes)
-	}
-	return buf
-}
-
-func IHTypedValue(hashes []byte, rootHash []byte) []common.Hash {
-	to := make([]common.Hash, len(hashes)/common.HashLength+len(rootHash)/common.HashLength)
-	i := 0
-	if len(rootHash) > 0 {
-		to[0].SetBytes(rootHash)
-		i++
-	}
-	for j := 0; j < len(hashes)/common.HashLength; j++ {
-		to[i].SetBytes(hashes[j*common.HashLength : (j+1)*common.HashLength])
-		i++
-	}
-	return to
 }

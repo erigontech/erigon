@@ -18,6 +18,7 @@ package trie
 
 import (
 	"fmt"
+	"math/bits"
 
 	"github.com/holiman/uint256"
 
@@ -107,7 +108,6 @@ func GenStructStep(
 	branches []uint16,
 	trace bool,
 ) ([]uint16, []uint16, error) {
-	fmt.Printf(":: %x,%x\n", curr, succ)
 	for precLen, buildExtensions := calcPrecLen(groups), false; precLen >= 0; precLen, buildExtensions = calcPrecLen(groups), true {
 		var precExists = len(groups) > 0
 		// Calculate the prefix of the smallest prefix group containing curr
@@ -125,27 +125,27 @@ func GenStructStep(
 		if trace || maxLen >= len(curr) {
 			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
 		}
+
 		// Add the digit immediately following the max common prefix and compute length of remainder length
 		extraDigit := curr[maxLen]
 		for maxLen >= len(groups) {
 			groups = append(groups, 0)
-			branches = append(branches, 0)
 		}
 		groups[maxLen] |= (uint16(1) << extraDigit)
 		remainderStart := maxLen
 		if len(succ) > 0 || precExists {
 			remainderStart++
 		}
+		for remainderStart >= len(branches) {
+			branches = append(branches, 0)
+		}
 		remainderLen := len(curr) - remainderStart
-		//fmt.Printf("groups is now %b\n", groups)
+		//fmt.Printf("groups is now %x,%b\n", extraDigit, groups)
 
 		if !buildExtensions {
 			switch v := data.(type) {
 			case *GenStructStepHashData:
 				branches[maxLen] |= (uint16(1) << curr[maxLen])
-				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("050800")) {
-				//	fmt.Printf("set hash bit: %x,%b,%x; cur: %x,suc:%x\n", curr[:maxLen], branches[maxLen], curr[maxLen], curr, succ)
-				//}
 				/* building a hash */
 				if err := e.hash(v.Hash[:]); err != nil {
 					return nil, nil, err
@@ -179,6 +179,29 @@ func GenStructStep(
 
 		if buildExtensions {
 			if remainderLen > 0 {
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0800")) {
+				//fmt.Printf("ext: %x->%x\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen])
+				//if len(branches) > 79 {
+				//	fmt.Printf("ext before: %b,%d,%d\n", branches[80:], remainderStart+remainderLen, maxLen)
+				//} else {
+				//	fmt.Printf("ext before: %b,%d,%d\n", branches, remainderStart+remainderLen, maxLen)
+				//}
+				//}
+				if remainderStart > 0 {
+					if (uint16(1)<<curr[remainderStart+remainderLen-1])&branches[remainderStart+remainderLen-1] != 0 {
+						branches[remainderStart-1] |= (uint16(1) << curr[remainderStart-1])
+					}
+					for i := remainderStart; i < len(branches); i++ {
+						branches[i] = 0
+					}
+				}
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0800")) {
+				//if len(branches) > 79 {
+				//	fmt.Printf("ext after: %b\n", branches[80:])
+				//} else {
+				//	fmt.Printf("ext after: %b\n", branches)
+				//}
+				//}
 				if trace {
 					fmt.Printf("Extension %x\n", curr[remainderStart:remainderStart+remainderLen])
 				}
@@ -198,29 +221,42 @@ func GenStructStep(
 		if precLen <= succLen && len(succ) > 0 {
 			return groups, branches, nil
 		}
+
+		var hashes []byte
 		// Close the immediately encompassing prefix group, if needed
 		if len(succ) > 0 || precExists {
-			var hashes []byte
 			if maxLen > 0 {
 				branches[maxLen-1] |= (uint16(1) << curr[maxLen-1])
-				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("050800")) {
-				//	fmt.Printf("set branch bit: %x,%b,%x; cur: %x,suc:%x\n", curr[:maxLen], branches[maxLen-1], curr[maxLen-1], curr, succ)
+				//branches[succLen] |= (uint16(1) << curr[succLen])
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0800")) {
+				//if maxLen >= 79 {
+				//	fmt.Printf("set bit %d, %x, %b, %b\n", maxLen, curr[maxLen-1], branches[maxLen-1], branches[80:])
+				//} else {
+				//	fmt.Printf("set bit %d, %x, %b, %b\n", maxLen, curr[maxLen-1], branches[maxLen-1], branches)
+				//}
 				//}
 			}
-
-			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("06")) {
-			if maxLen <= 2 {
-				//e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
-			}
+			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0c0e")) {
+			//if maxLen <= 3 {
+			//e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
 			//}
 			if h != nil {
-				if branches[maxLen] == 0 {
-					if err := h(curr[:maxLen], 0, 0, nil, nil); err != nil {
-						return nil, nil, err
-					}
-				} else {
+				//if err := h(curr[:maxLen], 0, 0, nil, nil); err != nil {
+				//	return nil, nil, err
+				//}
+				canSendHashes := bits.OnesCount16(branches[maxLen]) > 1
+				if canSendHashes {
+					//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0c0e0f")) {
+					//	if len(branches) > 80 {
+					//		fmt.Printf("why now: %x,%b,%t,%b\n", curr[:maxLen], branches[80:], buildExtensions, groups[80:])
+					//		fmt.Printf("why now2: %d,%d,%d\n", maxLen, succLen, precLen)
+					//	} else {
+					//		fmt.Printf("why now: %x,%b,%t,%b\n", curr[:maxLen], branches, buildExtensions, groups)
+					//		fmt.Printf("why now2: %d,%d,%d\n", maxLen, succLen, precLen)
+					//	}
+					//}
 					hashes = e.topHashes(curr[:maxLen], branches[maxLen], groups[maxLen])
-					if maxLen > 0 {
+					if maxLen != 0 && maxLen != 80 {
 						if err := h(curr[:maxLen], branches[maxLen], groups[maxLen], hashes, nil); err != nil {
 							return nil, nil, err
 						}
@@ -236,24 +272,21 @@ func GenStructStep(
 					return nil, nil, err
 				}
 			}
-			if h != nil && maxLen == 0 {
+			if h != nil && maxLen == 80 {
 				if branches[maxLen] > 0 {
 					if err := h(curr[:maxLen], branches[maxLen], groups[maxLen], hashes, e.topHash()); err != nil {
 						return nil, nil, err
 					}
 				}
 			}
-			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("06")) {
-			if maxLen <= 2 {
-				//fmt.Printf("--- %x, %x\n", curr[:maxLen], e.topHash())
+			for i := maxLen; i < len(branches); i++ {
+				branches[i] = 0
 			}
+			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0c0e")) {
+			//	fmt.Printf("--- %x, , %x\n", curr[:maxLen], e.topHash())
 			//}
-			branches = branches[:maxLen]
 		}
 		groups = groups[:maxLen]
-		if maxLen < len(branches) {
-			branches = branches[:maxLen+1]
-		}
 		// Check the end of recursion
 		if precLen == 0 {
 			return groups, branches, nil
@@ -262,10 +295,13 @@ func GenStructStep(
 		curr = curr[:precLen]
 		for len(groups) > 0 && groups[len(groups)-1] == 0 {
 			groups = groups[:len(groups)-1]
-			//if len(branches) > succLen+1 {
-			branches = branches[:len(branches)-1]
-			//}
+			//branches = branches[:len(branches)-1]
 		}
+		//if len(succ) > 0 || precExists {
+		//	for len(branches) > 0 && branches[len(branches)-1] == 0 {
+		//		branches = branches[:len(branches)-1]
+		//	}
+		//}
 	}
 	return nil, nil, nil
 }

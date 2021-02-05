@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/turbo/rlphacks"
+	"github.com/stretchr/testify/require"
 )
 
 func TestV2HashBuilding(t *testing.T) {
@@ -318,49 +319,65 @@ func TestEmbeddedStorage11(t *testing.T) {
 	fmt.Printf("groups: %d\n", len(groups))
 }
 
-func TestStorageOnly(t *testing.T) {
-	// 0f0f0f090c010a0a050808040f010103000300010f06000f09080401090b090d040201070b0c040a0b06050a020907060b04010e090a00000b0b0c0e0a0e090800000000000000000000000000000001,53754832dfdb81e5ca770a3f13a6545ad8ac58a7d1fbbc8848eb785ac02c6876
-
-	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae9800000000000000010d2f4a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c,496e7374616e6365000000000000000000000000000000000000000000000000
-	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae98000000000000000123a5384746519cbca71a22098063e5608768276f2dc212e71fd2c6c643c726c4,65eea643e9a9d6f5f2f7e13ccdff36cf45b46aab
-	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001387a79e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28,01
-	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001a8dc6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601,53706f7265000000000000000000000000000000000000000000000000000000
-	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001dee260551c74e3b37ed31b6e5f482a3ff9342f863a5880c9090db0cc9e002750,5067247f2214dca445bfb213277b5f19711e309f
-	//fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001fe59747b95e3ddbc3fd7e47a8bdf2465d2d88a030c9bd19cc3c0b7a9860c0d5f,01
+func TestAccountsOnly(t *testing.T) {
 	keys := []struct {
 		k []byte
 		v []byte
 	}{
 		{
-			k: common.FromHex("0d2f4a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"),
-			v: common.FromHex("496e7374616e6365000000000000000000000000000000000000000000000000"),
-		},
-		{
-			k: common.FromHex("23a5384746519cbca71a22098063e5608768276f2dc212e71fd2c6c643c726c4"),
-			v: common.FromHex("65eea643e9a9d6f5f2f7e13ccdff36cf45b46aab"),
-		},
-		{
-			k: common.FromHex("387a79e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
+			k: common.FromHex("10002a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"),
 			v: common.FromHex("01"),
 		},
 		{
-			k: common.FromHex("a8dc6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
-			v: common.FromHex("53706f7265000000000000000000000000000000000000000000000000000000"),
+			k: common.FromHex("10009384w46519cbca71a22098063e5608768276f2dc212e71fd2c6c643c726c4"),
+			v: common.FromHex("01"),
 		},
 		{
-			k: common.FromHex("dee260551c74e3b37ed31b6e5f482a3ff9342f863a5880c9090db0cc9e002750"),
-			v: common.FromHex("5067247f2214dca445bfb213277b5f19711e309f"),
+			k: common.FromHex("1000a9e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
+			v: common.FromHex("01"),
 		},
 		{
-			k: common.FromHex("fe59747b95e3ddbc3fd7e47a8bdf2465d2d88a030c9bd19cc3c0b7a9860c0d5f"),
+			k: common.FromHex("110006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
+			v: common.FromHex("01"),
+		},
+		{
+			k: common.FromHex("120006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
+			v: common.FromHex("01"),
+		},
+		{
+			k: common.FromHex("121006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
+			v: common.FromHex("01"),
+		},
+		{
+			k: common.FromHex("200c6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
 			v: common.FromHex("01"),
 		},
 	}
-	hb := NewHashBuilder(true)
+	hb := NewHashBuilder(false)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var groups, branches []uint16
 	var err error
+	i := 0
+	hc := func(keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
+		fmt.Printf("%x,%d,%b\n", keyHex, len(hashes), branches)
+		i++
+		switch i {
+		case 1:
+			require.Equal(t, common.FromHex("0102"), keyHex)
+			require.Equal(t, uint16(0), branches)
+			require.Nil(t, hashes)
+		case 2:
+			require.Equal(t, common.FromHex("01"), keyHex)
+			require.Equal(t, uint16(0b100), branches)
+			require.NotNil(t, hashes)
+		case 3:
+			require.NoError(t, fmt.Errorf("not expected"))
+		}
+
+		return nil
+	}
+
 	for _, key := range keys {
 		curr.Reset()
 		curr.Write(succ.Bytes())
@@ -372,7 +389,7 @@ func TestStorageOnly(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups, branches, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, branches, false)
+			groups, branches, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, branches, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -382,17 +399,97 @@ func TestStorageOnly(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	if groups, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, branches, false); err != nil {
+	if groups, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, branches, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
-	builtHash := hb.rootHash()
-	fmt.Printf("%x, %d, %x\n", builtHash, len(hb.hashStack), hb.hashStack)
-	//if trieHash != builtHash {
-	//	fmt.Printf("Trie built: %s\n", hb.root().fstring(""))
-	//	fmt.Printf("Trie expected: %s\n", tr.root.fstring(""))
-	//	t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
-	//}
-	fmt.Printf("groups: %d\n", len(groups))
+	require.Equal(t, 2, i)
+}
+
+func TestStorageOnly(t *testing.T) {
+	keys := []struct {
+		k []byte
+		v []byte
+	}{
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001500020e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
+			v: common.FromHex("01"),
+		},
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001500021e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
+			v: common.FromHex("01"),
+		},
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001500027e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
+			v: common.FromHex("01"),
+		},
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae9800000000000000015000979e93fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
+			v: common.FromHex("01"),
+		},
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae9800000000000000015000a7e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
+			v: common.FromHex("01"),
+		},
+		{
+			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001600a79e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
+			v: common.FromHex("01"),
+		},
+	}
+	hb := NewHashBuilder(false)
+	var succ bytes.Buffer
+	var curr bytes.Buffer
+	var groups, branches []uint16
+	var err error
+	i := 0
+	hc := func(keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
+		i++
+		switch i {
+		case 1:
+			require.Equal(t, common.FromHex("0f0f0f090c010a0a050808040f010103000300010f06000f09080401090b090d040201070b0c040a0b06050a020907060b04010e090a00000b0b0c0e0a0e09080000000000000000000000000000000105000000"), keyHex)
+			require.Equal(t, uint16(0b100), branches)
+			require.NotNil(t, hashes)
+		case 2:
+			require.Equal(t, common.FromHex("0f0f0f090c010a0a050808040f010103000300010f06000f09080401090b090d040201070b0c040a0b06050a020907060b04010e090a00000b0b0c0e0a0e090800000000000000000000000000000001"), keyHex)
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", branches))
+			require.NotNil(t, hashes)
+		case 3:
+			require.NoError(t, fmt.Errorf("not expected"))
+		}
+
+		return nil
+	}
+
+	for _, key := range keys {
+		curr.Reset()
+		curr.Write(succ.Bytes())
+		succ.Reset()
+		keyBytes := key.k
+		for _, b := range keyBytes {
+			succ.WriteByte(b / 16)
+			succ.WriteByte(b % 16)
+		}
+		if len(key.k) == 32 || len(key.k) == 72 {
+			succ.WriteByte(16)
+		}
+		if curr.Len() > 0 {
+			groups, branches, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, branches, false)
+			if err != nil {
+				t.Errorf("Could not execute step of structGen algorithm: %v", err)
+			}
+		}
+	}
+	curr.Reset()
+	curr.Write(succ.Bytes())
+	succ.Reset()
+	cutoff := 2 * (common.HashLength + common.IncarnationLength)
+	succ.Write(curr.Bytes()[:cutoff-1])
+	succ.WriteByte(curr.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
+
+	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
+	if groups, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, branches, false); err != nil {
+		t.Errorf("Could not execute step of structGen algorithm: %v", err)
+	}
+	require.Equal(t, 2, i)
 }
 
 func Test2(t *testing.T) {
@@ -412,14 +509,14 @@ func Test2(t *testing.T) {
 			k: common.FromHex("000009"),
 			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
 		},
-		{
-			k: common.FromHex("000010"),
-			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
-		},
-		{
-			k: common.FromHex("000020"),
-			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
-		},
+		//{
+		//	k: common.FromHex("000010"),
+		//	v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+		//},
+		//{
+		//	k: common.FromHex("000020"),
+		//	v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+		//},
 		{
 			k: common.FromHex("01"),
 			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),

@@ -35,7 +35,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 		s.Done()
 		return nil
 	}
-	fmt.Printf("%d->%d\n", s.BlockNumber, to)
+	fmt.Printf("\n\n%d->%d\n", s.BlockNumber, to)
 
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
@@ -254,7 +254,10 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 		}
 		if err := storageIHCollector.Load(logPrefix, db,
 			dbutils.TrieOfStorageBucket,
-			etl.IdentityLoadFunc,
+			func(k []byte, value []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+
+				return nil
+			},
 			etl.TransformArgs{
 				Quit: quit,
 			},
@@ -304,6 +307,9 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 			if err != nil {
 				return err
 			}
+			//if bytes.HasPrefix(newK, common.FromHex("ce")) {
+			//	fmt.Printf("kk: %d,%x,%x\n", blk, k, v)
+			//}
 
 			return next(dbKey, newK, nil)
 		}
@@ -319,6 +325,9 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 			if err != nil {
 				return err
 			}
+			//if bytes.HasPrefix(k, common.FromHex("ce")) {
+			//	fmt.Printf("kk: %d,%x,%x\n", blk, k, v)
+			//}
 
 			if len(value) == 0 && len(v) > 0 { // self-destructed
 				newKS := string(newK)
@@ -381,6 +390,10 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 		if err != nil {
 			return err
 		}
+
+		//if bytes.HasPrefix(newK, common.FromHex("ce")) {
+		//	fmt.Printf("kk: %d,%x,%x\n", blk, newK, v)
+		//}
 		return next(k, newK, nil)
 	}
 
@@ -411,6 +424,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		//if bytes.HasPrefix(k, common.FromHex("ce")) {
+		//	fmt.Printf("excl: %x\n", k)
+		//}
 		exclude = append(exclude, k)
 		return nil
 	}
@@ -608,7 +624,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 	}
 	syncHeadHeader := rawdb.ReadHeader(db, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
-	fmt.Printf("u: %d->%d\n", s.BlockNumber, u.UnwindPoint)
+	fmt.Printf("\n\nu: %d->%d\n", s.BlockNumber, u.UnwindPoint)
 
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
@@ -644,6 +660,9 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		//if bytes.HasPrefix(k, common.FromHex("ce")) {
+		//	fmt.Printf("excl: %x\n", k)
+		//}
 		exclude = append(exclude, k)
 		return nil
 	}

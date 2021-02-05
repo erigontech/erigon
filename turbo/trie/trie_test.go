@@ -928,7 +928,7 @@ func TestIHCursorCanUseNextParent(t *testing.T) {
 	defer db.Close()
 	hash := fmt.Sprintf("%064d", 0)
 
-	ih := IH(nil, nil, nil)
+	ih := IH(nil, nil, nil, nil)
 
 	ih.k[1], ih.v[1], ih.branches[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
 	ih.k[2], ih.v[2], ih.branches[2] = common.FromHex("0001"), common.FromHex(hash), 0b1000000000000000
@@ -988,9 +988,9 @@ func TestIHCursor(t *testing.T) {
 	rl.AddHex(common.FromHex("030000"))
 	rl.AddHex(common.FromHex("03000e"))
 	var filter = func(prefix []byte) bool { return !rl.Retain(prefix) }
-	ih := IH(filter, func(keyHex []byte, children uint16, branches uint16, hashes []byte, rootHash []byte) error {
+	ih := IH(filter, func(keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
 		return nil
-	}, cursor)
+	}, cursor, nil)
 	k, _, _ := ih.AtPrefix([]byte{})
 	require.Equal(common.FromHex("0001"), k)
 	require.False(ih.skipState)

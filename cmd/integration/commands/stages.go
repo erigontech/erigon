@@ -725,7 +725,6 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 		}
 		return s
 	}
-
 	return cc, bc, st, progress
 }
 
