@@ -195,7 +195,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		if err := st.Run(db, tx); err != nil {
 			return err
 		}
-		if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock); err != nil {
+		if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
 			return err
 		}
 
@@ -226,7 +226,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	return nil
 }
 
-func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db ethdb.Database, expectedStorageChanges map[uint64]*changeset.ChangeSet, execAtBlock uint64) error {
+func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db ethdb.Database, expectedStorageChanges map[uint64]*changeset.ChangeSet, execAtBlock uint64, historyEnabled bool) error {
 	for blockN := range expectedAccountChanges {
 		if err := checkChangeSet(db, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
 			return err
@@ -235,11 +235,13 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 		delete(expectedStorageChanges, blockN)
 	}
 
-	if err := checkHistory(db, dbutils.PlainAccountChangeSetBucket, execAtBlock); err != nil {
-		return err
-	}
-	if err := checkHistory(db, dbutils.PlainStorageChangeSetBucket, execAtBlock); err != nil {
-		return err
+	if historyEnabled {
+		if err := checkHistory(db, dbutils.PlainAccountChangeSetBucket, execAtBlock); err != nil {
+			return err
+		}
+		if err := checkHistory(db, dbutils.PlainStorageChangeSetBucket, execAtBlock); err != nil {
+			return err
+		}
 	}
 	return nil
 }
