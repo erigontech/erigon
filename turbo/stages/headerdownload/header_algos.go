@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"container/heap"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -18,6 +19,8 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -627,7 +630,7 @@ func InitHardCodedTips(network string) map[common.Hash]HeaderRecord {
 func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]HeaderRecord) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	for _, headerRecord := range hardTips {
+	for tipHash, headerRecord := range hardTips {
 		if headerRecord.Header.Number.Uint64() < hd.highestInDb {
 			// No need for this hard coded header anymore
 			continue
@@ -635,8 +638,13 @@ func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]HeaderRecord
 		if headerRecord.Header.Number.Uint64() > hd.maxHardTipHeight {
 			hd.maxHardTipHeight = headerRecord.Header.Number.Uint64()
 		}
+		if err := hd.HardCodedHeader(headerRecord.Header, uint64(time.Now().Unix())); err != nil {
+			log.Error("Failed to insert hard coded header", "block number", headerRecord.Header.Number.Uint64(), "error", err)
+		} else {
+			hd.AddHeaderToBuffer(headerRecord.Raw, headerRecord.Header.Number.Uint64())
+		}
+		hd.hardTips[tipHash] = headerRecord
 	}
-	hd.hardTips = hardTips
 }
 
 func ReadFilesAndBuffer(files []string, headerBuf *HeaderBuffer, hf func(header *types.Header, blockHeight uint64) error) error {
@@ -707,7 +715,57 @@ func ReadFilesAndBuffer(files []string, headerBuf *HeaderBuffer, hf func(header 
 }
 
 func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) error {
-	var err error
+	var anchor *Anchor
+	err := db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.HeaderPrefix)
+		var anchorH types.Header
+		// Take first header (with the lowest height) as the anchor
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			if len(k) == 40 {
+				// This is header record
+				if err = rlp.DecodeBytes(v, &anchorH); err != nil {
+					return err
+				}
+				break
+			}
+		}
+		// Take hd.tipLimit headers (with the highest heights) as tips
+		for k, v, err := c.Last(); k != nil && hd.tipCount < hd.tipLimit; k, v, err = c.Prev() {
+			if err != nil {
+				return err
+			}
+			if len(k) != 40 {
+				continue
+			}
+			var h types.Header
+			if err = rlp.DecodeBytes(v, &h); err != nil {
+				return err
+			}
+			var td *big.Int
+			if td, err = rawdb.ReadTd(db, h.Hash(), h.Number.Uint64()); err != nil {
+				return err
+			}
+			cumulativeDiff, overflow := uint256.FromBig(td)
+			if overflow {
+				return fmt.Errorf("overflow of difficulty: %d", td)
+			}
+			if anchor == nil {
+				if anchor, err = hd.addHeaderAsAnchor(&anchorH, true /* hardCoded */); err != nil {
+					return err
+				}
+			}
+			if err = hd.addHeaderAsTip(&h, anchor, *cumulativeDiff, currentTime, false /* hardCodedTip */); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
 	hd.highestInDb, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
 		return err

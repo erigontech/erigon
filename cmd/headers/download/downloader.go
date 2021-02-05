@@ -308,13 +308,6 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 	if !filesRecovered {
 		fmt.Printf("Inserting hard-coded tips\n")
 		hd.SetHardCodedTips(hardTips)
-		for _, headerRecord := range hardTips {
-			if err2 := hd.HardCodedHeader(headerRecord.Header, uint64(time.Now().Unix())); err2 != nil {
-				log.Error("Failed to insert hard coded header", "block number", headerRecord.Header.Number.Uint64(), "error", err2)
-			} else {
-				hd.AddHeaderToBuffer(headerRecord.Raw, headerRecord.Header.Number.Uint64())
-			}
-		}
 	}
 	log.Info(hd.AnchorState())
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
