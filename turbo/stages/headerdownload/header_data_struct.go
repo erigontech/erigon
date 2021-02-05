@@ -225,7 +225,7 @@ type HeaderDownload struct {
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
 	RequestQueueTimer      *time.Timer
-	highestInDb            uint64 // Height of the heighest block header in the database
+	highestInDb            uint64 // Height of the highest block header in the database
 	initialHash            common.Hash
 	stageReady             bool
 	stageReadyCh           chan struct{}

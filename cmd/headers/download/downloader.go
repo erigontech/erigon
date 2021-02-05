@@ -394,11 +394,11 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_core
 func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
 	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
-	_, err := rlpStream.List() // Now stream is at the beggining of the block record
+	_, err := rlpStream.List() // Now stream is at the beginning of the block record
 	if err != nil {
 		return nil, fmt.Errorf("decode NewBlockMsg: %w", err)
 	}
-	_, err = rlpStream.List() // Now stream is at the begininng of the header
+	_, err = rlpStream.List() // Now stream is at the beginning of the header
 	if err != nil {
 		return nil, fmt.Errorf("decode NewBlockMsg: %w", err)
 	}
