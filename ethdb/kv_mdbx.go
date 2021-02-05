@@ -86,7 +86,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	err = env.SetOption(mdbx.OptRpAugmentLimit, 16777216)
+	err = env.SetOption(mdbx.OptRpAugmentLimit, 16*1024*1024)
 	if err != nil {
 		return nil, err
 	}
