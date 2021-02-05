@@ -55,7 +55,8 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	var blockNum uint64
 	var req *BodyRequest
 	var peer []byte
-	for {
+	stopped := false
+	for !stopped {
 		penaltyPeers := bd.GetPenaltyPeers()
 		for _, penaltyPeer := range penaltyPeers {
 			penalise(ctx, penaltyPeer)
@@ -110,7 +111,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 		timer = time.NewTimer(1 * time.Second)
 		select {
 		case <-ctx.Done():
-			break
+			stopped = true
 		case <-logEvery.C:
 			deliveredCount, wastedCount := bd.DeliveryCounts()
 			logProgress(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, batch)
