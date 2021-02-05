@@ -28,7 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/eth"
+	"github.com/ethereum/go-ethereum/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ethereum/go-ethereum/params"
 
@@ -192,7 +192,7 @@ func createNode(t *testing.T, gqlEnabled bool) *node.Node {
 
 func createGQLService(t *testing.T, stack *node.Node, endpoint string) { //nolint:unparam
 	// create backend
-	ethConf := &eth.Config{
+	ethConf := &ethconfig.Config{
 		Genesis: &core.Genesis{
 			Config:     params.AllEthashProtocolChanges,
 			GasLimit:   11500000,

@@ -164,7 +164,7 @@ func makeMiner(genesis *core.Genesis) (*node.Node, *eth.Ethereum, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	ethBackend, err := eth.New(stack, &eth.Config{
+	ethBackend, err := eth.New(stack, &ethconfig.Config{
 		Genesis:         genesis,
 		NetworkID:       genesis.Config.ChainID.Uint64(),
 		SyncMode:        downloader.FullSync,
