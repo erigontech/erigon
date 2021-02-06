@@ -695,8 +695,8 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 			if len(k) > 2 {
 				return true, nil
 			}
-			branches, children, hashes := trie.UnmarshalIH(v)
-			cache.SetAccountHashesRead(k, branches, children, hashes)
+			hasState, hasBranch, hasHash, hashes := trie.UnmarshalIH(v)
+			cache.SetAccountHashesRead(k, hasState, hasBranch, hasHash, hashes)
 			return true, nil
 		}); err2 != nil {
 			panic(err2)

@@ -525,7 +525,7 @@ func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool)
 
 func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	if ii, ok := item.(*AccountHashItem); ok {
-		if bits.OnesCount16(ii.branches) != len(ii.hashes) {
+		if bits.OnesCount16(ii.hasBranch) != len(ii.hashes) {
 			panic(2)
 		}
 	}
@@ -614,12 +614,12 @@ func (sc *StateCache) SetAccountAbsent(address []byte) {
 
 func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete bool) {
 	if ii, ok := item.(*AccountHashItem); ok {
-		if bits.OnesCount16(ii.branches) != len(ii.hashes) {
+		if bits.OnesCount16(ii.hasBranch) != len(ii.hashes) {
 			panic(2)
 		}
 	}
 	if ii, ok := writeItem.(*AccountHashWriteItem); ok {
-		if bits.OnesCount16(ii.ai.branches) != len(ii.ai.hashes) {
+		if bits.OnesCount16(ii.ai.hasBranch) != len(ii.ai.hashes) {
 			panic(2)
 		}
 	}

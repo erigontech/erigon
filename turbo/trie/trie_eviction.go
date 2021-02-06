@@ -296,7 +296,7 @@ func evictList(evicter AccountEvicter, hexes []string) bool {
 }
 
 // EvictToFitSize evicts mininum number of generations necessary so that the total
-// size of accounts left is fits into the provided threshold
+// simze of accounts left is fits into the provided threshold
 func (tp *Eviction) EvictToFitSize(
 	evicter AccountEvicter,
 	threshold uint64,

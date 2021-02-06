@@ -1035,7 +1035,7 @@ func (t *Trie) deleteRecursive(origNode node, key []byte, keyStart int, preserve
 			n.Children[key[keyStart]] = nn
 			// Check how many non-nil entries are left after deleting and
 			// reduce the full node to a short node if only one entry is
-			// left. Since n must've contained at least two children
+			// left. Since n must've contained at least two hasState
 			// before deletion (otherwise it would not be a full node) n
 			// can never be reduced to nil.
 			//

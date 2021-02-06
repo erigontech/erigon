@@ -95,7 +95,7 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 		copy(storeTo, n.reference())
 		return len(n.reference()), nil
 	}
-	// Trie not processed yet or needs storage, walk the children
+	// Trie not processed yet or needs storage, walk the hasState
 	nodeRlp, err := h.hashChildren(n, bufOffset)
 	if err != nil {
 		return 0, err
@@ -153,7 +153,7 @@ func writeRlpPrefix(buffer []byte, pos int) []byte {
 	}
 }
 
-// hashChildren replaces the children of a node with their hashes
+// hashChildren replaces the hasState of a node with their hashes
 // if the RLP-encoded size of the child is >= 32,
 // returning node's RLP with the child hashes cached in.
 // DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
@@ -230,7 +230,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 		return writeRlpPrefix(buffer, pos), nil
 
 	case *fullNode:
-		// Hash the full node's children, caching the newly hashed subtrees
+		// Hash the full node's hasState, caching the newly hashed subtrees
 		for _, child := range n.Children[:16] {
 			written, err := h.hashChild(child, buffer, pos, bufOffset)
 			if err != nil {

@@ -61,7 +61,7 @@ func TestV2HashBuilding(t *testing.T) {
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var valueTape bytes.Buffer
-	var groups, branches []uint16
+	var groups, hasBranch, hasHash []uint16
 	for i, key := range keys {
 		curr.Reset()
 		curr.Write(succ.Bytes())
@@ -74,7 +74,7 @@ func TestV2HashBuilding(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, branches, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, branches, false)
+			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasBranch, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -89,7 +89,7 @@ func TestV2HashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, _, err := GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, branches, false); err != nil {
+	if _, _, _, err := GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasBranch, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()
@@ -129,7 +129,7 @@ func TestV2Resolution(t *testing.T) {
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var valueTape bytes.Buffer
-	var groups, branches []uint16
+	var groups, hasBranch, hasHash []uint16
 	for _, key := range keys {
 		curr.Reset()
 		curr.Write(succ.Bytes())
@@ -142,7 +142,7 @@ func TestV2Resolution(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, branches, err = GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, branches, false)
+			groups, hasBranch, hasHash, err = GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasBranch, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -153,7 +153,7 @@ func TestV2Resolution(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, _, err := GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, branches, false); err != nil {
+	if _, _, _, err := GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasBranch, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	tr1 := New(common.Hash{})
@@ -177,7 +177,7 @@ func TestV2Resolution(t *testing.T) {
 // For storage items, we will be using the keys which are concatenation of the contract address hash,
 // incarnation encoding, and the storage location hash.
 // If we just allow it to be processed natually, then at the end of the processing of all storage
-// items, we would have entension node which branches off at some point, but includes incarnation encoding
+// items, we would have entension node which hasBranch off at some point, but includes incarnation encoding
 // in it, which we do not want. To cut it off, we will use the "trick". When we give the last
 // storage item to the GenStructStep, instead of setting `succ` to the empty slice, indicating that
 // nothing follows, we will set `succ` to a key which is the concatenation of the address hash,
@@ -208,7 +208,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	hb := NewHashBuilder(true)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
-	var groups, branches []uint16
+	var groups, hasBranch, hasHash []uint16
 	var err error
 	for _, key := range keys {
 		curr.Reset()
@@ -221,7 +221,7 @@ func TestEmbeddedStorage(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups, branches, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, branches, false)
+			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, hasBranch, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -234,7 +234,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	cutoff := 2 * common.HashLength
 	succ.Write(curr.Bytes()[:cutoff-1])
 	succ.WriteByte(curr.Bytes()[cutoff-1] + 1)
-	if groups, _, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, branches, false); err != nil {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, hasBranch, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()
@@ -280,7 +280,7 @@ func TestEmbeddedStorage11(t *testing.T) {
 	hb := NewHashBuilder(true)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
-	var groups, branches []uint16
+	var groups, hasBranch, hasHash []uint16
 	var err error
 	for _, key := range keys {
 		curr.Reset()
@@ -293,7 +293,7 @@ func TestEmbeddedStorage11(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups, branches, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, branches, false)
+			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, hasBranch, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -306,7 +306,7 @@ func TestEmbeddedStorage11(t *testing.T) {
 	cutoff := 2 * (common.HashLength + common.IncarnationLength)
 	succ.Write(curr.Bytes()[:cutoff-1])
 	succ.WriteByte(curr.Bytes()[cutoff-1] + 1)
-	if _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, branches, false); err != nil {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasBranch, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()
@@ -356,20 +356,20 @@ func TestAccountsOnly(t *testing.T) {
 	hb := NewHashBuilder(false)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
-	var groups, branches []uint16
+	var groups, hasBranch, hasHash []uint16
 	var err error
 	i := 0
-	hc := func(keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
-		fmt.Printf("%x,%d,%b\n", keyHex, len(hashes), branches)
+	hc := func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
+		fmt.Printf("%x,%d,%b\n", keyHex, len(hashes), hasBranch)
 		i++
 		switch i {
 		case 1:
 			require.Equal(t, common.FromHex("0102"), keyHex)
-			require.Equal(t, uint16(0), branches)
+			require.Equal(t, uint16(0), hasBranch)
 			require.Nil(t, hashes)
 		case 2:
 			require.Equal(t, common.FromHex("01"), keyHex)
-			require.Equal(t, uint16(0b100), branches)
+			require.Equal(t, uint16(0b100), hasBranch)
 			require.NotNil(t, hashes)
 		case 3:
 			require.NoError(t, fmt.Errorf("not expected"))
@@ -389,7 +389,7 @@ func TestAccountsOnly(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups, branches, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, branches, false)
+			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, hasBranch, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -399,7 +399,7 @@ func TestAccountsOnly(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	if _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, branches, false); err != nil {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasBranch, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	require.Equal(t, 2, i)
@@ -438,19 +438,21 @@ func TestStorageOnly(t *testing.T) {
 	hb := NewHashBuilder(false)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
-	var groups, branches []uint16
+	var groups, hasHash, hasBranch []uint16
 	var err error
 	i := 0
-	hc := func(keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
+	hc := func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
 		i++
 		switch i {
 		case 1:
 			require.Equal(t, common.FromHex("0f0f0f090c010a0a050808040f010103000300010f06000f09080401090b090d040201070b0c040a0b06050a020907060b04010e090a00000b0b0c0e0a0e09080000000000000000000000000000000105000000"), keyHex)
-			require.Equal(t, uint16(0b100), branches)
+			require.Equal(t, fmt.Sprintf("%b", uint16(0)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasHash))
 			require.NotNil(t, hashes)
 		case 2:
 			require.Equal(t, common.FromHex("0f0f0f090c010a0a050808040f010103000300010f06000f09080401090b090d040201070b0c040a0b06050a020907060b04010e090a00000b0b0c0e0a0e090800000000000000000000000000000001"), keyHex)
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", branches))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasHash))
 			require.NotNil(t, hashes)
 		case 3:
 			require.NoError(t, fmt.Errorf("not expected"))
@@ -472,7 +474,7 @@ func TestStorageOnly(t *testing.T) {
 			succ.WriteByte(16)
 		}
 		if curr.Len() > 0 {
-			groups, branches, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, branches, false)
+			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(key.v)}, groups, hasBranch, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -486,7 +488,7 @@ func TestStorageOnly(t *testing.T) {
 	succ.WriteByte(curr.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
 
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	if _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, branches, false); err != nil {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasBranch, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	require.Equal(t, 2, i)
@@ -529,7 +531,7 @@ func Test2(t *testing.T) {
 	hb := NewHashBuilder(false)
 	var succ bytes.Buffer
 	var curr bytes.Buffer
-	var groups, branches []uint16
+	var groups, hasBranch, hasHash []uint16
 	var err error
 	for _, key := range keys {
 		curr.Reset()
@@ -543,12 +545,11 @@ func Test2(t *testing.T) {
 		//succ.WriteByte(16)
 		if curr.Len() > 0 {
 			fmt.Printf("send: %x\n", succ.Bytes())
-			groups, branches, err = GenStructStep(func(_ []byte) bool { return false },
+			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false },
 				curr.Bytes(), succ.Bytes(), hb,
-				func(keyHex []byte, children, branches uint16, hashes, rootHash []byte) error {
-					fmt.Printf("collect: %x, %b\n", keyHex, branches)
+				func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
 					return nil
-				}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(key.v)}, groups, branches, false)
+				}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(key.v)}, groups, hasBranch, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -558,10 +559,9 @@ func Test2(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	if groups, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, func(keyHex []byte, children, branches uint16, hashes, rootHash []byte) error {
-		fmt.Printf("collect: %x, %b\n", keyHex, branches)
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
 		return nil
-	}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(keys[len(keys)-1].v)}, groups, branches, false); err != nil {
+	}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(keys[len(keys)-1].v)}, groups, hasBranch, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()

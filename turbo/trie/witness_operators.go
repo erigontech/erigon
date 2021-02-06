@@ -23,8 +23,8 @@ const (
 	// OpExtension pops a node from the node stack, constructs extension node from it and its operand's key, and pushes this extension node onto
 	// the node stack, its hash onto the hash stack
 	OpExtension
-	// OpBranch has operand, which is a bitset representing digits in the branch node. Pops the children nodes from the node stack (the number of
-	// children is equal to the number of bits in the bitset), constructs branch node and pushes it onto the node stack, its hash onto the hash stack
+	// OpBranch has operand, which is a bitset representing digits in the branch node. Pops the hasState nodes from the node stack (the number of
+	// hasState is equal to the number of bits in the bitset), constructs branch node and pushes it onto the node stack, its hash onto the hash stack
 	OpBranch
 	// OpHash and pushes the hash them onto the stack.
 	OpHash

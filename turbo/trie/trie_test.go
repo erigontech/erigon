@@ -930,16 +930,16 @@ func TestIHCursorCanUseNextParent(t *testing.T) {
 
 	ih := IH(nil, nil, nil, nil)
 
-	ih.k[1], ih.v[1], ih.branches[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
-	ih.k[2], ih.v[2], ih.branches[2] = common.FromHex("0001"), common.FromHex(hash), 0b1000000000000000
+	ih.k[1], ih.v[1], ih.hasBranch[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
+	ih.k[2], ih.v[2], ih.hasBranch[2] = common.FromHex("0001"), common.FromHex(hash), 0b1000000000000000
 	ih.lvl = 2
 	ih.hashID[2], ih.maxHashID[2] = 1, 1
 	ih.hashID[1], ih.maxHashID[1] = 0, 1
 	assert.True(ih._nextSiblingOfParentInMem())
 	assert.Equal(ih.k[ih.lvl], common.FromHex("00"))
 
-	ih.k[1], ih.v[1], ih.branches[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
-	ih.k[3], ih.v[3], ih.branches[3] = common.FromHex("000101"), common.FromHex(hash), 0b1000000000000000
+	ih.k[1], ih.v[1], ih.hasBranch[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
+	ih.k[3], ih.v[3], ih.hasBranch[3] = common.FromHex("000101"), common.FromHex(hash), 0b1000000000000000
 	ih.lvl = 3
 	ih.hashID[3], ih.maxHashID[3] = 1, 1
 	ih.hashID[1], ih.maxHashID[1] = 0, 1
@@ -988,7 +988,7 @@ func TestIHCursor(t *testing.T) {
 	rl.AddHex(common.FromHex("030000"))
 	rl.AddHex(common.FromHex("03000e"))
 	var filter = func(prefix []byte) bool { return !rl.Retain(prefix) }
-	ih := IH(filter, func(keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
+	ih := IH(filter, func(keyHex []byte, _, _, _ uint16, hashes, rootHash []byte) error {
 		return nil
 	}, cursor, nil)
 	k, _, _ := ih.AtPrefix([]byte{})
@@ -1051,9 +1051,9 @@ func TestIHCursor(t *testing.T) {
 func TestEmptyRoot(t *testing.T) {
 	sc := shards.NewStateCache(32, 64*1024)
 
-	sc.SetAccountHashesRead(common.FromHex("00"), 0b10, 0b111, []common.Hash{{}})
-	sc.SetAccountHashesRead(common.FromHex("01"), 0b111, 0b111, []common.Hash{{}, {}, {}})
-	sc.SetAccountHashesRead(common.FromHex("02"), 0b100, 0b111, []common.Hash{{}})
+	sc.SetAccountHashesRead(common.FromHex("00"), 0b10, 0b111, 0b111, []common.Hash{{}})
+	sc.SetAccountHashesRead(common.FromHex("01"), 0b111, 0b111, 0b111, []common.Hash{{}, {}, {}})
+	sc.SetAccountHashesRead(common.FromHex("02"), 0b100, 0b111, 0b111, []common.Hash{{}})
 
 	rl := NewRetainList(0)
 	rl.AddHex(common.FromHex("01"))
@@ -1080,11 +1080,11 @@ func TestEmptyRoot(t *testing.T) {
 
 func TestCollectRanges(t *testing.T) {
 	sc := shards.NewStateCache(32, 64*1024)
-	sc.SetAccountHashesRead(common.FromHex("00"), 0b1, 0b11, []common.Hash{{}})
-	sc.SetAccountHashesRead(common.FromHex("02"), 0b10011, 0b10011, []common.Hash{{}, {}, {}})
-	sc.SetAccountHashesRead(common.FromHex("0200"), 0b111, 0b1111, []common.Hash{{}, {}, {}})
-	sc.SetAccountHashesRead(common.FromHex("0201"), 0b11, 0b11, []common.Hash{{}, {}})
-	sc.SetAccountHashesRead(common.FromHex("03"), 0b1, 0b11, []common.Hash{{}})
+	sc.SetAccountHashesRead(common.FromHex("00"), 0b1, 0b11, 0b11, []common.Hash{{}})
+	sc.SetAccountHashesRead(common.FromHex("02"), 0b10011, 0b10011, 0b10011, []common.Hash{{}, {}, {}})
+	sc.SetAccountHashesRead(common.FromHex("0200"), 0b111, 0b1111, 0b1111, []common.Hash{{}, {}, {}})
+	sc.SetAccountHashesRead(common.FromHex("0201"), 0b11, 0b11, 0b11, []common.Hash{{}, {}})
+	sc.SetAccountHashesRead(common.FromHex("03"), 0b1, 0b11, 0b11, []common.Hash{{}})
 	ranges, err := collectMissedAccIH(func(prefix []byte) bool {
 		if bytes.Equal(prefix, common.FromHex("02")) {
 			return false

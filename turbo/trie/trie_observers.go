@@ -34,7 +34,7 @@ func (*NoopObserver) WillUnloadNode(_ []byte, _ common.Hash)                 {}
 func (*NoopObserver) BranchNodeLoaded(_ []byte, _ uint64)                    {}
 
 // TrieObserverMux multiplies the callback methods and sends them to
-// all it's children.
+// all it's hasState.
 type ObserverMux struct {
 	children []Observer
 }

@@ -27,8 +27,9 @@ type AccountHashItem struct {
 	sequence       int
 	queuePos       int
 	flags          uint16
-	branches       uint16
-	children       uint16
+	hasHash        uint16
+	hasBranch      uint16
+	hasState       uint16
 	hashes         []common.Hash // TODO: store it as fixed size flat array?
 	addrHashPrefix []byte
 }
@@ -76,8 +77,8 @@ func (ahi *AccountHashItem) CopyValueFrom(item CacheItem) {
 	for i := 0; i < len(ahi.hashes); i++ {
 		ahi.hashes[i] = other.hashes[i]
 	}
-	ahi.branches = other.branches
-	ahi.children = other.children
+	ahi.hasBranch = other.hasBranch
+	ahi.hasState = other.hasState
 }
 
 type StorageHashWriteItem struct {
@@ -87,8 +88,9 @@ type StorageHashItem struct {
 	sequence      int
 	queuePos      int
 	flags         uint16
-	branches      uint16
-	children      uint16
+	hasHash       uint16
+	hasBranch     uint16
+	hasState      uint16
 	addrHash      common.Hash
 	incarnation   uint64
 	hashes        []common.Hash
@@ -135,8 +137,8 @@ func (shi *StorageHashItem) CopyValueFrom(item CacheItem) {
 	for i := 0; i < len(shi.hashes); i++ {
 		shi.hashes[i] = other.hashes[i]
 	}
-	shi.branches = other.branches
-	shi.children = other.children
+	shi.hasBranch = other.hasBranch
+	shi.hasState = other.hasState
 }
 
 // UnprocessedHeap is a priority queue of items that were modified after the last recalculation of the merkle tree
@@ -207,41 +209,41 @@ func (shi *StorageHashItem) HasPrefix(prefix CacheItem) bool {
 	}
 }
 
-func (sc *StateCache) SetAccountHashesRead(prefix []byte, branches, children uint16, hashes []common.Hash) {
-	if bits.OnesCount16(branches) != len(hashes) {
-		panic(fmt.Errorf("invariant bits.OnesCount16(branches) == len(hashes) failed: %d, %d", bits.OnesCount16(branches), len(hashes)))
+func (sc *StateCache) SetAccountHashesRead(prefix []byte, hasState, hasBranch, hasHash uint16, hashes []common.Hash) {
+	if bits.OnesCount16(hasHash) != len(hashes) {
+		panic(fmt.Errorf("invariant bits.OnesCount16(hasBranch) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)))
 	}
-	if (branches & children) != branches { // a & b == a - checks whether a is subset of b
-		panic(fmt.Errorf("invariant 'branches is subset of children' failed: %b, %b", branches, children))
-	}
+	assertSubset(hasBranch, hasState)
+	assertSubset(hasHash, hasState)
 	cpy := make([]common.Hash, len(hashes))
 	for i := 0; i < len(hashes); i++ {
 		cpy[i] = hashes[i]
 	}
 	ai := AccountHashItem{
 		addrHashPrefix: common.CopyBytes(prefix),
-		branches:       branches,
-		children:       children,
+		hasState:       hasState,
+		hasBranch:      hasBranch,
+		hasHash:        hasHash,
 		hashes:         cpy,
 	}
 	sc.setRead(&ai, false /* absent */)
 }
 
-func (sc *StateCache) SetAccountHashWrite(prefix []byte, branches, children uint16, hashes []common.Hash) {
-	if bits.OnesCount16(branches) != len(hashes) {
-		panic(fmt.Errorf("invariant bits.OnesCount16(branches) == len(hashes) failed: %d, %d", bits.OnesCount16(branches), len(hashes)))
+func (sc *StateCache) SetAccountHashWrite(prefix []byte, hasState, hasBranch, hasHash uint16, hashes []common.Hash) {
+	if bits.OnesCount16(hasHash) != len(hashes) {
+		panic(fmt.Errorf("invariant bits.OnesCount16(hasBranch) == len(hashes) failed: %d, %d", bits.OnesCount16(hasBranch), len(hashes)))
 	}
-	if (branches & children) != branches { // a & b == a - checks whether a is subset of b
-		panic(fmt.Errorf("invariant 'branches is subset of children' failed: %b, %b", branches, children))
-	}
+	assertSubset(hasBranch, hasState)
+	assertSubset(hasHash, hasState)
 	cpy := make([]common.Hash, len(hashes))
 	for i := 0; i < len(hashes); i++ {
 		cpy[i] = hashes[i]
 	}
 	var ai AccountHashItem
 	ai.addrHashPrefix = append(ai.addrHashPrefix[:0], prefix...)
-	ai.branches = branches
-	ai.children = children
+	ai.hasState = hasState
+	ai.hasBranch = hasBranch
+	ai.hasHash = hasHash
 	ai.hashes = cpy
 	var awi AccountHashWriteItem
 	awi.ai = &ai
@@ -256,7 +258,7 @@ func (sc *StateCache) SetAccountHashDelete(prefix []byte) {
 	sc.setWrite(&ai, &wi, true /* delete */)
 }
 
-func (sc *StateCache) SetStorageHashRead(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, branchChildren, children uint16, hashes []common.Hash) {
+func (sc *StateCache) SetStorageHashRead(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, hasState, hasBranch, hasHash uint16, hashes []common.Hash) {
 	cpy := make([]common.Hash, len(hashes))
 	for i := 0; i < len(hashes); i++ {
 		cpy[i] = hashes[i]
@@ -265,14 +267,15 @@ func (sc *StateCache) SetStorageHashRead(addrHash common.Hash, incarnation uint6
 		addrHash:      addrHash,
 		incarnation:   incarnation,
 		locHashPrefix: common.CopyBytes(locHashPrefix),
-		branches:      branchChildren,
-		children:      children,
+		hasState:      hasState,
+		hasBranch:     hasBranch,
+		hasHash:       hasHash,
 		hashes:        cpy,
 	}
 	sc.setRead(&ai, false /* absent */)
 }
 
-func (sc *StateCache) SetStorageHashWrite(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, branchChildren, children uint16, hashes []common.Hash) {
+func (sc *StateCache) SetStorageHashWrite(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, hasState, hasBranch, hasHash uint16, hashes []common.Hash) {
 	cpy := make([]common.Hash, len(hashes))
 	for i := 0; i < len(hashes); i++ {
 		cpy[i] = hashes[i]
@@ -281,8 +284,9 @@ func (sc *StateCache) SetStorageHashWrite(addrHash common.Hash, incarnation uint
 		addrHash:      addrHash,
 		incarnation:   incarnation,
 		locHashPrefix: common.CopyBytes(locHashPrefix),
-		branches:      branchChildren,
-		children:      children,
+		hasState:      hasState,
+		hasBranch:     hasBranch,
+		hasHash:       hasHash,
 		hashes:        cpy,
 	}
 	var wi StorageHashWriteItem
@@ -290,7 +294,7 @@ func (sc *StateCache) SetStorageHashWrite(addrHash common.Hash, incarnation uint
 	sc.setWrite(&ai, &wi, false /* delete */)
 }
 
-func (sc *StateCache) SetStorageHashDelete(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, branchChildren, children uint16, hashes []common.Hash) {
+func (sc *StateCache) SetStorageHashDelete(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, hasState, hasBranch, hasHash uint16, hashes []common.Hash) {
 	cpy := make([]common.Hash, len(hashes))
 	for i := 0; i < len(hashes); i++ {
 		cpy[i] = hashes[i]
@@ -299,8 +303,9 @@ func (sc *StateCache) SetStorageHashDelete(addrHash common.Hash, incarnation uin
 		addrHash:      addrHash,
 		incarnation:   incarnation,
 		locHashPrefix: common.CopyBytes(locHashPrefix),
-		branches:      branchChildren,
-		children:      children,
+		hasState:      hasState,
+		hasBranch:     hasBranch,
+		hasHash:       hasHash,
 		hashes:        cpy,
 	}
 	var wi StorageHashWriteItem
@@ -323,17 +328,17 @@ func (sc *StateCache) HasAccountHashWithPrefix(addrHashPrefix []byte) bool {
 	return found
 }
 
-func (sc *StateCache) GetAccountHash(prefix []byte) ([]byte, uint16, uint16, []common.Hash, bool) {
+func (sc *StateCache) GetAccountHash(prefix []byte) ([]byte, uint16, uint16, uint16, []common.Hash, bool) {
 	var key AccountHashItem
 	key.addrHashPrefix = prefix
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
 			i := item.(*AccountHashItem)
-			return i.addrHashPrefix, i.branches, i.children, i.hashes, true
+			return i.addrHashPrefix, i.hasHash, i.hasBranch, i.hasState, i.hashes, true
 		}
-		return nil, 0, 0, nil, true
+		return nil, 0, 0, 0, nil, true
 	}
-	return nil, 0, 0, nil, false
+	return nil, 0, 0, 0, nil, false
 }
 
 func (sc *StateCache) GetStorageHash(addrHash common.Hash, incarnation uint64, prefix []byte) ([]byte, uint16, uint16, []common.Hash, bool) {
@@ -341,7 +346,7 @@ func (sc *StateCache) GetStorageHash(addrHash common.Hash, incarnation uint64, p
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
 			i := item.(*StorageHashItem)
-			return i.locHashPrefix, i.branches, i.children, i.hashes, true
+			return i.locHashPrefix, i.hasBranch, i.hasState, i.hashes, true
 		}
 		return nil, 0, 0, nil, true
 	}
@@ -372,21 +377,21 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 	seek := make([]byte, 0, 64)
 	seek = append(seek, prefix...)
 	var k [64][]byte
-	var branch, child [64]uint16
+	var hasBranch, hasState, hasHash [64]uint16
 	var id, hashID, maxID [64]int8
 	var hashes [64][]common.Hash
 	var lvl int
 	var ok bool
-	var isChild = func() bool { return (uint16(1)<<id[lvl])&child[lvl] != 0 }
-	var isBranch = func() bool { return (uint16(1)<<id[lvl])&branch[lvl] != 0 }
+	var isChild = func() bool { return (uint16(1)<<id[lvl])&hasState[lvl] != 0 }
+	var isBranch = func() bool { return (uint16(1)<<id[lvl])&hasBranch[lvl] != 0 }
 	skipState := true
 
-	ihK, branches, children, hashItem := sc.AccountHashesSeek(prefix)
+	ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem := sc.AccountHashesSeek(prefix)
 GotItemFromCache:
 	for ihK != nil { // go to sibling in cache
 		lvl = len(ihK)
-		k[lvl], branch[lvl], child[lvl], hashes[lvl] = ihK, branches, children, hashItem
-		hashID[lvl], id[lvl], maxID[lvl] = -1, int8(bits.TrailingZeros16(children))-1, int8(bits.Len16(children))
+		k[lvl], hasState[lvl], hasBranch[lvl], hasHash[lvl], hashes[lvl] = ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem
+		hashID[lvl], id[lvl], maxID[lvl] = -1, int8(bits.TrailingZeros16(hasStateItem))-1, int8(bits.Len16(hasStateItem))
 
 		if prefix != nil && !bytes.HasPrefix(k[lvl], prefix) {
 			return nil
@@ -416,7 +421,7 @@ GotItemFromCache:
 					continue // cache item can be used and exists in cache, then just go to next sibling
 				}
 
-				ihK, branches, children, hashItem, ok = sc.GetAccountHash(cur)
+				ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
 				if ok {
 					continue GotItemFromCache
 				}
@@ -428,16 +433,16 @@ GotItemFromCache:
 		if !ok {
 			break
 		}
-		ihK, branches, children, hashItem = sc.AccountHashesSeek(seek)
+		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(seek)
 		for i := len(ihK); i >= lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
-			k[i], branch[i], child[i], maxID[i], hashID[i], id[i] = nil, 0, 0, 0, 0, 0
+			k[i], hasBranch[i], hasState[i], maxID[i], hashID[i], id[i] = nil, 0, 0, 0, 0, 0
 		}
 	}
 
 	return nil
 }
 
-func (sc *StateCache) AccountHashesSeek(prefix []byte) ([]byte, uint16, uint16, []common.Hash) {
+func (sc *StateCache) AccountHashesSeek(prefix []byte) ([]byte, uint16, uint16, uint16, []common.Hash) {
 	var cur *AccountHashItem
 	seek := &AccountHashItem{}
 	id := id(seek)
@@ -451,9 +456,9 @@ func (sc *StateCache) AccountHashesSeek(prefix []byte) ([]byte, uint16, uint16, 
 		return false
 	})
 	if cur == nil {
-		return nil, 0, 0, nil
+		return nil, 0, 0, 0, nil
 	}
-	return cur.addrHashPrefix, cur.branches, cur.children, cur.hashes
+	return cur.addrHashPrefix, cur.hasState, cur.hasBranch, cur.hasHash, cur.hashes
 }
 
 func (sc *StateCache) StorageHashesSeek(addrHash common.Hash, incarnation uint64, prefix []byte) ([]byte, uint16, uint16, []common.Hash) {
@@ -480,23 +485,23 @@ func (sc *StateCache) StorageHashesSeek(addrHash common.Hash, incarnation uint64
 	if cur == nil {
 		return nil, 0, 0, nil
 	}
-	return cur.locHashPrefix, cur.branches, cur.children, cur.hashes
+	return cur.locHashPrefix, cur.hasBranch, cur.hasState, cur.hashes
 }
 
-func WalkAccountHashesWrites(writes [5]*btree.BTree, update func(prefix []byte, branchChildren, children uint16, h []common.Hash), del func(prefix []byte, branchChildren, children uint16, h []common.Hash)) {
+func WalkAccountHashesWrites(writes [5]*btree.BTree, update func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash), del func(prefix []byte, hasStat, hasBranch, hasHash uint16, h []common.Hash)) {
 	id := id(&AccountHashWriteItem{})
 	writes[id].Ascend(func(i btree.Item) bool {
 		it := i.(*AccountHashWriteItem)
 		if it.ai.HasFlag(AbsentFlag) || it.ai.HasFlag(DeletedFlag) {
-			del(it.ai.addrHashPrefix, it.ai.branches, it.ai.children, it.ai.hashes)
+			del(it.ai.addrHashPrefix, it.ai.hasState, it.ai.hasBranch, it.ai.hasHash, it.ai.hashes)
 			return true
 		}
-		update(it.ai.addrHashPrefix, it.ai.branches, it.ai.children, it.ai.hashes)
+		update(it.ai.addrHashPrefix, it.ai.hasHash, it.ai.hasBranch, it.ai.hasState, it.ai.hashes)
 		return true
 	})
 }
 
-func (sc *StateCache) WalkStorageHashes(walker func(addrHash common.Hash, incarnation uint64, prefix []byte, branchChildren, children uint16, h []common.Hash) error) error {
+func (sc *StateCache) WalkStorageHashes(walker func(addrHash common.Hash, incarnation uint64, prefix []byte, hasStat, hasBranch, hasHash uint16, h []common.Hash) error) error {
 	id := id(&StorageHashItem{})
 	sc.readWrites[id].Ascend(func(i btree.Item) bool {
 		it, ok := i.(*StorageHashItem)
@@ -506,7 +511,7 @@ func (sc *StateCache) WalkStorageHashes(walker func(addrHash common.Hash, incarn
 		if it.HasFlag(AbsentFlag) || it.HasFlag(DeletedFlag) {
 			return true
 		}
-		if err := walker(it.addrHash, it.incarnation, it.locHashPrefix, it.branches, it.children, it.hashes); err != nil {
+		if err := walker(it.addrHash, it.incarnation, it.locHashPrefix, it.hasState, it.hasBranch, it.hasHash, it.hashes); err != nil {
 			panic(err)
 		}
 		return true
@@ -543,7 +548,7 @@ func (sc *StateCache) StorageHashes(adrHash common.Hash, incarnation uint64, wal
 			hashId++
 		}
 		for i := 0; i < 16; i++ {
-			if ((uint16(1) << i) & cur.branches) == 0 {
+			if ((uint16(1) << i) & cur.hasBranch) == 0 {
 				continue
 			}
 			ihK = append(append(ihK[:0], cur.locHashPrefix...), uint8(i))
@@ -566,15 +571,15 @@ func (sc *StateCache) StorageHashes(adrHash common.Hash, incarnation uint64, wal
 	return nil
 }
 
-func WalkStorageHashesWrites(writes [5]*btree.BTree, update func(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, branchChildren, children uint16, h []common.Hash), del func(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, branchChildren, children uint16, h []common.Hash)) {
+func WalkStorageHashesWrites(writes [5]*btree.BTree, update func(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash), del func(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, hasStat, hasBranch, hasHash uint16, h []common.Hash)) {
 	id := id(&StorageWriteItem{})
 	writes[id].Ascend(func(i btree.Item) bool {
 		it := i.(*StorageHashWriteItem)
 		if it.i.HasFlag(AbsentFlag) || it.i.HasFlag(DeletedFlag) {
-			del(it.i.addrHash, it.i.incarnation, it.i.locHashPrefix, it.i.branches, it.i.children, it.i.hashes)
+			del(it.i.addrHash, it.i.incarnation, it.i.locHashPrefix, it.i.hasState, it.i.hasBranch, it.i.hasHash, it.i.hashes)
 			return true
 		}
-		update(it.i.addrHash, it.i.incarnation, it.i.locHashPrefix, it.i.branches, it.i.children, it.i.hashes)
+		update(it.i.addrHash, it.i.incarnation, it.i.locHashPrefix, it.i.hasState, it.i.hasBranch, it.i.hasHash, it.i.hashes)
 		return true
 	})
 }
@@ -637,4 +642,10 @@ func (sc *StateCache) WalkAccounts(prefix []byte, walker func(addrHash common.Ha
 		return true
 	})
 	return nil
+}
+
+func assertSubset(a, b uint16) {
+	if (a & b) != a { // a & b == a - checks whether a is subset of b
+		panic(fmt.Errorf("invariant 'is subset' failed: %b, %b", a, b))
+	}
 }

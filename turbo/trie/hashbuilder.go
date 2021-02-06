@@ -495,7 +495,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	if _, err := hb.sha.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
-	// Output children hashes or embedded RLPs
+	// Output hasState hashes or embedded RLPs
 	i = 0
 	hb.b[0] = rlp.EmptyStringCode
 	for digit := uint(0); digit < 17; digit++ {
@@ -611,27 +611,27 @@ func (hb *HashBuilder) printTopHashes(prefix []byte, _, children uint16) {
 	}
 }
 
-func (hb *HashBuilder) topHashes(prefix []byte, branches, children uint16) []byte {
-	if (branches & children) != branches { // a & b == a - checks whether a is subset of b
-		panic(fmt.Errorf("invariant 'branches is subset of children' failed: %b, %b, %x", branches, children, prefix))
+func (hb *HashBuilder) topHashes(prefix []byte, hasHash, hasState uint16) []byte {
+	if (hasHash & hasState) != hasHash { // a & b == a - checks whether a is subset of b
+		panic(fmt.Errorf("invariant 'hasHash is subset of hasState' failed: %b, %b, %x", hasHash, hasState, prefix))
 	}
 
-	digits := bits.OnesCount16(children)
+	digits := bits.OnesCount16(hasState)
 	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
 	hb.topHashesCopy = hb.topHashesCopy[:0]
-	expect := bits.OnesCount16(branches)
-	for i := 0; branches > 0; children, branches = children>>1, branches>>1 {
-		if 1&children == 0 {
+	expect := bits.OnesCount16(hasHash)
+	for i := 0; hasHash > 0; hasState, hasHash = hasState>>1, hasHash>>1 {
+		if 1&hasState == 0 {
 			continue
 		}
 
-		if 1&branches != 0 {
+		if 1&hasHash != 0 {
 			hb.topHashesCopy = append(hb.topHashesCopy, hashes[hashStackStride*i+1:hashStackStride*(i+1)]...)
 		}
 		i++
 	}
 	if expect != len(hb.topHashesCopy)/common.HashLength {
-		panic(fmt.Errorf("invariant bits.OnesCount16(branches) == len(hashes) failed: %d, %d", expect, len(hb.topHashesCopy)/common.HashLength))
+		panic(fmt.Errorf("invariant bits.OnesCount16(hasBranch) == len(hashes) failed: %d, %d", expect, len(hb.topHashesCopy)/common.HashLength))
 	}
 
 	return hb.topHashesCopy
