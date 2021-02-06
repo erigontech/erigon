@@ -195,7 +195,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		if err := st.Run(db, tx); err != nil {
 			return err
 		}
-		if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock); err != nil {
+		if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
 			return err
 		}
 
@@ -226,7 +226,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	return nil
 }
 
-func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db ethdb.Database, expectedStorageChanges map[uint64]*changeset.ChangeSet, execAtBlock uint64) error {
+func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db ethdb.Database, expectedStorageChanges map[uint64]*changeset.ChangeSet, execAtBlock uint64, historyEnabled bool) error {
 	for blockN := range expectedAccountChanges {
 		if err := checkChangeSet(db, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
 			return err
@@ -235,11 +235,13 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 		delete(expectedStorageChanges, blockN)
 	}
 
-	if err := checkHistory(db, dbutils.AccountChangeSetBucket, execAtBlock); err != nil {
-		return err
-	}
-	if err := checkHistory(db, dbutils.StorageChangeSetBucket, execAtBlock); err != nil {
-		return err
+	if historyEnabled {
+		if err := checkHistory(db, dbutils.PlainAccountChangeSetBucket, execAtBlock); err != nil {
+			return err
+		}
+		if err := checkHistory(db, dbutils.PlainStorageChangeSetBucket, execAtBlock); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -371,13 +373,14 @@ func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) er
 		return errors.New("unknown bucket type")
 	}
 
-	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, k, v []byte) (bool, error) {
-		bm, innerErr := bitmapdb.Get(db, vv.IndexBucket, k, uint32(blockN-1), uint32(blockN+1))
+	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, address, v []byte) (bool, error) {
+		var k = address
+		bm, innerErr := bitmapdb.Get64(db, vv.IndexBucket, k, blockN-1, blockN+1)
 		if innerErr != nil {
 			return false, innerErr
 		}
-		if !bm.Contains(uint32(blockN)) {
-			return false, fmt.Errorf("checkHistory failed: block=%d,addr=%x", blockN, k)
+		if !bm.Contains(blockN) {
+			return false, fmt.Errorf("checkHistory failed: bucket=%s,block=%d,addr=%x", changeSetBucket, blockN, k)
 		}
 		return true, nil
 	}); err != nil {

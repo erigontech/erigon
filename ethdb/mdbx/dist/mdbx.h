@@ -353,12 +353,12 @@ typedef mode_t mdbx_mode_t;
 /** \brief Auxiliary macro for robustly define the both inline version of API
  * function and non-inline fallback dll-exported version for applications linked
  * with old version of libmdbx, with a strictly ODR-common implementation. */
-#if !defined(LIBMDBX_INTERNALS)
-#define LIBMDBX_INLINE_API(TYPE, NAME, ARGS) static __inline TYPE NAME ARGS
-#else
+#if defined(LIBMDBX_INTERNALS) && !defined(LIBMDBX_NO_EXPORTS_LEGACY_API)
 #define LIBMDBX_INLINE_API(TYPE, NAME, ARGS)                                   \
   /* proto of exported which uses common impl */ LIBMDBX_API TYPE NAME ARGS;   \
   /* definition of common impl */ static __inline TYPE __inline_##NAME ARGS
+#else
+#define LIBMDBX_INLINE_API(TYPE, NAME, ARGS) static __inline TYPE NAME ARGS
 #endif /* LIBMDBX_INLINE_API */
 
 /*----------------------------------------------------------------------------*/

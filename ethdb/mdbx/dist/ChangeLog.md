@@ -1,7 +1,7 @@
 ChangeLog
 ---------
 
-## v0.9.3 (in development) scheduled at 2021-02-23
+## v0.9.4 (in development) scheduled at 2021-02-23
 
 TODO:
  - Engage new terminology (https://github.com/erthink/libmdbx/issues/137).
@@ -9,6 +9,8 @@ TODO:
    https://github.com/erthink/libmdbx/issues/115).
  - Finalize C++ API (few typos and trivia bugs are still likely for now).
  - Packages for [ROSA Linux](https://www.rosalinux.ru/), [ALT Linux](https://www.altlinux.org/), Fedora/RHEL, Debian/Ubuntu.
+
+## v0.9.3 at 2021-02-02
 
 Acknowledgements:
 
@@ -49,6 +51,7 @@ New features:
  - Added `mdbx_default_pagesize()` function.
  - Better support architectures with a weak/relaxed memory consistency model (ARM, AARCH64, PPC, MIPS, RISC-V, etc) by means [C11 atomics](https://en.cppreference.com/w/c/atomic).
  - Speed up page number lists and dirty page lists (https://github.com/erthink/libmdbx/issues/132).
+ - Added `LIBMDBX_NO_EXPORTS_LEGACY_API` build option.
 
 Fixes:
 

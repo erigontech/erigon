@@ -86,6 +86,11 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, err
 	}
 
+	err = env.SetOption(mdbx.OptRpAugmentLimit, 16*1024*1024)
+	if err != nil {
+		return nil, err
+	}
+
 	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 
 	err = env.SetMaxDBs(100)
