@@ -361,13 +361,13 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 ) error {
 	if storageKey == nil {
 		if bytes.HasPrefix(accountKey, common.FromHex("05070202")) {
-			fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+			//fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
 		}
 	} else {
 		hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
 		if bytes.HasPrefix(r.currAccK, common.FromHex("5722")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
 			//fmt.Printf("%x\n", storageKey)
-			fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+			//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
 		}
 	}
 	switch itemType {
@@ -703,7 +703,7 @@ type IHCursor struct {
 	is, lvl                      int
 	k, v                         [64][]byte // store up to 64 levels of key/value pairs in nibbles format
 	hasState, hasBranch, hasHash [64]uint16 // branch hasState set, and any hasState set
-	childID, maxHashID, hashID   [64]int16  // meta info: current child in .hasState[lvl] field, max child id, current hash in .v[lvl]
+	childID, hashID              [64]int16  // meta info: current child in .hasState[lvl] field, max child id, current hash in .v[lvl]
 	deleted                      [64]bool   // helper to avoid multiple deletes of same key
 
 	c                     ethdb.Cursor
@@ -747,6 +747,7 @@ func (c *IHCursor) AtPrefix(prefix []byte) (k, v []byte, err error) {
 		c.skipState = isDenseSequence(c.prev, c.cur)
 		return nil, nil, nil
 	}
+	fmt.Printf("12: %x,%x,%t\n", c.k[c.lvl], c.childID[c.lvl], c._hasHash())
 	if c._hasHash() {
 		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
 		if c.canUse(c.kBuf) {
@@ -759,7 +760,6 @@ func (c *IHCursor) AtPrefix(prefix []byte) (k, v []byte, err error) {
 			return []byte{}, nil, err
 		}
 	}
-
 	return c._next()
 }
 
@@ -835,7 +835,6 @@ func (c *IHCursor) _nextItem(prefix []byte) error {
 	if ok {
 		return nil
 	}
-
 	return c._nextSibling()
 }
 
@@ -853,14 +852,20 @@ func (c *IHCursor) _nextSibling() error {
 }
 
 func (c *IHCursor) _nextSiblingInMem() bool {
-	if c.hashID[c.lvl] >= c.maxHashID[c.lvl] {
-		return false
+	fmt.Printf("4: %x, %d, %b, %b\n", c.k[c.lvl], c.childID[c.lvl], c.hasHash[c.lvl], c.hasBranch[c.lvl])
+	for c.childID[c.lvl]++; c.childID[c.lvl] < 16; c.childID[c.lvl]++ {
+		if ((uint16(1) << c.childID[c.lvl]) & c.hasHash[c.lvl]) != 0 {
+			c.hashID[c.lvl]++
+			fmt.Printf("6: %x, %d, %b, %b\n", c.k[c.lvl], c.childID[c.lvl], c.hasHash[c.lvl], c.hasBranch[c.lvl])
+			return true
+		}
+		if ((uint16(1) << c.childID[c.lvl]) & c.hasBranch[c.lvl]) != 0 {
+			fmt.Printf("7: %x, %d, %b, %b\n", c.k[c.lvl], c.childID[c.lvl], c.hasHash[c.lvl], c.hasBranch[c.lvl])
+			return true
+		}
 	}
-	c.childID[c.lvl]++
-	for c.childID[c.lvl] < 16 && ((uint16(1)<<c.childID[c.lvl])&c.hasBranch[c.lvl]) == 0 {
-		c.childID[c.lvl]++
-	}
-	return true
+	fmt.Printf("5: %x, %d, %b, %b\n", c.k[c.lvl], c.childID[c.lvl], c.hasHash[c.lvl], c.hasBranch[c.lvl])
+	return c.childID[c.lvl] < 16
 }
 
 func (c *IHCursor) _nextSiblingOfParentInMem() bool {
@@ -889,7 +894,7 @@ func (c *IHCursor) _nextSiblingInDB() error {
 		return nil
 	}
 	for i := len(k); i >= c.lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
-		c.k[i], c.hasBranch[i], c.hasState[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
+		c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
 	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
@@ -898,15 +903,17 @@ func (c *IHCursor) _nextSiblingInDB() error {
 }
 
 func (c *IHCursor) _unmarshal(k, v []byte) {
+
 	c.lvl = len(k)
 	c.k[c.lvl] = k
 	c.deleted[c.lvl] = false
 	c.hasState[c.lvl] = binary.BigEndian.Uint16(v)
 	c.hasBranch[c.lvl] = binary.BigEndian.Uint16(v[2:])
 	c.hasHash[c.lvl] = binary.BigEndian.Uint16(v[4:])
-	c.v[c.lvl] = v[4:]
-	c.hashID[c.lvl], c.maxHashID[c.lvl] = -1, int16(bits.OnesCount16(c.hasBranch[c.lvl])-1)
-	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.hasBranch[c.lvl]) - 1)
+	fmt.Printf("4: %x, %d, %b, %b\n", c.k[c.lvl], c.childID[c.lvl], c.hasHash[c.lvl], c.hasBranch[c.lvl])
+	c.v[c.lvl] = v[6:]
+	c.hashID[c.lvl] = -1
+	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.hasState[c.lvl]) - 1)
 	if len(c.k[c.lvl]) == 0 { // root record, firstly storing root hash
 		c.v[c.lvl] = c.v[c.lvl][32:]
 	}
@@ -932,11 +939,7 @@ func (c *IHCursor) _deleteCurrent() error {
 }
 
 func (c *IHCursor) _hasHash() bool {
-	if (uint16(1)<<c.childID[c.lvl])&c.hasHash[c.lvl] == 0 {
-		return false
-	}
-	c.hashID[c.lvl]++
-	return true
+	return (uint16(1)<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0
 }
 
 func (c *IHCursor) _complexSkpState() bool {
@@ -959,6 +962,8 @@ func (c *IHCursor) _complexSkpState() bool {
 }
 
 func (c *IHCursor) _next() (k, v []byte, err error) {
+	fmt.Printf("2: %x, %d\n", c.k[c.lvl], c.childID[c.lvl])
+
 	c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
 	err = c._nextItem(c.next)
 	if err != nil {
@@ -966,11 +971,13 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 	}
 
 	for {
+		fmt.Printf("3: %x, %d\n", c.k[c.lvl], c.childID[c.lvl])
 		if c.k[c.lvl] == nil {
 			c.cur = nil
 			c.skipState = isDenseSequence(c.prev, c.cur)
 			return nil, nil, nil
 		}
+
 		if c._hasHash() {
 			c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
 			if c.canUse(c.kBuf) {
@@ -998,7 +1005,7 @@ type StorageIHCursor struct {
 	k, v                         [64][]byte
 	hasState, hasBranch, hasHash [64]uint16
 	deleted                      [64]bool
-	childID, maxHashID, hashID   [64]int16
+	childID, hashID              [64]int16
 
 	c         ethdb.Cursor
 	shc       StorageHashCollector2
@@ -1045,7 +1052,7 @@ func (c *StorageIHCursor) SeekToAccount(prefix []byte) (k, v []byte, err error) 
 		return []byte{}, nil, err
 	}
 	for i := c.lvl - 1; i >= 0; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
-		c.k[i], c.hasBranch[i], c.hasState[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
+		c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
 	}
 	if !ok || c.k[c.lvl] == nil {
 		err = c._nextSiblingInDB()
@@ -1215,14 +1222,11 @@ func (c *StorageIHCursor) _hasHash() bool {
 }
 
 func (c *StorageIHCursor) _nextSiblingInMem() bool {
-	if c.hashID[c.lvl] >= c.maxHashID[c.lvl] {
-		return false
-	}
 	c.childID[c.lvl]++
 	for c.childID[c.lvl] < 16 && ((uint16(1)<<c.childID[c.lvl])&c.hasBranch[c.lvl] == 0) {
 		c.childID[c.lvl]++
 	}
-	return true
+	return c.childID[c.lvl] < 16
 }
 
 func (c *StorageIHCursor) _nextSiblingOfParentInMem() bool {
@@ -1258,7 +1262,7 @@ func (c *StorageIHCursor) _nextSiblingInDB() error {
 		return nil
 	}
 	for i := len(k); i >= c.lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
-		c.k[i], c.hasBranch[i], c.hasState[i], c.maxHashID[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
+		c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
 	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
@@ -1315,9 +1319,8 @@ func (c *StorageIHCursor) _unmarshal(k, v []byte) {
 	c.hasBranch[c.lvl] = binary.BigEndian.Uint16(v[2:])
 	c.hasHash[c.lvl] = binary.BigEndian.Uint16(v[4:])
 	c.hashID[c.lvl] = -1
-	c.maxHashID[c.lvl] = int16(bits.OnesCount16(c.hasBranch[c.lvl]) - 1)
-	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.hasBranch[c.lvl]) - 1)
-	c.v[c.lvl] = v[4:]
+	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.hasState[c.lvl]) - 1)
+	c.v[c.lvl] = v[6:]
 	if len(c.k[c.lvl]) == 0 { // root record, firstly storing root hash
 		c.root = c.v[c.lvl][:32]
 		c.v[c.lvl] = c.v[c.lvl][32:]
@@ -1495,7 +1498,7 @@ func keyIsBefore(k1, k2 []byte) bool {
 
 func UnmarshalIH(v []byte) (uint16, uint16, uint16, []common.Hash) {
 	hasState, hasBranch, hasHash := binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:])
-	v = v[4:]
+	v = v[6:]
 	newV := make([]common.Hash, len(v)/common.HashLength)
 	for i := 0; i < len(newV); i++ {
 		newV[i].SetBytes(v[i*common.HashLength : (i+1)*common.HashLength])
@@ -1509,7 +1512,7 @@ func MarshalIH(hasState, hasBranch, hasHash uint16, h []common.Hash) []byte {
 	binary.BigEndian.PutUint16(v[2:], hasBranch)
 	binary.BigEndian.PutUint16(v[4:], hasHash)
 	for i := 0; i < len(h); i++ {
-		copy(v[4+i*common.HashLength:4+(i+1)*common.HashLength], h[i].Bytes())
+		copy(v[6+i*common.HashLength:6+(i+1)*common.HashLength], h[i].Bytes())
 	}
 	return v
 }
@@ -1524,10 +1527,10 @@ func IHValue(hasState, hasBranch, hasHash uint16, hashes []byte, rootHash []byte
 	binary.BigEndian.PutUint16(buf[2:], hasBranch)
 	binary.BigEndian.PutUint16(buf[4:], hasHash)
 	if len(rootHash) == 0 {
-		copy(buf[4:], hashes)
+		copy(buf[6:], hashes)
 	} else {
-		copy(buf[4:], rootHash)
-		copy(buf[36:], hashes)
+		copy(buf[6:], rootHash)
+		copy(buf[38:], hashes)
 	}
 	return buf
 }

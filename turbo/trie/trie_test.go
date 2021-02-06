@@ -933,16 +933,16 @@ func TestIHCursorCanUseNextParent(t *testing.T) {
 	ih.k[1], ih.v[1], ih.hasBranch[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
 	ih.k[2], ih.v[2], ih.hasBranch[2] = common.FromHex("0001"), common.FromHex(hash), 0b1000000000000000
 	ih.lvl = 2
-	ih.hashID[2], ih.maxHashID[2] = 1, 1
-	ih.hashID[1], ih.maxHashID[1] = 0, 1
+	ih.hashID[2] = 1
+	ih.hashID[1] = 0
 	assert.True(ih._nextSiblingOfParentInMem())
 	assert.Equal(ih.k[ih.lvl], common.FromHex("00"))
 
 	ih.k[1], ih.v[1], ih.hasBranch[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
 	ih.k[3], ih.v[3], ih.hasBranch[3] = common.FromHex("000101"), common.FromHex(hash), 0b1000000000000000
 	ih.lvl = 3
-	ih.hashID[3], ih.maxHashID[3] = 1, 1
-	ih.hashID[1], ih.maxHashID[1] = 0, 1
+	ih.hashID[3] = 1
+	ih.hashID[1] = 0
 	assert.True(ih._nextSiblingOfParentInMem())
 	assert.Equal(ih.k[ih.lvl], common.FromHex("00"))
 
@@ -951,21 +951,25 @@ func TestIHCursorCanUseNextParent(t *testing.T) {
 func TestIHCursor(t *testing.T) {
 	db, require := ethdb.NewMemDatabase(), require.New(t)
 	defer db.Close()
-	acc := fmt.Sprintf("010101%0122x", 0)
-	storage := acc + fmt.Sprintf("%030x01", 0) + acc
-	_ = storage
-	hash := fmt.Sprintf("%064d", 0)
+	//acc := fmt.Sprintf("010101%0122x", 0)
+	//storage := acc + fmt.Sprintf("%030x01", 0) + acc
+	//_ = storage
+	hash := common.HexToHash(fmt.Sprintf("%064d", 0))
 
-	_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex("00"), common.FromHex(fmt.Sprintf("%04x", 0b0000000000000010)+fmt.Sprintf("%04x", 0b0000000000000010)+hash))
-	_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex("01"), common.FromHex(fmt.Sprintf("%04x", 0b0000000000000111)+fmt.Sprintf("%04x", 0b0000000000000111)+hash+hash+hash))
-	_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex("0101"), common.FromHex(fmt.Sprintf("%04x", 0b0000000000000111)+fmt.Sprintf("%04x", 0b0000000000000111)+hash+hash+hash))
-	_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex("02"), common.FromHex(fmt.Sprintf("%04x", 0b1000000000000000)+fmt.Sprintf("%04x", 0b1000000000000000)+hash))
-	_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex("0300"), common.FromHex(fmt.Sprintf("%04x", 0b0100000000000001)+fmt.Sprintf("%04x", 0b0000000000000001)+hash))
-	_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex("030000"), common.FromHex(fmt.Sprintf("%04x", 0b0000000000000001)+fmt.Sprintf("%04x", 0b0000000000000001)+hash))
-	_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex("03000e"), common.FromHex(fmt.Sprintf("%04x", 0b0100000000000000)+fmt.Sprintf("%04x", 0b1000000000000000)+hash))
-	_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex("050001"), common.FromHex(fmt.Sprintf("%04x", 0b0000000000000001)+fmt.Sprintf("%04x", 0b0000000000000001)+hash))
-	_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex("05000f"), common.FromHex(fmt.Sprintf("%04x", 0b0000000000000001)+fmt.Sprintf("%04x", 0b0000000000000001)+hash))
-	_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex("06"), common.FromHex(fmt.Sprintf("%04x", 0b0000000000000001)+fmt.Sprintf("%04x", 0b0000000000000001)+hash))
+	put := func(k string, v []byte) {
+		_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex(k), v)
+	}
+
+	put("00", MarshalIH(0b0000000000000010, 0b0000000000000000, 0b0000000000000010, []common.Hash{hash}))
+	put("01", MarshalIH(0b0000000000000111, 0b0000000000000010, 0b0000000000000111, []common.Hash{hash, hash, hash}))
+	put("0101", MarshalIH(0b0000000000000111, 0b0000000000000111, 0b0000000000000111, []common.Hash{hash, hash, hash}))
+	put("02", MarshalIH(0b1000000000000000, 0b0000000000000000, 0b1000000000000000, []common.Hash{hash}))
+	put("0300", MarshalIH(0b0100000000000001, 0b0100000000000001, 0b0100000000000001, []common.Hash{hash}))
+	put("030000", MarshalIH(0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash}))
+	put("03000e", MarshalIH(0b0100000000000000, 0b0000000000000000, 0b0100000000000000, []common.Hash{hash}))
+	put("050001", MarshalIH(0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash}))
+	put("05000f", MarshalIH(0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash}))
+	put("06", MarshalIH(0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash}))
 	//for _, k := range []string{"00", "0001", "01", "0100", "0101", "0102", "02"} {
 	//	kk := common.FromHex(k)
 	//	_ = db.Put(dbutils.TrieOfAccountsBucket, kk, kk)
@@ -982,9 +986,9 @@ func TestIHCursor(t *testing.T) {
 	cursor := tx.Cursor(dbutils.TrieOfAccountsBucket)
 	rl := NewRetainList(0)
 	//rl.AddHex(common.FromHex("0101"))
-	rl.AddHex(common.FromHex(acc))
-	rl.AddHex(common.FromHex(storage))
-	rl.AddHex(common.FromHex(acc + "01"))
+	//rl.AddHex(common.FromHex(acc))
+	//rl.AddHex(common.FromHex(storage))
+	rl.AddHex(common.FromHex("01"))
 	rl.AddHex(common.FromHex("030000"))
 	rl.AddHex(common.FromHex("03000e"))
 	var filter = func(prefix []byte) bool { return !rl.Retain(prefix) }

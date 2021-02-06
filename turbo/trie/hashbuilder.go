@@ -613,7 +613,7 @@ func (hb *HashBuilder) printTopHashes(prefix []byte, _, children uint16) {
 
 func (hb *HashBuilder) topHashes(prefix []byte, hasHash, hasState uint16) []byte {
 	if (hasHash & hasState) != hasHash { // a & b == a - checks whether a is subset of b
-		panic(fmt.Errorf("invariant 'hasHash is subset of hasState' failed: %b, %b, %x", hasHash, hasState, prefix))
+		panic(fmt.Errorf("invariant 'hasHash is subset of hasState' failed: %b, %b; prefix=%x", hasHash, hasState, prefix))
 	}
 
 	digits := bits.OnesCount16(hasState)
