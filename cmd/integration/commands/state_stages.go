@@ -87,6 +87,9 @@ func init() {
 }
 
 func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
+	//if err := resetTxPool(db); err != nil {
+	//	panic(err)
+	//}
 	sm, err1 := ethdb.GetStorageModeFromDB(db)
 	if err1 != nil {
 		panic(err1)

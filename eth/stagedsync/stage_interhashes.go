@@ -196,7 +196,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 			if len(keyHex) == 0 {
 				return nil
 			}
-			if hashes == nil {
+			if hashes == nil && rootHash == nil {
 				//fmt.Printf("collect del: %x\n", keyHex)
 				return accountIHCollector.Collect(keyHex, nil)
 			}
@@ -213,7 +213,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 		newK := make([]byte, 0, 128)
 		storageHashCollector := func(accWithInc []byte, keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
 			newK = append(append(newK[:0], accWithInc...), keyHex...)
-			if hashes == nil {
+			if hashes == nil && rootHash == nil {
 				return storageIHCollector.Collect(newK, nil)
 			}
 			if bits.OnesCount16(branches) != len(hashes)/common.HashLength {
@@ -254,10 +254,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 		}
 		if err := storageIHCollector.Load(logPrefix, db,
 			dbutils.TrieOfStorageBucket,
-			func(k []byte, value []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-
-				return nil
-			},
+			etl.IdentityLoadFunc,
 			etl.TransformArgs{
 				Quit: quit,
 			},
@@ -548,7 +545,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 			if len(keyHex) == 0 {
 				return nil
 			}
-			if hashes == nil {
+			if hashes == nil && rootHash == nil {
 				//fmt.Printf("collect del: %x\n", keyHex)
 				return accountIHCollector.Collect(keyHex, nil)
 			}
@@ -565,7 +562,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		newK := make([]byte, 0, 128)
 		storageHashCollector := func(accWithInc []byte, keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
 			newK = append(append(newK[:0], accWithInc...), keyHex...)
-			if hashes == nil {
+			if hashes == nil && rootHash == nil {
 				return storageIHCollector.Collect(newK, nil)
 			}
 			if bits.OnesCount16(branches) != len(hashes)/common.HashLength {
@@ -691,7 +688,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 				if len(keyHex) == 0 {
 					return nil
 				}
-				if hashes == nil {
+				if hashes == nil && rootHash == nil {
 					cache.SetAccountHashDelete(keyHex)
 					return nil
 				}
@@ -700,7 +697,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 			}
 			storageHashCollector := func(accWithInc []byte, keyHex []byte, branches, children uint16, hashes, rootHash []byte) error {
 				addr, inc := common.BytesToHash(accWithInc[:32]), binary.BigEndian.Uint64(accWithInc[32:])
-				if hashes == nil {
+				if hashes == nil && rootHash == nil {
 					cache.SetStorageHashDelete(addr, inc, keyHex, branches, children, nil)
 					return nil
 				}

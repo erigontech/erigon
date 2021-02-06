@@ -203,7 +203,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 		tx = txDB.(ethdb.HasTx).Tx()
 	}
 
-	accs := NewStateCursor(tx.Cursor(dbutils.HashedAccountsBucket))
+	accs := NewStateCursor(tx.Cursor(dbutils.HashedAccountsBucket), quit)
 	ihAccC, ihStorageC := tx.Cursor(dbutils.TrieOfAccountsBucket), tx.CursorDupSort(dbutils.TrieOfStorageBucket)
 
 	var canUse = func(prefix []byte) bool { return !l.rd.Retain(prefix) }
@@ -215,12 +215,11 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	defer func(t time.Time) { fmt.Printf("trie_root.go:225: %s\n", time.Since(t)) }(time.Now())
-	i1, i2, i3, i4 := 0, 0, 0, 0
+	i2, i4 := 0, 0
 	for ihK, ihV, err := ih.AtPrefix(prefix); ; ihK, ihV, err = ih.Next() { // no loop termination is at he end of loop
 		if err != nil {
 			return EmptyRoot, err
 		}
-		i1++
 		if ih.skipState {
 			goto SkipAccounts
 		}
@@ -250,7 +249,6 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					return EmptyRoot, err2
 				}
 
-				i3++
 				if ihStorage.skipState {
 					goto SkipStorage
 				}
@@ -266,7 +264,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					}
 					hexutil.DecompressNibbles(accWithInc, &l.kHexS)
 					l.kHexS = append(l.kHexS[:80], l.buf...)
-					if err = l.receiver.Receive(StorageStreamItem, nil, l.kHexS, nil, vS[32:], nil, 0); err != nil {
+					if err = l.receiver.Receive(StorageStreamItem, nil, common.CopyBytes(l.kHexS), nil, vS[32:], nil, 0); err != nil {
 						return EmptyRoot, err
 					}
 				}
@@ -278,7 +276,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 
 				hexutil.DecompressNibbles(accWithInc, &l.kHexS)
 				l.kHexS = append(l.kHexS[:80], ihKS...)
-				if err = l.receiver.Receive(SHashStreamItem, nil, l.kHexS, nil, nil, ihVS, 0); err != nil {
+				if err = l.receiver.Receive(SHashStreamItem, nil, common.CopyBytes(l.kHexS), nil, nil, ihVS, 0); err != nil {
 					return EmptyRoot, err
 				}
 				if len(ihKS) == 0 { // means we just sent acc.storageRoot
@@ -359,16 +357,17 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	hash []byte,
 	cutoff int,
 ) error {
-	//if storageKey == nil {
-	//	if bytes.HasPrefix(accountKey, common.FromHex("0c0e")) {
-	//		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-	//	}
-	//} else {
-	//	hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
-	//	if bytes.HasPrefix(r.currAccK, common.FromHex("ce")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
-	//		fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
-	//	}
-	//}
+	if storageKey == nil {
+		//if bytes.HasPrefix(accountKey, common.FromHex("040f060907")) {
+		//fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+		//}
+	} else {
+		//hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
+		//if bytes.HasPrefix(r.currAccK, common.FromHex("4f6975")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
+		//fmt.Printf("%x\n", storageKey)
+		//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+		//}
+	}
 	switch itemType {
 	case StorageStreamItem:
 		r.advanceKeysStorage(storageKey, true /* terminator */)
@@ -565,8 +564,8 @@ func (r *RootHashAggregator) genStructStorage() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("07050a")) {
-			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], branches, hashes == nil)
+			//if bytes.HasPrefix(r.currAccK, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], branches, hashes == nil && rootHash == nil)
 			//}
 			return r.shc(r.currAccK, keyHex[80:], branches, children, hashes, rootHash)
 		}
@@ -643,8 +642,8 @@ func (r *RootHashAggregator) genStructAccount() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
-			//fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], branches, hashes == nil)
+			//if bytes.HasPrefix(r.currAccK, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], branches, hashes == nil && rootHash == nil)
 			//}
 			return r.shc(r.currAccK, keyHex[80:], branches, children, hashes, rootHash)
 		}
@@ -1041,7 +1040,10 @@ func (c *StorageIHCursor) SeekToAccount(prefix []byte) (k, v []byte, err error) 
 			c.skipState = true
 			return c.cur, root, nil
 		}
-		c._nextSiblingInMem()
+		ok = c._nextSiblingInMem()
+		if !ok {
+			return nil, nil, nil
+		}
 	}
 
 	c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
@@ -1050,7 +1052,7 @@ func (c *StorageIHCursor) SeekToAccount(prefix []byte) (k, v []byte, err error) 
 		c.skipState = isDenseSequence(c.prev, c.cur)
 		return c.cur, c._hash(c.hashID[c.lvl]), nil
 	}
-	//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+	//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 	//	fmt.Printf("no ih(seek): %x -> %x, %016b, %016b\n", prefix, c.kBuf, c.branches[c.lvl], c.children[c.lvl])
 	//}
 	err = c._deleteCurrent()
@@ -1079,14 +1081,14 @@ func (c *StorageIHCursor) Next() (k, v []byte, err error) {
 	}
 	c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
 	if c.canUse(c.kBuf) {
-		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//	fmt.Printf("can use ih(next): %x,%x\n", c.k[c.lvl], c.childID[c.lvl])
 		//}
 		c.cur = common.CopyBytes(c.kBuf[80:])
 		c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
 		return c.cur, c._hash(c.hashID[c.lvl]), nil
 	}
-	//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+	//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 	//	fmt.Printf("no ih(next): %x\n", c.cur)
 	//}
 	err = c._deleteCurrent()
@@ -1103,7 +1105,7 @@ func (c *StorageIHCursor) _seek(prefix []byte) (bool, error) {
 	if len(prefix) == 40 {
 		c.is++
 		k, v, err = c.c.Seek(prefix)
-		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//	fmt.Printf("_seek1: %x -> %x\n", prefix, k)
 		//}
 	} else {
@@ -1115,13 +1117,13 @@ func (c *StorageIHCursor) _seek(prefix []byte) (bool, error) {
 		//if err != nil {
 		//	return false, err
 		//}
-		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//fmt.Printf("_seek2: %x -> %x\n", prefix, k)
 		//}
 		//if len(k) > c.lvl && c.childID[c.lvl] > int16(bits.TrailingZeros16(c.branches[c.lvl])) {
 		c.is++
 		k, v, err = c.c.Seek(prefix)
-		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//	fmt.Printf("_seek3: %x -> %x\n", prefix, k)
 		//}
 		//}
@@ -1130,7 +1132,7 @@ func (c *StorageIHCursor) _seek(prefix []byte) (bool, error) {
 		return false, err
 	}
 	if k == nil || !bytes.HasPrefix(k, prefix) {
-		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//	fmt.Printf("_seek4: %x -> %x\n", prefix, k)
 		//}
 		return false, nil
@@ -1159,12 +1161,12 @@ func (c *StorageIHCursor) _nextItem(prefix []byte) error {
 func (c *StorageIHCursor) _nextSibling() error {
 	ok := c._nextSiblingInMem() || c._nextSiblingOfParentInMem()
 	if ok {
-		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//	fmt.Printf("_nextSibling1: %d,%x,%b,%x\n", c.lvl, c.k[c.lvl], c.branches[c.lvl], c.childID[c.lvl])
 		//}
 		return nil
 	}
-	//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+	//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 	//	fmt.Printf("_nextSibling2: %d,%x\n", c.lvl, c.k[c.lvl])
 	//}
 	err := c._nextSiblingInDB()
@@ -1199,7 +1201,7 @@ func (c *StorageIHCursor) _nextSiblingOfParentInMem() bool {
 func (c *StorageIHCursor) _nextSiblingInDB() error {
 	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
 	if !ok {
-		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//	fmt.Printf("_nextSiblingInDB, not ok\n")
 		//}
 		c.k[c.lvl] = nil
@@ -1211,7 +1213,7 @@ func (c *StorageIHCursor) _nextSiblingInDB() error {
 	if err != nil {
 		return err
 	}
-	//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+	//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 	//	fmt.Printf("_nextSiblingInDB2: %x -> %x\n", c.seek, k)
 	//}
 	if k == nil || !bytes.HasPrefix(k, c.accWithInc) {
@@ -1249,7 +1251,7 @@ func (c *StorageIHCursor) _next() (k, v []byte, err error) {
 			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
 			return c.cur, c._hash(c.hashID[c.lvl]), nil
 		}
-		//if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//	fmt.Printf("no ih(next): %x,%x,%016b\n", c.k[c.lvl], c.childID[c.lvl], c.branches[c.lvl])
 		//}
 		err = c._deleteCurrent()
@@ -1303,8 +1305,8 @@ func (c *StorageIHCursor) _deleteCurrent() error {
 	if c.deleted[c.lvl] {
 		return nil
 	}
-	//if bytes.HasPrefix(c.accWithInc, common.FromHex("090bdc64a7e3632cde8f4689f47acfc0760e35bce43af50d4b1f5973463bde620000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
-	//fmt.Printf("delete: %x,%x\n", c.accWithInc, c.k[c.lvl])
+	//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+	//	fmt.Printf("delete: %x,%x\n", c.accWithInc, c.k[c.lvl])
 	//}
 
 	if err := c.shc(c.accWithInc, c.k[c.lvl], 0, 0, nil, nil); err != nil {
@@ -1368,11 +1370,12 @@ func firstNotCoveredPrefix(prev, prefix, buf []byte) []byte {
 
 type StateCursor struct {
 	c    ethdb.Cursor
+	quit <-chan struct{}
 	kHex []byte
 }
 
-func NewStateCursor(c ethdb.Cursor) *StateCursor {
-	return &StateCursor{c: c}
+func NewStateCursor(c ethdb.Cursor, quit <-chan struct{}) *StateCursor {
+	return &StateCursor{c: c, quit: quit}
 }
 
 func (c *StateCursor) Seek(seek []byte) ([]byte, []byte, []byte, error) {
@@ -1386,6 +1389,9 @@ func (c *StateCursor) Seek(seek []byte) ([]byte, []byte, []byte, error) {
 }
 
 func (c *StateCursor) Next() ([]byte, []byte, []byte, error) {
+	if err := common.Stopped(c.quit); err != nil {
+		return []byte{}, nil, nil, err
+	}
 	k, v, err := c.c.Next()
 	if err != nil {
 		return []byte{}, nil, nil, err
