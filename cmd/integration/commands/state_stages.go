@@ -11,7 +11,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -71,22 +70,6 @@ var loopIhCmd = &cobra.Command{
 	},
 }
 
-var preimageCmd = &cobra.Command{
-	Use: "preimage",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := utils.RootContext()
-		db := openDatabase(chaindata, true)
-		defer db.Close()
-
-		if err := preimage(db, common.HexToHash("53be4baab233c99b717a834218c17c06549a05131387104cea643d79c3cfa17"), ctx); err != nil {
-			log.Error("Error", "err", err)
-			return err
-		}
-
-		return nil
-	},
-}
-
 func init() {
 	withChaindata(stateStags)
 	withReferenceChaindata(stateStags)
@@ -101,10 +84,6 @@ func init() {
 	withBatchSize(loopIhCmd)
 
 	rootCmd.AddCommand(loopIhCmd)
-
-	withChaindata(preimageCmd)
-
-	rootCmd.AddCommand(preimageCmd)
 }
 
 func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
@@ -482,31 +461,6 @@ func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) er
 	}); err != nil {
 		return err
 	}
-
-	return nil
-}
-
-func preimage(db ethdb.Database, accHash common.Hash, ctx context.Context) error {
-	txDB, err1 := db.Begin(ctx, ethdb.RO)
-	if err1 != nil {
-		return err1
-	}
-	defer txDB.Rollback()
-
-	tx := txDB.(ethdb.HasTx).Tx()
-	c := tx.Cursor(dbutils.PlainStorageChangeSetBucket)
-	for k, v, err := c.Last(); k != nil; k, v, err = c.Prev() {
-		if err != nil {
-			return err
-		}
-
-		if bytes.Equal(common.FromHex("aba7de728950c92c57d08e20d4077161f12f"), k[8:28]) {
-			//hash, _ := common.HashData(v[:20])
-			//if hash == accHash {
-			fmt.Printf("found: %d,%x,%v\n", binary.BigEndian.Uint64(k), v[:32], v[32:])
-		}
-	}
-	fmt.Printf("not found\n")
 
 	return nil
 }
