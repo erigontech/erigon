@@ -197,7 +197,8 @@ func TestValidation(t *testing.T) {
 	}
 	forks := GatherForks(params.MainnetChainConfig)
 	for i, tt := range tests {
-		filter := newFilter(forks, params.MainnetGenesisHash, func() uint64 { return tt.head })
+		h := tt.head
+		filter := newFilter(forks, params.MainnetGenesisHash, func() uint64 { return h })
 		if err := filter(tt.id); err != tt.err {
 			t.Errorf("test %d: validation error mismatch: have %v, want %v", i, err, tt.err)
 		}
