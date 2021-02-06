@@ -3,6 +3,7 @@ package bodydownload
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"runtime"
 	"time"
 
@@ -18,10 +19,15 @@ const (
 )
 
 // Forward progresses Bodies stage in the forward direction
-func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyDownload, bodyReqSend func(context.Context, *BodyRequest) []byte, penalise func(context.Context, []byte), wakeUpChan chan struct{}, timeout int) error {
-	if err := bd.UpdateFromDb(db); err != nil {
-		return err
-	}
+func Forward(
+	logPrefix string,
+	ctx context.Context,
+	db ethdb.Database,
+	bd *BodyDownload,
+	bodyReqSend func(context.Context, *BodyRequest) []byte,
+	penalise func(context.Context, []byte),
+	updateHead func(head uint64, hash common.Hash, td *big.Int),
+	wakeUpChan chan struct{}, timeout int) error {
 	var headerProgress, bodyProgress uint64
 	var err error
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
@@ -56,6 +62,8 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	var req *BodyRequest
 	var peer []byte
 	stopped := false
+	var headHash common.Hash
+	var headSet bool
 	for !stopped {
 		penaltyPeers := bd.GetPenaltyPeers()
 		for _, penaltyPeer := range penaltyPeers {
@@ -90,7 +98,9 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 				if err = stages.SaveStageProgress(batch, stages.Bodies, blockHeight); err != nil {
 					return fmt.Errorf("[%s] saving Bodies progress: %w", logPrefix, err)
 				}
-				rawdb.WriteHeadBlockHash(batch, block.Header().Hash())
+				headHash = block.Header().Hash()
+				rawdb.WriteHeadBlockHash(batch, headHash)
+				headSet = true
 			}
 			if batch.BatchSize() >= batch.IdealBatchSize() {
 				if err = batch.CommitAndBegin(context.Background()); err != nil {
@@ -130,6 +140,13 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, bd *BodyD
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
 			return err
+		}
+	}
+	if headSet {
+		if headTd, err := rawdb.ReadTd(db, headHash, bodyProgress); err == nil {
+			updateHead(bodyProgress, headHash, headTd)
+		} else {
+			log.Error("Failed to get total difficulty", "hash", headHash, "height", bodyProgress, "error", err)
 		}
 	}
 	log.Info("Processed", "highest", bodyProgress)

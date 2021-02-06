@@ -72,11 +72,23 @@ func NewID(config *params.ChainConfig, genesis common.Hash, head uint64) ID {
 	return ID{Hash: checksumToBytes(hash), Next: next}
 }
 
+func NewIDFromForks(forks []uint64, genesis common.Hash) ID {
+	// Calculate the starting checksum from the genesis hash
+	hash := crc32.ChecksumIEEE(genesis[:])
+
+	// Calculate the current fork checksum and the next fork block
+	for _, fork := range forks {
+		hash = checksumUpdate(hash, fork)
+	}
+	return ID{Hash: checksumToBytes(hash), Next: 0}
+}
+
 // NewFilter creates a filter that returns if a fork ID should be rejected or not
 // based on the local chain's status.
 func NewFilter(config *params.ChainConfig, genesis common.Hash, head uint64) Filter {
+	forks := GatherForks(config)
 	return newFilter(
-		config,
+		forks,
 		genesis,
 		func() uint64 {
 			return head
@@ -84,20 +96,25 @@ func NewFilter(config *params.ChainConfig, genesis common.Hash, head uint64) Fil
 	)
 }
 
+func NewFilterFromForks(forks []uint64, genesis common.Hash) Filter {
+	head := func() uint64 { return 0 }
+	return newFilter(forks, genesis, head)
+}
+
 // NewStaticFilter creates a filter at block zero.
 func NewStaticFilter(config *params.ChainConfig, genesis common.Hash) Filter {
 	head := func() uint64 { return 0 }
-	return newFilter(config, genesis, head)
+	forks := GatherForks(config)
+	return newFilter(forks, genesis, head)
 }
 
 // newFilter is the internal version of NewFilter, taking closures as its arguments
 // instead of a chain. The reason is to allow testing it without having to simulate
 // an entire blockchain.
-func newFilter(config *params.ChainConfig, genesis common.Hash, headfn func() uint64) Filter {
+func newFilter(forks []uint64, genesis common.Hash, headfn func() uint64) Filter {
 	// Calculate the all the valid fork hash and fork next combos
 	var (
-		forks = GatherForks(config)
-		sums  = make([][4]byte, len(forks)+1) // 0th is the genesis
+		sums = make([][4]byte, len(forks)+1) // 0th is the genesis
 	)
 	hash := crc32.ChecksumIEEE(genesis[:])
 	sums[0] = checksumToBytes(hash)

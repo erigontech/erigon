@@ -5,6 +5,7 @@ import (
 	//"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -18,17 +19,16 @@ import (
 const BlockBufferSize = 1024
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
-func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
+func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, headHash common.Hash, headTd *big.Int, err error) {
 	var headerProgress, bodyProgress uint64
-	var err error
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
-		return err
+		return 0, common.Hash{}, nil, err
 	}
 	bd.maxProgress = headerProgress + 1
 	bodyProgress, err = stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
-		return err
+		return 0, common.Hash{}, nil, err
 	}
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
@@ -45,7 +45,13 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) error {
 		bd.requests[i] = nil
 	}
 	bd.peerMap = make(map[string]int)
-	return nil
+	headHeight = bodyProgress
+	headHash = rawdb.ReadHeaderByNumber(db, headHeight).Hash()
+	headTd, err = rawdb.ReadTd(db, headHash, headHeight)
+	if err != nil {
+		return 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %w", headHeight, headHash, headTd)
+	}
+	return headHeight, headHash, headTd, nil
 }
 
 func (bd *BodyDownload) RequestMoreBodies(db ethdb.Database, blockNum uint64, currentTime uint64) (*BodyRequest, uint64) {

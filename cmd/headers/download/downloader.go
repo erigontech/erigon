@@ -21,6 +21,7 @@ import (
 	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -47,7 +48,7 @@ func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header           {
 func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header          { panic("") }
 
 //nolint:interfacer
-func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
+func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
 	lock.Lock()
 	defer lock.Unlock()
 	log.Info(hd.AnchorState())
@@ -216,7 +217,18 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 		return err2
 	}
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendRequests, controlServer.sendBodyRequest, controlServer.penalise, controlServer.requestWakeUpBodies, timeout); err != nil {
+	if err := stages.StageLoop(
+		ctx,
+		db,
+		controlServer.hd,
+		controlServer.bd,
+		controlServer.sendRequests,
+		controlServer.sendBodyRequest,
+		controlServer.penalise,
+		controlServer.updateHead,
+		controlServer.requestWakeUpBodies,
+		timeout,
+	); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 
@@ -248,7 +260,18 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		return fmt.Errorf("could not start server: %w", err)
 	}
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.sendRequests, controlServer.sendBodyRequest, controlServer.penalise, controlServer.requestWakeUpBodies, timeout); err != nil {
+	if err := stages.StageLoop(
+		ctx,
+		db,
+		controlServer.hd,
+		controlServer.bd,
+		controlServer.sendRequests,
+		controlServer.sendBodyRequest,
+		controlServer.penalise,
+		controlServer.updateHead,
+		controlServer.requestWakeUpBodies,
+		timeout,
+	); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 	return nil
@@ -256,12 +279,20 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 
 type ControlServerImpl struct {
 	proto_core.UnimplementedControlServer
-	lock                 sync.Mutex
+	lock                 sync.RWMutex
 	hd                   *headerdownload.HeaderDownload
 	bd                   *bodydownload.BodyDownload
 	sentryClient         proto_sentry.SentryClient
 	requestWakeUpHeaders chan struct{}
 	requestWakeUpBodies  chan struct{}
+	headHeight           uint64
+	headHash             common.Hash
+	headTd               *big.Int
+	chainConfig          *params.ChainConfig
+	forks                []uint64
+	genesisHash          common.Hash
+	protocolVersion      uint32
+	networkId            uint64
 }
 
 func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient, window int) (*ControlServerImpl, error) {
@@ -307,7 +338,22 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 	}
 	log.Info(hd.AnchorState())
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
-	return &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}), requestWakeUpBodies: make(chan struct{})}, nil
+	cs := &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}), requestWakeUpBodies: make(chan struct{})}
+	cs.chainConfig = params.MainnetChainConfig // Hard-coded, needs to be parametrized
+	cs.forks = forkid.GatherForks(cs.chainConfig)
+	cs.genesisHash = params.MainnetGenesisHash // Hard-coded, needs to be parametrized
+	cs.protocolVersion = uint32(eth.ProtocolVersions[0])
+	cs.networkId = eth.DefaultConfig.NetworkID // Hard-coded, needs to be parametrized
+	cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(db)
+	return cs, err
+}
+
+func (cs *ControlServerImpl) updateHead(height uint64, hash common.Hash, td *big.Int) {
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+	cs.headHeight = height
+	cs.headHash = hash
+	cs.headTd = td
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
@@ -463,7 +509,17 @@ func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *p
 }
 
 func (cs *ControlServerImpl) GetStatus(context.Context, *empty.Empty) (*proto_core.StatusData, error) {
-	return nil, nil
+	cs.lock.RLock()
+	defer cs.lock.RUnlock()
+	return &proto_core.StatusData{
+		NetworkId:       cs.networkId,
+		TotalDifficulty: cs.headTd.Bytes(),
+		BestHash:        cs.headHash.Bytes(),
+		ForkData: &proto_core.Forks{
+			Genesis: cs.genesisHash.Bytes(),
+			Forks:   cs.forks,
+		},
+	}, nil
 }
 
 func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdownload.HeaderRequest) {

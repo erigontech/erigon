@@ -3,7 +3,9 @@ package stages
 import (
 	"context"
 	"fmt"
+	"math/big"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -20,6 +22,7 @@ func StageLoop(
 	headerReqSend func(context.Context, []*headerdownload.HeaderRequest),
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
+	updateHead func(uint64, common.Hash, *big.Int),
 	wakeUpChan chan struct{},
 	timeout int,
 ) error {
@@ -35,7 +38,7 @@ func StageLoop(
 		if err := headerdownload.Forward("1/14 Headers", ctx, db, hd, headerReqSend, wakeUpChan); err != nil {
 			log.Error("header download forward failed", "error", err)
 		}
-		if err := bodydownload.Forward("2/14 Bodies", ctx, db, bd, bodyReqSend, penalise, wakeUpChan, timeout); err != nil {
+		if err := bodydownload.Forward("2/14 Bodies", ctx, db, bd, bodyReqSend, penalise, updateHead, wakeUpChan, timeout); err != nil {
 			log.Error("body download forward failes", "error", err)
 		}
 	}
