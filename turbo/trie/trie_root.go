@@ -747,7 +747,6 @@ func (c *IHCursor) AtPrefix(prefix []byte) (k, v []byte, err error) {
 		c.skipState = isDenseSequence(c.prev, c.cur)
 		return nil, nil, nil
 	}
-	fmt.Printf("12: %x,%x,%t\n", c.k[c.lvl], c.childID[c.lvl], c._hasHash())
 	if c._hasHash() {
 		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
 		if c.canUse(c.kBuf) {
@@ -852,24 +851,25 @@ func (c *IHCursor) _nextSibling() error {
 }
 
 func (c *IHCursor) _nextSiblingInMem() bool {
-	fmt.Printf("4: %x, %d, %b, %b\n", c.k[c.lvl], c.childID[c.lvl], c.hasHash[c.lvl], c.hasBranch[c.lvl])
 	for c.childID[c.lvl]++; c.childID[c.lvl] < 16; c.childID[c.lvl]++ {
 		if ((uint16(1) << c.childID[c.lvl]) & c.hasHash[c.lvl]) != 0 {
 			c.hashID[c.lvl]++
-			fmt.Printf("6: %x, %d, %b, %b\n", c.k[c.lvl], c.childID[c.lvl], c.hasHash[c.lvl], c.hasBranch[c.lvl])
 			return true
 		}
 		if ((uint16(1) << c.childID[c.lvl]) & c.hasBranch[c.lvl]) != 0 {
-			fmt.Printf("7: %x, %d, %b, %b\n", c.k[c.lvl], c.childID[c.lvl], c.hasHash[c.lvl], c.hasBranch[c.lvl])
 			return true
 		}
+
+		c.skipState = c.skipState && ((uint16(1)<<c.childID[c.lvl])&c.hasState[c.lvl]) == 0
 	}
-	fmt.Printf("5: %x, %d, %b, %b\n", c.k[c.lvl], c.childID[c.lvl], c.hasHash[c.lvl], c.hasBranch[c.lvl])
 	return false
 }
 
 func (c *IHCursor) _nextSiblingOfParentInMem() bool {
 	for c.lvl > 1 {
+		if c.k[c.lvl-1] == nil {
+			return false
+		}
 		c.lvl--
 		if c._nextSiblingInMem() {
 			return true
@@ -879,7 +879,6 @@ func (c *IHCursor) _nextSiblingOfParentInMem() bool {
 }
 
 func (c *IHCursor) _nextSiblingInDB() error {
-	fmt.Printf("1111: %x\n", c.k[c.lvl])
 	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
 	if !ok {
 		c.k[c.lvl] = nil
@@ -894,9 +893,6 @@ func (c *IHCursor) _nextSiblingInDB() error {
 		c.k[c.lvl] = nil
 		return nil
 	}
-	for i := len(k); i >= c.lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
-		c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
-	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
 
@@ -904,14 +900,21 @@ func (c *IHCursor) _nextSiblingInDB() error {
 }
 
 func (c *IHCursor) _unmarshal(k, v []byte) {
-
+	if c.lvl < len(k) {
+		for i := c.lvl + 1; i < len(k); i++ { // if first meet key is not 0 length, then nullify all shorter metadata
+			c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
+		}
+	} else {
+		for i := len(k) + 1; i <= c.lvl+1; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
+			c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
+		}
+	}
 	c.lvl = len(k)
 	c.k[c.lvl] = k
 	c.deleted[c.lvl] = false
 	c.hasState[c.lvl] = binary.BigEndian.Uint16(v)
 	c.hasBranch[c.lvl] = binary.BigEndian.Uint16(v[2:])
 	c.hasHash[c.lvl] = binary.BigEndian.Uint16(v[4:])
-	fmt.Printf("4: %x, %d, %b, %b\n", c.k[c.lvl], c.childID[c.lvl], c.hasHash[c.lvl], c.hasBranch[c.lvl])
 	c.v[c.lvl] = v[6:]
 	c.hashID[c.lvl] = -1
 	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.hasState[c.lvl]) - 1)
@@ -963,8 +966,6 @@ func (c *IHCursor) _complexSkpState() bool {
 }
 
 func (c *IHCursor) _next() (k, v []byte, err error) {
-	fmt.Printf("2: %x, %d\n", c.k[c.lvl], c.childID[c.lvl])
-
 	c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
 	err = c._nextItem(c.next)
 	if err != nil {
@@ -972,7 +973,6 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 	}
 
 	for {
-		fmt.Printf("3: %x, %d\n", c.k[c.lvl], c.childID[c.lvl])
 		if c.k[c.lvl] == nil {
 			c.cur = nil
 			c.skipState = isDenseSequence(c.prev, c.cur)
@@ -1262,9 +1262,6 @@ func (c *StorageIHCursor) _nextSiblingInDB() error {
 		c.k[c.lvl] = nil
 		return nil
 	}
-	for i := len(k); i >= c.lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
-		c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
-	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
 	return nil
@@ -1313,6 +1310,16 @@ func (c *StorageIHCursor) _next() (k, v []byte, err error) {
 }
 
 func (c *StorageIHCursor) _unmarshal(k, v []byte) {
+	if c.lvl < len(k) {
+		for i := c.lvl + 1; i < len(k); i++ { // if first meet key is not 0 length, then nullify all shorter metadata
+			c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
+		}
+	} else {
+		for i := len(k) + 1; i <= c.lvl+1; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
+			c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
+		}
+	}
+
 	c.lvl = len(k) - 40
 	c.k[c.lvl] = k[40:]
 	c.deleted[c.lvl] = false
