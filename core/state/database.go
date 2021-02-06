@@ -897,18 +897,18 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			m = make(map[common.Hash][]byte)
 			b.storageUpdates[addrHash] = m
 		}
-		b.storageIncarnation[addrHash] = binary.BigEndian.Uint64([]byte(key)[common.HashLength:])
+		b.storageIncarnation[addrHash] = binary.BigEndian.Uint64(key[common.HashLength:])
 		var storageKey common.StorageKey
 		copy(storageKey[:], []byte(key))
 		b.storageReads[storageKey] = struct{}{}
 		if len(value) > 0 {
 			m[keyHash] = value
-			if err := tds.db.Put(dbutils.HashedStorageBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
+			if err := tds.db.Put(dbutils.HashedStorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
 				return err
 			}
 		} else {
 			m[keyHash] = nil
-			if err := tds.db.Delete(dbutils.HashedStorageBucket, []byte(key)[:common.HashLength+common.IncarnationLength+common.HashLength], nil); err != nil {
+			if err := tds.db.Delete(dbutils.HashedStorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength], nil); err != nil {
 				return err
 			}
 		}
