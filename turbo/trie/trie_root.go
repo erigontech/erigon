@@ -1052,9 +1052,6 @@ func (c *StorageIHCursor) SeekToAccount(prefix []byte) (k, v []byte, err error) 
 	if err != nil {
 		return []byte{}, nil, err
 	}
-	for i := c.lvl - 1; i >= 0; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
-		c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
-	}
 	if !ok || c.k[c.lvl] == nil {
 		err = c._nextSiblingInDB()
 		if err != nil {
@@ -1223,15 +1220,25 @@ func (c *StorageIHCursor) _hasHash() bool {
 }
 
 func (c *StorageIHCursor) _nextSiblingInMem() bool {
-	c.childID[c.lvl]++
-	for c.childID[c.lvl] < 16 && ((uint16(1)<<c.childID[c.lvl])&c.hasBranch[c.lvl] == 0) {
-		c.childID[c.lvl]++
+	for c.childID[c.lvl]++; c.childID[c.lvl] < 16; c.childID[c.lvl]++ {
+		if ((uint16(1) << c.childID[c.lvl]) & c.hasHash[c.lvl]) != 0 {
+			c.hashID[c.lvl]++
+			return true
+		}
+		if ((uint16(1) << c.childID[c.lvl]) & c.hasBranch[c.lvl]) != 0 {
+			return true
+		}
+
+		c.skipState = c.skipState && ((uint16(1)<<c.childID[c.lvl])&c.hasState[c.lvl]) == 0
 	}
-	return c.childID[c.lvl] < 16
+	return false
 }
 
 func (c *StorageIHCursor) _nextSiblingOfParentInMem() bool {
 	for c.lvl > 0 {
+		if c.k[c.lvl-1] == nil {
+			return false
+		}
 		c.lvl--
 		if c._nextSiblingInMem() {
 			return true
