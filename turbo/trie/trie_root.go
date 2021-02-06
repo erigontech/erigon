@@ -865,7 +865,7 @@ func (c *IHCursor) _nextSiblingInMem() bool {
 		}
 	}
 	fmt.Printf("5: %x, %d, %b, %b\n", c.k[c.lvl], c.childID[c.lvl], c.hasHash[c.lvl], c.hasBranch[c.lvl])
-	return c.childID[c.lvl] < 16
+	return false
 }
 
 func (c *IHCursor) _nextSiblingOfParentInMem() bool {
@@ -879,6 +879,7 @@ func (c *IHCursor) _nextSiblingOfParentInMem() bool {
 }
 
 func (c *IHCursor) _nextSiblingInDB() error {
+	fmt.Printf("1111: %x\n", c.k[c.lvl])
 	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
 	if !ok {
 		c.k[c.lvl] = nil
