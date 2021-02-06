@@ -266,7 +266,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					}
 					hexutil.DecompressNibbles(accWithInc, &l.kHexS)
 					l.kHexS = append(l.kHexS[:80], l.buf...)
-					if err = l.receiver.Receive(StorageStreamItem, nil, common.CopyBytes(l.kHexS), nil, vS[32:], nil, 0); err != nil {
+					if err = l.receiver.Receive(StorageStreamItem, nil, l.kHexS, nil, vS[32:], nil, 0); err != nil {
 						return EmptyRoot, err
 					}
 				}
