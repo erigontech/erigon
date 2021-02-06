@@ -1212,11 +1212,7 @@ func (c *StorageIHCursor) _nextSibling() error {
 }
 
 func (c *StorageIHCursor) _hasHash() bool {
-	if (uint16(1)<<c.childID[c.lvl])&c.hasHash[c.lvl] == 0 {
-		return false
-	}
-	c.hashID[c.lvl]++
-	return true
+	return (uint16(1)<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0
 }
 
 func (c *StorageIHCursor) _nextSiblingInMem() bool {
