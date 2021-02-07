@@ -951,33 +951,26 @@ func TestIHCursorCanUseNextParent(t *testing.T) {
 func TestIHCursor(t *testing.T) {
 	db, require := ethdb.NewMemDatabase(), require.New(t)
 	defer db.Close()
-	//acc := fmt.Sprintf("010101%0122x", 0)
-	//storage := acc + fmt.Sprintf("%030x01", 0) + acc
-	//_ = storage
 	hash := common.HexToHash(fmt.Sprintf("%064d", 0))
 
-	put := func(k string, v []byte) {
-		_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex(k), v)
+	put := func(k string, hasState, hasBranch, hasHash uint16, hashes []common.Hash) {
+		assertSubset(hasBranch, hasState)
+		assertSubset(hasHash, hasState)
+		_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex(k), MarshalIH(hasState, hasBranch, hasHash, hashes))
 	}
 
-	put("00", MarshalIH(0b0000000000000010, 0b0000000000000000, 0b0000000000000010, []common.Hash{hash}))
-	put("01", MarshalIH(0b0000000000000111, 0b0000000000000010, 0b0000000000000111, []common.Hash{hash, hash, hash}))
-	put("0101", MarshalIH(0b0000000000000111, 0b0000000000000000, 0b0000000000000111, []common.Hash{hash, hash, hash}))
-	put("02", MarshalIH(0b1000000000000000, 0b0000000000000000, 0b1000000000000000, []common.Hash{hash}))
-	put("03", MarshalIH(0b0100000000000001, 0b0000000000000001, 0b0000000000000000, []common.Hash{}))
-	put("030000", MarshalIH(0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash}))
-	put("03000e", MarshalIH(0b0100000000000000, 0b0000000000000000, 0b0100000000000000, []common.Hash{hash}))
-	put("050001", MarshalIH(0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash}))
-	put("05000f", MarshalIH(0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash}))
-	put("06", MarshalIH(0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash}))
-	//for _, k := range []string{"00", "0001", "01", "0100", "0101", "0102", "02"} {
-	//	kk := common.FromHex(k)
-	//	_ = db.Put(dbutils.TrieOfAccountsBucket, kk, kk)
-	//}
-	//for _, k := range []string{acc, acc + "00", acc + "01", acc + "02"} {
-	//	kk := common.FromHex(k)
-	//	_ = db.Put(dbutils.TrieOfStorageBucket, kk, kk)
-	//}
+	put("00", 0b0000000000000010, 0b0000000000000000, 0b0000000000000010, []common.Hash{hash})
+	put("01", 0b0000000000000111, 0b0000000000000010, 0b0000000000000111, []common.Hash{hash, hash, hash})
+	put("0101", 0b0000000000000111, 0b0000000000000000, 0b0000000000000111, []common.Hash{hash, hash, hash})
+	put("02", 0b1000000000000000, 0b0000000000000000, 0b1000000000000000, []common.Hash{hash})
+	put("03", 0b0000000000000001, 0b0000000000000001, 0b0000000000000000, []common.Hash{})
+	put("030000", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
+	put("03000e", 0b0000000000000001, 0b0000000000000001, 0b0000000000000001, []common.Hash{hash})
+	put("03000e000000", 0b0000000000000100, 0b0000000000000000, 0b0000000000000100, []common.Hash{hash})
+	put("03000e00000e", 0b0000000000000100, 0b0000000000000000, 0b0000000000000100, []common.Hash{hash})
+	put("050001", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
+	put("05000f", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
+	put("06", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
 
 	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
 	require.NoError(err)
@@ -989,6 +982,7 @@ func TestIHCursor(t *testing.T) {
 	rl.AddHex(common.FromHex("0101"))
 	rl.AddHex(common.FromHex("030000"))
 	rl.AddHex(common.FromHex("03000e"))
+	rl.AddHex(common.FromHex("03000e00"))
 	var filter = func(prefix []byte) bool { return !rl.Retain(prefix) }
 	ih := IH(filter, func(keyHex []byte, _, _, _ uint16, hashes, rootHash []byte) error {
 		return nil
@@ -1023,9 +1017,13 @@ func TestIHCursor(t *testing.T) {
 	require.Equal(common.FromHex("03000000"), k)
 	require.True(ih.skipState)
 	k, _, _ = ih.Next()
-	require.Equal(common.FromHex("03000e0e"), k)
+	require.Equal(common.FromHex("03000e00000002"), k)
 	require.False(ih.skipState)
 	require.Equal(common.FromHex("3001"), ih.FirstNotCoveredPrefix())
+	k, _, _ = ih.Next()
+	require.Equal(common.FromHex("03000e00000e02"), k)
+	require.False(ih.skipState)
+	require.Equal(common.FromHex("30e00030"), ih.FirstNotCoveredPrefix())
 	k, _, _ = ih.Next()
 	require.Equal(common.FromHex("05000100"), k)
 	require.False(ih.skipState)

@@ -360,15 +360,15 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	if storageKey == nil {
-		if bytes.HasPrefix(accountKey, common.FromHex("05070202")) {
-			//fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-		}
+		//if bytes.HasPrefix(accountKey, common.FromHex("05070202")) {
+		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+		//}
 	} else {
 		hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
-		if bytes.HasPrefix(r.currAccK, common.FromHex("5722")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
-			//fmt.Printf("%x\n", storageKey)
-			//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
-		}
+		//if bytes.HasPrefix(r.currAccK, common.FromHex("5722")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
+		//fmt.Printf("%x\n", storageKey)
+		fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+		//}
 	}
 	switch itemType {
 	case StorageStreamItem:
@@ -769,11 +769,11 @@ func (c *IHCursor) Next() (k, v []byte, err error) {
 
 	c.skipState = false
 	c.prev = append(c.prev[:0], c.cur...)
+	//err = c._nextItem()
 	err = c._nextSibling()
 	if err != nil {
 		return []byte{}, nil, err
 	}
-
 	if c.k[c.lvl] == nil {
 		c.cur = nil
 		c.skipState = isDenseSequence(c.prev, c.cur)
@@ -784,6 +784,7 @@ func (c *IHCursor) Next() (k, v []byte, err error) {
 		if c.canUse(c.kBuf) {
 			c.cur = append(c.cur[:0], c.kBuf...)
 			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
+			fmt.Printf("Next2: %x, %x\n", c.k, c.childID)
 			return c.cur, c._hash(c.hashID[c.lvl]), nil
 		}
 		err = c._deleteCurrent()
@@ -813,26 +814,32 @@ func (c *IHCursor) _seek(prefix []byte) (bool, error) {
 		//	c.is++
 		k, v, err = c.c.Seek(prefix)
 		//}
+		fmt.Printf("_seek1: %x ->%x,%b\n", prefix, k, c.hasBranch[c.lvl])
 	}
 	if err != nil {
 		return false, err
 	}
 	if k == nil || !bytes.HasPrefix(k, prefix) {
+		fmt.Printf("_seek2: %x ->%x\n", prefix, k)
 		return false, nil
 	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
+	fmt.Printf("_seek3: %x ->%x, %x, %x\n", prefix, k, c.k, c.childID)
 	return true, nil
 }
 
 // goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *IHCursor) _nextItem(prefix []byte) error {
-	ok, err := c._seek(prefix)
-	if err != nil {
-		return err
-	}
-	if ok {
-		return nil
+func (c *IHCursor) _nextItem() error {
+	if c._hasBranch() {
+		c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
+		ok, err := c._seek(c.next)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
 	}
 	return c._nextSibling()
 }
@@ -851,6 +858,7 @@ func (c *IHCursor) _nextSibling() error {
 }
 
 func (c *IHCursor) _nextSiblingInMem() bool {
+	fmt.Printf("_nextSiblingInMem: %d, %x, %x\n", c.lvl, c.k, c.childID)
 	for c.childID[c.lvl]++; c.childID[c.lvl] < 16; c.childID[c.lvl]++ {
 		if ((uint16(1) << c.childID[c.lvl]) & c.hasHash[c.lvl]) != 0 {
 			c.hashID[c.lvl]++
@@ -862,6 +870,7 @@ func (c *IHCursor) _nextSiblingInMem() bool {
 
 		c.skipState = c.skipState && ((uint16(1)<<c.childID[c.lvl])&c.hasState[c.lvl]) == 0
 	}
+	fmt.Printf("_nextSiblingInMem2: %d, %x, %x\n", c.lvl, c.k, c.childID)
 	return false
 }
 
@@ -877,6 +886,30 @@ func (c *IHCursor) _nextSiblingOfParentInMem() bool {
 	}
 	return false
 }
+
+//func (c *IHCursor) _nextSiblingOfParentInMem() bool {
+//	lastLvl := 0
+//	for c.lvl > 1 {
+//		if c.k[c.lvl-1] == nil {
+//			if lastLvl == 0 {
+//				lastLvl = c.lvl
+//			}
+//			c.lvl--
+//			continue
+//		}
+//		lastLvl = 0
+//		c.lvl--
+//		if c._nextSiblingInMem() {
+//			fmt.Printf("_nextSiblingOfParentInMem: %d,%x, %d,%x\n", c.lvl, c.k, c.childID, c.k[c.lvl])
+//			return true
+//		}
+//	}
+//	if lastLvl != 0 {
+//		c.lvl = lastLvl
+//	}
+//	fmt.Printf("_nextSiblingOfParentInMem2:%d, %d,%x, %d,%x\n", lastLvl, c.lvl, c.k, c.childID, c.k[c.lvl])
+//	return false
+//}
 
 func (c *IHCursor) _nextSiblingInDB() error {
 	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
@@ -946,6 +979,10 @@ func (c *IHCursor) _hasHash() bool {
 	return (uint16(1)<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0
 }
 
+func (c *IHCursor) _hasBranch() bool {
+	return (uint16(1)<<c.childID[c.lvl])&c.hasBranch[c.lvl] != 0
+}
+
 func (c *IHCursor) _complexSkpState() bool {
 	// experimental example of - how can skip state by looking to 'hasState' bitmap
 	return false
@@ -966,8 +1003,7 @@ func (c *IHCursor) _complexSkpState() bool {
 }
 
 func (c *IHCursor) _next() (k, v []byte, err error) {
-	c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-	err = c._nextItem(c.next)
+	err = c._nextItem()
 	if err != nil {
 		return []byte{}, nil, err
 	}
@@ -992,8 +1028,7 @@ func (c *IHCursor) _next() (k, v []byte, err error) {
 			}
 		}
 
-		c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-		err = c._nextItem(c.next)
+		err = c._nextItem()
 		if err != nil {
 			return []byte{}, nil, err
 		}
@@ -1102,6 +1137,7 @@ func (c *StorageIHCursor) Next() (k, v []byte, err error) {
 
 	c.skipState = false
 	c.prev = c.cur
+	//err = c._nextItem()
 	err = c._nextSibling()
 	if err != nil {
 		return []byte{}, nil, err
@@ -1180,15 +1216,17 @@ func (c *StorageIHCursor) _seek(prefix []byte) (bool, error) {
 }
 
 // goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *StorageIHCursor) _nextItem(prefix []byte) error {
-	ok, err := c._seek(prefix)
-	if err != nil {
-		return err
+func (c *StorageIHCursor) _nextItem() error {
+	if c._hasBranch() {
+		c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
+		ok, err := c._seek(c.seek)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
 	}
-	if ok {
-		return nil
-	}
-
 	return c._nextSibling()
 }
 
@@ -1213,6 +1251,10 @@ func (c *StorageIHCursor) _nextSibling() error {
 
 func (c *StorageIHCursor) _hasHash() bool {
 	return (uint16(1)<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0
+}
+
+func (c *StorageIHCursor) _hasBranch() bool {
+	return (uint16(1)<<c.childID[c.lvl])&c.hasBranch[c.lvl] != 0
 }
 
 func (c *StorageIHCursor) _nextSiblingInMem() bool {
@@ -1275,8 +1317,7 @@ func (c *StorageIHCursor) _hash(i int16) []byte {
 }
 
 func (c *StorageIHCursor) _next() (k, v []byte, err error) {
-	c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-	err = c._nextItem(c.seek)
+	err = c._nextItem()
 	if err != nil {
 		return []byte{}, nil, err
 	}
@@ -1304,8 +1345,7 @@ func (c *StorageIHCursor) _next() (k, v []byte, err error) {
 			}
 		}
 
-		c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-		err = c._nextItem(c.seek)
+		err = c._nextItem()
 		if err != nil {
 			return []byte{}, nil, err
 		}
@@ -1980,4 +2020,10 @@ func (l *FlatDBTrieLoader) CalcTrieRootOnCache(cache *shards.StateCache) (common
 		return EmptyRoot, err
 	}
 	return l.receiver.Root(), nil
+}
+
+func assertSubset(a, b uint16) {
+	if (a & b) != a { // a & b == a - checks whether a is subset of b
+		panic(fmt.Errorf("invariant 'is subset' failed: %b, %b", a, b))
+	}
 }
