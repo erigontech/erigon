@@ -361,13 +361,13 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 ) error {
 	if storageKey == nil {
 		//if bytes.HasPrefix(accountKey, common.FromHex("05070202")) {
-		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+		//fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
 		//}
 	} else {
 		hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
 		//if bytes.HasPrefix(r.currAccK, common.FromHex("5722")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
 		//fmt.Printf("%x\n", storageKey)
-		fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+		//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
 		//}
 	}
 	switch itemType {
@@ -784,7 +784,7 @@ func (c *IHCursor) Next() (k, v []byte, err error) {
 		if c.canUse(c.kBuf) {
 			c.cur = append(c.cur[:0], c.kBuf...)
 			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
-			fmt.Printf("Next2: %x, %x\n", c.k, c.childID)
+			fmt.Printf("Next2: %x, %d,%b,%d\n", c.k, c.childID[c.lvl], c.hasHash[c.lvl], len(c.v))
 			return c.cur, c._hash(c.hashID[c.lvl]), nil
 		}
 		err = c._deleteCurrent()
@@ -953,6 +953,10 @@ func (c *IHCursor) _unmarshal(k, v []byte) {
 	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.hasState[c.lvl]) - 1)
 	if len(c.k[c.lvl]) == 0 { // root record, firstly storing root hash
 		c.v[c.lvl] = c.v[c.lvl][32:]
+	}
+	if len(c.v[c.lvl])/common.HashLength != bits.OnesCount16(c.hasHash[c.lvl]) {
+		fmt.Printf("assert: %x, %b,%d\n", c.k[c.lvl], c.hasHash[c.lvl], len(c.v)/common.HashLength)
+		panic(1)
 	}
 }
 

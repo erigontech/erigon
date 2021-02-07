@@ -6,11 +6,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/bits"
 	"path"
 	"sort"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
@@ -243,6 +245,14 @@ func checkIH(db ethdb.Database) error {
 		if len(k) == 1 {
 			return true, nil
 		}
+		hasState := binary.BigEndian.Uint16(v)
+		hasBranch := binary.BigEndian.Uint16(v[2:])
+		hasHash := binary.BigEndian.Uint16(v[4:])
+		assertSubset(hasBranch, hasState)
+		assertSubset(hasHash, hasState)
+		if bits.OnesCount16(hasHash) != len(v[6:])/common.HashLength {
+			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/common.HashLength))
+		}
 		found := false
 		for parentK := k[:len(k)-1]; len(parentK) > 0; parentK = parentK[:len(parentK)-1] {
 			parent, err := db.Get(dbutils.TrieOfAccountsBucket, parentK)
@@ -253,10 +263,10 @@ func checkIH(db ethdb.Database) error {
 				return false, err
 			}
 			found = true
-			branches := binary.BigEndian.Uint16(parent)
-			parentHasBit := uint16(1)<<uint16(k[len(parentK)])&branches != 0
+			parentBranches := binary.BigEndian.Uint16(parent[2:])
+			parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentBranches != 0
 			if !parentHasBit {
-				return true, fmt.Errorf("for %x found parent %x, but it has no branchBit for child: %016b", k, parentK, branches)
+				panic(fmt.Errorf("for %x found parent %x, but it has no branchBit for child: %016b", k, parentK, parentBranches))
 			}
 		}
 		if !found {
@@ -271,6 +281,15 @@ func checkIH(db ethdb.Database) error {
 		if len(k) == 40 {
 			return true, nil
 		}
+		hasState := binary.BigEndian.Uint16(v)
+		hasBranch := binary.BigEndian.Uint16(v[2:])
+		hasHash := binary.BigEndian.Uint16(v[4:])
+		assertSubset(hasBranch, hasState)
+		assertSubset(hasHash, hasState)
+		if bits.OnesCount16(hasHash) != len(v[6:])/common.HashLength {
+			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/common.HashLength))
+		}
+
 		found := false
 		parentK := k
 		for i := len(k) - 1; i >= 40; i-- {
@@ -283,10 +302,10 @@ func checkIH(db ethdb.Database) error {
 				panic(err)
 			}
 			found = true
-			branches := binary.BigEndian.Uint16(parent)
-			parentHasBit := uint16(1)<<uint16(k[len(parentK)])&branches != 0
+			parentBranches := binary.BigEndian.Uint16(parent[2:])
+			parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentBranches != 0
 			if !parentHasBit {
-				panic(fmt.Errorf("for %x found parent %x, but it has no branchBit for child: %016b", k, parentK, branches))
+				panic(fmt.Errorf("for %x found parent %x, but it has no branchBit for child: %016b", k, parentK, parentBranches))
 			}
 		}
 		if !found {
@@ -466,4 +485,10 @@ func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) er
 	}
 
 	return nil
+}
+
+func assertSubset(a, b uint16) {
+	if (a & b) != a { // a & b == a - checks whether a is subset of b
+		panic(fmt.Errorf("invariant 'is subset' failed: %b, %b", a, b))
+	}
 }
