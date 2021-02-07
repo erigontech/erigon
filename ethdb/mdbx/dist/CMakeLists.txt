@@ -463,6 +463,7 @@ mark_as_advanced(MDBX_LOCKING)
 add_mdbx_option(MDBX_TRUST_RTC "Does a system have battery-backed Real-Time Clock or just a fake" AUTO)
 mark_as_advanced(MDBX_TRUST_RTC)
 option(MDBX_FORCE_ASSERTIONS "Force enable assertion checking" OFF)
+option(MDBX_DISABLE_PAGECHECKS "Disable some checks to reduce an overhead and detection probability of database corruption to a values closer to the LMDB" OFF)
 
 if(NOT MDBX_AMALGAMATED_SOURCE)
   add_mdbx_option(MDBX_ALLOY_BUILD "Build MDBX library through single/alloyed object file" ON)

@@ -4,11 +4,25 @@ ChangeLog
 ## v0.9.4 (in development) scheduled at 2021-02-23
 
 TODO:
+
  - Engage new terminology (https://github.com/erthink/libmdbx/issues/137).
  - Resolve few TODOs (https://github.com/erthink/libmdbx/issues/124, https://github.com/erthink/libmdbx/issues/127,
    https://github.com/erthink/libmdbx/issues/115).
  - Finalize C++ API (few typos and trivia bugs are still likely for now).
  - Packages for [ROSA Linux](https://www.rosalinux.ru/), [ALT Linux](https://www.altlinux.org/), Fedora/RHEL, Debian/Ubuntu.
+
+New features:
+
+ - Added `MDBX_DISABLE_PAGECHECKS` build option to disable some checks to reduce an overhead
+   and detection probability of database corruption to a values closer to the LMDB.
+   The `MDBX_DISABLE_PAGECHECKS=1` provides a performance boost of about 10% in CRUD scenarios,
+   and conjointly with the `MDBX_ENV_CHECKPID=0` and `MDBX_TXN_CHECKOWNER=0` options can yield
+   up to 30% more performance compared to LMDB.
+
+Fixes:
+
+ - Fixed performance regression due non-optimal C11 atomics usage (https://github.com/erthink/libmdbx/issues/160).
+
 
 ## v0.9.3 at 2021-02-02
 

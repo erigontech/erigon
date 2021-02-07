@@ -34,7 +34,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY 477643c06d6abd65845c44fe45fec23b7ac99ff180cd6d9b234b348de82fa7a6_v0_9_3_0_gd78150de
+#define MDBX_BUILD_SOURCERY a4ba2f45e9373fe98a379d44226ca1266609844b33df20d570bc9c41d3340fc5_v0_9_3_10_g2727072a
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -1616,6 +1616,15 @@ extern LIBMDBX_API const char *const mdbx_sourcery_anchor;
 #if !(MDBX_ENABLE_REFUND == 0 || MDBX_ENABLE_REFUND == 1)
 #error MDBX_ENABLE_REFUND must be defined as 0 or 1
 #endif /* MDBX_ENABLE_REFUND */
+
+/** Disable some checks to reduce an overhead and detection probability of
+ * database corruption to a values closer to the LMDB. */
+#ifndef MDBX_DISABLE_PAGECHECKS
+#define MDBX_DISABLE_PAGECHECKS 0
+#endif
+#if !(MDBX_DISABLE_PAGECHECKS == 0 || MDBX_DISABLE_PAGECHECKS == 1)
+#error MDBX_DISABLE_PAGECHECKS must be defined as 0 or 1
+#endif /* MDBX_DISABLE_PAGECHECKS */
 
 /** Controls sort order of internal page number lists.
  * The database format depend on this option and libmdbx builded with different

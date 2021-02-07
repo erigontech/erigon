@@ -26,6 +26,7 @@
 #ifndef MDBX_TRUST_RTC_AUTO
 #cmakedefine01 MDBX_TRUST_RTC
 #endif
+#cmakedefine01 MDBX_DISABLE_PAGECHECKS
 
 /* Windows */
 #cmakedefine01 MDBX_CONFIG_MANUAL_TLS_CALLBACK
