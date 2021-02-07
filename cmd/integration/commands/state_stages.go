@@ -146,9 +146,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	} else if backward {
 		stopAt = 1
 	}
-	if err := checkIH(tx); err != nil {
-		return err
-	}
+	checkIH(tx)
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -208,9 +206,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 			return err
 		}
 
-		if err := checkIH(tx); err != nil {
-			return err
-		}
+		checkIH(tx)
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
@@ -238,7 +234,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	return nil
 }
 
-func checkIH(db ethdb.Database) error {
+func checkIH(db ethdb.Database) {
 	//defer panic(1)
 	//return nil
 	if err := db.Walk(dbutils.TrieOfAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
@@ -263,10 +259,10 @@ func checkIH(db ethdb.Database) error {
 				return false, err
 			}
 			found = true
-			parentBranches := binary.BigEndian.Uint16(parent[2:])
-			parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentBranches != 0
+			parentHasBranch := binary.BigEndian.Uint16(parent[2:])
+			parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentHasBranch != 0
 			if !parentHasBit {
-				panic(fmt.Errorf("for %x found parent %x, but it has no branchBit for child: %016b", k, parentK, parentBranches))
+				panic(fmt.Errorf("for %x found parent %x, but it has no branchBit: %016b", k, parentK, parentHasBranch))
 			}
 		}
 		if !found {
@@ -275,9 +271,9 @@ func checkIH(db ethdb.Database) error {
 
 		return true, nil
 	}); err != nil {
-		return err
+		panic(err)
 	}
-	return db.Walk(dbutils.TrieOfStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.TrieOfStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
 		if len(k) == 40 {
 			return true, nil
 		}
@@ -313,7 +309,9 @@ func checkIH(db ethdb.Database) error {
 		}
 
 		return true, nil
-	})
+	}); err != nil {
+		panic(err)
+	}
 }
 
 func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db ethdb.Database, expectedStorageChanges map[uint64]*changeset.ChangeSet, execAtBlock uint64, historyEnabled bool) error {

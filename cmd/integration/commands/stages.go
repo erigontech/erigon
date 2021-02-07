@@ -441,9 +441,16 @@ func stageIHash(db ethdb.Database, ctx context.Context) error {
 	}
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
-		return stagedsync.UnwindIntermediateHashesStage(u, stage5, db, cache, tmpdir, ch)
+		if err = stagedsync.UnwindIntermediateHashesStage(u, stage5, db, cache, tmpdir, ch); err != nil {
+			return err
+		}
+		return nil
 	}
-	return stagedsync.SpawnIntermediateHashesStage(stage5, db, true /* checkRoot */, cache, tmpdir, ch)
+	if err = stagedsync.SpawnIntermediateHashesStage(stage5, db, true /* checkRoot */, cache, tmpdir, ch); err != nil {
+		return err
+	}
+	checkIH(db)
+	return nil
 }
 
 func stageHashState(db ethdb.Database, ctx context.Context) error {

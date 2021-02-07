@@ -360,15 +360,15 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	if storageKey == nil {
-		//if bytes.HasPrefix(accountKey, common.FromHex("05070202")) {
-		//fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-		//}
+		if bytes.HasPrefix(accountKey, common.FromHex("04090709")) {
+			fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+		}
 	} else {
 		hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
-		//if bytes.HasPrefix(r.currAccK, common.FromHex("5722")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
-		//fmt.Printf("%x\n", storageKey)
-		//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
-		//}
+		if bytes.HasPrefix(r.currAccK, common.FromHex("4979")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
+			//fmt.Printf("%x\n", storageKey)
+			fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+		}
 	}
 	switch itemType {
 	case StorageStreamItem:
@@ -583,7 +583,7 @@ func (r *RootHashAggregator) genStructStorage() error {
 		if r.hc == nil {
 			return nil
 		}
-		if bytes.HasPrefix(keyHex, common.FromHex("05070202")) {
+		if bytes.HasPrefix(keyHex, common.FromHex("04090709")) {
 			fmt.Printf("collect: %x,%016b,%016b, del:%t\n", keyHex, hasHash, hasBranch, hashes == nil)
 		}
 		return r.hc(keyHex, hasState, hasBranch, hasHash, hashes, rootHash)
@@ -661,7 +661,7 @@ func (r *RootHashAggregator) genStructAccount() error {
 		if r.hc == nil {
 			return nil
 		}
-		if bytes.HasPrefix(keyHex, common.FromHex("05070202")) {
+		if bytes.HasPrefix(keyHex, common.FromHex("04090709")) {
 			fmt.Printf("collect: %x,%016b,%016b, del:%t\n", keyHex, hasBranch, hasHash, hashes == nil)
 		}
 		return r.hc(keyHex, hasState, hasBranch, hasHash, hashes, rootHash)
@@ -784,7 +784,7 @@ func (c *IHCursor) Next() (k, v []byte, err error) {
 		if c.canUse(c.kBuf) {
 			c.cur = append(c.cur[:0], c.kBuf...)
 			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
-			fmt.Printf("Next2: %x, %d,%b,%d\n", c.k, c.childID[c.lvl], c.hasHash[c.lvl], len(c.v))
+			//fmt.Printf("Next2: %x, %d,%b,%d\n", c.k, c.childID[c.lvl], c.hasHash[c.lvl], len(c.v))
 			return c.cur, c._hash(c.hashID[c.lvl]), nil
 		}
 		err = c._deleteCurrent()
@@ -814,18 +814,18 @@ func (c *IHCursor) _seek(prefix []byte) (bool, error) {
 		//	c.is++
 		k, v, err = c.c.Seek(prefix)
 		//}
-		fmt.Printf("_seek1: %x ->%x,%b\n", prefix, k, c.hasBranch[c.lvl])
+		//fmt.Printf("_seek1: %x ->%x,%b\n", prefix, k, c.hasBranch[c.lvl])
 	}
 	if err != nil {
 		return false, err
 	}
 	if k == nil || !bytes.HasPrefix(k, prefix) {
-		fmt.Printf("_seek2: %x ->%x\n", prefix, k)
+		//fmt.Printf("_seek2: %x ->%x\n", prefix, k)
 		return false, nil
 	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
-	fmt.Printf("_seek3: %x ->%x, %x, %x\n", prefix, k, c.k, c.childID)
+	//fmt.Printf("_seek3: %x ->%x, %x, %x\n", prefix, k, c.k, c.childID)
 	return true, nil
 }
 
@@ -858,7 +858,7 @@ func (c *IHCursor) _nextSibling() error {
 }
 
 func (c *IHCursor) _nextSiblingInMem() bool {
-	fmt.Printf("_nextSiblingInMem: %d, %x, %x\n", c.lvl, c.k, c.childID)
+	//fmt.Printf("_nextSiblingInMem: %d, %x, %x\n", c.lvl, c.k, c.childID)
 	for c.childID[c.lvl]++; c.childID[c.lvl] < 16; c.childID[c.lvl]++ {
 		if ((uint16(1) << c.childID[c.lvl]) & c.hasHash[c.lvl]) != 0 {
 			c.hashID[c.lvl]++
@@ -870,7 +870,7 @@ func (c *IHCursor) _nextSiblingInMem() bool {
 
 		c.skipState = c.skipState && ((uint16(1)<<c.childID[c.lvl])&c.hasState[c.lvl]) == 0
 	}
-	fmt.Printf("_nextSiblingInMem2: %d, %x, %x\n", c.lvl, c.k, c.childID)
+	//fmt.Printf("_nextSiblingInMem2: %d, %x, %x\n", c.lvl, c.k, c.childID)
 	return false
 }
 
