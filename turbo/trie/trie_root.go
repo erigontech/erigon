@@ -935,11 +935,11 @@ func (c *IHCursor) _nextSiblingInDB() error {
 func (c *IHCursor) _unmarshal(k, v []byte) {
 	if c.lvl < len(k) {
 		for i := c.lvl + 1; i < len(k); i++ { // if first meet key is not 0 length, then nullify all shorter metadata
-			c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
+			c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
 		}
 	} else {
 		for i := len(k) + 1; i <= c.lvl+1; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
-			c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
+			c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
 		}
 	}
 	c.lvl = len(k)
@@ -1355,11 +1355,11 @@ func (c *StorageIHCursor) _next() (k, v []byte, err error) {
 func (c *StorageIHCursor) _unmarshal(k, v []byte) {
 	if c.lvl < len(k) {
 		for i := c.lvl + 1; i < len(k); i++ { // if first meet key is not 0 length, then nullify all shorter metadata
-			c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
+			c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
 		}
 	} else {
 		for i := len(k) + 1; i <= c.lvl+1; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
-			c.k[i], c.hasBranch[i], c.hasState[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0
+			c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i] = nil, 0, 0, 0, 0, 0
 		}
 	}
 
