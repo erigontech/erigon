@@ -205,9 +205,12 @@ the user's point of view.
   > and up to 21780 bytes for 64K page size. _LMDB_ allows key size up to
   > 511 bytes and may silently loses data with large values.
 
-2. Up to 20% faster than _LMDB_ in [CRUD](https://en.wikipedia.org/wiki/Create,_read,_update_and_delete) benchmarks.
+2. Up to 30% faster than _LMDB_ in [CRUD](https://en.wikipedia.org/wiki/Create,_read,_update_and_delete) benchmarks.
   > Benchmarks of the in-[tmpfs](https://en.wikipedia.org/wiki/Tmpfs) scenarios,
-  > that tests the speed of the engine itself, showned that _libmdbx_ 10-20% faster than _LMDB_.
+  > that tests the speed of the engine itself, showned that _libmdbx_ 10-20% faster than _LMDB_,
+  > and up to 30% faster when _libmdbx_ compiled with specific build options
+  > which downgrades several runtime checks to be match with LMDB behaviour.
+  >
   > These and other results could be easily reproduced with [ioArena](https://github.com/pmwkaa/ioarena) just by `make bench-quartet` command,
   > including comparisons with [RockDB](https://en.wikipedia.org/wiki/RocksDB)
   > and [WiredTiger](https://en.wikipedia.org/wiki/WiredTiger).
@@ -241,31 +244,32 @@ and/or optimize query execution plans.
 8. `mdbx_chk` utility for database integrity check.
 Since version 0.9.1, the utility supports checking the database using any of the three meta pages and the ability to switch to it.
 
-9. Automated steady sync-to-disk upon several thresholds and/or timeout via cheap polling.
+9. Support for opening databases in the exclusive mode, including on a network share.
 
-10. Sequence generation and three persistent 64-bit markers.
+10. Zero-length for keys and values.
 
-11. Handle-Slow-Readers callback to resolve a database full/overflow issues due to long-lived read transaction(s).
-
-12. Support for opening databases in the exclusive mode, including on a network share.
-
-## Added Abilities
-
-1. Zero-length for keys and values.
-
-2. Ability to determine whether the particular data is on a dirty page
+11. Ability to determine whether the particular data is on a dirty page
 or not, that allows to avoid copy-out before updates.
 
-3. Ability to determine whether the cursor is pointed to a key-value
-pair, to the first, to the last, or not set to anything.
-
-4. Extended information of whole-database, sub-databases, transactions, readers enumeration.
+12. Extended information of whole-database, sub-databases, transactions, readers enumeration.
   > _libmdbx_ provides a lot of information, including dirty and leftover pages
   > for a write transaction, reading lag and holdover space for read transactions.
 
-5. Extended update and delete operations.
+13. Extended update and delete operations.
   > _libmdbx_ allows one _at once_ with getting previous value
   > and addressing the particular item from multi-value with the same key.
+
+14. Useful runtime options for tuning engine to application's requirements and use cases specific.
+
+15. Automated steady sync-to-disk upon several thresholds and/or timeout via cheap polling.
+
+16. Sequence generation and three persistent 64-bit markers.
+
+17. Handle-Slow-Readers callback to resolve a database full/overflow issues due to long-lived read transaction(s).
+
+18. Ability to determine whether the cursor is pointed to a key-value
+pair, to the first, to the last, or not set to anything.
+
 
 ## Other fixes and specifics
 
@@ -482,8 +486,9 @@ and/or see the [mdbx.h](mdbx.h) header.
 Bindings
 ========
 
-| Runtime | GitHub | Author |
+| Runtime | Repo | Author |
 | ------- | ------ | ------ |
+| Go      | [mdbx-go](https://github.com/torquem-ch/mdbx-go) | [Alex Sharov](https://github.com/AskAlexSharov) |
 | [Nim](https://en.wikipedia.org/wiki/Nim_(programming_language)) | [NimDBX](https://github.com/snej/nimdbx) | [Jens Alfke](https://github.com/snej)
 | Rust    | [heed](https://github.com/Kerollmops/heed), [mdbx-rs](https://github.com/Kerollmops/mdbx-rs)   | [Clément Renault](https://github.com/Kerollmops) |
 | Java    | [mdbxjni](https://github.com/castortech/mdbxjni)   | [Castor Technologies](https://castortech.com/) |
