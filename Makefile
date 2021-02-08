@@ -113,7 +113,7 @@ ethdb/mdbx/dist/mdbx-static.o:
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
 test: ethdb/mdbx/dist/mdbx-static.o
-	TEST_DB=mdbx $(GOTEST)
+	$(GOTEST)
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
