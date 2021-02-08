@@ -579,9 +579,9 @@ func (r *RootHashAggregator) genStructStorage() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
-			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hashes == nil && rootHash == nil)
-			//}
+			if bytes.HasPrefix(r.currAccK, common.FromHex("00080a1f31c6963a2e4bec3f0437c9b918241e3e7b3a3ccc5413c22787862c000000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+				fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hashes == nil && rootHash == nil)
+			}
 			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
 		}
 		if r.hc == nil {
@@ -659,9 +659,9 @@ func (r *RootHashAggregator) genStructAccount() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
-			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hashes == nil && rootHash == nil)
-			//}
+			if bytes.HasPrefix(r.currAccK, common.FromHex("00080a1f31c6963a2e4bec3f0437c9b918241e3e7b3a3ccc5413c22787862c000000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+				fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hashes == nil && rootHash == nil)
+			}
 			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
 		}
 		if r.hc == nil {

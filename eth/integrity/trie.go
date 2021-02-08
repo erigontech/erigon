@@ -19,9 +19,8 @@ func AssertSubset(a, b uint16) {
 
 func Trie(tx ethdb.Tx) {
 	{
-		c := tx.Cursor(dbutils.TrieOfAccountsBucket)
+		c, parentC := tx.Cursor(dbutils.TrieOfAccountsBucket), tx.Cursor(dbutils.TrieOfAccountsBucket)
 		defer c.Close()
-		parentC := tx.Cursor(dbutils.TrieOfAccountsBucket)
 		defer parentC.Close()
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
@@ -62,9 +61,8 @@ func Trie(tx ethdb.Tx) {
 		}
 	}
 	{
-		c := tx.Cursor(dbutils.TrieOfStorageBucket)
+		c, parentC := tx.Cursor(dbutils.TrieOfStorageBucket), tx.Cursor(dbutils.TrieOfStorageBucket)
 		defer c.Close()
-		parentC := tx.Cursor(dbutils.TrieOfAccountsBucket)
 		defer parentC.Close()
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
