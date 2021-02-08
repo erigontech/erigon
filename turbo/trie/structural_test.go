@@ -448,11 +448,13 @@ func TestStorageOnly(t *testing.T) {
 			require.Equal(t, common.FromHex("0f0f0f090c010a0a050808040f010103000300010f06000f09080401090b090d040201070b0c040a0b06050a020907060b04010e090a00000b0b0c0e0a0e09080000000000000000000000000000000105000000"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0)), fmt.Sprintf("%b", hasBranch))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b000)), fmt.Sprintf("%b", hasBranch))
 			require.NotNil(t, hashes)
 		case 2:
 			require.Equal(t, common.FromHex("0f0f0f090c010a0a050808040f010103000300010f06000f09080401090b090d040201070b0c040a0b06050a020907060b04010e090a00000b0b0c0e0a0e090800000000000000000000000000000001"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasBranch))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasBranch))
 			require.NotNil(t, hashes)
 		case 3:
 			require.NoError(t, fmt.Errorf("not expected"))

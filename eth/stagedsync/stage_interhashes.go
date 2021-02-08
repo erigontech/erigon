@@ -563,7 +563,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 				return storageIHCollector.Collect(newK, nil)
 			}
 			if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
-				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)))
+				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %b, %d", hasHash, len(hashes)))
 			}
 			assertSubset(hasBranch, hasState)
 			assertSubset(hasHash, hasState)

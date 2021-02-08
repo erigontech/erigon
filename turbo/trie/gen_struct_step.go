@@ -17,7 +17,6 @@
 package trie
 
 import (
-	"bytes"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -147,18 +146,19 @@ func GenStructStep(
 		if !buildExtensions {
 			switch v := data.(type) {
 			case *GenStructStepHashData:
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("00090c08")) {
-					fmt.Printf("ih v.IsBranch before: %x, %t,%d,%d,%d,%b\n", curr, v.IsBranch, maxLen, remainderStart, precLen, hasBranch)
-				}
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				//	fmt.Printf("ih v.IsBranch before: %x,%d, %t,%d,%d,%d,%b\n", curr, len(curr)-1, v.IsBranch, maxLen, remainderStart, precLen, hasBranch)
+				//}
 				if maxLen > 0 {
-					hasBranch[len(curr)-1] |= (uint16(1) << curr[len(curr)-1])
+					//hasBranch[len(curr)-1] |= (uint16(1) << curr[len(curr)-1])
+					if v.IsBranch {
+						hasBranch[len(curr)-1] |= (uint16(1) << curr[len(curr)-1])
+						//hasBranch[maxLen-1] |= (uint16(1) << curr[maxLen-1])
+					}
 				}
-				if v.IsBranch {
-					hasBranch[maxLen] |= (uint16(1) << curr[maxLen])
-				}
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("00090c08")) {
-					fmt.Printf("ih v.IsBranch: %x,%x, %t,%b\n", curr, curr[:maxLen], v.IsBranch, hasBranch)
-				}
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				//	fmt.Printf("ih v.IsBranch: %x,%x, %t,%b\n", curr, curr[:maxLen], v.IsBranch, hasBranch)
+				//}
 				hasHash[maxLen] |= (uint16(1) << curr[maxLen])
 				/* building a hash */
 				if err := e.hash(v.Hash[:]); err != nil {
@@ -193,21 +193,17 @@ func GenStructStep(
 
 		if buildExtensions {
 			if remainderLen > 0 {
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("00090c08")) {
-					fmt.Printf("ext: %x->%x\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen])
-					if len(hasBranch) > 79 {
-						fmt.Printf("ext before: %b,%d,%d\n", hasBranch[80:], remainderStart+remainderLen, maxLen)
-					} else {
-						fmt.Printf("ext before: %b,%d,%d\n", hasBranch, remainderStart+remainderLen, maxLen)
-						fmt.Printf("ext decide: curr[remainderStart+remainderLen-1]=%x, hasBranch[remainderStart+remainderLen-1]=%b\n", curr[remainderStart+remainderLen-1], hasBranch[remainderStart+remainderLen-1])
-					}
-				}
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				//fmt.Printf("ext: %x->%x\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen])
+				//if len(hasBranch) > 79 {
+				//	fmt.Printf("ext before: %b,%d,%d\n", hasBranch[80:], remainderStart+remainderLen, maxLen)
+				//} else {
+				//	fmt.Printf("ext before: %b,%d,%d\n", hasBranch, remainderStart+remainderLen, maxLen)
+				//	fmt.Printf("ext decide: curr[remainderStart+remainderLen-1]=%x, hasBranch[remainderStart+remainderLen-1]=%b\n", curr[remainderStart+remainderLen-1], hasBranch[remainderStart+remainderLen-1])
+				//}
+				//}
 				if remainderStart > 0 {
 					if (uint16(1)<<curr[remainderStart+remainderLen-1])&hasBranch[remainderStart+remainderLen-1] != 0 {
-						if bytes.HasPrefix(curr[:maxLen], common.FromHex("00090c08")) {
-							fmt.Printf("ext set bit: %b,%d,remainderStart=%d\n", hasBranch[remainderStart-1], curr[remainderStart-1], remainderStart-1)
-						}
-
 						hasBranch[remainderStart-1] |= (uint16(1) << curr[remainderStart-1])
 					}
 					for i := remainderStart; i < len(hasBranch); i++ {
@@ -215,13 +211,13 @@ func GenStructStep(
 						hasHash[i] = 0
 					}
 				}
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("00090c08")) {
-					if len(hasBranch) > 79 {
-						fmt.Printf("ext after: %b\n", hasBranch[80:])
-					} else {
-						fmt.Printf("ext after: %b,%b,%d\n", hasBranch, groups, precLen)
-					}
-				}
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				//if len(hasBranch) > 79 {
+				//	fmt.Printf("ext after: %b\n", hasBranch[80:])
+				//} else {
+				//	fmt.Printf("ext after: %b,%b,%d\n", hasBranch, groups, precLen)
+				//}
+				//}
 				if trace {
 					fmt.Printf("Extension %x\n", curr[remainderStart:remainderStart+remainderLen])
 				}
@@ -248,38 +244,41 @@ func GenStructStep(
 			if maxLen > 0 {
 				hasHash[maxLen-1] |= (uint16(1) << curr[maxLen-1])
 				if hasBranch[maxLen] != 0 {
+					//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+					//fmt.Printf("whaaatw %b,\n", hasBranch)
+					//}
 					hasBranch[maxLen-1] |= (uint16(1) << curr[maxLen-1])
 				}
 
 				//hasBranch[succLen] |= (uint16(1) << curr[succLen])
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("00090c08")) {
-					if maxLen >= 79 {
-						fmt.Printf("set bit %x, %x, %b, %b\n", curr[:maxLen-1], curr[maxLen-1], hasBranch[maxLen-1], hasBranch[80:])
-					} else {
-						fmt.Printf("set bit %x, %x, %b, %b\n", curr[:maxLen-1], curr[maxLen-1], hasBranch[maxLen-1], hasBranch)
-					}
-				}
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				//if maxLen >= 79 {
+				//	fmt.Printf("set bit %x, %x, %b, %b\n", curr[:maxLen-1], curr[maxLen-1], hasBranch[maxLen-1], hasBranch[80:])
+				//} else {
+				//	fmt.Printf("set bit %x, %x, %b, %b\n", curr[:maxLen-1], curr[maxLen-1], hasBranch[maxLen-1], hasBranch)
+				//}
+				//}
 			}
-			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("05070202")) {
+			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e020507090f040a050b0e0105070504060504090206000f050503090c0c090404050f0a02060e07040a080b0b0603070004090f04030f0c010e0a0c02000000000000000000000000000000010c070b")) {
 			//if maxLen <= 3 {
-			//	e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
+			//e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
 			//}
 			if h != nil {
 				//if err := h(curr[:maxLen], 0, 0, nil, nil); err != nil {
 				//	return nil, nil, err
 				//}
 				//canSendHashes := bits.OnesCount16(hasBranch[maxLen]) > 1
-				canSendHashes := hasHash[maxLen] != 0
+				canSendHashes := hasHash[maxLen] != 0 || hasBranch[maxLen] != 0
 				if canSendHashes {
-					if bytes.HasPrefix(curr[:maxLen], common.FromHex("00090c08")) {
-						if len(hasBranch) > 80 {
-							fmt.Printf("why now: %x,%b,%t,%b\n", curr[:maxLen], hasBranch[80:], buildExtensions, groups[80:])
-							fmt.Printf("why now2: %d,%d,%d\n", maxLen, succLen, precLen)
-						} else {
-							fmt.Printf("why now: %x,%b,%t,%b\n", curr[:maxLen], hasBranch, buildExtensions, groups)
-							fmt.Printf("why now2: %d,%d,%d\n", maxLen, succLen, precLen)
-						}
-					}
+					//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+					//if len(hasBranch) > 80 {
+					//	fmt.Printf("why now: %x,%b,%t,%b\n", curr[:maxLen], hasBranch[80:], buildExtensions, groups[80:])
+					//	fmt.Printf("why now2: %d,%d,%d\n", maxLen, succLen, precLen)
+					//} else {
+					//	fmt.Printf("why now: %x,%b,%t,%b\n", curr[:maxLen], hasBranch, buildExtensions, groups)
+					//	fmt.Printf("why now2: %d,%d,%d\n", maxLen, succLen, precLen)
+					//}
+					//}
 					usefulHashes = e.topHashes(curr[:maxLen], hasHash[maxLen], groups[maxLen])
 					if maxLen != 0 && maxLen != 80 {
 						hasBranch[maxLen-1] |= (uint16(1) << curr[maxLen-1])
@@ -301,7 +300,7 @@ func GenStructStep(
 			if h != nil && maxLen == 80 {
 				//if hasBranch[maxLen] != 0 { //todo: remove this if check
 				//if bits.OnesCount16(hasBranch[maxLen]) > 1 { //todo: remove this if check
-				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("03050b05000e070602010205080005090508060f0701070c0a000f000507080f0106060f08030c08030101050e090d07090608080003050f04060606080d0a0100090c0800090c0800090c0800090c0800090c0800090c0800090c080001")) {
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("03050b05000e070602010205080005090508060f0701070c0a000f000507080f0106060f08030c08030101050e090d07090608080003050f04060606080d0a01060e060e060e060e060e060e060e0001")) {
 				//	fmt.Printf("root: %x\n", curr[:maxLen])
 				//}
 				if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, e.topHash()); err != nil {
@@ -326,13 +325,13 @@ func GenStructStep(
 		}
 		// Identify preceding key for the buildExtensions invocation
 
-		//if bytes.HasPrefix(curr[:maxLen], common.FromHex("00090c08")) {
+		//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
 		//	fmt.Printf("cut: %x\n", curr[:maxLen])
 		//}
 		curr = curr[:precLen]
 		for len(groups) > 0 && groups[len(groups)-1] == 0 {
 			groups = groups[:len(groups)-1]
-			//if bytes.HasPrefix(curr, common.FromHex("00090c08")) {
+			//if bytes.HasPrefix(curr, common.FromHex("060e")) {
 			//	fmt.Printf("cut: %b,%b\n", hasBranch, groups)
 			//}
 			//hasBranch = hasBranch[:len(hasBranch)-1]

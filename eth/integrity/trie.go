@@ -86,8 +86,11 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				if err != nil {
 					panic(err)
 				}
+				if k2 == nil {
+					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db; last seen key: %x->nil", k, hasBranch, i, seek))
+				}
 				if !bytes.HasPrefix(k2, seek) {
-					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db", k, hasBranch, i))
+					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db; last seen key: %x->%x", k, hasBranch, i, seek, k2))
 				}
 			}
 		}
