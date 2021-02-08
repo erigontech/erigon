@@ -1266,14 +1266,14 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 		return k, v[from-to:], nil
 	}
 
-	_, v, err := c.set(key)
+	k, v, err := c.set(key)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, err
 	}
-	return []byte{}, v, nil
+	return k, v, nil
 }
 
 // Append - speedy feature of mdbx which is not part of KV interface.
