@@ -363,14 +363,14 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	if storageKey == nil {
-		//if bytes.HasPrefix(accountKey, common.FromHex("00090c08")) {
-		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-		//}
+		if bytes.HasPrefix(accountKey, common.FromHex("00090c08")) {
+			fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+		}
 	} else {
 		hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
 		//if bytes.HasPrefix(r.currAccK, common.FromHex("4979")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
 		//fmt.Printf("%x\n", storageKey)
-		fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+		//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
 		//}
 	}
 	switch itemType {
@@ -788,7 +788,6 @@ func (c *IHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 	}
 	if c._hasHash() {
 		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-		fmt.Printf("canUse: %x\n", c.kBuf)
 		if c.canUse(c.kBuf) {
 			c.cur = append(c.cur[:0], c.kBuf...)
 			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()

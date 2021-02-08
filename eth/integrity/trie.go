@@ -1,6 +1,7 @@
 package integrity
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/bits"
@@ -60,6 +61,9 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				}
 				if kParent == nil {
 					continue
+				}
+				if bytes.HasPrefix(k, common.FromHex("00090c08")) {
+					fmt.Printf("k: %x, parent: %x, %d,%d\n", k, kParent, len(kParent), len(vParent))
 				}
 				found = true
 				parentHasBranch := binary.BigEndian.Uint16(vParent[2:])
