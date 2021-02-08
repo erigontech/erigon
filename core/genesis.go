@@ -178,7 +178,6 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 		}
 		return genesis.Config, block.Hash(), stateDB1, nil
 	}
-
 	// Check whether the genesis block is already written.
 	if genesis != nil {
 		block, stateDB1, _, err := genesis.ToBlock(nil, history)
@@ -190,7 +189,6 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 			return genesis.Config, block.Hash(), stateDB1, &GenesisMismatchError{stored, hash}
 		}
 	}
-
 	// Get the existing chain configuration.
 	newcfg := genesis.configOrDefault(stored)
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
@@ -214,7 +212,6 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 	if genesis == nil && stored != params.MainnetGenesisHash {
 		return storedcfg, stored, stateDB, nil
 	}
-
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
 	height := rawdb.ReadHeaderNumber(db, rawdb.ReadHeadHeaderHash(db))
