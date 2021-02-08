@@ -18,6 +18,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -604,12 +605,38 @@ func (tx *MdbxTx) Commit(ctx context.Context) error {
 		}
 	}()
 	tx.closeCursors()
+
+	if debug.EnabledTxInfo() {
+		res, err := tx.tx.Info(true)
+		if err != nil {
+			return err
+		}
+
+		log.Info("Tx info",
+			"id", res.Id,
+			"read_lag", res.ReadLag,
+			"space_used", res.SpaceUsed,
+			"space_retired", res.SpaceRetired,
+			"space_dirty", res.SpaceDirty,
+			"callers", debug.Callers(10),
+		)
+	}
+
 	latency, err := tx.tx.Commit()
 	if err != nil {
 		return err
 	}
+
 	if latency.Whole > 20*time.Second {
-		log.Info("Commit", "preparation", latency.Preparation, "gc", latency.GC, "audit", latency.Audit, "write", latency.Write, "fsync", latency.Sync, "ending", latency.Ending, "whole", latency.Whole)
+		log.Info("Commit",
+			"preparation", latency.Preparation,
+			"gc", latency.GC,
+			"audit", latency.Audit,
+			"write", latency.Write,
+			"fsync", latency.Sync,
+			"ending", latency.Ending,
+			"whole", latency.Whole,
+		)
 	}
 
 	return nil

@@ -56,3 +56,18 @@ func TestDB() string {
 	})
 	return testDB
 }
+
+var (
+	debugTxInfo    bool
+	getDebugTxInfo sync.Once
+)
+
+func EnabledTxInfo() bool {
+	getDebugTxInfo.Do(func() {
+		v, _ := os.LookupEnv("DEBUG_TX_INFO")
+		if v != "" {
+			debugTxInfo = true
+		}
+	})
+	return debugTxInfo
+}
