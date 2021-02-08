@@ -30,6 +30,7 @@ type StreamReceiver interface {
 		accountValue *accounts.Account,
 		storageValue []byte,
 		hash []byte,
+		hasBranch bool,
 		cutoff int,
 	) error
 
@@ -419,6 +420,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 	accountValue *accounts.Account,
 	storageValue []byte,
 	hash []byte,
+	hasBranch bool,
 	cutoff int,
 ) error {
 	switch itemType {
@@ -634,7 +636,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 
 		}
 		if fstl.itemPresent {
-			if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKey, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff); err != nil {
+			if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKey, &fstl.accountValue, fstl.storageValue, fstl.hashValue, false, fstl.streamCutoff); err != nil {
 				return SubTries{}, err
 			}
 			fstl.itemPresent = false

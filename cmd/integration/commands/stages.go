@@ -409,21 +409,25 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 func stageIHash(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	if err := migrations.NewMigrator().Apply(db, tmpdir); err != nil {
-		panic(err)
-	}
+	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+	defer tx.Rollback()
 
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
-
-	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	cc, bc, _, progress := newSync(ctx.Done(), db, tx, nil)
 	defer bc.Stop()
+	cc.SetDB(tx)
+
+	var err1 error
+	tx, err1 = tx.Begin(ctx, ethdb.RW)
+	if err1 != nil {
+		return err1
+	}
 
 	if reset {
-		if err := stagedsync.ResetIH(db); err != nil {
+		if err := stagedsync.ResetIH(tx); err != nil {
 			return err
+		}
+		if _, err := tx.Commit(); err != nil {
+			panic(err)
 		}
 		return nil
 	}
@@ -440,17 +444,21 @@ func stageIHash(db ethdb.Database, ctx context.Context) error {
 	if cacheSize > 0 {
 		cache = shards.NewStateCache(32, cacheSize)
 	}
+
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
-		if err = stagedsync.UnwindIntermediateHashesStage(u, stage5, db, cache, tmpdir, ch); err != nil {
+		if err := stagedsync.UnwindIntermediateHashesStage(u, stage5, tx, cache, tmpdir, ch); err != nil {
 			return err
 		}
-		return nil
+	} else {
+		if err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, true /* checkRoot */, cache, tmpdir, ch); err != nil {
+			return err
+		}
 	}
-	if err = stagedsync.SpawnIntermediateHashesStage(stage5, db, true /* checkRoot */, cache, tmpdir, ch); err != nil {
-		return err
+	integrity.Trie(tx.(ethdb.HasTx).Tx())
+	if _, err := tx.Commit(); err != nil {
+		panic(err)
 	}
-	integrity.Trie(db)
 	return nil
 }
 

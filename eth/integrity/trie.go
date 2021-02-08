@@ -2,7 +2,6 @@ package integrity
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math/bits"
 
@@ -18,80 +17,93 @@ func AssertSubset(a, b uint16) {
 	}
 }
 
-func Trie(db ethdb.Database) {
-	if err := db.Walk(dbutils.TrieOfAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
-		if len(k) == 1 {
-			return true, nil
-		}
-		hasState := binary.BigEndian.Uint16(v)
-		hasBranch := binary.BigEndian.Uint16(v[2:])
-		hasHash := binary.BigEndian.Uint16(v[4:])
-		AssertSubset(hasBranch, hasState)
-		AssertSubset(hasHash, hasState)
-		if bits.OnesCount16(hasHash) != len(v[6:])/common.HashLength {
-			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/common.HashLength))
-		}
-		found := false
-		for parentK := k[:len(k)-1]; len(parentK) > 0; parentK = parentK[:len(parentK)-1] {
-			parent, err := db.Get(dbutils.TrieOfAccountsBucket, parentK)
+func Trie(tx ethdb.Tx) {
+	{
+		c := tx.Cursor(dbutils.TrieOfAccountsBucket)
+		defer c.Close()
+		parentC := tx.Cursor(dbutils.TrieOfAccountsBucket)
+		defer parentC.Close()
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
-				if errors.Is(err, ethdb.ErrKeyNotFound) {
-					continue
-				}
-				return false, err
-			}
-			found = true
-			parentHasBranch := binary.BigEndian.Uint16(parent[2:])
-			parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentHasBranch != 0
-			if !parentHasBit {
-				panic(fmt.Errorf("for %x found parent %x, but it has no branchBit: %016b", k, parentK, parentHasBranch))
-			}
-		}
-		if !found {
-			return true, fmt.Errorf("trie hash %x has no parent", k)
-		}
-
-		return true, nil
-	}); err != nil {
-		panic(err)
-	}
-	if err := db.Walk(dbutils.TrieOfStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
-		if len(k) == 40 {
-			return true, nil
-		}
-		hasState := binary.BigEndian.Uint16(v)
-		hasBranch := binary.BigEndian.Uint16(v[2:])
-		hasHash := binary.BigEndian.Uint16(v[4:])
-		AssertSubset(hasBranch, hasState)
-		AssertSubset(hasHash, hasState)
-		if bits.OnesCount16(hasHash) != len(v[6:])/common.HashLength {
-			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/common.HashLength))
-		}
-
-		found := false
-		parentK := k
-		for i := len(k) - 1; i >= 40; i-- {
-			parentK = k[:i]
-			parent, err := db.Get(dbutils.TrieOfStorageBucket, parentK)
-			if err != nil {
-				if errors.Is(err, ethdb.ErrKeyNotFound) {
-					continue
-				}
 				panic(err)
 			}
-			found = true
-			parentBranches := binary.BigEndian.Uint16(parent[2:])
-			parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentBranches != 0
-			if !parentHasBit {
-				panic(fmt.Errorf("for %x found parent %x, but it has no branchBit for child: %016b", k, parentK, parentBranches))
+			if len(k) == 1 {
+				continue
+			}
+			hasState := binary.BigEndian.Uint16(v)
+			hasBranch := binary.BigEndian.Uint16(v[2:])
+			hasHash := binary.BigEndian.Uint16(v[4:])
+			AssertSubset(hasBranch, hasState)
+			AssertSubset(hasHash, hasState)
+			if bits.OnesCount16(hasHash) != len(v[6:])/common.HashLength {
+				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/common.HashLength))
+			}
+			found := false
+			var parentK []byte
+			for i := len(k) - 1; i > 0; i-- {
+				parentK = k[:i]
+				kParent, vParent, err := parentC.SeekExact(parentK)
+				if err != nil {
+					panic(err)
+				}
+				if kParent == nil {
+					continue
+				}
+				found = true
+				parentHasBranch := binary.BigEndian.Uint16(vParent[2:])
+				parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentHasBranch != 0
+				if !parentHasBit {
+					panic(fmt.Errorf("for %x found parent %x, but it has no branchBit: %016b", k, parentK, parentHasBranch))
+				}
+			}
+			if !found {
+				panic(fmt.Errorf("trie hash %x has no parent", k))
 			}
 		}
-		if !found {
-			panic(fmt.Errorf("trie hash %x has no parent. Last checked: %x", k, parentK))
-		}
+	}
+	{
+		c := tx.Cursor(dbutils.TrieOfStorageBucket)
+		defer c.Close()
+		parentC := tx.Cursor(dbutils.TrieOfAccountsBucket)
+		defer parentC.Close()
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				panic(err)
+			}
+			if len(k) == 40 {
+				continue
+			}
+			hasState := binary.BigEndian.Uint16(v)
+			hasBranch := binary.BigEndian.Uint16(v[2:])
+			hasHash := binary.BigEndian.Uint16(v[4:])
+			AssertSubset(hasBranch, hasState)
+			AssertSubset(hasHash, hasState)
+			if bits.OnesCount16(hasHash) != len(v[6:])/common.HashLength {
+				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/common.HashLength))
+			}
 
-		return true, nil
-	}); err != nil {
-		panic(err)
+			found := false
+			var parentK []byte
+			for i := len(k) - 1; i >= 40; i-- {
+				parentK = k[:i]
+				kParent, vParent, err := parentC.SeekExact(parentK)
+				fmt.Printf("qaa: %x,%x\n", kParent, vParent)
+				if err != nil {
+					panic(err)
+				}
+				if kParent == nil {
+					continue
+				}
+				found = true
+				parentBranches := binary.BigEndian.Uint16(vParent[2:])
+				parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentBranches != 0
+				if !parentHasBit {
+					panic(fmt.Errorf("for %x found parent %x, but it has no branchBit for child: %016b", k, parentK, parentBranches))
+				}
+			}
+			if !found {
+				panic(fmt.Errorf("trie hash %x has no parent. Last checked: %x", k, parentK))
+			}
+		}
 	}
 }

@@ -144,7 +144,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	} else if backward {
 		stopAt = 1
 	}
-	integrity.Trie(tx)
+	integrity.Trie(tx.(ethdb.HasTx).Tx())
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -204,7 +204,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 			return err
 		}
 
-		integrity.Trie(tx)
+		integrity.Trie(tx.(ethdb.HasTx).Tx())
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}
@@ -401,10 +401,4 @@ func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) er
 	}
 
 	return nil
-}
-
-func assertSubset(a, b uint16) {
-	if (a & b) != a { // a & b == a - checks whether a is subset of b
-		panic(fmt.Errorf("invariant 'is subset' failed: %b, %b", a, b))
-	}
 }
