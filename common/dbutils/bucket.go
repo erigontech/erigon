@@ -279,7 +279,6 @@ const (
 	ReverseKey BucketFlags = 0x02
 	DupSort    BucketFlags = 0x04
 	IntegerKey BucketFlags = 0x08
-	DupFixed   BucketFlags = 0x10
 	IntegerDup BucketFlags = 0x20
 	ReverseDup BucketFlags = 0x40
 )
@@ -299,7 +298,6 @@ type BucketConfigItem struct {
 	// Works only if AutoDupSortKeysConversion enabled
 	DupFromLen          int
 	DupToLen            int
-	DupFixedSize        int
 	CustomComparator    CustomComparator
 	CustomDupComparator CustomComparator
 }

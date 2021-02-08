@@ -477,10 +477,6 @@ func (tx *lmdbTx) CreateBucket(name string) error {
 		nativeFlags |= lmdb.DupSort
 		flags ^= dbutils.DupSort
 	}
-	if flags&dbutils.DupFixed != 0 {
-		nativeFlags |= lmdb.DupFixed
-		flags ^= dbutils.DupFixed
-	}
 
 	if flags != 0 {
 		return fmt.Errorf("some not supported flag provided for bucket")
@@ -767,10 +763,6 @@ func (tx *lmdbTx) Cursor(bucket string) Cursor {
 		return tx.stdCursor(bucket)
 	}
 
-	if b.Flags&dbutils.DupFixed != 0 {
-		return tx.CursorDupFixed(bucket)
-	}
-
 	if b.Flags&dbutils.DupSort != 0 {
 		return tx.CursorDupSort(bucket)
 	}
@@ -786,11 +778,6 @@ func (tx *lmdbTx) stdCursor(bucket string) Cursor {
 func (tx *lmdbTx) CursorDupSort(bucket string) CursorDupSort {
 	basicCursor := tx.stdCursor(bucket).(*LmdbCursor)
 	return &LmdbDupSortCursor{LmdbCursor: basicCursor}
-}
-
-func (tx *lmdbTx) CursorDupFixed(bucket string) CursorDupFixed {
-	basicCursor := tx.CursorDupSort(bucket).(*LmdbDupSortCursor)
-	return &LmdbDupFixedCursor{LmdbDupSortCursor: basicCursor}
 }
 
 func (tx *lmdbTx) CHandle() unsafe.Pointer {
@@ -1605,62 +1592,4 @@ func (c *LmdbDupSortCursor) CountDuplicates() (uint64, error) {
 		return 0, fmt.Errorf("in CountDuplicates: %w", err)
 	}
 	return res, nil
-}
-
-type LmdbDupFixedCursor struct {
-	*LmdbDupSortCursor
-}
-
-func (c *LmdbDupFixedCursor) initCursor() error {
-	if c.c != nil {
-		return nil
-	}
-
-	if c.bucketCfg.Flags&lmdb.DupFixed == 0 {
-		return fmt.Errorf("class LmdbDupSortCursor can be used only if bucket created with flag lmdb.DupSort")
-	}
-
-	return c.LmdbCursor.initCursor()
-}
-
-func (c *LmdbDupFixedCursor) GetMulti() ([]byte, error) {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return nil, err
-		}
-	}
-	_, v, err := c.c.Get(nil, nil, lmdb.GetMultiple)
-	if err != nil {
-		if lmdb.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return v, nil
-}
-
-func (c *LmdbDupFixedCursor) NextMulti() ([]byte, []byte, error) {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return []byte{}, nil, err
-		}
-	}
-	k, v, err := c.c.Get(nil, nil, lmdb.NextMultiple)
-	if err != nil {
-		if lmdb.IsNotFound(err) {
-			return nil, nil, nil
-		}
-		return []byte{}, nil, err
-	}
-	return k, v, nil
-}
-
-func (c *LmdbDupFixedCursor) PutMulti(key []byte, page []byte, stride int) error {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return err
-		}
-	}
-
-	return c.c.PutMulti(key, page, stride, 0)
 }
