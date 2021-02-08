@@ -455,7 +455,7 @@ func stageIHash(db ethdb.Database, ctx context.Context) error {
 			return err
 		}
 	}
-	integrity.Trie(tx.(ethdb.HasTx).Tx())
+	integrity.Trie(tx.(ethdb.HasTx).Tx(), ch)
 	if _, err := tx.Commit(); err != nil {
 		panic(err)
 	}

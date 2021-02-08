@@ -978,7 +978,7 @@ func TestIHCursor(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	integrity.Trie(tx)
+	integrity.Trie(tx, nil)
 
 	cursor := tx.Cursor(dbutils.TrieOfAccountsBucket)
 	rl := NewRetainList(0)

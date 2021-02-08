@@ -144,7 +144,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	} else if backward {
 		stopAt = 1
 	}
-	integrity.Trie(tx.(ethdb.HasTx).Tx())
+	integrity.Trie(tx.(ethdb.HasTx).Tx(), ch)
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -204,7 +204,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 			return err
 		}
 
-		integrity.Trie(tx.(ethdb.HasTx).Tx())
+		integrity.Trie(tx.(ethdb.HasTx).Tx(), ch)
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}

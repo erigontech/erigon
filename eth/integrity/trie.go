@@ -4,10 +4,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/bits"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 // AssertSubset a & b == a - checks whether a is subset of b
@@ -17,7 +19,10 @@ func AssertSubset(a, b uint16) {
 	}
 }
 
-func Trie(tx ethdb.Tx) {
+func Trie(tx ethdb.Tx, quit <-chan struct{}) {
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+
 	{
 		c, parentC := tx.Cursor(dbutils.TrieOfAccountsBucket), tx.Cursor(dbutils.TrieOfAccountsBucket)
 		defer c.Close()
@@ -29,6 +34,14 @@ func Trie(tx ethdb.Tx) {
 			if len(k) == 1 {
 				continue
 			}
+			select {
+			default:
+			case <-quit:
+				return
+			case <-logEvery.C:
+				log.Info("trie account integrity", "key", k)
+			}
+
 			hasState := binary.BigEndian.Uint16(v)
 			hasBranch := binary.BigEndian.Uint16(v[2:])
 			hasHash := binary.BigEndian.Uint16(v[4:])
@@ -71,6 +84,14 @@ func Trie(tx ethdb.Tx) {
 			if len(k) == 40 {
 				continue
 			}
+			select {
+			default:
+			case <-quit:
+				return
+			case <-logEvery.C:
+				log.Info("trie storage integrity", "key", k)
+			}
+
 			hasState := binary.BigEndian.Uint16(v)
 			hasBranch := binary.BigEndian.Uint16(v[2:])
 			hasHash := binary.BigEndian.Uint16(v[4:])
@@ -85,7 +106,6 @@ func Trie(tx ethdb.Tx) {
 			for i := len(k) - 1; i >= 40; i-- {
 				parentK = k[:i]
 				kParent, vParent, err := parentC.SeekExact(parentK)
-				fmt.Printf("qaa: %x,%x\n", kParent, vParent)
 				if err != nil {
 					panic(err)
 				}
