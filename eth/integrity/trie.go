@@ -53,7 +53,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			}
 			found := false
 			var parentK []byte
-			for i := len(k) - 1; i > 0; i-- {
+			for i := len(k) - 1; i > 0 && !found; i-- {
 				parentK = k[:i]
 				kParent, vParent, err := parentC.SeekExact(parentK)
 				if err != nil {
@@ -107,7 +107,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 
 			found := false
 			var parentK []byte
-			for i := len(k) - 1; i >= 40; i-- {
+			for i := len(k) - 1; i >= 40 && !found; i-- {
 				parentK = k[:i]
 				kParent, vParent, err := parentC.SeekExact(parentK)
 				if err != nil {
