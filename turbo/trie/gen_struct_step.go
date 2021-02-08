@@ -182,7 +182,7 @@ func GenStructStep(
 
 		if buildExtensions {
 			if remainderLen > 0 {
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("04090709")) {
+				if bytes.HasPrefix(curr[:maxLen], common.FromHex("0000")) {
 					fmt.Printf("ext: %x->%x\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen])
 					if len(hasBranch) > 79 {
 						fmt.Printf("ext before: %b,%d,%d\n", hasBranch[80:], remainderStart+remainderLen, maxLen)
@@ -200,7 +200,7 @@ func GenStructStep(
 						hasHash[i] = 0
 					}
 				}
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("04090709")) {
+				if bytes.HasPrefix(curr[:maxLen], common.FromHex("0000")) {
 					if len(hasBranch) > 79 {
 						fmt.Printf("ext after: %b\n", hasBranch[80:])
 					} else {
@@ -237,7 +237,7 @@ func GenStructStep(
 				}
 
 				//hasBranch[succLen] |= (uint16(1) << curr[succLen])
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("04090709")) {
+				if bytes.HasPrefix(curr[:maxLen], common.FromHex("0000")) {
 					fmt.Printf("aa:%d,%d,%d", maxLen, succLen, precLen)
 					if maxLen >= 79 {
 						fmt.Printf("set bit %x, %x, %b, %b\n", curr[:maxLen-1], curr[maxLen-1], hasBranch[maxLen-1], hasBranch[80:])
@@ -257,7 +257,7 @@ func GenStructStep(
 				//canSendHashes := bits.OnesCount16(hasBranch[maxLen]) > 1
 				canSendHashes := hasHash[maxLen] != 0
 				if canSendHashes {
-					if bytes.HasPrefix(curr[:maxLen], common.FromHex("04090709")) {
+					if bytes.HasPrefix(curr[:maxLen], common.FromHex("0000")) {
 						if len(hasBranch) > 80 {
 							fmt.Printf("why now: %x,%b,%t,%b\n", curr[:maxLen], hasBranch[80:], buildExtensions, groups[80:])
 							fmt.Printf("why now2: %d,%d,%d\n", maxLen, succLen, precLen)
@@ -312,13 +312,13 @@ func GenStructStep(
 		}
 		// Identify preceding key for the buildExtensions invocation
 
-		if bytes.HasPrefix(curr[:maxLen], common.FromHex("04090709")) {
+		if bytes.HasPrefix(curr[:maxLen], common.FromHex("0000")) {
 			fmt.Printf("cut: %x\n", curr[:maxLen])
 		}
 		curr = curr[:precLen]
 		for len(groups) > 0 && groups[len(groups)-1] == 0 {
 			groups = groups[:len(groups)-1]
-			if bytes.HasPrefix(curr, common.FromHex("04090709")) {
+			if bytes.HasPrefix(curr, common.FromHex("0000")) {
 				fmt.Printf("cut: %b,%b\n", hasBranch, groups)
 			}
 			//hasBranch = hasBranch[:len(hasBranch)-1]

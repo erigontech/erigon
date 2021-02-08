@@ -31,6 +31,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -954,8 +955,8 @@ func TestIHCursor(t *testing.T) {
 	hash := common.HexToHash(fmt.Sprintf("%064d", 0))
 
 	put := func(k string, hasState, hasBranch, hasHash uint16, hashes []common.Hash) {
-		assertSubset(hasBranch, hasState)
-		assertSubset(hasHash, hasState)
+		integrity.AssertSubset(hasBranch, hasState)
+		integrity.AssertSubset(hasHash, hasState)
 		_ = db.Put(dbutils.TrieOfAccountsBucket, common.FromHex(k), MarshalIH(hasState, hasBranch, hasHash, hashes))
 	}
 
@@ -968,9 +969,12 @@ func TestIHCursor(t *testing.T) {
 	put("03000e", 0b0000000000000001, 0b0000000000000001, 0b0000000000000001, []common.Hash{hash})
 	put("03000e000000", 0b0000000000000100, 0b0000000000000000, 0b0000000000000100, []common.Hash{hash})
 	put("03000e00000e", 0b0000000000000100, 0b0000000000000000, 0b0000000000000100, []common.Hash{hash})
+	put("05", 0b0000000000000001, 0b0000000000000001, 0b0000000000000001, []common.Hash{hash})
 	put("050001", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
 	put("05000f", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
 	put("06", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
+
+	integrity.Trie(db)
 
 	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
 	require.NoError(err)
@@ -983,6 +987,7 @@ func TestIHCursor(t *testing.T) {
 	rl.AddHex(common.FromHex("030000"))
 	rl.AddHex(common.FromHex("03000e"))
 	rl.AddHex(common.FromHex("03000e00"))
+	rl.AddHex(common.FromHex("0500"))
 	var filter = func(prefix []byte) bool { return !rl.Retain(prefix) }
 	ih := IH(filter, func(keyHex []byte, _, _, _ uint16, hashes, rootHash []byte) error {
 		return nil

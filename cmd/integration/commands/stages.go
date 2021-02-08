@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -449,7 +450,7 @@ func stageIHash(db ethdb.Database, ctx context.Context) error {
 	if err = stagedsync.SpawnIntermediateHashesStage(stage5, db, true /* checkRoot */, cache, tmpdir, ch); err != nil {
 		return err
 	}
-	checkIH(db)
+	integrity.Trie(db)
 	return nil
 }
 

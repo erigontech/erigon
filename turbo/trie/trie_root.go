@@ -360,15 +360,15 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	if storageKey == nil {
-		if bytes.HasPrefix(accountKey, common.FromHex("04090709")) {
-			fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-		}
+		//if bytes.HasPrefix(accountKey, common.FromHex("04090709")) {
+		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+		//}
 	} else {
 		hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
-		if bytes.HasPrefix(r.currAccK, common.FromHex("4979")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
-			//fmt.Printf("%x\n", storageKey)
-			fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
-		}
+		//if bytes.HasPrefix(r.currAccK, common.FromHex("4979")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
+		//fmt.Printf("%x\n", storageKey)
+		fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+		//}
 	}
 	switch itemType {
 	case StorageStreamItem:
@@ -738,7 +738,7 @@ func (c *IHCursor) AtPrefix(prefix []byte) (k, v []byte, err error) {
 	c.prev = append(c.prev[:0], c.cur...)
 	c.prefix = prefix
 	c.seek = prefix
-	ok, err := c._seek(prefix)
+	ok, err := c._seek(prefix, prefix)
 	if err != nil {
 		return []byte{}, nil, err
 	}
@@ -781,6 +781,7 @@ func (c *IHCursor) Next() (k, v []byte, err error) {
 	}
 	if c._hasHash() {
 		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+		fmt.Printf("canUse: %x\n", c.kBuf)
 		if c.canUse(c.kBuf) {
 			c.cur = append(c.cur[:0], c.kBuf...)
 			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
@@ -796,10 +797,10 @@ func (c *IHCursor) Next() (k, v []byte, err error) {
 	return c._next()
 }
 
-func (c *IHCursor) _seek(prefix []byte) (bool, error) {
+func (c *IHCursor) _seek(seek []byte, prefix []byte) (bool, error) {
 	var k, v []byte
 	var err error
-	if len(prefix) == 0 {
+	if len(seek) == 0 {
 		k, v, err = c.c.First()
 	} else {
 		// optimistic .Next call, can use result in 2 cases:
@@ -812,20 +813,20 @@ func (c *IHCursor) _seek(prefix []byte) (bool, error) {
 		//}
 		//if len(k) > c.lvl && c.childID[c.lvl] > int16(bits.TrailingZeros16(c.hasBranch[c.lvl])) {
 		//	c.is++
-		k, v, err = c.c.Seek(prefix)
+		k, v, err = c.c.Seek(seek)
 		//}
-		//fmt.Printf("_seek1: %x ->%x,%b\n", prefix, k, c.hasBranch[c.lvl])
+		fmt.Printf("_seek1: %x ->%x,%b\n", seek, k, c.hasBranch[c.lvl])
 	}
 	if err != nil {
 		return false, err
 	}
 	if k == nil || !bytes.HasPrefix(k, prefix) {
-		//fmt.Printf("_seek2: %x ->%x\n", prefix, k)
+		fmt.Printf("_seek2: %x ->%x\n", prefix, k)
 		return false, nil
 	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
-	//fmt.Printf("_seek3: %x ->%x, %x, %x\n", prefix, k, c.k, c.childID)
+	fmt.Printf("_seek3: %x ->%x, %x, %x\n", prefix, k, c.k, c.childID)
 	return true, nil
 }
 
@@ -833,7 +834,7 @@ func (c *IHCursor) _seek(prefix []byte) (bool, error) {
 func (c *IHCursor) _nextItem() error {
 	if c._hasBranch() {
 		c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-		ok, err := c._seek(c.next)
+		ok, err := c._seek(c.next, c.next)
 		if err != nil {
 			return err
 		}
@@ -858,32 +859,60 @@ func (c *IHCursor) _nextSibling() error {
 }
 
 func (c *IHCursor) _nextSiblingInMem() bool {
-	//fmt.Printf("_nextSiblingInMem: %d, %x, %x\n", c.lvl, c.k, c.childID)
+	//fmt.Printf("_nextSiblingInMem: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	for c.childID[c.lvl]++; c.childID[c.lvl] < 16; c.childID[c.lvl]++ {
 		if ((uint16(1) << c.childID[c.lvl]) & c.hasHash[c.lvl]) != 0 {
 			c.hashID[c.lvl]++
+			//fmt.Printf("_nextSiblingInMem2: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 			return true
 		}
 		if ((uint16(1) << c.childID[c.lvl]) & c.hasBranch[c.lvl]) != 0 {
+			//fmt.Printf("_nextSiblingInMem3: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 			return true
 		}
 
 		c.skipState = c.skipState && ((uint16(1)<<c.childID[c.lvl])&c.hasState[c.lvl]) == 0
 	}
-	//fmt.Printf("_nextSiblingInMem2: %d, %x, %x\n", c.lvl, c.k, c.childID)
+	//fmt.Printf("_nextSiblingInMem4: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	return false
 }
 
 func (c *IHCursor) _nextSiblingOfParentInMem() bool {
+	//fmt.Printf("_nextSiblingOfParentInMem: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	for c.lvl > 1 {
+		//fmt.Printf("_nextSiblingOfParentInMem2: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 		if c.k[c.lvl-1] == nil {
-			return false
+			nonNilLvl := c.lvl - 1
+			for ; c.k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
+			}
+			//fmt.Printf("nonNilLvl: %d-%d\n", nonNilLvl, c.lvl)
+			c.next = append(append(c.next[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+			c.kBuf = append(append(c.kBuf[:0], c.k[nonNilLvl]...), uint8(c.childID[nonNilLvl]))
+			//fmt.Printf("seeeek aa: %x\n", c.k[c.lvl])
+			//fmt.Printf("seeeek bb: %x\n", c.k[nonNilLvl])
+			ok, err := c._seek(c.next, c.kBuf)
+			if err != nil {
+				panic(err)
+			}
+			//fmt.Printf("seeeek: %x,%x,%x,%x\n", c.next, c.kBuf, c.k[c.lvl], c.childID[c.lvl])
+			if ok {
+				//fmt.Printf("_nextSiblingOfParentInMem32: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
+				return true
+			}
+
+			c.lvl = nonNilLvl + 1
+			continue
+			//fmt.Printf("_nextSiblingOfParentInMem3: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
+			//return false
 		}
 		c.lvl--
 		if c._nextSiblingInMem() {
+			//fmt.Printf("_nextSiblingOfParentInMem4: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 			return true
 		}
+		//fmt.Printf("_nextSiblingOfParentInMem5: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	}
+	//fmt.Printf("_nextSiblingOfParentInMem6: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	return false
 }
 
@@ -922,7 +951,9 @@ func (c *IHCursor) _nextSiblingInDB() error {
 	if err != nil {
 		return err
 	}
+	//fmt.Printf("_nextSiblingInDB: seek=%x, k=%x\n", c.next, k)
 	if k == nil || !bytes.HasPrefix(k, c.prefix) {
+		//fmt.Printf("_nextSiblingInDB: seek=%x, k=%x\n", c.next, k)
 		c.k[c.lvl] = nil
 		return nil
 	}
@@ -2024,10 +2055,4 @@ func (l *FlatDBTrieLoader) CalcTrieRootOnCache(cache *shards.StateCache) (common
 		return EmptyRoot, err
 	}
 	return l.receiver.Root(), nil
-}
-
-func assertSubset(a, b uint16) {
-	if (a & b) != a { // a & b == a - checks whether a is subset of b
-		panic(fmt.Errorf("invariant 'is subset' failed: %b, %b", a, b))
-	}
 }
