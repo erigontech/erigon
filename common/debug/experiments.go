@@ -60,20 +60,58 @@ func TestDB() string {
 }
 
 var (
-	printTxInfoIfSlower    time.Duration
-	getPrintTxInfoIfSlower sync.Once
+	bigRoTx    uint
+	getBigRoTx sync.Once
 )
 
-func SlowTxMs() time.Duration {
-	getPrintTxInfoIfSlower.Do(func() {
-		v, _ := os.LookupEnv("DEBUG_SLOW_TX_MS")
+func BigRoTxKb() uint {
+	getBigRoTx.Do(func() {
+		v, _ := os.LookupEnv("DEBUG_BIG_RO_TX_KB")
 		if v != "" {
 			i, err := strconv.Atoi(v)
 			if err != nil {
 				panic(err)
 			}
-			printTxInfoIfSlower = time.Duration(i)
+			bigRoTx = uint(i)
 		}
 	})
-	return printTxInfoIfSlower
+	return bigRoTx
+}
+
+var (
+	bigRwTx    uint
+	getBigRwTx sync.Once
+)
+
+func BigRwTxKb() uint {
+	getBigRwTx.Do(func() {
+		v, _ := os.LookupEnv("DEBUG_BIG_RW_TX_KB")
+		if v != "" {
+			i, err := strconv.Atoi(v)
+			if err != nil {
+				panic(err)
+			}
+			bigRwTx = uint(i)
+		}
+	})
+	return bigRwTx
+}
+
+var (
+	slowCommit    time.Duration
+	getSlowCommit sync.Once
+)
+
+func SlowCommit() time.Duration {
+	getSlowCommit.Do(func() {
+		v, _ := os.LookupEnv("DEBUG_SLOW_COMMIT_MS")
+		if v != "" {
+			i, err := strconv.Atoi(v)
+			if err != nil {
+				panic(err)
+			}
+			slowCommit = time.Duration(i) * time.Millisecond
+		}
+	})
+	return slowCommit
 }
