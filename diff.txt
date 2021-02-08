@@ -924,20 +924,3 @@ Date:   Mon Feb 8 13:03:06 2021 +0200
 
     params: just to make snapshots a bit more official
 
-commit bbe694fc52705e3cb128f21453ae1fcea6873fb2
-Merge: 477fd420b 994cdc69c
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Mon Feb 8 12:58:54 2021 +0200
-
-    Merge pull request #22280 from karalabe/snapshot-default
-    
-    cmd/utils: enable snapshots by default
-
-commit 477fd420b393e3e5b962ac8c5af90a1add54d9d7
-Author: isdyaufh8o7cq <sebaskil@icloud.com>
-Date:   Mon Feb 8 11:36:49 2021 +0100
-
-    metrics: fix cast omission in cpu_syscall.go (#22262)
-    
-    fixes an regression which caused build failure on certain platforms
-
