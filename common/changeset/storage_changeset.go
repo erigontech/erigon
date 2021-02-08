@@ -33,10 +33,6 @@ func EncodeStoragePlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error) 
 
 type StorageChangeSetPlain struct{ c ethdb.CursorDupSort }
 
-func (b StorageChangeSetPlain) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
-	return walk(b.c, from, to, common.AddressLength, f)
-}
-
 func (b StorageChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error) {
 	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.AddressLength, k[:common.AddressLength], k[common.AddressLength:])
 }
