@@ -941,9 +941,3 @@ Date:   Mon Feb 8 11:36:49 2021 +0100
     
     fixes an regression which caused build failure on certain platforms
 
-commit 994cdc69c8ab79b97f490c64721f2908df2070d7
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Sun Feb 7 20:13:59 2021 +0200
-
-    cmd/utils: enable snapshots by default
-
