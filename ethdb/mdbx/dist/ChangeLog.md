@@ -11,6 +11,10 @@ TODO:
  - Finalize C++ API (few typos and trivia bugs are still likely for now).
  - Packages for [ROSA Linux](https://www.rosalinux.ru/), [ALT Linux](https://www.altlinux.org/), Fedora/RHEL, Debian/Ubuntu.
 
+Acknowledgements:
+
+ - [Alex Sharov](https://github.com/AskAlexSharov) for [mdbx-go](https://github.com/torquem-ch/mdbx-go).
+
 New features:
 
  - Added `MDBX_DISABLE_PAGECHECKS` build option to disable some checks to reduce an overhead
