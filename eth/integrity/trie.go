@@ -76,11 +76,12 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			}
 
 			// must have all children
+			seek := append(common.CopyBytes(k), uint8(0))
 			for i := uint16(0); i < 16; i++ {
 				if 1<<i&hasBranch == 0 {
 					continue
 				}
-				seek := append(common.CopyBytes(k), uint8(i))
+				seek[len(seek)-1] = uint8(i)
 				k2, _, err := c2.Seek(seek)
 				if err != nil {
 					panic(err)
@@ -144,11 +145,12 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			}
 
 			// must have all children
+			seek := append(common.CopyBytes(k), uint8(0))
 			for i := uint16(0); i < 16; i++ {
 				if 1<<i&hasBranch == 0 {
 					continue
 				}
-				seek := append(common.CopyBytes(k), uint8(i))
+				seek[len(seek)-1] = uint8(i)
 				k2, _, err := c2.Seek(seek)
 				if err != nil {
 					panic(err)
