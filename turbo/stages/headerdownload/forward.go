@@ -23,7 +23,26 @@ const (
 )
 
 // Forward progresses Headers stage in the forward direction
-func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte) error {
+func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *HeaderDownload, headerReqSend func(context.Context, []*HeaderRequest), wakeUpChan chan struct{}) error {
+	var files []string
+	var buffer *HeaderBuffer
+	for {
+		files, buffer = hd.PrepareStageData()
+		if len(files) > 0 || buffer != nil && !buffer.IsEmpty() {
+			break
+		}
+		reqs, timer := hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
+		headerReqSend(ctx, reqs)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-timer.C:
+			//log.Info("RequestQueueTimer (headers) ticked")
+		case <-wakeUpChan:
+			//log.Info("headerLoop woken up by the incoming request")
+		}
+	}
+
 	count := 0
 	var highest uint64
 	var headerProgress uint64
@@ -65,7 +84,7 @@ func Forward(logPrefix string, db ethdb.Database, files []string, buffer []byte)
 	var newCanonical bool
 	var forkNumber uint64
 	var canonicalBacktrack = make(map[common.Hash]common.Hash)
-	if _, _, err1 = ReadFilesAndBuffer(files, buffer, func(header *types.Header, blockHeight uint64) error {
+	if err1 = ReadFilesAndBuffer(files, buffer, func(header *types.Header, blockHeight uint64) error {
 		hash := header.Hash()
 		if hash == prevHash {
 			// Skip duplicates

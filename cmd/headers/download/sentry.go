@@ -24,7 +24,6 @@ import (
 	proto_core "github.com/ledgerwatch/turbo-geth/cmd/headers/core"
 	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -105,7 +104,6 @@ func makeP2PServer(
 		return nil, fmt.Errorf("create discovery candidates: %v", err)
 	}
 
-	genesis := core.DefaultGenesisBlock()
 	serverKey := nodeKey()
 	p2pConfig := p2p.Config{}
 	natif, err := nat.Parse(natSetting)
@@ -134,15 +132,11 @@ func makeP2PServer(
 					ctx,
 					peerHeightMap,
 					peerTimeMap,
+					peerRwMap,
 					peer,
 					rw,
 					eth.ProtocolVersions[0], // version == eth65
 					eth.ProtocolVersions[1], // minVersion == eth64
-					eth.DefaultConfig.NetworkID,
-					genesis.Difficulty,
-					params.MainnetGenesisHash,
-					params.MainnetChainConfig,
-					0, /* head */
 					coreClient,
 				); err != nil {
 					log.Info(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
@@ -169,28 +163,31 @@ func runPeer(
 	ctx context.Context,
 	peerHeightMap *sync.Map,
 	peerTimeMap *sync.Map,
+	peerRwMap *sync.Map,
 	peer *p2p.Peer,
 	rw p2p.MsgReadWriter,
 	version uint,
 	minVersion uint,
-	networkID uint64,
-	td *big.Int,
-	genesisHash common.Hash,
-	chainConfig *params.ChainConfig,
-	head uint64,
 	coreClient proto_core.ControlClient,
 ) error {
 	peerID := peer.ID().String()
-	forkId := forkid.NewID(chainConfig, genesisHash, head)
-	// Send handshake message
-	if err := p2p.Send(rw, eth.StatusMsg, &eth.StatusData{
+	protoStatusData, err1 := coreClient.GetStatus(ctx, &empty.Empty{}, &grpc.EmptyCallOption{})
+	if err1 != nil {
+		return fmt.Errorf("could not get status message from core for peer %s connection: %w", peerID, err1)
+	}
+	// Convert proto status data into the one required by devp2p
+	genesisHash := common.BytesToHash(protoStatusData.ForkData.Genesis)
+	statusData := &eth.StatusData{
 		ProtocolVersion: uint32(version),
-		NetworkID:       networkID,
-		TD:              td,
-		Head:            genesisHash, // For now we always start unsyched
+		NetworkID:       protoStatusData.NetworkId,
+		TD:              new(big.Int).SetBytes(protoStatusData.TotalDifficulty),
+		Head:            common.BytesToHash(protoStatusData.BestHash),
 		Genesis:         genesisHash,
-		ForkID:          forkId,
-	}); err != nil {
+		ForkID:          forkid.NewIDFromForks(protoStatusData.ForkData.Forks, genesisHash),
+	}
+	forkFilter := forkid.NewFilterFromForks(protoStatusData.ForkData.Forks, genesisHash)
+	networkID := protoStatusData.NetworkId
+	if err := p2p.Send(rw, eth.StatusMsg, statusData); err != nil {
 		return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 	}
 	// Read handshake message
@@ -223,19 +220,19 @@ func runPeer(
 	if status.Genesis != genesisHash {
 		return errResp(eth.ErrGenesisMismatch, "genesis hash does not match: theirs %x, ours %x", status.Genesis, genesisHash)
 	}
-	forkFilter := forkid.NewFilter(chainConfig, genesisHash, head)
 	if err = forkFilter(status.ForkID); err != nil {
 		return errResp(eth.ErrForkIDRejected, "%v", err)
 	}
 	log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 	for {
+		if _, ok := peerRwMap.Load(peerID); !ok {
+			return fmt.Errorf("peer has been penalized")
+		}
 		msg, err = rw.ReadMsg()
 		if err != nil {
 			return fmt.Errorf("reading message: %v", err)
 		}
-		// Peer responded or sent message - reset the "back off" timer
-		peerTimeMap.Store(peerID, time.Now().Unix())
 		if msg.Size > eth.ProtocolMaxMsgSize {
 			msg.Discard()
 			return errResp(eth.ErrMsgTooLarge, "message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
@@ -256,6 +253,8 @@ func runPeer(
 				return fmt.Errorf("send empty headers reply: %v", err)
 			}
 		case eth.BlockHeadersMsg:
+			// Peer responded or sent message - reset the "back off" timer
+			peerTimeMap.Store(peerID, time.Now().Unix())
 			bytes := make([]byte, msg.Size)
 			_, err = io.ReadFull(msg.Payload, bytes)
 			if err != nil {
@@ -307,7 +306,9 @@ func runPeer(
 			}
 			log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}", peerID, hashesStr.String()))
 		case eth.BlockBodiesMsg:
-			log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peerID))
+			// Peer responded or sent message - reset the "back off" timer
+			peerTimeMap.Store(peerID, time.Now().Unix())
+			//log.Info(fmt.Sprintf("[%s] BlockBodiesMsg", peerID))
 			bytes := make([]byte, msg.Size)
 			_, err = io.ReadFull(msg.Payload, bytes)
 			if err != nil {
@@ -582,7 +583,10 @@ type SentryServerImpl struct {
 }
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
-	log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%x", req.GetPeerId()))
+	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
+	ss.peerRwMap.Delete(string(req.PeerId))
+	ss.peerTimeMap.Delete(string(req.PeerId))
+	ss.peerHeightMap.Delete(string(req.PeerId))
 	return nil, nil
 }
 
@@ -624,6 +628,9 @@ func (ss *SentryServerImpl) getBlockHeaders(inreq *proto_sentry.SendMessageByMin
 		return &proto_sentry.SentPeers{}, fmt.Errorf("find rw for peer %s", peerID)
 	}
 	if err := p2p.Send(rw, eth.GetBlockHeadersMsg, &req); err != nil {
+		ss.peerHeightMap.Delete(peerID)
+		ss.peerTimeMap.Delete(peerID)
+		ss.peerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("send to peer %s: %v", peerID, err)
 	}
 	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)
@@ -647,6 +654,9 @@ func (ss *SentryServerImpl) getBlockBodies(inreq *proto_sentry.SendMessageByMinB
 		return &proto_sentry.SentPeers{}, fmt.Errorf("find rw for peer %s", peerID)
 	}
 	if err := p2p.Send(rw, eth.GetBlockBodiesMsg, &req); err != nil {
+		ss.peerHeightMap.Delete(peerID)
+		ss.peerTimeMap.Delete(peerID)
+		ss.peerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("send to peer %s: %v", peerID, err)
 	}
 	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)
