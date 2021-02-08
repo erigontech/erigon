@@ -25,9 +25,9 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 	defer logEvery.Stop()
 
 	{
-		c, parentC := tx.Cursor(dbutils.TrieOfAccountsBucket), tx.Cursor(dbutils.TrieOfAccountsBucket)
+		c, c2 := tx.Cursor(dbutils.TrieOfAccountsBucket), tx.Cursor(dbutils.TrieOfAccountsBucket)
 		defer c.Close()
-		defer parentC.Close()
+		defer c2.Close()
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				panic(err)
@@ -53,9 +53,11 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			}
 			found := false
 			var parentK []byte
+
+			// must have parent with right hasBranch bit
 			for i := len(k) - 1; i > 0 && !found; i-- {
 				parentK = k[:i]
-				kParent, vParent, err := parentC.SeekExact(parentK)
+				kParent, vParent, err := c2.SeekExact(parentK)
 				if err != nil {
 					panic(err)
 				}
@@ -64,9 +66,6 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				}
 				found = true
 				parentHasBranch := binary.BigEndian.Uint16(vParent[2:])
-				if bytes.HasPrefix(k, common.FromHex("00090c08")) {
-					fmt.Printf("k: %x, parent: %x, %d,%b\n", k, kParent, len(kParent), parentHasBranch)
-				}
 				parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentHasBranch != 0
 				if !parentHasBit {
 					panic(fmt.Errorf("for %x found parent %x, but it has no branchBit: %016b", k, parentK, parentHasBranch))
@@ -75,12 +74,27 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			if !found {
 				panic(fmt.Errorf("trie hash %x has no parent", k))
 			}
+
+			// must have all children
+			for i := uint16(0); i < 16; i++ {
+				if 1<<i&hasBranch == 0 {
+					continue
+				}
+				seek := append(common.CopyBytes(k), uint8(i))
+				k2, _, err := c2.Seek(seek)
+				if err != nil {
+					panic(err)
+				}
+				if !bytes.HasPrefix(k2, seek) {
+					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db", k, hasBranch, i))
+				}
+			}
 		}
 	}
 	{
-		c, parentC := tx.Cursor(dbutils.TrieOfStorageBucket), tx.Cursor(dbutils.TrieOfStorageBucket)
+		c, c2 := tx.Cursor(dbutils.TrieOfStorageBucket), tx.Cursor(dbutils.TrieOfStorageBucket)
 		defer c.Close()
-		defer parentC.Close()
+		defer c2.Close()
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				panic(err)
@@ -107,9 +121,11 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 
 			found := false
 			var parentK []byte
+
+			// must have parent with right hasBranch bit
 			for i := len(k) - 1; i >= 40 && !found; i-- {
 				parentK = k[:i]
-				kParent, vParent, err := parentC.SeekExact(parentK)
+				kParent, vParent, err := c2.SeekExact(parentK)
 				if err != nil {
 					panic(err)
 				}
@@ -125,6 +141,21 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			}
 			if !found {
 				panic(fmt.Errorf("trie hash %x has no parent. Last checked: %x", k, parentK))
+			}
+
+			// must have all children
+			for i := uint16(0); i < 16; i++ {
+				if 1<<i&hasBranch == 0 {
+					continue
+				}
+				seek := append(common.CopyBytes(k), uint8(i))
+				k2, _, err := c2.Seek(seek)
+				if err != nil {
+					panic(err)
+				}
+				if !bytes.HasPrefix(k2, seek) {
+					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db", k, hasBranch, i))
+				}
 			}
 		}
 	}
