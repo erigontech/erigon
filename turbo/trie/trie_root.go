@@ -363,14 +363,14 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	if storageKey == nil {
-		if bytes.HasPrefix(accountKey, common.FromHex("00090c08")) {
-			fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-		}
+		//if bytes.HasPrefix(accountKey, common.FromHex("00090c08")) {
+		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+		//}
 	} else {
 		hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
 		//if bytes.HasPrefix(r.currAccK, common.FromHex("4979")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
 		//fmt.Printf("%x\n", storageKey)
-		//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+		fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
 		//}
 	}
 	switch itemType {
@@ -1124,7 +1124,7 @@ func (c *StorageIHCursor) SeekToAccount(prefix []byte) (k, v []byte, hasBranch b
 	c.seek = append(c.seek[:0], c.accWithInc...)
 	c.skipState = false
 	c.prev = c.cur
-	ok, err := c._seek(prefix)
+	ok, err := c._seek(prefix, prefix)
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
@@ -1211,12 +1211,12 @@ func (c *StorageIHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 	return c._next()
 }
 
-func (c *StorageIHCursor) _seek(prefix []byte) (bool, error) {
+func (c *StorageIHCursor) _seek(seek, prefix []byte) (bool, error) {
 	var k, v []byte
 	var err error
-	if len(prefix) == 40 {
+	if len(seek) == 40 {
 		c.is++
-		k, v, err = c.c.Seek(prefix)
+		k, v, err = c.c.Seek(seek)
 		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//	fmt.Printf("_seek1: %x -> %x\n", prefix, k)
 		//}
@@ -1234,7 +1234,7 @@ func (c *StorageIHCursor) _seek(prefix []byte) (bool, error) {
 		//}
 		//if len(k) > c.lvl && c.childID[c.lvl] > int16(bits.TrailingZeros16(c.hasBranch[c.lvl])) {
 		c.is++
-		k, v, err = c.c.Seek(prefix)
+		k, v, err = c.c.Seek(seek)
 		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//	fmt.Printf("_seek3: %x -> %x\n", prefix, k)
 		//}
@@ -1260,7 +1260,7 @@ func (c *StorageIHCursor) _seek(prefix []byte) (bool, error) {
 func (c *StorageIHCursor) _nextItem() error {
 	if c._hasBranch() {
 		c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-		ok, err := c._seek(c.seek)
+		ok, err := c._seek(c.seek, c.seek)
 		if err != nil {
 			return err
 		}
@@ -1314,15 +1314,41 @@ func (c *StorageIHCursor) _nextSiblingInMem() bool {
 }
 
 func (c *StorageIHCursor) _nextSiblingOfParentInMem() bool {
+	//fmt.Printf("_nextSiblingOfParentInMem: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	for c.lvl > 0 {
+		//fmt.Printf("_nextSiblingOfParentInMem2: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 		if c.k[c.lvl-1] == nil {
-			return false
+			nonNilLvl := c.lvl - 1
+			for ; c.k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
+			}
+			//fmt.Printf("nonNilLvl: %d-%d\n", nonNilLvl, c.lvl)
+			c.next = append(append(c.next[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+			c.kBuf = append(append(c.kBuf[:0], c.k[nonNilLvl]...), uint8(c.childID[nonNilLvl]))
+			//fmt.Printf("seeeek aa: %x\n", c.k[c.lvl])
+			//fmt.Printf("seeeek bb: %x\n", c.k[nonNilLvl])
+			ok, err := c._seek(c.next, c.kBuf)
+			if err != nil {
+				panic(err)
+			}
+			//fmt.Printf("seeeek: %x,%x,%x,%x\n", c.next, c.kBuf, c.k[c.lvl], c.childID[c.lvl])
+			if ok {
+				//fmt.Printf("_nextSiblingOfParentInMem32: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
+				return true
+			}
+
+			c.lvl = nonNilLvl + 1
+			continue
+			//fmt.Printf("_nextSiblingOfParentInMem3: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
+			//return false
 		}
 		c.lvl--
 		if c._nextSiblingInMem() {
+			//fmt.Printf("_nextSiblingOfParentInMem4: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 			return true
 		}
+		//fmt.Printf("_nextSiblingOfParentInMem5: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	}
+	//fmt.Printf("_nextSiblingOfParentInMem6: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	return false
 }
 

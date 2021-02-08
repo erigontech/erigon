@@ -147,11 +147,17 @@ func GenStructStep(
 		if !buildExtensions {
 			switch v := data.(type) {
 			case *GenStructStepHashData:
+				if bytes.HasPrefix(curr[:maxLen], common.FromHex("00090c08")) {
+					fmt.Printf("ih v.IsBranch before: %x, %t,%d,%d,%d,%b\n", curr, v.IsBranch, maxLen, remainderStart, precLen, hasBranch)
+				}
+				if maxLen > 0 {
+					hasBranch[len(curr)-1] |= (uint16(1) << curr[len(curr)-1])
+				}
 				if v.IsBranch {
 					hasBranch[maxLen] |= (uint16(1) << curr[maxLen])
 				}
 				if bytes.HasPrefix(curr[:maxLen], common.FromHex("00090c08")) {
-					fmt.Printf("ih v.IsBranch: %x, %t,%b\n", curr, v.IsBranch, hasBranch)
+					fmt.Printf("ih v.IsBranch: %x,%x, %t,%b\n", curr, curr[:maxLen], v.IsBranch, hasBranch)
 				}
 				hasHash[maxLen] |= (uint16(1) << curr[maxLen])
 				/* building a hash */
@@ -193,7 +199,7 @@ func GenStructStep(
 						fmt.Printf("ext before: %b,%d,%d\n", hasBranch[80:], remainderStart+remainderLen, maxLen)
 					} else {
 						fmt.Printf("ext before: %b,%d,%d\n", hasBranch, remainderStart+remainderLen, maxLen)
-						fmt.Printf("ext decide: %x,%b\n", curr[remainderStart+remainderLen-1], hasBranch[remainderStart+remainderLen-1])
+						fmt.Printf("ext decide: curr[remainderStart+remainderLen-1]=%x, hasBranch[remainderStart+remainderLen-1]=%b\n", curr[remainderStart+remainderLen-1], hasBranch[remainderStart+remainderLen-1])
 					}
 				}
 				if remainderStart > 0 {

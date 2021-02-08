@@ -62,11 +62,11 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				if kParent == nil {
 					continue
 				}
-				if bytes.HasPrefix(k, common.FromHex("00090c08")) {
-					fmt.Printf("k: %x, parent: %x, %d,%d\n", k, kParent, len(kParent), len(vParent))
-				}
 				found = true
 				parentHasBranch := binary.BigEndian.Uint16(vParent[2:])
+				if bytes.HasPrefix(k, common.FromHex("00090c08")) {
+					fmt.Printf("k: %x, parent: %x, %d,%b\n", k, kParent, len(kParent), parentHasBranch)
+				}
 				parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentHasBranch != 0
 				if !parentHasBit {
 					panic(fmt.Errorf("for %x found parent %x, but it has no branchBit: %016b", k, parentK, parentHasBranch))
