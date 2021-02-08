@@ -2,8 +2,10 @@ package debug
 
 import (
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // atomic: bit 0 is the value, bit 1 is the initialized flag
@@ -58,16 +60,20 @@ func TestDB() string {
 }
 
 var (
-	debugTxInfo    bool
-	getDebugTxInfo sync.Once
+	printTxInfoIfSlower    time.Duration
+	getPrintTxInfoIfSlower sync.Once
 )
 
-func EnabledTxInfo() bool {
-	getDebugTxInfo.Do(func() {
-		v, _ := os.LookupEnv("DEBUG_TX_INFO")
+func SlowTxMs() time.Duration {
+	getPrintTxInfoIfSlower.Do(func() {
+		v, _ := os.LookupEnv("DEBUG_SLOW_TX_MS")
 		if v != "" {
-			debugTxInfo = true
+			i, err := strconv.Atoi(v)
+			if err != nil {
+				panic(err)
+			}
+			printTxInfoIfSlower = time.Duration(i)
 		}
 	})
-	return debugTxInfo
+	return printTxInfoIfSlower
 }

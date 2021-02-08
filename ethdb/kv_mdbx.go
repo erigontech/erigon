@@ -606,20 +606,15 @@ func (tx *MdbxTx) Commit(ctx context.Context) error {
 	}()
 	tx.closeCursors()
 
-	if debug.EnabledTxInfo() {
-		res, err := tx.tx.Info(true)
+	slowTx := 10 * time.Second
+	var txInfo *mdbx.TxInfo
+	if debug.SlowTxMs() > 0 {
+		slowTx = debug.SlowTxMs() * time.Millisecond
+		var err error
+		txInfo, err = tx.tx.Info(true)
 		if err != nil {
 			return err
 		}
-
-		log.Info("Tx info",
-			"id", res.Id,
-			"read_lag", res.ReadLag,
-			"space_used", res.SpaceUsed,
-			"space_retired", res.SpaceRetired,
-			"space_dirty", res.SpaceDirty,
-			"callers", debug.Callers(10),
-		)
 	}
 
 	latency, err := tx.tx.Commit()
@@ -627,7 +622,7 @@ func (tx *MdbxTx) Commit(ctx context.Context) error {
 		return err
 	}
 
-	if latency.Whole > 20*time.Second {
+	if latency.Whole > slowTx {
 		log.Info("Commit",
 			"preparation", latency.Preparation,
 			"gc", latency.GC,
@@ -637,6 +632,17 @@ func (tx *MdbxTx) Commit(ctx context.Context) error {
 			"ending", latency.Ending,
 			"whole", latency.Whole,
 		)
+
+		if debug.SlowTxMs() > 0 {
+			log.Info("Tx info",
+				"id", txInfo.Id,
+				"read_lag", txInfo.ReadLag,
+				"space_used_mb", txInfo.SpaceUsed/1024/1024,
+				"space_retired", txInfo.SpaceRetired,
+				"space_dirty", txInfo.SpaceDirty,
+				"callers", debug.Callers(8),
+			)
+		}
 	}
 
 	return nil
