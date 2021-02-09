@@ -398,13 +398,17 @@ func TestBranchesOnly(t *testing.T) {
 		k         []byte
 		hasBranch bool
 	}{
-		{k: common.FromHex("01000000020a03"), hasBranch: false},
-		{k: common.FromHex("01000000020a04"), hasBranch: true},
+		{k: common.FromHex("0100000002000a03"), hasBranch: false},
+		{k: common.FromHex("0100000002000a04"), hasBranch: true},
 		{k: common.FromHex("01000000020b"), hasBranch: false},
-		{k: common.FromHex("010000000903"), hasBranch: false},
-		{k: common.FromHex("010000000904"), hasBranch: false},
+		{k: common.FromHex("010000000900000103"), hasBranch: false},
+		//{k: common.FromHex("010000000900000104"), hasBranch: false},
+		//{k: common.FromHex("010000000900000203"), hasBranch: false},
+		//{k: common.FromHex("010000000900000204"), hasBranch: false},
+		{k: common.FromHex("010000000901"), hasBranch: false},
 		{k: common.FromHex("010000000a"), hasBranch: false},
 		{k: common.FromHex("0101"), hasBranch: false},
+		{k: common.FromHex("0201"), hasBranch: false},
 	}
 	hb := NewHashBuilder(false)
 	var succ, curr bytes.Buffer
@@ -415,19 +419,29 @@ func TestBranchesOnly(t *testing.T) {
 		i++
 		switch i {
 		case 1:
-			require.Equal(t, common.FromHex("01000000020a"), keyHex)
+			require.Equal(t, common.FromHex("0100000002000a"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b11000)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b1000)), fmt.Sprintf("%b", hasBranch))
 			require.NotNil(t, hashes)
 		case 2:
 			require.Equal(t, common.FromHex("0100000002"), keyHex)
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b110000000000)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b10000000000)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000000000)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b1)), fmt.Sprintf("%b", hasBranch))
 			require.NotNil(t, hashes)
+		//case 3:
+		//	require.Equal(t, common.FromHex("0100000009000001"), keyHex)
+		//	require.Equal(t, fmt.Sprintf("%b", uint16(0b11000)), fmt.Sprintf("%b", hasHash))
+		//	require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasBranch))
+		//	require.NotNil(t, hashes)
+		////case 4:
+		//	require.Equal(t, common.FromHex("0100000009000002"), keyHex)
+		//	require.Equal(t, fmt.Sprintf("%b", uint16(0b11000)), fmt.Sprintf("%b", hasHash))
+		//	require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasBranch))
+		//	require.NotNil(t, hashes)
 		case 3:
 			require.Equal(t, common.FromHex("0100000009"), keyHex)
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b11000)), fmt.Sprintf("%b", hasHash))
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasBranch))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b11)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b1)), fmt.Sprintf("%b", hasBranch))
 			require.NotNil(t, hashes)
 		case 4:
 			require.Equal(t, common.FromHex("01000000"), keyHex)
@@ -439,7 +453,7 @@ func TestBranchesOnly(t *testing.T) {
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b01)), fmt.Sprintf("%b", hasBranch))
 			require.NotNil(t, hashes)
-		case 6:
+		case 7:
 			require.NoError(t, fmt.Errorf("not expected"))
 		}
 
