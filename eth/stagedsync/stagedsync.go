@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -16,7 +17,8 @@ type StagedSync struct {
 	stageBuilders    StageBuilders
 	unwindOrder      UnwindOrder
 	params           OptionalParameters
-	Notifier         ChainEventNotifier
+	scope            event.SubscriptionScope
+	notifier         event.Feed
 }
 
 // OptionalParameters contains any non-necessary parateres you can specify to fine-tune
@@ -29,9 +31,6 @@ type OptionalParameters struct {
 	// StateReaderBuilder is a function that returns state writer for the block execution stage.
 	// It can be used to update bloom or other types of filters between block execution.
 	StateWriterBuilder StateWriterBuilder
-
-	// Notifier allows sending some data when new headers or new blocks are added
-	Notifier ChainEventNotifier
 
 	SilkwormExecutionFunc unsafe.Pointer
 }
@@ -73,10 +72,6 @@ func (stagedSync *StagedSync) Prepare(
 		writerBuilder = stagedSync.params.StateWriterBuilder
 	}
 
-	if stagedSync.params.Notifier != nil {
-		stagedSync.Notifier = stagedSync.params.Notifier
-	}
-
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
 			d:                     d,
@@ -98,8 +93,8 @@ func (stagedSync *StagedSync) Prepare(
 			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
 			stateReaderBuilder:    readerBuilder,
 			stateWriterBuilder:    writerBuilder,
-			notifier:              stagedSync.Notifier,
 			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
+			notifier:              &stagedSync.notifier,
 		},
 	)
 	state := NewState(stages)
@@ -114,4 +109,8 @@ func (stagedSync *StagedSync) Prepare(
 		return nil, err
 	}
 	return state, nil
+}
+
+func (s *StagedSync) SubscribeChainHeadEvent(ch chan<- ChainHeadEvent) event.Subscription {
+	return s.scope.Track(s.notifier.Subscribe(ch))
 }

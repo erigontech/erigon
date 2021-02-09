@@ -12,13 +12,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-type ChainEventNotifier interface {
-	OnNewHeader(*types.Header)
-}
+type ChainHeadEvent struct{ Header *types.Header }
 
 // StageParameters contains the stage that stages receives at runtime when initializes.
 // Then the stage can use it to receive different useful functions.
@@ -46,7 +45,7 @@ type StageParameters struct {
 	prefetchedBlocks      *PrefetchedBlocks
 	stateReaderBuilder    StateReaderBuilder
 	stateWriterBuilder    StateWriterBuilder
-	notifier              ChainEventNotifier
+	notifier              *event.Feed
 	silkwormExecutionFunc unsafe.Pointer
 }
 

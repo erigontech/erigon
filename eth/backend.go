@@ -364,16 +364,9 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 
 	stagedSync := config.StagedSync
 
-	// setting notifier to support streaming events to rpc daemon
-	remoteEvents := remotedbserver.NewEvents()
+	// if there is not stagedsync, we create one
 	if stagedSync == nil {
-		// if there is not stagedsync, we create one with the custom notifier
-		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{Notifier: remoteEvents})
-	} else {
-		// otherwise we add one if needed
-		if stagedSync.Notifier == nil {
-			stagedSync.Notifier = remoteEvents
-		}
+		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{})
 	}
 
 	if stack.Config().PrivateApiAddr != "" {
@@ -408,12 +401,12 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds, remoteEvents)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stagedSync, stack.Config().PrivateApiAddr, &creds)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil, remoteEvents)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stagedSync, stack.Config().PrivateApiAddr, nil)
 			if err != nil {
 				return nil, err
 			}
