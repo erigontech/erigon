@@ -38,7 +38,7 @@ type MdbxOpts struct {
 func NewMDBX() MdbxOpts {
 	return MdbxOpts{
 		bucketsCfg: DefaultBucketConfigs,
-		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
+		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable | mdbx.LifoReclaim,
 	}
 }
 
