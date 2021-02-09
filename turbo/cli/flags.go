@@ -53,7 +53,7 @@ var (
 	}
 	SnapshotModeFlag = cli.StringFlag{
 		Name: "snapshot.mode",
-		Usage: `Configures the storage mode of the app:
+		Usage: `Configures the snapshot mode of the app:
 * h - download headers snapshot
 * b - download bodies snapshot
 * s - download state snapshot
