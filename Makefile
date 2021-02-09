@@ -59,14 +59,6 @@ state:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/state\" to launch state."
 
-restapi:
-	$(GOBUILD) -o $(GOBIN)/restapi -tags 'mdbx' ./cmd/restapi
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/restapi\" to launch restapi."
-
-run-web-ui:
-	@echo 'Web: Turbo-Geth Debug Utility is launching...'
-	@cd debug-web-ui && yarn start
 
 pics:
 	$(GOBUILD) -o $(GOBIN)/pics -tags 'mdbx' ./cmd/pics
