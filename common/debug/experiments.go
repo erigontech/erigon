@@ -64,6 +64,9 @@ var (
 	getBigRoTx sync.Once
 )
 
+// DEBUG_BIG_RO_TX_KB - print logs with info about large read-only transactions
+// DEBUG_BIG_RW_TX_KB - print logs with info about large read-write transactions
+// DEBUG_SLOW_COMMIT_MS - print logs with commit timing details if commit is slower than this threshold
 func BigRoTxKb() uint {
 	getBigRoTx.Do(func() {
 		v, _ := os.LookupEnv("DEBUG_BIG_RO_TX_KB")
