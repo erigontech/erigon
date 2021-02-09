@@ -209,12 +209,13 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 	runtime.ReadMemStats(&m)
 	log.Info("Memory", "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	log.Info("Timings", timings...)
-	if err := printBucketsSize(tx.(ethdb.HasTx).Tx()); err != nil {
-		return err
-	}
+	//if err := printBucketsSize(tx.(ethdb.HasTx).Tx()); err != nil {
+	//	return err
+	//}
 	return nil
 }
 
+//nolint
 func printBucketsSize(tx ethdb.Tx) error {
 	if tx == nil {
 		return nil
