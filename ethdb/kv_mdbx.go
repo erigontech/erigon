@@ -672,7 +672,7 @@ func (tx *MdbxTx) printDebugInfo() {
 				"read_lag", txInfo.ReadLag,
 				"ro", tx.readOnly,
 				"space_used_mb", txInfo.SpaceUsed/1024/1024,
-				"space_retired_mb", txInfo.SpaceRetired*4/1024,
+				"space_retired_mb", txInfo.SpaceRetired/1024/1024,
 				"space_dirty_kb", txInfo.SpaceDirty/1024,
 				"callers", debug.Callers(8),
 			)
@@ -764,7 +764,7 @@ func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 }
 
 func (tx *MdbxTx) BucketSize(name string) (uint64, error) {
-	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
+	st, err := tx.BucketStat(name)
 	if err != nil {
 		return 0, err
 	}
