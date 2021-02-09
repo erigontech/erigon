@@ -18,6 +18,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -296,8 +297,10 @@ func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (txn Tx, er
 		}()
 	}
 
+	var ro bool
 	nativeFlags := uint(0)
 	if flags&RO != 0 {
+		ro = true
 		nativeFlags |= mdbx.Readonly
 	}
 	if flags&NoSync != 0 {
@@ -317,17 +320,19 @@ func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (txn Tx, er
 	}
 	tx.RawRead = true
 	return &MdbxTx{
-		db:      db,
-		tx:      tx,
-		isSubTx: isSubTx,
+		db:       db,
+		tx:       tx,
+		isSubTx:  isSubTx,
+		readOnly: ro,
 	}, nil
 }
 
 type MdbxTx struct {
-	isSubTx bool
-	tx      *mdbx.Txn
-	db      *MdbxKV
-	cursors []*mdbx.Cursor
+	isSubTx  bool
+	readOnly bool
+	tx       *mdbx.Txn
+	db       *MdbxKV
+	cursors  []*mdbx.Cursor
 }
 
 type MdbxCursor struct {
@@ -604,12 +609,29 @@ func (tx *MdbxTx) Commit(ctx context.Context) error {
 		}
 	}()
 	tx.closeCursors()
+
+	slowTx := 10 * time.Second
+	if debug.SlowCommit() > 0 {
+		slowTx = debug.SlowCommit()
+	}
+
+	tx.printDebugInfo()
+
 	latency, err := tx.tx.Commit()
 	if err != nil {
 		return err
 	}
-	if latency.Whole > 20*time.Second {
-		log.Info("Commit", "preparation", latency.Preparation, "gc", latency.GC, "audit", latency.Audit, "write", latency.Write, "fsync", latency.Sync, "ending", latency.Ending, "whole", latency.Whole)
+
+	if latency.Whole > slowTx {
+		log.Info("Commit",
+			"preparation", latency.Preparation,
+			"gc", latency.GC,
+			"audit", latency.Audit,
+			"write", latency.Write,
+			"fsync", latency.Sync,
+			"ending", latency.Ending,
+			"whole", latency.Whole,
+		)
 	}
 
 	return nil
@@ -630,7 +652,32 @@ func (tx *MdbxTx) Rollback() {
 		}
 	}()
 	tx.closeCursors()
+	tx.printDebugInfo()
 	tx.tx.Abort()
+}
+
+func (tx *MdbxTx) printDebugInfo() {
+	if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
+		txInfo, err := tx.tx.Info(true)
+		if err != nil {
+			panic(err)
+		}
+
+		txSize := uint(txInfo.SpaceDirty / 1024)
+		doPrint := tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb()
+		doPrint = doPrint || (!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
+		if doPrint {
+			log.Info("Tx info",
+				"id", txInfo.Id,
+				"read_lag", txInfo.ReadLag,
+				"ro", tx.readOnly,
+				"space_used_mb", txInfo.SpaceUsed/1024/1024,
+				"space_retired_mb", txInfo.SpaceRetired*4/1024,
+				"space_dirty_kb", txInfo.SpaceDirty/1024,
+				"callers", debug.Callers(8),
+			)
+		}
+	}
 }
 
 func (tx *MdbxTx) get(dbi mdbx.DBI, key []byte) ([]byte, error) {
@@ -1266,14 +1313,14 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 		return k, v[from-to:], nil
 	}
 
-	_, v, err := c.set(key)
+	k, v, err := c.set(key)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, err
 	}
-	return []byte{}, v, nil
+	return k, v, nil
 }
 
 // Append - speedy feature of mdbx which is not part of KV interface.
