@@ -12,7 +12,6 @@ import (
 )
 
 type Walker interface {
-	Walk(from, to uint64, f func(blockNumber uint64, k, v []byte) error) error
 	Find(blockNumber uint64, k []byte) ([]byte, error)
 }
 
