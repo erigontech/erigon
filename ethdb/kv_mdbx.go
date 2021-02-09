@@ -52,7 +52,7 @@ type MdbxOpts struct {
 func NewMDBX() MdbxOpts {
 	return MdbxOpts{
 		bucketsCfg:        DefaultBucketConfigs,
-		flags:             mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable | mdbx.LifoReclaim, // | mdbx.LifoReclaim,
+		flags:             mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
 		dirtyListMaxPages: 128 * 1024,
 	}
 }
@@ -102,7 +102,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	err = env.SetOption(mdbx.OptRpAugmentLimit, 64*1024*1024)
+	err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024)
 	if err != nil {
 		return nil, err
 	}
