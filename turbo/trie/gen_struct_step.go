@@ -147,19 +147,21 @@ func GenStructStep(
 		if !buildExtensions {
 			switch v := data.(type) {
 			case *GenStructStepHashData:
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
-					fmt.Printf("ih v.IsBranch before: %x,%d, %t,%d,%d,%d,%b\n", curr, len(curr)-1, v.IsBranch, maxLen, remainderStart, precLen, hasBranch)
-					fmt.Printf("ih v.IsBranch before1: %d,%b,%x\n", len(curr)-2, hasBranch[len(curr)-2], curr[len(curr)-2])
-				}
-				if len(curr) > 1 {
-					hasBranch[len(curr)-2] |= 1 << curr[len(curr)-2]
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				fmt.Printf("ih v.IsBranch before: %x,%d, %t,%d,%d,%d,%b\n", curr, len(curr)-1, v.IsBranch, maxLen, remainderStart, precLen, hasBranch)
+				//}
+				if maxLen > 0 {
+					fmt.Printf("ih v.IsBranch before1: %b,%x\n", hasBranch[maxLen-1], curr[maxLen-1])
+					fmt.Printf("ih v.IsBranch before22: %d,%d,%x,%x\n", maxLen, remainderStart, curr, succ)
+					hasBranch[maxLen-1] |= 1 << curr[maxLen-1]
+					fmt.Printf("ih v.IsBranch aft1: %b,%x\n", hasBranch[maxLen-1], curr[maxLen-1])
 				}
 				if v.IsBranch {
 					hasBranch[len(curr)-1] |= 1 << curr[len(curr)-1]
 				}
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
-					fmt.Printf("ih v.IsBranch: %x,%x, %t,%b\n", curr, curr[:maxLen], v.IsBranch, hasBranch)
-				}
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				fmt.Printf("ih v.IsBranch: %x,%x, %t,%b\n", curr, curr[:maxLen], v.IsBranch, hasBranch)
+				//}
 				hasHash[maxLen] |= 1 << curr[maxLen]
 				/* building a hash */
 				if err := e.hash(v.Hash[:]); err != nil {
@@ -194,15 +196,15 @@ func GenStructStep(
 
 		if buildExtensions {
 			if remainderLen > 0 {
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
-					fmt.Printf("ext: %x->%x\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen])
-					if len(hasBranch) > 79 {
-						fmt.Printf("ext before: %b,%d,%d\n", hasBranch[80:], remainderStart+remainderLen, maxLen)
-					} else {
-						fmt.Printf("ext before: %b,%d,%d\n", hasBranch, remainderStart+remainderLen, maxLen)
-						fmt.Printf("ext decide: curr[remainderStart+remainderLen-1]=%x, hasBranch[remainderStart+remainderLen-1]=%b\n", curr[remainderStart+remainderLen-1], hasBranch[remainderStart+remainderLen-1])
-					}
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				fmt.Printf("ext: %x->%x\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen])
+				if len(hasBranch) > 79 {
+					fmt.Printf("ext before: %b,%d,%d\n", hasBranch[80:], remainderStart+remainderLen, maxLen)
+				} else {
+					fmt.Printf("ext before: %b,%d,%d\n", hasBranch, remainderStart+remainderLen, maxLen)
+					fmt.Printf("ext decide: curr[remainderStart+remainderLen-1]=%x, hasBranch[remainderStart+remainderLen-1]=%b\n", curr[remainderStart+remainderLen-1], hasBranch[remainderStart+remainderLen-1])
 				}
+				//}
 				if remainderStart > 0 {
 					for i := remainderStart; i < remainderStart+remainderLen; i++ {
 						if 1<<curr[i]&hasBranch[i] != 0 {
@@ -211,13 +213,13 @@ func GenStructStep(
 						hasBranch[i] = 0
 					}
 				}
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
-					if len(hasBranch) > 79 {
-						fmt.Printf("ext after: %b\n", hasBranch[80:])
-					} else {
-						fmt.Printf("ext after: %b,%b,%d\n", hasBranch, groups, precLen)
-					}
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				if len(hasBranch) > 79 {
+					fmt.Printf("ext after: %b\n", hasBranch[80:])
+				} else {
+					fmt.Printf("ext after: %b,%b,%d\n", hasBranch, groups, precLen)
 				}
+				//}
 				if trace {
 					fmt.Printf("Extension %x\n", curr[remainderStart:remainderStart+remainderLen])
 				}
@@ -266,7 +268,6 @@ func GenStructStep(
 				//if err := h(curr[:maxLen], 0, 0, nil, nil); err != nil {
 				//	return nil, nil, err
 				//}
-				//canSendHashes := bits.OnesCount16(hasBranch[maxLen]) > 1
 				canSendHashes := hasHash[maxLen] != 0 || hasBranch[maxLen] != 0
 				if canSendHashes {
 					if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
