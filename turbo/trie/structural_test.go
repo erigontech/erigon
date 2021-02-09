@@ -324,34 +324,16 @@ func TestAccountsOnly(t *testing.T) {
 		k []byte
 		v []byte
 	}{
-		{
-			k: common.FromHex("10002a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"),
-			v: common.FromHex("01"),
-		},
-		{
-			k: common.FromHex("10009384w46519cbca71a22098063e5608768276f2dc212e71fd2c6c643c726c4"),
-			v: common.FromHex("01"),
-		},
-		{
-			k: common.FromHex("1000a9e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
-			v: common.FromHex("01"),
-		},
-		{
-			k: common.FromHex("110006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
-			v: common.FromHex("01"),
-		},
-		{
-			k: common.FromHex("120006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
-			v: common.FromHex("01"),
-		},
-		{
-			k: common.FromHex("121006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
-			v: common.FromHex("01"),
-		},
-		{
-			k: common.FromHex("200c6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
-			v: common.FromHex("01"),
-		},
+		{k: common.FromHex("10002a312d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: common.FromHex("01")},
+		{k: common.FromHex("10002a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: common.FromHex("01")},
+		{k: common.FromHex("10002b412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: common.FromHex("01")},
+		{k: common.FromHex("10009384w46519cbc71a22098063e5608768276f2dc212e71fd2c6c643c726c4"), v: common.FromHex("01")},
+		{k: common.FromHex("10009484w46519cbc71a22098063e5608768276f2dc212e71fd2c6c643c726c4"), v: common.FromHex("01")},
+		{k: common.FromHex("1000a9e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: common.FromHex("01")},
+		{k: common.FromHex("110006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: common.FromHex("01")},
+		{k: common.FromHex("120006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: common.FromHex("01")},
+		{k: common.FromHex("121006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: common.FromHex("01")},
+		{k: common.FromHex("200c6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: common.FromHex("01")},
 	}
 	hb := NewHashBuilder(false)
 	var succ bytes.Buffer
@@ -360,18 +342,24 @@ func TestAccountsOnly(t *testing.T) {
 	var err error
 	i := 0
 	hc := func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-		fmt.Printf("%x,%d,%b\n", keyHex, len(hashes), hasBranch)
 		i++
 		switch i {
 		case 1:
-			require.Equal(t, common.FromHex("0102"), keyHex)
-			require.Equal(t, uint16(0), hasBranch)
-			require.Nil(t, hashes)
+			require.Equal(t, common.FromHex("0100000002"), keyHex)
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b10000000000)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b000)), fmt.Sprintf("%b", hasBranch))
+			require.NotNil(t, hashes)
 		case 2:
-			require.Equal(t, common.FromHex("01"), keyHex)
-			require.Equal(t, uint16(0b100), hasBranch)
+			require.Equal(t, common.FromHex("01000000"), keyHex)
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b1000000100)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasBranch))
 			require.NotNil(t, hashes)
 		case 3:
+			require.Equal(t, common.FromHex("01"), keyHex)
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b001)), fmt.Sprintf("%b", hasBranch))
+			require.NotNil(t, hashes)
+		case 4:
 			require.NoError(t, fmt.Errorf("not expected"))
 		}
 
@@ -402,7 +390,82 @@ func TestAccountsOnly(t *testing.T) {
 	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasBranch, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
-	require.Equal(t, 2, i)
+	require.Equal(t, 3, i)
+}
+
+func TestBranchesOnly(t *testing.T) {
+	keys := []struct {
+		k         []byte
+		hasBranch bool
+	}{
+		{k: common.FromHex("01000000020a03"), hasBranch: false},
+		{k: common.FromHex("01000000020a04"), hasBranch: true},
+		{k: common.FromHex("01000000020b"), hasBranch: false},
+		{k: common.FromHex("010000000903"), hasBranch: false},
+		{k: common.FromHex("010000000904"), hasBranch: false},
+		{k: common.FromHex("010000000a"), hasBranch: false},
+		{k: common.FromHex("0101"), hasBranch: false},
+	}
+	hb := NewHashBuilder(false)
+	var succ, curr bytes.Buffer
+	var groups, hasBranch, hasHash []uint16
+	var err error
+	i := 0
+	hc := func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
+		i++
+		switch i {
+		case 1:
+			require.Equal(t, common.FromHex("01000000020a"), keyHex)
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b11000)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b1000)), fmt.Sprintf("%b", hasBranch))
+			require.NotNil(t, hashes)
+		case 2:
+			require.Equal(t, common.FromHex("0100000002"), keyHex)
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b110000000000)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b10000000000)), fmt.Sprintf("%b", hasBranch))
+			require.NotNil(t, hashes)
+		case 3:
+			require.Equal(t, common.FromHex("0100000009"), keyHex)
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b11000)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasBranch))
+			require.NotNil(t, hashes)
+		case 4:
+			require.Equal(t, common.FromHex("01000000"), keyHex)
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b11000000100)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b01000000100)), fmt.Sprintf("%b", hasBranch))
+			require.NotNil(t, hashes)
+		case 5:
+			require.Equal(t, common.FromHex("01"), keyHex)
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasHash))
+			require.Equal(t, fmt.Sprintf("%b", uint16(0b01)), fmt.Sprintf("%b", hasBranch))
+			require.NotNil(t, hashes)
+		case 6:
+			require.NoError(t, fmt.Errorf("not expected"))
+		}
+
+		return nil
+	}
+
+	for _, key := range keys {
+		curr.Reset()
+		curr.Write(succ.Bytes())
+		succ.Reset()
+		succ.Write(key.k)
+		if curr.Len() > 0 {
+			groups, hasBranch, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepHashData{common.Hash{}, key.hasBranch}, groups, hasBranch, hasHash, false)
+			if err != nil {
+				t.Errorf("Could not execute step of structGen algorithm: %v", err)
+			}
+		}
+	}
+	curr.Reset()
+	curr.Write(succ.Bytes())
+	succ.Reset()
+	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, &GenStructStepHashData{common.Hash{}, false}, groups, hasBranch, hasHash, false); err != nil {
+		t.Errorf("Could not execute step of structGen algorithm: %v", err)
+	}
+	require.Equal(t, 5, i)
 }
 
 func TestStorageOnly(t *testing.T) {
@@ -446,13 +509,11 @@ func TestStorageOnly(t *testing.T) {
 		switch i {
 		case 1:
 			require.Equal(t, common.FromHex("0f0f0f090c010a0a050808040f010103000300010f06000f09080401090b090d040201070b0c040a0b06050a020907060b04010e090a00000b0b0c0e0a0e09080000000000000000000000000000000105000000"), keyHex)
-			require.Equal(t, fmt.Sprintf("%b", uint16(0)), fmt.Sprintf("%b", hasBranch))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b000)), fmt.Sprintf("%b", hasBranch))
 			require.NotNil(t, hashes)
 		case 2:
 			require.Equal(t, common.FromHex("0f0f0f090c010a0a050808040f010103000300010f06000f09080401090b090d040201070b0c040a0b06050a020907060b04010e090a00000b0b0c0e0a0e090800000000000000000000000000000001"), keyHex)
-			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasBranch))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasBranch))
 			require.NotNil(t, hashes)
