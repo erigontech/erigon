@@ -155,7 +155,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 
 	// Open or create buckets
 	if opts.flags&mdbx.Readonly != 0 {
-		tx, innerErr := db.Begin(context.Background(), nil, RO)
+		tx, innerErr := db.Begin(context.Background(), RO)
 		if innerErr != nil {
 			return nil, innerErr
 		}
@@ -283,19 +283,16 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(fileInfo.Size()), nil
 }
 
-func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (txn Tx, err error) {
+func (db *MdbxKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
-	isSubTx := parent != nil
-	if !isSubTx {
-		runtime.LockOSThread()
-		defer func() {
-			if err == nil {
-				db.wg.Add(1)
-			}
-		}()
-	}
+	runtime.LockOSThread()
+	defer func() {
+		if err == nil {
+			db.wg.Add(1)
+		}
+	}()
 
 	var ro bool
 	nativeFlags := uint(0)
@@ -307,28 +304,20 @@ func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (txn Tx, er
 		nativeFlags |= mdbx.TxNoSync
 	}
 
-	var parentTx *mdbx.Txn
-	if parent != nil {
-		parentTx = parent.(*MdbxTx).tx
-	}
-	tx, err := db.env.BeginTxn(parentTx, nativeFlags)
+	tx, err := db.env.BeginTxn(nativeFlags)
 	if err != nil {
-		if !isSubTx {
-			runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
-		}
+		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, err
 	}
 	tx.RawRead = true
 	return &MdbxTx{
 		db:       db,
 		tx:       tx,
-		isSubTx:  isSubTx,
 		readOnly: ro,
 	}, nil
 }
 
 type MdbxTx struct {
-	isSubTx  bool
 	readOnly bool
 	tx       *mdbx.Txn
 	db       *MdbxKV
@@ -460,7 +449,7 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	defer db.wg.Done()
 
 	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
-	tx, err := db.Begin(ctx, nil, RO)
+	tx, err := db.Begin(ctx, RO)
 	if err != nil {
 		return err
 	}
@@ -476,7 +465,7 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	db.wg.Add(1)
 	defer db.wg.Done()
 
-	tx, err := db.Begin(ctx, nil, RW)
+	tx, err := db.Begin(ctx, RW)
 	if err != nil {
 		return err
 	}
@@ -603,10 +592,8 @@ func (tx *MdbxTx) Commit(ctx context.Context) error {
 	}
 	defer func() {
 		tx.tx = nil
-		if !tx.isSubTx {
-			tx.db.wg.Done()
-			runtime.UnlockOSThread()
-		}
+		tx.db.wg.Done()
+		runtime.UnlockOSThread()
 	}()
 	tx.closeCursors()
 
@@ -646,10 +633,8 @@ func (tx *MdbxTx) Rollback() {
 	}
 	defer func() {
 		tx.tx = nil
-		if !tx.isSubTx {
-			tx.db.wg.Done()
-			runtime.UnlockOSThread()
-		}
+		tx.db.wg.Done()
+		runtime.UnlockOSThread()
 	}()
 	tx.closeCursors()
 	tx.printDebugInfo()

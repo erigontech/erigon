@@ -29,7 +29,7 @@ func TestTxn_ID(t *testing.T) {
 		t.Errorf("unexpected readonly id (before update): %v (!= %v)", id0, 3)
 	}
 
-	txnCached, err := env.BeginTxn(nil, Readonly)
+	txnCached, err := env.BeginTxn(Readonly)
 	if err != nil {
 		t.Error(err)
 		return
@@ -106,7 +106,7 @@ func TestTxn_errLogf(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	txn, err := env.BeginTxn(nil, 0)
+	txn, err := env.BeginTxn(0)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -124,7 +124,7 @@ func TestTxn_finalizer(t *testing.T) {
 
 	called := make(chan struct{})
 	func() {
-		txn, err := env.BeginTxn(nil, 0)
+		txn, err := env.BeginTxn(0)
 		if err != nil {
 			t.Error(err)
 		} else {
@@ -535,7 +535,7 @@ func TestTxn_Commit(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	txn, err := env.BeginTxn(nil, 0)
+	txn, err := env.BeginTxn(0)
 	if err != nil {
 		t.Error(err)
 		return
@@ -574,89 +574,6 @@ func TestTxn_Update(t *testing.T) {
 			return err
 		}
 		if string(v) != "myvalue" {
-			return fmt.Errorf("value: %q", v)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Errorf("view: %v", err)
-		return
-	}
-}
-
-func TestTxn_View_noSubTxn(t *testing.T) {
-	env := setup(t)
-	defer clean(env, t)
-
-	// view transactions cannot create subtransactions.  were it possible, they
-	// would provide no utility.
-	var executed bool
-	err := env.View(func(txn *Txn) (err error) {
-		return txn.Sub(func(txn *Txn) error {
-			executed = true
-			return nil
-		})
-	})
-	if err == nil {
-		t.Errorf("view: %v", err)
-	}
-	if executed {
-		t.Errorf("view executed: %v", err)
-	}
-}
-
-func TestTxn_Sub(t *testing.T) {
-	env := setup(t)
-	defer clean(env, t)
-
-	var errSubAbort = fmt.Errorf("aborted subtransaction")
-	var db DBI
-	err := env.Update(func(txn *Txn) (err error) {
-		db, err = txn.OpenRoot(Create)
-		if err != nil {
-			return err
-		}
-
-		// set the key in the root transaction
-		err = txn.Put(db, []byte("mykey"), []byte("myvalue"), 0)
-		if err != nil {
-			return err
-		}
-
-		// set the key in a sub transaction
-		err = txn.Sub(func(txn *Txn) (err error) {
-			return txn.Put(db, []byte("mykey"), []byte("yourvalue"), 0)
-		})
-		if err != nil {
-			return err
-		}
-
-		// set the key before aborting a subtransaction
-		err = txn.Sub(func(txn *Txn) (err error) {
-			err = txn.Put(db, []byte("mykey"), []byte("badvalue"), 0)
-			if err != nil {
-				return err
-			}
-			return errSubAbort
-		})
-		//nolint:goerr113
-		if err != errSubAbort {
-			return fmt.Errorf("expected abort: %v", err)
-		}
-
-		return nil
-	})
-	if err != nil {
-		t.Errorf("update: %v", err)
-		return
-	}
-
-	err = env.View(func(txn *Txn) (err error) {
-		v, err := txn.Get(db, []byte("mykey"))
-		if err != nil {
-			return err
-		}
-		if string(v) != "yourvalue" {
 			return fmt.Errorf("value: %q", v)
 		}
 		return nil
@@ -793,7 +710,7 @@ func TestTxn_Renew(t *testing.T) {
 		return
 	}
 
-	txn, err := env.BeginTxn(nil, Readonly)
+	txn, err := env.BeginTxn(Readonly)
 	if err != nil {
 		t.Error(err)
 		return
@@ -845,7 +762,7 @@ func TestTxn_Reset_doubleReset(t *testing.T) {
 	defer os.RemoveAll(path)
 	defer env.Close()
 
-	txn, err := env.BeginTxn(nil, Readonly)
+	txn, err := env.BeginTxn(Readonly)
 	if err != nil {
 		t.Error(err)
 		return
@@ -872,7 +789,7 @@ func TestTxn_Reset_writeTxn(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	txn, err := env.BeginTxn(nil, 0)
+	txn, err := env.BeginTxn(0)
 	if err != nil {
 		t.Error(err)
 		return
@@ -1126,61 +1043,6 @@ func TestSequence(t *testing.T) {
 	}
 }
 
-func BenchmarkTxn_Sub_commit(b *testing.B) {
-	env := setup(b)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		b.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
-
-	err = env.Update(func(txn *Txn) (err error) {
-		b.ResetTimer()
-		defer b.StopTimer()
-		for i := 0; i < b.N; i++ {
-			err = txn.Sub(func(txn *Txn) (err error) { return nil })
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		b.Error(err)
-		return
-	}
-}
-
-func BenchmarkTxn_Sub_abort(b *testing.B) {
-	env := setup(b)
-	path, err := env.Path()
-	if err != nil {
-		env.Close()
-		b.Error(err)
-		return
-	}
-	defer os.RemoveAll(path)
-	defer env.Close()
-
-	var e = fmt.Errorf("abort")
-
-	err = env.Update(func(txn *Txn) (err error) {
-		b.ResetTimer()
-		defer b.StopTimer()
-		for i := 0; i < b.N; i++ {
-			_ = txn.Sub(func(txn *Txn) (err error) { return e })
-		}
-		return nil
-	})
-	if err != nil {
-		b.Error(err)
-		return
-	}
-}
-
 func BenchmarkTxn_abort(b *testing.B) {
 	env := setup(b)
 	path, err := env.Path()
@@ -1258,7 +1120,7 @@ func BenchmarkTxn_unmanaged_abort(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		txn, err := env.BeginTxn(nil, 0)
+		txn, err := env.BeginTxn(0)
 		if err != nil {
 			b.Error(err)
 			return
@@ -1283,7 +1145,7 @@ func BenchmarkTxn_unmanaged_commit(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		txn, err := env.BeginTxn(nil, 0)
+		txn, err := env.BeginTxn(0)
 		if err != nil {
 			b.Error(err)
 			return
@@ -1308,7 +1170,7 @@ func BenchmarkTxn_unmanaged_ro(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		txn, err := env.BeginTxn(nil, Readonly)
+		txn, err := env.BeginTxn(Readonly)
 		if err != nil {
 			b.Error(err)
 			return
@@ -1331,7 +1193,7 @@ func BenchmarkTxn_renew(b *testing.B) {
 	// It is not necessary to call runtime.LockOSThread here because the txn is
 	// Readonly
 
-	txn, err := env.BeginTxn(nil, Readonly)
+	txn, err := env.BeginTxn(Readonly)
 	if err != nil {
 		b.Error(err)
 		return

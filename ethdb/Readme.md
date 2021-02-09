@@ -82,7 +82,7 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
 - it's safe to call .Rollback() after .Commit(), multiple rollbacks are also safe. Common transaction patter:
 
 ```
-tx, err := db.Begin(true, nil, ethdb.RW)
+tx, err := db.Begin(true, ethdb.RW)
 if err != nil {
     return err
 }

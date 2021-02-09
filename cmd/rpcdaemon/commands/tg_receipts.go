@@ -42,7 +42,7 @@ func (api *TgImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*ty
 
 // GetLogsByNumber implements tg_getLogsByHash. Returns all the logs that appear in a block given the block's hash.
 // func (api *TgImpl) GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error) {
-// 	tx, err := api.db.Begin(ctx, nil, false)
+// 	tx, err := api.db.Begin(ctx, false)
 // 	if err != nil {
 // 		return nil, err
 // 	}

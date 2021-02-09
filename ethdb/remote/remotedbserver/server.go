@@ -93,7 +93,7 @@ func NewKvServer(kv ethdb.KV) *KvServer {
 }
 
 func (s *KvServer) Tx(stream remote.KV_TxServer) error {
-	tx, errBegin := s.kv.Begin(stream.Context(), nil, ethdb.RO)
+	tx, errBegin := s.kv.Begin(stream.Context(), ethdb.RO)
 	if errBegin != nil {
 		return fmt.Errorf("server-side error: %w", errBegin)
 	}
@@ -137,7 +137,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			}
 
 			tx.Rollback()
-			tx, errBegin = s.kv.Begin(stream.Context(), nil, ethdb.RO)
+			tx, errBegin = s.kv.Begin(stream.Context(), ethdb.RO)
 			if errBegin != nil {
 				return fmt.Errorf("server-side error: %w", errBegin)
 			}

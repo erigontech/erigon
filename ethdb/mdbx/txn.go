@@ -79,35 +79,26 @@ type Txn struct {
 
 // beginTxn does not lock the OS thread which is a prerequisite for creating a
 // write transaction.
-func beginTxn(env *Env, parent *Txn, flags uint) (*Txn, error) {
+func beginTxn(env *Env, flags uint) (*Txn, error) {
 	txn := &Txn{
 		readonly: flags&Readonly != 0,
 		env:      env,
 	}
 
-	var ptxn *C.MDBX_txn
-	if parent == nil {
-		if flags&Readonly == 0 {
-			// In a write Txn we can use the shared, C-allocated key and value
-			// allocated by env, and freed when it is closed.
-			txn.key = env.ckey
-			txn.val = env.cval
-		} else {
-			// It is not easy to share C.MDBX_val values in this scenario unless
-			// there is a synchronized pool involved, which will increase
-			// overhead.  Further, allocating these values with C will add
-			// overhead both here and when the values are freed.
-			txn.key = new(C.MDBX_val)
-			txn.val = new(C.MDBX_val)
-		}
+	if flags&Readonly == 0 {
+		// In a write Txn we can use the shared, C-allocated key and value
+		// allocated by env, and freed when it is closed.
+		txn.key = env.ckey
+		txn.val = env.cval
 	} else {
-		// Because parent Txn objects cannot be used while a sub-Txn is active
-		// it is OK for them to share their C.MDBX_val objects.
-		ptxn = parent._txn
-		txn.key = parent.key
-		txn.val = parent.val
+		// It is not easy to share C.MDBX_val values in this scenario unless
+		// there is a synchronized pool involved, which will increase
+		// overhead.  Further, allocating these values with C will add
+		// overhead both here and when the values are freed.
+		txn.key = new(C.MDBX_val)
+		txn.val = new(C.MDBX_val)
 	}
-	ret := C.mdbx_txn_begin(env._env, ptxn, C.MDBX_txn_flags_t(flags), &txn._txn)
+	ret := C.mdbx_txn_begin(env._env, nil, C.MDBX_txn_flags_t(flags), &txn._txn)
 	if ret != success {
 		return nil, operrno("mdbx_txn_begin", ret)
 	}
@@ -471,38 +462,6 @@ func (txn *Txn) StatDBI(dbi DBI) (*Stat, error) {
 func (txn *Txn) Drop(dbi DBI, del bool) error {
 	ret := C.mdbx_drop(txn._txn, C.MDBX_dbi(dbi), C.bool(del))
 	return operrno("mdbx_drop", ret)
-}
-
-// Sub executes fn in a subtransaction.  Sub commits the subtransaction iff a
-// nil error is returned by fn and otherwise aborts it.  Sub returns any error
-// it encounters.
-//
-// Sub may only be called on an Update Txn (one created without the Readonly
-// flag).  Calling Sub on a View transaction will return an error.  Sub assumes
-// the calling goroutine is locked to an OS thread and will not call
-// runtime.LockOSThread.
-//
-// Any call to Abort, Commit, Renew, or Reset on a Txn created by Sub will
-// panic.
-func (txn *Txn) Sub(fn TxnOp) error {
-	// As of 0.9.14 Readonly is the only Txn flag and readonly subtransactions
-	// don't make sense.
-	return txn.subFlag(0, fn)
-}
-
-func (txn *Txn) subFlag(flags uint, fn TxnOp) error {
-	sub, err := beginTxn(txn.env, txn, flags)
-	if err != nil {
-		return err
-	}
-	sub.managed = true
-	defer sub.abort()
-	err = fn(sub)
-	if err != nil {
-		return err
-	}
-	_, err = sub.commit()
-	return err
 }
 
 func (txn *Txn) bytes(val *C.MDBX_val) []byte {
