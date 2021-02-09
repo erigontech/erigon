@@ -764,7 +764,7 @@ func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 }
 
 func (tx *MdbxTx) BucketSize(name string) (uint64, error) {
-	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
+	st, err := tx.BucketStat(name)
 	if err != nil {
 		return 0, err
 	}

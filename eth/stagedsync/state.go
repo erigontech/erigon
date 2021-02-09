@@ -239,6 +239,11 @@ func printBucketsSize(tx ethdb.Tx) error {
 	if len(bucketSizes) == 0 {
 		return nil
 	}
+	sz, err1 := tx.BucketSize("freelist")
+	if err1 != nil {
+		return err1
+	}
+	bucketSizes = append(bucketSizes, "freelist", common.StorageSize(sz))
 	log.Info("Tables", bucketSizes...)
 	return nil
 }
