@@ -216,7 +216,6 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 }
 
 func printBucketsSize(tx ethdb.Tx) error {
-	defer func(t time.Time) { fmt.Printf("state.go:219: %s\n", time.Since(t)) }(time.Now())
 	if tx == nil {
 		return nil
 	}
