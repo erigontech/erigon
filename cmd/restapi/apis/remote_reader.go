@@ -87,6 +87,10 @@ func (c *powEngine) AncestorsNeededForVerification(_ *types.Header) int {
 	panic("not implemented")
 }
 
+func (c *powEngine) PrepareHeaders(_ []*types.Header) {
+	panic("not implemented")
+}
+
 func NewRemoteReader(db ethdb.KV, blockNr uint64) *RemoteReader {
 	return &RemoteReader{
 		accountReads: make(map[common.Address]struct{}),

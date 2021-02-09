@@ -2,6 +2,7 @@ package clique
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 	"time"
 
@@ -28,6 +29,17 @@ func (c *Verifier) Verify(chain consensus.ChainHeaderReader, header *types.Heade
 
 func (c *Verifier) AncestorsNeededForVerification(header *types.Header) int {
 	return c.findPrevCheckpoint(header.Number.Uint64())
+}
+
+func (c *Verifier) PrepareHeaders(hs []*types.Header) {
+	addrs, err := c.recoverSig.ecrecovers(hs)
+	if err != nil {
+		return
+	}
+
+	for i := range hs {
+		hs[i].SetAuthor(addrs[i])
+	}
 }
 
 // verifyHeader checks whether a header conforms to the consensus rules.The
@@ -126,7 +138,9 @@ func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.
 		}
 	}
 
-	if highestParentNum == -1 || parent.Number.Uint64() != number-1 || parent.Hash() != header.ParentHash {
+	if highestParentNum == -1 || parent.Number.Uint64() != number-1 || parent.HashCache() != header.ParentHash {
+		fmt.Println("ERRRR!!!111", highestParentNum, parent.Number.Uint64(), number-1, parent.HashCache().String(), header.ParentHash.String())
+		// ERRRR!!!111					 1 1 16 0xa7684ac44d48494670b2e0d9085b7750e7341620f0a271db146ed5e70c1db854 0x64f506765747d2ed4cc810b5acd1859ae7fecd42cf28cbb961f01be5660a2da9
 		return consensus.ErrUnknownAncestor
 	}
 	if parent.Time+c.config.Period > header.Time {
@@ -150,7 +164,7 @@ func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.
 	err = c.verifySeal(header, snap)
 	if err == nil {
 		if err = c.applyAndStoreSnapshot(snap, header); err != nil {
-			log.Error("can't store a snapshot", "block", header.Number.Uint64(), "hash", header.Hash().String(), "err", err)
+			log.Error("can't store a snapshot", "block", header.Number.Uint64(), "hash", header.HashCache().String(), "err", err)
 		}
 	}
 
@@ -181,19 +195,19 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 		number := parents[i].Number.Uint64()
 
 		// If an in-memory snapshot was found, use that
-		if s, ok := c.recents.Get(p.Hash()); ok {
+		if s, ok := c.recents.Get(p.HashCache()); ok {
 			snap = s.(*Snapshot)
 			break
 		}
 
 		// If an on-disk checkpoint snapshot can be found, use that
 		if isSnapshot(number, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
-			if s, err = loadAndFillSnapshot(c.db, p.Number.Uint64(), p.Hash(), c.config, c.snapStorage, c.signatures); err == nil {
-				log.Trace("Loaded voting snapshot from disk", "number", p.Number, "hash", p.Hash())
+			if s, err = loadAndFillSnapshot(c.db, p.Number.Uint64(), p.HashCache(), c.config, c.snapStorage); err == nil {
+				log.Trace("Loaded voting snapshot from disk", "number", p.Number, "hash", p.HashCache())
 				snap = s
 				break
 			} else {
-				log.Trace("can't load and update a snapshot", "num", number, "block", p.Number.Uint64(), "hash", p.Hash().String(), "error", err)
+				log.Trace("can't load and update a snapshot", "num", number, "block", p.Number.Uint64(), "hash", p.HashCache().String(), "error", err)
 			}
 		}
 
@@ -204,12 +218,13 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 				return nil, err
 			}
 
-			log.Info("Stored genesis checkpoint snapshot to disk", "number", p.Number, "hash", p.Hash())
+			log.Info("Stored genesis checkpoint snapshot to disk", "number", p.Number, "hash", p.HashCache())
 			break
 		}
 	}
 
 	if snap == nil {
+		fmt.Println("NIL SNAP", len(parents))
 		return nil, consensus.ErrUnknownAncestor
 	}
 
@@ -244,7 +259,7 @@ func (c *Verifier) storeGenesisSnapshot(h *types.Header) (*Snapshot, error) {
 		copy(signers[i][:], h.Extra[extraVanity+i*common.AddressLength:])
 	}
 
-	snap := newSnapshot(c.config, c.snapStorage, c.signatures, h.Number.Uint64(), h.Hash(), signers)
+	snap := newSnapshot(c.config, c.snapStorage, h.Number.Uint64(), h.HashCache(), signers)
 	if err := c.applyAndStoreSnapshot(snap); err != nil {
 		return nil, err
 	}
@@ -264,7 +279,7 @@ func (c *Verifier) verifySeal(header *types.Header, snap *Snapshot) error {
 	}
 
 	// Resolve the authorization key and check against signers
-	signer, err := ecrecover(header, c.signatures)
+	signer, err := c.recoverSig.ecrecover(header)
 	if err != nil {
 		return err
 	}

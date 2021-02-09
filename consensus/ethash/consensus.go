@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -93,11 +94,12 @@ func (ethash *Ethash) Author(header *types.Header) (common.Address, error) {
 func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
 	// Short circuit if the header is known, or its parent not
 	number := header.Number.Uint64()
-	if chain.GetHeader(header.Hash(), number) != nil {
+	if chain.GetHeader(header.HashCache(), number) != nil {
 		return nil
 	}
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
+		log.Error("consensus.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return consensus.ErrUnknownAncestor
 	}
 	// Sanity checks passed, do a proper verification
@@ -181,13 +183,14 @@ func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, head
 	var parent *types.Header
 	if index == 0 {
 		parent = chain.GetHeader(headers[0].ParentHash, headers[0].Number.Uint64()-1)
-	} else if headers[index-1].Hash() == headers[index].ParentHash {
+	} else if headers[index-1].HashCache() == headers[index].ParentHash {
 		parent = headers[index-1]
 	}
 	if parent == nil {
+		log.Error("consensus.ErrUnknownAncestor", "index", index, "headers", len(headers), "index-1", headers[index-1].Number.Uint64(), "index", headers[index].Number.Uint64())
 		return consensus.ErrUnknownAncestor
 	}
-	if chain.GetHeader(headers[index].Hash(), headers[index].Number.Uint64()) != nil {
+	if chain.GetHeader(headers[index].HashCache(), headers[index].Number.Uint64()) != nil {
 		return nil // known block
 	}
 	return ethash.verifyHeader(chain, headers[index], parent, false, seals[index])
@@ -224,20 +227,20 @@ func getUncles(chain consensus.ChainReader, block *types.Block) (mapset.Set, map
 		if ancestor == nil {
 			break
 		}
-		ancestors[ancestor.Hash()] = ancestor.Header()
+		ancestors[ancestor.HashCache()] = ancestor.Header()
 		for _, uncle := range ancestor.Uncles() {
-			uncles.Add(uncle.Hash())
+			uncles.Add(uncle.HashCache())
 		}
 		parent, number = ancestor.ParentHash(), number-1
 	}
-	ancestors[block.Hash()] = block.Header()
-	uncles.Add(block.Hash())
+	ancestors[block.HashCache()] = block.Header()
+	uncles.Add(block.HashCache())
 	return uncles, ancestors
 }
 
 func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Block, uncle *types.Header, uncles mapset.Set, ancestors map[common.Hash]*types.Header, seal bool) error {
 	// Make sure every uncle is rewarded only once
-	hash := uncle.Hash()
+	hash := uncle.HashCache()
 	if uncles.Contains(hash) {
 		return errDuplicateUncle
 	}
@@ -272,7 +275,7 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		return errOlderBlockTime
 	}
 	// Verify the block's difficulty based on its timestamp and parent's difficulty
-	expected := ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
+	expected := ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number, parent.HashCache(), parent.UncleHash)
 
 	if expected.Cmp(header.Difficulty) != 0 {
 		return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, expected)
@@ -569,7 +572,7 @@ func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.H
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
-	header.Difficulty = ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
+	header.Difficulty = ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number, parent.HashCache(), parent.UncleHash)
 	return nil
 }
 

@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"os"
+	"runtime"
+	"runtime/pprof"
+	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -76,6 +80,7 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 func VerifyHeaders(db ethdb.Database, headers []*types.Header, engine consensus.EngineAPI, checkFreq int) error {
 	// Generate the list of seal verification requests, and start the parallel verifier
 	seals := make([]bool, len(headers))
+	fmt.Println("SEALS-checkFreq", headers[0].Number.Uint64(), checkFreq)
 	if checkFreq != 0 {
 		// In case of checkFreq == 0 all seals are left false.
 		for i := 0; i < len(seals)/checkFreq; i++ {
@@ -103,13 +108,13 @@ func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Hea
 		if err != nil {
 			return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 		}
-		if h.Hash() == ch {
+		if h.HashCache() == ch {
 			alreadyCanonicalIndex++
 		} else {
 			break
 		}
 		// If the header is a banned one, straight out abort
-		if core.BadHashes[h.Hash()] {
+		if core.BadHashes[h.HashCache()] {
 			log.Error(fmt.Sprintf(`[%s]
 ########## BAD BLOCK #########
 
@@ -118,7 +123,7 @@ Hash: 0x%x
 
 Error: %v
 ##############################
-`, logPrefix, h.Number, h.Hash(), core.ErrBlacklistedHash))
+`, logPrefix, h.Number, h.HashCache(), core.ErrBlacklistedHash))
 			return false, false, 0, core.ErrBlacklistedHash
 		}
 	}
@@ -137,7 +142,7 @@ Error: %v
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
 		if i > 0 {
-			if header.ParentHash != headers[i-1].Hash() {
+			if header.ParentHash != headers[i-1].HashCache() {
 				return false, false, 0, fmt.Errorf("%s: broken chain", logPrefix)
 			}
 		}
@@ -181,7 +186,7 @@ Error: %v
 		// we always add header difficulty to TD, because next blocks might
 		// be inserted and we need the right value for them
 		td = td.Add(td, header.Difficulty)
-		if !newCanonical && rawdb.ReadHeaderNumber(batch, header.Hash()) != nil {
+		if !newCanonical && rawdb.ReadHeaderNumber(batch, header.HashCache()) != nil {
 			// We cannot ignore blocks if they cause reorg
 			ignored++
 			continue
@@ -191,7 +196,7 @@ Error: %v
 		if err != nil {
 			return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 		}
-		hashesMatch := header.Hash() == ch
+		hashesMatch := header.HashCache() == ch
 		if newCanonical && !deepFork && !fork && !hashesMatch {
 			forkBlockNumber = number - 1
 			fork = true
@@ -200,7 +205,7 @@ Error: %v
 			fork = true
 		}
 		if newCanonical {
-			if err = rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64()); err != nil {
+			if err = rawdb.WriteCanonicalHash(batch, header.HashCache(), header.Number.Uint64()); err != nil {
 				return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 			}
 		}
@@ -208,10 +213,10 @@ Error: %v
 		if err != nil {
 			return false, false, 0, fmt.Errorf("[%s] Failed to RLP encode header: %w", logPrefix, err)
 		}
-		if err := rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td); err != nil {
+		if err := rawdb.WriteTd(batch, header.HashCache(), header.Number.Uint64(), td); err != nil {
 			return false, false, 0, fmt.Errorf("[%s] Failed to WriteTd: %w", logPrefix, err)
 		}
-		if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
+		if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.HashCache()), data); err != nil {
 			return false, false, 0, fmt.Errorf("[%s] Failed to store header: %w", logPrefix, err)
 		}
 	}
@@ -253,10 +258,10 @@ Error: %v
 	if newCanonical {
 		encoded := dbutils.EncodeBlockNumber(lastHeader.Number.Uint64())
 
-		if err := batch.Put(dbutils.HeaderNumberPrefix, lastHeader.Hash().Bytes(), encoded); err != nil {
+		if err := batch.Put(dbutils.HeaderNumberPrefix, lastHeader.HashCache().Bytes(), encoded); err != nil {
 			return false, false, 0, fmt.Errorf("[%s] Failed to store hash to number mapping: %w", logPrefix, err)
 		}
-		rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
+		rawdb.WriteHeadHeaderHash(batch, lastHeader.HashCache())
 	}
 	if _, err := batch.Commit(); err != nil {
 		return false, false, 0, fmt.Errorf("%s: write header markers into disk: %w", logPrefix, err)
@@ -266,7 +271,7 @@ Error: %v
 	since := time.Since(start)
 	ctx := []interface{}{
 		"count", len(headers), "elapsed", common.PrettyDuration(since),
-		"number", lastHeader.Number, "hash", lastHeader.Hash(),
+		"number", lastHeader.Number, "hash", lastHeader.HashCache(),
 		"blk/sec", float64(len(headers)) / float64(since.Seconds()),
 	}
 	if timestamp := time.Unix(int64(lastHeader.Time), 0); time.Since(timestamp) > time.Minute {
@@ -283,10 +288,49 @@ Error: %v
 	return newCanonical, reorg, forkBlockNumber, nil
 }
 
+var onceStart = sync.Once{}
+var onceStop = sync.Once{}
+var profF *os.File
+
 func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*types.Header, seals []bool) error {
 	toVerify := len(headers)
 	if toVerify == 0 {
 		return nil
+	}
+
+	const blocksToProfile = 100000
+
+	if headers[0].Number.Uint64() < blocksToProfile {
+		onceStart.Do(func() {
+			f, err := os.Create("./cpu_extr.prof")
+			if err != nil {
+				fmt.Println("could not create CPU profile: ", err)
+				os.Exit(1)
+			}
+			if err := pprof.StartCPUProfile(f); err != nil {
+				fmt.Println("could not start CPU profile: ", err)
+				os.Exit(1)
+			}
+			profF = f
+		})
+	}
+
+	if headers[0].Number.Uint64() >= blocksToProfile && profF != nil {
+		onceStop.Do(func() {
+			pprof.StopCPUProfile()
+
+			f, err := os.Create("./mem_extr.prof")
+			if err != nil {
+				fmt.Println("could not create mem profile: ", err)
+				os.Exit(1)
+			}
+			runtime.GC()
+			if err := pprof.WriteHeapProfile(f); err != nil {
+				fmt.Println("could not create mem profile: ", err)
+				os.Exit(1)
+			}
+			fmt.Println("DONE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+		})
 	}
 
 	engine.HeaderVerification() <- consensus.VerifyHeaderRequest{rand.Uint64(), headers, seals, nil}

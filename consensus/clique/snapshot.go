@@ -29,7 +29,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 
-	lru "github.com/hashicorp/golang-lru"
 	json "github.com/json-iterator/go"
 )
 
@@ -51,8 +50,7 @@ type Tally struct {
 
 // Snapshot is the state of the authorization voting at a given point in time.
 type Snapshot struct {
-	config   *params.CliqueConfig // Consensus engine parameters to fine tune behavior
-	sigcache *lru.ARCCache        // Cache of recent block signatures to speed up ecrecover
+	config *params.CliqueConfig // Consensus engine parameters to fine tune behavior
 
 	Number  uint64                      `json:"number"`  // Block number where the snapshot was created
 	Hash    common.Hash                 `json:"hash"`    // Block hash where the snapshot was created
@@ -74,10 +72,9 @@ func (s signersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent signers, so only ever use if for
 // the genesis block.
-func newSnapshot(config *params.CliqueConfig, snapStorage *storage, sigcache *lru.ARCCache, number uint64, hash common.Hash, signers []common.Address) *Snapshot {
+func newSnapshot(config *params.CliqueConfig, snapStorage *storage, number uint64, hash common.Hash, signers []common.Address) *Snapshot {
 	snap := &Snapshot{
 		config:      config,
-		sigcache:    sigcache,
 		Number:      number,
 		Hash:        hash,
 		Signers:     make(map[common.Address]struct{}),
@@ -92,14 +89,13 @@ func newSnapshot(config *params.CliqueConfig, snapStorage *storage, sigcache *lr
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadAndFillSnapshot(db ethdb.Database, num uint64, hash common.Hash, config *params.CliqueConfig, snapStorage *storage, sigcache *lru.ARCCache) (*Snapshot, error) {
+func loadAndFillSnapshot(db ethdb.Database, num uint64, hash common.Hash, config *params.CliqueConfig, snapStorage *storage) (*Snapshot, error) {
 	snap, err := loadSnapshot(db, num, hash)
 	if err != nil {
 		return nil, err
 	}
 
 	snap.config = config
-	snap.sigcache = sigcache
 	snap.snapStorage = snapStorage
 
 	return snap, nil
@@ -191,7 +187,7 @@ func (s *Snapshot) uncast(address common.Address, authorize bool) bool {
 
 // apply creates a new authorization snapshot by applying the given headers to
 // the original one.
-func (s *Snapshot) apply(headers ...*types.Header) error {
+func (s *Snapshot) apply(r *recoverer, headers ...*types.Header) error {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return nil
@@ -213,6 +209,11 @@ func (s *Snapshot) apply(headers ...*types.Header) error {
 		logged = start
 	)
 
+	signers, err := r.ecrecovers(headers)
+	if err != nil {
+		return err
+	}
+
 	for i := range headers {
 		header := headers[i]
 
@@ -227,10 +228,7 @@ func (s *Snapshot) apply(headers ...*types.Header) error {
 			delete(s.Recents, number-limit)
 		}
 		// Resolve the authorization key and check against signers
-		signer, err := ecrecover(header, s.sigcache)
-		if err != nil {
-			return err
-		}
+		signer := signers[i]
 		if _, ok := s.Signers[signer]; !ok {
 			return errUnauthorizedSigner
 		}
@@ -313,7 +311,7 @@ func (s *Snapshot) apply(headers ...*types.Header) error {
 		log.Info("Reconstructed voting history", "processed", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 	}
 	s.Number += uint64(len(headers))
-	s.Hash = headers[len(headers)-1].Hash()
+	s.Hash = headers[len(headers)-1].HashCache()
 
 	return nil
 }
@@ -352,7 +350,7 @@ type snapObj struct {
 	blob   []byte
 }
 
-func newStorage(db ethdb.Database) *storage {
+func newStorage(db ethdb.Database, exitCh chan struct{}) *storage {
 	const batchSize = 100000
 	const syncSmallBatch = time.Minute
 
@@ -360,7 +358,7 @@ func newStorage(db ethdb.Database) *storage {
 		db:        db,
 		ch:        make(chan *snapObj, batchSize/2),
 		chStatus:  new(uint32),
-		exit:      make(chan struct{}),
+		exit:      exitCh,
 		exitDone:  make(chan struct{}),
 		batchSize: batchSize,
 	}
@@ -472,7 +470,6 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 }
 
 func (st *storage) Close() {
-	common.SafeClose(st.exit)
 	if atomic.CompareAndSwapUint32(st.chStatus, 0, 1) {
 		close(st.ch)
 	}

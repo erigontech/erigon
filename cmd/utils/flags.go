@@ -748,7 +748,7 @@ var (
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
 		Name:  "clique.checkpoint",
 		Usage: "number of blocks after which to save the vote snapshot to the database",
-		Value: 1,
+		Value: 10,
 	}
 	CliqueSnapshotInmemorySnapshotsFlag = cli.IntFlag{
 		Name:  "clique.snapshots",
@@ -758,7 +758,7 @@ var (
 	CliqueSnapshotInmemorySignaturesFlag = cli.IntFlag{
 		Name:  "clique.signatures",
 		Usage: "number of recent block signatures to keep in memory",
-		Value: 4096,
+		Value: 16384,
 	}
 )
 

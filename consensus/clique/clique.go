@@ -20,10 +20,13 @@ package clique
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -37,6 +40,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -131,6 +135,8 @@ var (
 	// errRecentlySigned is returned if a header is signed by an authorized entity
 	// that already signed a header recently, thus is temporarily not allowed to.
 	errRecentlySigned = errors.New("recently signed")
+
+	errNoHeaders = errors.New("no any headers to restore signatures")
 )
 
 // SignerFn hashes and signs the data to be signed by a backing account.
@@ -139,7 +145,7 @@ type SignerFn func(signer accounts.Account, mimeType string, message []byte) ([]
 // ecrecover extracts the Ethereum account address from a signed header.
 func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, error) {
 	// If the signature's already cached, return that
-	hash := header.Hash()
+	hash := header.HashCache()
 	if address, known := sigcache.Get(hash); known {
 		return address.(common.Address), nil
 	}
@@ -164,6 +170,33 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 	return signer, nil
 }
 
+func ecrecoverWithContext(context *secp256k1.Context, header *types.Header, sigcache *lru.ARCCache) (common.Address, error) {
+	// If the signature's already cached, return that
+	hash := header.HashCache()
+	if address, known := sigcache.Get(hash); known {
+		return address.(common.Address), nil
+	}
+
+	// Retrieve the signature from the header extra-data
+	if len(header.Extra) < extraSeal {
+		return common.Address{}, errMissingSignature
+	}
+	signature := header.Extra[len(header.Extra)-extraSeal:]
+
+	// Recover the public key and the Ethereum address
+	pubkey, err := crypto.EcrecoverWithContext(context, SealHash(header).Bytes(), signature)
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	var signer common.Address
+	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
+
+	sigcache.Add(hash, signer)
+
+	return signer, nil
+}
+
 // Clique is the proof-of-authority consensus engine proposed to support the
 // Ethereum testnet following the Ropsten attacks.
 type Clique struct {
@@ -173,7 +206,7 @@ type Clique struct {
 
 	recents        *lru.ARCCache // Snapshots for recent block to speed up reorgs
 	snapshotBlocks *lru.ARCCache // blockNum -> hash
-	signatures     *lru.ARCCache // Signatures of recent blocks to speed up mining
+	recoverSig     *recoverer
 
 	proposals map[common.Address]bool // Current list of proposals we are pushing
 
@@ -185,6 +218,7 @@ type Clique struct {
 	fakeDiff bool // Skip difficulty verifications
 
 	snapStorage *storage
+	exitCh      chan struct{}
 }
 
 // New creates a Clique proof-of-authority consensus engine with the initial
@@ -198,7 +232,8 @@ func New(config *params.CliqueConfig, snapshotConfig *params.SnapshotConfig, db 
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC(snapshotConfig.InmemorySnapshots)
 	snapshotBlocks, _ := lru.NewARC(snapshotConfig.InmemorySnapshots)
-	signatures, _ := lru.NewARC(snapshotConfig.InmemorySignatures)
+
+	exitCh := make(chan struct{})
 
 	return &Clique{
 		config:         &conf,
@@ -206,16 +241,17 @@ func New(config *params.CliqueConfig, snapshotConfig *params.SnapshotConfig, db 
 		db:             db,
 		recents:        recents,
 		snapshotBlocks: snapshotBlocks,
-		signatures:     signatures,
+		recoverSig:     newRecoverer(snapshotConfig.InmemorySignatures, exitCh),
 		proposals:      make(map[common.Address]bool),
-		snapStorage:    newStorage(db),
+		snapStorage:    newStorage(db, exitCh),
+		exitCh:         exitCh,
 	}
 }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 func (c *Clique) Author(header *types.Header) (common.Address, error) {
-	return ecrecover(header, c.signatures)
+	return ecrecover(header, c.recoverSig.sigcache)
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
@@ -324,9 +360,140 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	return c.applyAndStoreSnapshot(snap, header)
 }
 
+type recoverer struct {
+	sigcache *lru.ARCCache
+	reqCh    chan recoverReq
+}
+
+type recoverReq struct {
+	h   []*types.Header
+	res chan recoverRes
+}
+
+type recoverRes struct {
+	addrs []common.Address
+	errs  []error
+}
+
+func newRecoverer(cacheSize int, exitCh chan struct{}) *recoverer {
+	signatures, _ := lru.NewARC(cacheSize)
+	requests := make(chan recoverReq, cacheSize)
+
+	r := &recoverer{
+		sigcache: signatures,
+		reqCh:    requests,
+	}
+
+	go func() {
+		numOfGoroutines := runtime.NumCPU()
+
+		for {
+			select {
+			case <-exitCh:
+				return
+			case req := <-requests:
+				if len(req.h) == 0 {
+					req.res <- recoverRes{nil, []error{errNoHeaders}}
+				}
+
+				addrs := make([]common.Address, len(req.h))
+				errs := make([]error, len(req.h))
+
+				done := true
+				for idx := range req.h {
+					if req.h[idx].Author() != (common.Address{}) {
+						addrs[idx] = req.h[idx].Author()
+						errs[idx] = nil
+					} else {
+						done = false
+						break
+					}
+				}
+				if done {
+					req.res <- recoverRes{addrs, errs}
+					continue
+				}
+
+				threads := numOfGoroutines
+				if threads > len(req.h) {
+					threads = len(req.h)
+				}
+
+				n := new(uint32)
+				wg := new(sync.WaitGroup)
+				wg.Add(threads)
+
+				for i := 0; i < threads; i++ {
+					go func(threadNo int) {
+						defer wg.Done()
+
+						for {
+							idx := atomic.AddUint32(n, 1) - 1
+							if idx > uint32(len(req.h)-1) {
+								return
+							}
+
+							if req.h[idx].Author() == (common.Address{}) {
+								addr, err := ecrecoverWithContext(secp256k1.ContextForThread(threadNo), req.h[idx], r.sigcache)
+
+								addrs[idx] = addr
+								errs[idx] = err
+							} else {
+								addrs[idx] = req.h[idx].Author()
+								errs[idx] = nil
+							}
+						}
+					}(i)
+				}
+
+				wg.Wait()
+
+				req.res <- recoverRes{addrs, errs}
+			}
+		}
+	}()
+
+	return r
+}
+
+func (r *recoverer) ecrecover(h *types.Header) (common.Address, error) {
+	if h.Author() != (common.Address{}) {
+		return h.Author(), nil
+	}
+
+	resCh := make(chan recoverRes)
+
+	r.reqCh <- recoverReq{[]*types.Header{h}, resCh}
+	res := <-resCh
+
+	return res.addrs[0], res.errs[0]
+}
+
+func (r *recoverer) ecrecovers(h []*types.Header) ([]common.Address, error) {
+	resCh := make(chan recoverRes, len(h))
+
+	r.reqCh <- recoverReq{h, resCh}
+	res := <-resCh
+
+	var errsMsg string
+	var isError bool
+	for _, err := range res.errs {
+		if err != nil {
+			isError = true
+			errsMsg = fmt.Sprintf("%s %s", errsMsg, err.Error())
+		}
+	}
+
+	if isError {
+		return res.addrs, errors.New(errsMsg)
+	}
+
+	return res.addrs, nil
+}
+
 func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, headers ...*types.Header) error {
 	if len(headers) > 0 {
-		if err := snap.apply(headers...); err != nil {
+		if err := snap.apply(c.recoverSig, headers...); err != nil {
 			return err
 		}
 	}
@@ -362,7 +529,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	} else {
 		parent = chain.GetHeader(header.ParentHash, number-1)
 	}
-	if parent == nil || parent.Number.Uint64() != number-1 || parent.Hash() != header.ParentHash {
+	if parent == nil || parent.Number.Uint64() != number-1 || parent.HashCache() != header.ParentHash {
 		return consensus.ErrUnknownAncestor
 	}
 	if parent.Time+c.config.Period > header.Time {
@@ -399,7 +566,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		}
 		// If an on-disk checkpoint snapshot can be found, use that
 		if isSnapshot(number, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
-			if s, err := loadAndFillSnapshot(c.db, number, hash, c.config, c.snapStorage, c.signatures); err == nil {
+			if s, err := loadAndFillSnapshot(c.db, number, hash, c.config, c.snapStorage); err == nil {
 				log.Trace("Loaded voting snapshot from disk", "number", number, "hash", hash)
 				snap = s
 				break
@@ -413,14 +580,14 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		if number == 0 || (number%c.config.Epoch == 0 && len(headers) > params.FullImmutabilityThreshold) {
 			checkpoint := chain.GetHeaderByNumber(number)
 			if checkpoint != nil {
-				hash := checkpoint.Hash()
+				hash := checkpoint.HashCache()
 
 				signers := make([]common.Address, (len(checkpoint.Extra)-extraVanity-extraSeal)/common.AddressLength)
 				for i := 0; i < len(signers); i++ {
 					copy(signers[i][:], checkpoint.Extra[extraVanity+i*common.AddressLength:])
 				}
 
-				snap = newSnapshot(c.config, c.snapStorage, c.signatures, number, hash, signers)
+				snap = newSnapshot(c.config, c.snapStorage, number, hash, signers)
 
 				if err := c.applyAndStoreSnapshot(snap); err != nil {
 					return nil, err
@@ -435,7 +602,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		if len(parents) > 0 {
 			// If we have explicit parents, pick from there (enforced)
 			header = parents[len(parents)-1]
-			if header.Hash() != hash || header.Number.Uint64() != number {
+			if header.HashCache() != hash || header.Number.Uint64() != number {
 				return nil, consensus.ErrUnknownAncestor
 			}
 			parents = parents[:len(parents)-1]
@@ -500,7 +667,7 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 	}
 
 	// Resolve the authorization key and check against signers
-	signer, err := ecrecover(header, c.signatures)
+	signer, err := c.recoverSig.ecrecover(header)
 	if err != nil {
 		return err
 	}
@@ -721,6 +888,7 @@ func (c *Clique) SealHash(header *types.Header) common.Hash {
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *Clique) Close() error {
+	common.SafeClose(c.exitCh)
 	c.snapStorage.Close()
 	return nil
 }
@@ -780,10 +948,14 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 	}
 }
 
-func (c *Clique) Verify(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, _ bool, _ bool) error {
+func (c *Clique) Verify(_ consensus.ChainHeaderReader, _ *types.Header, _ []*types.Header, _ bool, _ bool) error {
 	panic("should not be used")
 }
 
-func (c *Clique) AncestorsNeededForVerification(header *types.Header) int {
+func (c *Clique) AncestorsNeededForVerification(_ *types.Header) int {
 	panic("should not be used")
+}
+
+func (c *Clique) PrepareHeaders(_ []*types.Header) {
+	panic("not implemented")
 }

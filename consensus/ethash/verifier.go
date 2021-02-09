@@ -17,3 +17,7 @@ func (ethash *Ethash) Verify(chain consensus.ChainHeaderReader, header *types.He
 func (ethash *Ethash) AncestorsNeededForVerification(_ *types.Header) int {
 	return 1
 }
+
+func (ethash *Ethash) PrepareHeaders(_ []*types.Header) {
+	return
+}

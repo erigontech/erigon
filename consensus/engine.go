@@ -135,7 +135,7 @@ func (p *API) CacheHeader(header *types.Header) {
 
 	for _, h := range blocks {
 		// the block is already stored
-		if h.Hash() == header.Hash() {
+		if h.HashCache() == header.HashCache() {
 			return
 		}
 	}
@@ -160,7 +160,7 @@ func (p *API) GetCachedHeader(hash common.Hash, blockNum uint64) *types.Header {
 	}
 
 	for _, h := range headers {
-		if h.Hash() == hash {
+		if h.HashCache() == hash {
 			return h
 		}
 	}
