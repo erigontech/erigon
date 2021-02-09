@@ -81,11 +81,6 @@ func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts {
-	opts.flags = f(opts.flags)
-	return opts
-}
-
 func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 	opts.mapSize = sz
 	return opts
