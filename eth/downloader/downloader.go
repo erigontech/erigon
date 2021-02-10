@@ -135,6 +135,7 @@ type Downloader struct {
 	synchronising   int32
 	notified        int32
 	committed       int32
+	ancientLimit    uint64 // The maximum block number which can be regarded as ancient data.
 
 	// Channels
 	headerCh      chan dataPack        // [eth/62] Channel receiving inbound block headers
@@ -690,6 +691,7 @@ func (d *Downloader) Cancel() {
 	d.cancel()
 	d.cancelWg.Wait()
 
+	atomic.StoreUint64(&d.ancientLimit, 0)
 	log.Debug("Reset ancient limit to zero")
 }
 
@@ -1697,10 +1699,15 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					var err error
 					var newCanonical bool
 					if mode == StagedSync {
+
+						t := time.Now()
 						if err = stagedsync.VerifyHeaders(d.stateDB, chunk, d.consensusProcess, frequency); err != nil {
 							log.Warn("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
 							return fmt.Errorf("%w: %v", errInvalidChain, err)
 						}
+						elapsed := time.Since(t)
+						fmt.Println("VerifyHeaders", "count", len(chunk), "elapsed", elapsed, "number", chunk[n].Number, "hash", chunk[n].Hash().String(), "blk/sec", float64(len(chunk))/float64(elapsed))
+
 						var reorg bool
 						var forkBlockNumber uint64
 						logPrefix := d.stagedSyncState.LogPrefix()
@@ -1860,7 +1867,7 @@ func (d *Downloader) commitPivotBlock(result *fetchResult) error {
 	log.Debug("Committing fast sync pivot as new head", "number", block.Number(), "hash", block.Hash())
 
 	// Commit the pivot block as the new head, will require full sync from here on
-	if _, err := d.blockchain.InsertReceiptChain([]*types.Block{block}, []types.Receipts{result.Receipts}, 0); err != nil {
+	if _, err := d.blockchain.InsertReceiptChain([]*types.Block{block}, []types.Receipts{result.Receipts}, atomic.LoadUint64(&d.ancientLimit)); err != nil {
 		return err
 	}
 	if err := d.blockchain.FastSyncCommitHead(block.Hash()); err != nil {

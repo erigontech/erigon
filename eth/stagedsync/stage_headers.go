@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"runtime/trace"
 	"sync"
 	"time"
 
@@ -80,7 +81,6 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 func VerifyHeaders(db ethdb.Database, headers []*types.Header, engine consensus.EngineAPI, checkFreq int) error {
 	// Generate the list of seal verification requests, and start the parallel verifier
 	seals := make([]bool, len(headers))
-	fmt.Println("SEALS-checkFreq", headers[0].Number.Uint64(), checkFreq)
 	if checkFreq != 0 {
 		// In case of checkFreq == 0 all seals are left false.
 		for i := 0; i < len(seals)/checkFreq; i++ {
@@ -291,6 +291,7 @@ Error: %v
 var onceStart = sync.Once{}
 var onceStop = sync.Once{}
 var profF *os.File
+var profOn = false
 
 func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*types.Header, seals []bool) error {
 	toVerify := len(headers)
@@ -298,42 +299,56 @@ func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*typ
 		return nil
 	}
 
-	const blocksToProfile = 100000
+	if profOn {
+		const blocksToProfile = 10000
 
-	if headers[0].Number.Uint64() < blocksToProfile {
-		onceStart.Do(func() {
-			f, err := os.Create("./cpu_extr.prof")
-			if err != nil {
-				fmt.Println("could not create CPU profile: ", err)
-				os.Exit(1)
-			}
-			if err := pprof.StartCPUProfile(f); err != nil {
-				fmt.Println("could not start CPU profile: ", err)
-				os.Exit(1)
-			}
-			profF = f
-		})
+		if headers[0].Number.Uint64() < blocksToProfile {
+			onceStart.Do(func() {
+				f, err := os.Create("./cpu_extr.prof")
+				if err != nil {
+					fmt.Println("could not create CPU profile: ", err)
+					os.Exit(1)
+				}
+				if err := pprof.StartCPUProfile(f); err != nil {
+					fmt.Println("could not start CPU profile: ", err)
+					os.Exit(1)
+				}
+				profF = f
+
+				ft, err := os.Create("./trace.prof")
+				if err != nil {
+					fmt.Println("could not create trace profile: ", err)
+					os.Exit(1)
+				}
+				trace.Start(ft)
+			})
+		}
+
+		if headers[0].Number.Uint64() >= blocksToProfile && profF != nil {
+			onceStop.Do(func() {
+				pprof.StopCPUProfile()
+
+				f, err := os.Create("./mem_extr.prof")
+				if err != nil {
+					fmt.Println("could not create mem profile: ", err)
+					os.Exit(1)
+				}
+				runtime.GC()
+				if err := pprof.WriteHeapProfile(f); err != nil {
+					fmt.Println("could not create mem profile: ", err)
+					os.Exit(1)
+				}
+
+				trace.Stop()
+				fmt.Println("DONE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+			})
+		}
 	}
 
-	if headers[0].Number.Uint64() >= blocksToProfile && profF != nil {
-		onceStop.Do(func() {
-			pprof.StopCPUProfile()
+	reqID := rand.Uint64()
+	fmt.Println("\n\nIN verifyHeaders", reqID, len(headers))
 
-			f, err := os.Create("./mem_extr.prof")
-			if err != nil {
-				fmt.Println("could not create mem profile: ", err)
-				os.Exit(1)
-			}
-			runtime.GC()
-			if err := pprof.WriteHeapProfile(f); err != nil {
-				fmt.Println("could not create mem profile: ", err)
-				os.Exit(1)
-			}
-			fmt.Println("DONE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-		})
-	}
-
-	engine.HeaderVerification() <- consensus.VerifyHeaderRequest{rand.Uint64(), headers, seals, nil}
+	engine.HeaderVerification() <- consensus.VerifyHeaderRequest{reqID, headers, seals, nil}
 
 	reqResponses := make(map[common.Hash]struct{}, len(headers))
 
@@ -350,6 +365,7 @@ func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*typ
 				return nil
 			}
 		case result := <-engine.HeaderRequest():
+			t := time.Now()
 			var err error
 
 			length := 1
@@ -392,6 +408,8 @@ func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*typ
 			}
 
 			engine.HeaderResponse() <- resp
+
+			fmt.Println("<-engine.HeaderRequest()", result.ID, result.Number, len(resp.Headers), time.Since(t))
 		}
 	}
 }

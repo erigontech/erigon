@@ -1,0 +1,871 @@
+INFO [02-09|21:07:27.636] Starting Turbo-Geth on Ethereum mainnet... 
+INFO [02-09|21:07:27.636] Bumping default cache on mainnet         provided=0 updated=4096
+INFO [02-09|21:07:27.637] Dropping default light client cache      provided=0 updated=128
+INFO [02-09|21:07:27.638] Maximum peer count                       ETH=50 LES=0 total=50
+INFO [02-09|21:07:27.638] Set global gas cap                       cap=25000000
+INFO [02-09|21:07:27.651] Apply migration                          name=stages_to_use_named_keys
+INFO [02-09|21:07:27.657] Applied migration                        name=stages_to_use_named_keys
+INFO [02-09|21:07:27.657] Apply migration                          name=unwind_stages_to_use_named_keys
+INFO [02-09|21:07:27.662] Applied migration                        name=unwind_stages_to_use_named_keys
+INFO [02-09|21:07:27.662] Apply migration                          name=stagedsync_to_use_stage_blockhashes
+INFO [02-09|21:07:27.668] Applied migration                        name=stagedsync_to_use_stage_blockhashes
+INFO [02-09|21:07:27.668] Apply migration                          name=unwind_stagedsync_to_use_stage_blockhashes
+INFO [02-09|21:07:27.674] Applied migration                        name=unwind_stagedsync_to_use_stage_blockhashes
+INFO [02-09|21:07:27.674] Apply migration                          name=dupsort_hash_state
+INFO [02-09|21:07:27.677] Applied migration                        name=dupsort_hash_state
+INFO [02-09|21:07:27.677] Apply migration                          name=dupsort_plain_state
+INFO [02-09|21:07:27.680] Applied migration                        name=dupsort_plain_state
+INFO [02-09|21:07:27.680] Apply migration                          name=dupsort_intermediate_trie_hashes
+INFO [02-09|21:07:27.680] Dropping bucket                          name=iTh
+INFO [02-09|21:07:27.683] Applied migration                        name=dupsort_intermediate_trie_hashes
+INFO [02-09|21:07:27.683] Apply migration                          name=clear_log_indices7
+INFO [02-09|21:07:27.688] Applied migration                        name=clear_log_indices7
+INFO [02-09|21:07:27.688] Apply migration                          name=reset_in_bucket_to_recover_db
+INFO [02-09|21:07:27.691] Applied migration                        name=reset_in_bucket_to_recover_db
+INFO [02-09|21:07:27.691] Apply migration                          name=receipts_cbor_encode
+INFO [02-09|21:07:27.700] Applied migration                        name=receipts_cbor_encode
+INFO [02-09|21:07:27.700] Apply migration                          name=receipts_store_logs_separately
+INFO [02-09|21:07:27.708] Applied migration                        name=receipts_store_logs_separately
+INFO [02-09|21:07:27.708] Apply migration                          name=acc_change_set_dup_sort_18
+INFO [02-09|21:07:27.716] Applied migration                        name=acc_change_set_dup_sort_18
+INFO [02-09|21:07:27.716] Apply migration                          name=storage_change_set_dup_sort_22
+INFO [02-09|21:07:27.724] Applied migration                        name=storage_change_set_dup_sort_22
+INFO [02-09|21:07:27.724] Apply migration                          name=tx_table_4
+INFO [02-09|21:07:27.732] Applied migration                        name=tx_table_4
+INFO [02-09|21:07:27.732] Apply migration                          name=history_account_bitmap
+INFO [02-09|21:07:27.738] Applied migration                        name=history_account_bitmap
+INFO [02-09|21:07:27.738] Apply migration                          name=history_storage_bitmap
+INFO [02-09|21:07:27.743] Applied migration                        name=history_storage_bitmap
+INFO [02-09|21:07:27.743] database closed (LMDB)                   lmdb=chaindata
+INFO [02-09|21:07:27.743] Opening Database (LMDB)                  mapSize="2.0 TB" maxFreelistReuse=1000
+INFO [02-09|21:07:27.744] Writing default main-net genesis block 
+INFO [02-09|21:07:28.021] Initialised chain configuration          config="{ChainID: 1 Homestead: 1150000 DAO: 1920000 DAOSupport: true EIP150: 2463000 EIP155: 2675000 EIP158: 2675000 Byzantium: 4370000 Constantinople: 7280000 Petersburg: 7280000 Istanbul: 9069000, Muir Glacier: 9200000, YOLO v2: <nil>, Engine: ethash}"
+INFO [02-09|21:07:28.021] Disk storage enabled for ethash DAGs     dir=/home/eugene/.local/share/tg-ethash count=2
+INFO [02-09|21:07:28.021] Initialising Ethereum protocol           versions="[65 64]" network=1
+WARN [02-09|21:07:28.021] Upgrade blockchain database version      from=<nil> to=8
+INFO [02-09|21:07:28.047] Most recent local header                 number=0 hash="d4e567…cb8fa3" td=17179869184 age=51y10mo1w
+INFO [02-09|21:07:28.047] Most recent local block                  number=0 hash="d4e567…cb8fa3" td=17179869184 age=51y10mo1w
+INFO [02-09|21:07:28.047] Starting peer-to-peer node               instance=turbo-geth/v2021.01.3-alpha-305525c8/linux-amd64/go1.15.8
+INFO [02-09|21:07:28.070] New local node record                    seq=1 id=d289342fdabbc48a ip=127.0.0.1 udp=30303 tcp=30303
+INFO [02-09|21:07:28.070] Started P2P networking                   self=enode://bfb456eb57f4cb49b613f4f0823d8938ea349b1eddd1da41ffee39eb3daf7164bec09ed60557d3cd5b579c7293629d28e5dec06b0e1c9c09fccaa84f4bc8a013@127.0.0.1:30303
+INFO [02-09|21:07:31.349] New local node record                    seq=2 id=d289342fdabbc48a ip=95.84.164.19 udp=30303 tcp=30303
+INFO [02-09|21:07:38.179] Looking for peers                        peercount=0 tried=47 static=0
+INFO [02-09|21:07:48.221] Looking for peers                        peercount=0 tried=45 static=0
+INFO [02-09|21:07:50.025] Block synchronisation started 
+INFO [02-09|21:07:58.398] Looking for peers                        peercount=1 tried=47 static=0
+INFO [02-09|21:08:08.398] Looking for peers                        peercount=1 tried=36 static=0
+INFO [02-09|21:08:18.398] Looking for peers                        peercount=1 tried=58 static=0
+INFO [02-09|21:08:28.420] Looking for peers                        peercount=0 tried=50 static=0
+INFO [02-09|21:08:38.597] Looking for peers                        peercount=0 tried=55 static=0
+INFO [02-09|21:08:48.731] Looking for peers                        peercount=0 tried=50 static=0
+WARN [02-09|21:08:55.013] Synchronisation failed, dropping peer    peer=6fceb5916d341378 err=timeout
+INFO [02-09|21:08:58.731] Looking for peers                        peercount=0 tried=36 static=0
+INFO [02-09|21:09:08.731] Looking for peers                        peercount=1 tried=48 static=0
+INFO [02-09|21:09:18.942] Looking for peers                        peercount=1 tried=52 static=0
+INFO [02-09|21:09:28.942] Looking for peers                        peercount=1 tried=46 static=0
+INFO [02-09|21:09:38.956] Looking for peers                        peercount=1 tried=49 static=0
+INFO [02-09|21:09:49.049] Looking for peers                        peercount=2 tried=53 static=0
+INFO [02-09|21:10:14.438] [1/14 Headers] Imported new block headers count=3264 elapsed=37.348ms number=3264 hash="c9ccf0…cfbc3f" blk/sec=87393.222 age=5y7mo1w
+INFO [02-09|21:10:50.374] [1/14 Headers] Imported new block headers count=8256 elapsed=78.253ms number=11520 hash="12395e…1376ed" blk/sec=105503.878 age=5y7mo1w
+INFO [02-09|21:11:31.066] [1/14 Headers] Imported new block headers count=13056 elapsed=108.757ms number=24576 hash="32aa83…ca3c79" blk/sec=120047.115 age=5y7mo1w
+INFO [02-09|21:12:07.705] Got interrupt, shutting down...          sig=interrupt
+INFO [02-09|21:12:07.705] Got interrupt, shutting down... 
+INFO [02-09|21:12:07.705] Blockchain stopped 
+WARN [02-09|21:12:08.205] Already shutting down, interrupt more to panic. times=9
+WARN [02-09|21:12:08.236] Already shutting down, interrupt more to panic. times=8
+WARN [02-09|21:12:08.267] Already shutting down, interrupt more to panic. times=7
+WARN [02-09|21:12:08.298] Already shutting down, interrupt more to panic. times=6
+WARN [02-09|21:12:08.328] Already shutting down, interrupt more to panic. times=5
+WARN [02-09|21:12:08.358] Already shutting down, interrupt more to panic. times=4
+WARN [02-09|21:12:08.392] Already shutting down, interrupt more to panic. times=3
+WARN [02-09|21:12:08.421] Already shutting down, interrupt more to panic. times=2
+WARN [02-09|21:12:08.451] Already shutting down, interrupt more to panic. times=1
+panic: boom
+
+goroutine 157 [running]:
+github.com/ledgerwatch/turbo-geth/internal/debug.LoudPanic(...)
+	github.com/ledgerwatch/turbo-geth/internal/debug/loudpanic.go:26
+github.com/ledgerwatch/turbo-geth/cmd/utils.StartNode.func1(0xc00033ad20)
+	github.com/ledgerwatch/turbo-geth/cmd/utils/cmd.go:91 +0x28a
+created by github.com/ledgerwatch/turbo-geth/cmd/utils.StartNode
+	github.com/ledgerwatch/turbo-geth/cmd/utils/cmd.go:77 +0xad
+
+goroutine 1 [chan receive, 4 minutes]:
+github.com/ledgerwatch/turbo-geth/node.(*Node).Wait(...)
+	github.com/ledgerwatch/turbo-geth/node/node.go:434
+github.com/ledgerwatch/turbo-geth/turbo/node.(*TurboGethNode).Serve(0xc0023d93c0, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/turbo/node/node.go:43 +0x85
+main.runTurboGeth(0xc0001562c0)
+	github.com/ledgerwatch/turbo-geth/cmd/tg/main.go:59 +0x2da
+github.com/urfave/cli.HandleAction(0x131fe60, 0x1620408, 0xc0001562c0, 0xc0001562c0, 0x0)
+	github.com/urfave/cli@v1.22.4/app.go:528 +0x58
+github.com/urfave/cli.(*App).Run(0xc000367880, 0xc00003c0a0, 0x5, 0x5, 0x0, 0x0)
+	github.com/urfave/cli@v1.22.4/app.go:288 +0x655
+main.main()
+	github.com/ledgerwatch/turbo-geth/cmd/tg/main.go:26 +0x87
+
+goroutine 22 [chan receive]:
+github.com/ledgerwatch/turbo-geth/metrics.(*meterArbiter).tick(0x207e6e0)
+	github.com/ledgerwatch/turbo-geth/metrics/meter.go:292 +0x7d
+created by github.com/ledgerwatch/turbo-geth/metrics.NewMeterForced
+	github.com/ledgerwatch/turbo-geth/metrics/meter.go:71 +0x105
+
+goroutine 23 [select]:
+github.com/ledgerwatch/turbo-geth/consensus/ethash.(*remoteSealer).loop(0xc0002f6000)
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/sealer.go:269 +0x25c
+created by github.com/ledgerwatch/turbo-geth/consensus/ethash.startRemoteSealer
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/sealer.go:253 +0x2b2
+
+goroutine 30 [sync.Cond.Wait, 4 minutes]:
+runtime.goparkunlock(...)
+	runtime/proc.go:312
+sync.runtime_notifyListWait(0xc000134120, 0xc000000000)
+	runtime/sema.go:513 +0xf8
+sync.(*Cond).Wait(0xc000134110)
+	sync/cond.go:56 +0x9d
+github.com/anacrolix/stm.(*Tx).wait(0xc0001340e0)
+	github.com/anacrolix/stm@v0.2.0/tx.go:45 +0x131
+github.com/anacrolix/stm.Atomically(0xc0000c01d0, 0xc0000c01d0, 0x207fe40)
+	github.com/anacrolix/stm@v0.2.0/funcs.go:51 +0x138
+github.com/anacrolix/stm/rate.(*Limiter).tokenGenerator(0xc0001eb320, 0x2625a00)
+	github.com/anacrolix/stm@v0.2.0/rate/ratelimit.go:59 +0x1d7
+created by github.com/anacrolix/stm/rate.NewLimiter
+	github.com/anacrolix/stm@v0.2.0/rate/ratelimit.go:45 +0x315
+
+goroutine 6541 [semacquire]:
+sync.runtime_Semacquire(0xc0018b9500)
+	runtime/sema.go:56 +0x45
+sync.(*WaitGroup).Wait(0xc0018b94f8)
+	sync/waitgroup.go:130 +0x65
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).Stop(0xc0018b9400)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:383 +0x6e
+github.com/ledgerwatch/turbo-geth/eth.(*Ethereum).Stop(0xc00033a0e0, 0xc0021ad520, 0xc000e4aa80)
+	github.com/ledgerwatch/turbo-geth/eth/backend.go:875 +0x45
+github.com/ledgerwatch/turbo-geth/node.(*Node).stopServices(0xc00033ad20, 0xc0023d93b0, 0x1, 0x1, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/node/node.go:304 +0xc2
+github.com/ledgerwatch/turbo-geth/node.(*Node).Close(0xc00033ad20, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/node/node.go:224 +0x145
+created by github.com/ledgerwatch/turbo-geth/cmd/utils.StartNode.func1
+	github.com/ledgerwatch/turbo-geth/cmd/utils/cmd.go:83 +0x16a
+
+goroutine 38 [syscall]:
+os/signal.signal_recv(0x17772c0)
+	runtime/sigqueue.go:147 +0x9d
+os/signal.loop()
+	os/signal/signal_unix.go:23 +0x25
+created by os/signal.Notify.func1.1
+	os/signal/signal.go:150 +0x45
+
+goroutine 33 [select, 4 minutes]:
+github.com/ledgerwatch/turbo-geth/accounts/keystore.(*watcher).loop(0xc0001405c0)
+	github.com/ledgerwatch/turbo-geth/accounts/keystore/watch.go:107 +0x485
+created by github.com/ledgerwatch/turbo-geth/accounts/keystore.(*watcher).start
+	github.com/ledgerwatch/turbo-geth/accounts/keystore/watch.go:56 +0x59
+
+goroutine 66 [select]:
+github.com/ledgerwatch/turbo-geth/accounts/keystore.(*KeyStore).updater(0xc0002f6870)
+	github.com/ledgerwatch/turbo-geth/accounts/keystore/keystore.go:203 +0xda
+created by github.com/ledgerwatch/turbo-geth/accounts/keystore.(*KeyStore).Subscribe
+	github.com/ledgerwatch/turbo-geth/accounts/keystore/keystore.go:190 +0x12f
+
+goroutine 67 [select, 4 minutes]:
+github.com/ledgerwatch/turbo-geth/accounts.(*Manager).update(0xc0001480d0)
+	github.com/ledgerwatch/turbo-geth/accounts/manager.go:118 +0x1a6
+created by github.com/ledgerwatch/turbo-geth/accounts.NewManager
+	github.com/ledgerwatch/turbo-geth/accounts/manager.go:79 +0x4e5
+
+goroutine 13 [chan receive, 4 minutes]:
+github.com/JekaMas/notify.(*nonrecursiveTree).dispatch(0xc000600120, 0xc000600060)
+	github.com/JekaMas/notify@v0.9.4/tree_nonrecursive.go:36 +0xb6
+created by github.com/JekaMas/notify.newNonrecursiveTree
+	github.com/JekaMas/notify@v0.9.4/tree_nonrecursive.go:29 +0xe5
+
+goroutine 14 [chan receive, 4 minutes]:
+github.com/JekaMas/notify.(*nonrecursiveTree).internal(0xc000600120, 0xc0006000c0)
+	github.com/JekaMas/notify@v0.9.4/tree_nonrecursive.go:81 +0x58
+created by github.com/JekaMas/notify.newNonrecursiveTree
+	github.com/JekaMas/notify@v0.9.4/tree_nonrecursive.go:30 +0x111
+
+goroutine 15 [syscall]:
+syscall.Syscall6(0xe8, 0x8, 0xc0001fcf9c, 0x1, 0xffffffffffffffff, 0x0, 0x0, 0xffffffffffffffff, 0x0, 0x4)
+	syscall/asm_linux_amd64.s:41 +0x5
+golang.org/x/sys/unix.EpollWait(0x8, 0xc0001fcf9c, 0x1, 0x1, 0xffffffffffffffff, 0xffffffffffffffff, 0x1765080, 0x1fb73e0)
+	golang.org/x/sys@v0.0.0-20210119212857-b64e53b001e4/unix/zsyscall_linux_amd64.go:76 +0x72
+github.com/JekaMas/notify.(*inotify).loop(0xc000680000, 0xc0001f2000)
+	github.com/JekaMas/notify@v0.9.4/watcher_inotify.go:194 +0x79
+created by github.com/JekaMas/notify.(*inotify).lazyinit
+	github.com/JekaMas/notify@v0.9.4/watcher_inotify.go:134 +0x145
+
+goroutine 16 [chan receive, 4 minutes]:
+github.com/JekaMas/notify.(*inotify).send(0xc000680000, 0xc0001f2000)
+	github.com/JekaMas/notify@v0.9.4/watcher_inotify.go:254 +0xab
+created by github.com/JekaMas/notify.(*inotify).lazyinit
+	github.com/JekaMas/notify@v0.9.4/watcher_inotify.go:137 +0x19a
+
+goroutine 82 [chan receive, 4 minutes]:
+github.com/JekaMas/notify.(*inotify).send(0xc000680000, 0xc0001f2000)
+	github.com/JekaMas/notify@v0.9.4/watcher_inotify.go:254 +0xab
+created by github.com/JekaMas/notify.(*inotify).lazyinit
+	github.com/JekaMas/notify@v0.9.4/watcher_inotify.go:137 +0x19a
+
+goroutine 83 [select]:
+github.com/ledgerwatch/turbo-geth/consensus/ethash.(*remoteSealer).loop(0xc0002f6960)
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/sealer.go:269 +0x25c
+created by github.com/ledgerwatch/turbo-geth/consensus/ethash.startRemoteSealer
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/sealer.go:253 +0x2b2
+
+goroutine 84 [runnable]:
+github.com/ledgerwatch/turbo-geth/consensus/ethash.fnvHash(0xc0027854d8, 0x10, 0x10, 0xc003b81fc0, 0x337740, 0x337740)
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/algorithm.go:227 +0x38
+github.com/ledgerwatch/turbo-geth/consensus/ethash.generateDatasetItem(0xc003840000, 0x407f30, 0x407f30, 0xc0000e1ab0, 0xc0023d2fe0, 0xc007875fc0, 0x40, 0x40)
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/algorithm.go:255 +0x229
+github.com/ledgerwatch/turbo-geth/consensus/ethash.hashimotoLight.func1(0xc0000e1ab0, 0x20, 0x20, 0xc0087a8f00)
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/algorithm.go:381 +0x51
+github.com/ledgerwatch/turbo-geth/consensus/ethash.hashimoto(0xc002785830, 0x20, 0x20, 0x52564a21f1b3abaf, 0x407fff80, 0xc002785738, 0xc008806e00, 0xc00a0f4760, 0x0, 0x20, ...)
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/algorithm.go:357 +0x234
+github.com/ledgerwatch/turbo-geth/consensus/ethash.hashimotoLight(0x407fff80, 0xc003840000, 0x407f30, 0x407f30, 0xc002785830, 0x20, 0x20, 0x52564a21f1b3abaf, 0x0, 0x8, ...)
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/algorithm.go:389 +0x11b
+github.com/ledgerwatch/turbo-geth/consensus/ethash.(*Ethash).verifySeal(0xc0018bf4a0, 0xc007373400, 0x0, 0xc0027859b8, 0x55c1cd84)
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/consensus.go:551 +0x39e
+github.com/ledgerwatch/turbo-geth/consensus/ethash.(*Ethash).VerifySeal(...)
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/consensus.go:507
+github.com/ledgerwatch/turbo-geth/consensus/ethash.(*Ethash).verifyHeader(0xc0018bf4a0, 0x1788280, 0x1f5ef80, 0xc007373400, 0xc007373180, 0xc008d00100, 0x8, 0x4098)
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/consensus.go:309 +0x50c
+github.com/ledgerwatch/turbo-geth/consensus/ethash.(*Ethash).Verify(0xc0018bf4a0, 0x1788280, 0x1f5ef80, 0xc007373400, 0xc00a4a3b28, 0x1, 0x1, 0x100, 0x1, 0xc008d041b0)
+	github.com/ledgerwatch/turbo-geth/consensus/ethash/verifier.go:14 +0xc6
+github.com/ledgerwatch/turbo-geth/consensus/process.(*Consensus).verifyByRequest(0xc0023daba0, 0xbe9f7dc120c5cde0, 0xc007373400, 0xc008cec001, 0x1, 0xc00a4a3b28, 0x1, 0x1, 0x1, 0x1)
+	github.com/ledgerwatch/turbo-geth/consensus/process/process.go:208 +0xb4
+github.com/ledgerwatch/turbo-geth/consensus/process.NewConsensusProcess.func1(0xc0023daba0, 0xc00004e960)
+	github.com/ledgerwatch/turbo-geth/consensus/process/process.go:86 +0x609
+created by github.com/ledgerwatch/turbo-geth/consensus/process.NewConsensusProcess
+	github.com/ledgerwatch/turbo-geth/consensus/process/process.go:35 +0x9d
+
+goroutine 85 [select]:
+github.com/ledgerwatch/turbo-geth/consensus/process.NewConsensusProcess.func2(0xc0023daba0, 0xc00004e960)
+	github.com/ledgerwatch/turbo-geth/consensus/process/process.go:126 +0xe7
+created by github.com/ledgerwatch/turbo-geth/consensus/process.NewConsensusProcess
+	github.com/ledgerwatch/turbo-geth/consensus/process/process.go:124 +0xc9
+
+goroutine 95 [select, 2 minutes]:
+github.com/ledgerwatch/turbo-geth/miner.(*Miner).update(0xc0000ce500)
+	github.com/ledgerwatch/turbo-geth/miner/miner.go:101 +0x225
+created by github.com/ledgerwatch/turbo-geth/miner.New
+	github.com/ledgerwatch/turbo-geth/miner/miner.go:80 +0x209
+
+goroutine 96 [select, 2 minutes]:
+github.com/ledgerwatch/turbo-geth/eth/downloader.(*PublicDownloaderAPI).eventLoop(0xc002468540)
+	github.com/ledgerwatch/turbo-geth/eth/downloader/api.go:63 +0x2af
+created by github.com/ledgerwatch/turbo-geth/eth/downloader.NewPublicDownloaderAPI
+	github.com/ledgerwatch/turbo-geth/eth/downloader/api.go:49 +0xca
+
+goroutine 98 [select, 4 minutes]:
+github.com/ledgerwatch/turbo-geth/eth/filters.(*PublicFilterAPI).timeoutLoop(0xc0023df0e0)
+	github.com/ledgerwatch/turbo-geth/eth/filters/api.go:84 +0x1db
+created by github.com/ledgerwatch/turbo-geth/eth/filters.NewPublicFilterAPI
+	github.com/ledgerwatch/turbo-geth/eth/filters/api.go:73 +0x131
+
+goroutine 3453 [IO wait]:
+internal/poll.runtime_pollWait(0x7fd6d017f1e8, 0x72, 0x1765080)
+	runtime/netpoll.go:222 +0x55
+internal/poll.(*pollDesc).wait(0xc000137e98, 0x72, 0x1765000, 0x1f86430, 0x0)
+	internal/poll/fd_poll_runtime.go:87 +0x45
+internal/poll.(*pollDesc).waitRead(...)
+	internal/poll/fd_poll_runtime.go:92
+internal/poll.(*FD).Read(0xc000137e80, 0xc00bc414c0, 0x20, 0x20, 0x0, 0x0, 0x0)
+	internal/poll/fd_unix.go:159 +0x1a5
+net.(*netFD).Read(0xc000137e80, 0xc00bc414c0, 0x20, 0x20, 0x7fd6c831b978, 0x0, 0x20)
+	net/fd_posix.go:55 +0x4f
+net.(*conn).Read(0xc00251c160, 0xc00bc414c0, 0x20, 0x20, 0x0, 0x0, 0x0)
+	net/net.go:182 +0x8e
+io.ReadAtLeast(0x17635c0, 0xc00251c160, 0xc00bc414c0, 0x20, 0x20, 0x20, 0x17635c0, 0x469e77b77f, 0xc00062bc70)
+	io/io.go:314 +0x87
+io.ReadFull(...)
+	io/io.go:333
+github.com/ledgerwatch/turbo-geth/p2p/rlpx.(*handshakeState).readFrame(0xc00023a370, 0x17635c0, 0xc00251c160, 0x17635c0, 0xc00251c160, 0xc000137e80, 0x16201e8, 0xc00062bd30)
+	github.com/ledgerwatch/turbo-geth/p2p/rlpx/rlpx.go:131 +0x9c
+github.com/ledgerwatch/turbo-geth/p2p/rlpx.(*Conn).Read(0xc000766660, 0xc000d203b357e9b2, 0x469e77b77f, 0x207fe40, 0x0, 0x0, 0x207fe40, 0x0)
+	github.com/ledgerwatch/turbo-geth/p2p/rlpx/rlpx.go:103 +0x92
+github.com/ledgerwatch/turbo-geth/p2p.(*rlpxTransport).ReadMsg(0xc00021c340, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/transport.go:66 +0x15e
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).readLoop(0xc000572d20, 0xc000572de0)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:280 +0xb5
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).run
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:217 +0xf4
+
+goroutine 100 [select, 4 minutes]:
+github.com/ledgerwatch/turbo-geth/p2p/nat.Map(0x1784ac0, 0xc0000c85c0, 0xc00004ff20, 0x1553c4a, 0x3, 0x765f, 0x765f, 0x155dc4d, 0xc)
+	github.com/ledgerwatch/turbo-geth/p2p/nat/nat.go:114 +0x452
+github.com/ledgerwatch/turbo-geth/p2p.(*Server).setupListening.func1(0xc000364280, 0xc002466d80)
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:683 +0x8b
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Server).setupListening
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:682 +0x231
+
+goroutine 101 [IO wait, 4 minutes]:
+internal/poll.runtime_pollWait(0x7fd6d017f758, 0x72, 0x0)
+	runtime/netpoll.go:222 +0x55
+internal/poll.(*pollDesc).wait(0xc0000ce618, 0x72, 0x0, 0x0, 0x15578dd)
+	internal/poll/fd_poll_runtime.go:87 +0x45
+internal/poll.(*pollDesc).waitRead(...)
+	internal/poll/fd_poll_runtime.go:92
+internal/poll.(*FD).Accept(0xc0000ce600, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0)
+	internal/poll/fd_unix.go:394 +0x1fc
+net.(*netFD).accept(0xc0000ce600, 0xc0000b6298, 0x1d6ee20, 0x1f9ee40)
+	net/fd_unix.go:172 +0x45
+net.(*TCPListener).accept(0xc002468c20, 0x43334b, 0xc0000b6240, 0x0)
+	net/tcpsock_posix.go:139 +0x32
+net.(*TCPListener).Accept(0xc002468c20, 0x0, 0xc0000b6240, 0xc000276000, 0x2)
+	net/tcpsock.go:261 +0x65
+github.com/ledgerwatch/turbo-geth/p2p.(*Server).listenLoop(0xc000364280)
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:877 +0x242
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Server).setupListening
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:690 +0x15b
+
+goroutine 102 [select]:
+golang.org/x/time/rate.(*Limiter).WaitN(0xc0023defa0, 0x1784440, 0xc00246a1c0, 0x1, 0x0, 0x0)
+	golang.org/x/time@v0.0.0-20200630173020-3af7569d3a1e/rate/rate.go:259 +0x31e
+golang.org/x/time/rate.(*Limiter).Wait(...)
+	golang.org/x/time@v0.0.0-20200630173020-3af7569d3a1e/rate/rate.go:219
+github.com/ledgerwatch/turbo-geth/p2p/dnsdisc.(*rateLimitResolver).LookupTXT(0xc002468480, 0x1784440, 0xc00246a1c0, 0xc00edc5fc0, 0x33, 0xc0024ec040, 0x18, 0xc00edc5fc0, 0x33, 0xc00079bbc8)
+	github.com/ledgerwatch/turbo-geth/p2p/dnsdisc/client.go:206 +0x50
+github.com/ledgerwatch/turbo-geth/p2p/dnsdisc.(*Client).doResolveEntry(0xc0002dcb60, 0x1784440, 0xc00246a1c0, 0xc0024ec040, 0x18, 0xc000535353, 0x1a, 0x1762040, 0x442292, 0xc007610d20, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/dnsdisc/client.go:179 +0x1ad
+github.com/ledgerwatch/turbo-geth/p2p/dnsdisc.(*Client).resolveEntry(0xc0002dcb60, 0x1784440, 0xc00246a1c0, 0xc0024ec040, 0x18, 0xc000535353, 0x1a, 0xc00079bd30, 0x538a5f, 0xc00007a1f0, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/dnsdisc/client.go:164 +0xfa
+github.com/ledgerwatch/turbo-geth/p2p/dnsdisc.(*subtreeSync).resolveNext(0xc0024f21c0, 0x1784440, 0xc00246a1c0, 0xc000535353, 0x1a, 0x61cd4eb76d413, 0x1105f8f, 0xc0024e41e0, 0xc0024e41e0)
+	github.com/ledgerwatch/turbo-geth/p2p/dnsdisc/sync.go:247 +0x8d
+github.com/ledgerwatch/turbo-geth/p2p/dnsdisc.(*clientTree).syncNextRandomENR(0xc000200840, 0x1784440, 0xc00246a1c0, 0x1389da0, 0xc002466840, 0xc0000d01a0)
+	github.com/ledgerwatch/turbo-geth/p2p/dnsdisc/sync.go:127 +0xa7
+github.com/ledgerwatch/turbo-geth/p2p/dnsdisc.(*clientTree).syncRandom(0xc000200840, 0x1784440, 0xc00246a1c0, 0x0, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/p2p/dnsdisc/sync.go:96 +0xe5
+github.com/ledgerwatch/turbo-geth/p2p/dnsdisc.(*randomIterator).nextNode(0xc0023deff0, 0x3)
+	github.com/ledgerwatch/turbo-geth/p2p/dnsdisc/client.go:271 +0x65
+github.com/ledgerwatch/turbo-geth/p2p/dnsdisc.(*randomIterator).Next(0xc0023deff0, 0xc00079bf04)
+	github.com/ledgerwatch/turbo-geth/p2p/dnsdisc/client.go:250 +0x2b
+github.com/ledgerwatch/turbo-geth/p2p/enode.(*FairMix).runSource(0xc000600ea0, 0xc0001f2360, 0xc002468c40)
+	github.com/ledgerwatch/turbo-geth/p2p/enode/iter.go:279 +0xb0
+created by github.com/ledgerwatch/turbo-geth/p2p/enode.(*FairMix).AddSource
+	github.com/ledgerwatch/turbo-geth/p2p/enode/iter.go:180 +0x153
+
+goroutine 103 [select, 4 minutes]:
+github.com/ledgerwatch/turbo-geth/p2p/nat.Map(0x1784ac0, 0xc0000c85c0, 0xc00004ff20, 0x1553c5f, 0x3, 0x765f, 0x765f, 0x1564cae, 0x12)
+	github.com/ledgerwatch/turbo-geth/p2p/nat/nat.go:114 +0x452
+github.com/ledgerwatch/turbo-geth/p2p.(*Server).setupDiscovery.func1(0xc000364280, 0xc002466e40)
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:577 +0x8b
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Server).setupDiscovery
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:576 +0x7ff
+
+goroutine 39 [select, 4 minutes]:
+github.com/ledgerwatch/turbo-geth/p2p/enode.(*DB).expirer(0xc002466bd0)
+	github.com/ledgerwatch/turbo-geth/p2p/enode/nodedb.go:363 +0x105
+created by github.com/ledgerwatch/turbo-geth/p2p/enode.(*DB).ensureExpirer.func1
+	github.com/ledgerwatch/turbo-geth/p2p/enode/nodedb.go:354 +0x3e
+
+goroutine 146 [select]:
+github.com/ledgerwatch/turbo-geth/p2p/discover.(*Table).loop(0xc0018b9540)
+	github.com/ledgerwatch/turbo-geth/p2p/discover/table.go:236 +0x312
+created by github.com/ledgerwatch/turbo-geth/p2p/discover.ListenV4
+	github.com/ledgerwatch/turbo-geth/p2p/discover/v4_udp.go:151 +0x2d1
+
+goroutine 6367 [select]:
+net.(*netFD).connect.func2(0x17844c0, 0xc000751440, 0xc000e35c80, 0xc00c958420, 0xc00c9583c0)
+	net/fd_unix.go:118 +0xc5
+created by net.(*netFD).connect
+	net/fd_unix.go:117 +0x234
+
+goroutine 147 [select]:
+github.com/ledgerwatch/turbo-geth/p2p/discover.(*UDPv4).loop(0xc0023dd440)
+	github.com/ledgerwatch/turbo-geth/p2p/discover/v4_udp.go:459 +0x519
+created by github.com/ledgerwatch/turbo-geth/p2p/discover.ListenV4
+	github.com/ledgerwatch/turbo-geth/p2p/discover/v4_udp.go:154 +0x30e
+
+goroutine 148 [IO wait]:
+internal/poll.runtime_pollWait(0x7fd6d017f670, 0x72, 0x0)
+	runtime/netpoll.go:222 +0x55
+internal/poll.(*pollDesc).wait(0xc0000ce698, 0x72, 0x500, 0x500, 0x0)
+	internal/poll/fd_poll_runtime.go:87 +0x45
+internal/poll.(*pollDesc).waitRead(...)
+	internal/poll/fd_poll_runtime.go:92
+internal/poll.(*FD).ReadFrom(0xc0000ce680, 0xc000026000, 0x500, 0x500, 0x0, 0x0, 0x0, 0x0, 0x0)
+	internal/poll/fd_unix.go:215 +0x1c5
+net.(*netFD).readFrom(0xc0000ce680, 0xc000026000, 0x500, 0x500, 0x7484910980825ef7, 0x8d3240cb1d96fbd9, 0x96b116b3d1fb8fef, 0x8362dc8b1caf1b62, 0x80f0cb4d4d64b824)
+	net/fd_posix.go:61 +0x5b
+net.(*UDPConn).readFrom(0xc0023a52e8, 0xc000026000, 0x500, 0x500, 0xc000026000, 0x0, 0xc000140520, 0xc009981620)
+	net/udpsock_posix.go:47 +0x5c
+net.(*UDPConn).ReadFromUDP(0xc0023a52e8, 0xc000026000, 0x500, 0x500, 0x500, 0x0, 0x0, 0x0)
+	net/udpsock.go:106 +0x5d
+github.com/ledgerwatch/turbo-geth/p2p/discover.(*UDPv4).readLoop(0xc0023dd440, 0x0)
+	github.com/ledgerwatch/turbo-geth/p2p/discover/v4_udp.go:537 +0x111
+created by github.com/ledgerwatch/turbo-geth/p2p/discover.ListenV4
+	github.com/ledgerwatch/turbo-geth/p2p/discover/v4_udp.go:155 +0x33d
+
+goroutine 149 [select]:
+github.com/ledgerwatch/turbo-geth/p2p/enode.(*FairMix).runSource(0xc000600ea0, 0xc0001f2360, 0xc000e2ea40)
+	github.com/ledgerwatch/turbo-geth/p2p/enode/iter.go:281 +0x1af
+created by github.com/ledgerwatch/turbo-geth/p2p/enode.(*FairMix).AddSource
+	github.com/ledgerwatch/turbo-geth/p2p/enode/iter.go:180 +0x153
+
+goroutine 150 [select]:
+github.com/ledgerwatch/turbo-geth/p2p/enode.(*FairMix).Next(0xc000600ea0, 0xc0025abf00)
+	github.com/ledgerwatch/turbo-geth/p2p/enode/iter.go:217 +0x16a
+github.com/ledgerwatch/turbo-geth/p2p.(*dialScheduler).readNodes(0xc000e64000, 0x177d540, 0xc000600ea0)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:326 +0x86
+created by github.com/ledgerwatch/turbo-geth/p2p.newDialScheduler
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:183 +0x365
+
+goroutine 151 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*dialScheduler).loop(0xc000e64000, 0x177d540, 0xc000600ea0)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:246 +0x30a
+created by github.com/ledgerwatch/turbo-geth/p2p.newDialScheduler
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:184 +0x3a5
+
+goroutine 152 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*Server).run(0xc000364280)
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:730 +0x60f
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Server).Start
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:498 +0x389
+
+goroutine 2999 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*protoRW).ReadMsg(0xc0001c6f00, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:437 +0xee
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).handleMsg(0xc0018b9400, 0xc0001a8dd0, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:518 +0x76
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).handle(0xc0018b9400, 0xc0001a8dd0, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:498 +0xc18
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).runPeer(0xc0018b9400, 0xc0001a8dd0, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:405 +0xbc
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).makeProtocol.func1(0xc000889380, 0x17735c0, 0xc0001c6f00, 0x89d772657d48248f, 0x219603707bbb0c0e)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:268 +0xaf
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).startProtocols.func1(0xc000889380, 0xc0001c6f00, 0x17735c0, 0xc0001c6f00)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:380 +0x98
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).startProtocols
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:378 +0x205
+
+goroutine 155 [semacquire]:
+sync.runtime_Semacquire(0xc00231b740)
+	runtime/sema.go:56 +0x45
+sync.(*WaitGroup).Wait(0xc00231b738)
+	sync/waitgroup.go:130 +0x65
+github.com/ledgerwatch/turbo-geth/eth/downloader.(*Downloader).Cancel(0xc00231b600)
+	github.com/ledgerwatch/turbo-geth/eth/downloader/downloader.go:691 +0x45
+github.com/ledgerwatch/turbo-geth/eth/downloader.(*Downloader).Terminate(0xc00231b600)
+	github.com/ledgerwatch/turbo-geth/eth/downloader/downloader.go:711 +0x9b
+github.com/ledgerwatch/turbo-geth/eth.(*chainSyncer).loop(0xc0024666f0)
+	github.com/ledgerwatch/turbo-geth/eth/sync.go:234 +0x25e
+created by github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).Start
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:329 +0x14e
+
+goroutine 158 [select]:
+github.com/ledgerwatch/turbo-geth/eth/fetcher.(*BlockFetcher).loop(0xc00012cb00)
+	github.com/ledgerwatch/turbo-geth/eth/fetcher/block_fetcher.go:376 +0x7ba
+created by github.com/ledgerwatch/turbo-geth/eth/fetcher.(*BlockFetcher).Start
+	github.com/ledgerwatch/turbo-geth/eth/fetcher/block_fetcher.go:231 +0x3f
+
+goroutine 6297 [IO wait]:
+internal/poll.runtime_pollWait(0x7fd6c84bd290, 0x77, 0xc00259e180)
+	runtime/netpoll.go:222 +0x55
+internal/poll.(*pollDesc).wait(0xc009663c18, 0x77, 0x1784400, 0xc0003f9f20, 0xc009663c00)
+	internal/poll/fd_poll_runtime.go:87 +0x45
+internal/poll.(*pollDesc).waitWrite(...)
+	internal/poll/fd_poll_runtime.go:96
+internal/poll.(*FD).WaitWrite(...)
+	internal/poll/fd_unix.go:508
+net.(*netFD).connect(0xc009663c00, 0x17844c0, 0xc0003f9f20, 0x0, 0x0, 0x1763b60, 0xc0075c4c20, 0x0, 0x0, 0x0, ...)
+	net/fd_unix.go:141 +0x25c
+net.(*netFD).dial(0xc009663c00, 0x17844c0, 0xc0003f9f20, 0x178e2c0, 0x0, 0x178e2c0, 0xc0068466f0, 0x0, 0x1, 0xc000081918)
+	net/sock_posix.go:149 +0x108
+net.socket(0x17844c0, 0xc0003f9f20, 0x1553c4a, 0x3, 0x2, 0x1, 0x0, 0x0, 0x178e2c0, 0x0, ...)
+	net/sock_posix.go:70 +0x1c5
+net.internetSocket(0x17844c0, 0xc0003f9f20, 0x1553c4a, 0x3, 0x178e2c0, 0x0, 0x178e2c0, 0xc0068466f0, 0x1, 0x0, ...)
+	net/ipsock_posix.go:141 +0x145
+net.(*sysDialer).doDialTCP(0xc009663b80, 0x17844c0, 0xc0003f9f20, 0x0, 0xc0068466f0, 0x13999c0, 0x20bb320, 0x0)
+	net/tcpsock_posix.go:65 +0xc5
+net.(*sysDialer).dialTCP(0xc009663b80, 0x17844c0, 0xc0003f9f20, 0x0, 0xc0068466f0, 0xc000081b58, 0x432710, 0x60)
+	net/tcpsock_posix.go:61 +0xd7
+net.(*sysDialer).dialSingle(0xc009663b80, 0x17844c0, 0xc0003f9f20, 0x1775280, 0xc0068466f0, 0x0, 0x0, 0x0, 0x0)
+	net/dial.go:580 +0x5e5
+net.(*sysDialer).dialSerial(0xc009663b80, 0x17844c0, 0xc0003f9f20, 0xc002798bb0, 0x1, 0x1, 0x0, 0x0, 0x0, 0x0)
+	net/dial.go:548 +0x152
+net.(*Dialer).DialContext(0xc000e3c6c0, 0x1784440, 0xc000e4e100, 0x1553c4a, 0x3, 0xc0075c4be0, 0x14, 0x0, 0x0, 0x0, ...)
+	net/dial.go:425 +0x6e5
+github.com/ledgerwatch/turbo-geth/p2p.tcpDialer.Dial(0xc000e3c6c0, 0x1784440, 0xc000e4e100, 0xc0005ddd40, 0x499b1e, 0xc0003f95f0, 0xc000060700, 0x0)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:68 +0x91
+github.com/ledgerwatch/turbo-geth/p2p.(*dialTask).dial(0xc0068465d0, 0xc000e64000, 0xc0005ddd40, 0x0, 0x1)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:542 +0x75
+github.com/ledgerwatch/turbo-geth/p2p.(*dialTask).run(0xc0068465d0, 0xc000e64000)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:492 +0x59
+github.com/ledgerwatch/turbo-geth/p2p.(*dialScheduler).startDial.func1(0xc0068465d0, 0xc000e64000)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:463 +0x35
+created by github.com/ledgerwatch/turbo-geth/p2p.(*dialScheduler).startDial
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:462 +0x42a
+
+goroutine 6594 [IO wait]:
+internal/poll.runtime_pollWait(0x7fd6c84bdab8, 0x72, 0x1765080)
+	runtime/netpoll.go:222 +0x55
+internal/poll.(*pollDesc).wait(0xc00ddd5398, 0x72, 0x1765000, 0x1f86430, 0x0)
+	internal/poll/fd_poll_runtime.go:87 +0x45
+internal/poll.(*pollDesc).waitRead(...)
+	internal/poll/fd_poll_runtime.go:92
+internal/poll.(*FD).Read(0xc00ddd5380, 0xc008571540, 0x20, 0x20, 0x0, 0x0, 0x0)
+	internal/poll/fd_unix.go:159 +0x1a5
+net.(*netFD).Read(0xc00ddd5380, 0xc008571540, 0x20, 0x20, 0x7fd6ad4ec050, 0x0, 0x20)
+	net/fd_posix.go:55 +0x4f
+net.(*conn).Read(0xc00f0f8b38, 0xc008571540, 0x20, 0x20, 0x0, 0x0, 0x0)
+	net/net.go:182 +0x8e
+io.ReadAtLeast(0x17635c0, 0xc00f0f8b38, 0xc008571540, 0x20, 0x20, 0x20, 0x17635c0, 0x1377920, 0xc000587830)
+	io/io.go:314 +0x87
+io.ReadFull(...)
+	io/io.go:333
+github.com/ledgerwatch/turbo-geth/p2p/rlpx.(*handshakeState).readFrame(0xc00021ef50, 0x17635c0, 0xc00f0f8b38, 0x17635c0, 0xc00f0f8b38, 0xc00ddd5380, 0x16201e8, 0xc0005878f0)
+	github.com/ledgerwatch/turbo-geth/p2p/rlpx/rlpx.go:131 +0x9c
+github.com/ledgerwatch/turbo-geth/p2p/rlpx.(*Conn).Read(0xc0095a18c0, 0xc000d20579b3dd8a, 0x48460f315d, 0x207fe40, 0x0, 0x0, 0x207fe40, 0x7fd6d0189400)
+	github.com/ledgerwatch/turbo-geth/p2p/rlpx/rlpx.go:103 +0x92
+github.com/ledgerwatch/turbo-geth/p2p.(*rlpxTransport).ReadMsg(0xc000657240, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/transport.go:66 +0x15e
+github.com/ledgerwatch/turbo-geth/p2p.readProtocolHandshake(0x1761fe0, 0xc000657240, 0xc009981c20, 0xc000657240, 0xc0002dccb0)
+	github.com/ledgerwatch/turbo-geth/p2p/transport.go:157 +0x6e
+github.com/ledgerwatch/turbo-geth/p2p.(*rlpxTransport).doProtoHandshake(0xc000657240, 0xc0002dccb0, 0xc0001f2060, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/p2p/transport.go:143 +0x9b
+github.com/ledgerwatch/turbo-geth/p2p.(*Server).setupConn(0xc000364280, 0xc00e2eafc0, 0xc000000001, 0xc0004d7200, 0xc000657240, 0x3)
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:986 +0x447
+github.com/ledgerwatch/turbo-geth/p2p.(*Server).SetupConn(0xc000364280, 0x1792940, 0xc00f0f8b38, 0x1, 0xc0004d7200, 0x1762180, 0xc00c0ec28c)
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:940 +0x132
+github.com/ledgerwatch/turbo-geth/p2p.(*dialTask).dial(0xc00944db90, 0xc000e64000, 0xc0004d7200, 0x12e3860, 0xc0002dccb0)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:548 +0x57f
+github.com/ledgerwatch/turbo-geth/p2p.(*dialTask).run(0xc00944db90, 0xc000e64000)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:492 +0x59
+github.com/ledgerwatch/turbo-geth/p2p.(*dialScheduler).startDial.func1(0xc00944db90, 0xc000e64000)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:463 +0x35
+created by github.com/ledgerwatch/turbo-geth/p2p.(*dialScheduler).startDial
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:462 +0x42a
+
+goroutine 2749 [IO wait]:
+internal/poll.runtime_pollWait(0x7fd6d017e9c0, 0x72, 0x1765080)
+	runtime/netpoll.go:222 +0x55
+internal/poll.(*pollDesc).wait(0xc0000cf098, 0x72, 0x1765000, 0x1f86430, 0x0)
+	internal/poll/fd_poll_runtime.go:87 +0x45
+internal/poll.(*pollDesc).waitRead(...)
+	internal/poll/fd_poll_runtime.go:92
+internal/poll.(*FD).Read(0xc0000cf080, 0xc008851194, 0xc, 0xc, 0x0, 0x0, 0x0)
+	internal/poll/fd_unix.go:159 +0x1a5
+net.(*netFD).Read(0xc0000cf080, 0xc008851194, 0xc, 0xc, 0x14, 0x0, 0x0)
+	net/fd_posix.go:55 +0x4f
+net.(*conn).Read(0xc0023a4210, 0xc008851194, 0xc, 0xc, 0x0, 0x0, 0x0)
+	net/net.go:182 +0x8e
+io.ReadAtLeast(0x17635c0, 0xc0023a4210, 0xc008851180, 0x20, 0x20, 0x20, 0x17635c0, 0x48580cce3f, 0xc0008e3c70)
+	io/io.go:314 +0x87
+io.ReadFull(...)
+	io/io.go:333
+github.com/ledgerwatch/turbo-geth/p2p/rlpx.(*handshakeState).readFrame(0xc0005e5cc0, 0x17635c0, 0xc0023a4210, 0x17635c0, 0xc0023a4210, 0xc0000cf080, 0x16201e8, 0xc0008e3d30)
+	github.com/ledgerwatch/turbo-geth/p2p/rlpx/rlpx.go:131 +0x9c
+github.com/ledgerwatch/turbo-geth/p2p/rlpx.(*Conn).Read(0xc000229c50, 0xc000d2059016b078, 0x48580cce3f, 0x207fe40, 0x0, 0x0, 0x207fe40, 0x0)
+	github.com/ledgerwatch/turbo-geth/p2p/rlpx/rlpx.go:103 +0x92
+github.com/ledgerwatch/turbo-geth/p2p.(*rlpxTransport).ReadMsg(0xc0023d5500, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/transport.go:66 +0x15e
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).readLoop(0xc000554b40, 0xc000554c00)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:280 +0xb5
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).run
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:217 +0xf4
+
+goroutine 6120 [select]:
+github.com/ledgerwatch/turbo-geth/eth.(*peer).broadcastBlocks(0xc00ba04750, 0xc008af7000)
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:137 +0x12a
+created by github.com/ledgerwatch/turbo-geth/eth.(*peerSet).Register
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:696 +0x128
+
+goroutine 6534 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).pingLoop(0xc0025f77a0)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:264 +0x145
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).run
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:218 +0x119
+
+goroutine 6094 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).run(0xc0007a55c0, 0x12e36a0, 0xc00027f880, 0x0)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:227 +0x272
+github.com/ledgerwatch/turbo-geth/p2p.(*Server).runPeer(0xc000364280, 0xc0007a55c0)
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:1050 +0x1ed
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Server).launchPeer
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:1033 +0xc5
+
+goroutine 6548 [select]:
+github.com/ledgerwatch/turbo-geth/eth.(*peer).broadcastBlocks(0xc00f128b60, 0xc00063a270)
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:137 +0x12a
+created by github.com/ledgerwatch/turbo-geth/eth.(*peerSet).Register
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:696 +0x128
+
+goroutine 6366 [IO wait]:
+internal/poll.runtime_pollWait(0x7fd6c84bd378, 0x77, 0xc00259ec00)
+	runtime/netpoll.go:222 +0x55
+internal/poll.(*pollDesc).wait(0xc000e35c98, 0x77, 0x1784400, 0xc000751440, 0xc000e35c80)
+	internal/poll/fd_poll_runtime.go:87 +0x45
+internal/poll.(*pollDesc).waitWrite(...)
+	internal/poll/fd_poll_runtime.go:96
+internal/poll.(*FD).WaitWrite(...)
+	internal/poll/fd_unix.go:508
+net.(*netFD).connect(0xc000e35c80, 0x17844c0, 0xc000751440, 0x0, 0x0, 0x1763b60, 0xc00c97ba40, 0x0, 0x0, 0x0, ...)
+	net/fd_unix.go:141 +0x25c
+net.(*netFD).dial(0xc000e35c80, 0x17844c0, 0xc000751440, 0x178e2c0, 0x0, 0x178e2c0, 0xc00c972a50, 0x0, 0x1, 0xc0025a4918)
+	net/sock_posix.go:149 +0x108
+net.socket(0x17844c0, 0xc000751440, 0x1553c4a, 0x3, 0x2, 0x1, 0x0, 0x0, 0x178e2c0, 0x0, ...)
+	net/sock_posix.go:70 +0x1c5
+net.internetSocket(0x17844c0, 0xc000751440, 0x1553c4a, 0x3, 0x178e2c0, 0x0, 0x178e2c0, 0xc00c972a50, 0x1, 0x0, ...)
+	net/ipsock_posix.go:141 +0x145
+net.(*sysDialer).doDialTCP(0xc000e35c00, 0x17844c0, 0xc000751440, 0x0, 0xc00c972a50, 0x13999c0, 0x20bb320, 0x0)
+	net/tcpsock_posix.go:65 +0xc5
+net.(*sysDialer).dialTCP(0xc000e35c00, 0x17844c0, 0xc000751440, 0x0, 0xc00c972a50, 0xc0025a4b58, 0x432710, 0x60)
+	net/tcpsock_posix.go:61 +0xd7
+net.(*sysDialer).dialSingle(0xc000e35c00, 0x17844c0, 0xc000751440, 0x1775280, 0xc00c972a50, 0x0, 0x0, 0x0, 0x0)
+	net/dial.go:580 +0x5e5
+net.(*sysDialer).dialSerial(0xc000e35c00, 0x17844c0, 0xc000751440, 0xc0048930d0, 0x1, 0x1, 0x0, 0x0, 0x0, 0x0)
+	net/dial.go:548 +0x152
+net.(*Dialer).DialContext(0xc000e3c6c0, 0x1784440, 0xc000e4e100, 0x1553c4a, 0x3, 0xc00c946be0, 0x10, 0x0, 0x0, 0x0, ...)
+	net/dial.go:425 +0x6e5
+github.com/ledgerwatch/turbo-geth/p2p.tcpDialer.Dial(0xc000e3c6c0, 0x1784440, 0xc000e4e100, 0xc0003bb560, 0xc0002e9eb0, 0xc000750240, 0xc0002e9f60, 0xe4d2cd)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:68 +0x91
+github.com/ledgerwatch/turbo-geth/p2p.(*dialTask).dial(0xc00c972930, 0xc000e64000, 0xc0003bb560, 0x12e3860, 0xc0002dccb0)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:542 +0x75
+github.com/ledgerwatch/turbo-geth/p2p.(*dialTask).run(0xc00c972930, 0xc000e64000)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:492 +0x59
+github.com/ledgerwatch/turbo-geth/p2p.(*dialScheduler).startDial.func1(0xc00c972930, 0xc000e64000)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:463 +0x35
+created by github.com/ledgerwatch/turbo-geth/p2p.(*dialScheduler).startDial
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:462 +0x42a
+
+goroutine 6535 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*protoRW).ReadMsg(0xc0076bc140, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:437 +0xee
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).handleMsg(0xc0018b9400, 0xc00f128b60, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:518 +0x76
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).handle(0xc0018b9400, 0xc00f128b60, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:498 +0xc18
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).runPeer(0xc0018b9400, 0xc00f128b60, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:405 +0xbc
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).makeProtocol.func1(0xc0025f77a0, 0x17735c0, 0xc0076bc140, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:268 +0xaf
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).startProtocols.func1(0xc0025f77a0, 0xc0076bc140, 0x17735c0, 0xc0076bc140)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:380 +0x98
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).startProtocols
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:378 +0x205
+
+goroutine 6459 [select]:
+net.(*netFD).connect.func2(0x17844c0, 0xc0007509c0, 0xc00ddd4a00, 0xc00ddf0900, 0xc00ddf08a0)
+	net/fd_unix.go:118 +0xc5
+created by net.(*netFD).connect
+	net/fd_unix.go:117 +0x234
+
+goroutine 4610 [select, 1 minutes]:
+github.com/ledgerwatch/turbo-geth/eth.(*peer).broadcastTransactions(0xc006783ad0, 0xc00139a600)
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:199 +0x1a5
+created by github.com/ledgerwatch/turbo-geth/eth.(*peerSet).Register
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:697 +0x154
+
+goroutine 4923 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).pingLoop(0xc0025f7440)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:264 +0x145
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).run
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:218 +0x119
+
+goroutine 3800 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*protoRW).ReadMsg(0xc004e44140, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:437 +0xee
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).handleMsg(0xc0018b9400, 0xc001a84a90, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:518 +0x76
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).handle(0xc0018b9400, 0xc001a84a90, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:498 +0xc18
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).runPeer(0xc0018b9400, 0xc001a84a90, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:405 +0xbc
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).makeProtocol.func1(0xc0008e72c0, 0x17735c0, 0xc004e44140, 0x8382ac25c57a2d73, 0x8f4f8c19dc02b30a)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:268 +0xaf
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).startProtocols.func1(0xc0008e72c0, 0xc004e44140, 0x17735c0, 0xc004e44140)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:380 +0x98
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).startProtocols
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:378 +0x205
+
+goroutine 6279 [select]:
+net.(*netFD).connect.func2(0x17844c0, 0xc0099804e0, 0xc009406d00, 0xc0001f3aa0, 0xc0001f3a40)
+	net/fd_unix.go:118 +0xc5
+created by net.(*netFD).connect
+	net/fd_unix.go:117 +0x234
+
+goroutine 6122 [select]:
+github.com/ledgerwatch/turbo-geth/eth.(*peer).announceTransactions(0xc00ba04750, 0xc008af7000)
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:270 +0x1e5
+created by github.com/ledgerwatch/turbo-geth/eth.(*peerSet).Register
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:699 +0x1ae
+
+goroutine 6115 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*protoRW).ReadMsg(0xc0076bcf00, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:437 +0xee
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).handleMsg(0xc0018b9400, 0xc00ba04750, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:518 +0x76
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).handle(0xc0018b9400, 0xc00ba04750, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:498 +0xc18
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).runPeer(0xc0018b9400, 0xc00ba04750, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:405 +0xbc
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).makeProtocol.func1(0xc000738b40, 0x17735c0, 0xc0076bcf00, 0x3, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:268 +0xaf
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).startProtocols.func1(0xc000738b40, 0xc0076bcf00, 0x17735c0, 0xc0076bcf00)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:380 +0x98
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).startProtocols
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:378 +0x205
+
+goroutine 3039 [select, 2 minutes]:
+github.com/ledgerwatch/turbo-geth/eth.(*peer).broadcastBlocks(0xc0000d1110, 0xc0013f6240)
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:137 +0x12a
+created by github.com/ledgerwatch/turbo-geth/eth.(*peerSet).Register
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:696 +0x128
+
+goroutine 6549 [select]:
+github.com/ledgerwatch/turbo-geth/eth.(*peer).broadcastTransactions(0xc00f128b60, 0xc00063a270)
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:199 +0x1a5
+created by github.com/ledgerwatch/turbo-geth/eth.(*peerSet).Register
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:697 +0x154
+
+goroutine 2750 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).pingLoop(0xc000554b40)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:264 +0x145
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).run
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:218 +0x119
+
+goroutine 3009 [select, 2 minutes]:
+github.com/ledgerwatch/turbo-geth/eth.(*peer).broadcastBlocks(0xc0001a8dd0, 0xc0013f6990)
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:137 +0x12a
+created by github.com/ledgerwatch/turbo-geth/eth.(*peerSet).Register
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:696 +0x128
+
+goroutine 6511 [select]:
+net.(*netFD).connect.func2(0x17844c0, 0xc009980ae0, 0xc009406680, 0xc00c958660, 0xc00c958600)
+	net/fd_unix.go:118 +0xc5
+created by net.(*netFD).connect
+	net/fd_unix.go:117 +0x234
+
+goroutine 6567 [IO wait]:
+internal/poll.runtime_pollWait(0x7fd6d017ef30, 0x77, 0xc002711500)
+	runtime/netpoll.go:222 +0x55
+internal/poll.(*pollDesc).wait(0xc009407018, 0x77, 0x1784400, 0xc0099819e0, 0xc009407000)
+	internal/poll/fd_poll_runtime.go:87 +0x45
+internal/poll.(*pollDesc).waitWrite(...)
+	internal/poll/fd_poll_runtime.go:96
+internal/poll.(*FD).WaitWrite(...)
+	internal/poll/fd_unix.go:508
+net.(*netFD).connect(0xc009407000, 0x17844c0, 0xc0099819e0, 0x0, 0x0, 0x1763b60, 0xc0076001c0, 0x0, 0x0, 0x0, ...)
+	net/fd_unix.go:141 +0x25c
+net.(*netFD).dial(0xc009407000, 0x17844c0, 0xc0099819e0, 0x178e2c0, 0x0, 0x178e2c0, 0xc00ba49320, 0x0, 0x1, 0xc0008df918)
+	net/sock_posix.go:149 +0x108
+net.socket(0x17844c0, 0xc0099819e0, 0x1553c4a, 0x3, 0x2, 0x1, 0x0, 0x0, 0x178e2c0, 0x0, ...)
+	net/sock_posix.go:70 +0x1c5
+net.internetSocket(0x17844c0, 0xc0099819e0, 0x1553c4a, 0x3, 0x178e2c0, 0x0, 0x178e2c0, 0xc00ba49320, 0x1, 0x0, ...)
+	net/ipsock_posix.go:141 +0x145
+net.(*sysDialer).doDialTCP(0xc009406f80, 0x17844c0, 0xc0099819e0, 0x0, 0xc00ba49320, 0x13999c0, 0x20bb320, 0x0)
+	net/tcpsock_posix.go:65 +0xc5
+net.(*sysDialer).dialTCP(0xc009406f80, 0x17844c0, 0xc0099819e0, 0x0, 0xc00ba49320, 0xc0008dfb58, 0x432710, 0x60)
+	net/tcpsock_posix.go:61 +0xd7
+net.(*sysDialer).dialSingle(0xc009406f80, 0x17844c0, 0xc0099819e0, 0x1775280, 0xc00ba49320, 0x0, 0x0, 0x0, 0x0)
+	net/dial.go:580 +0x5e5
+net.(*sysDialer).dialSerial(0xc009406f80, 0x17844c0, 0xc0099819e0, 0xc008af6640, 0x1, 0x1, 0x0, 0x0, 0x0, 0x0)
+	net/dial.go:548 +0x152
+net.(*Dialer).DialContext(0xc000e3c6c0, 0x1784440, 0xc000e4e100, 0x1553c4a, 0x3, 0xc0076001a0, 0x14, 0x0, 0x0, 0x0, ...)
+	net/dial.go:425 +0x6e5
+github.com/ledgerwatch/turbo-geth/p2p.tcpDialer.Dial(0xc000e3c6c0, 0x1784440, 0xc000e4e100, 0xc0001c0c60, 0xc00052d6b0, 0x3, 0x0, 0xc008eaa780)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:68 +0x91
+github.com/ledgerwatch/turbo-geth/p2p.(*dialTask).dial(0xc00ba49200, 0xc000e64000, 0xc0001c0c60, 0x0, 0x1)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:542 +0x75
+github.com/ledgerwatch/turbo-geth/p2p.(*dialTask).run(0xc00ba49200, 0xc000e64000)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:492 +0x59
+github.com/ledgerwatch/turbo-geth/p2p.(*dialScheduler).startDial.func1(0xc00ba49200, 0xc000e64000)
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:463 +0x35
+created by github.com/ledgerwatch/turbo-geth/p2p.(*dialScheduler).startDial
+	github.com/ledgerwatch/turbo-geth/p2p/dial.go:462 +0x42a
+
+goroutine 3455 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*protoRW).ReadMsg(0xc00011e6e0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:437 +0xee
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).handleMsg(0xc0018b9400, 0xc00274ab60, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:518 +0x76
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).handle(0xc0018b9400, 0xc00274ab60, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:498 +0xc18
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).runPeer(0xc0018b9400, 0xc00274ab60, 0x0, 0x0)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:405 +0xbc
+github.com/ledgerwatch/turbo-geth/eth.(*ProtocolManager).makeProtocol.func1(0xc000572d20, 0x17735c0, 0xc00011e6e0, 0xc000e58fc8, 0xdc66df)
+	github.com/ledgerwatch/turbo-geth/eth/handler.go:268 +0xaf
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).startProtocols.func1(0xc000572d20, 0xc00011e6e0, 0x17735c0, 0xc00011e6e0)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:380 +0x98
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).startProtocols
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:378 +0x205
+
+goroutine 4963 [select, 1 minutes]:
+github.com/ledgerwatch/turbo-geth/eth.(*peer).broadcastBlocks(0xc0098cb930, 0xc000e477b0)
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:137 +0x12a
+created by github.com/ledgerwatch/turbo-geth/eth.(*peerSet).Register
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:696 +0x128
+
+goroutine 4921 [select]:
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).run(0xc0025f7440, 0x12e36a0, 0xc0000cf100, 0x0)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:227 +0x272
+github.com/ledgerwatch/turbo-geth/p2p.(*Server).runPeer(0xc000364280, 0xc0025f7440)
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:1050 +0x1ed
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Server).launchPeer
+	github.com/ledgerwatch/turbo-geth/p2p/server.go:1033 +0xc5
+
+goroutine 4922 [IO wait]:
+internal/poll.runtime_pollWait(0x7fd6c84bd630, 0x72, 0x1765080)
+	runtime/netpoll.go:222 +0x55
+internal/poll.(*pollDesc).wait(0xc000658398, 0x72, 0x1765000, 0x1f86430, 0x0)
+	internal/poll/fd_poll_runtime.go:87 +0x45
+internal/poll.(*pollDesc).waitRead(...)
+	internal/poll/fd_poll_runtime.go:92
+internal/poll.(*FD).Read(0xc000658380, 0xc00eb1ef20, 0x20, 0x20, 0x0, 0x0, 0x0)
+	internal/poll/fd_unix.go:159 +0x1a5
+net.(*netFD).Read(0xc000658380, 0xc00eb1ef20, 0x20, 0x20, 0x7fd6ad08a1f8, 0x0, 0x20)
+	net/fd_posix.go:55 +0x4f
+net.(*conn).Read(0xc0079ca368, 0xc00eb1ef20, 0x20, 0x20, 0x0, 0x0, 0x0)
+	net/net.go:182 +0x8e
+io.ReadAtLeast(0x17635c0, 0xc0079ca368, 0xc00eb1ef20, 0x20, 0x20, 0x20, 0x17635c0, 0x474109e51e, 0xc000086c70)
+	io/io.go:314 +0x87
+io.ReadFull(...)
+	io/io.go:333
+github.com/ledgerwatch/turbo-geth/p2p/rlpx.(*handshakeState).readFrame(0xc0005e4aa0, 0x17635c0, 0xc0079ca368, 0x17635c0, 0xc0079ca368, 0xc000658380, 0x16201e8, 0xc000086d30)
+	github.com/ledgerwatch/turbo-geth/p2p/rlpx/rlpx.go:131 +0x9c
+github.com/ledgerwatch/turbo-geth/p2p/rlpx.(*Conn).Read(0xc0078b5200, 0xc000d2046319b94f, 0x474109e51e, 0x207fe40, 0x0, 0x0, 0x207fe40, 0x0)
+	github.com/ledgerwatch/turbo-geth/p2p/rlpx/rlpx.go:103 +0x92
+github.com/ledgerwatch/turbo-geth/p2p.(*rlpxTransport).ReadMsg(0xc000589f40, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/transport.go:66 +0x15e
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).readLoop(0xc0025f7440, 0xc0025f7500)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:280 +0xb5
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).run
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:217 +0xf4
+
+goroutine 2802 [select, 2 minutes]:
+github.com/ledgerwatch/turbo-geth/eth.(*peer).broadcastBlocks(0xc0000b9520, 0xc00270a6b0)
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:137 +0x12a
+created by github.com/ledgerwatch/turbo-geth/eth.(*peerSet).Register
+	github.com/ledgerwatch/turbo-geth/eth/peer.go:696 +0x128
+
+goroutine 4602 [IO wait]:
+internal/poll.runtime_pollWait(0x7fd6c84bd8e8, 0x72, 0x1765080)
+	runtime/netpoll.go:222 +0x55
+internal/poll.(*pollDesc).wait(0xc00251ad18, 0x72, 0x1765000, 0x1f86430, 0x0)
+	internal/poll/fd_poll_runtime.go:87 +0x45
+internal/poll.(*pollDesc).waitRead(...)
+	internal/poll/fd_poll_runtime.go:92
+internal/poll.(*FD).Read(0xc00251ad00, 0xc004980e00, 0x20, 0x20, 0x0, 0x0, 0x0)
+	internal/poll/fd_unix.go:159 +0x1a5
+net.(*netFD).Read(0xc00251ad00, 0xc004980e00, 0x20, 0x20, 0x7fd6c83f2730, 0x0, 0x20)
+	net/fd_posix.go:55 +0x4f
+net.(*conn).Read(0xc004fde228, 0xc004980e00, 0x20, 0x20, 0x0, 0x0, 0x0)
+	net/net.go:182 +0x8e
+io.ReadAtLeast(0x17635c0, 0xc004fde228, 0xc004980e00, 0x20, 0x20, 0x20, 0x17635c0, 0x481a43410d, 0xc0025a6c70)
+	io/io.go:314 +0x87
+io.ReadFull(...)
+	io/io.go:333
+github.com/ledgerwatch/turbo-geth/p2p/rlpx.(*handshakeState).readFrame(0xc000637180, 0x17635c0, 0xc004fde228, 0x17635c0, 0xc004fde228, 0xc00251ad00, 0x16201e8, 0xc0025a6d30)
+	github.com/ledgerwatch/turbo-geth/p2p/rlpx/rlpx.go:131 +0x9c
+github.com/ledgerwatch/turbo-geth/p2p/rlpx.(*Conn).Read(0xc006f8ec30, 0xc000d2054de7ed3b, 0x481a43410d, 0x207fe40, 0x0, 0x0, 0x207fe40, 0x0)
+	github.com/ledgerwatch/turbo-geth/p2p/rlpx/rlpx.go:103 +0x92
+github.com/ledgerwatch/turbo-geth/p2p.(*rlpxTransport).ReadMsg(0xc002709c00, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, ...)
+	github.com/ledgerwatch/turbo-geth/p2p/transport.go:66 +0x15e
+github.com/ledgerwatch/turbo-geth/p2p.(*Peer).readLoop(0xc0006ce960, 0xc0006cea80)
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:280 +0xb5
+created by github.com/ledgerwatch/turbo-geth/p2p.(*Peer).run
+	github.com/ledgerwatch/turbo-geth/p2p/peer.go:217 +0xf4
+
+goroutine 6532 [select]:

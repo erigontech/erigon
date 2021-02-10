@@ -146,6 +146,8 @@ type SignerFn func(signer accounts.Account, mimeType string, message []byte) ([]
 func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.HashCache()
+
+	// fixme попробовать убрать
 	if address, known := sigcache.Get(hash); known {
 		return address.(common.Address), nil
 	}
