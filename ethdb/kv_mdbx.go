@@ -530,10 +530,6 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		nativeFlags |= mdbx.DupSort
 		flags ^= dbutils.DupSort
 	}
-	if flags&dbutils.DupFixed != 0 {
-		nativeFlags |= mdbx.DupFixed
-		flags ^= dbutils.DupFixed
-	}
 	if flags != 0 {
 		return fmt.Errorf("some not supported flag provided for bucket")
 	}
@@ -786,10 +782,6 @@ func (tx *MdbxTx) Cursor(bucket string) Cursor {
 		return tx.stdCursor(bucket)
 	}
 
-	if b.Flags&dbutils.DupFixed != 0 {
-		return tx.CursorDupFixed(bucket)
-	}
-
 	if b.Flags&dbutils.DupSort != 0 {
 		return tx.CursorDupSort(bucket)
 	}
@@ -805,11 +797,6 @@ func (tx *MdbxTx) stdCursor(bucket string) Cursor {
 func (tx *MdbxTx) CursorDupSort(bucket string) CursorDupSort {
 	basicCursor := tx.stdCursor(bucket).(*MdbxCursor)
 	return &MdbxDupSortCursor{MdbxCursor: basicCursor}
-}
-
-func (tx *MdbxTx) CursorDupFixed(bucket string) CursorDupFixed {
-	basicCursor := tx.CursorDupSort(bucket).(*MdbxDupSortCursor)
-	return &MdbxDupFixedCursor{MdbxDupSortCursor: basicCursor}
 }
 
 func (tx *MdbxTx) CHandle() unsafe.Pointer {
@@ -1632,62 +1619,4 @@ func (c *MdbxDupSortCursor) CountDuplicates() (uint64, error) {
 		return 0, fmt.Errorf("in CountDuplicates: %w", err)
 	}
 	return res, nil
-}
-
-type MdbxDupFixedCursor struct {
-	*MdbxDupSortCursor
-}
-
-func (c *MdbxDupFixedCursor) initCursor() error {
-	if c.c != nil {
-		return nil
-	}
-
-	if c.bucketCfg.Flags&mdbx.DupFixed == 0 {
-		return fmt.Errorf("class MdbxDupSortCursor can be used only if bucket created with flag mdbx.DupSort")
-	}
-
-	return c.MdbxCursor.initCursor()
-}
-
-func (c *MdbxDupFixedCursor) GetMulti() ([]byte, error) {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return nil, err
-		}
-	}
-	_, v, err := c.c.Get(nil, nil, mdbx.GetMultiple)
-	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return v, nil
-}
-
-func (c *MdbxDupFixedCursor) NextMulti() ([]byte, []byte, error) {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return []byte{}, nil, err
-		}
-	}
-	k, v, err := c.c.Get(nil, nil, mdbx.NextMultiple)
-	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return nil, nil, nil
-		}
-		return []byte{}, nil, err
-	}
-	return k, v, nil
-}
-
-func (c *MdbxDupFixedCursor) PutMulti(key []byte, page []byte, stride int) error {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return err
-		}
-	}
-
-	return c.c.PutMulti(key, page, stride, 0)
 }
