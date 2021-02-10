@@ -534,6 +534,17 @@ func NewStateCache(degree int, limit int) *StateCache {
 	return &sc
 }
 
+// Clone creates a clone cache which can be modified independently, but it shares the parts of the cache that are common
+func (sc *StateCache) Clone() *StateCache {
+	var clone StateCache
+	clone.readWrites = sc.readWrites.Clone()
+	clone.writes = sc.writes.Clone()
+	clone.limit = sc.limit
+	heap.Init(&clone.readQueue)
+	heap.Init(&clone.unprocQueue)
+	return &clone
+}
+
 func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
 	item := sc.readWrites.Get(key)
 	if item == nil {
@@ -646,7 +657,7 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	} else {
 		item.ClearFlags(AbsentFlag)
 	}
-	if sc.readSize+item.GetSize() > sc.limit {
+	if sc.limit != 0 && sc.readSize+item.GetSize() > sc.limit {
 		for sc.readQueue.Len() > 0 && sc.readSize+item.GetSize() > sc.limit {
 			// Read queue cannot grow anymore, need to evict one element
 			cacheItem := heap.Pop(&sc.readQueue).(CacheItem)
@@ -728,7 +739,7 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		sc.writeSize += writeItem.GetSize()
 		return
 	}
-	if sc.readSize+item.GetSize() > sc.limit {
+	if sc.limit != 0 && sc.readSize+item.GetSize() > sc.limit {
 		for sc.readQueue.Len() > 0 && sc.readSize+item.GetSize() > sc.limit {
 			// There is no space available, need to evict one read element
 			cacheItem := heap.Pop(&sc.readQueue).(CacheItem)

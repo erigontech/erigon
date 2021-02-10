@@ -10,6 +10,8 @@ import (
 
 // Transactions on which OpenEthereum reports incorrect traces
 var wrongTxs = []string{
+	"0xe47180a05a7cc25c187b426fed5390365874add72a5681242ac4b288d4a6833a", // Block 7000000
+	"0x76ea0eae8561c10321b050bc28d00ae4e22f99dc303153cc7fb1334ec88ad41e", // Block 7000053
 	"0xd5a9b32b262202cda422dd5a2ccf8d7d56e9b3425ba7d350548e62a5bd26b481", // Block 8000011
 	"0x1953ad3591fa0f6f3f00dfa0f93a57e1dc7fa003e2192a18c64c71847cf64e0c", // Block 8000035
 	"0xfbd66bcbc4cb374946f350ca6835571b09f68c5f635ff9fc533c3fa2ac0d19cb", // Block 9000004
