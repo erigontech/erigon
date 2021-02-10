@@ -368,10 +368,10 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 		}
 	} else {
 		hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
-		if bytes.HasPrefix(r.currAccK, common.FromHex("71fe2579f4a5be157546549260f5539cc9445fa20674a8bb637049f43fc1eac20000000000000001")) && bytes.HasPrefix(storageKey[80:], common.FromHex("0c070b")) {
-			//fmt.Printf("%x\n", storageKey)
-			//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
-		}
+		//if bytes.HasPrefix(r.currAccK, common.FromHex("71fe2579f4a5be157546549260f5539cc9445fa20674a8bb637049f43fc1eac20000000000000001")) && bytes.HasPrefix(storageKey[80:], common.FromHex("0c070b")) {
+		//fmt.Printf("%x\n", storageKey)
+		//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+		//}
 	}
 	switch itemType {
 	case StorageStreamItem:
