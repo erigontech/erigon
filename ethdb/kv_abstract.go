@@ -57,7 +57,7 @@ type KV interface {
 	//	as its parent. Transactions may be nested to any level. A parent
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
-	Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, error)
+	Begin(ctx context.Context, flags TxFlags) (Tx, error)
 	AllBuckets() dbutils.BucketsCfg
 }
 

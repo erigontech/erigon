@@ -19,12 +19,11 @@ import (
 // you can put unlimited amount of data into this class, call IdealBatchSize is unnecessary
 // Walk and MultiWalk methods - work outside of Tx object yet, will implement it later
 type TxDb struct {
-	db       Database
-	tx       Tx
-	ParentTx Tx
-	txFlags  TxFlags
-	cursors  map[string]Cursor
-	len      uint64
+	db      Database
+	tx      Tx
+	txFlags TxFlags
+	cursors map[string]Cursor
+	len     uint64
 }
 
 func (m *TxDb) Close() {
@@ -41,10 +40,10 @@ func NewTxDbWithoutTransaction(db Database, flags TxFlags) *TxDb {
 func (m *TxDb) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
 	batch := m
 	if m.tx != nil {
-		batch = &TxDb{db: m.db, txFlags: flags}
+		panic("nested transactions not supported")
 	}
 
-	if err := batch.begin(ctx, m.tx, flags); err != nil {
+	if err := batch.begin(ctx, flags); err != nil {
 		return nil, err
 	}
 	return batch, nil
@@ -100,13 +99,12 @@ func (m *TxDb) NewBatch() DbWithPendingMutations {
 	}
 }
 
-func (m *TxDb) begin(ctx context.Context, parent Tx, flags TxFlags) error {
-	tx, err := m.db.(HasKV).KV().Begin(ctx, parent, flags)
+func (m *TxDb) begin(ctx context.Context, flags TxFlags) error {
+	tx, err := m.db.(HasKV).KV().Begin(ctx, flags)
 	if err != nil {
 		return err
 	}
 	m.tx = tx
-	m.ParentTx = parent
 	m.cursors = make(map[string]Cursor, 16)
 	return nil
 }
@@ -347,12 +345,12 @@ func (m *TxDb) CommitAndBegin(ctx context.Context) error {
 		return err
 	}
 
-	return m.begin(ctx, m.ParentTx, m.txFlags)
+	return m.begin(ctx, m.txFlags)
 }
 
 func (m *TxDb) RollbackAndBegin(ctx context.Context) error {
 	m.Rollback()
-	return m.begin(ctx, m.ParentTx, m.txFlags)
+	return m.begin(ctx, m.txFlags)
 }
 
 func (m *TxDb) Commit() (uint64, error) {
@@ -367,7 +365,6 @@ func (m *TxDb) Commit() (uint64, error) {
 		return 0, err
 	}
 	m.tx = nil
-	m.ParentTx = nil
 	m.cursors = nil
 	m.len = 0
 	return 0, nil
@@ -380,7 +377,6 @@ func (m *TxDb) Rollback() {
 	m.tx.Rollback()
 	m.cursors = nil
 	m.tx = nil
-	m.ParentTx = nil
 	m.len = 0
 }
 

@@ -254,7 +254,7 @@ func change3(tx ethdb.Tx) (bool, error) {
 
 func launchReader(kv ethdb.KV, tx ethdb.Tx, expectVal string, startCh chan struct{}, errorCh chan error) (bool, error) {
 	tx.Rollback()
-	tx1, err := kv.Begin(context.Background(), nil, ethdb.RO)
+	tx1, err := kv.Begin(context.Background(), ethdb.RO)
 	if err != nil {
 		return false, err
 	}

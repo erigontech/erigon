@@ -108,11 +108,11 @@ func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockNu
 		}
 	}
 
-	tgTx, err := resultsKV.Begin(context.Background(), nil, ethdb.RO)
+	tgTx, err := resultsKV.Begin(context.Background(), ethdb.RO)
 	if err != nil {
 		log.Fatal(err)
 	}
-	gethTx, err := gethKV.Begin(context.Background(), nil, ethdb.RO)
+	gethTx, err := gethKV.Begin(context.Background(), ethdb.RO)
 	if err != nil {
 		log.Fatal(err)
 	}

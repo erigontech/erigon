@@ -217,7 +217,7 @@ func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
 	return sizeReply.Size, nil
 }
 
-func (db *RemoteKV) Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, error) {
+func (db *RemoteKV) Begin(ctx context.Context, flags TxFlags) (Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
@@ -228,7 +228,7 @@ func (db *RemoteKV) Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, er
 }
 
 func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	tx, err := db.Begin(ctx, nil, RO)
+	tx, err := db.Begin(ctx, RO)
 	if err != nil {
 		return err
 	}
