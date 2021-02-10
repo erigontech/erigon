@@ -73,14 +73,12 @@ const (
 type Tx interface {
 	// Cursor - creates cursor object on top of given bucket. Type of cursor - depends on bucket configuration.
 	// If bucket was created with lmdb.DupSort flag, then cursor with interface CursorDupSort created
-	// If bucket was created with lmdb.DupFixed flag, then cursor with interface CursorDupFixed created
 	// Otherwise - object of interface Cursor created
 	//
 	// Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break
 	// long keys into DupSort key/values. See docs for `bucket.go:BucketConfigItem`
 	Cursor(bucket string) Cursor
-	CursorDupSort(bucket string) CursorDupSort   // CursorDupSort - can be used if bucket has lmdb.DupSort flag
-	CursorDupFixed(bucket string) CursorDupFixed // CursorDupSort - can be used if bucket has lmdb.DupFixed flag
+	CursorDupSort(bucket string) CursorDupSort // CursorDupSort - can be used if bucket has lmdb.DupSort flag
 	GetOne(bucket string, key []byte) (val []byte, err error)
 	HasOne(bucket string, key []byte) (bool, error)
 
@@ -112,7 +110,7 @@ type BucketMigrator interface {
 }
 
 // Cursor - class for navigating through a database
-// CursorDupSort and CursorDupFixed are inherit this class
+// CursorDupSort are inherit this class
 //
 // If methods (like First/Next/Seek) return error, then returned key SHOULD not be nil (can be []byte{} for example).
 // Then looping code will look as:
@@ -174,23 +172,6 @@ type CursorDupSort interface {
 	AppendDup(key, value []byte) error // AppendDup - same as Append, but for sorted dup data
 
 	//PutIfNoDup()      // Store the key-value pair only if key is not present
-}
-
-// CursorDupFixed - has methods valid for buckets with lmdb.DupFixed flag
-// See also lmdb.WrapMulti
-type CursorDupFixed interface {
-	CursorDupSort
-
-	// GetMulti - return up to a page of duplicate data items from current cursor position
-	// After return - move cursor to prepare for #MDB_NEXT_MULTIPLE
-	GetMulti() ([]byte, error)
-	// NextMulti - return up to a page of duplicate data items from next cursor position
-	// After return - move cursor to prepare for #MDB_NEXT_MULTIPLE
-	NextMulti() ([]byte, []byte, error)
-	// PutMulti store multiple contiguous data elements in a single request.
-	// Panics if len(page) is not a multiple of stride.
-	// The cursor's bucket must be DupFixed and DupSort.
-	PutMulti(key []byte, page []byte, stride int) error
 }
 
 type HasStats interface {

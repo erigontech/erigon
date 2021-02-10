@@ -5,9 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"unsafe"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"unsafe"
 )
 
 var (
@@ -170,10 +171,6 @@ func (s *sn2TX) CursorDupSort(bucket string) CursorDupSort {
 		dbc,
 		sncbc,
 	}
-}
-
-func (s *sn2TX) CursorDupFixed(bucket string) CursorDupFixed {
-	panic("implement me")
 }
 
 func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {

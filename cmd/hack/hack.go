@@ -1724,71 +1724,6 @@ func extracHeaders(chaindata string, block uint64, name string) error {
 	return nil
 }
 
-func receiptSizes(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	fmt.Printf("bucket: %s\n", dbutils.Log)
-	c := tx.Cursor(dbutils.Log)
-	defer c.Close()
-	sizes := make(map[int]int)
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		sizes[len(v)]++
-	}
-	var lens = make([]int, len(sizes))
-	i := 0
-	for l := range sizes {
-		lens[i] = l
-		i++
-	}
-	sort.Ints(lens)
-	for _, l := range lens {
-		if sizes[l] < 100000 {
-			continue
-		}
-		fmt.Printf("%6d - %d\n", l, sizes[l])
-	}
-	return nil
-}
-
-func dupSz(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	kv := db.KV()
-	tx, err := kv.Begin(context.Background(), nil, ethdb.RO)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	c := tx.CursorDupSort(*bucket)
-	fmt.Printf("bkt: %s\n", *bucket)
-	defer c.Close()
-	total := 0
-	for k, v, err := c.First(); k != nil; k, v, err = c.NextNoDup() {
-		check(err)
-		//fmt.Printf("%x\n", k)
-		//fmt.Printf("\t%x\n", v)
-		total += len(k) + len(v) + 8
-		for k, v, err := c.NextDup(); k != nil; k, v, err = c.NextDup() {
-			check(err)
-			total += len(v)
-			//fmt.Printf("\t%x\n", v)
-		}
-	}
-	fmt.Printf("total sz: %s\n", common.StorageSize(total))
-
-	return nil
-}
-
 func indexKeySizes(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
@@ -2073,16 +2008,6 @@ func main() {
 	}
 	if *action == "extractHeaders" {
 		if err := extracHeaders(*chaindata, uint64(*block), *name); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "receiptSizes" {
-		if err := receiptSizes(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "dupSz" {
-		if err := dupSz(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

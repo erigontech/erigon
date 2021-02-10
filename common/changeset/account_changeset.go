@@ -24,10 +24,6 @@ func EncodeAccountsPlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error)
 
 type AccountChangeSetPlain struct{ c ethdb.CursorDupSort }
 
-func (b AccountChangeSetPlain) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
-	return walk(b.c, from, to, common.AddressLength, f)
-}
-
 func (b AccountChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error) {
 	return findInAccountChangeSet(b.c, blockNumber, k, common.AddressLength)
 }

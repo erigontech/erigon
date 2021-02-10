@@ -99,7 +99,7 @@ if err != nil {
 
 - No internal copies/allocations. It means: 1. app must copy keys/values before put to database. 2. Data after read from db - valid only during current transaction - copy it if plan use data after transaction Commit/Rollback.
 - Methods .Bucket() and .Cursor(), can’t return nil, can't return error.
-- Bucket and Cursor - are interfaces - means different classes can satisfy it: for example `LmdbCursor`, `LmdbDupSortCursor`, `LmdbDupFixedCursor` classes satisfy it. 
+- Bucket and Cursor - are interfaces - means different classes can satisfy it: for example `LmdbCursor` and `LmdbDupSortCursor` classes satisfy it. 
   If your are not familiar with "DupSort" concept, please read [indices.md](./../docs/programmers_guide/indices.md) first.
 
 

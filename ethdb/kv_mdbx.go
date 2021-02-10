@@ -18,6 +18,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -296,8 +297,10 @@ func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (txn Tx, er
 		}()
 	}
 
+	var ro bool
 	nativeFlags := uint(0)
 	if flags&RO != 0 {
+		ro = true
 		nativeFlags |= mdbx.Readonly
 	}
 	if flags&NoSync != 0 {
@@ -317,17 +320,19 @@ func (db *MdbxKV) Begin(_ context.Context, parent Tx, flags TxFlags) (txn Tx, er
 	}
 	tx.RawRead = true
 	return &MdbxTx{
-		db:      db,
-		tx:      tx,
-		isSubTx: isSubTx,
+		db:       db,
+		tx:       tx,
+		isSubTx:  isSubTx,
+		readOnly: ro,
 	}, nil
 }
 
 type MdbxTx struct {
-	isSubTx bool
-	tx      *mdbx.Txn
-	db      *MdbxKV
-	cursors []*mdbx.Cursor
+	isSubTx  bool
+	readOnly bool
+	tx       *mdbx.Txn
+	db       *MdbxKV
+	cursors  []*mdbx.Cursor
 }
 
 type MdbxCursor struct {
@@ -525,10 +530,6 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		nativeFlags |= mdbx.DupSort
 		flags ^= dbutils.DupSort
 	}
-	if flags&dbutils.DupFixed != 0 {
-		nativeFlags |= mdbx.DupFixed
-		flags ^= dbutils.DupFixed
-	}
 	if flags != 0 {
 		return fmt.Errorf("some not supported flag provided for bucket")
 	}
@@ -604,12 +605,29 @@ func (tx *MdbxTx) Commit(ctx context.Context) error {
 		}
 	}()
 	tx.closeCursors()
+
+	slowTx := 10 * time.Second
+	if debug.SlowCommit() > 0 {
+		slowTx = debug.SlowCommit()
+	}
+
+	tx.printDebugInfo()
+
 	latency, err := tx.tx.Commit()
 	if err != nil {
 		return err
 	}
-	if latency.Whole > 20*time.Second {
-		log.Info("Commit", "preparation", latency.Preparation, "gc", latency.GC, "audit", latency.Audit, "write", latency.Write, "fsync", latency.Sync, "ending", latency.Ending, "whole", latency.Whole)
+
+	if latency.Whole > slowTx {
+		log.Info("Commit",
+			"preparation", latency.Preparation,
+			"gc", latency.GC,
+			"audit", latency.Audit,
+			"write", latency.Write,
+			"fsync", latency.Sync,
+			"ending", latency.Ending,
+			"whole", latency.Whole,
+		)
 	}
 
 	return nil
@@ -630,7 +648,31 @@ func (tx *MdbxTx) Rollback() {
 		}
 	}()
 	tx.closeCursors()
+	tx.printDebugInfo()
 	tx.tx.Abort()
+}
+
+func (tx *MdbxTx) printDebugInfo() {
+	if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
+		txInfo, err := tx.tx.Info(true)
+		if err != nil {
+			panic(err)
+		}
+
+		txSize := uint(txInfo.SpaceDirty / 1024)
+		doPrint := tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb()
+		doPrint = doPrint || (!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
+		if doPrint {
+			log.Info("Tx info",
+				"id", txInfo.Id,
+				"read_lag", txInfo.ReadLag,
+				"ro", tx.readOnly,
+				//"space_retired_mb", txInfo.SpaceRetired/1024/1024,
+				"space_dirty_kb", txInfo.SpaceDirty/1024,
+				"callers", debug.Callers(7),
+			)
+		}
+	}
 }
 
 func (tx *MdbxTx) get(dbi mdbx.DBI, key []byte) ([]byte, error) {
@@ -717,7 +759,7 @@ func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 }
 
 func (tx *MdbxTx) BucketSize(name string) (uint64, error) {
-	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
+	st, err := tx.BucketStat(name)
 	if err != nil {
 		return 0, err
 	}
@@ -740,10 +782,6 @@ func (tx *MdbxTx) Cursor(bucket string) Cursor {
 		return tx.stdCursor(bucket)
 	}
 
-	if b.Flags&dbutils.DupFixed != 0 {
-		return tx.CursorDupFixed(bucket)
-	}
-
 	if b.Flags&dbutils.DupSort != 0 {
 		return tx.CursorDupSort(bucket)
 	}
@@ -759,11 +797,6 @@ func (tx *MdbxTx) stdCursor(bucket string) Cursor {
 func (tx *MdbxTx) CursorDupSort(bucket string) CursorDupSort {
 	basicCursor := tx.stdCursor(bucket).(*MdbxCursor)
 	return &MdbxDupSortCursor{MdbxCursor: basicCursor}
-}
-
-func (tx *MdbxTx) CursorDupFixed(bucket string) CursorDupFixed {
-	basicCursor := tx.CursorDupSort(bucket).(*MdbxDupSortCursor)
-	return &MdbxDupFixedCursor{MdbxDupSortCursor: basicCursor}
 }
 
 func (tx *MdbxTx) CHandle() unsafe.Pointer {
@@ -1266,14 +1299,14 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 		return k, v[from-to:], nil
 	}
 
-	_, v, err := c.set(key)
+	k, v, err := c.set(key)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, err
 	}
-	return []byte{}, v, nil
+	return k, v, nil
 }
 
 // Append - speedy feature of mdbx which is not part of KV interface.
@@ -1586,62 +1619,4 @@ func (c *MdbxDupSortCursor) CountDuplicates() (uint64, error) {
 		return 0, fmt.Errorf("in CountDuplicates: %w", err)
 	}
 	return res, nil
-}
-
-type MdbxDupFixedCursor struct {
-	*MdbxDupSortCursor
-}
-
-func (c *MdbxDupFixedCursor) initCursor() error {
-	if c.c != nil {
-		return nil
-	}
-
-	if c.bucketCfg.Flags&mdbx.DupFixed == 0 {
-		return fmt.Errorf("class MdbxDupSortCursor can be used only if bucket created with flag mdbx.DupSort")
-	}
-
-	return c.MdbxCursor.initCursor()
-}
-
-func (c *MdbxDupFixedCursor) GetMulti() ([]byte, error) {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return nil, err
-		}
-	}
-	_, v, err := c.c.Get(nil, nil, mdbx.GetMultiple)
-	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return v, nil
-}
-
-func (c *MdbxDupFixedCursor) NextMulti() ([]byte, []byte, error) {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return []byte{}, nil, err
-		}
-	}
-	k, v, err := c.c.Get(nil, nil, mdbx.NextMultiple)
-	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return nil, nil, nil
-		}
-		return []byte{}, nil, err
-	}
-	return k, v, nil
-}
-
-func (c *MdbxDupFixedCursor) PutMulti(key []byte, page []byte, stride int) error {
-	if c.c == nil {
-		if err := c.initCursor(); err != nil {
-			return err
-		}
-	}
-
-	return c.c.PutMulti(key, page, stride, 0)
 }
