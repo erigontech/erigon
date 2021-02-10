@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"bufio"
@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"log"
 	"math/big"
 	"os"
@@ -16,6 +14,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/cmd/hack/tool"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 )
 
 var maxStackLen = 1024
@@ -28,7 +30,7 @@ var mode = flag.String("mode", "test", "Mode for cfg analysis.")
 var bytecode = flag.String("bytecode", "0x00", "Bytecode for cfg analysis")
 var quiet = flag.Bool("quiet", false, "Quiet for cfg analysis")
 
-func testGenCfg() {
+func TestGenCfg() {
 	if *mode == "worker" {
 		code, _ := hex.DecodeString(*bytecode)
 		worker(code)
@@ -154,7 +156,7 @@ func batchServer() {
 		}
 		row := strings.Split(line, ",")
 		txcnt, perr := strconv.ParseInt(row[0], 10, 64)
-		check(perr)
+		tool.Check(perr)
 
 		code, _ := hex.DecodeString(row[1][2:])
 		jobList = append(jobList, &cfgJob{int(txcnt), code})
@@ -206,7 +208,7 @@ func batchServer() {
 	filename := fmt.Sprintf("results_%v.csv", timestamp)
 	fmt.Printf("Writing results to %v\n", filename)
 	resultsFile, err := os.Create(filename)
-	check(err)
+	tool.Check(err)
 	headers := []string{"TxCount",
 		"BytecodeLen",
 		"Valid",
@@ -221,9 +223,9 @@ func batchServer() {
 		"ProofSize (bytes)",
 		"Bytecode"}
 	_, err = resultsFile.WriteString(strings.Join(headers, "|") + "\n")
-	check(err)
+	tool.Check(err)
 	err = resultsFile.Sync()
-	check(err)
+	tool.Check(err)
 
 	eval := CfgEval{numPrograms: 191400}
 	//numJobs := len(jobList)
@@ -246,10 +248,10 @@ func batchServer() {
 			hex.EncodeToString(result.job.code)}
 
 		_, err = resultsFile.WriteString(strings.Join(line, "|") + "\n")
-		check(err)
+		tool.Check(err)
 
 		err = resultsFile.Sync()
-		check(err)
+		tool.Check(err)
 
 		eval.update(result, 1)
 

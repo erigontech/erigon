@@ -599,16 +599,22 @@ func (h *Heap) Pop() interface{} {
 const AnchorSerLen = 32 /* ParentHash */ + 8 /* powDepth */ + 8 /* maxTipHeight */
 
 func InitHardCodedTips(network string) map[common.Hash]HeaderRecord {
-	hardTips := make(map[common.Hash]HeaderRecord)
 	var encodings []string
 	switch network {
 	case "mainnet":
 		encodings = mainnetHardCodedHeaders
 	default:
 		log.Error("Hard coded headers not found for", "network", network)
-		return hardTips
+		return nil
 	}
+
 	// Insert hard-coded headers if present
+	return DecodeTips(encodings)
+}
+
+func DecodeTips(encodings []string) map[common.Hash]HeaderRecord {
+	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
+
 	for _, encoding := range encodings {
 		b, err := base64.RawStdEncoding.DecodeString(encoding)
 		if err != nil {
@@ -622,6 +628,7 @@ func InitHardCodedTips(network string) map[common.Hash]HeaderRecord {
 			}
 		}
 	}
+
 	return hardTips
 }
 
