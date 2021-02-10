@@ -162,6 +162,16 @@ func main() {
 	}
 	with(bench12Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum)
 
+	var bench13Cmd = &cobra.Command{
+		Use:   "bench13",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			rpctest.Bench13(tgURL, gethURL, needCompare, blockNum)
+		},
+	}
+	with(bench13Cmd, withGethUrl, withTGUrl, withNeedCompare, withBlockNum)
+
 	var proofsCmd = &cobra.Command{
 		Use:   "proofs",
 		Short: "",
@@ -215,6 +225,7 @@ func main() {
 		bench10Cmd,
 		bench11Cmd,
 		bench12Cmd,
+		bench13Cmd,
 		proofsCmd,
 		fixStateCmd,
 		compareAccountRange,
