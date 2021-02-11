@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -16,7 +17,7 @@ type TraceAPI interface {
 	ReplayBlockTransactions(ctx context.Context, blockNr rpc.BlockNumber, traceTypes []string) ([]interface{}, error)
 	ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error)
 	Call(ctx context.Context, call TraceCallParam, types []string, blockNr *rpc.BlockNumberOrHash) (*TraceCallResult, error)
-	CallMany(ctx context.Context, calls []interface{}, blockNr *rpc.BlockNumberOrHash) ([]interface{}, error)
+	CallMany(ctx context.Context, calls json.RawMessage, blockNr *rpc.BlockNumberOrHash) ([]*TraceCallResult, error)
 	RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error)
 
 	// Filtering (see ./trace_filtering.go)

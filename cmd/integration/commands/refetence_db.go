@@ -241,7 +241,7 @@ func fToMdbx(ctx context.Context, to string) error {
 	defer file.Close()
 
 	dst := ethdb.NewMDBX().Path(to).MustOpen()
-	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW)
+	dstTx, err1 := dst.Begin(ctx, ethdb.RW)
 	if err1 != nil {
 		return err1
 	}
@@ -345,7 +345,7 @@ MainLoop:
 	if err != nil {
 		return err
 	}
-	dstTx, err = dst.Begin(ctx, nil, ethdb.RW)
+	dstTx, err = dst.Begin(ctx, ethdb.RW)
 	if err != nil {
 		return err
 	}
@@ -364,12 +364,12 @@ func toMdbx(ctx context.Context, from, to string) error {
 	}).MustOpen()
 	dst := ethdb.NewMDBX().Path(to).MustOpen()
 
-	srcTx, err1 := src.Begin(ctx, nil, ethdb.RO)
+	srcTx, err1 := src.Begin(ctx, ethdb.RO)
 	if err1 != nil {
 		return err1
 	}
 	defer srcTx.Rollback()
-	dstTx, err1 := dst.Begin(ctx, nil, ethdb.RW)
+	dstTx, err1 := dst.Begin(ctx, ethdb.RW)
 	if err1 != nil {
 		return err1
 	}
@@ -420,7 +420,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 				if err2 := dstTx.Commit(ctx); err2 != nil {
 					return err2
 				}
-				dstTx, err = dst.Begin(ctx, nil, ethdb.RW)
+				dstTx, err = dst.Begin(ctx, ethdb.RW)
 				if err != nil {
 					return err
 				}
@@ -445,7 +445,7 @@ func toMdbx(ctx context.Context, from, to string) error {
 	if err != nil {
 		return err
 	}
-	dstTx, err = dst.Begin(ctx, nil, ethdb.RW)
+	dstTx, err = dst.Begin(ctx, ethdb.RW)
 	if err != nil {
 		return err
 	}
@@ -454,5 +454,6 @@ func toMdbx(ctx context.Context, from, to string) error {
 		return err
 	}
 	srcTx.Rollback()
+	fmt.Printf("done!\n")
 	return nil
 }

@@ -183,6 +183,12 @@ func compareTraceCalls(trace, traceg *fastjson.Value) error {
 	return compareJsonValues("result", r, rg)
 }
 
+func compareTraceCallManys(trace, traceg *fastjson.Value) error {
+	r := trace.Get("result")
+	rg := traceg.Get("result")
+	return compareJsonValues("result", r, rg)
+}
+
 func compareBalances(balance, balanceg *EthBalance) bool {
 	if balance.Balance.ToInt().Cmp(balanceg.Balance.ToInt()) != 0 {
 		fmt.Printf("Different balance: %d %d\n", balance.Balance.ToInt(), balanceg.Balance.ToInt())

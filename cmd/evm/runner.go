@@ -281,7 +281,7 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		tx, err1 := db.KV().Begin(context.Background(), nil, ethdb.RO)
+		tx, err1 := db.KV().Begin(context.Background(), ethdb.RO)
 		if err1 != nil {
 			return fmt.Errorf("transition cannot open tx: %v", err1)
 		}

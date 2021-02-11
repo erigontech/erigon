@@ -34,7 +34,7 @@ type BlockGetter interface {
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, tx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.Context, *state.IntraBlockState, *state2.StateReader, error) {
+func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, dbtx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.Context, *state.IntraBlockState, *state2.StateReader, error) {
 	// Create the parent state database
 	block, err := blockGetter.GetBlockByHash(blockHash)
 	if err != nil {
@@ -48,7 +48,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		return nil, vm.Context{}, nil, nil, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
 
-	statedb, reader := state2.ComputeIntraBlockState(tx, parent)
+	statedb, reader := state2.ComputeIntraBlockState(dbtx, parent)
 
 	if txIndex == 0 && len(block.Transactions()) == 0 {
 		return nil, vm.Context{}, statedb, reader, nil

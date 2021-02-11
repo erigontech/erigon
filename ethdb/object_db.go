@@ -382,7 +382,7 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 
 func (db *ObjectDatabase) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
 	batch := &TxDb{db: db}
-	if err := batch.begin(ctx, nil, flags); err != nil {
+	if err := batch.begin(ctx, flags); err != nil {
 		panic(err)
 	}
 	return batch, nil
