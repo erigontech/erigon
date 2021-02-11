@@ -2,13 +2,10 @@ package debug
 
 import (
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
-)
-
-var (
-	compressBlocks    bool
-	getCompressBlocks sync.Once
+	"time"
 )
 
 // atomic: bit 0 is the value, bit 1 is the initialized flag
@@ -47,13 +44,6 @@ func OverrideGetNodeData(val bool) {
 	}
 }
 
-func IsBlockCompressionEnabled() bool {
-	getCompressBlocks.Do(func() {
-		_, compressBlocks = os.LookupEnv("COMPRESS_BLOCKS")
-	})
-	return compressBlocks
-}
-
 var (
 	testDB    string
 	getTestDB sync.Once
@@ -67,4 +57,64 @@ func TestDB() string {
 		}
 	})
 	return testDB
+}
+
+var (
+	bigRoTx    uint
+	getBigRoTx sync.Once
+)
+
+// DEBUG_BIG_RO_TX_KB - print logs with info about large read-only transactions
+// DEBUG_BIG_RW_TX_KB - print logs with info about large read-write transactions
+// DEBUG_SLOW_COMMIT_MS - print logs with commit timing details if commit is slower than this threshold
+func BigRoTxKb() uint {
+	getBigRoTx.Do(func() {
+		v, _ := os.LookupEnv("DEBUG_BIG_RO_TX_KB")
+		if v != "" {
+			i, err := strconv.Atoi(v)
+			if err != nil {
+				panic(err)
+			}
+			bigRoTx = uint(i)
+		}
+	})
+	return bigRoTx
+}
+
+var (
+	bigRwTx    uint
+	getBigRwTx sync.Once
+)
+
+func BigRwTxKb() uint {
+	getBigRwTx.Do(func() {
+		v, _ := os.LookupEnv("DEBUG_BIG_RW_TX_KB")
+		if v != "" {
+			i, err := strconv.Atoi(v)
+			if err != nil {
+				panic(err)
+			}
+			bigRwTx = uint(i)
+		}
+	})
+	return bigRwTx
+}
+
+var (
+	slowCommit    time.Duration
+	getSlowCommit sync.Once
+)
+
+func SlowCommit() time.Duration {
+	getSlowCommit.Do(func() {
+		v, _ := os.LookupEnv("DEBUG_SLOW_COMMIT_MS")
+		if v != "" {
+			i, err := strconv.Atoi(v)
+			if err != nil {
+				panic(err)
+			}
+			slowCommit = time.Duration(i) * time.Millisecond
+		}
+	})
+	return slowCommit
 }

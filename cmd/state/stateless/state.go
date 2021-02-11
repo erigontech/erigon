@@ -171,7 +171,7 @@ func (r *StateGrowth1Reporter) interrupt(ctx context.Context, i int, startTime t
 }
 
 func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
-	tx, err2 := r.remoteDB.Begin(ctx, nil, ethdb.RO)
+	tx, err2 := r.remoteDB.Begin(ctx, ethdb.RO)
 	if err2 != nil {
 		panic(err2)
 	}
@@ -308,7 +308,7 @@ func (r *StateGrowth2Reporter) interrupt(ctx context.Context, i int, startTime t
 }
 
 func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
-	tx, err2 := r.remoteDB.Begin(context.Background(), nil, ethdb.RO)
+	tx, err2 := r.remoteDB.Begin(context.Background(), ethdb.RO)
 	if err2 != nil {
 		panic(err2)
 	}
@@ -434,7 +434,7 @@ func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB ethdb.K
 	var err error
 	var localTx ethdb.Tx
 
-	if localTx, err = localDB.Begin(ctx, nil, ethdb.RW); err != nil {
+	if localTx, err = localDB.Begin(ctx, ethdb.RW); err != nil {
 		panic(err)
 	}
 
@@ -449,7 +449,7 @@ func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB ethdb.K
 		if err = localTx.Commit(ctx); err != nil {
 			panic(err)
 		}
-		if localTx, err = localDB.Begin(ctx, nil, ethdb.RW); err != nil {
+		if localTx, err = localDB.Begin(ctx, ethdb.RW); err != nil {
 			panic(err)
 		}
 

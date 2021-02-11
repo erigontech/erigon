@@ -64,12 +64,12 @@ var (
 	CurrentStateBucket     = "CST2"
 	CurrentStateBucketOld1 = "CST"
 
-	//key - address hash
-	//value - list of block where it's changed
+	//key - address + shard_id_u64
+	//value - roaring bitmap  - list of block where it changed
 	AccountsHistoryBucket = "hAT"
 
-	//key - address hash
-	//value - list of block where it's changed
+	//key - address + storage_key + shard_id_u64
+	//value - roaring bitmap - list of block where it changed
 	StorageHistoryBucket = "hST"
 
 	//key - contract code hash
@@ -84,16 +84,6 @@ var (
 	//key - address
 	//value - incarnation of account when it was last deleted
 	IncarnationMapBucket = "incarnationMap"
-
-	//AccountChangeSetBucket keeps changesets of accounts
-	// key - encoded timestamp(block number)
-	// value - encoded ChangeSet{k - addrHash v - account(encoded).
-	AccountChangeSetBucket = "ACS"
-
-	// StorageChangeSetBucket keeps changesets of storage
-	// key - encoded timestamp(block number)
-	// value - encoded ChangeSet{k - compositeKey(for storage) v - originalValue(common.Hash)}.
-	StorageChangeSetBucket = "SCS"
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
 	IntermediateTrieHashBucket     = "iTh2"
@@ -212,8 +202,6 @@ var Buckets = []string{
 	StorageHistoryBucket,
 	CodeBucket,
 	ContractCodeBucket,
-	AccountChangeSetBucket,
-	StorageChangeSetBucket,
 	IntermediateTrieHashBucket,
 	DatabaseVerisionKey,
 	HeaderPrefix,
@@ -291,7 +279,6 @@ const (
 	ReverseKey BucketFlags = 0x02
 	DupSort    BucketFlags = 0x04
 	IntegerKey BucketFlags = 0x08
-	DupFixed   BucketFlags = 0x10
 	IntegerDup BucketFlags = 0x20
 	ReverseDup BucketFlags = 0x40
 )
@@ -311,7 +298,6 @@ type BucketConfigItem struct {
 	// Works only if AutoDupSortKeysConversion enabled
 	DupFromLen          int
 	DupToLen            int
-	DupFixedSize        int
 	CustomComparator    CustomComparator
 	CustomDupComparator CustomComparator
 }
@@ -327,12 +313,6 @@ var BucketsConfigs = BucketsCfg{
 		Flags: DupSort,
 	},
 	PlainStorageChangeSetBucket: {
-		Flags: DupSort,
-	},
-	AccountChangeSetBucket: {
-		Flags: DupSort,
-	},
-	StorageChangeSetBucket: {
 		Flags: DupSort,
 	},
 	PlainStateBucket: {

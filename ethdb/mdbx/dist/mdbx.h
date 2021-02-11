@@ -19,7 +19,7 @@ _The Future will (be) [Positive](https://www.ptsecurity.com). Всё будет 
 
 \section copyright LICENSE & COPYRIGHT
 
-\authors Copyright (c) 2015-2020, Leonid Yuriev <leo@yuriev.ru>
+\authors Copyright (c) 2015-2021, Leonid Yuriev <leo@yuriev.ru>
 and other _libmdbx_ authors: please see [AUTHORS](./AUTHORS) file.
 
 \copyright Redistribution and use in source and binary forms, with or without
@@ -353,12 +353,12 @@ typedef mode_t mdbx_mode_t;
 /** \brief Auxiliary macro for robustly define the both inline version of API
  * function and non-inline fallback dll-exported version for applications linked
  * with old version of libmdbx, with a strictly ODR-common implementation. */
-#if !defined(LIBMDBX_INTERNALS)
-#define LIBMDBX_INLINE_API(TYPE, NAME, ARGS) static __inline TYPE NAME ARGS
-#else
+#if defined(LIBMDBX_INTERNALS) && !defined(LIBMDBX_NO_EXPORTS_LEGACY_API)
 #define LIBMDBX_INLINE_API(TYPE, NAME, ARGS)                                   \
   /* proto of exported which uses common impl */ LIBMDBX_API TYPE NAME ARGS;   \
   /* definition of common impl */ static __inline TYPE __inline_##NAME ARGS
+#else
+#define LIBMDBX_INLINE_API(TYPE, NAME, ARGS) static __inline TYPE NAME ARGS
 #endif /* LIBMDBX_INLINE_API */
 
 /*----------------------------------------------------------------------------*/
@@ -823,7 +823,7 @@ DEFINE_ENUM_FLAG_OPERATORS(MDBX_debug_flags_t)
  * \param [in] env  An environment handle returned by \ref mdbx_env_create().
  * \param [in] msg  The assertion message, not including newline. */
 typedef void MDBX_debug_func(MDBX_log_level_t loglevel, const char *function,
-                             int line, const char *msg,
+                             int line, const char *fmt,
                              va_list args) MDBX_CXX17_NOEXCEPT;
 
 /** \brief The "don't change `logger`" value for mdbx_setup_debug() */
@@ -1380,7 +1380,7 @@ DEFINE_ENUM_FLAG_OPERATORS(MDBX_db_flags_t)
 
 /** \brief Data changing flags
  * \ingroup c_crud
- * \see c_crud_hint
+ * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
  * \see mdbx_put() \see mdbx_cursor_put() \see mdbx_replace() */
 enum MDBX_put_flags_t {
   /** Upsertion by default (without any other flags) */
@@ -1793,6 +1793,176 @@ LIBMDBX_API const char *mdbx_strerror_r_ANSI2OEM(int errnum, char *buf,
  * \returns a non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_env_create(MDBX_env **penv);
 
+/** \brief MDBX environment options. */
+enum MDBX_option_t {
+  /** \brief Controls the maximum number of named databases for the environment.
+   *
+   * \details By default only unnamed key-value database could used and
+   * appropriate value should set by `MDBX_opt_max_db` to using any more named
+   * subDB(s). To reduce overhead, use the minimum sufficient value. This option
+   * may only set after \ref mdbx_env_create() and before \ref mdbx_env_open().
+   *
+   * \see mdbx_env_set_maxdbs() \see mdbx_env_get_maxdbs() */
+  MDBX_opt_max_db,
+
+  /** \brief Defines the maximum number of threads/reader slots
+   * for all processes interacting with the database.
+   *
+   * \details This defines the number of slots in the lock table that is used to
+   * track readers in the the environment. The default is about 100 for 4K
+   * system page size. Starting a read-only transaction normally ties a lock
+   * table slot to the current thread until the environment closes or the thread
+   * exits. If \ref MDBX_NOTLS is in use, \ref mdbx_txn_begin() instead ties the
+   * slot to the \ref MDBX_txn object until it or the \ref MDBX_env object is
+   * destroyed. This option may only set after \ref mdbx_env_create() and before
+   * \ref mdbx_env_open(), and has an effect only when the database is opened by
+   * the first process interacts with the database.
+   *
+   * \see mdbx_env_set_maxreaders() \see mdbx_env_get_maxreaders() */
+  MDBX_opt_max_readers,
+
+  /** \brief Controls interprocess/shared threshold to force flush the data
+   * buffers to disk, if \ref MDBX_SAFE_NOSYNC is used.
+   *
+   * \see mdbx_env_set_syncbytes() \see mdbx_env_get_syncbytes() */
+  MDBX_opt_sync_bytes,
+
+  /** \brief Controls interprocess/shared relative period since the last
+   * unsteady commit to force flush the data buffers to disk,
+   * if \ref MDBX_SAFE_NOSYNC is used.
+   * \see mdbx_env_set_syncperiod() \see mdbx_env_get_syncperiod() */
+  MDBX_opt_sync_period,
+
+  /** \brief Controls the in-process limit to grow a list of reclaimed/recycled
+   * page's numbers for finding a sequence of contiguous pages for large data
+   * items.
+   *
+   * \details A long values requires allocation of contiguous database pages.
+   * To find such sequences, it may be necessary to accumulate very large lists,
+   * especially when placing very long values (more than a megabyte) in a large
+   * databases (several tens of gigabytes), which is much expensive in extreme
+   * cases. This threshold allows you to avoid such costs by allocating new
+   * pages at the end of the database (with its possible growth on disk),
+   * instead of further accumulating/reclaiming Garbage Collection records.
+   *
+   * On the other hand, too small threshold will lead to unreasonable database
+   * growth, or/and to the inability of put long values.
+   *
+   * The `MDBX_opt_rp_augment_limit` controls described limit for the current
+   * process. Default is 262144, it is usually enough for most cases. */
+  MDBX_opt_rp_augment_limit,
+
+  /** \brief Controls the in-process limit to grow a cache of dirty
+   * pages for reuse in the current transaction.
+   *
+   * \details A 'dirty page' refers to a page that has been updated in memory
+   * only, the changes to a dirty page are not yet stored on disk.
+   * To reduce overhead, it is reasonable to release not all such pages
+   * immediately, but to leave some ones in cache for reuse in the current
+   * transaction.
+   *
+   * The `MDBX_opt_loose_limit` allows you to set a limit for such cache inside
+   * the current process. Should be in the range 0..255, default is 64. */
+  MDBX_opt_loose_limit,
+
+  /** \brief Controls the in-process limit of a pre-allocated memory items
+   * for dirty pages.
+   *
+   * \details A 'dirty page' refers to a page that has been updated in memory
+   * only, the changes to a dirty page are not yet stored on disk.
+   * Without \ref MDBX_WRITEMAP dirty pages are allocated from memory and
+   * released when a transaction is committed. To reduce overhead, it is
+   * reasonable to release not all ones, but to leave some allocations in
+   * reserve for reuse in the next transaction(s).
+   *
+   * The `MDBX_opt_dp_reserve_limit` allows you to set a limit for such reserve
+   * inside the current process. Default is 1024. */
+  MDBX_opt_dp_reserve_limit,
+
+  /** \brief Controls the in-process limit of dirty pages
+   * for a write transaction.
+   *
+   * \details A 'dirty page' refers to a page that has been updated in memory
+   * only, the changes to a dirty page are not yet stored on disk.
+   * Without \ref MDBX_WRITEMAP dirty pages are allocated from memory and will
+   * be busy until are written to disk. Therefore for a large transactions is
+   * reasonable to limit dirty pages collecting above an some threshold but
+   * spill to disk instead.
+   *
+   * The `MDBX_opt_txn_dp_limit` controls described threshold for the current
+   * process. Default is 65536, it is usually enough for most cases. */
+  MDBX_opt_txn_dp_limit,
+
+  /** \brief Controls the in-process initial allocation size for dirty pages
+   * list of a write transaction. Default is 1024. */
+  MDBX_opt_txn_dp_initial,
+
+  /** \brief Controls the in-process how maximal part of the dirty pages may be
+   * spilled when necessary.
+   *
+   * \details The `MDBX_opt_spill_max_denominator` defines the denominator for
+   * limiting from the top for part of the current dirty pages may be spilled
+   * when the free room for a new dirty pages (i.e. distance to the
+   * `MDBX_opt_txn_dp_limit` threshold) is not enough to perform requested
+   * operation.
+   * Exactly `max_pages_to_spill = dirty_pages - dirty_pages / N`,
+   * where `N` is the value set by `MDBX_opt_spill_max_denominator`.
+   *
+   * Should be in the range 0..255, where zero means no limit, i.e. all dirty
+   * pages could be spilled. Default is 8, i.e. no more than 7/8 of the current
+   * dirty pages may be spilled when reached the condition described above. */
+  MDBX_opt_spill_max_denominator,
+
+  /** \brief Controls the in-process how minimal part of the dirty pages should
+   * be spilled when necessary.
+   *
+   * \details The `MDBX_opt_spill_min_denominator` defines the denominator for
+   * limiting from the bottom for part of the current dirty pages should be
+   * spilled when the free room for a new dirty pages (i.e. distance to the
+   * `MDBX_opt_txn_dp_limit` threshold) is not enough to perform requested
+   * operation.
+   * Exactly `min_pages_to_spill = dirty_pages / N`,
+   * where `N` is the value set by `MDBX_opt_spill_min_denominator`.
+   *
+   * Should be in the range 0..255, where zero means no restriction at the
+   * bottom. Default is 8, i.e. at least the 1/8 of the current dirty pages
+   * should be spilled when reached the condition described above. */
+  MDBX_opt_spill_min_denominator,
+
+  /** \brief Controls the in-process how much of the parent transaction dirty
+   * pages will be spilled while start each child transaction.
+   *
+   * \details The `MDBX_opt_spill_parent4child_denominator` defines the
+   * denominator to determine how much of parent transaction dirty pages will be
+   * spilled explicitly while start each child transaction.
+   * Exactly `pages_to_spill = dirty_pages / N`,
+   * where `N` is the value set by `MDBX_opt_spill_parent4child_denominator`.
+   *
+   * For a stack of nested transactions each dirty page could be spilled only
+   * once, and parent's dirty pages couldn't be spilled while child
+   * transaction(s) are running. Therefore a child transaction could reach
+   * \ref MDBX_TXN_FULL when parent(s) transaction has  spilled too less (and
+   * child reach the limit of dirty pages), either when parent(s) has spilled
+   * too more (since child can't spill already spilled pages). So there is no
+   * universal golden ratio.
+   *
+   * Should be in the range 0..255, where zero means no explicit spilling will
+   * be performed during starting nested transactions.
+   * Default is 0, i.e. by default no spilling performed during starting nested
+   * transactions, that correspond historically behaviour. */
+  MDBX_opt_spill_parent4child_denominator,
+};
+#ifndef __cplusplus
+/** \ingroup c_settings */
+typedef enum MDBX_option_t MDBX_option_t;
+#endif
+
+LIBMDBX_API int mdbx_env_set_option(MDBX_env *env, const MDBX_option_t option,
+                                    const uint64_t value);
+LIBMDBX_API int mdbx_env_get_option(const MDBX_env *env,
+                                    const MDBX_option_t option,
+                                    uint64_t *value);
+
 /** \brief Open an environment instance.
  * \ingroup c_opening
  *
@@ -2178,7 +2348,10 @@ LIBMDBX_INLINE_API(int, mdbx_env_sync_poll, (MDBX_env * env)) {
  *                         a synchronous flush would be made.
  *
  * \returns A non-zero error value on failure and 0 on success. */
-LIBMDBX_API int mdbx_env_set_syncbytes(MDBX_env *env, size_t threshold);
+LIBMDBX_INLINE_API(int, mdbx_env_set_syncbytes,
+                   (MDBX_env * env, size_t threshold)) {
+  return mdbx_env_set_option(env, MDBX_opt_sync_bytes, threshold);
+}
 
 /** \brief Sets relative period since the last unsteady commit to force flush
  * the data buffers to disk, even of \ref MDBX_SAFE_NOSYNC flag in the
@@ -2210,8 +2383,10 @@ LIBMDBX_API int mdbx_env_set_syncbytes(MDBX_env *env, size_t threshold);
  *                              the last unsteady commit.
  *
  * \returns A non-zero error value on failure and 0 on success. */
-LIBMDBX_API int mdbx_env_set_syncperiod(MDBX_env *env,
-                                        unsigned seconds_16dot16);
+LIBMDBX_INLINE_API(int, mdbx_env_set_syncperiod,
+                   (MDBX_env * env, unsigned seconds_16dot16)) {
+  return mdbx_env_set_option(env, MDBX_opt_sync_period, seconds_16dot16);
+}
 
 /** \brief Close the environment and release the memory map.
  * \ingroup c_opening
@@ -2582,17 +2757,18 @@ mdbx_limits_valsize_max(intptr_t pagesize, MDBX_db_flags_t flags);
 MDBX_NOTHROW_CONST_FUNCTION LIBMDBX_API intptr_t
 mdbx_limits_txnsize_max(intptr_t pagesize);
 
-/** \brief Set the maximum number of threads/reader slots for the environment.
- * \ingroup c_settings
+/** \brief Set the maximum number of threads/reader slots for for all processes
+ * interacts with the database. \ingroup c_settings
  *
- * This defines the number of slots in the lock table that is used to track
- * readers in the the environment. The default is 119 for 4K system page size.
- * Starting a read-only transaction normally ties a lock table slot to the
- * current thread until the environment closes or the thread exits. If
+ * \details This defines the number of slots in the lock table that is used to
+ * track readers in the the environment. The default is about 100 for 4K system
+ * page size. Starting a read-only transaction normally ties a lock table slot
+ * to the current thread until the environment closes or the thread exits. If
  * \ref MDBX_NOTLS is in use, \ref mdbx_txn_begin() instead ties the slot to the
  * \ref MDBX_txn object until it or the \ref MDBX_env object is destroyed.
  * This function may only be called after \ref mdbx_env_create() and before
- * \ref mdbx_env_open().
+ * \ref mdbx_env_open(), and has an effect only when the database is opened by
+ * the first process interacts with the database.
  * \see mdbx_env_get_maxreaders()
  *
  * \param [in] env       An environment handle returned
@@ -2603,7 +2779,10 @@ mdbx_limits_txnsize_max(intptr_t pagesize);
  *          some possible errors are:
  * \retval MDBX_EINVAL   An invalid parameter was specified.
  * \retval MDBX_EPERM    The environment is already open. */
-LIBMDBX_API int mdbx_env_set_maxreaders(MDBX_env *env, unsigned readers);
+LIBMDBX_INLINE_API(int, mdbx_env_set_maxreaders,
+                   (MDBX_env * env, unsigned readers)) {
+  return mdbx_env_set_option(env, MDBX_opt_max_readers, readers);
+}
 
 /** \brief Get the maximum number of threads/reader slots for the environment.
  * \ingroup c_statinfo
@@ -2616,7 +2795,16 @@ LIBMDBX_API int mdbx_env_set_maxreaders(MDBX_env *env, unsigned readers);
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
  * \retval MDBX_EINVAL   An invalid parameter was specified. */
-LIBMDBX_API int mdbx_env_get_maxreaders(const MDBX_env *env, unsigned *readers);
+LIBMDBX_INLINE_API(int, mdbx_env_get_maxreaders,
+                   (const MDBX_env *env, unsigned *readers)) {
+  int rc = MDBX_EINVAL;
+  if (readers) {
+    uint64_t proxy = 0;
+    rc = mdbx_env_get_option(env, MDBX_opt_max_readers, &proxy);
+    *readers = (unsigned)proxy;
+  }
+  return rc;
+}
 
 /** \brief Set the maximum number of named databases for the environment.
  * \ingroup c_settings
@@ -2639,7 +2827,9 @@ LIBMDBX_API int mdbx_env_get_maxreaders(const MDBX_env *env, unsigned *readers);
  *          some possible errors are:
  * \retval MDBX_EINVAL   An invalid parameter was specified.
  * \retval MDBX_EPERM    The environment is already open. */
-LIBMDBX_API int mdbx_env_set_maxdbs(MDBX_env *env, MDBX_dbi dbs);
+LIBMDBX_INLINE_API(int, mdbx_env_set_maxdbs, (MDBX_env * env, MDBX_dbi dbs)) {
+  return mdbx_env_set_option(env, MDBX_opt_max_db, dbs);
+}
 
 /** \brief Get the maximum number of named databases for the environment.
  * \ingroup c_statinfo
@@ -2651,7 +2841,22 @@ LIBMDBX_API int mdbx_env_set_maxdbs(MDBX_env *env, MDBX_dbi dbs);
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
  * \retval MDBX_EINVAL   An invalid parameter was specified. */
-LIBMDBX_API int mdbx_env_get_maxdbs(MDBX_env *env, MDBX_dbi *dbs);
+LIBMDBX_INLINE_API(int, mdbx_env_get_maxdbs,
+                   (const MDBX_env *env, MDBX_dbi *dbs)) {
+  int rc = MDBX_EINVAL;
+  if (dbs) {
+    uint64_t proxy = 0;
+    rc = mdbx_env_get_option(env, MDBX_opt_max_db, &proxy);
+    *dbs = (MDBX_dbi)proxy;
+  }
+  return rc;
+}
+
+/** \brief Returns the default size of database page for the current system.
+ * \ingroup c_statinfo
+ * \details Default size of database page depends on the size of the system
+ * page and usually exactly match it. */
+MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API size_t mdbx_default_pagesize(void);
 
 /** \brief Get the maximum size of keys can write.
  * \ingroup c_statinfo
@@ -3624,6 +3829,8 @@ LIBMDBX_API int mdbx_get_equal_or_great(MDBX_txn *txn, MDBX_dbi dbi,
  *      the count of the number of elements actually written. The `iov_base` of
  *      the second \ref MDBX_val is unused.
  *
+ * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
+ *
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
  * \retval MDBX_THREAD_MISMATCH  Given transaction is not owned
@@ -3677,6 +3884,8 @@ LIBMDBX_API int mdbx_put(MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key,
  *                           combination for selection particular item from
  *                           multi-value/duplicates.
  *
+ * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
+ *
  * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_replace(MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key,
                              MDBX_val *new_data, MDBX_val *old_data,
@@ -3702,6 +3911,8 @@ LIBMDBX_API int mdbx_replace_ex(MDBX_txn *txn, MDBX_dbi dbi,
  *
  * This function will return \ref MDBX_NOTFOUND if the specified key/data
  * pair is not in the database.
+ *
+ * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
  *
  * \param [in] txn   A transaction handle returned by \ref mdbx_txn_begin().
  * \param [in] dbi   A database handle returned by \ref mdbx_dbi_open().
@@ -3743,7 +3954,7 @@ LIBMDBX_API int mdbx_del(MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key,
 LIBMDBX_API MDBX_cursor *mdbx_cursor_create(void *context);
 
 /** \brief Set application information associated with the \ref MDBX_cursor.
- * \ingroup c_crud
+ * \ingroup c_cursors
  * \see mdbx_cursor_get_userctx()
  *
  * \param [in] cursor  An cursor handle returned by \ref mdbx_cursor_create()
@@ -3754,7 +3965,7 @@ LIBMDBX_API MDBX_cursor *mdbx_cursor_create(void *context);
 LIBMDBX_API int mdbx_cursor_set_userctx(MDBX_cursor *cursor, void *ctx);
 
 /** \brief Get the application information associated with the MDBX_cursor.
- * \ingroup c_crud
+ * \ingroup c_cursors
  * \see mdbx_cursor_set_userctx()
  *
  * \param [in] cursor  An cursor handle returned by \ref mdbx_cursor_create()
@@ -3897,7 +4108,7 @@ LIBMDBX_API MDBX_dbi mdbx_cursor_dbi(const MDBX_cursor *cursor);
 LIBMDBX_API int mdbx_cursor_copy(const MDBX_cursor *src, MDBX_cursor *dest);
 
 /** \brief Retrieve by cursor.
- * \ingroup c_crud
+ * \ingroup c_cursors c_crud
  *
  * This function retrieves key/data pairs from the database. The address and
  * length of the key are returned in the object to which key refers (except
@@ -3921,7 +4132,7 @@ LIBMDBX_API int mdbx_cursor_get(MDBX_cursor *cursor, MDBX_val *key,
                                 MDBX_val *data, MDBX_cursor_op op);
 
 /** \brief Store by cursor.
- * \ingroup c_crud
+ * \ingroup c_cursors c_crud
  *
  * This function stores key/data pairs into the database. The cursor is
  * positioned at the new item, or on failure usually near it.
@@ -3986,6 +4197,8 @@ LIBMDBX_API int mdbx_cursor_get(MDBX_cursor *cursor, MDBX_val *key,
  *      the count of the number of elements actually written. The `iov_base` of
  *      the second \ref MDBX_val is unused.
  *
+ * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
+ *
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
  * \retval MDBX_THREAD_MISMATCH  Given transaction is not owned
@@ -4002,7 +4215,7 @@ LIBMDBX_API int mdbx_cursor_put(MDBX_cursor *cursor, const MDBX_val *key,
                                 MDBX_val *data, MDBX_put_flags_t flags);
 
 /** \brief Delete current key/data pair.
- * \ingroup c_crud
+ * \ingroup c_cursors c_crud
  *
  * This function deletes the key/data pair to which the cursor refers. This
  * does not invalidate the cursor, so operations such as \ref MDBX_NEXT can
@@ -4019,6 +4232,8 @@ LIBMDBX_API int mdbx_cursor_put(MDBX_cursor *cursor, const MDBX_val *key,
  *      Delete all of the data items for the current key. This flag has effect
  *      only for database(s) was created with \ref MDBX_DUPSORT.
  *
+ * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
+ *
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
  * \retval MDBX_THREAD_MISMATCH  Given transaction is not owned
@@ -4032,7 +4247,7 @@ LIBMDBX_API int mdbx_cursor_put(MDBX_cursor *cursor, const MDBX_val *key,
 LIBMDBX_API int mdbx_cursor_del(MDBX_cursor *cursor, MDBX_put_flags_t flags);
 
 /** \brief Return count of duplicates for current key.
- * \ingroup c_crud
+ * \ingroup c_cursors c_crud
  *
  * This call is valid for all databases, but reasonable only for that support
  * sorted duplicate data items \ref MDBX_DUPSORT.
@@ -4604,6 +4819,8 @@ typedef uint_fast64_t mdbx_attr_t;
  *      keys are already known to be in the correct order. Loading unsorted
  *      keys with this flag will cause a \ref MDBX_KEYEXIST error.
  *
+ * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
+ *
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
  * \retval MDBX_EKEYMISMATCH
@@ -4650,6 +4867,8 @@ LIBMDBX_API int mdbx_cursor_put_attr(MDBX_cursor *cursor, MDBX_val *key,
  *      allows fast bulk loading when keys are already known to be in the
  *      correct order. Loading unsorted keys with this flag will cause
  *      a \ref MDBX_EKEYMISMATCH error.
+ *
+ * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
  *
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:

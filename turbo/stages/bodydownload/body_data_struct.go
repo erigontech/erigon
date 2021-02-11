@@ -1,9 +1,7 @@
 package bodydownload
 
 import (
-	"container/list"
 	"sync"
-	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -13,45 +11,42 @@ import (
 // DoubleHash is type to be used for the mapping between TxHash and UncleHash to the block header
 type DoubleHash [2 * common.HashLength]byte
 
-const MaxBodiesInRequest = 128
+const MaxBodiesInRequest = 1024
 
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
-	lock              sync.RWMutex
-	required          *roaring64.Bitmap // Bitmap of block numbers for which the block bodies are required
-	requested         *roaring64.Bitmap // Bitmap of block numbers for which block bodies were requested
-	delivered         *roaring64.Bitmap // Bitmap of block numbers that have been delivered but not yet inserted into the database
-	deliveries        []*types.Block
-	requestedMap      map[DoubleHash]uint64
-	requestedLow      uint64     // Lower bound of block number for outstanding requests
-	outstandingLimit  uint64     // Limit of number of outstanding blocks for body requests
-	requestQueue      *list.List // Queue of items of type RequestQueueItem to deal with the request timeouts
-	RequestQueueTimer *time.Timer
-	blockChannel      chan *types.Block
-}
-
-type RequestQueueItem struct {
-	requested *roaring64.Bitmap
-	waitUntil uint64
+	lock             sync.RWMutex
+	delivered        *roaring64.Bitmap
+	deliveries       []*types.Block
+	deliveredCount   float64
+	wastedCount      float64
+	requests         []*BodyRequest
+	requestedMap     map[DoubleHash]uint64
+	maxProgress      uint64
+	requestedLow     uint64 // Lower bound of block number for outstanding requests
+	requestHigh      uint64
+	lowWaitUntil     uint64 // Time to wait for before starting the next round request from requestedLow
+	outstandingLimit uint64 // Limit of number of outstanding blocks for body requests
+	peerMap          map[string]int
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
 type BodyRequest struct {
 	BlockNums []uint64
 	Hashes    []common.Hash
-	requested *roaring64.Bitmap
+	peerID    []byte
+	waitUntil uint64
 }
 
 // NewBodyDownload create a new body download state object
 func NewBodyDownload(outstandingLimit int) *BodyDownload {
-	return &BodyDownload{
-		required:          roaring64.New(),
-		requested:         roaring64.New(),
-		delivered:         roaring64.New(),
-		requestedMap:      make(map[DoubleHash]uint64),
-		outstandingLimit:  uint64(outstandingLimit),
-		deliveries:        make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
-		requestQueue:      list.New(),
-		RequestQueueTimer: time.NewTimer(time.Hour),
+	bd := &BodyDownload{
+		requestedMap:     make(map[DoubleHash]uint64),
+		outstandingLimit: uint64(outstandingLimit),
+		delivered:        roaring64.New(),
+		deliveries:       make([]*types.Block, outstandingLimit+MaxBodiesInRequest),
+		requests:         make([]*BodyRequest, outstandingLimit+MaxBodiesInRequest),
+		peerMap:          make(map[string]int),
 	}
+	return bd
 }

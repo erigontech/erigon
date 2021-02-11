@@ -12,7 +12,6 @@ import (
 )
 
 type Walker interface {
-	Walk(from, to uint64, f func(blockNumber uint64, k, v []byte) error) error
 	Find(blockNumber uint64, k []byte) ([]byte, error)
 }
 
@@ -183,28 +182,6 @@ var Mapper = map[string]struct {
 	Encode        Encoder
 	Decode        Decoder
 }{
-	dbutils.AccountChangeSetBucket: {
-		IndexBucket: dbutils.AccountsHistoryBucket,
-		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
-			return AccountChangeSet{c: c}
-		},
-		KeySize:  common.HashLength,
-		Template: "acc-ind-",
-		New:      NewAccountChangeSet,
-		Encode:   EncodeAccounts,
-		Decode:   FromDBFormat(common.HashLength),
-	},
-	dbutils.StorageChangeSetBucket: {
-		IndexBucket: dbutils.StorageHistoryBucket,
-		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
-			return StorageChangeSet{c: c}
-		},
-		KeySize:  common.HashLength,
-		Template: "st-ind-",
-		New:      NewStorageChangeSet,
-		Encode:   EncodeStorage,
-		Decode:   FromDBFormat(common.HashLength),
-	},
 	dbutils.PlainAccountChangeSetBucket: {
 		IndexBucket: dbutils.AccountsHistoryBucket,
 		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {

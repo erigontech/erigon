@@ -1,15 +1,13 @@
 package download
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net"
-	"os"
 	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -23,6 +21,7 @@ import (
 	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -49,7 +48,7 @@ func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header           {
 func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header          { panic("") }
 
 //nolint:interfacer
-func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
+func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
 	lock.Lock()
 	defer lock.Unlock()
 	log.Info(hd.AnchorState())
@@ -66,10 +65,14 @@ func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment
 		log.Error(fmt.Sprintf("FindTip penalty %d", penalty))
 		return
 	}
+	if end == 0 {
+		log.Info("Duplicate segment")
+		return
+	}
 	currentTime := uint64(time.Now().Unix())
-	var powDepth int
-	if powDepth1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
-		powDepth = powDepth1
+	var hardCoded bool
+	if hardCoded1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
+		hardCoded = hardCoded1
 	} else {
 		log.Error("VerifySeals", "error", err1)
 		return
@@ -90,7 +93,7 @@ func processSegment(lock *sync.Mutex, hd *headerdownload.HeaderDownload, segment
 			}
 		} else {
 			// ExtendDown
-			if err1 := hd.ExtendDown(segment, start, end, powDepth, currentTime); err1 != nil {
+			if err1 := hd.ExtendDown(segment, start, end, hardCoded, currentTime); err1 != nil {
 				log.Error("ExtendDown failed", "error", err1)
 			} else {
 				hd.AddSegmentToBuffer(segment, start, end)
@@ -141,7 +144,7 @@ func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 	return proto_sentry.NewSentryClient(conn), nil
 }
 
-func grpcControlServer(ctx context.Context, coreAddr string, sentryClient proto_sentry.SentryClient, filesDir string, bufferSizeStr string, db ethdb.Database) (*ControlServerImpl, error) {
+func grpcControlServer(ctx context.Context, coreAddr string, sentryClient proto_sentry.SentryClient, filesDir string, bufferSizeStr string, db ethdb.Database, window int) (*ControlServerImpl, error) {
 	log.Info("Starting Core P2P server", "on", coreAddr)
 
 	listenConfig := net.ListenConfig{
@@ -185,7 +188,7 @@ func grpcControlServer(ctx context.Context, coreAddr string, sentryClient proto_
 	}
 	var controlServer *ControlServerImpl
 
-	if controlServer, err = NewControlServer(db, filesDir, int(bufferSize), sentryClient); err != nil {
+	if controlServer, err = NewControlServer(db, filesDir, int(bufferSize), sentryClient, window); err != nil {
 		return nil, fmt.Errorf("create core P2P server: %w", err)
 	}
 	proto_core.RegisterControlServer(grpcServer, controlServer)
@@ -202,21 +205,30 @@ func grpcControlServer(ctx context.Context, coreAddr string, sentryClient proto_
 }
 
 // Download creates and starts standalone downloader
-func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database) error {
+func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database, timeout, window int) error {
 	ctx := rootContext()
 
 	sentryClient, err1 := grpcSentryClient(ctx, sentryAddr)
 	if err1 != nil {
 		return err1
 	}
-	controlServer, err2 := grpcControlServer(ctx, coreAddr, sentryClient, filesDir, bufferSizeStr, db)
+	controlServer, err2 := grpcControlServer(ctx, coreAddr, sentryClient, filesDir, bufferSizeStr, db, window)
 	if err2 != nil {
 		return err2
 	}
-	go controlServer.headerLoop(ctx)
-	go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.requestWakeUpBodies); err != nil {
+	if err := stages.StageLoop(
+		ctx,
+		db,
+		controlServer.hd,
+		controlServer.bd,
+		controlServer.sendRequests,
+		controlServer.sendBodyRequest,
+		controlServer.penalise,
+		controlServer.updateHead,
+		controlServer.requestWakeUpBodies,
+		timeout,
+	); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 
@@ -224,7 +236,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 }
 
 // Combined creates and starts sentry and downloader in the same process
-func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, filesDir string, bufferSizeStr string, db ethdb.Database) error {
+func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, filesDir string, bufferSizeStr string, db ethdb.Database, timeout, window int) error {
 	ctx := rootContext()
 
 	coreClient := &ControlClientDirect{}
@@ -239,7 +251,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	if err := bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
 		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
 	}
-	controlServer, err2 := NewControlServer(db, filesDir, int(bufferSize), sentryClient)
+	controlServer, err2 := NewControlServer(db, filesDir, int(bufferSize), sentryClient, window)
 	if err2 != nil {
 		return fmt.Errorf("create core P2P server: %w", err2)
 	}
@@ -247,10 +259,19 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	if err := server.Start(); err != nil {
 		return fmt.Errorf("could not start server: %w", err)
 	}
-	go controlServer.headerLoop(ctx)
-	go controlServer.bodyLoop(ctx, db)
 
-	if err := stages.StageLoop(ctx, db, controlServer.hd, controlServer.bd, controlServer.requestWakeUpBodies); err != nil {
+	if err := stages.StageLoop(
+		ctx,
+		db,
+		controlServer.hd,
+		controlServer.bd,
+		controlServer.sendRequests,
+		controlServer.sendBodyRequest,
+		controlServer.penalise,
+		controlServer.updateHead,
+		controlServer.requestWakeUpBodies,
+		timeout,
+	); err != nil {
 		log.Error("Stage loop failure", "error", err)
 	}
 	return nil
@@ -258,15 +279,23 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 
 type ControlServerImpl struct {
 	proto_core.UnimplementedControlServer
-	lock                 sync.Mutex
+	lock                 sync.RWMutex
 	hd                   *headerdownload.HeaderDownload
 	bd                   *bodydownload.BodyDownload
 	sentryClient         proto_sentry.SentryClient
 	requestWakeUpHeaders chan struct{}
 	requestWakeUpBodies  chan struct{}
+	headHeight           uint64
+	headHash             common.Hash
+	headTd               *big.Int
+	chainConfig          *params.ChainConfig
+	forks                []uint64
+	genesisHash          common.Hash
+	protocolVersion      uint32
+	networkId            uint64
 }
 
-func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient) (*ControlServerImpl, error) {
+func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient, window int) (*ControlServerImpl, error) {
 	//config := eth.DefaultConfig.Ethash
 	engine := ethash.New(ethash.Config{
 		CachesInMem:      1,
@@ -294,47 +323,37 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		3600, /* newAnchor future limit */
 		3600, /* newAnchor past limit */
 	)
-	dbRecovered, err := hd.RecoverFromDb(db, uint64(time.Now().Unix()))
+	err := hd.RecoverFromDb(db, uint64(time.Now().Unix()))
 	if err != nil {
 		log.Error("Recovery from DB failed", "error", err)
 	}
-	hardTips := headerdownload.InitHardCodedTips("hard-coded-headers.dat")
-	if recovered, err1 := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips); (err1 != nil && !dbRecovered) || !recovered {
-		if err1 != nil {
-			log.Error("Recovery from file failed, will start from scratch", "error", err1)
-		}
+	hardTips := headerdownload.InitHardCodedTips("mainnet")
+	filesRecovered, err1 := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips)
+	if err1 != nil {
+		log.Error("Recovery from file failed, will start from scratch", "error", err1)
+	}
+	if !filesRecovered {
+		fmt.Printf("Inserting hard-coded tips\n")
 		hd.SetHardCodedTips(hardTips)
-		// Insert hard-coded headers if present
-		if _, err := os.Stat("hard-coded-headers.dat"); err == nil {
-			if f, err1 := os.Open("hard-coded-headers.dat"); err1 == nil {
-				var hBuffer [headerdownload.HeaderSerLength]byte
-				i := 0
-				for {
-					var h types.Header
-					if _, err2 := io.ReadFull(f, hBuffer[:]); err2 == nil {
-						headerdownload.DeserialiseHeader(&h, hBuffer[:])
-					} else if errors.Is(err2, io.EOF) {
-						break
-					} else {
-						log.Error("Failed to read hard coded header", "i", i, "error", err2)
-						break
-					}
-					if err2 := hd.HardCodedHeader(&h, uint64(time.Now().Unix())); err2 != nil {
-						log.Error("Failed to insert hard coded header", "i", i, "block", h.Number.Uint64(), "error", err2)
-					} else {
-						hd.AddHeaderToBuffer(&h)
-					}
-					i++
-				}
-			}
-		}
 	}
 	log.Info(hd.AnchorState())
-	bd := bodydownload.NewBodyDownload(64 * 1024 /* outstandingLimit */)
-	if err := bd.UpdateFromDb(db); err != nil {
-		return nil, err
-	}
-	return &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}), requestWakeUpBodies: make(chan struct{})}, nil
+	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
+	cs := &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}), requestWakeUpBodies: make(chan struct{})}
+	cs.chainConfig = params.MainnetChainConfig // Hard-coded, needs to be parametrized
+	cs.forks = forkid.GatherForks(cs.chainConfig)
+	cs.genesisHash = params.MainnetGenesisHash // Hard-coded, needs to be parametrized
+	cs.protocolVersion = uint32(eth.ProtocolVersions[0])
+	cs.networkId = eth.DefaultConfig.NetworkID // Hard-coded, needs to be parametrized
+	cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(db)
+	return cs, err
+}
+
+func (cs *ControlServerImpl) updateHead(height uint64, hash common.Hash, td *big.Int) {
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+	cs.headHeight = height
+	cs.headHash = hash
+	cs.headTd = td
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
@@ -371,11 +390,29 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_co
 }
 
 func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
-	var request []*types.Header
-	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return nil, fmt.Errorf("decode BlockHeaders: %v", err)
+	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
+	_, err := rlpStream.List()
+	if err != nil {
+		return nil, fmt.Errorf("decode BlockHeaders: %w", err)
 	}
-	if segments, penalty, err := cs.hd.SplitIntoSegments(request); err == nil {
+	var headersRaw [][]byte
+	var headerRaw []byte
+	for headerRaw, err = rlpStream.Raw(); err == nil; headerRaw, err = rlpStream.Raw() {
+		headersRaw = append(headersRaw, headerRaw)
+	}
+	if err != nil && !errors.Is(err, rlp.EOL) {
+		return nil, fmt.Errorf("decode BlockHeaders: %w", err)
+	}
+	headers := make([]*types.Header, len(headersRaw))
+	var i int
+	for i, headerRaw = range headersRaw {
+		var h types.Header
+		if err = rlp.DecodeBytes(headerRaw, &h); err != nil {
+			return nil, fmt.Errorf("decode BlockHeaders: %w", err)
+		}
+		headers[i] = &h
+	}
+	if segments, penalty, err := cs.hd.SplitIntoSegments(headersRaw, headers); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			for _, segment := range segments {
 				processSegment(&cs.lock, cs.hd, segment)
@@ -397,11 +434,26 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_core
 }
 
 func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_core.InboundMessage) (*empty.Empty, error) {
+	// Extract header from the block
+	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
+	_, err := rlpStream.List() // Now stream is at the beginning of the block record
+	if err != nil {
+		return nil, fmt.Errorf("decode NewBlockMsg: %w", err)
+	}
+	_, err = rlpStream.List() // Now stream is at the beginning of the header
+	if err != nil {
+		return nil, fmt.Errorf("decode NewBlockMsg: %w", err)
+	}
+	var headerRaw []byte
+	if headerRaw, err = rlpStream.Raw(); err != nil {
+		return nil, fmt.Errorf("decode NewBlockMsg: %w", err)
+	}
+	// Parse the entire request from scratch
 	var request eth.NewBlockData
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode NewBlockMsg: %v", err)
 	}
-	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(request.Block.Header()); err == nil {
+	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			processSegment(&cs.lock, cs.hd, segments[0]) // There is only one segment in this case
 		} else {
@@ -425,20 +477,9 @@ func (cs *ControlServerImpl) blockBodies(inreq *proto_core.InboundMessage) (*emp
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return nil, fmt.Errorf("decode BlockBodies: %v", err)
 	}
-	var sb strings.Builder
-	var unrequested int
-	for _, body := range request {
-		if blockNum, ok := cs.bd.DeliverBody(body); ok {
-			if sb.Len() > 0 {
-				fmt.Fprintf(&sb, ",")
-			}
-			fmt.Fprintf(&sb, "%d", blockNum)
-		} else {
-			unrequested++
-		}
-	}
-	cs.bd.FeedDeliveries()
-	//log.Info(fmt.Sprintf("BlockBodies{delivered=%s, unrequestedCount=%d}", sb.String(), unrequested))
+	delivered, undelivered := cs.bd.DeliverBodies(request)
+	// Approximate numbers
+	cs.bd.DeliverySize(float64(len(inreq.Data))*float64(delivered)/float64(delivered+undelivered), float64(len(inreq.Data))*float64(undelivered)/float64(delivered+undelivered))
 	return &empty.Empty{}, nil
 }
 
@@ -468,7 +509,17 @@ func (cs *ControlServerImpl) ForwardInboundMessage(ctx context.Context, inreq *p
 }
 
 func (cs *ControlServerImpl) GetStatus(context.Context, *empty.Empty) (*proto_core.StatusData, error) {
-	return nil, nil
+	cs.lock.RLock()
+	defer cs.lock.RUnlock()
+	return &proto_core.StatusData{
+		NetworkId:       cs.networkId,
+		TotalDifficulty: cs.headTd.Bytes(),
+		BestHash:        cs.headHash.Bytes(),
+		ForkData: &proto_core.Forks{
+			Genesis: cs.genesisHash.Bytes(),
+			Forks:   cs.forks,
+		},
+	}, nil
 }
 
 func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdownload.HeaderRequest) {
@@ -499,14 +550,14 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 	}
 }
 
-func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) bool {
+func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) []byte {
 	//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 	var bytes []byte
 	var err error
 	bytes, err = rlp.EncodeToBytes(req.Hashes)
 	if err != nil {
 		log.Error("Could not encode block bodies request", "err", err)
-		return false
+		return nil
 	}
 	outreq := proto_sentry.SendMessageByMinBlockRequest{
 		MinBlock: req.BlockNums[len(req.BlockNums)-1],
@@ -518,44 +569,17 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 	sentPeers, err1 := cs.sentryClient.SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err1 != nil {
 		log.Error("Could not send block bodies request", "err", err1)
+		return nil
 	}
-	return sentPeers != nil && len(sentPeers.Peers) > 0
+	if sentPeers == nil || len(sentPeers.Peers) == 0 {
+		return nil
+	}
+	return common.CopyBytes(sentPeers.Peers[0])
 }
 
-func (cs *ControlServerImpl) bodyLoop(ctx context.Context, db ethdb.Database) {
-	for {
-		timer := cs.bd.CancelExpiredRequests(uint64(time.Now().Unix()))
-		req := cs.bd.RequestMoreBodies(db)
-		for req != nil && cs.sendBodyRequest(ctx, req) { // Don't keep producing requests and sending if there are no peers to accept it
-			timer = cs.bd.ApplyBodyRequest(uint64(time.Now().Unix()), 15 /*timeout*/, req)
-			req = cs.bd.RequestMoreBodies(db)
-		}
-		if req != nil {
-			cs.bd.CancelBodyRequest(req)
-		}
-		select {
-		case <-ctx.Done():
-			cs.bd.CloseStageData()
-			return
-		case <-timer.C:
-			//log.Info("RequestQueueTime (bodies) ticked")
-		case <-cs.requestWakeUpHeaders:
-			//log.Info("bodyLoop woken up by the incoming request")
-		}
-	}
-}
-
-func (cs *ControlServerImpl) headerLoop(ctx context.Context) {
-	for {
-		reqs, timer := cs.hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-		cs.sendRequests(ctx, reqs)
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			//log.Info("RequestQueueTimer (headers) ticked")
-		case <-cs.requestWakeUpBodies:
-			//log.Info("headerLoop woken up by the incoming request")
-		}
+func (cs *ControlServerImpl) penalise(ctx context.Context, peer []byte) {
+	penalizeReq := proto_sentry.PenalizePeerRequest{PeerId: peer, Penalty: proto_sentry.PenaltyKind_Kick}
+	if _, err := cs.sentryClient.PenalizePeer(ctx, &penalizeReq, &grpc.EmptyCallOption{}); err != nil {
+		log.Error("Could not penalise", "peer", peer, "error", err)
 	}
 }

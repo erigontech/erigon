@@ -855,9 +855,11 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	if err != nil {
 		return err
 	}
-	for key, value := range accountMap {
-		var addrHash common.Hash
-		copy(addrHash[:], []byte(key))
+	for plainKey, value := range accountMap {
+		var addrHash, err = common.HashData([]byte(plainKey))
+		if err != nil {
+			return err
+		}
 		if len(value) > 0 {
 			var acc accounts.Account
 			if err := acc.DecodeForStorage(value); err != nil {
@@ -882,9 +884,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 		}
 		b.accountReads[addrHash] = struct{}{}
 	}
-	for key, value := range storageMap {
-		var addrHash common.Hash
-		copy(addrHash[:], []byte(key)[:common.HashLength])
+	for plainKey, value := range storageMap {
+		addrHash, hashErr := common.HashData([]byte(plainKey)[:common.AddressLength])
+		if hashErr != nil {
+			return hashErr
+		}
+		var key = append(addrHash[:], []byte(plainKey)[common.AddressLength:]...)
 		var keyHash common.Hash
 		copy(keyHash[:], []byte(key)[common.HashLength+common.IncarnationLength:])
 		m, ok := b.storageUpdates[addrHash]
@@ -932,8 +937,8 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 
 func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 	changeSetKey := dbutils.EncodeBlockNumber(timestamp)
-	err := tds.db.Walk(dbutils.AccountChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
-		if err := tds.db.Delete(dbutils.AccountChangeSetBucket, k, v); err != nil {
+	err := tds.db.Walk(dbutils.PlainAccountChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
+		if err := tds.db.Delete(dbutils.PlainAccountChangeSetBucket, k, v); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -942,8 +947,8 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 		return err
 	}
 
-	err = tds.db.Walk(dbutils.StorageChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
-		if err2 := tds.db.Delete(dbutils.StorageChangeSetBucket, k, v); err2 != nil {
+	err = tds.db.Walk(dbutils.PlainStorageChangeSetBucket, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
+		if err2 := tds.db.Delete(dbutils.PlainStorageChangeSetBucket, k, v); err2 != nil {
 			return false, err2
 		}
 		return true, nil
@@ -955,13 +960,23 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 }
 
 func (tds *TrieDbState) truncateHistory(timestampTo uint64, accountMap map[string][]byte, storageMap map[string][]byte) error {
-	for key := range accountMap {
-		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, []byte(key), timestampTo+1); err != nil {
+	for plainKey := range accountMap {
+		key, err := common.HashData([]byte(plainKey)[:])
+		if err != nil {
+			return err
+		}
+
+		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, key[:], timestampTo+1); err != nil {
 			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
 		}
 	}
-	for key := range storageMap {
-		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, dbutils.CompositeKeyWithoutIncarnation([]byte(key)), timestampTo+1); err != nil {
+	for plainKey := range storageMap {
+		key, err := common.HashData([]byte(plainKey)[:])
+		if err != nil {
+			return err
+		}
+
+		if err := bitmapdb.TruncateRange64(tds.db, dbutils.AccountsHistoryBucket, dbutils.CompositeKeyWithoutIncarnation(key[:]), timestampTo+1); err != nil {
 			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", dbutils.AccountsHistoryBucket, err)
 		}
 	}

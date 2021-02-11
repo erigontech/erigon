@@ -865,7 +865,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	}
 
 	fmt.Println("==========================CHANGESET===========================")
-	err = db.Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = db.Walk(dbutils.PlainAccountChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		stats.ChangeSetHAT += uint64(len(v))
 		return true, nil
 	})
@@ -873,7 +873,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = db.Walk(dbutils.PlainStorageChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		stats.ChangeSetHST += uint64(len(v))
 		return true, nil
 	})

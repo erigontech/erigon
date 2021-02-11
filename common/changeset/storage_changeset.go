@@ -18,36 +18,6 @@ var (
 	ErrFindValue     = errors.New("find value error")
 )
 
-/* Hashed changesets (key is a hash of common.Address) */
-
-func NewStorageChangeSet() *ChangeSet {
-	return &ChangeSet{
-		Changes: make([]Change, 0),
-		keyLen:  2*common.HashLength + common.IncarnationLength,
-	}
-}
-
-func EncodeStorage(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
-	return encodeStorage2(blockN, s, common.HashLength, f)
-}
-
-type StorageChangeSet struct{ c ethdb.CursorDupSort }
-
-func (b StorageChangeSet) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
-	return walk(b.c, from, to, common.HashLength, f)
-}
-
-func (b StorageChangeSet) Find(blockNumber uint64, k []byte) ([]byte, error) {
-	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.HashLength, k[:common.HashLength], k[common.HashLength:])
-}
-func (b StorageChangeSet) FindWithIncarnation(blockNumber uint64, k []byte) ([]byte, error) {
-	return findInStorageChangeSet2(b.c, blockNumber, common.HashLength, k)
-}
-
-func (b StorageChangeSet) FindWithoutIncarnation(blockNumber uint64, addrHashToFind []byte, keyHashToFind []byte) ([]byte, error) {
-	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.HashLength, addrHashToFind, keyHashToFind)
-}
-
 /* Plain changesets (key is a common.Address) */
 
 func NewStorageChangeSetPlain() *ChangeSet {
@@ -63,10 +33,6 @@ func EncodeStoragePlain(blockN uint64, s *ChangeSet, f func(k, v []byte) error) 
 
 type StorageChangeSetPlain struct{ c ethdb.CursorDupSort }
 
-func (b StorageChangeSetPlain) Walk(from, to uint64, f func(blockNum uint64, k, v []byte) error) error {
-	return walk(b.c, from, to, common.AddressLength, f)
-}
-
 func (b StorageChangeSetPlain) Find(blockNumber uint64, k []byte) ([]byte, error) {
 	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.AddressLength, k[:common.AddressLength], k[common.AddressLength:])
 }
@@ -79,34 +45,9 @@ func (b StorageChangeSetPlain) FindWithoutIncarnation(blockNumber uint64, addres
 	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.AddressLength, addressToFind, keyToFind)
 }
 
-// RewindData generates rewind data for all buckets between the timestamp
+// RewindData generates rewind data for all plain buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
 func RewindData(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
-	// Collect list of buckets and keys that need to be considered
-	collector := newRewindDataCollector()
-
-	if err := walkAndCollect(
-		collector.AccountWalker,
-		db, dbutils.AccountChangeSetBucket,
-		timestampDst+1, timestampSrc,
-	); err != nil {
-		return nil, nil, err
-	}
-
-	if err := walkAndCollect(
-		collector.StorageWalker,
-		db, dbutils.StorageChangeSetBucket,
-		timestampDst+1, timestampSrc,
-	); err != nil {
-		return nil, nil, err
-	}
-
-	return collector.AccountData, collector.StorageData, nil
-}
-
-// RewindDataPlain generates rewind data for all plain buckets between the timestamp
-// timestapSrc is the current timestamp, and timestamp Dst is where we rewind
-func RewindDataPlain(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
 	// Collect list of buckets and keys that need to be considered
 	collector := newRewindDataCollector()
 

@@ -9,10 +9,10 @@
 #cmakedefine ENABLE_GPROF
 #cmakedefine ENABLE_GCOV
 #cmakedefine ENABLE_ASAN
+#cmakedefine ENABLE_UBSAN
 #cmakedefine MDBX_FORCE_ASSERTIONS
 
 /* Common */
-#cmakedefine01 MDBX_HUGE_TRANSACTIONS
 #cmakedefine01 MDBX_TXN_CHECKOWNER
 #cmakedefine MDBX_ENV_CHECKPID_AUTO
 #ifndef MDBX_ENV_CHECKPID_AUTO
@@ -26,6 +26,7 @@
 #ifndef MDBX_TRUST_RTC_AUTO
 #cmakedefine01 MDBX_TRUST_RTC
 #endif
+#cmakedefine01 MDBX_DISABLE_PAGECHECKS
 
 /* Windows */
 #cmakedefine01 MDBX_CONFIG_MANUAL_TLS_CALLBACK

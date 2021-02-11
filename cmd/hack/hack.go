@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -48,7 +49,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
@@ -979,14 +979,14 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 	for i := uint64(0); i < rewind; i++ {
 		var printed bool
 		encodedTS := dbutils.EncodeBlockNumber(timestamp)
-		err = changeset.Walk(ethDb, dbutils.StorageChangeSetBucket, encodedTS, 8*8, func(blockN uint64, k, v []byte) (bool, error) {
-			if bytes.HasPrefix(k, secKey) {
-				incarnation := binary.BigEndian.Uint64(k[common.HashLength : common.HashLength+common.IncarnationLength])
+		err = changeset.Walk(ethDb, dbutils.PlainStorageChangeSetBucket, encodedTS, 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+			if bytes.HasPrefix(k, account[:]) {
+				incarnation := binary.BigEndian.Uint64(k[common.AddressLength : common.AddressLength+common.IncarnationLength])
 				if !printed {
 					fmt.Printf("Changes for block %d\n", timestamp)
 					printed = true
 				}
-				fmt.Printf("%d %x %x\n", incarnation, k[common.HashLength+common.IncarnationLength:], v)
+				fmt.Printf("%d %x %x\n", incarnation, k[common.AddressLength+common.IncarnationLength:], v)
 			}
 			return true, nil
 		})
@@ -1293,10 +1293,16 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	ts := dbutils.EncodeBlockNumber(block + 1)
 	accountMap := make(map[string]*accounts.Account)
 
-	if err := changeset.Walk(db, dbutils.AccountChangeSetBucket, ts, 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.Walk(db, dbutils.PlainAccountChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
 		if blockN > *headNumber {
 			return false, nil
 		}
+
+		var addrHash, err = common.HashData(address)
+		if err != nil {
+			return false, err
+		}
+		k := addrHash[:]
 
 		if _, ok := accountMap[string(k)]; !ok {
 			if len(v) > 0 {
@@ -1317,10 +1323,15 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("Constructed account map", "size", len(accountMap),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	storageMap := make(map[string][]byte)
-	if err := changeset.Walk(db, dbutils.StorageChangeSetBucket, ts, 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.Walk(db, dbutils.PlainStorageChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
 		if blockN > *headNumber {
 			return false, nil
 		}
+		var addrHash, err = common.HashData(address)
+		if err != nil {
+			return false, err
+		}
+		k := addrHash[:]
 		if _, ok := storageMap[string(k)]; !ok {
 			storageMap[string(k)] = v
 		}
@@ -1675,31 +1686,38 @@ func mint(chaindata string, block uint64) error {
 	return nil
 }
 
-func extracHeaders(chaindata string, block uint64) error {
+func extracHeaders(chaindata string, block uint64, name string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	b := uint64(0)
-	f, err := os.Create("hard-coded-headers.dat")
+	f, err := os.Create(fmt.Sprintf("hard_coded_headers_%s.go", name))
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	var hBuffer [headerdownload.HeaderSerLength]byte
+	fmt.Fprintf(w, "package headerdownload\n\n")
+	fmt.Fprintf(w, "var %sHardCodedHeaders = []string{\n", name)
 	for {
 		hash, err := rawdb.ReadCanonicalHash(db, b)
-		check(err)
+		if err != nil {
+			return err
+		}
 		if hash == (common.Hash{}) {
 			break
 		}
 		h := rawdb.ReadHeader(db, hash, b)
-		headerdownload.SerialiseHeader(h, hBuffer[:])
-		if _, err := w.Write(hBuffer[:]); err != nil {
+		fmt.Fprintf(w, "	\"")
+		base64writer := base64.NewEncoder(base64.RawStdEncoding, w)
+		if err = rlp.Encode(base64writer, h); err != nil {
 			return err
 		}
+		base64writer.Close()
+		fmt.Fprintf(w, "\",\n")
 		b += block
 	}
+	fmt.Fprintf(w, "}\n")
 	fmt.Printf("Last block is %d\n", b)
 
 	hash := rawdb.ReadHeadHeaderHash(db)
@@ -1708,71 +1726,6 @@ func extracHeaders(chaindata string, block uint64) error {
 		return err
 	}
 	fmt.Printf("Latest header timestamp: %d, current time: %d\n", h.Time, uint64(time.Now().Unix()))
-	return nil
-}
-
-func receiptSizes(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RW)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	fmt.Printf("bucket: %s\n", dbutils.Log)
-	c := tx.Cursor(dbutils.Log)
-	defer c.Close()
-	sizes := make(map[int]int)
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		sizes[len(v)]++
-	}
-	var lens = make([]int, len(sizes))
-	i := 0
-	for l := range sizes {
-		lens[i] = l
-		i++
-	}
-	sort.Ints(lens)
-	for _, l := range lens {
-		if sizes[l] < 100000 {
-			continue
-		}
-		fmt.Printf("%6d - %d\n", l, sizes[l])
-	}
-	return nil
-}
-
-func dupSz(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	kv := db.KV()
-	tx, err := kv.Begin(context.Background(), nil, ethdb.RO)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	c := tx.CursorDupSort(*bucket)
-	fmt.Printf("bkt: %s\n", *bucket)
-	defer c.Close()
-	total := 0
-	for k, v, err := c.First(); k != nil; k, v, err = c.NextNoDup() {
-		check(err)
-		//fmt.Printf("%x\n", k)
-		//fmt.Printf("\t%x\n", v)
-		total += len(k) + len(v) + 8
-		for k, v, err := c.NextDup(); k != nil; k, v, err = c.NextDup() {
-			check(err)
-			total += len(v)
-			//fmt.Printf("\t%x\n", v)
-		}
-	}
-	fmt.Printf("total sz: %s\n", common.StorageSize(total))
-
 	return nil
 }
 
@@ -1925,7 +1878,7 @@ func snapSizes(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 
-	tx, err := db.KV().Begin(context.Background(), nil, ethdb.RO)
+	tx, err := db.KV().Begin(context.Background(), ethdb.RO)
 	if err != nil {
 		return err
 	}
@@ -2116,17 +2069,7 @@ func main() {
 		}
 	}
 	if *action == "extractHeaders" {
-		if err := extracHeaders(*chaindata, uint64(*block)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "receiptSizes" {
-		if err := receiptSizes(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "dupSz" {
-		if err := dupSz(*chaindata); err != nil {
+		if err := extracHeaders(*chaindata, uint64(*block), *name); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

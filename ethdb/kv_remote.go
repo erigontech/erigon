@@ -73,10 +73,6 @@ type remoteCursorDupSort struct {
 	*remoteCursor
 }
 
-type remoteCursorDupFixed struct {
-	*remoteCursorDupSort
-}
-
 func (opts remoteOpts) ReadOnly() remoteOpts {
 	return opts
 }
@@ -221,7 +217,7 @@ func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
 	return sizeReply.Size, nil
 }
 
-func (db *RemoteKV) Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, error) {
+func (db *RemoteKV) Begin(ctx context.Context, flags TxFlags) (Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
@@ -232,7 +228,7 @@ func (db *RemoteKV) Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, er
 }
 
 func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	tx, err := db.Begin(ctx, nil, RO)
+	tx, err := db.Begin(ctx, RO)
 	if err != nil {
 		return err
 	}
@@ -495,26 +491,6 @@ func (c *remoteCursor) getCurrent() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
-func (c *remoteCursor) multiple() ([]byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_GET_MULTIPLE}); err != nil {
-		return nil, err
-	}
-	pair, err := c.stream.Recv()
-	if err != nil {
-		return nil, err
-	}
-	return pair.V, nil
-}
-func (c *remoteCursor) nextMultiple() ([]byte, []byte, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_NEXT_MULTIPLE}); err != nil {
-		return []byte{}, nil, err
-	}
-	pair, err := c.stream.Recv()
-	if err != nil {
-		return []byte{}, nil, err
-	}
-	return pair.K, pair.V, nil
-}
 
 func (c *remoteCursor) Current() ([]byte, []byte, error) {
 	if err := c.initCursor(); err != nil {
@@ -667,28 +643,6 @@ func (c *remoteCursorDupSort) LastDup(k []byte) ([]byte, error) {
 		return nil, err
 	}
 	return c.lastDup(k)
-}
-
-func (tx *remoteTx) CursorDupFixed(bucket string) CursorDupFixed {
-	return &remoteCursorDupFixed{remoteCursorDupSort: tx.CursorDupSort(bucket).(*remoteCursorDupSort)}
-}
-
-func (c *remoteCursorDupFixed) GetMulti() ([]byte, error) {
-	if err := c.initCursor(); err != nil {
-		return nil, err
-	}
-	return c.multiple()
-}
-
-func (c *remoteCursorDupFixed) NextMulti() ([]byte, []byte, error) {
-	if err := c.initCursor(); err != nil {
-		return []byte{}, nil, err
-	}
-	return c.nextMultiple()
-}
-
-func (c *remoteCursorDupFixed) PutMulti(key []byte, page []byte, stride int) error {
-	panic("not supported")
 }
 
 func (back *RemoteBackend) AddLocal(signedTx []byte) ([]byte, error) {

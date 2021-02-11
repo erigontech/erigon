@@ -212,6 +212,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					if err = tx.CommitAndBegin(context.Background()); err != nil {
 						return err
 					}
+					if err = printBucketsSize(tx); err != nil {
+						return err
+					}
 					chainContext.SetDB(tx)
 				}
 			}
@@ -228,6 +231,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 				}
 				if !useExternalTx {
 					if err = tx.CommitAndBegin(context.Background()); err != nil {
+						return err
+					}
+					if err = printBucketsSize(tx); err != nil {
 						return err
 					}
 					chainContext.SetDB(tx)
@@ -378,7 +384,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, stateDB ethdb.Database,
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 
-	accountMap, storageMap, errRewind := changeset.RewindDataPlain(tx, s.BlockNumber, u.UnwindPoint)
+	accountMap, storageMap, errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint)
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
