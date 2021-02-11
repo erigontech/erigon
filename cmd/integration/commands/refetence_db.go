@@ -454,5 +454,6 @@ func toMdbx(ctx context.Context, from, to string) error {
 		return err
 	}
 	srcTx.Rollback()
+	fmt.Printf("done!\n")
 	return nil
 }
