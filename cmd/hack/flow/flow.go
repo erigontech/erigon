@@ -1,4 +1,4 @@
-package config
+package flow
 
 import (
 	"bufio"
@@ -20,15 +20,19 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 )
 
-var maxStackLen = 1024
-var maxStackCount = 25600000
-var maxAnlyCounterLimit = 1048756
-var maxSecs int64 = 600
-var maxMBs uint64 = 1000
+const (
+	maxStackLen         = 1024
+	maxStackCount       = 25600000
+	maxAnlyCounterLimit = 1048756
+	maxSecs             = int64(600)
+	maxMBs              = uint64(1000)
+)
 
-var mode = flag.String("mode", "test", "Mode for cfg analysis.")
-var bytecode = flag.String("bytecode", "0x00", "Bytecode for cfg analysis")
-var quiet = flag.Bool("quiet", false, "Quiet for cfg analysis")
+var (
+	mode     = flag.String("mode", "test", "Mode for cfg analysis.")
+	bytecode = flag.String("bytecode", "0x00", "Bytecode for cfg analysis")
+	quiet    = flag.Bool("quiet", false, "Quiet for cfg analysis")
+)
 
 func TestGenCfg() {
 	if *mode == "worker" {

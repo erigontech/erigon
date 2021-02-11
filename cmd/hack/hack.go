@@ -1,3 +1,5 @@
+//+build mdbx
+
 package main
 
 import (
@@ -21,11 +23,13 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/hack/config"
+	"github.com/ledgerwatch/lmdb-go/lmdb"
+
+	"github.com/ledgerwatch/turbo-geth/cmd/hack/db"
+	"github.com/ledgerwatch/turbo-geth/cmd/hack/flow"
 	"github.com/ledgerwatch/turbo-geth/cmd/hack/tool"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -1892,7 +1896,7 @@ func main() {
 	//check(err)
 	//defer db.Close()
 	if *action == "cfg" {
-		config.TestGenCfg()
+		flow.TestGenCfg()
 	}
 	if *action == "bucketStats" {
 		if err := bucketStats(*chaindata); err != nil {
@@ -2019,13 +2023,13 @@ func main() {
 		}
 	}
 	if *action == "defrag" {
-		if err := config.Defrag(); err != nil {
+		if err := db.Defrag(); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
 	if *action == "textInfo" {
 		sb := strings.Builder{}
-		if err := config.TextInfo(*chaindata, &sb); err != nil {
+		if err := db.TextInfo(*chaindata, &sb); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
