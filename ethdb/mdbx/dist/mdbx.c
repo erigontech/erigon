@@ -14244,6 +14244,7 @@ static __cold int mdbx_setup_dxb(MDBX_env *env, const int lck_rc) {
 #if defined(MADV_DONTNEED)
     mdbx_notice("open-MADV_%s %u..%u", "DONTNEED", env->me_discarded_tail->weak,
                 bytes2pgno(env, env->me_dxb_mmap.current));
+    mdbx_notice("open-1-%u", MDBX_PGL_LIMIT);
     err =
         madvise(env->me_map + used_aligned2os_bytes,
                 env->me_dxb_mmap.current - used_aligned2os_bytes, MADV_DONTNEED)
@@ -23956,6 +23957,11 @@ __cold int mdbx_env_set_option(MDBX_env *env, const MDBX_option_t option,
 
   case MDBX_opt_txn_dp_limit:
   case MDBX_opt_txn_dp_initial:
+      mdbx_notice("open-0-%llu", value);
+      mdbx_notice("open-1-%u", MDBX_PGL_LIMIT);
+      mdbx_notice("open-2-%u", CURSOR_STACK * 4);
+      mdbx_notice("open-3-%u", bytes2pgno(env, env->me_dbgeo.upper) - NUM_METAS);
+
     if (unlikely(value > MDBX_PGL_LIMIT || value < CURSOR_STACK * 4 ||
                  value > bytes2pgno(env, env->me_dbgeo.upper) - NUM_METAS))
       return MDBX_EINVAL;
