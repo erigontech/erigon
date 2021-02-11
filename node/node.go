@@ -565,7 +565,6 @@ func (n *Node) OpenDatabase(name string) (*ethdb.ObjectDatabase, error) {
 }
 
 func (n *Node) ApplyMigrations(name string, tmpdir string) error {
-	return nil
 	if n.config.DataDir == "" {
 		return nil
 	}

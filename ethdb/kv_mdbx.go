@@ -111,10 +111,10 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	err = env.SetOption(mdbx.OptTxnDpLimit, 128*1024) // default: 64*1024
-	if err != nil {
-		return nil, err
-	}
+	//err = env.SetOption(mdbx.OptTxnDpLimit, 128*1024) // default: 64*1024
+	//if err != nil {
+	//	return nil, err
+	//}
 
 	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 
