@@ -398,11 +398,13 @@ func NewStateCache(degree int, limit datasize.ByteSize) *StateCache {
 // Clone creates a clone cache which can be modified independently, but it shares the parts of the cache that are common
 func (sc *StateCache) Clone() *StateCache {
 	var clone StateCache
-	clone.readWrites = sc.readWrites.Clone()
-	clone.writes = sc.writes.Clone()
-	clone.limit = sc.limit
-	heap.Init(&clone.readQueue)
-	heap.Init(&clone.unprocQueue)
+	for i := range clone.readWrites {
+		clone.readWrites[i] = sc.readWrites[i].Clone()
+		clone.writes[i] = sc.writes[i].Clone()
+		clone.limit = sc.limit
+		heap.Init(&clone.readQueue[i])
+		heap.Init(&clone.unprocQueue[i])
+	}
 	return &clone
 }
 
