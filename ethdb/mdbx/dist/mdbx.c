@@ -23957,7 +23957,7 @@ __cold int mdbx_env_set_option(MDBX_env *env, const MDBX_option_t option,
 
   case MDBX_opt_txn_dp_limit:
   case MDBX_opt_txn_dp_initial:
-      mdbx_notice("open-0-%llu", value);
+      mdbx_notice("open-0-%lu", value);
       mdbx_notice("open-1-%u", MDBX_PGL_LIMIT);
       mdbx_notice("open-2-%u", CURSOR_STACK * 4);
       mdbx_notice("open-3-%u", bytes2pgno(env, env->me_dbgeo.upper) - NUM_METAS);
