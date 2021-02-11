@@ -241,9 +241,13 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 			"root hash", hash.Hex(),
 			"gen IH", generationIHTook,
 		)
+		load := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return next(k, k, value)
+		}
+
 		if err := accountIHCollector.Load(logPrefix, db,
 			dbutils.TrieOfAccountsBucket,
-			etl.IdentityLoadFunc,
+			load,
 			etl.TransformArgs{
 				Quit: quit,
 			},
@@ -252,7 +256,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 		}
 		if err := storageIHCollector.Load(logPrefix, db,
 			dbutils.TrieOfStorageBucket,
-			etl.IdentityLoadFunc,
+			load,
 			etl.TransformArgs{
 				Quit: quit,
 			},
@@ -588,9 +592,13 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 			"root hash", hash.Hex(),
 			"gen IH", generationIHTook,
 		)
+		load := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return next(k, k, value)
+		}
+
 		if err := accountIHCollector.Load(logPrefix, db,
 			dbutils.TrieOfAccountsBucket,
-			etl.IdentityLoadFunc,
+			load,
 			etl.TransformArgs{
 				Quit: quit,
 			},
@@ -599,7 +607,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		}
 		if err := storageIHCollector.Load(logPrefix, db,
 			dbutils.TrieOfStorageBucket,
-			etl.IdentityLoadFunc,
+			load,
 			etl.TransformArgs{
 				Quit: quit,
 			},
@@ -653,9 +661,9 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if bytes.HasPrefix(k, common.FromHex("5722")) {
-			fmt.Printf("excl: %x\n", k)
-		}
+		//if bytes.HasPrefix(k, common.FromHex("5722")) {
+		//	fmt.Printf("excl: %x\n", k)
+		//}
 		exclude = append(exclude, k)
 		return nil
 	}
@@ -818,9 +826,12 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 			"root hash", hash.Hex(),
 			"gen IH", generationIHTook,
 		)
+		load := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return next(k, k, value)
+		}
 		if err := accountIHCollector.Load(logPrefix, db,
 			dbutils.TrieOfAccountsBucket,
-			etl.IdentityLoadFunc,
+			load,
 			etl.TransformArgs{
 				Quit: quit,
 			},
@@ -829,7 +840,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		}
 		if err := storageIHCollector.Load(logPrefix, db,
 			dbutils.TrieOfStorageBucket,
-			etl.IdentityLoadFunc,
+			load,
 			etl.TransformArgs{
 				Quit: quit,
 			},

@@ -574,6 +574,9 @@ func (r *RootHashAggregator) genStructStorage() error {
 		data = &r.leafData
 	}
 	r.groups, r.hasBranch, r.hasHash, err = GenStructStep(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
+		if len(keyHex) > 64 && len(keyHex) < 80 {
+			return nil
+		}
 		if len(keyHex) >= 80 {
 			if r.shc == nil {
 				return nil
@@ -654,6 +657,9 @@ func (r *RootHashAggregator) genStructAccount() error {
 	r.succStorage.Reset()
 	var err error
 	if r.groups, r.hasBranch, r.hasHash, err = GenStructStep(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
+		if len(keyHex) > 64 && len(keyHex) < 80 {
+			return nil
+		}
 		if len(keyHex) >= 80 {
 			if r.shc == nil {
 				return nil
@@ -788,6 +794,9 @@ func (c *IHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 	}
 	if c._hasHash() {
 		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+		if bytes.HasPrefix(c.kBuf, common.FromHex("060e")) {
+			fmt.Printf(".Next can use: %x ->%t\n", c.kBuf, c.canUse(c.kBuf))
+		}
 		if c.canUse(c.kBuf) {
 			c.cur = append(c.cur[:0], c.kBuf...)
 			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
@@ -865,11 +874,9 @@ func (c *IHCursor) _nextSibling() error {
 }
 
 func (c *IHCursor) _nextSiblingInMem() bool {
-	//fmt.Printf("_nextSiblingInMem: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	for c.childID[c.lvl]++; c.childID[c.lvl] < 16; c.childID[c.lvl]++ {
 		if ((uint16(1) << c.childID[c.lvl]) & c.hasHash[c.lvl]) != 0 {
 			c.hashID[c.lvl]++
-			//fmt.Printf("_nextSiblingInMem2: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 			return true
 		}
 		if ((uint16(1) << c.childID[c.lvl]) & c.hasBranch[c.lvl]) != 0 {
@@ -879,28 +886,21 @@ func (c *IHCursor) _nextSiblingInMem() bool {
 
 		c.skipState = c.skipState && ((uint16(1)<<c.childID[c.lvl])&c.hasState[c.lvl]) == 0
 	}
-	//fmt.Printf("_nextSiblingInMem4: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	return false
 }
 
 func (c *IHCursor) _nextSiblingOfParentInMem() bool {
-	//fmt.Printf("_nextSiblingOfParentInMem: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	for c.lvl > 1 {
-		//fmt.Printf("_nextSiblingOfParentInMem2: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 		if c.k[c.lvl-1] == nil {
 			nonNilLvl := c.lvl - 1
 			for ; c.k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
 			}
-			//fmt.Printf("nonNilLvl: %d-%d\n", nonNilLvl, c.lvl)
 			c.next = append(append(c.next[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
 			c.kBuf = append(append(c.kBuf[:0], c.k[nonNilLvl]...), uint8(c.childID[nonNilLvl]))
-			//fmt.Printf("seeeek aa: %x\n", c.k[c.lvl])
-			//fmt.Printf("seeeek bb: %x\n", c.k[nonNilLvl])
 			ok, err := c._seek(c.next, c.kBuf)
 			if err != nil {
 				panic(err)
 			}
-			//fmt.Printf("seeeek: %x,%x,%x,%x\n", c.next, c.kBuf, c.k[c.lvl], c.childID[c.lvl])
 			if ok {
 				//fmt.Printf("_nextSiblingOfParentInMem32: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 				return true
@@ -908,43 +908,15 @@ func (c *IHCursor) _nextSiblingOfParentInMem() bool {
 
 			c.lvl = nonNilLvl + 1
 			continue
-			//fmt.Printf("_nextSiblingOfParentInMem3: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
-			//return false
 		}
 		c.lvl--
 		if c._nextSiblingInMem() {
 			//fmt.Printf("_nextSiblingOfParentInMem4: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 			return true
 		}
-		//fmt.Printf("_nextSiblingOfParentInMem5: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	}
-	//fmt.Printf("_nextSiblingOfParentInMem6: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 	return false
 }
-
-//func (c *IHCursor) _nextSiblingOfParentInMem() bool {
-//	lastLvl := 0
-//	for c.lvl > 1 {
-//		if c.k[c.lvl-1] == nil {
-//			if lastLvl == 0 {
-//				lastLvl = c.lvl
-//			}
-//			c.lvl--
-//			continue
-//		}
-//		lastLvl = 0
-//		c.lvl--
-//		if c._nextSiblingInMem() {
-//			fmt.Printf("_nextSiblingOfParentInMem: %d,%x, %d,%x\n", c.lvl, c.k, c.childID, c.k[c.lvl])
-//			return true
-//		}
-//	}
-//	if lastLvl != 0 {
-//		c.lvl = lastLvl
-//	}
-//	fmt.Printf("_nextSiblingOfParentInMem2:%d, %d,%x, %d,%x\n", lastLvl, c.lvl, c.k, c.childID, c.k[c.lvl])
-//	return false
-//}
 
 func (c *IHCursor) _nextSiblingInDB() error {
 	ok := dbutils.NextNibblesSubtree(c.k[c.lvl], &c.next)
@@ -1058,6 +1030,9 @@ func (c *IHCursor) _next() (k, v []byte, hasBranch bool, err error) {
 
 		if c._hasHash() {
 			c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+			if bytes.HasPrefix(c.kBuf, common.FromHex("060e")) {
+				fmt.Printf("_next can use: %x ->%t\n", c.kBuf, c.canUse(c.kBuf))
+			}
 			if c.canUse(c.kBuf) {
 				c.cur = append(c.cur[:0], c.kBuf...)
 				c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
