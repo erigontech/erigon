@@ -268,17 +268,13 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 	abort := make(chan struct{})
 	results := make(chan error, len(headers))
 
-	wg := &sync.WaitGroup{}
-
 	cancel := func() {
 		close(abort)
-		wg.Wait()
 	}
 
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
 		var doneCount int
+
 		for i, header := range headers {
 			err := c.verifyHeader(chain, header, headers[:i])
 
@@ -352,6 +348,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 			return errInvalidDifficulty
 		}
 	}
+
 	// If all checks passed, validate any special fields for hard forks
 	if err := misc.VerifyForkHashes(chain.Config(), header, false); err != nil {
 		return err
@@ -468,19 +465,19 @@ func newRecoverer(cacheSize int, exitCh chan struct{}) *recoverer {
 }
 
 func (r *recoverer) ecrecover(h *types.Header) (common.Address, error) {
-	if h.Author() != (common.Address{}) {
-		return h.Author(), nil
+	acc := h.Author()
+	if acc == (common.Address{}) {
+		return ecrecover(h, r.sigcache)
 	}
-
-	resCh := make(chan recoverRes)
-
-	r.reqCh <- recoverReq{[]*types.Header{h}, resCh}
-	res := <-resCh
-
-	return res.addrs[0], res.errs[0]
+	return acc, nil
 }
 
 func (r *recoverer) ecrecovers(h []*types.Header) ([]common.Address, error) {
+	if len(h) == 1 {
+		addr, err := r.ecrecover(h[0])
+		return []common.Address{addr}, err
+	}
+
 	resCh := make(chan recoverRes, len(h))
 
 	r.reqCh <- recoverReq{h, resCh}
@@ -514,7 +511,7 @@ func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, headers ...*types.Header)
 
 	// If we've generated a new checkpoint snapshot, save to disk
 	if isSnapshot(snap.Number, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
-		if err := snap.store(c.db, snap.Number == 0); err != nil {
+		if err := snap.store(snap.Number == 0); err != nil {
 			return err
 		}
 		log.Trace("Stored a snapshot to disk", "number", snap.Number, "hash", snap.Hash)
@@ -558,6 +555,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 			return errMismatchingCheckpointSigners
 		}
 	}
+
 	// All basic checks passed, verify the seal and return
 	return c.verifySeal(chain, header, parents, snap)
 }
@@ -682,9 +680,11 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 	if err != nil {
 		return err
 	}
+
 	if _, ok := snap.Signers[signer]; !ok {
 		return errUnauthorizedSigner
 	}
+
 	for seen, recent := range snap.Recents {
 		if recent == signer {
 			// Signer is among recents, only fail if the current block doesn't shift it out
@@ -693,6 +693,7 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 			}
 		}
 	}
+
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
 	if !c.fakeDiff {
 		inturn := snap.inturn(header.Number.Uint64(), signer)
@@ -703,6 +704,7 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 			return errWrongDifficulty
 		}
 	}
+
 	return nil
 }
 

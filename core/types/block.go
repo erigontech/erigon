@@ -113,6 +113,7 @@ func (h *Header) HashCache() common.Hash {
 	if hash := h.hash.Load(); hash != nil && hash != (common.Hash{}) {
 		return hash.(common.Hash)
 	}
+
 	v := rlpHash(h)
 	h.hash.Store(v)
 
