@@ -362,17 +362,17 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	hasBranch bool,
 	cutoff int,
 ) error {
-	if storageKey == nil {
-		if bytes.HasPrefix(accountKey, common.FromHex("060e")) {
-			fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-		}
-	} else {
-		hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
-		//if bytes.HasPrefix(r.currAccK, common.FromHex("71fe2579f4a5be157546549260f5539cc9445fa20674a8bb637049f43fc1eac20000000000000001")) && bytes.HasPrefix(storageKey[80:], common.FromHex("0c070b")) {
-		//fmt.Printf("%x\n", storageKey)
-		//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
-		//}
-	}
+	//if storageKey == nil {
+	//	if bytes.HasPrefix(accountKey, common.FromHex("0e08060a")) {
+	//		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+	//}
+	//} else {
+	//	hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
+	//	if bytes.HasPrefix(r.currAccK, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(storageKey[80:], common.FromHex("0f")) {
+	//		fmt.Printf("%x\n", storageKey)
+	//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+	//}
+	//}
 	switch itemType {
 	case StorageStreamItem:
 		r.advanceKeysStorage(storageKey, true /* terminator */)
@@ -582,7 +582,7 @@ func (r *RootHashAggregator) genStructStorage() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("06")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+			//if bytes.HasPrefix(r.currAccK, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("0f")) {
 			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hashes == nil && rootHash == nil)
 			//}
 			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
@@ -590,9 +590,9 @@ func (r *RootHashAggregator) genStructStorage() error {
 		if r.hc == nil {
 			return nil
 		}
-		if bytes.HasPrefix(keyHex, common.FromHex("060e")) {
-			fmt.Printf("collect: %x,%016b, del:%t\n", keyHex, hasBranch, hashes == nil)
-		}
+		//if bytes.HasPrefix(keyHex, common.FromHex("060e")) {
+		//	fmt.Printf("collect: %x,%016b, del:%t\n", keyHex, hasBranch, hashes == nil)
+		//}
 		return r.hc(keyHex, hasState, hasBranch, hasHash, hashes, rootHash)
 	}, data, r.groups, r.hasBranch, r.hasHash, r.trace)
 	if err != nil {
@@ -665,7 +665,7 @@ func (r *RootHashAggregator) genStructAccount() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("06")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+			//if bytes.HasPrefix(r.currAccK, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
 			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hashes == nil && rootHash == nil)
 			//}
 			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
@@ -673,9 +673,9 @@ func (r *RootHashAggregator) genStructAccount() error {
 		if r.hc == nil {
 			return nil
 		}
-		if bytes.HasPrefix(keyHex, common.FromHex("060e")) {
-			fmt.Printf("collect: %x,%016b, del:%t\n", keyHex, hasBranch, hashes == nil)
-		}
+		//if bytes.HasPrefix(keyHex, common.FromHex("060e")) {
+		//	fmt.Printf("collect: %x,%016b, del:%t\n", keyHex, hasBranch, hashes == nil)
+		//}
 		return r.hc(keyHex, hasState, hasBranch, hasHash, hashes, rootHash)
 	}, data, r.groups, r.hasBranch, r.hasHash, r.trace); err != nil {
 		return err
@@ -794,9 +794,9 @@ func (c *IHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 	}
 	if c._hasHash() {
 		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-		if bytes.HasPrefix(c.kBuf, common.FromHex("060e")) {
-			fmt.Printf(".Next can use: %x ->%t\n", c.kBuf, c.canUse(c.kBuf))
-		}
+		//if bytes.HasPrefix(c.kBuf, common.FromHex("060e")) {
+		//	fmt.Printf(".Next can use: %x ->%t\n", c.kBuf, c.canUse(c.kBuf))
+		//}
 		if c.canUse(c.kBuf) {
 			c.cur = append(c.cur[:0], c.kBuf...)
 			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
@@ -977,9 +977,9 @@ func (c *IHCursor) _deleteCurrent() error {
 	if c.deleted[c.lvl] {
 		return nil
 	}
-	if bytes.HasPrefix(c.k[c.lvl], common.FromHex("060e")) {
-		fmt.Printf("delete: %x\n", c.k[c.lvl])
-	}
+	//if bytes.HasPrefix(c.k[c.lvl], common.FromHex("060e")) {
+	//	fmt.Printf("delete: %x\n", c.k[c.lvl])
+	//}
 
 	if err := c.hc(c.k[c.lvl], 0, 0, 0, nil, nil); err != nil {
 		return err
@@ -1030,9 +1030,9 @@ func (c *IHCursor) _next() (k, v []byte, hasBranch bool, err error) {
 
 		if c._hasHash() {
 			c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-			if bytes.HasPrefix(c.kBuf, common.FromHex("060e")) {
-				fmt.Printf("_next can use: %x ->%t\n", c.kBuf, c.canUse(c.kBuf))
-			}
+			//if bytes.HasPrefix(c.kBuf, common.FromHex("060e")) {
+			//	fmt.Printf("_next can use: %x ->%t\n", c.kBuf, c.canUse(c.kBuf))
+			//}
 			if c.canUse(c.kBuf) {
 				c.cur = append(c.cur[:0], c.kBuf...)
 				c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
@@ -1072,6 +1072,7 @@ type StorageIHCursor struct {
 
 	accWithInc []byte
 	kBuf       []byte
+	kBuf2      []byte
 	quit       <-chan struct{}
 }
 
@@ -1093,13 +1094,12 @@ func (c *StorageIHCursor) FirstNotCoveredPrefix() []byte {
 	return c.firstNotCoveredPrefix
 }
 
-func (c *StorageIHCursor) SeekToAccount(prefix []byte) (k, v []byte, hasBranch bool, err error) {
-	c.accWithInc = prefix
+func (c *StorageIHCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasBranch bool, err error) {
+	c.accWithInc = accWithInc
 	hexutil.DecompressNibbles(c.accWithInc, &c.kBuf)
-	c.seek = append(c.seek[:0], c.accWithInc...)
 	c.skipState = false
 	c.prev = c.cur
-	ok, err := c._seek(prefix, prefix)
+	ok, err := c._seek(accWithInc, nil)
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
@@ -1218,7 +1218,7 @@ func (c *StorageIHCursor) _seek(seek, prefix []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if k == nil || !bytes.HasPrefix(k, prefix) {
+	if k == nil || !bytes.HasPrefix(k, c.accWithInc) || !bytes.HasPrefix(k[40:], prefix) {
 		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//	fmt.Printf("_seek4: %x -> %x\n", prefix, k)
 		//}
@@ -1234,8 +1234,8 @@ func (c *StorageIHCursor) _seek(seek, prefix []byte) (bool, error) {
 // goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
 func (c *StorageIHCursor) _nextItem() error {
 	if c._hasBranch() {
-		c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-		ok, err := c._seek(c.seek, c.seek)
+		c.seek = append(append(c.seek, c.k[c.lvl]...), byte(c.childID[c.lvl]))
+		ok, err := c._seek(c.seek, nil)
 		if err != nil {
 			return err
 		}
@@ -1294,9 +1294,9 @@ func (c *StorageIHCursor) _nextSiblingOfParentInMem() bool {
 			nonNilLvl := c.lvl - 1
 			for ; c.k[nonNilLvl] == nil && nonNilLvl > 0; nonNilLvl-- {
 			}
-			c.next = append(append(c.next[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-			c.kBuf = append(append(c.kBuf[:0], c.k[nonNilLvl]...), uint8(c.childID[nonNilLvl]))
-			ok, err := c._seek(c.next, c.kBuf)
+			c.seek = append(append(c.seek[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+			c.kBuf2 = append(append(c.kBuf2[:0], c.k[nonNilLvl]...), uint8(c.childID[nonNilLvl]))
+			ok, err := c._seek(c.seek, c.kBuf2)
 			if err != nil {
 				panic(err)
 			}
@@ -1430,9 +1430,9 @@ func (c *StorageIHCursor) _deleteCurrent() error {
 	if c.deleted[c.lvl] {
 		return nil
 	}
-	//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
-	//	fmt.Printf("delete: %x,%x\n", c.accWithInc, c.k[c.lvl])
-	//}
+	if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		fmt.Printf("delete: %x,%x\n", c.accWithInc, c.k[c.lvl])
+	}
 
 	if err := c.shc(c.accWithInc, c.k[c.lvl], 0, 0, 0, nil, nil); err != nil {
 		return err
