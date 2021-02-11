@@ -141,11 +141,6 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, err
 	}
 
-	err = env.SetOption(mdbx.OptTxnDpLimit, 128*1024) // default: 64*1024
-	if err != nil {
-		return nil, err
-	}
-
 	if opts.maxFreelistReuse == 0 {
 		opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
 	}
@@ -164,6 +159,10 @@ func (opts MdbxOpts) Open() (KV, error) {
 	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
+	}
+	err = env.SetOption(mdbx.OptTxnDpLimit, 128*1024) // default: 64*1024
+	if err != nil {
+		return nil, err
 	}
 
 	// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
