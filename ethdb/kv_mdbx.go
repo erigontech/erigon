@@ -304,7 +304,7 @@ func (db *MdbxKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
 		nativeFlags |= mdbx.TxNoSync
 	}
 
-	tx, err := db.env.BeginTxn(nativeFlags)
+	tx, err := db.env.BeginTxn(nil, nativeFlags)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, err

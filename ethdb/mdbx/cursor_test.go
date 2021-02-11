@@ -86,7 +86,7 @@ func TestCursor_Close(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	txn, err := env.BeginTxn(0)
+	txn, err := env.BeginTxn(nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
