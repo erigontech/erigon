@@ -141,6 +141,11 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, err
 	}
 
+	err = env.SetOption(mdbx.OptTxnDpLimit, 128*1024) // default: 64*1024
+	if err != nil {
+		return nil, err
+	}
+
 	if opts.maxFreelistReuse == 0 {
 		opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
 	}
