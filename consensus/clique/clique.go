@@ -271,6 +271,7 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 	cancel := func() {
 		close(abort)
 		wg.Wait()
+		close(results)
 	}
 	wg.Add(1)
 	go func() {

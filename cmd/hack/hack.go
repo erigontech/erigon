@@ -18,7 +18,6 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -29,6 +28,7 @@ import (
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/hack/tool"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -52,38 +52,30 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
-var emptyCodeHash = crypto.Keccak256(nil)
+var (
+	emptyCodeHash = crypto.Keccak256(nil) //nolint
 
-var verbosity = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
-var action = flag.String("action", "", "action to execute")
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
-var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
-var block = flag.Int("block", 1, "specifies a block number for operation")
-var account = flag.String("account", "0x", "specifies account to investigate")
-var name = flag.String("name", "", "name to add to the file names")
-var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata database file")
-var bucket = flag.String("bucket", "", "bucket in the database")
-var hash = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
-
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
-
-func parseFloat64(str string) float64 {
-	v, _ := strconv.ParseFloat(str, 64)
-	return v
-}
+	verbosity  = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
+	action     = flag.String("action", "", "action to execute")
+	cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
+	rewind     = flag.Int("rewind", 1, "rewind to given number of blocks")
+	block      = flag.Int("block", 1, "specifies a block number for operation")
+	blockTotal = flag.Int("blocktotal", 1, "specifies a total amount of blocks to process")
+	account    = flag.String("account", "0x", "specifies account to investigate")
+	name       = flag.String("name", "", "name to add to the file names")
+	chaindata  = flag.String("chaindata", "chaindata", "path to the chaindata database file")
+	bucket     = flag.String("bucket", "", "bucket in the database")
+	hash       = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
+)
 
 func readData(filename string) (blocks []float64, hours []float64, dbsize []float64, trienodes []float64, heap []float64) {
 	err := util.File.ReadByLines(filename, func(line string) error {
 		parts := strings.Split(line, ",")
-		blocks = append(blocks, parseFloat64(strings.Trim(parts[0], " ")))
-		hours = append(hours, parseFloat64(strings.Trim(parts[1], " ")))
-		dbsize = append(dbsize, parseFloat64(strings.Trim(parts[2], " ")))
-		trienodes = append(trienodes, parseFloat64(strings.Trim(parts[3], " ")))
-		heap = append(heap, parseFloat64(strings.Trim(parts[4], " ")))
+		blocks = append(blocks, tool.ParseFloat64(strings.Trim(parts[0], " ")))
+		hours = append(hours, tool.ParseFloat64(strings.Trim(parts[1], " ")))
+		dbsize = append(dbsize, tool.ParseFloat64(strings.Trim(parts[2], " ")))
+		trienodes = append(trienodes, tool.ParseFloat64(strings.Trim(parts[3], " ")))
+		heap = append(heap, tool.ParseFloat64(strings.Trim(parts[4], " ")))
 		return nil
 	})
 	if err != nil {
@@ -226,9 +218,9 @@ func mychart() {
 
 	buffer := bytes.NewBuffer([]byte{})
 	err := graph1.Render(chart.PNG, buffer)
-	check(err)
+	tool.Check(err)
 	err = ioutil.WriteFile("chart1.png", buffer.Bytes(), 0644)
-	check(err)
+	tool.Check(err)
 
 	heapSeries := &chart.ContinuousSeries{
 		Name: "Allocated heap",
@@ -309,16 +301,16 @@ func mychart() {
 	graph2.Elements = []chart.Renderable{chart.LegendThin(&graph2)}
 	buffer.Reset()
 	err = graph2.Render(chart.PNG, buffer)
-	check(err)
+	tool.Check(err)
 	err = ioutil.WriteFile("chart2.png", buffer.Bytes(), 0644)
-	check(err)
+	tool.Check(err)
 }
 
 //nolint
 func accountSavings(db ethdb.KV) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
-	check(db.View(context.Background(), func(tx ethdb.Tx) error {
+	tool.Check(db.View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.CurrentStateBucket)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
@@ -365,13 +357,13 @@ func bucketStats(chaindata string) error {
 		if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
 			for _, bucket := range bucketList {
 				bs, statErr := tx.(LmdbStat).BucketStat(bucket)
-				check(statErr)
+				tool.Check(statErr)
 				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
 					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
 			}
 
 			bs, statErr := tx.(LmdbStat).BucketStat("freelist")
-			check(statErr)
+			tool.Check(statErr)
 			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
 			return nil
 		}); err != nil {
@@ -385,12 +377,12 @@ func bucketStats(chaindata string) error {
 		if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
 			for _, bucket := range bucketList {
 				bs, statErr := tx.(MdbxStat).BucketStat(bucket)
-				check(statErr)
+				tool.Check(statErr)
 				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
 					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
 			}
 			bs, statErr := tx.(MdbxStat).BucketStat("freelist")
-			check(statErr)
+			tool.Check(statErr)
 			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
 			return nil
 		}); err != nil {
@@ -402,7 +394,7 @@ func bucketStats(chaindata string) error {
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
 	data, err := ioutil.ReadFile("dust/hack.log")
-	check(err)
+	tool.Check(err)
 	thresholds := []float64{}
 	counts := map[int][]float64{}
 	for i := 2; i <= 16; i++ {
@@ -414,14 +406,14 @@ func readTrieLog() ([]float64, map[int][]float64, []float64) {
 		if bytes.HasPrefix(line, []byte("Threshold:")) {
 			tokens := bytes.Split(line, []byte(" "))
 			if len(tokens) == 23 {
-				wei := parseFloat64(string(tokens[1]))
+				wei := tool.ParseFloat64(string(tokens[1]))
 				thresholds = append(thresholds, wei)
 				for i := 2; i <= 16; i++ {
 					pair := bytes.Split(tokens[i+3], []byte(":"))
-					counts[i] = append(counts[i], parseFloat64(string(pair[1])))
+					counts[i] = append(counts[i], tool.ParseFloat64(string(pair[1])))
 				}
 				pair := bytes.Split(tokens[21], []byte(":"))
-				shorts = append(shorts, parseFloat64(string(pair[1])))
+				shorts = append(shorts, tool.ParseFloat64(string(pair[1])))
 			}
 		}
 	}
@@ -526,9 +518,9 @@ func trieChart() {
 	graph3.Elements = []chart.Renderable{chart.LegendThin(&graph3)}
 	buffer := bytes.NewBuffer([]byte{})
 	err := graph3.Render(chart.PNG, buffer)
-	check(err)
+	tool.Check(err)
 	err = ioutil.WriteFile("chart3.png", buffer.Bytes(), 0644)
-	check(err)
+	tool.Check(err)
 	graph4 := chart.Chart{
 		Width:  1280,
 		Height: 720,
@@ -562,9 +554,9 @@ func trieChart() {
 	graph4.Elements = []chart.Renderable{chart.LegendThin(&graph4)}
 	buffer = bytes.NewBuffer([]byte{})
 	err = graph4.Render(chart.PNG, buffer)
-	check(err)
+	tool.Check(err)
 	err = ioutil.WriteFile("chart4.png", buffer.Bytes(), 0644)
-	check(err)
+	tool.Check(err)
 	graph5 := chart.Chart{
 		Width:  1280,
 		Height: 720,
@@ -609,9 +601,9 @@ func trieChart() {
 	graph5.Elements = []chart.Renderable{chart.LegendThin(&graph5)}
 	buffer = bytes.NewBuffer([]byte{})
 	err = graph5.Render(chart.PNG, buffer)
-	check(err)
+	tool.Check(err)
 	err = ioutil.WriteFile("chart5.png", buffer.Bytes(), 0644)
-	check(err)
+	tool.Check(err)
 }
 
 func extractTrie(block int) {
@@ -619,7 +611,7 @@ func extractTrie(block int) {
 	defer stateDb.Close()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	bc, err := core.NewBlockChain(stateDb, nil, params.RopstenChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	check(err)
+	tool.Check(err)
 	defer bc.Stop()
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
@@ -639,7 +631,7 @@ func testRewind(chaindata string, block, rewind int) {
 	defer ethDb.Close()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	check(err)
+	tool.Check(err)
 	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -661,7 +653,7 @@ func testRewind(chaindata string, block, rewind int) {
 
 	err = tds.UnwindTo(baseBlockNr - rewindLen)
 	fmt.Printf("Unwind done in %v\n", time.Since(startTime))
-	check(err)
+	tool.Check(err)
 	rewoundBlock1 := bc.GetBlockByNumber(baseBlockNr - rewindLen + 1)
 	fmt.Printf("Rewound+1 block number: %d\n", rewoundBlock1.NumberU64())
 	fmt.Printf("Rewound+1 block hash: %x\n", rewoundBlock1.Hash())
@@ -702,7 +694,7 @@ func testStartup() {
 	defer ethDb.Close()
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil, txCacher)
-	check(err)
+	tool.Check(err)
 	defer bc.Stop()
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
@@ -789,10 +781,10 @@ func testResolve(chaindata string) {
 
 func hashFile() {
 	f, err := os.Open("/Users/alexeyakhunov/mygit/go-ethereum/geth.log")
-	check(err)
+	tool.Check(err)
 	defer f.Close()
 	w, err := os.Create("/Users/alexeyakhunov/mygit/go-ethereum/geth_read.log")
-	check(err)
+	tool.Check(err)
 	defer w.Close()
 	scanner := bufio.NewScanner(f)
 	count := 0
@@ -838,7 +830,7 @@ func printFullNodeRLPs() {
 
 func testDifficulty() {
 	genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil, false /* history */)
-	check(err)
+	tool.Check(err)
 	genesisHeader := genesisBlock.Header()
 	d1 := ethash.CalcDifficulty(params.MainnetChainConfig, 100000, genesisHeader.Time, genesisHeader.Difficulty, genesisHeader.Number, genesisHeader.UncleHash)
 	fmt.Printf("Block 1 difficulty: %d\n", d1)
@@ -877,7 +869,7 @@ func printTxHashes() {
 	defer ethDb.Close()
 	for b := uint64(0); b < uint64(100000); b++ {
 		hash, err := rawdb.ReadCanonicalHash(ethDb, b)
-		check(err)
+		tool.Check(err)
 		block := rawdb.ReadBlock(ethDb, hash, b)
 		if block == nil {
 			break
@@ -890,10 +882,10 @@ func printTxHashes() {
 
 func readTrie(filename string) *trie.Trie {
 	f, err := os.Open(filename)
-	check(err)
+	tool.Check(err)
 	defer f.Close()
 	t, err := trie.Load(f)
-	check(err)
+	tool.Check(err)
 	return t
 }
 
@@ -905,7 +897,7 @@ func invTree(wrong, right, diff string, name string) {
 	t2 := readTrie(fmt.Sprintf("%s_%s.txt", right, name))
 	fmt.Printf("Root hash: %x\n", t2.Hash())
 	c, err := os.Create(fmt.Sprintf("%s_%s.txt", diff, name))
-	check(err)
+	tool.Check(err)
 	defer c.Close()
 	t1.PrintDiff(t2, c)
 }
@@ -914,7 +906,7 @@ func preimage(chaindata string, image common.Hash) {
 	ethDb := ethdb.MustOpen(chaindata)
 	defer ethDb.Close()
 	p, err := ethDb.Get(dbutils.PreimagePrefix, image[:])
-	check(err)
+	tool.Check(err)
 	fmt.Printf("%x\n", p)
 }
 
@@ -990,7 +982,7 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 			}
 			return true, nil
 		})
-		check(err)
+		tool.Check(err)
 		timestamp--
 	}
 }
@@ -1038,8 +1030,8 @@ func repairCurrent() {
 	defer historyDb.Close()
 	currentDb := ethdb.MustOpen("statedb")
 	defer currentDb.Close()
-	check(historyDb.ClearBuckets(dbutils.CurrentStateBucket))
-	check(historyDb.KV().Update(context.Background(), func(tx ethdb.Tx) error {
+	tool.Check(historyDb.ClearBuckets(dbutils.CurrentStateBucket))
+	tool.Check(historyDb.KV().Update(context.Background(), func(tx ethdb.Tx) error {
 		newB := tx.Cursor(dbutils.CurrentStateBucket)
 		count := 0
 		if err := currentDb.KV().View(context.Background(), func(ctx ethdb.Tx) error {
@@ -1051,7 +1043,7 @@ func repairCurrent() {
 				if len(k) == 32 {
 					continue
 				}
-				check(newB.Put(k, v))
+				tool.Check(newB.Put(k, v))
 				count++
 				if count == 10000 {
 					fmt.Printf("Copied %d storage items\n", count)
@@ -1083,7 +1075,7 @@ func printBucket(chaindata string) {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	f, err := os.Create("bucket.txt")
-	check(err)
+	tool.Check(err)
 	defer f.Close()
 	fb := bufio.NewWriter(f)
 	defer fb.Flush()
@@ -1127,7 +1119,7 @@ func validateTxLookups2(db ethdb.Database, startBlock uint64, interruptCh chan b
 	blockBytes := big.NewInt(0)
 	for !interrupt {
 		blockHash, err := rawdb.ReadCanonicalHash(db, blockNum)
-		check(err)
+		tool.Check(err)
 		body := rawdb.ReadBody(db, blockHash, blockNum)
 
 		if body == nil {
@@ -1149,7 +1141,7 @@ func validateTxLookups2(db ethdb.Database, startBlock uint64, interruptCh chan b
 				log.Info("Validated", "entries", iterations, "number", blockNum)
 			}
 			if bytes.Compare(val, bn) != 0 {
-				check(err)
+				tool.Check(err)
 				panic(fmt.Sprintf("Validation process failed(%d). Expected %b, got %b", iterations, bn, val))
 			}
 		}
@@ -1232,7 +1224,7 @@ func regenerate(chaindata string) error {
 	var m runtime.MemStats
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	check(db.ClearBuckets(
+	tool.Check(db.ClearBuckets(
 		dbutils.IntermediateTrieHashBucket,
 	))
 	headHash := rawdb.ReadHeadBlockHash(db)
@@ -1402,7 +1394,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("Loaded subtries",
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
 	hash, err := rawdb.ReadCanonicalHash(db, block)
-	check(err)
+	tool.Check(err)
 	header := rawdb.ReadHeader(db, hash, block)
 	tr := trie.New(common.Hash{})
 	if err = tr.HookSubTries(subTries, [][]byte{nil}); err != nil {
@@ -1686,36 +1678,49 @@ func mint(chaindata string, block uint64) error {
 	return nil
 }
 
-func extracHeaders(chaindata string, block uint64, name string) error {
+func extractHeaders(chaindata string, blockStep uint64, blockTotal uint64, name string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	b := uint64(0)
+
 	f, err := os.Create(fmt.Sprintf("hard_coded_headers_%s.go", name))
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+
 	w := bufio.NewWriter(f)
 	defer w.Flush()
+
 	fmt.Fprintf(w, "package headerdownload\n\n")
 	fmt.Fprintf(w, "var %sHardCodedHeaders = []string{\n", name)
+
+	b := uint64(0)
 	for {
 		hash, err := rawdb.ReadCanonicalHash(db, b)
 		if err != nil {
 			return err
 		}
+
 		if hash == (common.Hash{}) {
 			break
 		}
+
 		h := rawdb.ReadHeader(db, hash, b)
+
 		fmt.Fprintf(w, "	\"")
+
 		base64writer := base64.NewEncoder(base64.RawStdEncoding, w)
 		if err = rlp.Encode(base64writer, h); err != nil {
 			return err
 		}
 		base64writer.Close()
+
 		fmt.Fprintf(w, "\",\n")
-		b += block
+		b += blockStep
+
+		if b > blockTotal {
+			break
+		}
 	}
 	fmt.Fprintf(w, "}\n")
 	fmt.Printf("Last block is %d\n", b)
@@ -1947,7 +1952,7 @@ func main() {
 	//check(err)
 	//defer db.Close()
 	if *action == "cfg" {
-		testGenCfg()
+		flow.TestGenCfg()
 	}
 	if *action == "bucketStats" {
 		if err := bucketStats(*chaindata); err != nil {
@@ -2069,18 +2074,18 @@ func main() {
 		}
 	}
 	if *action == "extractHeaders" {
-		if err := extracHeaders(*chaindata, uint64(*block), *name); err != nil {
+		if err := extractHeaders(*chaindata, uint64(*block), uint64(*blockTotal), *name); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
 	if *action == "defrag" {
-		if err := defrag(); err != nil {
+		if err := flow.Defrag(); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
 	if *action == "textInfo" {
 		sb := strings.Builder{}
-		if err := textInfo(*chaindata, &sb); err != nil {
+		if err := flow.TextInfo(*chaindata, &sb); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
