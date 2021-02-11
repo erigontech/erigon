@@ -535,8 +535,8 @@ func (env *Env) SetMaxDBs(size int) error {
 // database performance and cause the database to grow until the map is full.
 //
 // See mdbx_txn_begin.
-func (env *Env) BeginTxn(flags uint) (*Txn, error) {
-	txn, err := beginTxn(env, flags)
+func (env *Env) BeginTxn(parent *Txn, flags uint) (*Txn, error) {
+	txn, err := beginTxn(env, parent, flags)
 	if txn != nil {
 		runtime.SetFinalizer(txn, func(v interface{}) { v.(*Txn).finalize() })
 	}
@@ -625,7 +625,7 @@ func (env *Env) run(lock bool, flags uint, fn TxnOp) error {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 	}
-	txn, err := beginTxn(env, flags)
+	txn, err := beginTxn(env, nil, flags)
 	if err != nil {
 		return err
 	}

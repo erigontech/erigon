@@ -29,7 +29,7 @@ func TestTxn_ID(t *testing.T) {
 		t.Errorf("unexpected readonly id (before update): %v (!= %v)", id0, 3)
 	}
 
-	txnCached, err := env.BeginTxn(Readonly)
+	txnCached, err := env.BeginTxn(nil, Readonly)
 	if err != nil {
 		t.Error(err)
 		return
@@ -106,7 +106,7 @@ func TestTxn_errLogf(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	txn, err := env.BeginTxn(0)
+	txn, err := env.BeginTxn(nil, 0)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -124,7 +124,7 @@ func TestTxn_finalizer(t *testing.T) {
 
 	called := make(chan struct{})
 	func() {
-		txn, err := env.BeginTxn(0)
+		txn, err := env.BeginTxn(nil, 0)
 		if err != nil {
 			t.Error(err)
 		} else {
@@ -535,7 +535,7 @@ func TestTxn_Commit(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	txn, err := env.BeginTxn(0)
+	txn, err := env.BeginTxn(nil, 0)
 	if err != nil {
 		t.Error(err)
 		return
@@ -710,7 +710,7 @@ func TestTxn_Renew(t *testing.T) {
 		return
 	}
 
-	txn, err := env.BeginTxn(Readonly)
+	txn, err := env.BeginTxn(nil, Readonly)
 	if err != nil {
 		t.Error(err)
 		return
@@ -762,7 +762,7 @@ func TestTxn_Reset_doubleReset(t *testing.T) {
 	defer os.RemoveAll(path)
 	defer env.Close()
 
-	txn, err := env.BeginTxn(Readonly)
+	txn, err := env.BeginTxn(nil, Readonly)
 	if err != nil {
 		t.Error(err)
 		return
@@ -789,7 +789,7 @@ func TestTxn_Reset_writeTxn(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	txn, err := env.BeginTxn(0)
+	txn, err := env.BeginTxn(nil, 0)
 	if err != nil {
 		t.Error(err)
 		return
@@ -1120,7 +1120,7 @@ func BenchmarkTxn_unmanaged_abort(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		txn, err := env.BeginTxn(0)
+		txn, err := env.BeginTxn(nil, 0)
 		if err != nil {
 			b.Error(err)
 			return
@@ -1145,7 +1145,7 @@ func BenchmarkTxn_unmanaged_commit(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		txn, err := env.BeginTxn(0)
+		txn, err := env.BeginTxn(nil, 0)
 		if err != nil {
 			b.Error(err)
 			return
@@ -1170,7 +1170,7 @@ func BenchmarkTxn_unmanaged_ro(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		txn, err := env.BeginTxn(Readonly)
+		txn, err := env.BeginTxn(nil, Readonly)
 		if err != nil {
 			b.Error(err)
 			return
@@ -1193,7 +1193,7 @@ func BenchmarkTxn_renew(b *testing.B) {
 	// It is not necessary to call runtime.LockOSThread here because the txn is
 	// Readonly
 
-	txn, err := env.BeginTxn(Readonly)
+	txn, err := env.BeginTxn(nil, Readonly)
 	if err != nil {
 		b.Error(err)
 		return
