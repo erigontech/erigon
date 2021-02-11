@@ -251,7 +251,7 @@ func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal boo
 		}
 	*/
 
-	fmt.Println("verifyByRequest-4", reqID, time.Since(t), "\n")
+	fmt.Println("verifyByRequest-4", reqID, time.Since(t))
 
 	return nil
 }

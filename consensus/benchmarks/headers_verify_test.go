@@ -1,17 +1,19 @@
-package stagedsync
+package benchmarks
 
 import (
-	"fmt"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
@@ -21,60 +23,56 @@ func TestVerifyHeadersEthash(t *testing.T) {
 	hardTips := headerdownload.DecodeTips(verifyHardCodedHeadersEthash)
 	headers := toHeaders(hardTips)
 
-	engine := ethash.New(ethash.Config{
+	ethConfig := ethash.Config{
 		CachesInMem:      1,
 		CachesLockMmap:   false,
 		DatasetDir:       "ethash",
 		DatasetsInMem:    1,
 		DatasetsOnDisk:   0,
 		DatasetsLockMmap: false,
-	}, nil, false)
-	engine.SetThreads(-1)
-
-	defer engine.Close()
-
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-
-	config, _, _, err := core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false /* history */, false /* overwrite */)
-	if err != nil {
-		t.Fatalf("setting up genensis block: %v", err)
 	}
 
-	seals := make([]bool, len(headers[1:]))
-	for i := range seals {
-		seals[i] = true
+	resEthash := verifyByEngine(t, headers, core.DefaultGenesisBlock(), func(_ ethdb.Database) consensus.Engine {
+		engine := ethash.New(ethConfig, nil, false)
+		engine.SetThreads(-1)
+
+		return engine
+	})
+
+	resEthashProcess := verifyByEngineProcess(t, headers, core.DefaultGenesisBlock(), &ethConfig)
+
+	if resEthash-resEthashProcess < 0 {
+		t.Fatalf("diff is %d (%.2f%%)\n", resEthash-resEthashProcess, float64(resEthash-resEthashProcess)/float64(resEthash)*100)
 	}
-
-	chain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer chain.Stop()
-
-	tn := time.Now()
-	cancel, results := engine.VerifyHeaders(chain, headers[1:], seals)
-	defer cancel()
-
-	done := 0
-	for range results {
-		done++
-	}
-
-	fmt.Println("finished in", time.Since(tn), done)
 }
 
 func TestVerifyHeadersClique(t *testing.T) {
 	hardTips := headerdownload.DecodeTips(verifyHardCodedHeadersClique)
 	headers := toHeaders(hardTips)
 
+	resClique := verifyByEngine(t, headers, core.DefaultRinkebyGenesisBlock(), func(db ethdb.Database) consensus.Engine {
+		return clique.New(params.RinkebyChainConfig.Clique, params.CliqueSnapshot, db)
+	})
+
+	resCliqueProcess := verifyByEngineProcess(t, headers, core.DefaultRinkebyGenesisBlock(), params.CliqueSnapshot)
+
+	if resClique-resCliqueProcess < 0 {
+		t.Fatalf("diff is %d (%.2f%%)\n", resClique-resCliqueProcess, float64(resClique-resCliqueProcess)/float64(resClique)*100)
+	}
+}
+
+type engineConstructor func(db ethdb.Database) consensus.Engine
+
+func verifyByEngine(t *testing.T, headers []*types.Header, genesis *core.Genesis, engineConstr engineConstructor) time.Duration {
+	t.Helper()
+
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
-	engine := clique.New(params.RinkebyChainConfig.Clique, params.CliqueSnapshot, db)
+	engine := engineConstr(db)
 	defer engine.Close()
 
-	config, _, _, err := core.SetupGenesisBlock(db, core.DefaultRinkebyGenesisBlock(), false /* history */, false /* overwrite */)
+	config, _, _, err := core.SetupGenesisBlock(db, genesis, false, false)
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)
 	}
@@ -99,7 +97,34 @@ func TestVerifyHeadersClique(t *testing.T) {
 		done++
 	}
 
-	fmt.Println("finished in", time.Since(tn), done)
+	res := time.Since(tn)
+
+	return res
+}
+
+func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.Genesis, consensusConfig interface{}) time.Duration {
+	t.Helper()
+
+	db := ethdb.NewMemDatabase()
+	defer db.Close()
+
+	config, _, _, err := core.SetupGenesisBlock(db, genesis, false, false)
+	if err != nil {
+		t.Fatalf("setting up genensis block: %v", err)
+	}
+
+	engine := eth.CreateConsensusEngine(nil, config, consensusConfig, nil, false, db)
+	defer engine.Close()
+
+	tn := time.Now()
+	err = stagedsync.VerifyHeaders(db, headers[1:], engine, 1)
+	if err != nil {
+		t.Error(err)
+	}
+
+	res := time.Since(tn)
+
+	return res
 }
 
 func toHeaders(tips map[common.Hash]headerdownload.HeaderRecord) []*types.Header {

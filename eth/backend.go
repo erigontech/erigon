@@ -33,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -538,15 +539,19 @@ func CreateConsensusEngine(_ *node.Node, chainConfig *params.ChainConfig, config
 	case *ethash.Config:
 		switch consensusCfg.PowMode {
 		case ethash.ModeFake:
+			fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-1")
 			log.Warn("Ethash used in fake mode")
 			eng = ethash.NewFaker()
 		case ethash.ModeTest:
+			fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-2")
 			log.Warn("Ethash used in test mode")
 			eng = ethash.NewTester(nil, noverify)
 		case ethash.ModeShared:
+			fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-3")
 			log.Warn("Ethash used in shared mode")
 			eng = ethash.NewShared()
 		default:
+			fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-4")
 			engine := ethash.New(ethash.Config{
 				CachesInMem:      consensusCfg.CachesInMem,
 				CachesLockMmap:   consensusCfg.CachesLockMmap,
@@ -559,13 +564,16 @@ func CreateConsensusEngine(_ *node.Node, chainConfig *params.ChainConfig, config
 			eng = engine
 		}
 	case *params.SnapshotConfig:
+		fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-5")
+
 		if chainConfig.Clique != nil {
+			fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!-6")
 			eng = clique.NewCliqueVerifier(clique.New(chainConfig.Clique, consensusCfg, db))
 		}
 	}
 
 	if eng == nil {
-		panic("unknown config")
+		panic("unknown config" + spew.Sdump(config))
 	}
 
 	return process.NewRemoteEngine(eng, chainConfig)
