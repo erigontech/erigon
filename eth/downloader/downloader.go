@@ -559,7 +559,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				if len(k) > 2 {
 					return true, nil
 				}
-				hasState, hasBranch, hasHash, hashes := trie.UnmarshalIH(v)
+				hasState, hasBranch, hasHash, hashes := trie.UnmarshalIHTyped(v)
 				cache.SetAccountHashesRead(k, hasState, hasBranch, hasHash, hashes)
 				return true, nil
 			})

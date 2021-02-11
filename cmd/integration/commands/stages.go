@@ -711,7 +711,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 			if len(k) > 2 {
 				return true, nil
 			}
-			hasState, hasBranch, hasHash, hashes := trie.UnmarshalIH(v)
+			hasState, hasBranch, hasHash, hashes := trie.UnmarshalIHTyped(v)
 			cache.SetAccountHashesRead(k, hasState, hasBranch, hasHash, hashes)
 			return true, nil
 		}); err2 != nil {

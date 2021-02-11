@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 // AssertSubset a & b == a - checks whether a is subset of b
@@ -32,9 +33,6 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			if err != nil {
 				panic(err)
 			}
-			if len(k) == 1 {
-				continue
-			}
 			select {
 			default:
 			case <-quit:
@@ -42,13 +40,10 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			case <-logEvery.C:
 				log.Info("trie account integrity", "key", k)
 			}
-
-			hasState := binary.BigEndian.Uint16(v)
-			hasBranch := binary.BigEndian.Uint16(v[2:])
-			hasHash := binary.BigEndian.Uint16(v[4:])
+			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalIH(v)
 			AssertSubset(hasBranch, hasState)
 			AssertSubset(hasHash, hasState)
-			if bits.OnesCount16(hasHash) != len(v[6:])/common.HashLength {
+			if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
 				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/common.HashLength))
 			}
 			found := false
@@ -71,7 +66,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 					panic(fmt.Errorf("for %x found parent %x, but it has no branchBit: %016b", k, parentK, parentHasBranch))
 				}
 			}
-			if !found {
+			if !found && len(k) > 1 {
 				panic(fmt.Errorf("trie hash %x has no parent", k))
 			}
 
@@ -100,11 +95,11 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 		defer c.Close()
 		defer c2.Close()
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if bytes.HasPrefix(k, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001000e")) {
+				fmt.Printf("check00: %x\n", k)
+			}
 			if err != nil {
 				panic(err)
-			}
-			if len(k) == 40 {
-				continue
 			}
 			select {
 			default:
@@ -114,13 +109,11 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				log.Info("trie storage integrity", "key", k)
 			}
 
-			hasState := binary.BigEndian.Uint16(v)
-			hasBranch := binary.BigEndian.Uint16(v[2:])
-			hasHash := binary.BigEndian.Uint16(v[4:])
+			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalIH(v)
 			AssertSubset(hasBranch, hasState)
 			AssertSubset(hasHash, hasState)
-			if bits.OnesCount16(hasHash) != len(v[6:])/common.HashLength {
-				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/common.HashLength))
+			if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
+				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/common.HashLength))
 			}
 
 			found := false
@@ -136,6 +129,10 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				if kParent == nil {
 					continue
 				}
+				if bytes.HasPrefix(k, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001000e")) {
+					fmt.Printf("check: %x->%x\n", parentK, kParent)
+				}
+
 				found = true
 				parentBranches := binary.BigEndian.Uint16(vParent[2:])
 				parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentBranches != 0
@@ -143,7 +140,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 					panic(fmt.Errorf("for %x found parent %x, but it has no branchBit for child: %016b", k, parentK, parentBranches))
 				}
 			}
-			if !found {
+			if !found && len(k) > 40 {
 				panic(fmt.Errorf("trie hash %x has no parent. Last checked: %x", k, parentK))
 			}
 

@@ -572,6 +572,12 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 			assertSubset(hasBranch, hasState)
 			assertSubset(hasHash, hasState)
 			newV = trie.IHValue(hasState, hasBranch, hasHash, hashes, rootHash, newV)
+			if bytes.HasPrefix(newK, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001000e")) {
+				fmt.Printf("alex: %x,%x\n", newK, newV)
+				if len(newV) == 0 && newV == nil {
+					panic(1)
+				}
+			}
 			return storageIHCollector.Collect(newK, newV)
 		}
 		// hashCollector in the line below will collect deletes

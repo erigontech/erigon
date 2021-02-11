@@ -146,13 +146,13 @@ func GenStructStep(
 		if !buildExtensions {
 			switch v := data.(type) {
 			case *GenStructStepHashData:
-				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("000001000003050a05080d05090b0e0e0f030a0a050504070f0c060a0b03010c03000e03080900030c0e0a08050f0a070b070300060d00000603020c070a030e00000000000000000000000000000001000e")) {
 				//	fmt.Printf("ih v.IsBranch before: %x, %t,%b\n", curr, v.IsBranch, hasBranch)
 				//}
 				if v.IsBranch {
 					hasBranch[len(curr)-1] |= 1 << curr[len(curr)-1]
 				}
-				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("000001000003050a05080d05090b0e0e0f030a0a050504070f0c060a0b03010c03000e03080900030c0e0a08050f0a070b070300060d00000603020c070a030e00000000000000000000000000000001000e")) {
 				//	fmt.Printf("ih v.IsBranch: %x, %t, %b\n", curr, v.IsBranch, hasHash)
 				//}
 				hasHash[len(curr)-1] |= 1 << curr[len(curr)-1]
@@ -189,7 +189,7 @@ func GenStructStep(
 
 		if buildExtensions {
 			if remainderLen > 0 {
-				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("000001000003050a05080d05090b0e0e0f030a0a050504070f0c060a0b03010c03000e03080900030c0e0a08050f0a070b070300060d00000603020c070a030e00000000000000000000000000000001000e")) {
 				//	fmt.Printf("ext: %x->%x\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen])
 				//	if len(hasBranch) > 79 {
 				//		fmt.Printf("ext before: %b,%d,%d\n", hasBranch[80:], remainderStart+remainderLen, maxLen)
@@ -214,7 +214,7 @@ func GenStructStep(
 						}
 					}
 				}
-				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("000001000003050a05080d05090b0e0e0f030a0a050504070f0c060a0b03010c03000e03080900030c0e0a08050f0a070b070300060d00000603020c070a030e00000000000000000000000000000001000e")) {
 				//	if len(hasBranch) > 79 {
 				//		fmt.Printf("ext after: %b\n", hasBranch[80:])
 				//	} else {
@@ -237,31 +237,6 @@ func GenStructStep(
 			}
 		}
 
-		var usefulHashes []byte
-		if h != nil {
-			canSendHashes := hasHash[maxLen] != 0 || hasBranch[maxLen] != 0
-			if canSendHashes {
-				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
-				//	if len(hasBranch) >= 79 {
-				//		fmt.Printf("why now: %x,%b,%b\n", curr[:maxLen][79:], hasBranch[79:], groups[79:])
-				//	} else {
-				//		fmt.Printf("why now: %x,%b,%b\n", curr[:maxLen], hasBranch, groups)
-				//	}
-				//}
-				usefulHashes = e.topHashes(curr[:maxLen], hasHash[maxLen], groups[maxLen])
-				if maxLen != 0 && maxLen != 80 {
-					hasBranch[maxLen-1] |= 1 << curr[maxLen-1]
-					if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, nil); err != nil {
-						return nil, nil, nil, err
-					}
-				}
-			} else {
-				if err := h(curr[:maxLen], 0, 0, 0, nil, nil); err != nil {
-					return nil, nil, nil, err
-				}
-			}
-		}
-
 		// Check for the optional part
 		if precLen <= succLen && len(succ) > 0 {
 			return groups, hasBranch, hasHash, nil
@@ -272,21 +247,48 @@ func GenStructStep(
 			if maxLen > 0 {
 				hasHash[maxLen-1] |= 1 << curr[maxLen-1]
 				if hasBranch[maxLen] != 0 {
-					//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
-					//	fmt.Printf("whaaatw %b,\n", hasBranch)
-					//}
 					hasBranch[maxLen-1] |= 1 << curr[maxLen-1]
-				} else {
-					//fmt.Printf("whaaatw %b,%x\n", hasBranch, curr)
 				}
-
-				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("060e")) {
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("000001000003050a05080d05090b0e0e0f030a0a050504070f0c060a0b03010c03000e03080900030c0e0a08050f0a070b070300060d00000603020c070a030e00000000000000000000000000000001000e")) {
 				//	if maxLen >= 79 {
-				//		fmt.Printf("set bit %x, %x, %b,%b\n", curr[:maxLen-1][79:], curr[maxLen-1], hasHash[79:], groups[79:])
+				//		fmt.Printf("set bit %x, %x, %b,%b\n", curr[:maxLen-1][79:], curr[maxLen-1], hasBranch[79:], groups[79:])
 				//	} else {
-				//		fmt.Printf("set bit %x, %x,m %b\n", curr[:maxLen-1], curr[maxLen-1], hasHash)
+				//		fmt.Printf("set bit %x, %x,m %b\n", curr[:maxLen-1], curr[maxLen-1], hasBranch)
 				//	}
 				//}
+			}
+
+			var usefulHashes []byte
+			if h != nil {
+				canSendHashes := hasHash[maxLen] != 0 || hasBranch[maxLen] != 0
+				if canSendHashes {
+					//if bytes.HasPrefix(curr[:maxLen], common.FromHex("000001000003050a05080d05090b0e0e0f030a0a050504070f0c060a0b03010c03000e03080900030c0e0a08050f0a070b070300060d00000603020c070a030e00000000000000000000000000000001000e")) {
+					//	if len(hasBranch) >= 79 {
+					//		fmt.Printf("why now: %x,%b,%b\n", curr[:maxLen][79:], hasBranch[79:], groups[79:])
+					//	} else {
+					//		fmt.Printf("why now: %x,%b,%b\n", curr[:maxLen], hasBranch, groups)
+					//	}
+					//}
+					usefulHashes = e.topHashes(curr[:maxLen], hasHash[maxLen], groups[maxLen])
+					if maxLen != 0 && maxLen != 80 {
+						hasBranch[maxLen-1] |= 1 << curr[maxLen-1]
+						//if bytes.HasPrefix(curr[:maxLen], common.FromHex("000001000003050a05080d05090b0e0e0f030a0a050504070f0c060a0b03010c03000e03080900030c0e0a08050f0a070b070300060d00000603020c070a030e00000000000000000000000000000001000e")) {
+						//	if len(hasBranch) >= 79 {
+						//		fmt.Printf("send: %x,%d,%b,%b\n", curr[:maxLen][79:], maxLen, hasBranch[maxLen], groups[maxLen])
+						//		fmt.Printf("send2: %b,%b\n", hasBranch[maxLen-1], hasBranch[maxLen])
+						//	} else {
+						//		fmt.Printf("send: %x,%b,%b\n", curr[:maxLen], hasBranch[maxLen], groups[maxLen])
+						//	}
+						//}
+						if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, nil); err != nil {
+							return nil, nil, nil, err
+						}
+					}
+				} else {
+					if err := h(curr[:maxLen], 0, 0, 0, nil, nil); err != nil {
+						return nil, nil, nil, err
+					}
+				}
 			}
 
 			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0e08060a030b0b0a0b0b070c06020a0e04010a0e05050c0f0c010f020a07000b07020e0501030b0106010704000e0d030a060d000c0d000901040a04000c020300000000000000000000000000000001")) {

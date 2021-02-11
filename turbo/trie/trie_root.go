@@ -363,15 +363,15 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	//if storageKey == nil {
-	//	if bytes.HasPrefix(accountKey, common.FromHex("0e08060a")) {
-	//		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-	//}
+	//	//if bytes.HasPrefix(accountKey, common.FromHex("0e08060a")) {
+	//	//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+	//	//}
 	//} else {
 	//	hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
-	//	if bytes.HasPrefix(r.currAccK, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(storageKey[80:], common.FromHex("0f")) {
-	//		fmt.Printf("%x\n", storageKey)
-	//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
-	//}
+	//	if bytes.HasPrefix(r.currAccK, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001")) && bytes.HasPrefix(storageKey[80:], common.FromHex("000e")) {
+	//		//fmt.Printf("%x\n", storageKey)
+	//		fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+	//	}
 	//}
 	switch itemType {
 	case StorageStreamItem:
@@ -582,7 +582,7 @@ func (r *RootHashAggregator) genStructStorage() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("0f")) {
+			//if bytes.HasPrefix(r.currAccK, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("00")) {
 			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hashes == nil && rootHash == nil)
 			//}
 			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
@@ -665,7 +665,7 @@ func (r *RootHashAggregator) genStructAccount() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+			//if bytes.HasPrefix(r.currAccK, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("00")) {
 			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hashes == nil && rootHash == nil)
 			//}
 			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
@@ -954,19 +954,9 @@ func (c *IHCursor) _unmarshal(k, v []byte) {
 	c.lvl = len(k)
 	c.k[c.lvl] = k
 	c.deleted[c.lvl] = false
-	c.hasState[c.lvl] = binary.BigEndian.Uint16(v)
-	c.hasBranch[c.lvl] = binary.BigEndian.Uint16(v[2:])
-	c.hasHash[c.lvl] = binary.BigEndian.Uint16(v[4:])
-	c.v[c.lvl] = v[6:]
+	c.hasState[c.lvl], c.hasBranch[c.lvl], c.hasHash[c.lvl], c.v[c.lvl], _ = UnmarshalIH(v)
 	c.hashID[c.lvl] = -1
 	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.hasState[c.lvl]) - 1)
-	if len(c.k[c.lvl]) == 0 { // root record, firstly storing root hash
-		c.v[c.lvl] = c.v[c.lvl][32:]
-	}
-	if len(c.v[c.lvl])/common.HashLength != bits.OnesCount16(c.hasHash[c.lvl]) {
-		fmt.Printf("assert: %x, %b,%d\n", c.k[c.lvl], c.hasHash[c.lvl], len(c.v)/common.HashLength)
-		panic(1)
-	}
 }
 
 func (c *IHCursor) _hash(i int16) []byte {
@@ -1097,6 +1087,7 @@ func (c *StorageIHCursor) FirstNotCoveredPrefix() []byte {
 func (c *StorageIHCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasBranch bool, err error) {
 	c.accWithInc = accWithInc
 	hexutil.DecompressNibbles(c.accWithInc, &c.kBuf)
+	c.seek = append(c.seek[:0], c.accWithInc...)
 	c.skipState = false
 	c.prev = c.cur
 	ok, err := c._seek(accWithInc, nil)
@@ -1166,10 +1157,10 @@ func (c *StorageIHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 	}
 	if c._hasHash() {
 		c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+		//if bytes.HasPrefix(c.accWithInc, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("000e")) {
+		//	fmt.Printf("can use ih(next): %x,%x\n", c.k[c.lvl], c.childID[c.lvl])
+		//}
 		if c.canUse(c.kBuf) {
-			//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
-			//	fmt.Printf("can use ih(next): %x,%x\n", c.k[c.lvl], c.childID[c.lvl])
-			//}
 			c.cur = common.CopyBytes(c.kBuf[80:])
 			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
 			return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
@@ -1218,11 +1209,19 @@ func (c *StorageIHCursor) _seek(seek, prefix []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if bytes.HasPrefix(c.accWithInc, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		fmt.Printf("seek: %x,%x,%x\n", seek, prefix, k)
+	}
+
 	if k == nil || !bytes.HasPrefix(k, c.accWithInc) || !bytes.HasPrefix(k[40:], prefix) {
 		//if bytes.HasPrefix(c.accWithInc, common.FromHex("35b50e7621258059586f717ca0f0578f166f83c83115e9d79688035f46668da10000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		//	fmt.Printf("_seek4: %x -> %x\n", prefix, k)
 		//}
 		return false, nil
+	}
+
+	if bytes.HasPrefix(c.accWithInc, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+		fmt.Printf("seek2: %x,%x,%x\n", seek, prefix, k)
 	}
 	c._unmarshal(k, v)
 	if len(c.k[c.lvl]) > 0 { // root record, firstly storing root hash
@@ -1234,7 +1233,7 @@ func (c *StorageIHCursor) _seek(seek, prefix []byte) (bool, error) {
 // goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
 func (c *StorageIHCursor) _nextItem() error {
 	if c._hasBranch() {
-		c.seek = append(append(c.seek, c.k[c.lvl]...), byte(c.childID[c.lvl]))
+		c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
 		ok, err := c._seek(c.seek, nil)
 		if err != nil {
 			return err
@@ -1361,6 +1360,9 @@ func (c *StorageIHCursor) _next() (k, v []byte, hasBranch bool, err error) {
 
 		if c._hasHash() {
 			c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+			if bytes.HasPrefix(c.accWithInc, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("000e")) {
+				fmt.Printf("can use 2 ih(next): %x,%x\n", c.k[c.lvl], c.childID[c.lvl])
+			}
 			if c.canUse(c.kBuf) {
 				c.cur = common.CopyBytes(c.kBuf[80:])
 				c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
@@ -1396,16 +1398,9 @@ func (c *StorageIHCursor) _unmarshal(k, v []byte) {
 	c.lvl = len(k) - 40
 	c.k[c.lvl] = k[40:]
 	c.deleted[c.lvl] = false
-	c.hasState[c.lvl] = binary.BigEndian.Uint16(v)
-	c.hasBranch[c.lvl] = binary.BigEndian.Uint16(v[2:])
-	c.hasHash[c.lvl] = binary.BigEndian.Uint16(v[4:])
+	c.hasState[c.lvl], c.hasBranch[c.lvl], c.hasHash[c.lvl], c.v[c.lvl], c.root = UnmarshalIH(v)
 	c.hashID[c.lvl] = -1
 	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.hasState[c.lvl]) - 1)
-	c.v[c.lvl] = v[6:]
-	if len(c.k[c.lvl]) == 0 { // root record, firstly storing root hash
-		c.root = c.v[c.lvl][:32]
-		c.v[c.lvl] = c.v[c.lvl][32:]
-	}
 }
 
 func (c *StorageIHCursor) _complexSkpState() bool {
@@ -1430,7 +1425,7 @@ func (c *StorageIHCursor) _deleteCurrent() error {
 	if c.deleted[c.lvl] {
 		return nil
 	}
-	if bytes.HasPrefix(c.accWithInc, common.FromHex("e86a3bbabb7c62ae41ae55cfc1f2a70b72e513b161740ed3a6d0cd0914a40c230000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
+	if bytes.HasPrefix(c.accWithInc, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
 		fmt.Printf("delete: %x,%x\n", c.accWithInc, c.k[c.lvl])
 	}
 
@@ -1577,7 +1572,7 @@ func keyIsBefore(k1, k2 []byte) bool {
 	return bytes.Compare(k1, k2) < 0
 }
 
-func UnmarshalIH(v []byte) (uint16, uint16, uint16, []common.Hash) {
+func UnmarshalIHTyped(v []byte) (uint16, uint16, uint16, []common.Hash) {
 	hasState, hasBranch, hasHash := binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:])
 	v = v[6:]
 	newV := make([]common.Hash, len(v)/common.HashLength)
@@ -1585,6 +1580,15 @@ func UnmarshalIH(v []byte) (uint16, uint16, uint16, []common.Hash) {
 		newV[i].SetBytes(v[i*common.HashLength : (i+1)*common.HashLength])
 	}
 	return hasState, hasBranch, hasHash, newV
+}
+
+func UnmarshalIH(v []byte) (hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) {
+	hasState, hasBranch, hasHash, hashes = binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:]), v[6:]
+	if bits.OnesCount16(hasHash)+1 == len(hashes)/common.HashLength {
+		rootHash = hashes[:32]
+		hashes = hashes[32:]
+	}
+	return
 }
 
 func MarshalIH(hasState, hasBranch, hasHash uint16, h []common.Hash) []byte {
@@ -1688,7 +1692,7 @@ func loadAccIHToCache(ih ethdb.Cursor, prefix []byte, ranges [][]byte, cache *sh
 			if keyIsBeforeOrEqual(to, k) || !bytes.HasPrefix(k, prefix) { // read all accounts until next IH
 				break
 			}
-			hasState, hasBranch, hasHash, newV := UnmarshalIH(v)
+			hasState, hasBranch, hasHash, newV := UnmarshalIHTyped(v)
 			cache.SetAccountHashesRead(k, hasState, hasBranch, hasHash, newV)
 		}
 	}
