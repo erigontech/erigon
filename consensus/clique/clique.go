@@ -264,18 +264,21 @@ func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.H
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
 // method returns a quit channel to abort the operations and a results channel to
 // retrieve the async verifications (the order is that of the input slice).
-func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
+func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) (func(), <-chan error) {
 	abort := make(chan struct{})
 	results := make(chan error, len(headers))
+
 	wg := &sync.WaitGroup{}
+
 	cancel := func() {
 		close(abort)
 		wg.Wait()
-		close(results)
 	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		var doneCount int
 		for i, header := range headers {
 			err := c.verifyHeader(chain, header, headers[:i])
 
@@ -283,9 +286,14 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 			case <-abort:
 				return
 			case results <- err:
+				doneCount++
+				if doneCount == len(headers) {
+					close(results)
+				}
 			}
 		}
 	}()
+
 	return cancel, results
 }
 

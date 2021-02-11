@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"fmt"
-	"runtime"
 	"sort"
 	"testing"
 	"time"
@@ -32,6 +31,8 @@ func TestVerifyHeadersEthash(t *testing.T) {
 	}, nil, false)
 	engine.SetThreads(-1)
 
+	defer engine.Close()
+
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
@@ -45,8 +46,7 @@ func TestVerifyHeadersEthash(t *testing.T) {
 		seals[i] = true
 	}
 
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	chain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil, txCacher)
+	chain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +72,7 @@ func TestVerifyHeadersClique(t *testing.T) {
 	defer db.Close()
 
 	engine := clique.New(params.RinkebyChainConfig.Clique, params.CliqueSnapshot, db)
+	defer engine.Close()
 
 	config, _, _, err := core.SetupGenesisBlock(db, core.DefaultRinkebyGenesisBlock(), false /* history */, false /* overwrite */)
 	if err != nil {
@@ -83,8 +84,7 @@ func TestVerifyHeadersClique(t *testing.T) {
 		seals[i] = true
 	}
 
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
-	chain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil, txCacher)
+	chain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

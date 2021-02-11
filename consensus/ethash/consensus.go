@@ -168,6 +168,7 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 				for checked[index] = true; checked[out]; out++ {
 					errorsOut <- errors[out]
 					if out == len(headers)-1 {
+						close(errorsOut)
 						return
 					}
 				}
