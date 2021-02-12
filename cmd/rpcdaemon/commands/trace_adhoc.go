@@ -481,7 +481,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	traceResult := &TraceCallResult{}
+	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
 	for _, traceType := range traceTypes {
 		switch traceType {
@@ -517,7 +517,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	gp := new(core.GasPool).AddGas(msg.Gas())
 	var execResult *core.ExecutionResult
-	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */)
+	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 	if err != nil {
 		return nil, err
 	}
@@ -526,7 +526,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sdMap := make(map[common.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.CommitBlock(ctx, sd); err != nil {
+		if err = ibs.FinalizeTx(ctx, sd); err != nil {
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
@@ -628,7 +628,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 		if tok != json.Delim(']') {
 			return nil, fmt.Errorf("expected end of [callparam, tracetypes]")
 		}
-		traceResult := &TraceCallResult{}
+		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
 		for _, traceType := range traceTypes {
 			switch traceType {
@@ -659,15 +659,18 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
 		var execResult *core.ExecutionResult
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */)
+		// Clone the state cache before applying the changes, clone is discarded
+		var cloneReader state.StateReader
+		if traceTypeStateDiff {
+			cloneCache := stateCache.Clone()
+			cloneReader = state.NewCachedReader(stateReader, cloneCache)
+		}
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
 		traceResult.Output = execResult.ReturnData
 		if traceTypeStateDiff {
-			// Clone the state cache before applying the changes, clone is discarded
-			cloneCache := stateCache.Clone()
-			cloneReader := state.NewCachedReader(stateReader, cloneCache)
 			initialIbs := state.New(cloneReader)
 			sdMap := make(map[common.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
@@ -679,6 +682,13 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 				return nil, err
 			}
 			sd.CompareStates(initialIbs, ibs)
+		} else {
+			if err = ibs.FinalizeTx(ctx, noop); err != nil {
+				return nil, err
+			}
+			if err = ibs.CommitBlock(ctx, cachedWriter); err != nil {
+				return nil, err
+			}
 		}
 
 		if traceTypeVmTrace {
