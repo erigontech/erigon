@@ -481,7 +481,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	traceResult := &TraceCallResult{}
+	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
 	for _, traceType := range traceTypes {
 		switch traceType {
@@ -628,7 +628,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 		if tok != json.Delim(']') {
 			return nil, fmt.Errorf("expected end of [callparam, tracetypes]")
 		}
-		traceResult := &TraceCallResult{}
+		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
 		for _, traceType := range traceTypes {
 			switch traceType {
