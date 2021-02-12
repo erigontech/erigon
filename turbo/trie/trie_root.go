@@ -267,7 +267,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					}
 					hexutil.DecompressNibbles(accWithInc, &l.kHexS)
 					l.kHexS = append(l.kHexS[:80], l.buf...)
-					if err = l.receiver.Receive(StorageStreamItem, nil, l.kHexS, nil, vS[32:], nil, false, 0); err != nil {
+					if err = l.receiver.Receive(StorageStreamItem, nil, common.CopyBytes(l.kHexS), nil, vS[32:], nil, false, 0); err != nil {
 						return EmptyRoot, err
 					}
 				}
@@ -279,7 +279,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 
 				hexutil.DecompressNibbles(accWithInc, &l.kHexS)
 				l.kHexS = append(l.kHexS[:80], ihKS...)
-				if err = l.receiver.Receive(SHashStreamItem, nil, l.kHexS, nil, nil, ihVS, hasBranchS, 0); err != nil {
+				if err = l.receiver.Receive(SHashStreamItem, nil, common.CopyBytes(l.kHexS), nil, nil, ihVS, hasBranchS, 0); err != nil {
 					return EmptyRoot, err
 				}
 				if len(ihKS) == 0 { // means we just sent acc.storageRoot
@@ -582,9 +582,9 @@ func (r *RootHashAggregator) genStructStorage() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("85d7")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
-			//	fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hasHash, hashes == nil && rootHash == nil)
-			//}
+			if bytes.HasPrefix(r.currAccK, common.FromHex("e4405bfd8d8a3a8b528b1fc9187bc030f0dbaa79e828619a95d9335ddfe3ea6b0000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+				fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hasHash, hashes == nil && rootHash == nil)
+			}
 			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
 		}
 		if r.hc == nil {
@@ -665,9 +665,9 @@ func (r *RootHashAggregator) genStructAccount() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("85d7")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
-			//	fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hasHash, hashes == nil && rootHash == nil)
-			//}
+			if bytes.HasPrefix(r.currAccK, common.FromHex("e4405bfd8d8a3a8b528b1fc9187bc030f0dbaa79e828619a95d9335ddfe3ea6b0000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+				fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hasHash, hashes == nil && rootHash == nil)
+			}
 			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
 		}
 		if r.hc == nil {
