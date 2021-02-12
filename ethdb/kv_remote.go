@@ -25,15 +25,10 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-// generate the messages
-//go:generate protoc --go_out=. "./remote/kv.proto" -I=. -I=./../build/include/google
-//go:generate protoc --go_out=. "./remote/db.proto" -I=. -I=./../build/include/google
-//go:generate protoc --go_out=. "./remote/ethbackend.proto" -I=. -I=./../build/include/google
-
-// generate the services
-//go:generate protoc --go-grpc_out=. "./remote/kv.proto" -I=. -I=./../build/include/google
-//go:generate protoc --go-grpc_out=. "./remote/db.proto" -I=. -I=./../build/include/google
-//go:generate protoc --go-grpc_out=. "./remote/ethbackend.proto" -I=. -I=./../build/include/google
+// generate the messages and services
+//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/kv.proto" -I=. -I=./../build/include/google
+//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/db.proto" -I=. -I=./../build/include/google
+//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/ethbackend.proto" -I=. -I=./../build/include/google
 
 type remoteOpts struct {
 	DialAddress string
