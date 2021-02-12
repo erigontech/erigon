@@ -267,7 +267,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					}
 					hexutil.DecompressNibbles(accWithInc, &l.kHexS)
 					l.kHexS = append(l.kHexS[:80], l.buf...)
-					if err = l.receiver.Receive(StorageStreamItem, nil, common.CopyBytes(l.kHexS), nil, vS[32:], nil, false, 0); err != nil {
+					if err = l.receiver.Receive(StorageStreamItem, nil, l.kHexS, nil, vS[32:], nil, false, 0); err != nil {
 						return EmptyRoot, err
 					}
 				}
@@ -279,7 +279,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 
 				hexutil.DecompressNibbles(accWithInc, &l.kHexS)
 				l.kHexS = append(l.kHexS[:80], ihKS...)
-				if err = l.receiver.Receive(SHashStreamItem, nil, common.CopyBytes(l.kHexS), nil, nil, ihVS, hasBranchS, 0); err != nil {
+				if err = l.receiver.Receive(SHashStreamItem, nil, l.kHexS, nil, nil, ihVS, hasBranchS, 0); err != nil {
 					return EmptyRoot, err
 				}
 				if len(ihKS) == 0 { // means we just sent acc.storageRoot
