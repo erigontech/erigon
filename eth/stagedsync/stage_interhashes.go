@@ -423,9 +423,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if bytes.HasPrefix(k, common.FromHex("5722")) {
-			fmt.Printf("excl: %x\n", k)
-		}
+		//if bytes.HasPrefix(k, common.FromHex("5722")) {
+		//	fmt.Printf("excl: %x\n", k)
+		//}
 		exclude = append(exclude, k)
 		return nil
 	}
