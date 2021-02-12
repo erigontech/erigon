@@ -136,7 +136,7 @@ func (t *VMTest) exec(state vm.IntraBlockState, vmconfig vm.Config) ([]byte, uin
 	evm := t.newEVM(state, vmconfig)
 	e := t.json.Exec
 	value, _ := uint256.FromBig(e.Value)
-	return evm.Call(vm.AccountRef(e.Caller), e.Address, e.Data, e.GasLimit, value)
+	return evm.Call(vm.AccountRef(e.Caller), e.Address, e.Data, e.GasLimit, value, false /* bailout */)
 }
 
 func (t *VMTest) newEVM(state vm.IntraBlockState, vmconfig vm.Config) *vm.EVM {
@@ -148,7 +148,7 @@ func (t *VMTest) newEVM(state vm.IntraBlockState, vmconfig vm.Config) *vm.EVM {
 		}
 		return core.CanTransfer(db, address, amount)
 	}
-	transfer := func(db vm.IntraBlockState, sender, recipient common.Address, amount *uint256.Int) {}
+	transfer := func(db vm.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) {}
 	context := vm.Context{
 		CanTransfer: canTransfer,
 		Transfer:    transfer,

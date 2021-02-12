@@ -271,7 +271,7 @@ func (host *hostContext) Call(kind evmc.CallKind,
 		if static {
 			output, gasLeftU, err = host.env.StaticCall(host.contract, destination, input, gasU)
 		} else {
-			output, gasLeftU, err = host.env.Call(host.contract, destination, input, gasU, value)
+			output, gasLeftU, err = host.env.Call(host.contract, destination, input, gasU, value, false /* bailout */)
 		}
 	case evmc.DelegateCall:
 		output, gasLeftU, err = host.env.DelegateCall(host.contract, destination, input, gasU)

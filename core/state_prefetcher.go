@@ -80,6 +80,6 @@ func precacheTransaction(config *params.ChainConfig, bc ChainContext, author *co
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 	vm := vm.NewEVM(context, statedb, config, cfg)
 
-	_, err = ApplyMessage(vm, msg, gaspool, true /* refunds */)
+	_, err = ApplyMessage(vm, msg, gaspool, true /* refunds */, false /* gasBailout */)
 	return err
 }

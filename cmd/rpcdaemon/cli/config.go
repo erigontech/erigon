@@ -108,10 +108,15 @@ func OpenDB(cfg Flags) (ethdb.KV, ethdb.Backend, error) {
 			}
 			db = kv
 		}
-	} else if cfg.PrivateApiAddr != "" {
-		db, ethBackend, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+	}
+	if cfg.PrivateApiAddr != "" {
+		var remoteDb ethdb.KV
+		remoteDb, ethBackend, err = ethdb.NewRemote().Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
 		if err != nil {
 			return nil, nil, fmt.Errorf("could not connect to remoteDb: %w", err)
+		}
+		if db == nil {
+			db = remoteDb
 		}
 	} else {
 		return nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
