@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package sentry;
+
+option go_package = "./sentry;sentry";
+
+enum OutboundMessageId {
+  GetBlockHeaders = 0; GetBlockBodies = 1; GetNodeData = 2;
+}
+
+message OutboundMessageData {
+  OutboundMessageId id = 1;
+  bytes data = 2;
+}
+
+message SendMessageByMinBlockRequest {
+  OutboundMessageData data = 1;
+  uint64 min_block = 2;
+}
+
+message SendMessageByIdRequest {
+  OutboundMessageData data = 1;
+  bytes peer_id = 2;
+}
+
+message SendMessageToRandomPeersRequest {
+  OutboundMessageData data = 1;
+  uint64 max_peers = 2;
+}
+
+message SentPeers { repeated bytes peers = 1; }
+
+enum PenaltyKind { Kick = 0; }
+
+message PenalizePeerRequest {
+  bytes peer_id = 1;
+  PenaltyKind penalty = 2;
+}
+
+service Sentry {
+  rpc PenalizePeer(PenalizePeerRequest) returns(google.protobuf.Empty);
+  rpc SendMessageByMinBlock(SendMessageByMinBlockRequest) returns(SentPeers);
+  rpc SendMessageById(SendMessageByIdRequest) returns(SentPeers);
+  rpc SendMessageToRandomPeers(SendMessageToRandomPeersRequest)
+      returns(SentPeers);
+  rpc SendMessageToAll(OutboundMessageData) returns(SentPeers);
+}
