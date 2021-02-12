@@ -223,7 +223,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 		if err != nil {
 			return EmptyRoot, err
 		}
-		if ih.skipState {
+		if ih.SkipState {
 			goto SkipAccounts
 		}
 
@@ -362,17 +362,17 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	hasBranch bool,
 	cutoff int,
 ) error {
-	//if storageKey == nil {
-	//	//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
-	//	//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-	//	//}
-	//} else {
-	//	hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
-	//	if bytes.HasPrefix(r.currAccK, common.FromHex("71fe2579f4a5be157546549260f5539cc9445fa20674a8bb637049f43fc1eac20000000000000001")) && bytes.HasPrefix(storageKey[80:], common.FromHex("020903")) {
-	//		//fmt.Printf("%x\n", storageKey)
-	//		fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
-	//	}
-	//}
+	if storageKey == nil {
+		//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
+		//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+		//}
+	} else {
+		hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
+		if bytes.HasPrefix(r.currAccK, common.FromHex("71fe2579f4a5be157546549260f5539cc9445fa20674a8bb637049f43fc1eac20000000000000001")) && bytes.HasPrefix(storageKey[80:], common.FromHex("020903")) {
+			//fmt.Printf("%x\n", storageKey)
+			fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+		}
+	}
 	switch itemType {
 	case StorageStreamItem:
 		r.advanceKeysStorage(storageKey, true /* terminator */)
@@ -712,7 +712,7 @@ const IHDupKeyLen = 2 * (common.HashLength + common.IncarnationLength)
 // goToChild can be done only by DB operation (go to longer prefix)
 // goToSibling can be done in memory or by DB operation: nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
 type IHCursor struct {
-	skipState                    bool
+	SkipState                    bool
 	is, lvl                      int
 	k, v                         [64][]byte // store up to 64 levels of key/value pairs in nibbles format
 	hasState, hasBranch, hasHash [64]uint16 // branch hasState set, and any hasState set
@@ -747,7 +747,7 @@ func (c *IHCursor) FirstNotCoveredPrefix() []byte {
 }
 
 func (c *IHCursor) AtPrefix(prefix []byte) (k, v []byte, hasBranch bool, err error) {
-	c.skipState = false
+	c.SkipState = false
 	c.prev = append(c.prev[:0], c.cur...)
 	c.prefix = prefix
 	c.seek = prefix
@@ -757,14 +757,14 @@ func (c *IHCursor) AtPrefix(prefix []byte) (k, v []byte, hasBranch bool, err err
 	}
 	if !ok || c.k[c.lvl] == nil {
 		c.cur = nil
-		c.skipState = isDenseSequence(c.prev, c.cur)
+		c.SkipState = isDenseSequence(c.prev, c.cur)
 		return nil, nil, false, nil
 	}
 	if c._hasHash() {
 		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
 		if c.canUse(c.kBuf) {
 			c.cur = append(c.cur[:0], c.kBuf...)
-			c.skipState = isDenseSequence(c.prev, c.cur)
+			c.SkipState = isDenseSequence(c.prev, c.cur)
 			return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
 		}
 	}
@@ -781,7 +781,7 @@ func (c *IHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 		return []byte{}, nil, false, err
 	}
 
-	c.skipState = false
+	c.SkipState = false
 	c.prev = append(c.prev[:0], c.cur...)
 	err = c._nextSibling()
 	if err != nil {
@@ -789,7 +789,7 @@ func (c *IHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 	}
 	if c.k[c.lvl] == nil {
 		c.cur = nil
-		c.skipState = isDenseSequence(c.prev, c.cur)
+		c.SkipState = isDenseSequence(c.prev, c.cur)
 		return nil, nil, false, nil
 	}
 	if c._hasHash() {
@@ -799,7 +799,7 @@ func (c *IHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 		//}
 		if c.canUse(c.kBuf) {
 			c.cur = append(c.cur[:0], c.kBuf...)
-			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
+			c.SkipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
 			//fmt.Printf("Next2: %x, %d,%b,%d\n", c.k, c.childID[c.lvl], c.hasHash[c.lvl], len(c.v))
 			return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
 		}
@@ -884,7 +884,7 @@ func (c *IHCursor) _nextSiblingInMem() bool {
 			return true
 		}
 
-		c.skipState = c.skipState && ((uint16(1)<<c.childID[c.lvl])&c.hasState[c.lvl]) == 0
+		c.SkipState = c.SkipState && ((uint16(1)<<c.childID[c.lvl])&c.hasState[c.lvl]) == 0
 	}
 	return false
 }
@@ -1014,7 +1014,7 @@ func (c *IHCursor) _next() (k, v []byte, hasBranch bool, err error) {
 	for {
 		if c.k[c.lvl] == nil {
 			c.cur = nil
-			c.skipState = isDenseSequence(c.prev, c.cur)
+			c.SkipState = isDenseSequence(c.prev, c.cur)
 			return nil, nil, false, nil
 		}
 
@@ -1025,7 +1025,7 @@ func (c *IHCursor) _next() (k, v []byte, hasBranch bool, err error) {
 			//}
 			if c.canUse(c.kBuf) {
 				c.cur = append(c.cur[:0], c.kBuf...)
-				c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
+				c.SkipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
 				return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
 			}
 		}
