@@ -95,9 +95,6 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 		defer c.Close()
 		defer c2.Close()
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if bytes.HasPrefix(k, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001000e")) {
-				fmt.Printf("check00: %x\n", k)
-			}
 			if err != nil {
 				panic(err)
 			}
