@@ -293,9 +293,9 @@ func GenStructStep(
 			}
 
 			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0e08060a030b0b0a0b0b070c06020a0e04010a0e05050c0f0c010f020a07000b07020e0501030b0106010704000e0d030a060d000c0d000901040a04000c020300000000000000000000000000000001")) {
-			//if maxLen <= 3 {
-			//e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
-			//}
+			if maxLen <= 3 {
+				e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
+			}
 			if retain(curr[:maxLen]) {
 				if err := e.branch(groups[maxLen]); err != nil {
 					return nil, nil, nil, err
