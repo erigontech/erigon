@@ -165,7 +165,7 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 // indicates a core error meaning that the message would always fail for that particular
 // state and would never be accepted within a block.
 // `refunds` is false when it is not required to apply gas refunds
-// `gasBailout` is true when it is not required to fail transation if the balance is not enough to pay gas.
+// `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
 // for trace_call to replicate OE/Pariry behaviour
 func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*ExecutionResult, error) {
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
