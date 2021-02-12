@@ -363,15 +363,15 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	//if storageKey == nil {
-	//	//if bytes.HasPrefix(accountKey, common.FromHex("0e08060a")) {
-	//	//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-	//	//}
+	//	if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
+	//		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+	//	}
 	//} else {
 	//	hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
-	//	if bytes.HasPrefix(r.currAccK, common.FromHex("71fe2579f4a5be157546549260f5539cc9445fa20674a8bb637049f43fc1eac20000000000000001")) && bytes.HasPrefix(storageKey[80:], common.FromHex("0d030a")) {
-	//		//fmt.Printf("%x\n", storageKey)
-	//		fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
-	//	}
+	//	if bytes.HasPrefix(r.currAccK, common.FromHex("85d7")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
+	//fmt.Printf("%x\n", storageKey)
+	//fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
+	//}
 	//}
 	switch itemType {
 	case StorageStreamItem:
@@ -582,8 +582,8 @@ func (r *RootHashAggregator) genStructStorage() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("71fe2579f4a5be157546549260f5539cc9445fa20674a8bb637049f43fc1eac20000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("00")) {
-			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hashes == nil && rootHash == nil)
+			//if bytes.HasPrefix(r.currAccK, common.FromHex("85d7")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+			//	fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hasHash, hashes == nil && rootHash == nil)
 			//}
 			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
 		}
@@ -665,8 +665,8 @@ func (r *RootHashAggregator) genStructAccount() error {
 				return nil
 			}
 			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			//if bytes.HasPrefix(r.currAccK, common.FromHex("71fe2579f4a5be157546549260f5539cc9445fa20674a8bb637049f43fc1eac20000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("00")) {
-			//	fmt.Printf("collect: %x,%x,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hashes == nil && rootHash == nil)
+			//if bytes.HasPrefix(r.currAccK, common.FromHex("85d7")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
+			//	fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hasHash, hashes == nil && rootHash == nil)
 			//}
 			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
 		}
