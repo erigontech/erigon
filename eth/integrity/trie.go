@@ -38,7 +38,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			case <-quit:
 				return
 			case <-logEvery.C:
-				log.Info("trie account integrity", "key", k)
+				log.Info("trie account integrity", "key", fmt.Sprintf("%x", k))
 			}
 			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalIH(v)
 			AssertSubset(hasBranch, hasState)
@@ -106,7 +106,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			case <-quit:
 				return
 			case <-logEvery.C:
-				log.Info("trie storage integrity", "key", k)
+				log.Info("trie storage integrity", "key", fmt.Sprintf("%x", k))
 			}
 
 			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalIH(v)
@@ -128,9 +128,6 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				}
 				if kParent == nil {
 					continue
-				}
-				if bytes.HasPrefix(k, common.FromHex("0010035a58d59beef3aa5547fc6ab31c30e38903cea85fa7b7306d00632c7a3e0000000000000001000e")) {
-					fmt.Printf("check: %x->%x\n", parentK, kParent)
 				}
 
 				found = true
