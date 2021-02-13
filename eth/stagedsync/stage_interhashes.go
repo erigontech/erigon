@@ -297,7 +297,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	startkey := dbutils.EncodeBlockNumber(from + 1)
 
 	decode := changeset.Mapper[changeSetBucket].Decode
-	deletedAccounts := map[string]struct{}{}
+	var deletedAccounts [][]byte
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, v := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
@@ -310,8 +310,9 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 				return err
 			}
 			if len(value) == 0 && len(v) > 0 { // self-destructed
+				deletedAccounts = append(deletedAccounts, newK)
 				fmt.Printf("deleted accs: %x\n", newK)
-				deletedAccounts[string(newK)] = struct{}{}
+				//deletedAccounts[string(newK)] = struct{}{}
 			}
 		}
 		return next(dbKey, newK, nil)
@@ -338,8 +339,8 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	}
 
 	if !storage { // delete Intermediate hashes of deleted accounts
-		for kS := range deletedAccounts {
-			k := []byte(kS)
+		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
+		for _, k := range deletedAccounts {
 			if err := p.db.Walk(dbutils.TrieOfStorageBucket, k, 8*len(k), func(k, v []byte) (bool, error) {
 				return true, p.db.Delete(dbutils.TrieOfStorageBucket, k, v)
 			}); err != nil {
@@ -364,17 +365,16 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	startkey := dbutils.EncodeBlockNumber(to + 1)
 
 	decode := changeset.Mapper[changeSetBucket].Decode
-	deletedAccounts := map[string]struct{}{}
+	var deletedAccounts [][]byte
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		n, k, v := decode(dbKey, dbValue)
+		_, k, v := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
 
-		fmt.Printf("u: %d,%x,%x\n", n, newK, v)
 		if !storage && len(v) == 0 { // self-destructed
-			deletedAccounts[string(newK)] = struct{}{}
+			deletedAccounts = append(deletedAccounts, newK)
 		}
 		return next(k, newK, nil)
 	}
@@ -400,11 +400,11 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	}
 
 	if !storage { // delete Intermediate hashes of deleted accounts
-		fmt.Printf("deleted accs u: %d\n", len(deletedAccounts))
-		for kS := range deletedAccounts {
-			k := []byte(kS)
-			if err := p.db.Walk(dbutils.TrieOfStorageBucket, k, 8*len(k), func(k, v []byte) (bool, error) {
-				return true, p.db.Delete(dbutils.TrieOfStorageBucket, k, v)
+		defer func(t time.Time) { fmt.Printf("stage_interhashes.go:404: %s\n", time.Since(t)) }(time.Now())
+		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
+		for _, k := range deletedAccounts {
+			if err := p.db.Walk(dbutils.TrieOfStorageBucket, k, 8*len(k), func(k, _ []byte) (bool, error) {
+				return true, p.db.Delete(dbutils.TrieOfStorageBucket, k, nil)
 			}); err != nil {
 				return err
 			}
@@ -420,9 +420,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if bytes.HasPrefix(k, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) {
-			fmt.Printf("excl: %x\n", k)
-		}
+		//if bytes.HasPrefix(k, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) {
+		//	fmt.Printf("excl: %x\n", k)
+		//}
 		exclude = append(exclude, k)
 		return nil
 	}
@@ -664,9 +664,9 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if bytes.HasPrefix(k, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) {
-			fmt.Printf("excl: %x\n", k)
-		}
+		//if bytes.HasPrefix(k, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) {
+		//	fmt.Printf("excl: %x\n", k)
+		//}
 		exclude = append(exclude, k)
 		return nil
 	}

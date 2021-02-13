@@ -607,9 +607,9 @@ func (r *RootHashAggregator) genStructStorage() error {
 		if r.shc == nil {
 			return nil
 		}
-		if bytes.HasPrefix(r.currAccK, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) && bytes.HasPrefix(keyHex, common.FromHex("00")) {
-			fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex, hasHash, hasBranch, hashes == nil && rootHash == nil)
-		}
+		//if bytes.HasPrefix(r.currAccK, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) && bytes.HasPrefix(keyHex, common.FromHex("00")) {
+		//	fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex, hasHash, hasBranch, hashes == nil && rootHash == nil)
+		//}
 		return r.shc(r.currAccK, keyHex, hasState, hasBranch, hasHash, hashes, rootHash)
 	}, data, r.groupsStorage, r.hasBranchStorage, r.hasHashStorage,
 		//false,
