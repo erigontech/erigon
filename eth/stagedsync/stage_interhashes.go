@@ -366,13 +366,14 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	decode := changeset.Mapper[changeSetBucket].Decode
 	deletedAccounts := map[string]struct{}{}
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, v := decode(dbKey, dbValue)
+		n, k, v := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
+
+		fmt.Printf("u: %d,%x,%x\n", n, newK, v)
 		if !storage && len(v) == 0 { // self-destructed
-			fmt.Printf("deleted accs u: %x\n", newK)
 			deletedAccounts[string(newK)] = struct{}{}
 		}
 		return next(k, newK, nil)
@@ -399,6 +400,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	}
 
 	if !storage { // delete Intermediate hashes of deleted accounts
+		fmt.Printf("deleted accs u: %d\n", len(deletedAccounts))
 		for kS := range deletedAccounts {
 			k := []byte(kS)
 			if err := p.db.Walk(dbutils.TrieOfStorageBucket, k, 8*len(k), func(k, v []byte) (bool, error) {
