@@ -311,8 +311,6 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 			}
 			if len(value) == 0 && len(v) > 0 { // self-destructed
 				deletedAccounts = append(deletedAccounts, newK)
-				fmt.Printf("deleted accs: %x\n", newK)
-				//deletedAccounts[string(newK)] = struct{}{}
 			}
 		}
 		return next(dbKey, newK, nil)
@@ -372,7 +370,6 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 		if err != nil {
 			return err
 		}
-
 		if !storage && len(v) == 0 { // self-destructed
 			deletedAccounts = append(deletedAccounts, newK)
 		}
