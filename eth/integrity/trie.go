@@ -34,13 +34,6 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			if err != nil {
 				panic(err)
 			}
-			select {
-			default:
-			case <-quit:
-				return
-			case <-logEvery.C:
-				log.Info("trie account integrity", "key", fmt.Sprintf("%x", k))
-			}
 			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalIH(v)
 			AssertSubset(hasBranch, hasState)
 			AssertSubset(hasHash, hasState)
@@ -90,6 +83,13 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db; last seen key: %x->%x", k, hasBranch, i, seek, k2))
 				}
 			}
+			select {
+			default:
+			case <-quit:
+				return
+			case <-logEvery.C:
+				log.Info("trie account integrity", "key", fmt.Sprintf("%x", k))
+			}
 		}
 	}
 	{
@@ -99,13 +99,6 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				panic(err)
-			}
-			select {
-			default:
-			case <-quit:
-				return
-			case <-logEvery.C:
-				log.Info("trie storage integrity", "key", fmt.Sprintf("%x", k))
 			}
 
 			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalIH(v)
@@ -155,6 +148,14 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				if !bytes.HasPrefix(k2, seek) {
 					panic(fmt.Errorf("key %x has branches %016b, but there is no child %d in db", k, hasBranch, i))
 				}
+			}
+
+			select {
+			default:
+			case <-quit:
+				return
+			case <-logEvery.C:
+				log.Info("trie storage integrity", "key", fmt.Sprintf("%x", k))
 			}
 		}
 	}
