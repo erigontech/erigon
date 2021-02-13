@@ -385,7 +385,7 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 	}
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: stage4.BlockNumber - unwind}
-		return stagedsync.UnwindExecutionStage(u, stage4, db,
+		return stagedsync.UnwindExecutionStage(u, stage4, db, ch,
 			stagedsync.ExecuteBlockStageParams{
 				ToBlock:               block, // limit execution to the specified block
 				WriteReceipts:         sm.Receipts,

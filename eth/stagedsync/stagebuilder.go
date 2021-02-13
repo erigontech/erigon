@@ -191,7 +191,7 @@ func DefaultStages() StageBuilders {
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindExecutionStage(u, s, world.TX, ExecuteBlockStageParams{
+						return UnwindExecutionStage(u, s, world.TX, world.QuitCh, ExecuteBlockStageParams{
 							WriteReceipts:         world.storageMode.Receipts,
 							Cache:                 world.cache,
 							BatchSize:             world.batchSize,

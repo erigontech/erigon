@@ -32,7 +32,7 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	}
 	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
 	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, tx2, ExecuteBlockStageParams{WriteReceipts: true})
+	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockStageParams{WriteReceipts: true})
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	}
 	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
 	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, tx2, ExecuteBlockStageParams{WriteReceipts: true})
+	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockStageParams{WriteReceipts: true})
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	}
 	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
 	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, tx2, ExecuteBlockStageParams{WriteReceipts: true})
+	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockStageParams{WriteReceipts: true})
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
