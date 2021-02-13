@@ -110,17 +110,20 @@ type RootHashAggregator struct {
 	currStorage      bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succStorage      bytes.Buffer
 	valueStorage     []byte // Current value to be used as the value tape for the hash builder
-	hasBranchStorage bool
+	hadBranchStorage bool
 	hashAccount      common.Hash  // Current value to be used as the value tape for the hash builder
 	hashStorage      common.Hash  // Current value to be used as the value tape for the hash builder
 	curr             bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ             bytes.Buffer
 	currAccK         []byte
 	value            []byte // Current value to be used as the value tape for the hash builder
-	hasBranchAcc     bool
+	hadBranchAcc     bool
 	groups           []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
 	hasBranch        []uint16
 	hasHash          []uint16
+	groupsStorage    []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
+	hasBranchStorage []uint16
+	hasHashStorage   []uint16
 	hb               *HashBuilder
 	hashData         GenStructStepHashData
 	a                accounts.Account
@@ -255,19 +258,16 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 				if ihStorage.skipState {
 					goto SkipStorage
 				}
-
 				i4++
 				for kS, vS, err3 := ss.SeekBothRange(accWithInc, ihStorage.FirstNotCoveredPrefix()); kS != nil; kS, vS, err3 = ss.NextDup() {
 					if err3 != nil {
 						return EmptyRoot, err3
 					}
-					hexutil.DecompressNibbles(vS[:32], &l.buf)
-					if keyIsBefore(ihKS, l.buf) { // read until next IH
+					hexutil.DecompressNibbles(vS[:32], &l.kHexS)
+					if keyIsBefore(ihKS, l.kHexS) { // read until next IH
 						break
 					}
-					hexutil.DecompressNibbles(accWithInc, &l.kHexS)
-					l.kHexS = append(l.kHexS[:80], l.buf...)
-					if err = l.receiver.Receive(StorageStreamItem, nil, common.CopyBytes(l.kHexS), nil, vS[32:], nil, false, 0); err != nil {
+					if err = l.receiver.Receive(StorageStreamItem, accWithInc, common.CopyBytes(l.kHexS), nil, vS[32:], nil, false, 0); err != nil {
 						return EmptyRoot, err
 					}
 				}
@@ -277,9 +277,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					break
 				}
 
-				hexutil.DecompressNibbles(accWithInc, &l.kHexS)
-				l.kHexS = append(l.kHexS[:80], ihKS...)
-				if err = l.receiver.Receive(SHashStreamItem, nil, common.CopyBytes(l.kHexS), nil, nil, ihVS, hasBranchS, 0); err != nil {
+				if err = l.receiver.Receive(SHashStreamItem, accWithInc, common.CopyBytes(ihKS), nil, nil, ihVS, hasBranchS, 0); err != nil {
 					return EmptyRoot, err
 				}
 				if len(ihKS) == 0 { // means we just sent acc.storageRoot
@@ -362,19 +360,23 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	hasBranch bool,
 	cutoff int,
 ) error {
-	if storageKey == nil {
-		//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
-		//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-		//}
-	} else {
-		hexutil.CompressNibbles(storageKey[:80], &r.currAccK)
-		if bytes.HasPrefix(r.currAccK, common.FromHex("e4405bfd8d8a3a8b528b1fc9187bc030f0dbaa79e828619a95d9335ddfe3ea6b0000000000000001")) && bytes.HasPrefix(storageKey[80:], common.FromHex("")) {
-			fmt.Printf("%x\n", storageKey)
-			fmt.Printf("1: %d, %x, %x, %x\n", itemType, r.currAccK, storageKey[80:], hash)
-		}
-	}
+	//r.traceIf("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb", "00")
+	//if storageKey == nil {
+	//	//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
+	//	//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+	//	//}
+	//} else {
+	//	if bytes.HasPrefix(accountKey, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb")) && bytes.HasPrefix(storageKey, common.FromHex("00")) {
+	//		//fmt.Printf("%x\n", storageKey)
+	//		fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
+	//	}
+	//}
+
 	switch itemType {
 	case StorageStreamItem:
+		if len(r.currAccK) == 0 {
+			r.currAccK = append(r.currAccK[:0], accountKey...)
+		}
 		r.advanceKeysStorage(storageKey, true /* terminator */)
 		if r.currStorage.Len() > 0 {
 			if err := r.genStructStorage(); err != nil {
@@ -389,6 +391,9 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 			r.accData.FieldSet |= AccountFieldStorageOnly
 			break
 		}
+		if len(r.currAccK) == 0 {
+			r.currAccK = append(r.currAccK[:0], accountKey...)
+		}
 		r.advanceKeysStorage(storageKey, false /* terminator */)
 		if r.currStorage.Len() > 0 {
 			if err := r.genStructStorage(); err != nil {
@@ -399,23 +404,27 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	case AccountStreamItem:
 		r.advanceKeysAccount(accountKey, true /* terminator */)
 		if r.curr.Len() > 0 && !r.wasIH {
-			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			//r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			r.cutoffKeysStorage(0)
 			if r.currStorage.Len() > 0 {
 				if err := r.genStructStorage(); err != nil {
 					return err
 				}
 			}
 			if r.currStorage.Len() > 0 {
-				if len(r.groups) >= 2*common.HashLength {
-					r.groups = r.groups[:2*common.HashLength-1]
-					r.hasBranch = r.hasBranch[:2*common.HashLength-1]
-					r.hasHash = r.hasHash[:2*common.HashLength-1]
-				}
-				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
-					r.groups = r.groups[:len(r.groups)-1]
-					r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
-					r.hasHash = r.hasHash[:len(r.hasHash)-1]
-				}
+				//if len(r.groups) >= 2*common.HashLength {
+				//	r.groups = r.groups[:2*common.HashLength-1]
+				//	r.hasBranch = r.hasBranch[:2*common.HashLength-1]
+				//	r.hasHash = r.hasHash[:2*common.HashLength-1]
+				//}
+				//for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+				//	r.groups = r.groups[:len(r.groups)-1]
+				//	r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
+				//	r.hasHash = r.hasHash[:len(r.hasHash)-1]
+				//}
+				r.groupsStorage = r.groupsStorage[:0]
+				r.hasBranchStorage = r.hasBranchStorage[:0]
+				r.hasHashStorage = r.hasHashStorage[:0]
 				r.currStorage.Reset()
 				r.succStorage.Reset()
 				r.wasIHStorage = false
@@ -423,6 +432,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				r.accData.FieldSet |= AccountFieldStorageOnly
 			}
 		}
+		r.currAccK = r.currAccK[:0]
 		if r.curr.Len() > 0 {
 			if err := r.genStructAccount(); err != nil {
 				return err
@@ -434,23 +444,27 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	case AHashStreamItem:
 		r.advanceKeysAccount(accountKey, false /* terminator */)
 		if r.curr.Len() > 0 && !r.wasIH {
-			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			//r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			r.cutoffKeysStorage(0)
 			if r.currStorage.Len() > 0 {
 				if err := r.genStructStorage(); err != nil {
 					return err
 				}
 			}
 			if r.currStorage.Len() > 0 {
-				if len(r.groups) >= 2*common.HashLength {
-					r.groups = r.groups[:2*common.HashLength-1]
-					r.hasBranch = r.hasBranch[:2*common.HashLength-1]
-					r.hasHash = r.hasHash[:2*common.HashLength-1]
-				}
-				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
-					r.groups = r.groups[:len(r.groups)-1]
-					r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
-					r.hasHash = r.hasHash[:len(r.hasHash)-1]
-				}
+				//if len(r.groups) >= 2*common.HashLength {
+				//	r.groups = r.groups[:2*common.HashLength-1]
+				//	r.hasBranch = r.hasBranch[:2*common.HashLength-1]
+				//	r.hasHash = r.hasHash[:2*common.HashLength-1]
+				//}
+				//for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+				//	r.groups = r.groups[:len(r.groups)-1]
+				//	r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
+				//	r.hasHash = r.hasHash[:len(r.hasHash)-1]
+				//}
+				r.groupsStorage = r.groupsStorage[:0]
+				r.hasBranchStorage = r.hasBranchStorage[:0]
+				r.hasHashStorage = r.hasHashStorage[:0]
 				r.currStorage.Reset()
 				r.succStorage.Reset()
 				r.wasIHStorage = false
@@ -458,6 +472,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				r.accData.FieldSet |= AccountFieldStorageOnly
 			}
 		}
+		r.currAccK = r.currAccK[:0]
 		if r.curr.Len() > 0 {
 			if err := r.genStructAccount(); err != nil {
 				return err
@@ -472,23 +487,27 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 		}
 		r.cutoffKeysAccount(cutoff)
 		if r.curr.Len() > 0 && !r.wasIH {
-			r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			//r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
+			r.cutoffKeysStorage(0)
 			if r.currStorage.Len() > 0 {
 				if err := r.genStructStorage(); err != nil {
 					return err
 				}
 			}
 			if r.currStorage.Len() > 0 {
-				if len(r.groups) >= 2*common.HashLength {
-					r.groups = r.groups[:2*common.HashLength-1]
-					r.hasBranch = r.hasBranch[:2*common.HashLength-1]
-					r.hasHash = r.hasHash[:2*common.HashLength-1]
-				}
-				for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
-					r.groups = r.groups[:len(r.groups)-1]
-					r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
-					r.hasHash = r.hasHash[:len(r.hasHash)-1]
-				}
+				//if len(r.groups) >= 2*common.HashLength {
+				//	r.groups = r.groups[:2*common.HashLength-1]
+				//	r.hasBranch = r.hasBranch[:2*common.HashLength-1]
+				//	r.hasHash = r.hasHash[:2*common.HashLength-1]
+				//}
+				//for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+				//	r.groups = r.groups[:len(r.groups)-1]
+				//	r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
+				//	r.hasHash = r.hasHash[:len(r.hasHash)-1]
+				//}
+				r.groupsStorage = r.groupsStorage[:0]
+				r.hasBranchStorage = r.hasBranchStorage[:0]
+				r.hasHashStorage = r.hasHashStorage[:0]
 				r.currStorage.Reset()
 				r.succStorage.Reset()
 				r.wasIHStorage = false
@@ -507,11 +526,11 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				r.hasBranch = r.hasBranch[:cutoff]
 				r.hasHash = r.hasHash[:cutoff]
 			}
-			for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
-				r.groups = r.groups[:len(r.groups)-1]
-				r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
-				r.hasHash = r.hasHash[:len(r.hasHash)-1]
-			}
+			//for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
+			//	r.groups = r.groups[:len(r.groups)-1]
+			//	r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
+			//	r.hasHash = r.hasHash[:len(r.hasHash)-1]
+			//}
 		}
 		if r.hb.hasRoot() {
 			r.root = r.hb.rootHash()
@@ -530,6 +549,17 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 		r.succStorage.Reset()
 	}
 	return nil
+}
+
+func (r *RootHashAggregator) traceIf(acc, st string) {
+	// "succ" - because on this iteration this "succ" will become "curr"
+	if r.succStorage.Len() == 0 {
+		var accNibbles []byte
+		hexutil.DecompressNibbles(common.FromHex(acc), &accNibbles)
+		r.trace = bytes.HasPrefix(r.succ.Bytes(), accNibbles)
+	} else {
+		r.trace = bytes.HasPrefix(r.currAccK, common.FromHex(acc)) && bytes.HasPrefix(r.succStorage.Bytes(), common.FromHex(st))
+	}
 }
 
 func (r *RootHashAggregator) Result() SubTries {
@@ -556,10 +586,10 @@ func (r *RootHashAggregator) cutoffKeysStorage(cutoff int) {
 	r.currStorage.Reset()
 	r.currStorage.Write(r.succStorage.Bytes())
 	r.succStorage.Reset()
-	if r.currStorage.Len() > 0 {
-		r.succStorage.Write(r.currStorage.Bytes()[:cutoff-1])
-		r.succStorage.WriteByte(r.currStorage.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
-	}
+	//if r.currStorage.Len() > 0 {
+	//r.succStorage.Write(r.currStorage.Bytes()[:cutoff-1])
+	//r.succStorage.WriteByte(r.currStorage.Bytes()[cutoff-1] + 1) // Modify last nibble in the incarnation part of the `currStorage`
+	//}
 }
 
 func (r *RootHashAggregator) genStructStorage() error {
@@ -567,34 +597,24 @@ func (r *RootHashAggregator) genStructStorage() error {
 	var data GenStructStepData
 	if r.wasIHStorage {
 		r.hashData.Hash = r.hashStorage
-		r.hashData.IsBranch = r.hasBranchStorage
+		r.hashData.IsBranch = r.hadBranchStorage
 		data = &r.hashData
 	} else {
 		r.leafData.Value = rlphacks.RlpSerializableBytes(r.valueStorage)
 		data = &r.leafData
 	}
-	r.groups, r.hasBranch, r.hasHash, err = GenStructStep(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-		if len(keyHex) > 64 && len(keyHex) < 80 {
+	r.groupsStorage, r.hasBranchStorage, r.hasHashStorage, err = GenStructStep(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
+		if r.shc == nil {
 			return nil
 		}
-		if len(keyHex) >= 80 {
-			if r.shc == nil {
-				return nil
-			}
-			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			if bytes.HasPrefix(r.currAccK, common.FromHex("e4405bfd8d8a3a8b528b1fc9187bc030f0dbaa79e828619a95d9335ddfe3ea6b0000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
-				fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hasHash, hashes == nil && rootHash == nil)
-			}
-			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
+		if bytes.HasPrefix(r.currAccK, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) && bytes.HasPrefix(keyHex, common.FromHex("00")) {
+			fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex, hasHash, hasBranch, hashes == nil && rootHash == nil)
 		}
-		if r.hc == nil {
-			return nil
-		}
-		//if bytes.HasPrefix(keyHex, common.FromHex("060e")) {
-		//	fmt.Printf("collect: %x,%016b, del:%t\n", keyHex, hasBranch, hashes == nil)
-		//}
-		return r.hc(keyHex, hasState, hasBranch, hasHash, hashes, rootHash)
-	}, data, r.groups, r.hasBranch, r.hasHash, r.trace)
+		return r.shc(r.currAccK, keyHex, hasState, hasBranch, hasHash, hashes, rootHash)
+	}, data, r.groupsStorage, r.hasBranchStorage, r.hasHashStorage,
+		//false,
+		r.trace,
+	)
 	if err != nil {
 		return err
 	}
@@ -607,7 +627,7 @@ func (r *RootHashAggregator) saveValueStorage(isIH, hasBranch bool, v, h []byte)
 	r.valueStorage = nil
 	if isIH {
 		r.hashStorage.SetBytes(h)
-		r.hasBranchStorage = hasBranch
+		r.hadBranchStorage = hasBranch
 	} else {
 		r.valueStorage = v
 	}
@@ -637,7 +657,7 @@ func (r *RootHashAggregator) genStructAccount() error {
 	var data GenStructStepData
 	if r.wasIH {
 		r.hashData.Hash = r.hashAccount
-		r.hashData.IsBranch = r.hasBranchAcc
+		r.hashData.IsBranch = r.hadBranchAcc
 		//copy(r.hashData.Hash[:], r.value)
 		data = &r.hashData
 	} else {
@@ -657,27 +677,18 @@ func (r *RootHashAggregator) genStructAccount() error {
 	r.succStorage.Reset()
 	var err error
 	if r.groups, r.hasBranch, r.hasHash, err = GenStructStep(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-		if len(keyHex) > 64 && len(keyHex) < 80 {
-			return nil
-		}
-		if len(keyHex) >= 80 {
-			if r.shc == nil {
-				return nil
-			}
-			hexutil.CompressNibbles(keyHex[:80], &r.currAccK)
-			if bytes.HasPrefix(r.currAccK, common.FromHex("e4405bfd8d8a3a8b528b1fc9187bc030f0dbaa79e828619a95d9335ddfe3ea6b0000000000000001")) && bytes.HasPrefix(keyHex[80:], common.FromHex("")) {
-				fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex[80:], hasBranch, hasHash, hashes == nil && rootHash == nil)
-			}
-			return r.shc(r.currAccK, keyHex[80:], hasState, hasBranch, hasHash, hashes, rootHash)
-		}
 		if r.hc == nil {
 			return nil
 		}
+
 		//if bytes.HasPrefix(keyHex, common.FromHex("060e")) {
-		//	fmt.Printf("collect: %x,%016b, del:%t\n", keyHex, hasBranch, hashes == nil)
+		//	fmt.Printf("collect: %x,%b,%b, del:%t\n", keyHex, hasHash, hasBranch, hashes == nil)
 		//}
 		return r.hc(keyHex, hasState, hasBranch, hasHash, hashes, rootHash)
-	}, data, r.groups, r.hasBranch, r.hasHash, r.trace); err != nil {
+	}, data, r.groups, r.hasBranch, r.hasHash,
+		false,
+		//r.trace,
+	); err != nil {
 		return err
 	}
 	r.accData.FieldSet = 0
@@ -688,7 +699,7 @@ func (r *RootHashAggregator) saveValueAccount(isIH, hasBranch bool, v *accounts.
 	r.wasIH = isIH
 	if isIH {
 		r.hashAccount.SetBytes(h)
-		r.hasBranchAcc = hasBranch
+		r.hadBranchAcc = hasBranch
 		return nil
 	}
 	r.a.Copy(v)

@@ -297,45 +297,26 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	startkey := dbutils.EncodeBlockNumber(from + 1)
 
 	decode := changeset.Mapper[changeSetBucket].Decode
-	var extract etl.ExtractFunc
-	var deletedAccounts map[string]struct{}
-	if storage {
-		extract = func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-			_, k, _ := decode(dbKey, dbValue)
-			newK, err := transformPlainStateKey(k)
-			if err != nil {
-				return err
-			}
-			//if bytes.HasPrefix(newK, common.FromHex("ce")) {
-			//	fmt.Printf("kk: %d,%x,%x\n", blk, k, v)
-			//}
-
-			return next(dbKey, newK, nil)
+	deletedAccounts := map[string]struct{}{}
+	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
+		_, k, v := decode(dbKey, dbValue)
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
 		}
-	} else {
-		deletedAccounts = map[string]struct{}{}
-		extract = func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-			_, k, v := decode(dbKey, dbValue)
+		if !storage {
 			value, err := p.db.Get(dbutils.PlainStateBucket, k)
 			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 				return err
 			}
-			newK, err := transformPlainStateKey(k)
-			if err != nil {
-				return err
-			}
-			//if bytes.HasPrefix(k, common.FromHex("ce")) {
-			//	fmt.Printf("kk: %d,%x,%x\n", blk, k, v)
-			//}
-
 			if len(value) == 0 && len(v) > 0 { // self-destructed
-				newKS := string(newK)
-				deletedAccounts[newKS] = struct{}{}
+				fmt.Printf("deleted accs: %x\n", newK)
+				deletedAccounts[string(newK)] = struct{}{}
 			}
-
-			return next(dbKey, newK, nil)
 		}
+		return next(dbKey, newK, nil)
 	}
+
 	var l OldestAppearedLoad
 	l.innerLoadFunc = load
 
@@ -383,16 +364,17 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	startkey := dbutils.EncodeBlockNumber(to + 1)
 
 	decode := changeset.Mapper[changeSetBucket].Decode
+	deletedAccounts := map[string]struct{}{}
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, _ := decode(dbKey, dbValue)
+		_, k, v := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
-
-		//if bytes.HasPrefix(newK, common.FromHex("ce")) {
-		//	fmt.Printf("kk: %d,%x,%x\n", blk, newK, v)
-		//}
+		if !storage && len(v) == 0 { // self-destructed
+			fmt.Printf("deleted accs u: %x\n", newK)
+			deletedAccounts[string(newK)] = struct{}{}
+		}
 		return next(k, newK, nil)
 	}
 
@@ -415,6 +397,19 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	); err != nil {
 		return err
 	}
+
+	if !storage { // delete Intermediate hashes of deleted accounts
+		for kS := range deletedAccounts {
+			k := []byte(kS)
+			if err := p.db.Walk(dbutils.TrieOfStorageBucket, k, 8*len(k), func(k, v []byte) (bool, error) {
+				return true, p.db.Delete(dbutils.TrieOfStorageBucket, k, v)
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	return nil
 }
 
@@ -423,9 +418,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		//if bytes.HasPrefix(k, common.FromHex("5722")) {
-		//	fmt.Printf("excl: %x\n", k)
-		//}
+		if bytes.HasPrefix(k, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) {
+			fmt.Printf("excl: %x\n", k)
+		}
 		exclude = append(exclude, k)
 		return nil
 	}
@@ -667,9 +662,9 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		//if bytes.HasPrefix(k, common.FromHex("5722")) {
-		//	fmt.Printf("excl: %x\n", k)
-		//}
+		if bytes.HasPrefix(k, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) {
+			fmt.Printf("excl: %x\n", k)
+		}
 		exclude = append(exclude, k)
 		return nil
 	}

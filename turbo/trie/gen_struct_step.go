@@ -17,7 +17,6 @@
 package trie
 
 import (
-	"bytes"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -123,9 +122,9 @@ func GenStructStep(
 		} else {
 			maxLen = succLen
 		}
-		if trace || maxLen >= len(curr) {
-			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
-		}
+		//if trace || maxLen >= len(curr) {
+		//	fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
+		//}
 
 		// Add the digit immediately following the max common prefix and compute length of remainder length
 		extraDigit := curr[maxLen]
@@ -147,16 +146,16 @@ func GenStructStep(
 		if !buildExtensions {
 			switch v := data.(type) {
 			case *GenStructStepHashData:
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("07010f0e020507090f040a050b0e0105070504060504090206000f050503090c0c090404050f0a02000607040a080b0b0603070004090f04030f0c010e0a0c020000000000000000000000000000000102091")) {
-					fmt.Printf("ih v.IsBranch before: %x, %t,%b\n", curr, v.IsBranch, hasBranch)
+				if trace {
+					fmt.Printf("ih v.IsBranch before: %x, %t,%b,%b,%b\n", curr, v.IsBranch, hasHash, hasBranch, groups)
 				}
 				if v.IsBranch {
 					hasBranch[len(curr)-1] |= 1 << curr[len(curr)-1]
 				}
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("07010f0e020507090f040a050b0e0105070504060504090206000f050503090c0c090404050f0a02000607040a080b0b0603070004090f04030f0c010e0a0c02000000000000000000000000000000010209")) {
-					fmt.Printf("ih v.IsBranch: %x, %t, %b\n", curr, v.IsBranch, hasHash)
-				}
 				hasHash[len(curr)-1] |= 1 << curr[len(curr)-1]
+				if trace {
+					fmt.Printf("ih v.IsBranch after: %x, %t,%b,%b,%b\n", curr, v.IsBranch, hasHash, hasBranch, groups)
+				}
 				/* building a hash */
 				if err := e.hash(v.Hash[:]); err != nil {
 					return nil, nil, nil, err
@@ -190,40 +189,32 @@ func GenStructStep(
 
 		if buildExtensions {
 			if remainderLen > 0 {
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("0e040400050b0f0d080d080a030a080b0502080b010f0c090108070b0c0003000f000d0b0a0a07090e0802080601090a09050d090303050d0d0f0e030e0a060b00000000000000000000000000000001")) {
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0e040400050b0f0d080d080a030a080b0502080b010f0c090108070b0c0003000f000d0b0a0a07090e0802080601090a09050d090303050d0d0f0e030e0a060b00000000000000000000000000000001")) {
+				if trace {
 					fmt.Printf("ext: %x->%x\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen])
-					if len(hasBranch) > 79 {
-						fmt.Printf("ext before: %b,%d,%d\n", hasBranch[80:], remainderStart+remainderLen, maxLen)
-					} else {
-						fmt.Printf("ext before: %b,%d,%d\n", hasBranch, remainderStart+remainderLen, maxLen)
-						fmt.Printf("ext decide: curr[remainderStart+remainderLen-1]=%x, hasBranch[remainderStart+remainderLen-1]=%b\n", curr[remainderStart+remainderLen-1], hasBranch[remainderStart+remainderLen-1])
+					fmt.Printf("ext before: %b, %b, %b\n", hasHash, hasBranch, groups)
+				}
+				from := remainderStart
+				if from == 0 {
+					from = 1
+				}
+				for i := from; i < remainderStart+remainderLen; i++ {
+					if 1<<curr[i]&hasBranch[i] != 0 {
+						hasBranch[from-1] |= 1 << curr[from-1]
 					}
 				}
-				if remainderStart > 0 {
-					for i := remainderStart; i < remainderStart+remainderLen; i++ {
-						if 1<<curr[i]&hasBranch[i] != 0 {
-							hasBranch[remainderStart-1] |= 1 << curr[remainderStart-1]
-						}
-					}
-					hasBranch = hasBranch[:remainderStart]
-				}
-				hasHash = hasHash[:remainderStart]
+				hasBranch = hasBranch[:from]
+				hasHash = hasHash[:from]
 				if h != nil {
-					for i := remainderStart; i < remainderStart+remainderLen; i++ {
+					for i := from; i < remainderStart+remainderLen; i++ {
 						if err := h(curr[:i], 0, 0, 0, nil, nil); err != nil {
 							return nil, nil, nil, err
 						}
 					}
 				}
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("0e040400050b0f0d080d080a030a080b0502080b010f0c090108070b0c0003000f000d0b0a0a07090e0802080601090a09050d090303050d0d0f0e030e0a060b00000000000000000000000000000001")) {
-					if len(hasBranch) > 79 {
-						fmt.Printf("ext after: %b\n", hasBranch[80:])
-					} else {
-						fmt.Printf("ext after: %b,%b\n", hasBranch, groups)
-					}
-				}
 				if trace {
-					fmt.Printf("Extension %x\n", curr[remainderStart:remainderStart+remainderLen])
+					fmt.Printf("ext after: %b, %b, %b\n", hasHash, hasBranch, groups)
+					//fmt.Printf("Extension %x\n", curr[remainderStart:remainderStart+remainderLen])
 				}
 				/* building extensions */
 				if retain(curr[:maxLen]) {
@@ -240,6 +231,12 @@ func GenStructStep(
 
 		// Check for the optional part
 		if precLen <= succLen && len(succ) > 0 {
+			//fmt.Printf("sdf: %d\n", len(groups))
+			//if h != nil && maxLen == 79 && (hasHash[80] != 0 || hasBranch[80] != 0) {
+			//	if err := h(curr[:80], groups[80], hasBranch[80], hasHash[80], nil, e.topHash()); err != nil {
+			//		return nil, nil, nil, err
+			//	}
+			//}
 			return groups, hasBranch, hasHash, nil
 		}
 
@@ -247,29 +244,20 @@ func GenStructStep(
 		if h != nil {
 			canSendHashes := hasHash[maxLen] != 0 || hasBranch[maxLen] != 0
 			if canSendHashes {
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("0e040400050b0f0d080d080a030a080b0502080b010f0c090108070b0c0003000f000d0b0a0a07090e0802080601090a09050d090303050d0d0f0e030e0a060b00000000000000000000000000000001")) {
-					if len(hasBranch) >= 79 {
-						fmt.Printf("why now: %x,%b,%b\n", curr[:maxLen][79:], hasBranch[79:], groups[79:])
-					} else {
-						fmt.Printf("why now: %x,%b,%b\n", curr[:maxLen], hasBranch, groups)
-					}
+				if trace {
+					fmt.Printf("why now: %x,%b,%b,%b\n", curr[:maxLen], hasHash, hasBranch, groups)
 				}
 				usefulHashes = e.topHashes(curr[:maxLen], hasHash[maxLen], groups[maxLen])
-				if maxLen != 0 && maxLen != 80 {
+				if maxLen != 0 {
 					hasBranch[maxLen-1] |= 1 << curr[maxLen-1]
-
-					if bytes.HasPrefix(curr[:maxLen], common.FromHex("0e040400050b0f0d080d080a030a080b0502080b010f0c090108070b0c0003000f000d0b0a0a07090e0802080601090a09050d090303050d0d0f0e030e0a060b00000000000000000000000000000001")) {
-						if len(hasBranch) >= 79 {
-							fmt.Printf("send: %x,%d,%b,%b\n", curr[:maxLen][79:], maxLen, hasBranch[maxLen], groups[maxLen])
-							fmt.Printf("send2: %b,%b\n", hasBranch[maxLen-1], hasBranch[maxLen])
-						} else {
-							fmt.Printf("send: %x,%b,%b\n", curr[:maxLen], hasBranch[maxLen], groups[maxLen])
-						}
-					}
-					if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, nil); err != nil {
-						return nil, nil, nil, err
-					}
 				}
+				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0e040400050b0f0d080d080a030a080b0502080b010f0c090108070b0c0003000f000d0b0a0a07090e0802080601090a09050d090303050d0d0f0e030e0a060b00000000000000000000000000000001")) {
+				//fmt.Printf("send: %x,%b,%b\n", curr[:maxLen], hasBranch[maxLen], groups[maxLen])
+				//}
+				if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, nil); err != nil {
+					return nil, nil, nil, err
+				}
+
 			} else {
 				if err := h(curr[:maxLen], 0, 0, 0, nil, nil); err != nil {
 					return nil, nil, nil, err
@@ -280,23 +268,23 @@ func GenStructStep(
 		// Close the immediately encompassing prefix group, if needed
 		if len(succ) > 0 || precExists {
 			if maxLen > 0 {
+				if trace {
+					fmt.Printf("set bit before %x, %b, %b, %b\n", curr[:maxLen], hasHash, hasBranch, groups)
+				}
+
 				hasHash[maxLen-1] |= 1 << curr[maxLen-1]
 				if hasBranch[maxLen] != 0 {
 					hasBranch[maxLen-1] |= 1 << curr[maxLen-1]
 				}
-				if bytes.HasPrefix(curr[:maxLen], common.FromHex("0e040400050b0f0d080d080a030a080b0502080b010f0c090108070b0c0003000f000d0b0a0a07090e0802080601090a09050d090303050d0d0f0e030e0a060b00000000000000000000000000000001")) {
-					if maxLen >= 79 {
-						fmt.Printf("set bit %x, %x, %b,%b\n", curr[:maxLen-1][79:], curr[maxLen-1], hasBranch[79:], groups[79:])
-					} else {
-						fmt.Printf("set bit %x, %x,m %b\n", curr[:maxLen-1], curr[maxLen-1], hasBranch)
-					}
+				if trace {
+					fmt.Printf("set bit %x, %b, %b, %b\n", curr[:maxLen], hasHash, hasBranch, groups)
 				}
 			}
 
-			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("08050d07")) {
-			//	if maxLen <= 3 {
-			//e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
-			//}
+			if trace {
+				//if trace && maxLen <= 3 {
+				e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
+			}
 			if retain(curr[:maxLen]) {
 				if err := e.branch(groups[maxLen]); err != nil {
 					return nil, nil, nil, err
@@ -306,11 +294,8 @@ func GenStructStep(
 					return nil, nil, nil, err
 				}
 			}
-			//if bytes.HasPrefix(curr[:maxLen], common.FromHex("0c0e")) {
-			//	fmt.Printf("--- %x, , %x\n", curr[:maxLen], e.topHash())
-			//}
 		}
-		if h != nil && maxLen == 80 && (hasHash[maxLen] != 0 || hasBranch[maxLen] != 0) {
+		if h != nil && maxLen == 0 && (hasHash[maxLen] != 0 || hasBranch[maxLen] != 0) {
 			if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, e.topHash()); err != nil {
 				return nil, nil, nil, err
 			}
