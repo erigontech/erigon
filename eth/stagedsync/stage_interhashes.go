@@ -353,6 +353,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, load etl.LoadFunc) error {
 	to := u.UnwindPoint
 	var changeSetBucket string
+
 	if storage {
 		changeSetBucket = dbutils.PlainStorageChangeSetBucket
 	} else {
