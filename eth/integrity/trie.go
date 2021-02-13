@@ -24,6 +24,7 @@ func AssertSubset(a, b uint16) {
 func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
+	seek := make([]byte, 256)
 
 	{
 		c, c2 := tx.Cursor(dbutils.TrieOfAccountsBucket), tx.Cursor(dbutils.TrieOfAccountsBucket)
@@ -71,7 +72,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			}
 
 			// must have all children
-			seek := make([]byte, len(k)+1)
+			seek = seek[:len(k)+1]
 			copy(seek, k)
 			for i := uint16(0); i < 16; i++ {
 				if 1<<i&hasBranch == 0 {
@@ -140,7 +141,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			}
 
 			// must have all children
-			seek := make([]byte, len(k)+1)
+			seek = seek[:len(k)+1]
 			copy(seek, k)
 			for i := uint16(0); i < 16; i++ {
 				if 1<<i&hasBranch == 0 {
