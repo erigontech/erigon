@@ -510,7 +510,7 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 	rwRaw, _ := ss.peerRwMap.Load(peerID)
 	rw, _ := rwRaw.(p2p.MsgReadWriter)
 	if rw == nil {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("SendMessageByMinBlock find rw for peer %s", peerID)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock find rw for peer %s", peerID)
 	}
 	var msgcode uint64
 	switch inreq.Data.Id {
@@ -519,13 +519,13 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 	case proto_sentry.MessageId_GetBlockBodies:
 		msgcode = eth.GetBlockBodiesMsg
 	default:
-		return &proto_sentry.SentPeers{}, fmt.Errorf("SendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
 	if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(inreq.Data.Data)), Payload: bytes.NewReader(inreq.Data.Data)}); err != nil {
 		ss.peerHeightMap.Delete(peerID)
 		ss.peerTimeMap.Delete(peerID)
 		ss.peerRwMap.Delete(peerID)
-		return &proto_sentry.SentPeers{}, fmt.Errorf("SendMessageByMinBlock to peer %s: %v", peerID, err)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %v", peerID, err)
 	}
 	ss.peerTimeMap.Store(peerID, time.Now().Unix()+5)
 	return &proto_sentry.SentPeers{Peers: [][]byte{[]byte(peerID)}}, nil
@@ -545,13 +545,13 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	case proto_sentry.MessageId_BlockHeaders:
 		msgcode = eth.BlockHeadersMsg
 	default:
-		return &proto_sentry.SentPeers{}, fmt.Errorf("SendMessageById not implemented for message Id: %s", inreq.Data.Id)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
 	}
 	if err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(inreq.Data.Data)), Payload: bytes.NewReader(inreq.Data.Data)}); err != nil {
 		ss.peerHeightMap.Delete(peerID)
 		ss.peerTimeMap.Delete(peerID)
 		ss.peerRwMap.Delete(peerID)
-		return &proto_sentry.SentPeers{}, fmt.Errorf("SendMessageById to peer %s: %v", peerID, err)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %v", peerID, err)
 	}
 	return &proto_sentry.SentPeers{Peers: [][]byte{inreq.PeerId}}, nil
 }
