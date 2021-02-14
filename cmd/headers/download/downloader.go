@@ -148,7 +148,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 	}
 
 	var bufferSize datasize.ByteSize
-	if err := bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
+	if err = bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
 		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
 	}
 	controlServer, err1 := NewControlServer(db, filesDir, int(bufferSize), sentryClient, window)
@@ -215,7 +215,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	sentryClient := &SentryClientDirect{}
 	sentryClient.SetServer(sentryServer)
 	var bufferSize datasize.ByteSize
-	if err := bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
+	if err = bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
 		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
 	}
 	controlServer, err2 := NewControlServer(db, filesDir, int(bufferSize), sentryClient, window)
