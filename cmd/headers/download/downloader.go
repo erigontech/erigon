@@ -675,7 +675,6 @@ func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_s
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetBlockHeader: %v", err)
 	}
-	log.Info(fmt.Sprintf("GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t}", query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse))
 	headers, err1 := queryHeaders(cs.db, &query)
 	if err1 != nil {
 		return fmt.Errorf("querying BlockHeaders: %w", err1)
@@ -695,10 +694,11 @@ func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_s
 	if err != nil {
 		return fmt.Errorf("send header response: %v", err)
 	}
+	log.Info(fmt.Sprintf("GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
 	return nil
 }
 
-func (cs *ControlServerImpl) getBlockBodies(_ context.Context, inreq *proto_sentry.InboundMessage) error {
+func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_sentry.InboundMessage) error {
 	// Decode the retrieval message
 	msgStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
 	if _, err := msgStream.List(); err != nil {
@@ -706,20 +706,48 @@ func (cs *ControlServerImpl) getBlockBodies(_ context.Context, inreq *proto_sent
 	}
 	// Gather blocks until the fetch or network limits is reached
 	var hash common.Hash
+	var bytes int
+	var bodies []rlp.RawValue
 	var hashesStr strings.Builder
-	for {
+	for bytes < softResponseLimit && len(bodies) < downloader.MaxBlockFetch {
 		// Retrieve the hash of the next block
 		if err := msgStream.Decode(&hash); errors.Is(err, rlp.EOL) {
 			break
 		} else if err != nil {
 			return errResp(eth.ErrDecode, "decode hash for GetBlockBodiesMsg: %v", err)
 		}
+		// Retrieve the requested block body, stopping if enough was found
+		number := rawdb.ReadHeaderNumber(cs.db, hash)
+		if number == nil {
+			continue
+		}
+		data := rawdb.ReadBodyRLP(cs.db, hash, *number)
+		if len(data) == 0 {
+			continue
+		}
+		bodies = append(bodies, data)
+		bytes += len(data)
 		if hashesStr.Len() > 0 {
 			hashesStr.WriteString(",")
 		}
 		hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
 	}
-	log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}", inreq.PeerId, hashesStr.String()))
+	b, err := rlp.EncodeToBytes(bodies)
+	if err != nil {
+		return fmt.Errorf("encode header response: %v", err)
+	}
+	outreq := proto_sentry.SendMessageByIdRequest{
+		PeerId: inreq.PeerId,
+		Data: &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_BlockBodies,
+			Data: b,
+		},
+	}
+	_, err = cs.sentryClient.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err != nil {
+		return fmt.Errorf("send bodies response: %v", err)
+	}
+	log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}, responseLen %d", inreq.PeerId, hashesStr.String(), len(bodies)))
 	return nil
 }
 
