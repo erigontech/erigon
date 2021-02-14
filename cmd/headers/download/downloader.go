@@ -190,6 +190,21 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 			log.Error("Receive loop terminated", "error", err)
 		}
 	}()
+	receiveUploadClient, err3 := sentryClient.ReceiveUploadMessages(ctx, &empty.Empty{}, &grpc.EmptyCallOption{})
+	if err3 != nil {
+		return fmt.Errorf("receive upload messages failed: %w", err3)
+	}
+	go func() {
+		inreq, err := receiveUploadClient.Recv()
+		for ; err == nil; inreq, err = receiveUploadClient.Recv() {
+			if err1 := controlServer.handleInboundMessage(ctx, inreq); err1 != nil {
+				log.Error("Handling incoming message", "error", err1)
+			}
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			log.Error("Receive loop terminated", "error", err)
+		}
+	}()
 
 	if err := stages.StageLoop(
 		ctx,
@@ -248,6 +263,21 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	go func() {
 		inreq, err := receiveClient.Recv()
 		for ; err == nil; inreq, err = receiveClient.Recv() {
+			if err1 := controlServer.handleInboundMessage(ctx, inreq); err1 != nil {
+				log.Error("Handling incoming message", "error", err1)
+			}
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			log.Error("Receive loop terminated", "error", err)
+		}
+	}()
+	receiveUploadClient, err3 := sentryClient.ReceiveUploadMessages(ctx, &empty.Empty{}, &grpc.EmptyCallOption{})
+	if err3 != nil {
+		return fmt.Errorf("receive upload messages failed: %w", err3)
+	}
+	go func() {
+		inreq, err := receiveUploadClient.Recv()
+		for ; err == nil; inreq, err = receiveUploadClient.Recv() {
 			if err1 := controlServer.handleInboundMessage(ctx, inreq); err1 != nil {
 				log.Error("Handling incoming message", "error", err1)
 			}

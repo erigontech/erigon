@@ -26,6 +26,7 @@ type SentryClient interface {
 	SendMessageToAll(ctx context.Context, in *OutboundMessageData, opts ...grpc.CallOption) (*SentPeers, error)
 	SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	ReceiveMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveMessagesClient, error)
+	ReceiveUploadMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveUploadMessagesClient, error)
 	ReceiveTxMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveTxMessagesClient, error)
 }
 
@@ -132,8 +133,40 @@ func (x *sentryReceiveMessagesClient) Recv() (*InboundMessage, error) {
 	return m, nil
 }
 
+func (c *sentryClient) ReceiveUploadMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveUploadMessagesClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_Sentry_serviceDesc.Streams[1], "/sentry.Sentry/ReceiveUploadMessages", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &sentryReceiveUploadMessagesClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Sentry_ReceiveUploadMessagesClient interface {
+	Recv() (*InboundMessage, error)
+	grpc.ClientStream
+}
+
+type sentryReceiveUploadMessagesClient struct {
+	grpc.ClientStream
+}
+
+func (x *sentryReceiveUploadMessagesClient) Recv() (*InboundMessage, error) {
+	m := new(InboundMessage)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *sentryClient) ReceiveTxMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveTxMessagesClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_Sentry_serviceDesc.Streams[1], "/sentry.Sentry/ReceiveTxMessages", opts...)
+	stream, err := c.cc.NewStream(ctx, &_Sentry_serviceDesc.Streams[2], "/sentry.Sentry/ReceiveTxMessages", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -176,6 +209,7 @@ type SentryServer interface {
 	SendMessageToAll(context.Context, *OutboundMessageData) (*SentPeers, error)
 	SetStatus(context.Context, *StatusData) (*emptypb.Empty, error)
 	ReceiveMessages(*emptypb.Empty, Sentry_ReceiveMessagesServer) error
+	ReceiveUploadMessages(*emptypb.Empty, Sentry_ReceiveUploadMessagesServer) error
 	ReceiveTxMessages(*emptypb.Empty, Sentry_ReceiveTxMessagesServer) error
 	mustEmbedUnimplementedSentryServer()
 }
@@ -207,6 +241,9 @@ func (UnimplementedSentryServer) SetStatus(context.Context, *StatusData) (*empty
 }
 func (UnimplementedSentryServer) ReceiveMessages(*emptypb.Empty, Sentry_ReceiveMessagesServer) error {
 	return status.Errorf(codes.Unimplemented, "method ReceiveMessages not implemented")
+}
+func (UnimplementedSentryServer) ReceiveUploadMessages(*emptypb.Empty, Sentry_ReceiveUploadMessagesServer) error {
+	return status.Errorf(codes.Unimplemented, "method ReceiveUploadMessages not implemented")
 }
 func (UnimplementedSentryServer) ReceiveTxMessages(*emptypb.Empty, Sentry_ReceiveTxMessagesServer) error {
 	return status.Errorf(codes.Unimplemented, "method ReceiveTxMessages not implemented")
@@ -371,6 +408,27 @@ func (x *sentryReceiveMessagesServer) Send(m *InboundMessage) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Sentry_ReceiveUploadMessages_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(emptypb.Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(SentryServer).ReceiveUploadMessages(m, &sentryReceiveUploadMessagesServer{stream})
+}
+
+type Sentry_ReceiveUploadMessagesServer interface {
+	Send(*InboundMessage) error
+	grpc.ServerStream
+}
+
+type sentryReceiveUploadMessagesServer struct {
+	grpc.ServerStream
+}
+
+func (x *sentryReceiveUploadMessagesServer) Send(m *InboundMessage) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 func _Sentry_ReceiveTxMessages_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(emptypb.Empty)
 	if err := stream.RecvMsg(m); err != nil {
@@ -429,6 +487,11 @@ var _Sentry_serviceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "ReceiveMessages",
 			Handler:       _Sentry_ReceiveMessages_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ReceiveUploadMessages",
+			Handler:       _Sentry_ReceiveUploadMessages_Handler,
 			ServerStreams: true,
 		},
 		{

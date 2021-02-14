@@ -240,7 +240,7 @@ func runPeer(
 			// Status messages should never arrive after the handshake
 			return errResp(eth.ErrExtraStatusMsg, "uncontrolled status message")
 		case eth.GetBlockHeadersMsg:
-			if err = ss.forwardMessage(msg, peerID, "GetBlockHeadersMsg", proto_sentry.MessageId_GetBlockHeaders); err != nil {
+			if err = ss.forwardUploadMessage(msg, peerID, "GetBlockHeadersMsg", proto_sentry.MessageId_GetBlockHeaders); err != nil {
 				return err
 			}
 		case eth.BlockHeadersMsg:
@@ -250,7 +250,7 @@ func runPeer(
 				return err
 			}
 		case eth.GetBlockBodiesMsg:
-			if err = ss.forwardMessage(msg, peerID, "GetBlockBodiesMsg", proto_sentry.MessageId_GetBlockBodies); err != nil {
+			if err = ss.forwardUploadMessage(msg, peerID, "GetBlockBodiesMsg", proto_sentry.MessageId_GetBlockBodies); err != nil {
 				return err
 			}
 		case eth.BlockBodiesMsg:
@@ -432,13 +432,14 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, sta
 
 type SentryServerImpl struct {
 	proto_sentry.UnimplementedSentryServer
-	peerHeightMap sync.Map
-	peerRwMap     sync.Map
-	peerTimeMap   sync.Map
-	statusData    *proto_sentry.StatusData
-	p2pServer     *p2p.Server
-	receiveServer proto_sentry.Sentry_ReceiveMessagesServer
-	lock          sync.RWMutex
+	peerHeightMap       sync.Map
+	peerRwMap           sync.Map
+	peerTimeMap         sync.Map
+	statusData          *proto_sentry.StatusData
+	p2pServer           *p2p.Server
+	receiveServer       proto_sentry.Sentry_ReceiveMessagesServer
+	receiveUploadServer proto_sentry.Sentry_ReceiveUploadMessagesServer
+	lock                sync.RWMutex
 }
 
 func (ss *SentryServerImpl) forwardMessage(msg p2p.Msg, peerID string, msgName string, msgId proto_sentry.MessageId) error {
@@ -456,6 +457,27 @@ func (ss *SentryServerImpl) forwardMessage(msg p2p.Msg, peerID string, msgName s
 			Data:   b,
 		}
 		if err := receiveServer.Send(&outreq); err != nil {
+			log.Error("Sending msg to core P2P failed", "msg", msgName, "error", err)
+		}
+	}
+	return nil
+}
+
+func (ss *SentryServerImpl) forwardUploadMessage(msg p2p.Msg, peerID string, msgName string, msgId proto_sentry.MessageId) error {
+	b := make([]byte, msg.Size)
+	if _, err := io.ReadFull(msg.Payload, b); err != nil {
+		return fmt.Errorf("%s: reading msg into bytes: %v", peerID, err)
+	}
+	receiveUploadServer := ss.getReceiveUploadServer()
+	if receiveUploadServer == nil {
+		log.Error("Sending msg to core, but receiver is nil", "msg", msgName)
+	} else {
+		outreq := proto_sentry.InboundMessage{
+			PeerId: []byte(peerID),
+			Id:     msgId,
+			Data:   b,
+		}
+		if err := receiveUploadServer.Send(&outreq); err != nil {
 			log.Error("Sending msg to core P2P failed", "msg", msgName, "error", err)
 		}
 	}
@@ -591,8 +613,21 @@ func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentr
 	return nil
 }
 
+func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveUploadMessagesServer) error {
+	ss.lock.Lock()
+	defer ss.lock.Unlock()
+	ss.receiveUploadServer = server
+	return nil
+}
+
 func (ss *SentryServerImpl) getReceiveServer() proto_sentry.Sentry_ReceiveMessagesServer {
 	ss.lock.RLock()
 	defer ss.lock.RUnlock()
 	return ss.receiveServer
+}
+
+func (ss *SentryServerImpl) getReceiveUploadServer() proto_sentry.Sentry_ReceiveMessagesServer {
+	ss.lock.RLock()
+	defer ss.lock.RUnlock()
+	return ss.receiveUploadServer
 }
