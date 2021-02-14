@@ -34,9 +34,9 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 		defer c.Close()
 		defer trieAcc2.Close()
 		defer accC.Close()
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				panic(err)
+		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {
+			if errc != nil {
+				panic(errc)
 			}
 			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalIH(v)
 			AssertSubset(hasBranch, hasState)
@@ -104,7 +104,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 					buf = append(buf, 0)
 				}
 				hexutil.CompressNibbles(buf, &seek)
-				if err = ethdb.Walk(accC, seek, bitsToMatch, func(k, v []byte) (bool, error) {
+				if err := ethdb.Walk(accC, seek, bitsToMatch, func(k, v []byte) (bool, error) {
 					found = true
 					return false, nil
 				}); err != nil {
@@ -129,9 +129,9 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 		defer c.Close()
 		defer trieStorage.Close()
 		defer storageC.Close()
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				panic(err)
+		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {
+			if errc != nil {
+				panic(errc)
 			}
 
 			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalIH(v)
@@ -201,7 +201,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				seek = seek[:40+len(buf2)]
 				copy(seek, k[:40])
 				copy(seek[40:], buf2)
-				if err = ethdb.Walk(storageC, seek, bitsToMatch, func(k, v []byte) (bool, error) {
+				if err := ethdb.Walk(storageC, seek, bitsToMatch, func(k, v []byte) (bool, error) {
 					found = true
 					return false, nil
 				}); err != nil {
