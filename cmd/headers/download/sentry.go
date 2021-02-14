@@ -566,6 +566,8 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		msgcode = eth.GetBlockHeadersMsg
 	case proto_sentry.MessageId_BlockHeaders:
 		msgcode = eth.BlockHeadersMsg
+	case proto_sentry.MessageId_BlockBodies:
+		msgcode = eth.BlockBodiesMsg
 	default:
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
 	}
