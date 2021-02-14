@@ -548,9 +548,8 @@ func getAncestor(db ethdb.Database, hash common.Hash, number, ancestor uint64, m
 		// in this case it is cheaper to just read the header
 		if header := rawdb.ReadHeader(db, hash, number); header != nil {
 			return header.ParentHash, number - 1
-		} else {
-			return common.Hash{}, 0
 		}
+		return common.Hash{}, 0
 	}
 	for ancestor != 0 {
 		h, err := rawdb.ReadCanonicalHash(db, number)
