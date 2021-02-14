@@ -74,5 +74,6 @@ service Sentry {
   rpc SendMessageToAll(OutboundMessageData) returns(SentPeers);
   rpc SetStatus(StatusData) returns (google.protobuf.Empty);
   rpc ReceiveMessages(google.protobuf.Empty) returns (stream InboundMessage);
+  rpc ReceiveUploadMessages(google.protobuf.Empty) returns (stream InboundMessage);
   rpc ReceiveTxMessages(google.protobuf.Empty) returns (stream InboundMessage);
 }
