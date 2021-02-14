@@ -6,12 +6,14 @@ package sentry;
 
 option go_package = "./sentry;sentry";
 
-enum OutboundMessageId {
+enum MessageId {
   GetBlockHeaders = 0; GetBlockBodies = 1; GetNodeData = 2;
+  NewBlockHashes = 3; BlockHeaders = 4; BlockBodies = 5; NewBlock = 6;
+  NodeData = 7;
 }
 
 message OutboundMessageData {
-  OutboundMessageId id = 1;
+  MessageId id = 1;
   bytes data = 2;
 }
 
@@ -39,11 +41,38 @@ message PenalizePeerRequest {
   PenaltyKind penalty = 2;
 }
 
+message PeerMinBlockRequest {
+  bytes peer_id = 1;
+  uint64 min_block = 2;
+}
+
+message InboundMessage {
+  MessageId id = 1;
+  bytes data = 2;
+  bytes peer_id = 3;
+}
+
+message Forks {
+  bytes genesis = 1;
+  repeated uint64 forks = 2;
+}
+
+message StatusData {
+  uint64 network_id = 1;
+  bytes total_difficulty = 2;
+  bytes best_hash = 3;
+  Forks fork_data = 4;
+}
+
 service Sentry {
   rpc PenalizePeer(PenalizePeerRequest) returns(google.protobuf.Empty);
+  rpc PeerMinBlock(PeerMinBlockRequest) returns(google.protobuf.Empty);
   rpc SendMessageByMinBlock(SendMessageByMinBlockRequest) returns(SentPeers);
   rpc SendMessageById(SendMessageByIdRequest) returns(SentPeers);
   rpc SendMessageToRandomPeers(SendMessageToRandomPeersRequest)
       returns(SentPeers);
   rpc SendMessageToAll(OutboundMessageData) returns(SentPeers);
+  rpc SetStatus(StatusData) returns (google.protobuf.Empty);
+  rpc ReceiveMessages(google.protobuf.Empty) returns (stream InboundMessage);
+  rpc ReceiveTxMessages(google.protobuf.Empty) returns (stream InboundMessage);
 }
