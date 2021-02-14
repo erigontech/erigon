@@ -1178,10 +1178,15 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion {
-		return c.putDupSort(key, value)
+		if err := c.putDupSort(key, value); err != nil {
+			return err
+		}
+		return nil
 	}
-
-	return c.put(key, value)
+	if err := c.put(key, value); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
