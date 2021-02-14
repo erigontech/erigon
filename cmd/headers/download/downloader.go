@@ -715,6 +715,10 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 		} else if err != nil {
 			return errResp(eth.ErrDecode, "decode hash for GetBlockBodiesMsg: %v", err)
 		}
+		if hashesStr.Len() > 0 {
+			hashesStr.WriteString(",")
+		}
+		hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
 		// Retrieve the requested block body, stopping if enough was found
 		number := rawdb.ReadHeaderNumber(cs.db, hash)
 		if number == nil {
@@ -726,10 +730,6 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 		}
 		bodies = append(bodies, data)
 		bytes += len(data)
-		if hashesStr.Len() > 0 {
-			hashesStr.WriteString(",")
-		}
-		hashesStr.WriteString(fmt.Sprintf("%x-%x", hash[:4], hash[28:]))
 	}
 	b, err := rlp.EncodeToBytes(bodies)
 	if err != nil {
