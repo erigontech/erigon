@@ -76,9 +76,9 @@ integration:
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
 headers:
-	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers
+	$(GOBUILD) -o $(GOBIN)/headers -tags 'mdbx' ./cmd/headers
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
+	@echo "Run \"$(GOBIN)/headers\" to run headers download PoC."
 
 db-tools:
 	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; make clean mdb_stat mdb_copy mdb_dump mdb_load; cp mdb_stat $(GOBIN); cp mdb_copy $(GOBIN); cp mdb_dump $(GOBIN); cp mdb_load $(GOBIN); cd ../../../../..; rm -rf vendor

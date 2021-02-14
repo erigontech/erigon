@@ -51,6 +51,9 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, head
 	if err != nil {
 		return 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %w", headHeight, headHash, headTd)
 	}
+	if headTd == nil {
+		headTd = new(big.Int)
+	}
 	return headHeight, headHash, headTd, nil
 }
 

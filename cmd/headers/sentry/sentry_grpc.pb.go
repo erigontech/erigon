@@ -19,10 +19,14 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SentryClient interface {
 	PenalizePeer(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	PeerMinBlock(ctx context.Context, in *PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	SendMessageByMinBlock(ctx context.Context, in *SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*SentPeers, error)
 	SendMessageById(ctx context.Context, in *SendMessageByIdRequest, opts ...grpc.CallOption) (*SentPeers, error)
 	SendMessageToRandomPeers(ctx context.Context, in *SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*SentPeers, error)
 	SendMessageToAll(ctx context.Context, in *OutboundMessageData, opts ...grpc.CallOption) (*SentPeers, error)
+	SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	ReceiveMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveMessagesClient, error)
+	ReceiveTxMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveTxMessagesClient, error)
 }
 
 type sentryClient struct {
@@ -36,6 +40,15 @@ func NewSentryClient(cc grpc.ClientConnInterface) SentryClient {
 func (c *sentryClient) PenalizePeer(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/sentry.Sentry/PenalizePeer", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sentryClient) PeerMinBlock(ctx context.Context, in *PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/sentry.Sentry/PeerMinBlock", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -78,15 +91,92 @@ func (c *sentryClient) SendMessageToAll(ctx context.Context, in *OutboundMessage
 	return out, nil
 }
 
+func (c *sentryClient) SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, "/sentry.Sentry/SetStatus", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sentryClient) ReceiveMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveMessagesClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_Sentry_serviceDesc.Streams[0], "/sentry.Sentry/ReceiveMessages", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &sentryReceiveMessagesClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Sentry_ReceiveMessagesClient interface {
+	Recv() (*InboundMessage, error)
+	grpc.ClientStream
+}
+
+type sentryReceiveMessagesClient struct {
+	grpc.ClientStream
+}
+
+func (x *sentryReceiveMessagesClient) Recv() (*InboundMessage, error) {
+	m := new(InboundMessage)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *sentryClient) ReceiveTxMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (Sentry_ReceiveTxMessagesClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_Sentry_serviceDesc.Streams[1], "/sentry.Sentry/ReceiveTxMessages", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &sentryReceiveTxMessagesClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Sentry_ReceiveTxMessagesClient interface {
+	Recv() (*InboundMessage, error)
+	grpc.ClientStream
+}
+
+type sentryReceiveTxMessagesClient struct {
+	grpc.ClientStream
+}
+
+func (x *sentryReceiveTxMessagesClient) Recv() (*InboundMessage, error) {
+	m := new(InboundMessage)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // SentryServer is the server API for Sentry service.
 // All implementations must embed UnimplementedSentryServer
 // for forward compatibility
 type SentryServer interface {
 	PenalizePeer(context.Context, *PenalizePeerRequest) (*emptypb.Empty, error)
+	PeerMinBlock(context.Context, *PeerMinBlockRequest) (*emptypb.Empty, error)
 	SendMessageByMinBlock(context.Context, *SendMessageByMinBlockRequest) (*SentPeers, error)
 	SendMessageById(context.Context, *SendMessageByIdRequest) (*SentPeers, error)
 	SendMessageToRandomPeers(context.Context, *SendMessageToRandomPeersRequest) (*SentPeers, error)
 	SendMessageToAll(context.Context, *OutboundMessageData) (*SentPeers, error)
+	SetStatus(context.Context, *StatusData) (*emptypb.Empty, error)
+	ReceiveMessages(*emptypb.Empty, Sentry_ReceiveMessagesServer) error
+	ReceiveTxMessages(*emptypb.Empty, Sentry_ReceiveTxMessagesServer) error
 	mustEmbedUnimplementedSentryServer()
 }
 
@@ -96,6 +186,9 @@ type UnimplementedSentryServer struct {
 
 func (UnimplementedSentryServer) PenalizePeer(context.Context, *PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PenalizePeer not implemented")
+}
+func (UnimplementedSentryServer) PeerMinBlock(context.Context, *PeerMinBlockRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PeerMinBlock not implemented")
 }
 func (UnimplementedSentryServer) SendMessageByMinBlock(context.Context, *SendMessageByMinBlockRequest) (*SentPeers, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendMessageByMinBlock not implemented")
@@ -108,6 +201,15 @@ func (UnimplementedSentryServer) SendMessageToRandomPeers(context.Context, *Send
 }
 func (UnimplementedSentryServer) SendMessageToAll(context.Context, *OutboundMessageData) (*SentPeers, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendMessageToAll not implemented")
+}
+func (UnimplementedSentryServer) SetStatus(context.Context, *StatusData) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetStatus not implemented")
+}
+func (UnimplementedSentryServer) ReceiveMessages(*emptypb.Empty, Sentry_ReceiveMessagesServer) error {
+	return status.Errorf(codes.Unimplemented, "method ReceiveMessages not implemented")
+}
+func (UnimplementedSentryServer) ReceiveTxMessages(*emptypb.Empty, Sentry_ReceiveTxMessagesServer) error {
+	return status.Errorf(codes.Unimplemented, "method ReceiveTxMessages not implemented")
 }
 func (UnimplementedSentryServer) mustEmbedUnimplementedSentryServer() {}
 
@@ -136,6 +238,24 @@ func _Sentry_PenalizePeer_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(SentryServer).PenalizePeer(ctx, req.(*PenalizePeerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Sentry_PeerMinBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PeerMinBlockRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentryServer).PeerMinBlock(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sentry.Sentry/PeerMinBlock",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentryServer).PeerMinBlock(ctx, req.(*PeerMinBlockRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -212,6 +332,66 @@ func _Sentry_SendMessageToAll_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Sentry_SetStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StatusData)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentryServer).SetStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sentry.Sentry/SetStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentryServer).SetStatus(ctx, req.(*StatusData))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Sentry_ReceiveMessages_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(emptypb.Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(SentryServer).ReceiveMessages(m, &sentryReceiveMessagesServer{stream})
+}
+
+type Sentry_ReceiveMessagesServer interface {
+	Send(*InboundMessage) error
+	grpc.ServerStream
+}
+
+type sentryReceiveMessagesServer struct {
+	grpc.ServerStream
+}
+
+func (x *sentryReceiveMessagesServer) Send(m *InboundMessage) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _Sentry_ReceiveTxMessages_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(emptypb.Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(SentryServer).ReceiveTxMessages(m, &sentryReceiveTxMessagesServer{stream})
+}
+
+type Sentry_ReceiveTxMessagesServer interface {
+	Send(*InboundMessage) error
+	grpc.ServerStream
+}
+
+type sentryReceiveTxMessagesServer struct {
+	grpc.ServerStream
+}
+
+func (x *sentryReceiveTxMessagesServer) Send(m *InboundMessage) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 var _Sentry_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "sentry.Sentry",
 	HandlerType: (*SentryServer)(nil),
@@ -219,6 +399,10 @@ var _Sentry_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PenalizePeer",
 			Handler:    _Sentry_PenalizePeer_Handler,
+		},
+		{
+			MethodName: "PeerMinBlock",
+			Handler:    _Sentry_PeerMinBlock_Handler,
 		},
 		{
 			MethodName: "SendMessageByMinBlock",
@@ -236,7 +420,22 @@ var _Sentry_serviceDesc = grpc.ServiceDesc{
 			MethodName: "SendMessageToAll",
 			Handler:    _Sentry_SendMessageToAll_Handler,
 		},
+		{
+			MethodName: "SetStatus",
+			Handler:    _Sentry_SetStatus_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "ReceiveMessages",
+			Handler:       _Sentry_ReceiveMessages_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ReceiveTxMessages",
+			Handler:       _Sentry_ReceiveTxMessages_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "sentry.proto",
 }

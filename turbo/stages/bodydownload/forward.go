@@ -26,7 +26,7 @@ func Forward(
 	bd *BodyDownload,
 	bodyReqSend func(context.Context, *BodyRequest) []byte,
 	penalise func(context.Context, []byte),
-	updateHead func(head uint64, hash common.Hash, td *big.Int),
+	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *big.Int),
 	wakeUpChan chan struct{}, timeout int) error {
 	var headerProgress, bodyProgress uint64
 	var err error
@@ -80,7 +80,6 @@ func Forward(
 		for req != nil && peer != nil {
 			currentTime := uint64(time.Now().Unix())
 			bd.RequestSent(req, currentTime+uint64(timeout), peer)
-			log.Info(fmt.Sprintf("Generated request for %d bodies [%d-%d] sent to %s", len(req.BlockNums), req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1], peer))
 			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
 			peer = nil
 			if req != nil {
@@ -113,7 +112,7 @@ func Forward(
 				}
 			}
 		}
-		log.Info("Body progress", "block number", bodyProgress, "header progress", headerProgress)
+		//log.Info("Body progress", "block number", bodyProgress, "header progress", headerProgress)
 		if bodyProgress == headerProgress {
 			break
 		}
@@ -144,7 +143,7 @@ func Forward(
 	}
 	if headSet {
 		if headTd, err := rawdb.ReadTd(db, headHash, bodyProgress); err == nil {
-			updateHead(bodyProgress, headHash, headTd)
+			updateHead(ctx, bodyProgress, headHash, headTd)
 		} else {
 			log.Error("Failed to get total difficulty", "hash", headHash, "height", bodyProgress, "error", err)
 		}

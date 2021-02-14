@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"github.com/golang/protobuf/ptypes/empty"
-	proto_core "github.com/ledgerwatch/turbo-geth/cmd/headers/core"
 	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Contains implementations of SentryServer, SentryClient, ControlClient, and ControlServer, that may be linked to each other
@@ -31,6 +31,10 @@ func (scd *SentryClientDirect) PenalizePeer(ctx context.Context, in *proto_sentr
 	return scd.server.PenalizePeer(ctx, in)
 }
 
+func (scd *SentryClientDirect) PeerMinBlock(ctx context.Context, in *proto_sentry.PeerMinBlockRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
+	return scd.server.PeerMinBlock(ctx, in)
+}
+
 func (scd *SentryClientDirect) SendMessageByMinBlock(ctx context.Context, in *proto_sentry.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
 	return scd.server.SendMessageByMinBlock(ctx, in)
 }
@@ -47,21 +51,45 @@ func (scd *SentryClientDirect) SendMessageToAll(ctx context.Context, in *proto_s
 	return scd.server.SendMessageToAll(ctx, in)
 }
 
-// ControlClientDirect implement ControlClient interface by connecting the instance of the client directly with the corresponding
-// instance of ControlServer
-type ControlClientDirect struct {
-	server proto_core.ControlServer
+func (scd *SentryClientDirect) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return scd.server.SetStatus(ctx, in)
 }
 
-// SetServer inject a reference to the ControlServer into the client
-func (ccd *ControlClientDirect) SetServer(controlServer proto_core.ControlServer) {
-	ccd.server = controlServer
+// implements proto_sentry.Sentry_ReceiveMessagesServer
+type SentryReceiveServerDirect struct {
+	messageCh chan *proto_sentry.InboundMessage
+	grpc.ServerStream
 }
 
-func (ccd *ControlClientDirect) ForwardInboundMessage(ctx context.Context, in *proto_core.InboundMessage, opts ...grpc.CallOption) (*empty.Empty, error) {
-	return ccd.server.ForwardInboundMessage(ctx, in)
+func (s *SentryReceiveServerDirect) Send(m *proto_sentry.InboundMessage) error {
+	s.messageCh <- m
+	return nil
 }
 
-func (ccd *ControlClientDirect) GetStatus(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*proto_core.StatusData, error) {
-	return ccd.server.GetStatus(ctx, in)
+type SentryReceiveClientDirect struct {
+	messageCh chan *proto_sentry.InboundMessage
+	grpc.ClientStream
+}
+
+func (c *SentryReceiveClientDirect) Recv() (*proto_sentry.InboundMessage, error) {
+	m := <-c.messageCh
+	return m, nil
+}
+
+func (scd *SentryClientDirect) ReceiveMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (proto_sentry.Sentry_ReceiveMessagesClient, error) {
+	messageCh := make(chan *proto_sentry.InboundMessage, 16384)
+	streamServer := &SentryReceiveServerDirect{messageCh: messageCh}
+	if err := scd.server.ReceiveMessages(&empty.Empty{}, streamServer); err != nil {
+		return nil, err
+	}
+	return &SentryReceiveClientDirect{messageCh: messageCh}, nil
+}
+
+func (scd *SentryClientDirect) ReceiveTxMessages(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (proto_sentry.Sentry_ReceiveTxMessagesClient, error) {
+	messageCh := make(chan *proto_sentry.InboundMessage, 16384)
+	streamServer := &SentryReceiveServerDirect{messageCh: messageCh}
+	if err := scd.server.ReceiveMessages(&empty.Empty{}, streamServer); err != nil {
+		return nil, err
+	}
+	return &SentryReceiveClientDirect{messageCh: messageCh}, nil
 }

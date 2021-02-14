@@ -22,7 +22,7 @@ func StageLoop(
 	headerReqSend func(context.Context, []*headerdownload.HeaderRequest),
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
-	updateHead func(uint64, common.Hash, *big.Int),
+	updateHead func(context.Context, uint64, common.Hash, *big.Int),
 	wakeUpChan chan struct{},
 	timeout int,
 ) error {
