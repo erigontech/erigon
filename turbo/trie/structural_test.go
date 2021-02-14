@@ -643,7 +643,6 @@ func TestStorageWithoutBranchNodeInRoot(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	currHasBranch = succHasBranch
-	succHasBranch = false
 	v := &GenStructStepHashData{common.Hash{}, currHasBranch}
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
 	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, v, groups, hasBranch, hasHash, trace); err != nil {

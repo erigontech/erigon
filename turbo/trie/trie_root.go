@@ -551,6 +551,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	return nil
 }
 
+//nolint
 func (r *RootHashAggregator) traceIf(acc, st string) {
 	// "succ" - because on this iteration this "succ" will become "curr"
 	if r.succStorage.Len() == 0 {
