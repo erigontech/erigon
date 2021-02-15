@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
@@ -31,7 +30,6 @@ func SpawnBlockHashStage(s *StageState, db ethdb.Database, tmpdir string, quit <
 		s.Done()
 		return nil
 	}
-	log.Info("BlockHashes", "from", s.BlockNumber, "headHash", headHash, "headNumber", headNumber)
 
 	startKey := make([]byte, 8)
 	binary.BigEndian.PutUint64(startKey, s.BlockNumber)
