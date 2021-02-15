@@ -2,11 +2,13 @@ package stagedsync
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -18,22 +20,25 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 	return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
 }
 
-func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, tmpdir string, quit <-chan struct{}) error {
-	headHash := rawdb.ReadHeadHeaderHash(stateDB)
-	headNumber := rawdb.ReadHeaderNumber(stateDB, headHash)
-	if s.BlockNumber == *headNumber {
+func SpawnBlockHashStage(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
+	headNumber, err := stages.GetStageProgress(db, stages.Headers)
+	if err != nil {
+		return fmt.Errorf("getting headers progress: %w", err)
+	}
+	headHash := rawdb.ReadHeaderByNumber(db, headNumber).Hash()
+	if s.BlockNumber == headNumber {
 		s.Done()
 		return nil
 	}
 
 	startKey := make([]byte, 8)
 	binary.BigEndian.PutUint64(startKey, s.BlockNumber)
-	endKey := dbutils.HeaderKey(*headNumber, headHash) // Make sure we stop at head
+	endKey := dbutils.HeaderKey(headNumber, headHash) // Make sure we stop at head
 
 	logPrefix := s.state.LogPrefix()
 	if err := etl.Transform(
 		logPrefix,
-		stateDB,
+		db,
 		dbutils.HeaderPrefix,
 		dbutils.HeaderNumberPrefix,
 		tmpdir,
@@ -47,5 +52,5 @@ func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, tmpdir string, q
 	); err != nil {
 		return err
 	}
-	return s.DoneAndUpdate(stateDB, *headNumber)
+	return s.DoneAndUpdate(db, headNumber)
 }

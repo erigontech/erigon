@@ -153,6 +153,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *Heade
 					return fmt.Errorf("[%s] saving Headers progress: %w", logPrefix, err)
 				}
 			}
+			//rawdb.WriteHeadHeaderHash(batch, hash)
 		}
 		data, err := rlp.EncodeToBytes(header)
 		if err != nil {
