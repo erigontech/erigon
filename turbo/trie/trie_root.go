@@ -682,9 +682,7 @@ type CanUse func([]byte) bool // returns false - if element must be skipped
 const IHDupKeyLen = 2 * (common.HashLength + common.IncarnationLength)
 
 // IHCursor - holds logic related to iteration over IH bucket
-// has 2 main operations: goToChild and goToSibling
-// goToChild can be done only by DB operation (go to longer prefix)
-// goToSibling can be done in memory or by DB operation: nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+// has 2 basic operations:  _preOrderTraversalStep and _preOrderTraversalStepNoInDepth
 type IHCursor struct {
 	SkipState                    bool
 	is, lvl                      int
@@ -696,10 +694,10 @@ type IHCursor struct {
 	c                     ethdb.Cursor
 	hc                    HashCollector2
 	seek, prev, cur, next []byte
-	prefix                []byte
+	prefix                []byte // global prefix - cursor will never return records without this prefix
 
 	firstNotCoveredPrefix []byte
-	canUse                func(prefix []byte) bool
+	canUse                func(prefix []byte) bool // if this function returns true - then this IH can be used as is and don't need continue PostorderTraversal, but switch to sibling instead
 
 	kBuf []byte
 	quit <-chan struct{}
@@ -715,6 +713,34 @@ func IH(canUse func(prefix []byte) bool, hc HashCollector2, c ethdb.Cursor, quit
 	return ih
 }
 
+// _preOrderTraversalStep - goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+func (c *IHCursor) _preOrderTraversalStep() error {
+	if c._hasBranch() {
+		c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
+		ok, err := c._seek(c.next, c.next)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+	}
+	return c._preOrderTraversalStepNoInDepth()
+}
+
+// _preOrderTraversalStepNoInDepth - nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+func (c *IHCursor) _preOrderTraversalStepNoInDepth() error {
+	ok := c._nextSiblingInMem() || c._nextSiblingOfParentInMem()
+	if ok {
+		return nil
+	}
+	err := c._nextSiblingInDB()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (c *IHCursor) FirstNotCoveredPrefix() []byte {
 	c.firstNotCoveredPrefix = firstNotCoveredPrefix(c.prev, c.seek, c.firstNotCoveredPrefix)
 	return c.firstNotCoveredPrefix
@@ -725,7 +751,7 @@ func (c *IHCursor) AtPrefix(prefix []byte) (k, v []byte, hasBranch bool, err err
 	c.prev = append(c.prev[:0], c.cur...)
 	c.prefix = prefix
 	c.seek = prefix
-	ok, err := c._seek(prefix, prefix)
+	ok, err := c._seek(prefix, []byte{})
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
@@ -786,7 +812,7 @@ func (c *IHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 	return c._next()
 }
 
-func (c *IHCursor) _seek(seek []byte, prefix []byte) (bool, error) {
+func (c *IHCursor) _seek(seek []byte, withinPrefix []byte) (bool, error) {
 	var k, v []byte
 	var err error
 	if len(seek) == 0 {
@@ -809,42 +835,14 @@ func (c *IHCursor) _seek(seek []byte, prefix []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if k == nil || !bytes.HasPrefix(k, prefix) {
-		//fmt.Printf("_seek2: %x ->%x\n", prefix, k)
+	if k == nil || !bytes.HasPrefix(k, withinPrefix) || !bytes.HasPrefix(k, c.prefix) {
+		//fmt.Printf("_seek2: %x ->%x\n", withinPrefix, k)
 		return false, nil
 	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
-	//fmt.Printf("_seek3: %x ->%x, %x, %x\n", prefix, k, c.k, c.childID)
+	//fmt.Printf("_seek3: %x ->%x, %x, %x\n", withinPrefix, k, c.k, c.childID)
 	return true, nil
-}
-
-// _preOrderTraversalStep - goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *IHCursor) _preOrderTraversalStep() error {
-	if c._hasBranch() {
-		c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
-		ok, err := c._seek(c.next, c.next)
-		if err != nil {
-			return err
-		}
-		if ok {
-			return nil
-		}
-	}
-	return c._preOrderTraversalStepNoInDepth()
-}
-
-// _preOrderTraversalStepNoInDepth - nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *IHCursor) _preOrderTraversalStepNoInDepth() error {
-	ok := c._nextSiblingInMem() || c._nextSiblingOfParentInMem()
-	if ok {
-		return nil
-	}
-	err := c._nextSiblingInDB()
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func (c *IHCursor) _nextSiblingInMem() bool {
@@ -897,7 +895,7 @@ func (c *IHCursor) _nextSiblingInDB() error {
 		return nil
 	}
 	c.is++
-	if _, err := c._seek(c.next, c.prefix); err != nil {
+	if _, err := c._seek(c.next, []byte{}); err != nil {
 		return err
 	}
 	return nil

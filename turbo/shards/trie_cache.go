@@ -421,9 +421,9 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 		}
 		return false
 	}
-	var _seek = func(seek []byte, prefix []byte) bool {
-		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(prefix)
-		if ihK == nil || !bytes.HasPrefix(ihK, prefix) {
+	var _seek = func(seek []byte, withinPrefix []byte) bool {
+		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(seek)
+		if ihK == nil || !bytes.HasPrefix(ihK, withinPrefix) || !bytes.HasPrefix(ihK, prefix) {
 			return false
 		}
 		_unmarshal()
@@ -436,9 +436,9 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 				nonNilLvl := lvl - 1
 				for ; k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
 				}
-				next = append(append(next[:0], k[lvl]...), uint8(id[lvl]))
+				cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
 				buf = append(append(buf[:0], k[nonNilLvl]...), uint8(id[nonNilLvl]))
-				if _seek(next, buf) {
+				if _seek(cur, buf) {
 					return true
 				}
 				lvl = nonNilLvl + 1
@@ -457,32 +457,31 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 			k[lvl] = nil
 			return false
 		}
-		_seek(next, next)
+		_seek(seek, []byte{})
 		return k[lvl] != nil
 	}
 	var _preOrderTraversalStepNoInDepth = func() { _ = _nextSiblingInMem() || _nextSiblingOfParentInMem() || _nextSiblingInDB() }
 	var _preOrderTraversalStep = func() {
 		if isBranch() {
+			cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
 			ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
 			if !ok {
 				panic(fmt.Errorf("item %x hasBranch bit %x, but it not found in cache", k[lvl], id[lvl]))
 			}
-			_seek(next, prefix)
 			return
 		}
 		_preOrderTraversalStepNoInDepth()
 	}
 
-	_seek(next, prefix)
+	_seek(next, []byte{})
 
 	for k[lvl] != nil { // go to sibling in cache
 		if prefix != nil && !bytes.HasPrefix(k[lvl], prefix) {
 			break
 		}
 
-		cur = append(append(cur[:0], k[lvl]...), 0)
 		if isHash() {
-			cur[len(cur)-1] = uint8(id[lvl])
+			cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
 			if canUse(cur) {
 				if err := walker(cur, hashes[lvl][hashID[lvl]], isBranch(), false); err != nil {
 					return err
