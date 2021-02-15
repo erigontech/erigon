@@ -897,18 +897,9 @@ func (c *IHCursor) _nextSiblingInDB() error {
 		return nil
 	}
 	c.is++
-	k, v, err := c.c.Seek(c.next)
-	if err != nil {
+	if _, err := c._seek(c.next, c.prefix); err != nil {
 		return err
 	}
-	//fmt.Printf("_nextSiblingInDB: seek=%x, k=%x\n", c.next, k)
-	if k == nil || !bytes.HasPrefix(k, c.prefix) {
-		//fmt.Printf("_nextSiblingInDB: seek=%x, k=%x\n", c.next, k)
-		c.k[c.lvl] = nil
-		return nil
-	}
-	c._unmarshal(k, v)
-	c._nextSiblingInMem()
 	return nil
 }
 
@@ -928,10 +919,6 @@ func (c *IHCursor) _unmarshal(k, v []byte) {
 	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.hasState[c.lvl]) - 1)
 }
 
-func (c *IHCursor) _hash(i int16) []byte {
-	return c.v[c.lvl][common.HashLength*i : common.HashLength*(i+1)]
-}
-
 func (c *IHCursor) _deleteCurrent() error {
 	if c.deleted[c.lvl] {
 		return nil
@@ -947,12 +934,10 @@ func (c *IHCursor) _deleteCurrent() error {
 	return nil
 }
 
-func (c *IHCursor) _hasHash() bool {
-	return (uint16(1)<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0
-}
-
-func (c *IHCursor) _hasBranch() bool {
-	return (uint16(1)<<c.childID[c.lvl])&c.hasBranch[c.lvl] != 0
+func (c *IHCursor) _hasBranch() bool { return (1<<c.childID[c.lvl])&c.hasBranch[c.lvl] != 0 }
+func (c *IHCursor) _hasHash() bool   { return (1<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0 }
+func (c *IHCursor) _hash(i int16) []byte {
+	return c.v[c.lvl][common.HashLength*i : common.HashLength*(i+1)]
 }
 
 func (c *IHCursor) _next() (k, v []byte, hasBranch bool, err error) {
@@ -1176,25 +1161,23 @@ func (c *StorageIHCursor) _preOrderTraversalStepNoInDepth() error {
 	return nil
 }
 
-func (c *StorageIHCursor) _hasHash() bool {
-	return (uint16(1)<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0
-}
-
-func (c *StorageIHCursor) _hasBranch() bool {
-	return (uint16(1)<<c.childID[c.lvl])&c.hasBranch[c.lvl] != 0
+func (c *StorageIHCursor) _hasHash() bool   { return (1<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0 }
+func (c *StorageIHCursor) _hasBranch() bool { return (1<<c.childID[c.lvl])&c.hasBranch[c.lvl] != 0 }
+func (c *StorageIHCursor) _hash(i int16) []byte {
+	return c.v[c.lvl][common.HashLength*i : common.HashLength*(i+1)]
 }
 
 func (c *StorageIHCursor) _nextSiblingInMem() bool {
 	for c.childID[c.lvl]++; c.childID[c.lvl] < 16; c.childID[c.lvl]++ {
-		if ((uint16(1) << c.childID[c.lvl]) & c.hasHash[c.lvl]) != 0 {
+		if ((1 << c.childID[c.lvl]) & c.hasHash[c.lvl]) != 0 {
 			c.hashID[c.lvl]++
 			return true
 		}
-		if ((uint16(1) << c.childID[c.lvl]) & c.hasBranch[c.lvl]) != 0 {
+		if ((1 << c.childID[c.lvl]) & c.hasBranch[c.lvl]) != 0 {
 			return true
 		}
 
-		c.skipState = c.skipState && ((uint16(1)<<c.childID[c.lvl])&c.hasState[c.lvl]) == 0
+		c.skipState = c.skipState && ((1<<c.childID[c.lvl])&c.hasState[c.lvl]) == 0
 	}
 	return false
 }
@@ -1232,23 +1215,11 @@ func (c *StorageIHCursor) _nextSiblingInDB() error {
 		c.k[c.lvl] = nil
 		return nil
 	}
-	c.is++
 	c.seek = append(c.seek[:40], c.next...)
-	k, v, err := c.c.Seek(c.seek)
-	if err != nil {
+	if _, err := c._seek(c.seek, []byte{}); err != nil {
 		return err
 	}
-	if k == nil || !bytes.HasPrefix(k, c.accWithInc) {
-		c.k[c.lvl] = nil
-		return nil
-	}
-	c._unmarshal(k, v)
-	c._nextSiblingInMem()
 	return nil
-}
-
-func (c *StorageIHCursor) _hash(i int16) []byte {
-	return c.v[c.lvl][common.HashLength*i : common.HashLength*(i+1)]
 }
 
 func (c *StorageIHCursor) _next() (k, v []byte, hasBranch bool, err error) {

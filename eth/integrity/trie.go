@@ -59,7 +59,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				}
 				found = true
 				parentHasBranch := binary.BigEndian.Uint16(vParent[2:])
-				parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentHasBranch != 0
+				parentHasBit := 1<<uint16(k[len(parentK)])&parentHasBranch != 0
 				if !parentHasBit {
 					panic(fmt.Errorf("for %x found parent %x, but it has no branchBit: %016b", k, parentK, parentHasBranch))
 				}
@@ -157,7 +157,7 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 
 				found = true
 				parentBranches := binary.BigEndian.Uint16(vParent[2:])
-				parentHasBit := uint16(1)<<uint16(k[len(parentK)])&parentBranches != 0
+				parentHasBit := 1<<uint16(k[len(parentK)])&parentBranches != 0
 				if !parentHasBit {
 					panic(fmt.Errorf("for %x found parent %x, but it has no branchBit for child: %016b", k, parentK, parentBranches))
 				}

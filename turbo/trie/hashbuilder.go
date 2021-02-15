@@ -444,7 +444,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
-		if ((uint16(1) << digit) & set) != 0 {
+		if ((1 << digit) & set) != 0 {
 			if nodes[i] == nil {
 				f.Children[digit] = hashNode{hash: common.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
 			} else {
@@ -480,7 +480,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	totalSize := 17 // These are 17 length prefixes
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
-		if ((uint16(1) << digit) & set) != 0 {
+		if ((1 << digit) & set) != 0 {
 			if hashes[hashStackStride*i] == 0x80+common.HashLength {
 				totalSize += common.HashLength
 			} else {
@@ -499,7 +499,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	i = 0
 	hb.b[0] = rlp.EmptyStringCode
 	for digit := uint(0); digit < 17; digit++ {
-		if ((uint16(1) << digit) & set) != 0 {
+		if ((1 << digit) & set) != 0 {
 			if hashes[hashStackStride*i] == byte(0x80+common.HashLength) {
 				if _, err := hb.sha.Write(hashes[hashStackStride*i : hashStackStride*i+hashStackStride]); err != nil {
 					return err
@@ -604,7 +604,7 @@ func (hb *HashBuilder) printTopHashes(prefix []byte, _, children uint16) {
 	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
-		if ((uint16(1) << digit) & children) != 0 {
+		if ((1 << digit) & children) != 0 {
 			fmt.Printf("topHash: %x%02x, %x\n", prefix, digit, hashes[hashStackStride*i+1:hashStackStride*(i+1)])
 			i++
 		}

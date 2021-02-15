@@ -376,6 +376,7 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 	var cur []byte
 	seek := make([]byte, 0, 64)
 	next := make([]byte, 0, 64)
+	buf := make([]byte, 0, 64)
 	seek = append(seek, prefix...)
 	var k [64][]byte
 	var hasBranch, hasState, hasHash [64]uint16
@@ -409,8 +410,7 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 		for id[lvl]++; id[lvl] <= int8(bits.Len16(hasState[lvl])); id[lvl]++ { // go to sibling
 			// TODO: replace isDenseSequence() by next logic
 			//c.SkipState = c.SkipState && ((1<<(c.childID[c.lvl]-1))&c.hasState[c.lvl]) == 0 // if prev child has state - then we skipped some state
-
-			_ = isChild()
+			_ = isChild
 			if isHash() {
 				hashID[lvl]++
 				return true
@@ -421,6 +421,15 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 		}
 		return false
 	}
+	var _seek = func(seek []byte, prefix []byte) bool {
+		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(prefix)
+		if ihK == nil || !bytes.HasPrefix(ihK, prefix) {
+			return false
+		}
+		_unmarshal()
+		_nextSiblingInMem()
+		return true
+	}
 	var _nextSiblingOfParentInMem = func() bool {
 		for lvl > 1 { // go to parent sibling in mem
 			if k[lvl-1] == nil {
@@ -428,13 +437,10 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 				for ; k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
 				}
 				next = append(append(next[:0], k[lvl]...), uint8(id[lvl]))
-				ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(next)
-				next = append(append(next[:0], k[nonNilLvl]...), uint8(id[nonNilLvl]))
-				if bytes.HasPrefix(ihK, next) {
-					_unmarshal()
+				buf = append(append(buf[:0], k[nonNilLvl]...), uint8(id[nonNilLvl]))
+				if _seek(next, buf) {
 					return true
 				}
-
 				lvl = nonNilLvl + 1
 				continue
 			}
@@ -451,8 +457,7 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 		if !ok {
 			return false
 		}
-		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(seek)
-		_unmarshal()
+		_seek(next, next)
 		return ihK != nil
 	}
 	var _preOrderTraversalStepNoInDepth = func() { _ = _nextSiblingInMem() || _nextSiblingOfParentInMem() || _nextSiblingInDB() }
@@ -462,14 +467,13 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 			if !ok {
 				panic(fmt.Errorf("item %x hasBranch bit %x, but it not found in cache", k[lvl], id[lvl]))
 			}
-			_unmarshal()
+			_seek(next, prefix)
 			return
 		}
 		_preOrderTraversalStepNoInDepth()
 	}
 
-	ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(prefix)
-	_unmarshal()
+	_seek(next, prefix)
 
 	for ihK != nil { // go to sibling in cache
 		if prefix != nil && !bytes.HasPrefix(k[lvl], prefix) {
