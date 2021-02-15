@@ -372,73 +372,115 @@ func (sc *StateCache) DebugPrintAccounts() error {
 	return nil
 }
 
-func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte, walker func(prefix []byte, h common.Hash, skipState bool) error) error {
+func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte, walker func(prefix []byte, h common.Hash, hasBranch, skipState bool) error) error {
 	var cur []byte
 	seek := make([]byte, 0, 64)
+	next := make([]byte, 0, 64)
 	seek = append(seek, prefix...)
 	var k [64][]byte
 	var hasBranch, hasState, hasHash [64]uint16
-	var id, hashID, maxID [64]int8
+	var id, hashID [64]int8
+	var deleted [64]bool
 	var hashes [64][]common.Hash
 	var lvl int
 	var ok bool
-	var isChild = func() bool { return (uint16(1)<<id[lvl])&hasState[lvl] != 0 }
-	var isBranch = func() bool { return (uint16(1)<<id[lvl])&hasBranch[lvl] != 0 }
+	var isChild = func() bool { return (1<<id[lvl])&hasState[lvl] != 0 }
+	var isBranch = func() bool { return (1<<id[lvl])&hasBranch[lvl] != 0 }
+	var isHash = func() bool { return (1<<id[lvl])&hasHash[lvl] != 0 }
 	skipState := true
 
 	ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem := sc.AccountHashesSeek(prefix)
 GotItemFromCache:
 	for ihK != nil { // go to sibling in cache
+		from, to := lvl+1, len(k)
+		if lvl >= len(k) {
+			from, to = len(k)+1, lvl+2
+		}
+		for i := from; i < to; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
+			k[i], hasState[i], hasBranch[i], hasHash[i], hashID[i], id[i], hashes[i], deleted[i] = nil, 0, 0, 0, 0, 0, nil, false
+		}
 		lvl = len(ihK)
 		k[lvl], hasState[lvl], hasBranch[lvl], hasHash[lvl], hashes[lvl] = ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem
-		hashID[lvl], id[lvl], maxID[lvl] = -1, int8(bits.TrailingZeros16(hasStateItem))-1, int8(bits.Len16(hasStateItem))
+		hashID[lvl], id[lvl], deleted[lvl] = -1, int8(bits.TrailingZeros16(hasStateItem))-1, false
 
 		if prefix != nil && !bytes.HasPrefix(k[lvl], prefix) {
 			return nil
 		}
 
-		for ; lvl > 0; lvl-- { // go to parent sibling in mem
-			//for i := lvl; i < len(hashID); i++ {
-			//	hashID[i] = 0
-			//}
+		for ; lvl > 1; lvl-- { // go to parent sibling in mem
+			if k[lvl-1] == nil {
+				nonNilLvl := lvl - 1
+				for ; k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
+				}
+				next = append(append(next[:0], k[lvl]...), uint8(id[lvl]))
+				ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(next)
+				next = append(append(next[:0], k[nonNilLvl]...), uint8(id[nonNilLvl]))
+				if bytes.HasPrefix(ihK, next) {
+					continue GotItemFromCache
+				}
+
+				lvl = nonNilLvl + 1
+				continue
+			}
+			lvl--
+			// END of _nextSiblingOfParentInMem
+
+			// START of _nextSiblingInMem
 			cur = append(append(cur[:0], k[lvl]...), 0)
-			for id[lvl]++; id[lvl] <= maxID[lvl]; id[lvl]++ { // go to sibling
+			for id[lvl]++; id[lvl] <= int8(bits.Len16(hasState[lvl])); id[lvl]++ { // go to sibling
 				if !isChild() {
 					continue
 				}
 
-				cur[len(cur)-1] = uint8(id[lvl])
-				if !isBranch() {
+				if !isHash() {
+					if !isBranch() {
+						continue
+					}
 					skipState = false
-					continue
+					ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
+					if ok {
+						continue GotItemFromCache
+					}
+					return fmt.Errorf("item %x hasBranch bit %x, but it not found in cache", k[lvl], id[lvl])
 				}
-				hashID[lvl]++
+
+				cur[len(cur)-1] = uint8(id[lvl])
 				if canUse(cur) {
-					if err := walker(cur, hashes[lvl][hashID[lvl]], skipState); err != nil {
+					if err := walker(cur, hashes[lvl][hashID[lvl]], isBranch(), skipState); err != nil {
 						return err
 					}
 					skipState = true
 					continue // cache item can be used and exists in cache, then just go to next sibling
 				}
 
+				if !deleted[lvl] {
+					sc.SetAccountHashDelete(k[lvl])
+					deleted[lvl] = true
+				}
+
+				if !isBranch() {
+					skipState = false
+					continue
+				}
 				ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
 				if ok {
 					continue GotItemFromCache
 				}
-				skipState = false
 			}
 		}
 
-		ok = dbutils.NextNibblesSubtree(k[1], &seek)
+		ok := dbutils.NextNibblesSubtree(k[lvl], &seek)
 		if !ok {
 			break
 		}
 		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(seek)
-		for i := len(ihK); i >= lvl; i-- { // if first meet key is not 0 length, then nullify all shorter metadata
-			k[i], hasBranch[i], hasState[i], maxID[i], hashID[i], id[i] = nil, 0, 0, 0, 0, 0
-		}
 	}
 
+	fmt.Printf("alex2\n")
+
+	if err := walker(nil, common.Hash{}, false, skipState); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -516,58 +558,6 @@ func (sc *StateCache) WalkStorageHashes(walker func(addrHash common.Hash, incarn
 		}
 		return true
 	})
-	return nil
-}
-
-func (sc *StateCache) StorageHashes(adrHash common.Hash, incarnation uint64, walker func(prefix []byte, h common.Hash) error) error {
-	var cur, prev *StorageHashItem
-	next := &StorageHashItem{addrHash: adrHash, incarnation: incarnation, locHashPrefix: make([]byte, 0, 64)}
-	step := func(i btree.Item) bool {
-		it := i.(*StorageHashItem)
-		if it.HasFlag(AbsentFlag) || it.HasFlag(DeletedFlag) {
-			return true
-		}
-		cur = it // found
-		return false
-	}
-	rw := sc.readWrites[id(cur)]
-	rw.AscendGreaterOrEqual(next, step)
-	var ihK []byte
-	for {
-		if cur == nil {
-			break
-		}
-		if cur.addrHash != adrHash || cur.incarnation != incarnation {
-			break
-		}
-		hashId := 0
-		if len(cur.locHashPrefix) == 0 { // root record, firstly storing root hash
-			if err := walker([]byte{}, cur.hashes[0]); err != nil {
-				return err
-			}
-			hashId++
-		}
-		for i := 0; i < 16; i++ {
-			if ((uint16(1) << i) & cur.hasBranch) == 0 {
-				continue
-			}
-			ihK = append(append(ihK[:0], cur.locHashPrefix...), uint8(i))
-			if err := walker(common.CopyBytes(ihK), cur.hashes[hashId]); err != nil {
-				return err
-			}
-			hashId++
-		}
-		prev = cur
-		cur = nil
-		ok := dbutils.NextNibblesSubtree(prev.locHashPrefix, &next.locHashPrefix) // go to sibling
-		if !ok {
-			break
-		}
-		rw.AscendGreaterOrEqual(next, step)
-	}
-	if err := walker(nil, common.Hash{}); err != nil {
-		return err
-	}
 	return nil
 }
 

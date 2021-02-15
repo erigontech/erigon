@@ -773,7 +773,7 @@ func (c *IHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 		//}
 		if c.canUse(c.kBuf) {
 			c.cur = append(c.cur[:0], c.kBuf...)
-			c.SkipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
+			c.SkipState = isDenseSequence(c.prev, c.cur)
 			//fmt.Printf("Next2: %x, %d,%b,%d\n", c.k, c.childID[c.lvl], c.hasHash[c.lvl], len(c.v))
 			return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
 		}
@@ -848,17 +848,17 @@ func (c *IHCursor) _nextSibling() error {
 }
 
 func (c *IHCursor) _nextSiblingInMem() bool {
-	for c.childID[c.lvl]++; c.childID[c.lvl] < 16; c.childID[c.lvl]++ {
-		if ((uint16(1) << c.childID[c.lvl]) & c.hasHash[c.lvl]) != 0 {
+	for c.childID[c.lvl]++; c.childID[c.lvl] < int16(bits.Len16(c.hasState[c.lvl])); c.childID[c.lvl]++ {
+		// TODO: replace isDenseSequence() by next logic
+		//c.SkipState = c.SkipState && ((1<<(c.childID[c.lvl]-1))&c.hasState[c.lvl]) == 0 // if prev child has state - then we skipped some state
+
+		if ((1 << c.childID[c.lvl]) & c.hasHash[c.lvl]) != 0 {
 			c.hashID[c.lvl]++
 			return true
 		}
-		if ((uint16(1) << c.childID[c.lvl]) & c.hasBranch[c.lvl]) != 0 {
-			//fmt.Printf("_nextSiblingInMem3: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
+		if ((1 << c.childID[c.lvl]) & c.hasBranch[c.lvl]) != 0 {
 			return true
 		}
-
-		c.SkipState = c.SkipState && ((uint16(1)<<c.childID[c.lvl])&c.hasState[c.lvl]) == 0
 	}
 	return false
 }
@@ -916,14 +916,12 @@ func (c *IHCursor) _nextSiblingInDB() error {
 }
 
 func (c *IHCursor) _unmarshal(k, v []byte) {
-	if c.lvl < len(k) {
-		for i := c.lvl + 1; i < len(k); i++ { // if first meet key is not 0 length, then nullify all shorter metadata
-			c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
-		}
-	} else {
-		for i := len(k) + 1; i <= c.lvl+1; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
-			c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
-		}
+	from, to := c.lvl+1, len(k)
+	if c.lvl >= len(k) {
+		from, to = len(k)+1, c.lvl+2
+	}
+	for i := from; i < to; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
+		c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
 	}
 	c.lvl = len(k)
 	c.k[c.lvl] = k
@@ -960,25 +958,6 @@ func (c *IHCursor) _hasBranch() bool {
 	return (uint16(1)<<c.childID[c.lvl])&c.hasBranch[c.lvl] != 0
 }
 
-func (c *IHCursor) _complexSkpState() bool {
-	// experimental example of - how can skip state by looking to 'hasState' bitmap
-	return false
-	//if len(c.prev) == len(c.cur) && bytes.Equal(c.prev[:len(c.prev)-1], c.cur[:len(c.cur)-1]) {
-	//	mask := uint16(0)
-	//	foundThings := false
-	//	for i := int16(c.prev[len(c.prev)-1]) + 1; i < c.childID[c.lvl]; i++ {
-	//		c.kBuf[len(c.kBuf)-1] = uint8(i)
-	//		if !c.canUse(c.kBuf) {
-	//			foundThings = true
-	//			break
-	//		}
-	//		mask |= uint16(1) << i
-	//	}
-	//	return !foundThings && c.hasState[c.lvl]&mask == 0
-	//}
-	//return false
-}
-
 func (c *IHCursor) _next() (k, v []byte, hasBranch bool, err error) {
 	err = c._nextItem()
 	if err != nil {
@@ -999,7 +978,7 @@ func (c *IHCursor) _next() (k, v []byte, hasBranch bool, err error) {
 			//}
 			if c.canUse(c.kBuf) {
 				c.cur = append(c.cur[:0], c.kBuf...)
-				c.SkipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
+				c.SkipState = isDenseSequence(c.prev, c.cur)
 				return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
 			}
 		}
@@ -1129,7 +1108,7 @@ func (c *StorageIHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 		c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
 		if c.canUse(c.kBuf) {
 			c.cur = common.CopyBytes(c.kBuf[80:])
-			c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
+			c.skipState = isDenseSequence(c.prev, c.cur)
 			return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
 		}
 	}
@@ -1304,7 +1283,7 @@ func (c *StorageIHCursor) _next() (k, v []byte, hasBranch bool, err error) {
 			c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
 			if c.canUse(c.kBuf) {
 				c.cur = common.CopyBytes(c.kBuf[80:])
-				c.skipState = isDenseSequence(c.prev, c.cur) || c._complexSkpState()
+				c.skipState = isDenseSequence(c.prev, c.cur)
 				return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
 			}
 		}
@@ -1321,14 +1300,12 @@ func (c *StorageIHCursor) _next() (k, v []byte, hasBranch bool, err error) {
 }
 
 func (c *StorageIHCursor) _unmarshal(k, v []byte) {
-	if c.lvl < len(k) {
-		for i := c.lvl + 1; i < len(k); i++ { // if first meet key is not 0 length, then nullify all shorter metadata
-			c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
-		}
-	} else {
-		for i := len(k) + 1; i <= c.lvl+1; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
-			c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
-		}
+	from, to := c.lvl+1, len(k)
+	if c.lvl >= len(k) {
+		from, to = len(k)+1, c.lvl+2
+	}
+	for i := from; i < to; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
+		c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
 	}
 
 	c.lvl = len(k) - 40
@@ -1337,24 +1314,6 @@ func (c *StorageIHCursor) _unmarshal(k, v []byte) {
 	c.hasState[c.lvl], c.hasBranch[c.lvl], c.hasHash[c.lvl], c.v[c.lvl], c.root = UnmarshalIH(v)
 	c.hashID[c.lvl] = -1
 	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.hasState[c.lvl]) - 1)
-}
-
-func (c *StorageIHCursor) _complexSkpState() bool {
-	return false
-	//if len(c.prev) == len(c.cur) && bytes.Equal(c.prev[:len(c.prev)-1], c.cur[:len(c.cur)-1]) {
-	//	mask := uint16(0)
-	//	foundThings := false
-	//	for i := int16(c.prev[len(c.prev)-1]) + 1; i < c.childID[c.lvl]; i++ {
-	//		c.kBuf[len(c.kBuf)-1] = uint8(i)
-	//		if !c.canUse(c.kBuf) {
-	//			foundThings = true
-	//			break
-	//		}
-	//		mask |= uint16(1) << i
-	//	}
-	//	return !foundThings && c.hasState[c.lvl]&mask == 0
-	//}
-	//return false
 }
 
 func (c *StorageIHCursor) _deleteCurrent() error {
@@ -1524,15 +1483,15 @@ func UnmarshalIH(v []byte) (hasState, hasBranch, hasHash uint16, hashes, rootHas
 	return
 }
 
-func MarshalIH(hasState, hasBranch, hasHash uint16, h []common.Hash) []byte {
-	v := make([]byte, 6+len(h)*common.HashLength)
-	binary.BigEndian.PutUint16(v, hasState)
-	binary.BigEndian.PutUint16(v[2:], hasBranch)
-	binary.BigEndian.PutUint16(v[4:], hasHash)
-	for i := 0; i < len(h); i++ {
-		copy(v[6+i*common.HashLength:6+(i+1)*common.HashLength], h[i].Bytes())
+func MarshalIH(hasState, hasBranch, hasHash uint16, h []common.Hash, buf []byte) []byte {
+	buf = buf[:6+len(h)*common.HashLength]
+	binary.BigEndian.PutUint16(buf, hasState)
+	binary.BigEndian.PutUint16(buf[2:], hasBranch)
+	binary.BigEndian.PutUint16(buf[4:], hasHash)
+	for i := 0; i < len(h); i += common.HashLength {
+		copy(buf[6+i:6+i+common.HashLength], h[i].Bytes())
 	}
-	return v
+	return buf
 }
 
 func IHStorageKey(addressHash []byte, incarnation uint64, prefix []byte) []byte {
@@ -1585,7 +1544,7 @@ func collectMissedAccIH(canUse func(prefix []byte) bool, prefix []byte, cache *s
 		ranges = append(ranges, common.CopyBytes(rangeFrom), common.CopyBytes(cur))
 		hasRange = false
 	}
-	if err := walkIHAccounts(canUse, prefix, cache, func(isBranch, canUse bool, cur []byte, hash common.Hash) error {
+	if err := walkIHAccounts(canUse, prefix, cache, func(cur []byte, hash common.Hash, isBranch, canUse bool) error {
 		if err := common.Stopped(quit); err != nil {
 			return err
 		}
@@ -1693,7 +1652,7 @@ func collectMissedAccounts(canUse func(prefix []byte) bool, prefix []byte, cache
 		ranges = append(ranges, common.CopyBytes(rangeFrom), common.CopyBytes(cur))
 		hasRange = false
 	}
-	if err := walkIHAccounts(canUse, prefix, cache, func(isBranch, canUse bool, cur []byte, hash common.Hash) error {
+	if err := walkIHAccounts(canUse, prefix, cache, func(cur []byte, hash common.Hash, isBranch, canUse bool) error {
 		if err := common.Stopped(quit); err != nil {
 			return err
 		}
@@ -1722,72 +1681,142 @@ func collectMissedAccounts(canUse func(prefix []byte) bool, prefix []byte, cache
 	return ranges, nil
 }
 
-func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, cache *shards.StateCache, walker func(isBranch, canUse bool, cur []byte, hash common.Hash) error) error {
+func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.StateCache, walker func(cur []byte, hash common.Hash, isBranch, canUse bool) error) error {
 	var cur []byte
 	seek := make([]byte, 0, 64)
+	next := make([]byte, 0, 64)
 	seek = append(seek, prefix...)
 	var k [64][]byte
-	var hasState, hasBranch, hasHash [64]uint16
-	var id, maxID, hashID [64]int8
+	var hasBranch, hasState, hasHash [64]uint16
+	var id, hashID [64]int8
 	var hashes [64][]common.Hash
 	var lvl int
 	var ok bool
-	var isChild = func() bool { return (uint16(1)<<id[lvl])&hasState[lvl] != 0 }
-	var isBranch = func() bool { return (uint16(1)<<id[lvl])&hasBranch[lvl] != 0 }
+	var isChild = func() bool { return (1<<id[lvl])&hasState[lvl] != 0 }
+	var isBranch = func() bool { return (1<<id[lvl])&hasBranch[lvl] != 0 }
+	var isHash = func() bool { return (1<<id[lvl])&hasHash[lvl] != 0 }
 
-	ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem := cache.AccountHashesSeek(prefix)
+	ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem := sc.AccountHashesSeek(prefix)
 GotItemFromCache:
 	for ihK != nil { // go to sibling in cache
+		from, to := lvl+1, len(k)
+		if lvl >= len(k) {
+			from, to = len(k)+1, lvl+2
+		}
+		for i := from; i < to; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
+			k[i], hasState[i], hasBranch[i], hasHash[i], hashID[i], id[i], hashes[i] = nil, 0, 0, 0, 0, 0, nil
+		}
 		lvl = len(ihK)
 		k[lvl], hasState[lvl], hasBranch[lvl], hasHash[lvl], hashes[lvl] = ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem
-		hashID[lvl], id[lvl], maxID[lvl] = -1, int8(bits.TrailingZeros16(hasBranchItem))-1, int8(bits.Len16(hasBranchItem))
+		hashID[lvl], id[lvl] = -1, int8(bits.TrailingZeros16(hasStateItem))-1
 
 		if prefix != nil && !bytes.HasPrefix(k[lvl], prefix) {
 			return nil
 		}
 
-		for ; lvl > 0; lvl-- { // go to parent sibling in mem
+		for ; lvl > 1; lvl-- { // go to parent sibling in mem
+			if k[lvl-1] == nil {
+				nonNilLvl := lvl - 1
+				for ; k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
+				}
+				next = append(append(next[:0], k[lvl]...), uint8(id[lvl]))
+				ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(next)
+				next = append(append(next[:0], k[nonNilLvl]...), uint8(id[nonNilLvl]))
+				if bytes.HasPrefix(ihK, next) {
+					continue GotItemFromCache
+				}
+
+				lvl = nonNilLvl + 1
+				continue
+			}
+			lvl--
+			// END of _nextSiblingOfParentInMem
+
+			// START of _nextSiblingInMem
 			cur = append(append(cur[:0], k[lvl]...), 0)
-			for id[lvl]++; id[lvl] <= maxID[lvl]; id[lvl]++ { // go to sibling
+			for id[lvl]++; id[lvl] <= int8(bits.Len16(hasState[lvl])); id[lvl]++ { // go to sibling
 				if !isChild() {
 					continue
 				}
 
-				cur[len(cur)-1] = uint8(id[lvl])
-				if !isBranch() {
-					if err := walker(false, false, cur, common.Hash{}); err != nil {
-						return err
+				if !isHash() {
+					if !isBranch() {
+						if err := walker(cur, common.Hash{}, false, false); err != nil {
+							return err
+						}
+						continue
 					}
-					continue
-				}
-				hashID[lvl]++
-				if canUse(cur) {
-					if err := walker(true, true, cur, hashes[lvl][hashID[lvl]]); err != nil {
-						return err
+
+					ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
+					if ok {
+						continue GotItemFromCache
 					}
-					continue // cache item can be used and exists in cache, then just go to next sibling
+					return fmt.Errorf("item %x hasBranch bit %x, but it not found in cache", k[lvl], id[lvl])
 				}
 
-				if err := walker(true, false, cur, hashes[lvl][hashID[lvl]]); err != nil {
+				cur[len(cur)-1] = uint8(id[lvl])
+				can := canUse(cur)
+				if err := walker(cur, hashes[lvl][hashID[lvl]], isBranch(), can); err != nil {
 					return err
 				}
-
-				ihK, hasStateItem, hasBranchItem, hasHashItem, _, ok = cache.GetAccountHash(cur)
+				if can {
+					continue // cache item can be used and exists in cache, then just go to next sibling
+				}
+				if !isBranch() {
+					continue
+				}
+				ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
 				if ok {
 					continue GotItemFromCache
 				}
 			}
 		}
 
-		ok = dbutils.NextNibblesSubtree(k[1], &seek)
+		ok := dbutils.NextNibblesSubtree(k[lvl], &seek)
 		if !ok {
 			break
 		}
-		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = cache.AccountHashesSeek(seek)
-		//fmt.Printf("sibling: %x -> %x, %d, %d, %d\n", seek, ihK, lvl, id[lvl], maxID[lvl])
+		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(seek)
 	}
+
 	return nil
 }
+
+//				cur[len(cur)-1] = uint8(id[lvl])
+//				if !isBranch() {
+//					if err := walker(false, false, cur, common.Hash{}); err != nil {
+//						return err
+//					}
+//					continue
+//				}
+//				hashID[lvl]++
+//				if canUse(cur) {
+//					if err := walker(true, true, cur, hashes[lvl][hashID[lvl]]); err != nil {
+//						return err
+//					}
+//					continue // cache item can be used and exists in cache, then just go to next sibling
+//				}
+//
+//				if err := walker(true, false, cur, hashes[lvl][hashID[lvl]]); err != nil {
+//					return err
+//				}
+//
+//				ihK, hasStateItem, hasBranchItem, hasHashItem, _, ok = cache.GetAccountHash(cur)
+//				if ok {
+//					continue GotItemFromCache
+//				}
+//			}
+//		}
+//
+//		ok = dbutils.NextNibblesSubtree(k[1], &seek)
+//		if !ok {
+//			break
+//		}
+//		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = cache.AccountHashesSeek(seek)
+//		//fmt.Printf("sibling: %x -> %x, %d, %d, %d\n", seek, ihK, lvl, id[lvl], maxID[lvl])
+//	}
+//	return nil
+//}
 
 func (l *FlatDBTrieLoader) prep(accs, ihAcc ethdb.Cursor, prefix []byte, cache *shards.StateCache, quit <-chan struct{}) error {
 	defer func(t time.Time) { fmt.Printf("trie_root.go:338: %s\n", time.Since(t)) }(time.Now())
@@ -1812,17 +1841,16 @@ func (l *FlatDBTrieLoader) prep(accs, ihAcc ethdb.Cursor, prefix []byte, cache *
 	return nil
 }
 
-func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, prefix []byte, cache *shards.StateCache, quit <-chan struct{}) (common.Hash, error) {
+func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *StorageIHCursor, prefix []byte, cache *shards.StateCache, quit <-chan struct{}) (common.Hash, error) {
 	var prevIHK []byte
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	l.accSeek = make([]byte, 64)
 	defer func(t time.Time) { fmt.Printf("trie_root.go:375: %s\n", time.Since(t)) }(time.Now())
+	i2, i4 := 0, 0
 	canUse := func(prefix []byte) bool { return !l.rd.Retain(prefix) }
-	i1, i2, i3, i4 := 0, 0, 0, 0
 
-	if err := cache.AccountHashesTree(canUse, prefix, func(ihK []byte, ihV common.Hash, skipState bool) error {
-		i1++
+	if err := cache.AccountHashesTree(canUse, prefix, func(ihK []byte, ihV common.Hash, hasBranch, skipState bool) error {
 		if skipState {
 			goto SkipAccounts
 		}
@@ -1847,47 +1875,40 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, prefix []byte, cac
 			copy(l.accAddrHashWithInc[:], addrHash.Bytes())
 			binary.BigEndian.PutUint64(l.accAddrHashWithInc[32:], l.accountValue.Incarnation)
 			l.accAddrHash.SetBytes(addrHash.Bytes())
-			var prevIHKS []byte
 			accWithInc := l.accAddrHashWithInc[:]
-			hexutil.DecompressNibbles(accWithInc, &l.kHexS)
-			if err := cache.StorageHashes(l.accAddrHash, l.accountValue.Incarnation, func(ihKS []byte, h common.Hash) error {
-				i3++
-				if isDenseSequence(prevIHKS, ihKS) {
-					goto SkipStorage
+			for ihKS, ihVS, hasBranchS, err2 := ihStorage.SeekToAccount(accWithInc); ; ihKS, ihVS, hasBranchS, err2 = ihStorage.Next() {
+				if err2 != nil {
+					return false, err2
 				}
 
-				l.storageSeek = firstNotCoveredPrefix(prevIHK, prefix, l.storageSeek)
-				for kS, vS, err3 := storages.SeekBothRange(accWithInc, l.storageSeek); kS != nil; kS, vS, err3 = storages.NextDup() {
+				if ihStorage.skipState {
+					goto SkipStorage
+				}
+				i4++
+				for kS, vS, err3 := storages.SeekBothRange(accWithInc, ihStorage.FirstNotCoveredPrefix()); kS != nil; kS, vS, err3 = storages.NextDup() {
 					if err3 != nil {
-						return err3
+						return false, err3
 					}
-					i4++
-					hexutil.DecompressNibbles(vS[:32], &l.buf)
-					if keyIsBefore(ihKS, l.buf) { // read until next IH
+					hexutil.DecompressNibbles(vS[:32], &l.kHexS)
+					if keyIsBefore(ihKS, l.kHexS) { // read until next IH
 						break
 					}
-					l.kHexS = append(l.kHexS[80:], l.buf...)
-					//if err := l.receiver.Receive(StorageStreamItem, accWithInc, l.kHexS, nil, vS[32:], nil, 0); err != nil {
-					//	return err
-					//}
+					if err := l.receiver.Receive(StorageStreamItem, accWithInc, common.CopyBytes(l.kHexS), nil, vS[32:], nil, false, 0); err != nil {
+						return false, err
+					}
 				}
 
 			SkipStorage:
-				if len(ihKS) == 0 || !bytes.HasPrefix(ihKS, l.ihSeek) { // Loop termination
-					return nil
+				if ihKS == nil { // Loop termination
+					break
 				}
 
-				l.kHexS = append(l.kHexS[80:], ihKS...)
-				//if err := l.receiver.Receive(SHashStreamItem, accWithInc, l.kHexS, nil, nil, h.Bytes(), 0); err != nil {
-				//	return err
-				//}
-				if len(ihKS) == 0 { // means we just sent acc.storageRoot
-					return nil
+				if err := l.receiver.Receive(SHashStreamItem, accWithInc, common.CopyBytes(ihKS), nil, nil, ihVS, hasBranchS, 0); err != nil {
+					return false, err
 				}
-				prevIHKS = append(prevIHKS[:0], ihKS...)
-				return nil
-			}); err != nil {
-				return false, err
+				if len(ihKS) == 0 { // means we just sent acc.storageRoot
+					break
+				}
 			}
 
 			select {
@@ -1905,18 +1926,18 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, prefix []byte, cac
 			return nil
 		}
 
-		//if err := l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV[:], 0); err != nil {
-		//	return err
-		//}
+		if err := l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV[:], hasBranch, 0); err != nil {
+			return err
+		}
 		prevIHK = append(prevIHK[:0], ihK...)
 		return nil
 	}); err != nil {
 		return EmptyRoot, err
 	}
 
-	//if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, len(prefix)); err != nil {
-	//	return EmptyRoot, err
-	//}
+	if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, false, len(prefix)); err != nil {
+		return EmptyRoot, err
+	}
 
 	return EmptyRoot, nil
 }
@@ -1947,6 +1968,9 @@ func (l *FlatDBTrieLoader) CalcSubTrieRootOnCache(db ethdb.Database, prefix []by
 
 	accsC, stC := tx.Cursor(dbutils.HashedAccountsBucket), tx.Cursor(dbutils.HashedStorageBucket)
 	ihAccC, ihStorageC := tx.Cursor(dbutils.TrieOfAccountsBucket), tx.Cursor(dbutils.TrieOfStorageBucket)
+	canUse := func(prefix []byte) bool { return !l.rd.Retain(prefix) }
+	ihStorage := IHStorage2(canUse, l.shc, ihStorageC, quit)
+
 	ss := tx.CursorDupSort(dbutils.HashedStorageBucket)
 
 	_ = ihStorageC
@@ -1955,7 +1979,7 @@ func (l *FlatDBTrieLoader) CalcSubTrieRootOnCache(db ethdb.Database, prefix []by
 	if err := l.prep(accsC, ihAccC, prefix, cache, quit); err != nil {
 		return EmptyRoot, err
 	}
-	if _, err := l.post(ss, prefix, cache, quit); err != nil {
+	if _, err := l.post(ss, ihStorage, prefix, cache, quit); err != nil {
 		return EmptyRoot, err
 	}
 	if !useExternalTx {
@@ -1970,21 +1994,21 @@ func (l *FlatDBTrieLoader) CalcSubTrieRootOnCache(db ethdb.Database, prefix []by
 
 func (l *FlatDBTrieLoader) CalcTrieRootOnCache(cache *shards.StateCache) (common.Hash, error) {
 	fmt.Printf("CalcTrieRootOnCache\n")
-	if err := cache.AccountHashesTree(func(_ []byte) bool { return true }, []byte{}, func(ihK []byte, ihV common.Hash, skipState bool) error {
+	if err := cache.AccountHashesTree(func(_ []byte) bool { return true }, []byte{}, func(ihK []byte, ihV common.Hash, hasBranch, skipState bool) error {
 		if len(ihK) == 0 { // Loop termination
 			return nil
 		}
 		//fmt.Printf("1:%x\n", ihK)
-		//if err := l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV[:], 0); err != nil {
-		//	return err
-		//}
+		if err := l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV[:], hasBranch, 0); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		return EmptyRoot, err
 	}
 
-	//if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, 0); err != nil {
-	//	return EmptyRoot, err
-	//}
+	if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, false, 0); err != nil {
+		return EmptyRoot, err
+	}
 	return l.receiver.Root(), nil
 }

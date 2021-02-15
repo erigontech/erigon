@@ -113,7 +113,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 				if len(keyHex) == 0 {
 					return nil
 				}
-				if hashes == nil {
+				if hashes == nil && rootHash == nil {
 					cache.SetAccountHashDelete(keyHex)
 					return nil
 				}
@@ -123,7 +123,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 			}
 			storageHashCollector := func(accWithInc []byte, keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
 				addr, inc := common.BytesToHash(accWithInc[:32]), binary.BigEndian.Uint64(accWithInc[32:])
-				if hashes == nil {
+				if hashes == nil && rootHash == nil {
 					cache.SetStorageHashDelete(addr, inc, keyHex, hasState, hasBranch, hasHash, nil)
 					return nil
 				}
@@ -165,9 +165,9 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 		//_ = cache.DebugPrintAccounts()
 		writes := cache.PrepareWrites()
 
+		newV := make([]byte, 0, 1024)
 		shards.WalkAccountHashesWrites(writes, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			newV := trie.MarshalIH(hasState, hasBranch, hasHash, h)
-			fmt.Printf("write: %x,%x\n", prefix, newV)
+			newV = trie.MarshalIH(hasState, hasBranch, hasHash, h, newV)
 			if err := db.Put(dbutils.TrieOfAccountsBucket, prefix, newV); err != nil {
 				panic(err)
 			}
@@ -177,8 +177,9 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 			}
 		})
 		shards.WalkStorageHashesWrites(writes, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			k, v := trie.IHStorageKey(addrHash.Bytes(), incarnation, prefix), trie.MarshalIH(hasState, hasBranch, hasHash, h)
-			if err := db.Put(dbutils.TrieOfStorageBucket, k, v); err != nil {
+			k := trie.IHStorageKey(addrHash.Bytes(), incarnation, prefix)
+			newV = trie.MarshalIH(hasState, hasBranch, hasHash, h, newV)
+			if err := db.Put(dbutils.TrieOfStorageBucket, k, newV); err != nil {
 				panic(err)
 			}
 		}, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
@@ -452,7 +453,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 				if len(keyHex) == 0 {
 					return nil
 				}
-				if hashes == nil {
+				if hashes == nil && rootHash == nil {
 					cache.SetAccountHashDelete(keyHex)
 					return nil
 				}
@@ -462,7 +463,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 			}
 			storageHashCollector := func(accWithInc []byte, keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
 				addr, inc := common.BytesToHash(accWithInc[:32]), binary.BigEndian.Uint64(accWithInc[32:])
-				if hashes == nil {
+				if hashes == nil && rootHash == nil {
 					cache.SetStorageHashDelete(addr, inc, keyHex, hasState, hasBranch, hasHash, nil)
 					return nil
 				}
@@ -504,8 +505,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		)
 
 		writes := cache.PrepareWrites()
+		newV := make([]byte, 0, 1024)
 		shards.WalkAccountHashesWrites(writes, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			newV := trie.MarshalIH(hasState, hasBranch, hasHash, h)
+			newV = trie.MarshalIH(hasState, hasBranch, hasHash, h, newV)
 			if err := db.Put(dbutils.TrieOfAccountsBucket, prefix, newV); err != nil {
 				panic(err)
 			}
@@ -515,8 +517,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 			}
 		})
 		shards.WalkStorageHashesWrites(writes, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			k, v := trie.IHStorageKey(addrHash.Bytes(), incarnation, prefix), trie.MarshalIH(hasState, hasBranch, hasHash, h)
-			if err := db.Put(dbutils.TrieOfStorageBucket, k, v); err != nil {
+			k := trie.IHStorageKey(addrHash.Bytes(), incarnation, prefix)
+			newV = trie.MarshalIH(hasState, hasBranch, hasHash, h, newV)
+			if err := db.Put(dbutils.TrieOfStorageBucket, k, newV); err != nil {
 				panic(err)
 			}
 		}, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
@@ -697,7 +700,8 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 					cache.SetAccountHashDelete(keyHex)
 					return nil
 				}
-				cache.SetAccountHashWrite(keyHex, hasState, hasBranch, hasHash, trie.IHTypedValue(hashes, rootHash))
+				newV := trie.IHTypedValue(hashes, rootHash)
+				cache.SetAccountHashWrite(keyHex, hasState, hasBranch, hasHash, newV)
 				return nil
 			}
 			storageHashCollector := func(accWithInc []byte, keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
@@ -706,7 +710,8 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 					cache.SetStorageHashDelete(addr, inc, keyHex, hasState, hasBranch, hasHash, nil)
 					return nil
 				}
-				cache.SetStorageHashWrite(addr, inc, keyHex, hasState, hasBranch, hasHash, trie.IHTypedValue(hashes, rootHash))
+				newV := trie.IHTypedValue(hashes, rootHash)
+				cache.SetStorageHashWrite(addr, inc, keyHex, hasState, hasBranch, hasHash, newV)
 				return nil
 			}
 			loader := trie.NewFlatDBTrieLoader(logPrefix)
@@ -743,8 +748,9 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		)
 
 		writes := cache.PrepareWrites()
+		newV := make([]byte, 0, 1024)
 		shards.WalkAccountHashesWrites(writes, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			newV := trie.MarshalIH(hasState, hasBranch, hasHash, h)
+			newV = trie.MarshalIH(hasState, hasBranch, hasHash, h, newV)
 			if err := db.Put(dbutils.TrieOfAccountsBucket, prefix, newV); err != nil {
 				panic(err)
 			}
@@ -754,8 +760,9 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 			}
 		})
 		shards.WalkStorageHashesWrites(writes, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			k, v := trie.IHStorageKey(addrHash.Bytes(), incarnation, prefix), trie.MarshalIH(hasState, hasBranch, hasHash, h)
-			if err := db.Put(dbutils.TrieOfStorageBucket, k, v); err != nil {
+			k := trie.IHStorageKey(addrHash.Bytes(), incarnation, prefix)
+			newV = trie.MarshalIH(hasState, hasBranch, hasHash, h, newV)
+			if err := db.Put(dbutils.TrieOfStorageBucket, k, newV); err != nil {
 				panic(err)
 			}
 		}, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
