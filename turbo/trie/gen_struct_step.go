@@ -93,7 +93,9 @@ func (GenStructStepHashData) GenStructStepData() {}
 // `e` parameter is the trie builder, which uses the structure information to assemble trie on the stack and compute its hash.
 // `h` parameter is the hash collector, which is notified whenever branch node is constructed.
 // `data` parameter specified if a hash or a binary string or an account should be emitted.
-// `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack.
+// `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. Meaning - which children of given prefix have state.
+// `hasBranch` same as `groups`, but meaning - which children of given prefix have IntermediateHash.
+// `hasHash` same as `groups`, but meaning - which children of given prefix are branch nodes and their hashes can be saved and used on next trie resolution (as IntermediateHash).
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure

@@ -404,7 +404,6 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	case AccountStreamItem:
 		r.advanceKeysAccount(accountKey, true /* terminator */)
 		if r.curr.Len() > 0 && !r.wasIH {
-			//r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
 			r.cutoffKeysStorage(0)
 			if r.currStorage.Len() > 0 {
 				if err := r.genStructStorage(); err != nil {
@@ -412,16 +411,6 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				}
 			}
 			if r.currStorage.Len() > 0 {
-				//if len(r.groups) >= 2*common.HashLength {
-				//	r.groups = r.groups[:2*common.HashLength-1]
-				//	r.hasBranch = r.hasBranch[:2*common.HashLength-1]
-				//	r.hasHash = r.hasHash[:2*common.HashLength-1]
-				//}
-				//for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
-				//	r.groups = r.groups[:len(r.groups)-1]
-				//	r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
-				//	r.hasHash = r.hasHash[:len(r.hasHash)-1]
-				//}
 				r.groupsStorage = r.groupsStorage[:0]
 				r.hasBranchStorage = r.hasBranchStorage[:0]
 				r.hasHashStorage = r.hasHashStorage[:0]
@@ -444,7 +433,6 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	case AHashStreamItem:
 		r.advanceKeysAccount(accountKey, false /* terminator */)
 		if r.curr.Len() > 0 && !r.wasIH {
-			//r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
 			r.cutoffKeysStorage(0)
 			if r.currStorage.Len() > 0 {
 				if err := r.genStructStorage(); err != nil {
@@ -452,16 +440,6 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				}
 			}
 			if r.currStorage.Len() > 0 {
-				//if len(r.groups) >= 2*common.HashLength {
-				//	r.groups = r.groups[:2*common.HashLength-1]
-				//	r.hasBranch = r.hasBranch[:2*common.HashLength-1]
-				//	r.hasHash = r.hasHash[:2*common.HashLength-1]
-				//}
-				//for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
-				//	r.groups = r.groups[:len(r.groups)-1]
-				//	r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
-				//	r.hasHash = r.hasHash[:len(r.hasHash)-1]
-				//}
 				r.groupsStorage = r.groupsStorage[:0]
 				r.hasBranchStorage = r.hasBranchStorage[:0]
 				r.hasHashStorage = r.hasHashStorage[:0]
@@ -487,7 +465,6 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 		}
 		r.cutoffKeysAccount(cutoff)
 		if r.curr.Len() > 0 && !r.wasIH {
-			//r.cutoffKeysStorage(2 * (common.HashLength + common.IncarnationLength))
 			r.cutoffKeysStorage(0)
 			if r.currStorage.Len() > 0 {
 				if err := r.genStructStorage(); err != nil {
@@ -495,16 +472,6 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				}
 			}
 			if r.currStorage.Len() > 0 {
-				//if len(r.groups) >= 2*common.HashLength {
-				//	r.groups = r.groups[:2*common.HashLength-1]
-				//	r.hasBranch = r.hasBranch[:2*common.HashLength-1]
-				//	r.hasHash = r.hasHash[:2*common.HashLength-1]
-				//}
-				//for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
-				//	r.groups = r.groups[:len(r.groups)-1]
-				//	r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
-				//	r.hasHash = r.hasHash[:len(r.hasHash)-1]
-				//}
 				r.groupsStorage = r.groupsStorage[:0]
 				r.hasBranchStorage = r.hasBranchStorage[:0]
 				r.hasHashStorage = r.hasHashStorage[:0]
@@ -526,11 +493,6 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				r.hasBranch = r.hasBranch[:cutoff]
 				r.hasHash = r.hasHash[:cutoff]
 			}
-			//for len(r.groups) > 0 && r.groups[len(r.groups)-1] == 0 {
-			//	r.groups = r.groups[:len(r.groups)-1]
-			//	r.hasBranch = r.hasBranch[:len(r.hasBranch)-1]
-			//	r.hasHash = r.hasHash[:len(r.hasHash)-1]
-			//}
 		}
 		if r.hb.hasRoot() {
 			r.root = r.hb.rootHash()
