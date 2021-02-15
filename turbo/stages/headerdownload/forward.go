@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -23,34 +24,18 @@ const (
 )
 
 // Forward progresses Headers stage in the forward direction
-func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *HeaderDownload, headerReqSend func(context.Context, []*HeaderRequest), wakeUpChan chan struct{}) error {
-	var files []string
-	var buffer *HeaderBuffer
-	for {
-		files, buffer = hd.PrepareStageData()
-		if len(files) > 0 || buffer != nil && !buffer.IsEmpty() {
-			break
-		}
-		reqs, timer := hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-		headerReqSend(ctx, reqs)
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-timer.C:
-			//log.Info("RequestQueueTimer (headers) ticked")
-		case <-wakeUpChan:
-			//log.Info("headerLoop woken up by the incoming request")
-		}
+func Forward(s *stagedsync.StageState, ctx context.Context, db ethdb.Database, hd *HeaderDownload) error {
+	files, buffer := hd.PrepareStageData()
+	if len(files) == 0 && (buffer == nil || buffer.IsEmpty()) {
+		return nil
 	}
+
+	logPrefix := s.LogPrefix()
 
 	count := 0
 	var highest uint64
 	var headerProgress uint64
 	var err error
-	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
-	if err != nil {
-		return err
-	}
 	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
@@ -64,6 +49,10 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *Heade
 			return err
 		}
 		defer tx.Rollback()
+	}
+	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		return err
 	}
 	batch := tx.NewBatch()
 	defer batch.Rollback()
@@ -191,6 +180,9 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *Heade
 	}
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
+	}
+	if err := s.DoneAndUpdate(tx, highest); err != nil {
+		return err
 	}
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {

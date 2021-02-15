@@ -229,6 +229,7 @@ type HeaderDownload struct {
 	initialHash            common.Hash
 	stageReady             bool
 	stageReadyCh           chan struct{}
+	stageHeight            uint64
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
