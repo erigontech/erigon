@@ -625,17 +625,3 @@ Date:   Mon Feb 15 18:47:47 2021 +0000
 
     cmd/geth: fix js unclean shutdown (#22302)
 
-commit 08c878acd235fdc908b3a7a3c43dfc9fc5e9b2ef
-Author: Guillaume Ballet <gballet@gmail.com>
-Date:   Mon Feb 15 19:37:09 2021 +0100
-
-    cmd/utils: add workaround for FreeBSD statfs quirk (#22310)
-    
-    Make geth build on FreeBSD, fixes #22309.
-
-commit 7d1b711c7d0f27efd7772c81bb73b9b29720515a
-Author: Zsolt Felföldi <zsfelfoldi@gmail.com>
-Date:   Fri Feb 12 20:48:18 2021 +0100
-
-    les: enable les/4 and add tests (#22321)
- to state
