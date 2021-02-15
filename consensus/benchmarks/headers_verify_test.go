@@ -1,6 +1,7 @@
 package benchmarks
 
 import (
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -64,8 +65,6 @@ func TestVerifyHeadersClique(t *testing.T) {
 type engineConstructor func(db ethdb.Database) consensus.Engine
 
 func verifyByEngine(t *testing.T, headers []*types.Header, genesis *core.Genesis, engineConstr engineConstructor) time.Duration {
-	t.Helper()
-
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
@@ -77,16 +76,24 @@ func verifyByEngine(t *testing.T, headers []*types.Header, genesis *core.Genesis
 		t.Fatalf("setting up genensis block: %v", err)
 	}
 
-	seals := make([]bool, len(headers[1:]))
-	for i := range seals {
-		seals[i] = true
-	}
-
 	chain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer chain.Stop()
+
+	// prepare hashimoto cache
+	err = engine.VerifySeal(chain, headers[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Println("============================================================")
+
+	seals := make([]bool, len(headers[1:]))
+	for i := range seals {
+		seals[i] = true
+	}
 
 	tn := time.Now()
 	cancel, results := engine.VerifyHeaders(chain, headers[1:], seals)
@@ -103,8 +110,6 @@ func verifyByEngine(t *testing.T, headers []*types.Header, genesis *core.Genesis
 }
 
 func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.Genesis, consensusConfig interface{}) time.Duration {
-	t.Helper()
-
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 
@@ -115,6 +120,12 @@ func verifyByEngineProcess(t *testing.T, headers []*types.Header, genesis *core.
 
 	engine := eth.CreateConsensusEngine(nil, config, consensusConfig, nil, false, db)
 	defer engine.Close()
+
+	// prepare
+	err = stagedsync.VerifyHeaders(db, headers[1:2], engine, 1)
+	if err != nil {
+		t.Error(err)
+	}
 
 	tn := time.Now()
 	err = stagedsync.VerifyHeaders(db, headers[1:], engine, 1)

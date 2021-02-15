@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -161,7 +162,9 @@ func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.
 	}
 
 	// All basic checks passed, verify the seal and return
+	t := time.Now()
 	err = c.verifySeal(header, snap)
+	fmt.Println("\tclique.VerifySeal", header.Number.Uint64(), time.Since(t), debug.Callers(10))
 	if err == nil {
 		if err = c.applyAndStoreSnapshot(snap, header); err != nil {
 			log.Error("can't store a snapshot", "block", header.Number.Uint64(), "hash", header.HashCache().String(), "err", err)

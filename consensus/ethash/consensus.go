@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
@@ -30,6 +31,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -111,8 +113,7 @@ func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *ty
 // a results channel to retrieve the async verifications.
 func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
 	if len(headers) == 0 {
-		results := make(chan error)
-		return func() {}, results
+		return func() {}, make(chan error)
 	}
 
 	// Spawn as many workers as allowed threads
@@ -123,25 +124,38 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 
 	// Create a task channel and spawn the verifiers
 	var (
-		inputs = make(chan int)
 		done   = make(chan int, workers)
 		errors = make([]error, len(headers))
 		abort  = make(chan struct{})
 	)
+
 	wg := sync.WaitGroup{}
 	cancel := func() {
 		close(abort)
 		wg.Wait()
 	}
 
+	input := new(int64)
+
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for index := range inputs {
-				errors[index] = ethash.verifyHeaderWorker(chain, headers, seals, index)
+			var index int64
+			for {
+				index = atomic.AddInt64(input, 1) - 1
+				if int(index) > len(headers)-1 {
+					return
+				}
+
+				t := time.Now()
+
+				errors[index] = ethash.verifyHeaderWorker(chain, headers, seals, int(index))
+
+				fmt.Println("verify verifyHeaderWorker", time.Since(t))
+
 				select {
-				case done <- index:
+				case done <- int(index):
 				case <-abort:
 					return
 				}
@@ -151,19 +165,12 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 
 	errorsOut := make(chan error, len(headers))
 	go func() {
-		defer close(inputs)
 		var (
-			in, out = 0, 0
+			out     = 0
 			checked = make([]bool, len(headers))
-			inputs  = inputs
 		)
 		for {
 			select {
-			case inputs <- in:
-				if in++; in == len(headers) {
-					// Reached end of headers. Stop sending to workers.
-					inputs = nil
-				}
 			case index := <-done:
 				for checked[index] = true; checked[out]; out++ {
 					errorsOut <- errors[out]
@@ -177,6 +184,7 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 			}
 		}
 	}()
+
 	return cancel, errorsOut
 }
 
@@ -307,9 +315,11 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	}
 	// Verify the engine specific seal securing the block
 	if seal {
+		t := time.Now()
 		if err := ethash.VerifySeal(nil, header); err != nil {
 			return err
 		}
+		fmt.Println("\tethash.VerifySeal", header.Number.Uint64(), time.Since(t), debug.Callers(10))
 	}
 	// If all checks passed, validate any special fields for hard forks
 	if err := misc.VerifyDAOHeaderExtraData(chain.Config(), header); err != nil {
@@ -516,6 +526,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 	if ethash.shared != nil {
 		return ethash.shared.verifySeal(header, fulldag)
 	}
+
 	// Ensure that we have a valid difficulty for the block
 	if header.Difficulty.Sign() <= 0 {
 		return errInvalidDifficulty

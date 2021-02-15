@@ -70,29 +70,47 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 
 				fmt.Println("VerifyHeaderRequests-1.Prepare", req.ID, time.Since(t))
 
+				var totalVerify time.Duration
+				totalT := time.Now()
 				for i, header := range req.Headers {
+					t1 := time.Now()
 					if header == nil {
 						c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, common.Hash{}, errEmptyHeader}
 						continue eventLoop
 					}
 
+					t2 := time.Now()
 					// Short circuit if the header is known
 					if h := c.API.GetCachedHeader(header.HashCache(), header.Number.Uint64()); h != nil {
 						c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{req.ID, header.HashCache(), nil}
 						continue
 					}
+					fmt.Println("verify-loop-1", time.Since(t2))
+					t2 = time.Now()
 
 					knownParentsSlice, parentsToValidate, ancestorsReq := c.requestParentHeaders(req.ID, header, req.Headers)
 					if ancestorsReq != nil {
 						ancestorsReqs = append(ancestorsReqs, *ancestorsReq)
 					}
+					fmt.Println("verify-loop-2", time.Since(t2))
+					t2 = time.Now()
 
 					err := c.verifyByRequest(req.ID, header, req.Seal[i], parentsToValidate, knownParentsSlice)
+					totalVerify += time.Since(t2)
+					fmt.Println("verify-loop-3", time.Since(t2))
+					t2 = time.Now()
 					if errors.Is(err, errNotAllParents) {
 						c.addVerifyHeaderRequest(req.ID, header, req.Seal[i], req.Deadline, knownParentsSlice, parentsToValidate)
+						fmt.Println("verify-loop-4", time.Since(t2))
+						t2 = time.Now()
 					}
+					fmt.Println("verify-loop-total", time.Since(t1))
 				}
 
+				totalVerifyLoop := time.Since(totalT)
+				fmt.Println("verify-loop-RESULT", totalVerifyLoop, totalVerify, totalVerifyLoop-totalVerify)
+
+				tSecond := time.Now()
 				t1 := time.Now()
 				ancestorsReq, err := sumHeadersRequestsInRange(req.ID, req.Headers[0].Number.Uint64(), ancestorsReqs...)
 				if err != nil {
@@ -103,6 +121,8 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 
 				fmt.Println("VerifyHeaderRequests-3", req.ID, time.Since(t))
 				c.API.HeadersRequests <- ancestorsReq
+				fmt.Println("verify-loop-total-second-part", time.Since(tSecond))
+				fmt.Printf("\n*********************************************************\n\n")
 
 			case parentResp := <-c.API.HeaderResponses:
 				t := time.Now()
@@ -209,6 +229,8 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 
 	knownByRequests := make(map[uint64]map[common.Hash]map[uint64]struct{}) // reqID -> parenthash -> blockToValidate
 
+	var onlyVerify time.Duration
+
 	for _, num := range nums {
 		c.API.ProcessingRequestsMu.Lock()
 		req := reqHeaders[num]
@@ -216,13 +238,17 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 
 		appendAncestors(req, headers, knownByRequests)
 
+		t1 := time.Now()
 		err := c.verifyByRequest(req.ID, req.Header, req.Seal, req.ParentsExpected, req.KnownParents)
+		onlyVerify += time.Since(t1)
+
 		if err == nil {
 			headers = append(headers, req.Header)
 		}
 	}
 
-	fmt.Println("VerifyRequestsCommonAncestor", reqID, time.Since(t))
+	total := time.Since(t)
+	fmt.Println("VerifyRequestsCommonAncestor", reqID, total, onlyVerify, total - onlyVerify)
 }
 
 func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal bool, parentsExpected int, knownParents []*types.Header) error {
@@ -232,14 +258,18 @@ func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal boo
 	}
 
 	err := c.Server.Verify(c.API.Chain, header, knownParents, false, seal)
-	fmt.Println("verifyByRequest-1", reqID, time.Since(t))
+	fmt.Println("verifyByRequest-1", header.Number.Uint64(), reqID, time.Since(t))
+	t = time.Now()
 	if err == nil {
 		c.API.CacheHeader(header)
 	}
-	fmt.Println("verifyByRequest-2", reqID, time.Since(t))
+	fmt.Println("verifyByRequest-2", header.Number.Uint64(), reqID, time.Since(t))
+	t = time.Now()
 
 	c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, header.HashCache(), err}
-	fmt.Println("verifyByRequest-3", reqID, time.Since(t))
+	fmt.Println("verifyByRequest-3", header.Number.Uint64(), reqID, time.Since(t))
+	t = time.Now()
+
 	// remove finished request
 	//fixme debug
 	/*
@@ -251,7 +281,7 @@ func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal boo
 		}
 	*/
 
-	fmt.Println("verifyByRequest-4", reqID, time.Since(t))
+	fmt.Println("verifyByRequest-4", header.Number.Uint64(), reqID, time.Since(t))
 
 	return nil
 }
