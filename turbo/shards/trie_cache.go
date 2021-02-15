@@ -405,10 +405,17 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 		k[lvl], hasState[lvl], hasBranch[lvl], hasHash[lvl], hashes[lvl] = ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem
 		hashID[lvl], id[lvl], deleted[lvl] = -1, int8(bits.TrailingZeros16(hasStateItem))-1, false
 	}
-
 	var _nextSiblingInMem = func() bool {
 		for id[lvl]++; id[lvl] <= int8(bits.Len16(hasState[lvl])); id[lvl]++ { // go to sibling
-			if isChild() {
+			// TODO: replace isDenseSequence() by next logic
+			//c.SkipState = c.SkipState && ((1<<(c.childID[c.lvl]-1))&c.hasState[c.lvl]) == 0 // if prev child has state - then we skipped some state
+
+			_ = isChild()
+			if isHash() {
+				hashID[lvl]++
+				return true
+			}
+			if isBranch() {
 				return true
 			}
 		}
