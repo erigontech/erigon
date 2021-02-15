@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"container/heap"
 	"fmt"
-	"math/bits"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -526,11 +525,6 @@ func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool)
 }
 
 func (sc *StateCache) setRead(item CacheItem, absent bool) {
-	if ii, ok := item.(*AccountHashItem); ok {
-		if bits.OnesCount16(ii.hasBranch) != len(ii.hashes) {
-			panic(2)
-		}
-	}
 	id := id(item)
 	if sc.readWrites[id].Get(item) != nil {
 		panic(fmt.Sprintf("item must not be present in the cache before doing setRead: %s", item))
@@ -615,16 +609,6 @@ func (sc *StateCache) SetAccountAbsent(address []byte) {
 }
 
 func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete bool) {
-	if ii, ok := item.(*AccountHashItem); ok {
-		if bits.OnesCount16(ii.hasBranch) != len(ii.hashes) {
-			panic(2)
-		}
-	}
-	if ii, ok := writeItem.(*AccountHashWriteItem); ok {
-		if bits.OnesCount16(ii.ai.hasBranch) != len(ii.ai.hashes) {
-			panic(2)
-		}
-	}
 	id := id(item)
 	// Check if this is going to be modification of the existing entry
 	if existing := sc.writes[id].Get(writeItem); existing != nil {

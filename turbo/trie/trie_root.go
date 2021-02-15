@@ -361,16 +361,16 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	//r.traceIf("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb", "00")
-	//if storageKey == nil {
-	//	//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
-	//	//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-	//	//}
-	//} else {
-	//	if bytes.HasPrefix(accountKey, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb")) && bytes.HasPrefix(storageKey, common.FromHex("00")) {
-	//		//fmt.Printf("%x\n", storageKey)
-	//		fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
-	//	}
-	//}
+	if storageKey == nil {
+		//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
+		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+		//}
+	} else {
+		//if bytes.HasPrefix(accountKey, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb")) && bytes.HasPrefix(storageKey, common.FromHex("00")) {
+		//fmt.Printf("%x\n", storageKey)
+		fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
+		//}
+	}
 
 	switch itemType {
 	case StorageStreamItem:
@@ -757,7 +757,7 @@ func (c *IHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 
 	c.SkipState = false
 	c.prev = append(c.prev[:0], c.cur...)
-	err = c._nextSibling()
+	err = c._preOrderTraversalStepNoInDepth()
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
@@ -819,8 +819,8 @@ func (c *IHCursor) _seek(seek []byte, prefix []byte) (bool, error) {
 	return true, nil
 }
 
-// goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *IHCursor) _nextItem() error {
+// _preOrderTraversalStep - goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+func (c *IHCursor) _preOrderTraversalStep() error {
 	if c._hasBranch() {
 		c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
 		ok, err := c._seek(c.next, c.next)
@@ -831,11 +831,11 @@ func (c *IHCursor) _nextItem() error {
 			return nil
 		}
 	}
-	return c._nextSibling()
+	return c._preOrderTraversalStepNoInDepth()
 }
 
-// nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *IHCursor) _nextSibling() error {
+// _preOrderTraversalStepNoInDepth - nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+func (c *IHCursor) _preOrderTraversalStepNoInDepth() error {
 	ok := c._nextSiblingInMem() || c._nextSiblingOfParentInMem()
 	if ok {
 		return nil
@@ -876,7 +876,6 @@ func (c *IHCursor) _nextSiblingOfParentInMem() bool {
 				panic(err)
 			}
 			if ok {
-				//fmt.Printf("_nextSiblingOfParentInMem32: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 				return true
 			}
 
@@ -885,7 +884,6 @@ func (c *IHCursor) _nextSiblingOfParentInMem() bool {
 		}
 		c.lvl--
 		if c._nextSiblingInMem() {
-			//fmt.Printf("_nextSiblingOfParentInMem4: lvl=%d, k=%x, child=%x,%x\n", c.lvl, c.k[c.lvl], c.childID[c.lvl], c.k)
 			return true
 		}
 	}
@@ -959,7 +957,7 @@ func (c *IHCursor) _hasBranch() bool {
 }
 
 func (c *IHCursor) _next() (k, v []byte, hasBranch bool, err error) {
-	err = c._nextItem()
+	err = c._preOrderTraversalStep()
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
@@ -987,7 +985,7 @@ func (c *IHCursor) _next() (k, v []byte, hasBranch bool, err error) {
 			return []byte{}, nil, false, err
 		}
 
-		err = c._nextItem()
+		err = c._preOrderTraversalStep()
 		if err != nil {
 			return []byte{}, nil, false, err
 		}
@@ -1047,16 +1045,8 @@ func (c *StorageIHCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasBran
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
-	if !ok || c.k[c.lvl] == nil {
-		err = c._nextSiblingInDB()
-		if err != nil {
-			return []byte{}, nil, false, err
-		}
-		if c.k[c.lvl] == nil {
-			c.cur = nil
-			c.skipState = isDenseSequence(c.prev, c.cur)
-			return nil, nil, false, nil
-		}
+	if !ok {
+		return nil, nil, false, nil
 	}
 	if c.root != nil { // check if acc.storageRoot can be used
 		root := c.root
@@ -1066,9 +1056,9 @@ func (c *StorageIHCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasBran
 			c.skipState = true
 			return c.cur, root, false, nil
 		}
-		ok = c._nextSiblingInMem()
-		if !ok {
-			return nil, nil, false, nil
+		err = c._preOrderTraversalStepNoInDepth()
+		if err != nil {
+			return []byte{}, nil, false, err
 		}
 	}
 
@@ -1094,11 +1084,10 @@ func (c *StorageIHCursor) Next() (k, v []byte, hasBranch bool, err error) {
 
 	c.skipState = false
 	c.prev = c.cur
-	err = c._nextSibling()
+	err = c._preOrderTraversalStepNoInDepth()
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
-
 	if c.k[c.lvl] == nil {
 		c.cur = nil
 		c.skipState = isDenseSequence(c.prev, c.cur)
@@ -1157,8 +1146,8 @@ func (c *StorageIHCursor) _seek(seek, prefix []byte) (bool, error) {
 	return true, nil
 }
 
-// goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *StorageIHCursor) _nextItem() error {
+// _preOrderTraversalStep - goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+func (c *StorageIHCursor) _preOrderTraversalStep() error {
 	if c._hasBranch() {
 		c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
 		ok, err := c._seek(c.seek, []byte{})
@@ -1169,11 +1158,11 @@ func (c *StorageIHCursor) _nextItem() error {
 			return nil
 		}
 	}
-	return c._nextSibling()
+	return c._preOrderTraversalStepNoInDepth()
 }
 
-// nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
-func (c *StorageIHCursor) _nextSibling() error {
+// _preOrderTraversalStepNoInDepth - nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
+func (c *StorageIHCursor) _preOrderTraversalStepNoInDepth() error {
 	ok := c._nextSiblingInMem() || c._nextSiblingOfParentInMem()
 	if ok {
 		//if bytes.HasPrefix(c.accWithInc, common.FromHex("71fe2579f4a5be157546549260f5539cc9445fa20674a8bb637049f43fc1eac20000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
@@ -1181,9 +1170,6 @@ func (c *StorageIHCursor) _nextSibling() error {
 		//}
 		return nil
 	}
-	//if bytes.HasPrefix(c.accWithInc, common.FromHex("71fe2579f4a5be157546549260f5539cc9445fa20674a8bb637049f43fc1eac20000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
-	//	fmt.Printf("_nextSibling2: %d,%x\n", c.lvl, c.k[c.lvl])
-	//}
 	err := c._nextSiblingInDB()
 	if err != nil {
 		return err
@@ -1267,7 +1253,7 @@ func (c *StorageIHCursor) _hash(i int16) []byte {
 }
 
 func (c *StorageIHCursor) _next() (k, v []byte, hasBranch bool, err error) {
-	err = c._nextItem()
+	err = c._preOrderTraversalStep()
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
@@ -1292,7 +1278,7 @@ func (c *StorageIHCursor) _next() (k, v []byte, hasBranch bool, err error) {
 			return []byte{}, nil, false, err
 		}
 
-		err = c._nextItem()
+		err = c._preOrderTraversalStep()
 		if err != nil {
 			return []byte{}, nil, false, err
 		}
@@ -1836,9 +1822,9 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *Storage
 				return false, nil
 			}
 			l.accountValue.Copy(acc)
-			//if err := l.receiver.Receive(AccountStreamItem, l.kHex, nil, &l.accountValue, nil, nil, 0); err != nil {
-			//	return false, err
-			//}
+			if err := l.receiver.Receive(AccountStreamItem, l.kHex, nil, &l.accountValue, nil, nil, false, 0); err != nil {
+				return false, err
+			}
 			if l.accountValue.Incarnation == 0 {
 				return true, nil
 			}
@@ -1968,7 +1954,6 @@ func (l *FlatDBTrieLoader) CalcTrieRootOnCache(cache *shards.StateCache) (common
 		if len(ihK) == 0 { // Loop termination
 			return nil
 		}
-		//fmt.Printf("1:%x\n", ihK)
 		if err := l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV[:], hasBranch, 0); err != nil {
 			return err
 		}

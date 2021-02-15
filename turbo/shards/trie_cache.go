@@ -384,14 +384,16 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 	var hashes [64][]common.Hash
 	var lvl int
 	var ok bool
+	skipState := true
+	var (
+		ihK                                      []byte
+		hasStateItem, hasBranchItem, hasHashItem uint16
+		hashItem                                 []common.Hash
+	)
 	var isChild = func() bool { return (1<<id[lvl])&hasState[lvl] != 0 }
 	var isBranch = func() bool { return (1<<id[lvl])&hasBranch[lvl] != 0 }
 	var isHash = func() bool { return (1<<id[lvl])&hasHash[lvl] != 0 }
-	skipState := true
-
-	ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem := sc.AccountHashesSeek(prefix)
-GotItemFromCache:
-	for ihK != nil { // go to sibling in cache
+	var _unmarshal = func() {
 		from, to := lvl+1, len(k)
 		if lvl >= len(k) {
 			from, to = len(k)+1, lvl+2
@@ -402,12 +404,18 @@ GotItemFromCache:
 		lvl = len(ihK)
 		k[lvl], hasState[lvl], hasBranch[lvl], hasHash[lvl], hashes[lvl] = ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem
 		hashID[lvl], id[lvl], deleted[lvl] = -1, int8(bits.TrailingZeros16(hasStateItem))-1, false
+	}
 
-		if prefix != nil && !bytes.HasPrefix(k[lvl], prefix) {
-			return nil
+	var _nextSiblingInMem = func() bool {
+		for id[lvl]++; id[lvl] <= int8(bits.Len16(hasState[lvl])); id[lvl]++ { // go to sibling
+			if isChild() {
+				return true
+			}
 		}
-
-		for ; lvl > 1; lvl-- { // go to parent sibling in mem
+		return false
+	}
+	var _nextSiblingOfParentInMem = func() bool {
+		for lvl > 1 { // go to parent sibling in mem
 			if k[lvl-1] == nil {
 				nonNilLvl := lvl - 1
 				for ; k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
@@ -416,7 +424,8 @@ GotItemFromCache:
 				ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(next)
 				next = append(append(next[:0], k[nonNilLvl]...), uint8(id[nonNilLvl]))
 				if bytes.HasPrefix(ihK, next) {
-					continue GotItemFromCache
+					_unmarshal()
+					return true
 				}
 
 				lvl = nonNilLvl + 1
@@ -424,59 +433,64 @@ GotItemFromCache:
 			}
 			lvl--
 			// END of _nextSiblingOfParentInMem
+			if _nextSiblingInMem() {
+				return true
+			}
+		}
+		return false
+	}
+	var _nextSiblingInDB = func() bool {
+		ok := dbutils.NextNibblesSubtree(k[lvl], &seek)
+		if !ok {
+			return false
+		}
+		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(seek)
+		_unmarshal()
+		return ihK != nil
+	}
+	var _preOrderTraversalStepNoInDepth = func() { _ = _nextSiblingInMem() || _nextSiblingOfParentInMem() || _nextSiblingInDB() }
+	var _preOrderTraversalStep = func() {
+		if isBranch() {
+			ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
+			if !ok {
+				panic(fmt.Errorf("item %x hasBranch bit %x, but it not found in cache", k[lvl], id[lvl]))
+			}
+			_unmarshal()
+			return
+		}
+		_preOrderTraversalStepNoInDepth()
+	}
 
-			// START of _nextSiblingInMem
-			cur = append(append(cur[:0], k[lvl]...), 0)
-			for id[lvl]++; id[lvl] <= int8(bits.Len16(hasState[lvl])); id[lvl]++ { // go to sibling
-				if !isChild() {
-					continue
-				}
+	ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(prefix)
+	_unmarshal()
 
-				if !isHash() {
-					if !isBranch() {
-						continue
-					}
-					skipState = false
-					ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
-					if ok {
-						continue GotItemFromCache
-					}
-					return fmt.Errorf("item %x hasBranch bit %x, but it not found in cache", k[lvl], id[lvl])
-				}
+	for ihK != nil { // go to sibling in cache
+		if prefix != nil && !bytes.HasPrefix(k[lvl], prefix) {
+			break
+		}
 
-				cur[len(cur)-1] = uint8(id[lvl])
-				if canUse(cur) {
-					if err := walker(cur, hashes[lvl][hashID[lvl]], isBranch(), skipState); err != nil {
-						return err
-					}
-					skipState = true
-					continue // cache item can be used and exists in cache, then just go to next sibling
+		cur = append(append(cur[:0], k[lvl]...), 0)
+		if isHash() {
+			cur[len(cur)-1] = uint8(id[lvl])
+			if canUse(cur) {
+				if err := walker(cur, hashes[lvl][hashID[lvl]], isBranch(), false); err != nil {
+					return err
 				}
-
-				if !deleted[lvl] {
-					sc.SetAccountHashDelete(k[lvl])
-					deleted[lvl] = true
-				}
-
-				if !isBranch() {
-					skipState = false
-					continue
-				}
-				ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
-				if ok {
-					continue GotItemFromCache
-				}
+				_ = skipState
+				skipState = true
+				_preOrderTraversalStepNoInDepth()
+				continue
 			}
 		}
 
-		ok := dbutils.NextNibblesSubtree(k[lvl], &seek)
-		if !ok {
-			break
+		if !deleted[lvl] {
+			sc.SetAccountHashDelete(k[lvl])
+			deleted[lvl] = true
 		}
-		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(seek)
+		_preOrderTraversalStep()
 	}
 
-	if err := walker(nil, common.Hash{}, false, skipState); err != nil {
+	if err := walker(nil, common.Hash{}, false, false); err != nil {
 		return err
 	}
 	return nil

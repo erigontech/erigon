@@ -958,7 +958,7 @@ func TestEmptyRoot(t *testing.T) {
 	rl.AddHex(common.FromHex("0101"))
 	canUse := func(prefix []byte) bool { return !rl.Retain(prefix) }
 	i := 0
-	if err := sc.AccountHashesTree(canUse, []byte{}, func(ihK []byte, h common.Hash, skipState bool) error {
+	if err := sc.AccountHashesTree(canUse, []byte{}, func(ihK []byte, h common.Hash, hasBranch, skipState bool) error {
 		i++
 		switch i {
 		case 1:
