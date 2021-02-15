@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -114,9 +115,16 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 					return nil
 				}
 				if hashes == nil && rootHash == nil {
+					if bytes.HasPrefix(keyHex, common.FromHex("00")) {
+						fmt.Printf("collect del:%x,%b\n", keyHex, hasBranch)
+					}
 					cache.SetAccountHashDelete(keyHex)
 					return nil
 				}
+				if bytes.HasPrefix(keyHex, common.FromHex("00")) {
+					fmt.Printf("collect:%x,%b\n", keyHex, hasBranch)
+				}
+
 				newV := trie.IHTypedValue(hashes, rootHash)
 				cache.SetAccountHashWrite(keyHex, hasState, hasBranch, hasHash, newV)
 				return nil
@@ -167,11 +175,19 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 
 		newV := make([]byte, 0, 1024)
 		shards.WalkAccountHashesWrites(writes, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
+			if bytes.HasPrefix(prefix, common.FromHex("00")) {
+				fmt.Printf("put:%x,%b\n", prefix, hasBranch)
+			}
 			newV = trie.MarshalIH(hasState, hasBranch, hasHash, h, newV)
+			integrity.AssertSubset(prefix, hasBranch, hasState)
+			integrity.AssertSubset(prefix, hasHash, hasState)
 			if err := db.Put(dbutils.TrieOfAccountsBucket, prefix, newV); err != nil {
 				panic(err)
 			}
 		}, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
+			if bytes.HasPrefix(prefix, common.FromHex("00")) {
+				fmt.Printf("del:%x\n", prefix)
+			}
 			if err := db.Delete(dbutils.TrieOfAccountsBucket, prefix, nil); err != nil {
 				panic(err)
 			}

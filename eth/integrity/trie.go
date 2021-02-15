@@ -16,9 +16,9 @@ import (
 )
 
 // AssertSubset a & b == a - checks whether a is subset of b
-func AssertSubset(a, b uint16) {
+func AssertSubset(prefix []byte, a, b uint16) {
 	if (a & b) != a {
-		panic(fmt.Errorf("invariant 'is subset' failed: %b, %b", a, b))
+		panic(fmt.Errorf("invariant 'is subset' failed: %x, %b, %b", prefix, a, b))
 	}
 }
 
@@ -39,8 +39,8 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				panic(errc)
 			}
 			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalIH(v)
-			AssertSubset(hasBranch, hasState)
-			AssertSubset(hasHash, hasState)
+			AssertSubset(k, hasBranch, hasState)
+			AssertSubset(k, hasHash, hasState)
 			if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
 				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/common.HashLength))
 			}
@@ -135,8 +135,8 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 			}
 
 			hasState, hasBranch, hasHash, hashes, _ := trie.UnmarshalIH(v)
-			AssertSubset(hasBranch, hasState)
-			AssertSubset(hasHash, hasState)
+			AssertSubset(k, hasBranch, hasState)
+			AssertSubset(k, hasHash, hasState)
 			if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
 				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/common.HashLength))
 			}
