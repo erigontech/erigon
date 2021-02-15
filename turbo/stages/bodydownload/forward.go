@@ -28,6 +28,10 @@ func Forward(
 	penalise func(context.Context, []byte),
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *big.Int),
 	wakeUpChan chan struct{}, timeout int) error {
+	// This will update bd.maxProgress
+	if _, _, _, err := bd.UpdateFromDb(db); err != nil {
+		return err
+	}
 	var headerProgress, bodyProgress uint64
 	var err error
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
