@@ -1674,7 +1674,6 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 		for id[lvl]++; id[lvl] < int16(bits.Len16(hasState[lvl])); id[lvl]++ { // go to sibling
 			// TODO: replace isDenseSequence() by next logic
 			//c.SkipState = c.SkipState && ((1<<(c.childID[c.lvl]-1))&c.hasState[c.lvl]) == 0 // if prev child has state - then we skipped some state
-			fmt.Printf("alex:%x,%d,%d\n", k[lvl], id[lvl], int16(bits.Len16(hasState[lvl])))
 			if !isChild() {
 				continue
 			}
@@ -1692,11 +1691,9 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 	var _seek = func(seek []byte, withinPrefix []byte) bool {
 		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(seek)
 		if ihK == nil || !bytes.HasPrefix(ihK, withinPrefix) || !bytes.HasPrefix(ihK, prefix) {
-			fmt.Printf("_seek0: %x\n", ihK)
 			k[lvl] = nil
 			return false
 		}
-		fmt.Printf("_seek: %x\n", ihK)
 		_unmarshal()
 		_nextSiblingInMem()
 		return true
@@ -1766,12 +1763,8 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 				return err
 			}
 		}
-		fmt.Printf("alex3:%x,%d,%d\n", k[lvl], id[lvl], int16(bits.Len16(hasState[lvl])))
 		_preOrderTraversalStep()
-		fmt.Printf("alex4:%x,%d,%d\n", k[lvl], id[lvl], int16(bits.Len16(hasState[lvl])))
 	}
-
-	fmt.Printf("=====end\n")
 
 	if err := walker(nil, common.Hash{}, false, false, false); err != nil {
 		return err
