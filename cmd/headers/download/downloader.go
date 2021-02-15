@@ -724,6 +724,7 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 		if number == nil {
 			continue
 		}
+		hashesStr.WriteString(fmt.Sprintf("(%d)", *number))
 		data := rawdb.ReadBodyRLP(cs.db, hash, *number)
 		if len(data) == 0 {
 			continue
