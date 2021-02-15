@@ -361,16 +361,16 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	//r.traceIf("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb", "00")
-	if storageKey == nil {
-		//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
-		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-		//}
-	} else {
-		//if bytes.HasPrefix(accountKey, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb")) && bytes.HasPrefix(storageKey, common.FromHex("00")) {
-		//fmt.Printf("%x\n", storageKey)
-		fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
-		//}
-	}
+	//if storageKey == nil {
+	//	//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
+	//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+	//	//}
+	//} else {
+	//	//if bytes.HasPrefix(accountKey, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb")) && bytes.HasPrefix(storageKey, common.FromHex("00")) {
+	//	//fmt.Printf("%x\n", storageKey)
+	//	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
+	//	//}
+	//}
 
 	switch itemType {
 	case StorageStreamItem:

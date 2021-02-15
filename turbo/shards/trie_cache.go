@@ -453,12 +453,12 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 		return false
 	}
 	var _nextSiblingInDB = func() bool {
-		ok := dbutils.NextNibblesSubtree(k[lvl], &seek)
-		if !ok {
+		if ok := dbutils.NextNibblesSubtree(k[lvl], &seek); !ok {
+			k[lvl] = nil
 			return false
 		}
 		_seek(next, next)
-		return ihK != nil
+		return k[lvl] != nil
 	}
 	var _preOrderTraversalStepNoInDepth = func() { _ = _nextSiblingInMem() || _nextSiblingOfParentInMem() || _nextSiblingInDB() }
 	var _preOrderTraversalStep = func() {
@@ -475,7 +475,7 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 
 	_seek(next, prefix)
 
-	for ihK != nil { // go to sibling in cache
+	for k[lvl] != nil { // go to sibling in cache
 		if prefix != nil && !bytes.HasPrefix(k[lvl], prefix) {
 			break
 		}
