@@ -729,7 +729,7 @@ func (c *IHCursor) AtPrefix(prefix []byte) (k, v []byte, hasBranch bool, err err
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
-	if !ok || c.k[c.lvl] == nil {
+	if !ok {
 		c.cur = nil
 		c.SkipState = isDenseSequence(c.prev, c.cur)
 		return nil, nil, false, nil
@@ -909,7 +909,6 @@ func (c *IHCursor) _nextSiblingInDB() error {
 	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
-
 	return nil
 }
 
