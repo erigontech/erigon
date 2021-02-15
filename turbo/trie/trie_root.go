@@ -1677,7 +1677,9 @@ func collectMissedAccounts(canUse func(prefix []byte) bool, prefix []byte, cache
 	}); err != nil {
 		return nil, err
 	}
-
+	if len(ranges) == 0 {
+		ranges = append(ranges, []byte{}, nil)
+	}
 	return ranges, nil
 }
 
@@ -1779,44 +1781,12 @@ GotItemFromCache:
 		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(seek)
 	}
 
+	if err := walker(nil, common.Hash{}, false, false); err != nil {
+		return err
+	}
+
 	return nil
 }
-
-//				cur[len(cur)-1] = uint8(id[lvl])
-//				if !isBranch() {
-//					if err := walker(false, false, cur, common.Hash{}); err != nil {
-//						return err
-//					}
-//					continue
-//				}
-//				hashID[lvl]++
-//				if canUse(cur) {
-//					if err := walker(true, true, cur, hashes[lvl][hashID[lvl]]); err != nil {
-//						return err
-//					}
-//					continue // cache item can be used and exists in cache, then just go to next sibling
-//				}
-//
-//				if err := walker(true, false, cur, hashes[lvl][hashID[lvl]]); err != nil {
-//					return err
-//				}
-//
-//				ihK, hasStateItem, hasBranchItem, hasHashItem, _, ok = cache.GetAccountHash(cur)
-//				if ok {
-//					continue GotItemFromCache
-//				}
-//			}
-//		}
-//
-//		ok = dbutils.NextNibblesSubtree(k[1], &seek)
-//		if !ok {
-//			break
-//		}
-//		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = cache.AccountHashesSeek(seek)
-//		//fmt.Printf("sibling: %x -> %x, %d, %d, %d\n", seek, ihK, lvl, id[lvl], maxID[lvl])
-//	}
-//	return nil
-//}
 
 func (l *FlatDBTrieLoader) prep(accs, ihAcc ethdb.Cursor, prefix []byte, cache *shards.StateCache, quit <-chan struct{}) error {
 	defer func(t time.Time) { fmt.Printf("trie_root.go:338: %s\n", time.Since(t)) }(time.Now())

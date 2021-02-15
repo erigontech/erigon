@@ -476,8 +476,6 @@ GotItemFromCache:
 		ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem = sc.AccountHashesSeek(seek)
 	}
 
-	fmt.Printf("alex2\n")
-
 	if err := walker(nil, common.Hash{}, false, skipState); err != nil {
 		return err
 	}
