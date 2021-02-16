@@ -77,7 +77,7 @@ func init() {
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
 	withBatchSize(stateStags)
-	withNoIntegrityChecks(stateStags)
+	withIntegrityChecks(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 

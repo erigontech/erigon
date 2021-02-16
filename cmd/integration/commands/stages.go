@@ -64,15 +64,15 @@ var cmdStageExec = &cobra.Command{
 	},
 }
 
-var cmdStageIHash = &cobra.Command{
-	Use:   "stage_ih",
+var cmdStageTrie = &cobra.Command{
+	Use:   "stage_trie",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
-		if err := stageIHash(db, ctx); err != nil {
+		if err := stageTrie(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -250,14 +250,15 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageHashState)
 
-	withChaindata(cmdStageIHash)
-	withLmdbFlags(cmdStageIHash)
-	withReset(cmdStageIHash)
-	withBlock(cmdStageIHash)
-	withUnwind(cmdStageIHash)
-	withDatadir(cmdStageIHash)
+	withChaindata(cmdStageTrie)
+	withLmdbFlags(cmdStageTrie)
+	withReset(cmdStageTrie)
+	withBlock(cmdStageTrie)
+	withUnwind(cmdStageTrie)
+	withDatadir(cmdStageTrie)
+	withIntegrityChecks(cmdStageTrie)
 
-	rootCmd.AddCommand(cmdStageIHash)
+	rootCmd.AddCommand(cmdStageTrie)
 
 	withChaindata(cmdStageHistory)
 	withLmdbFlags(cmdStageHistory)
@@ -406,7 +407,7 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 		})
 }
 
-func stageIHash(db ethdb.Database, ctx context.Context) error {
+func stageTrie(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
@@ -455,7 +456,7 @@ func stageIHash(db ethdb.Database, ctx context.Context) error {
 			return err
 		}
 	}
-	integrity.Trie(tx.(ethdb.HasTx).Tx(), ch)
+	integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, ch)
 	if _, err := tx.Commit(); err != nil {
 		panic(err)
 	}

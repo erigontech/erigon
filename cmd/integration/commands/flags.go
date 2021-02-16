@@ -99,7 +99,7 @@ func withBatchSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", "512M", "batch size for execution stage")
 }
 
-func withNoIntegrityChecks(cmd *cobra.Command) {
+func withIntegrityChecks(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", true, "enable slow data-integrity checks")
 	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", true, "enable fast data-integrity checks")
 }
