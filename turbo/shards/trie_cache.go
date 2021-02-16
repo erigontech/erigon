@@ -89,8 +89,8 @@ type StorageHashItem struct {
 	flags                        uint16
 	addrHash                     common.Hash
 	incarnation                  uint64
-	locHashPrefix                []byte
 	hasState, hasBranch, hasHash uint16
+	locHashPrefix                []byte
 	hashes                       []common.Hash
 }
 

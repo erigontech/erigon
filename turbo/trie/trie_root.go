@@ -83,7 +83,7 @@ type FlatDBTrieLoader struct {
 	accAddrHashWithInc [40]byte    // Concatenation of addrHash of the currently build account with its incarnation encoding
 
 	ihSeek, accSeek, storageSeek []byte
-	kHex, kHexS, buf             []byte
+	kHex, kHexS                  []byte
 	// Storage item buffer
 	storageKey   []byte
 	storageValue []byte
