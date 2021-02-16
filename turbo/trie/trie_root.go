@@ -79,8 +79,7 @@ type FlatDBTrieLoader struct {
 	logPrefix          string
 	trace              bool
 	rd                 RetainDecider
-	accAddrHash        common.Hash // Concatenation of addrHash of the currently build account with its incarnation encoding
-	accAddrHashWithInc [40]byte    // Concatenation of addrHash of the currently build account with its incarnation encoding
+	accAddrHashWithInc [40]byte // Concatenation of addrHash of the currently build account with its incarnation encoding
 
 	ihSeek, accSeek, storageSeek []byte
 	kHex, kHexS                  []byte
@@ -1832,7 +1831,6 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *Storage
 			}
 			copy(l.accAddrHashWithInc[:], addrHash.Bytes())
 			binary.BigEndian.PutUint64(l.accAddrHashWithInc[32:], l.accountValue.Incarnation)
-			l.accAddrHash.SetBytes(addrHash.Bytes())
 			accWithInc := l.accAddrHashWithInc[:]
 			for ihKS, ihVS, hasBranchS, err2 := ihStorage.SeekToAccount(accWithInc); ; ihKS, ihVS, hasBranchS, err2 = ihStorage.Next() {
 				if err2 != nil {
