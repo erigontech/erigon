@@ -28,11 +28,11 @@ var stateStags = &cobra.Command{
 	Use: "state_stages",
 	Short: `Move all StateStages (which happen after senders) forward. 
 			Stops at StageSenders progress or at "--block".
-			Each iteration test will move forward "--unwind_every" blocks, then unwind "--unwind" blocks.
+			Each iteration test will move forward "--unwind.every" blocks, then unwind "--unwind" blocks.
 			Use reset_state command to re-run this test.
-			When finish all cycles, does comparison to "--reference_chaindata" if flag provided.
+			When finish all cycles, does comparison to "--chaindata.reference" if flag provided.
 		`,
-	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind_every=100000 --block=2000000",
+	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
 		db := openDatabase(chaindata, true)
@@ -77,6 +77,7 @@ func init() {
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
 	withBatchSize(stateStags)
+	withNoIntegrityChecks(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 
@@ -144,7 +145,6 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	} else if backward {
 		stopAt = 1
 	}
-	integrity.Trie(tx.(ethdb.HasTx).Tx(), ch)
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -200,11 +200,14 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		if err := st.Run(db, tx); err != nil {
 			return err
 		}
-		if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
-			return err
+
+		if integrityChecks {
+			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
+				return err
+			}
+			integrity.Trie(tx.(ethdb.HasTx).Tx(), ch)
 		}
 
-		integrity.Trie(tx.(ethdb.HasTx).Tx(), ch)
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
 			return err
 		}

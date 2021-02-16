@@ -37,7 +37,7 @@ var stateBuckets = []string{
 
 var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
-	Short: "compare bucket to the same bucket in '--reference_chaindata'",
+	Short: "compare bucket to the same bucket in '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
 		if referenceChaindata == "" {
@@ -54,7 +54,7 @@ var cmdCompareBucket = &cobra.Command{
 
 var cmdCompareStates = &cobra.Command{
 	Use:   "compare_states",
-	Short: "compare state buckets to buckets in '--reference_chaindata'",
+	Short: "compare state buckets to buckets in '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
 		if referenceChaindata == "" {
@@ -71,7 +71,7 @@ var cmdCompareStates = &cobra.Command{
 
 var cmdToMdbx = &cobra.Command{
 	Use:   "to_mdbx",
-	Short: "copy data from '--chaindata' to '--reference_chaindata'",
+	Short: "copy data from '--chaindata' to '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
 		err := toMdbx(ctx, chaindata, toChaindata)
@@ -85,7 +85,7 @@ var cmdToMdbx = &cobra.Command{
 
 var cmdFToMdbx = &cobra.Command{
 	Use:   "f_to_mdbx",
-	Short: "copy data from '--chaindata' to '--reference_chaindata'",
+	Short: "copy data from '--chaindata' to '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
 		err := fToMdbx(ctx, toChaindata)
