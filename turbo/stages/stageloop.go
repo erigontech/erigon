@@ -36,7 +36,7 @@ func StageLoop(
 		stagedsync.DefaultStages(),
 		stagedsync.DefaultUnwindOrder(),
 		stagedsync.OptionalParameters{},
-	).Prepare(nil, nil, nil, &vm.Config{}, db, db, "downloader", ethdb.DefaultStorageMode, ".", 0, 512*1024*1024, make(chan struct{}), nil, nil, func() error { return nil }, nil)
+	).Prepare(nil, nil, nil, &vm.Config{}, db, db, "downloader", ethdb.DefaultStorageMode, ".", nil, 512*1024*1024, make(chan struct{}), nil, nil, func() error { return nil }, nil)
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
