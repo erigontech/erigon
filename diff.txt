@@ -598,18 +598,3 @@ Date:   Tue Feb 16 09:04:07 2021 +0200
 
     core/state/snapshot: ensure Cap retains a min number of layers
 
-commit 915c614959024940515e044b2ea9c07317ce4b4a
-Merge: f4fcd4f50 e991bdae2
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Feb 16 13:30:15 2021 +0200
-
-    Merge pull request #22332 from karalabe/fix-fastsync-restart-bloom-crash
-    
-    trie: fix bloom crash on fast sync restart
-
-commit f4fcd4f506661c7cece755b90b8a84e51d5925ac
-Author: Guillaume Ballet <gballet@gmail.com>
-Date:   Tue Feb 16 10:40:59 2021 +0100
-
-    rpc: increase the number of subscriptions in storm test (#22316)
-
