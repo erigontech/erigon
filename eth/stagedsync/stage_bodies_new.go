@@ -39,7 +39,7 @@ func BodiesForward(
 		defer tx.Rollback()
 	}
 	// This will update bd.maxProgress
-	if _, _, _, err := bd.UpdateFromDb(tx); err != nil {
+	if _, _, _, err = bd.UpdateFromDb(tx); err != nil {
 		return err
 	}
 	var headerProgress, bodyProgress uint64

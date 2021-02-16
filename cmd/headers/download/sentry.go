@@ -532,6 +532,9 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 	rwRaw, _ := ss.peerRwMap.Load(peerID)
 	rw, _ := rwRaw.(p2p.MsgReadWriter)
 	if rw == nil {
+		ss.peerHeightMap.Delete(peerID)
+		ss.peerTimeMap.Delete(peerID)
+		ss.peerRwMap.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock find rw for peer %s", peerID)
 	}
 	var msgcode uint64
