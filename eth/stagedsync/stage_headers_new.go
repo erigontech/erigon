@@ -105,7 +105,7 @@ func HeadersForward(s *StageState, ctx context.Context, db ethdb.Database, hd *h
 				return fmt.Errorf("[%s] reading total difficulty of the parent header %d %x: %w", logPrefix, blockHeight-1, header.ParentHash, err)
 			}
 			if parentDiff == nil {
-				return fmt.Errorf("[%s] could not find parentDiff for %d\n", logPrefix, header.Number)
+				return fmt.Errorf("[%s] could not find parentDiff for %d", logPrefix, header.Number)
 			}
 		}
 		cumulativeDiff := new(big.Int).Add(parentDiff, header.Difficulty)
