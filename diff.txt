@@ -613,9 +613,3 @@ Date:   Tue Feb 16 10:40:59 2021 +0100
 
     rpc: increase the number of subscriptions in storm test (#22316)
 
-commit e991bdae2458dbee5a28addd188a897858aa34dd
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Feb 16 10:44:38 2021 +0200
-
-    trie: fix bloom crash on fast sync restart
-
