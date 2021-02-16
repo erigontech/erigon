@@ -233,16 +233,16 @@ func (sc *StateCache) SetAccountHashWrite(prefix []byte, hasState, hasBranch, ha
 	}
 	assertSubset(hasBranch, hasState)
 	assertSubset(hasHash, hasState)
-	cpy := make([]common.Hash, len(hashes))
-	for i := 0; i < len(hashes); i++ {
-		cpy[i] = hashes[i]
+	ai := AccountHashItem{
+		addrHashPrefix: common.CopyBytes(prefix),
+		hasState:       hasState,
+		hasBranch:      hasBranch,
+		hasHash:        hasHash,
+		hashes:         make([]common.Hash, len(hashes)),
 	}
-	var ai AccountHashItem
-	ai.addrHashPrefix = append(ai.addrHashPrefix[:0], prefix...)
-	ai.hasState = hasState
-	ai.hasBranch = hasBranch
-	ai.hasHash = hasHash
-	ai.hashes = cpy
+	for i := 0; i < len(hashes); i++ {
+		ai.hashes[i] = hashes[i]
+	}
 	var awi AccountHashWriteItem
 	awi.ai = &ai
 	sc.setWrite(&ai, &awi, false /* delete */)
@@ -374,6 +374,7 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 	var cur []byte
 	seek := make([]byte, 0, 64)
 	buf := make([]byte, 0, 64)
+	next := make([]byte, 0, 64)
 	seek = append(seek, prefix...)
 	var k [64][]byte
 	var hasBranch, hasState, hasHash [64]uint16
@@ -464,8 +465,8 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 	var _preOrderTraversalStepNoInDepth = func() { _ = _nextSiblingInMem() || _nextSiblingOfParentInMem() || _nextSiblingInDB() }
 	var _preOrderTraversalStep = func() {
 		if isBranch() {
-			cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
-			ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
+			next = append(append(next[:0], k[lvl]...), uint8(id[lvl]))
+			ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(next)
 			if !ok {
 				panic(fmt.Errorf("item %x hasBranch bit %x, but it not found in cache", k[lvl], id[lvl]))
 			}

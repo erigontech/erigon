@@ -708,7 +708,7 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	if cacheSize > 0 {
 		cache = shards.NewStateCache(32, cacheSize)
 		if err2 := db.Walk(dbutils.TrieOfAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
-			if len(k) > 2 {
+			if len(k) > 3 {
 				return true, nil
 			}
 			hasState, hasBranch, hasHash, hashes := trie.UnmarshalIHTyped(v)

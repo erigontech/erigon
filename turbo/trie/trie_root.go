@@ -1423,7 +1423,7 @@ func UnmarshalIHTyped(v []byte) (uint16, uint16, uint16, []common.Hash) {
 	v = v[6:]
 	newV := make([]common.Hash, len(v)/common.HashLength)
 	for i := 0; i < len(newV); i++ {
-		newV[i].SetBytes(v[i*common.HashLength : (i+1)*common.HashLength])
+		newV[i].SetBytes(common.CopyBytes(v[i*common.HashLength : (i+1)*common.HashLength]))
 	}
 	return hasState, hasBranch, hasHash, newV
 }
@@ -1439,11 +1439,13 @@ func UnmarshalIH(v []byte) (hasState, hasBranch, hasHash uint16, hashes, rootHas
 
 func MarshalIH(hasState, hasBranch, hasHash uint16, h []common.Hash, buf []byte) []byte {
 	buf = buf[:6+len(h)*common.HashLength]
-	binary.BigEndian.PutUint16(buf, hasState)
-	binary.BigEndian.PutUint16(buf[2:], hasBranch)
-	binary.BigEndian.PutUint16(buf[4:], hasHash)
-	for i := 0; i < len(h); i += common.HashLength {
-		copy(buf[6+i:6+i+common.HashLength], h[i].Bytes())
+	meta := buf[:6]
+	hashes := buf[6:]
+	binary.BigEndian.PutUint16(meta, hasState)
+	binary.BigEndian.PutUint16(meta[2:], hasBranch)
+	binary.BigEndian.PutUint16(meta[4:], hasHash)
+	for i := 0; i < len(h); i++ {
+		copy(hashes[i*common.HashLength:(i+1)*common.HashLength], h[i].Bytes())
 	}
 	return buf
 }
@@ -1470,11 +1472,11 @@ func IHTypedValue(hashes []byte, rootHash []byte) []common.Hash {
 	to := make([]common.Hash, len(hashes)/common.HashLength+len(rootHash)/common.HashLength)
 	i := 0
 	if len(rootHash) > 0 {
-		to[0].SetBytes(rootHash)
+		to[0].SetBytes(common.CopyBytes(rootHash))
 		i++
 	}
 	for j := 0; j < len(hashes)/common.HashLength; j++ {
-		to[i].SetBytes(hashes[j*common.HashLength : (j+1)*common.HashLength])
+		to[i].SetBytes(common.CopyBytes(hashes[j*common.HashLength : (j+1)*common.HashLength]))
 		i++
 	}
 	return to
@@ -1498,27 +1500,24 @@ func collectMissedAccIH(canUse func(prefix []byte) bool, prefix []byte, cache *s
 		ranges = append(ranges, common.CopyBytes(rangeFrom), common.CopyBytes(cur))
 		hasRange = false
 	}
-	if err := walkIHAccounts(canUse, prefix, cache, func(cur []byte, hash common.Hash, isBranch, _, canUse bool) error {
-		if err := common.Stopped(quit); err != nil {
-			return err
-		}
-
+	if err := walkIHAccounts(canUse, prefix, cache, func(k []byte, _ common.Hash, isBranch, _, canUse bool) error {
 		if !isBranch {
 			return nil
 		}
 
 		if canUse {
-			endRange(cur)
+			endRange(k)
 			return nil
 		}
 
-		inCache := cache.HasAccountHashWithPrefix(cur)
+		inCache := cache.HasAccountHashWithPrefix(k)
 		if inCache {
-			endRange(cur)
+			endRange(k)
 		} else {
-			addToRange(cur)
+			addToRange(k)
 		}
-		return nil
+
+		return common.Stopped(quit)
 	}); err != nil {
 		return nil, err
 	}
@@ -1546,7 +1545,7 @@ func loadAccIHToCache(ih ethdb.Cursor, prefix []byte, ranges [][]byte, cache *sh
 }
 
 func loadAccsToCache(accs ethdb.Cursor, ranges [][]byte, cache *shards.StateCache, quit <-chan struct{}) ([][]byte, error) {
-	var storageIHRanges [][]byte
+	var storagePrefixes [][]byte
 	for i := 0; i < len(ranges); i += 2 {
 		if err := common.Stopped(quit); err != nil {
 			return nil, err
@@ -1568,21 +1567,23 @@ func loadAccsToCache(accs ethdb.Cursor, ranges [][]byte, cache *shards.StateCach
 				break
 			}
 
-			var a accounts.Account
-			if err := a.DecodeForStorage(v); err != nil {
-				return nil, err
-			}
-			if _, ok := cache.GetAccountByHashedAddress(common.BytesToHash(k)); !ok {
+			var incarnation uint64
+			b, ok := cache.GetAccountByHashedAddress(common.BytesToHash(k))
+			if !ok {
+				var a accounts.Account
+				if err := a.DecodeForStorage(v); err != nil {
+					return nil, err
+				}
+				incarnation = a.Incarnation
 				cache.DeprecatedSetAccountRead(common.BytesToHash(k), &a)
+			} else {
+				incarnation = b.Incarnation
 			}
 
-			accWithInc := make([]byte, 40)
-			copy(accWithInc, k)
-			binary.BigEndian.PutUint64(accWithInc[32:], a.Incarnation)
-			storageIHRanges = append(storageIHRanges, accWithInc)
+			storagePrefixes = append(storagePrefixes, dbutils.GenerateCompositeStoragePrefix(k, incarnation, []byte{}))
 		}
 	}
-	return storageIHRanges, nil
+	return storagePrefixes, nil
 }
 
 func collectMissedAccounts(canUse func(prefix []byte) bool, prefix []byte, cache *shards.StateCache, quit <-chan struct{}) ([][]byte, error) {
@@ -1606,7 +1607,7 @@ func collectMissedAccounts(canUse func(prefix []byte) bool, prefix []byte, cache
 		ranges = append(ranges, common.CopyBytes(rangeFrom), common.CopyBytes(cur))
 		hasRange = false
 	}
-	if err := walkIHAccounts(canUse, prefix, cache, func(cur []byte, hash common.Hash, isBranch, _, canUse bool) error {
+	if err := walkIHAccounts(canUse, prefix, cache, func(cur []byte, _ common.Hash, isBranch, _, canUse bool) error {
 		if err := common.Stopped(quit); err != nil {
 			return err
 		}
@@ -1679,16 +1680,13 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 			}
 
 			if isHash() {
-				fmt.Printf("_siblMem: %x,%x\n", k[lvl], id[lvl])
 				hashID[lvl]++
 				return true
 			}
 			if isBranch() {
-				fmt.Printf("_siblMem2: %x,%x\n", k[lvl], id[lvl])
 				return true
 			}
 		}
-		fmt.Printf("_siblMem3: %x,%x\n", k[lvl], id[lvl])
 		return false
 	}
 	var _seek = func(seek []byte, withinPrefix []byte) bool {
@@ -1703,14 +1701,12 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 	}
 	var _nextSiblingOfParentInMem = func() bool {
 		for lvl > 1 { // go to parent sibling in mem
-			fmt.Printf("_parent: %x,%x\n", k[lvl], id[lvl])
 			if k[lvl-1] == nil {
 				nonNilLvl := lvl - 1
 				for ; k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
 				}
 				next = append(append(next[:0], k[lvl]...), uint8(id[lvl]))
 				buf = append(append(buf[:0], k[nonNilLvl]...), uint8(id[nonNilLvl]))
-				fmt.Printf("_parent: %x,%x\n", next, buf)
 				if _seek(next, buf) {
 					return true
 				}
@@ -1727,13 +1723,11 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 	}
 	var _nextSiblingInDB = func() bool {
 		ok = dbutils.NextNibblesSubtree(k[lvl], &seek)
-		fmt.Printf("_siblDB: %t,%x,%x\n", ok, k[lvl], seek)
 		if !ok {
 			k[lvl] = nil
 			return false
 		}
 		_seek(seek, []byte{})
-		fmt.Printf("_siblDB2: %t,%x,%x\n", k[lvl] != nil, k[lvl], seek)
 		return k[lvl] != nil
 	}
 	var _preOrderTraversalStepNoInDepth = func() { _ = _nextSiblingInMem() || _nextSiblingOfParentInMem() || _nextSiblingInDB() }
@@ -1741,7 +1735,6 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 		if isBranch() {
 			cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
 			ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
-			fmt.Printf("_toChild: %t,%x,%x\n", ok, k[lvl], id[lvl])
 			if !ok {
 				panic(fmt.Errorf("item %x hasBranch bit %x, but it not found in cache", k[lvl], id[lvl]))
 			}
@@ -1751,7 +1744,6 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 		}
 		_preOrderTraversalStepNoInDepth()
 	}
-	fmt.Printf("_start: %x,%x\n", cur, buf)
 
 	_seek(prefix, []byte{})
 
@@ -1763,8 +1755,6 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 		cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
 		if isHash() {
 			can := canUse(cur)
-			fmt.Printf("_loop1: %t,%x,%x\n", ok, k[lvl], id[lvl])
-
 			if err := walker(cur, hashes[lvl][hashID[lvl]], isBranch(), true, can); err != nil {
 				return err
 			}
@@ -1773,15 +1763,12 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 				continue
 			}
 		} else {
-			fmt.Printf("_loop2: %t,%x,%x\n", ok, k[lvl], id[lvl])
 			if err := walker(cur, common.Hash{}, isBranch(), false, false); err != nil {
 				return err
 			}
 		}
 		_preOrderTraversalStep()
 	}
-
-	fmt.Printf("_end: %x,%x\n", cur, buf)
 
 	if err := walker(nil, common.Hash{}, false, false, false); err != nil {
 		return err

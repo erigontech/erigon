@@ -115,16 +115,9 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 					return nil
 				}
 				if hashes == nil && rootHash == nil {
-					if bytes.HasPrefix(keyHex, common.FromHex("00")) {
-						fmt.Printf("collect del:%x,%b\n", keyHex, hasBranch)
-					}
 					cache.SetAccountHashDelete(keyHex)
 					return nil
 				}
-				if bytes.HasPrefix(keyHex, common.FromHex("00")) {
-					fmt.Printf("collect:%x,%b\n", keyHex, hasBranch)
-				}
-
 				newV := trie.IHTypedValue(hashes, rootHash)
 				cache.SetAccountHashWrite(keyHex, hasState, hasBranch, hasHash, newV)
 				return nil
@@ -175,9 +168,6 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 
 		newV := make([]byte, 0, 1024)
 		shards.WalkAccountHashesWrites(writes, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			if bytes.HasPrefix(prefix, common.FromHex("00")) {
-				fmt.Printf("put:%x,%b\n", prefix, hasBranch)
-			}
 			newV = trie.MarshalIH(hasState, hasBranch, hasHash, h, newV)
 			integrity.AssertSubset(prefix, hasBranch, hasState)
 			integrity.AssertSubset(prefix, hasHash, hasState)
@@ -185,9 +175,6 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 				panic(err)
 			}
 		}, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			if bytes.HasPrefix(prefix, common.FromHex("00")) {
-				fmt.Printf("del:%x\n", prefix)
-			}
 			if err := db.Delete(dbutils.TrieOfAccountsBucket, prefix, nil); err != nil {
 				panic(err)
 			}
@@ -436,7 +423,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	var exclude [][]byte
 	collect := func(k []byte, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		//if bytes.HasPrefix(k, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) {
-		//	fmt.Printf("excl: %x\n", k)
+		fmt.Printf("excl: %x\n", k)
 		//}
 		exclude = append(exclude, k)
 		return nil
