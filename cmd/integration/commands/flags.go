@@ -24,7 +24,8 @@ var (
 	mapSizeStr         string
 	freelistReuse      int
 	migration          string
-	integrityChecks    bool
+	integritySlow      bool
+	integrityFast      bool
 	silkwormPath       string
 	file               string
 )
@@ -99,7 +100,8 @@ func withBatchSize(cmd *cobra.Command) {
 }
 
 func withNoIntegrityChecks(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&integrityChecks, "integrityChecks", true, "action to apply to given migration")
+	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", true, "enable slow data-integrity checks")
+	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", true, "enable fast data-integrity checks")
 }
 
 func withMigration(cmd *cobra.Command) {

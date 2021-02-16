@@ -22,7 +22,7 @@ func AssertSubset(prefix []byte, a, b uint16) {
 	}
 }
 
-func Trie(tx ethdb.Tx, quit <-chan struct{}) {
+func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 	seek := make([]byte, 256)
@@ -88,6 +88,9 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				}
 			}
 
+			if !slowChecks {
+				continue
+			}
 			// each IH must cover some state
 			buf = buf[:len(k)+1]
 			copy(buf, k)
@@ -183,6 +186,9 @@ func Trie(tx ethdb.Tx, quit <-chan struct{}) {
 				}
 			}
 
+			if !slowChecks {
+				continue
+			}
 			// each IH must cover some state
 			buf = buf[:len(k)-40+1]
 			copy(buf, k[40:])

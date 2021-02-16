@@ -201,11 +201,11 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 			return err
 		}
 
-		if integrityChecks {
+		if integrityFast {
 			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
 				return err
 			}
-			integrity.Trie(tx.(ethdb.HasTx).Tx(), ch)
+			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, ch)
 		}
 
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
