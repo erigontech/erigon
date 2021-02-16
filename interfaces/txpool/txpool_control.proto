@@ -28,7 +28,7 @@ message AccountInfo {
 message AppliedBlock {
   bytes hash = 1;
   bytes parent_hash = 2;
-  repeated AccountDiff account_diffs = 3;
+  repeated AccountInfo account_diffs = 3;
 }
 
 message RevertedBlock {
@@ -36,7 +36,7 @@ message RevertedBlock {
   repeated bytes reverted_transactions = 2;
   bytes new_hash = 3;
   bytes new_parent = 4;
-  repeated AccountInfo new_state = 5;
+  repeated AccountInfo account_diffs = 5;
 }
 
 message BlockDiff {

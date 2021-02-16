@@ -80,7 +80,7 @@ func buildRevertedBlockDiff(oldHead, newHead *types.Header, db ethdb.Database) (
 			NewHash:              newHead.Hash().Bytes(),
 			NewParent:            newHead.ParentHash.Bytes(),
 			RevertedTransactions: encoded,
-			NewState:             buildAccountDiff(append(included, reverted...), db),
+			AccountDiffs:         buildAccountDiff(append(included, reverted...), db),
 		},
 	}
 	return &pb.BlockDiff{Diff: &diff}, nil
@@ -153,20 +153,17 @@ func cmpTxsAcrossFork(oldHead, newHead *types.Header, db ethdb.Database) (types.
 	return included, discarded
 }
 
-func buildAccountDiff(txs types.Transactions, db ethdb.Database) []*pb.AccountDiff {
+func buildAccountDiff(txs types.Transactions, db ethdb.Database) []*pb.AccountInfo {
 	addrs, nonces, balances := touchedAccounts(txs, db)
 
-	diffs := make([]*pb.AccountDiff, len(addrs))
+	diffs := make([]*pb.AccountInfo, len(addrs))
 
 	for i, addr := range addrs {
-		diff := pb.AccountDiff{
-			Diff: &pb.AccountDiff_Changed{
-				Changed: &pb.AccountInfo{
-					Address: addr.Bytes(),
-					Nonce:   i64tob(nonces[i]),
-					Balance: balances[i].Bytes(),
-				},
-			}}
+		diff := pb.AccountInfo{
+			Address: addr.Bytes(),
+			Nonce:   i64tob(nonces[i]),
+			Balance: balances[i].Bytes(),
+		}
 
 		diffs[i] = &diff
 	}
