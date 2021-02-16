@@ -469,6 +469,8 @@ func (sc *StateCache) AccountHashesTree(canUse func([]byte) bool, prefix []byte,
 			if !ok {
 				panic(fmt.Errorf("item %x hasBranch bit %x, but it not found in cache", k[lvl], id[lvl]))
 			}
+			_unmarshal()
+			_nextSiblingInMem()
 			return
 		}
 		_preOrderTraversalStepNoInDepth()

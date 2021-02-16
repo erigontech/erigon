@@ -1641,6 +1641,7 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 	var cur []byte
 	seek := make([]byte, 0, 64)
 	buf := make([]byte, 0, 64)
+	next := make([]byte, 0, 64)
 	seek = append(seek, prefix...)
 	var k [64][]byte
 	var hasBranch, hasState, hasHash [64]uint16
@@ -1668,7 +1669,6 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 		lvl = len(ihK)
 		k[lvl], hasState[lvl], hasBranch[lvl], hasHash[lvl], hashes[lvl] = ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem
 		hashID[lvl], id[lvl], deleted[lvl] = -1, int16(bits.TrailingZeros16(hasStateItem))-1, false
-		fmt.Printf("_unmarshal: %x,%x\n", ihK, k[lvl])
 	}
 	var _nextSiblingInMem = func() bool {
 		for id[lvl]++; id[lvl] < int16(bits.Len16(hasState[lvl])); id[lvl]++ { // go to sibling
@@ -1679,13 +1679,16 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 			}
 
 			if isHash() {
+				fmt.Printf("_siblMem: %x,%x\n", k[lvl], id[lvl])
 				hashID[lvl]++
 				return true
 			}
 			if isBranch() {
+				fmt.Printf("_siblMem2: %x,%x\n", k[lvl], id[lvl])
 				return true
 			}
 		}
+		fmt.Printf("_siblMem3: %x,%x\n", k[lvl], id[lvl])
 		return false
 	}
 	var _seek = func(seek []byte, withinPrefix []byte) bool {
@@ -1700,13 +1703,15 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 	}
 	var _nextSiblingOfParentInMem = func() bool {
 		for lvl > 1 { // go to parent sibling in mem
+			fmt.Printf("_parent: %x,%x\n", k[lvl], id[lvl])
 			if k[lvl-1] == nil {
 				nonNilLvl := lvl - 1
 				for ; k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
 				}
-				cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
+				next = append(append(next[:0], k[lvl]...), uint8(id[lvl]))
 				buf = append(append(buf[:0], k[nonNilLvl]...), uint8(id[nonNilLvl]))
-				if _seek(cur, buf) {
+				fmt.Printf("_parent: %x,%x\n", next, buf)
+				if _seek(next, buf) {
 					return true
 				}
 				lvl = nonNilLvl + 1
@@ -1721,11 +1726,14 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 		return false
 	}
 	var _nextSiblingInDB = func() bool {
-		if ok = dbutils.NextNibblesSubtree(k[lvl], &seek); !ok {
+		ok = dbutils.NextNibblesSubtree(k[lvl], &seek)
+		fmt.Printf("_siblDB: %t,%x,%x\n", ok, k[lvl], seek)
+		if !ok {
 			k[lvl] = nil
 			return false
 		}
 		_seek(seek, []byte{})
+		fmt.Printf("_siblDB2: %t,%x,%x\n", k[lvl] != nil, k[lvl], seek)
 		return k[lvl] != nil
 	}
 	var _preOrderTraversalStepNoInDepth = func() { _ = _nextSiblingInMem() || _nextSiblingOfParentInMem() || _nextSiblingInDB() }
@@ -1733,13 +1741,17 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 		if isBranch() {
 			cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
 			ihK, hasStateItem, hasBranchItem, hasHashItem, hashItem, ok = sc.GetAccountHash(cur)
+			fmt.Printf("_toChild: %t,%x,%x\n", ok, k[lvl], id[lvl])
 			if !ok {
 				panic(fmt.Errorf("item %x hasBranch bit %x, but it not found in cache", k[lvl], id[lvl]))
 			}
+			_unmarshal()
+			_nextSiblingInMem()
 			return
 		}
 		_preOrderTraversalStepNoInDepth()
 	}
+	fmt.Printf("_start: %x,%x\n", cur, buf)
 
 	_seek(prefix, []byte{})
 
@@ -1748,9 +1760,11 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 			break
 		}
 
+		cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
 		if isHash() {
-			cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
 			can := canUse(cur)
+			fmt.Printf("_loop1: %t,%x,%x\n", ok, k[lvl], id[lvl])
+
 			if err := walker(cur, hashes[lvl][hashID[lvl]], isBranch(), true, can); err != nil {
 				return err
 			}
@@ -1759,12 +1773,15 @@ func walkIHAccounts(canUse func(prefix []byte) bool, prefix []byte, sc *shards.S
 				continue
 			}
 		} else {
+			fmt.Printf("_loop2: %t,%x,%x\n", ok, k[lvl], id[lvl])
 			if err := walker(cur, common.Hash{}, isBranch(), false, false); err != nil {
 				return err
 			}
 		}
 		_preOrderTraversalStep()
 	}
+
+	fmt.Printf("_end: %x,%x\n", cur, buf)
 
 	if err := walker(nil, common.Hash{}, false, false, false); err != nil {
 		return err
