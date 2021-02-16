@@ -46,7 +46,6 @@ func (c *TxPoolControlServer) AccountInfo(ctx context.Context, request *pb.Accou
 }
 
 func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream pb.TxpoolControl_BlockStreamServer) error {
-	fmt.Println("==== received new block stream request ====")
 	db := ethdb.NewObjectDatabase(c.kv)
 
 	// Tracks the last "latest" header sent in the stream.
@@ -67,7 +66,6 @@ func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream
 
 	}
 	queueHeader := func(h *types.Header) error {
-		fmt.Println("==== new header received ====")
 		newHeadCh <- h
 		return nil
 	}
@@ -76,7 +74,6 @@ func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream
 	if err := handleStreamRequest(request, stream, lastHeader, db); err != nil {
 		return err
 	}
-	fmt.Println("=== lastHeader after req response ===")
 	fmt.Println(lastHeader.Hash().String())
 
 	// Spawn listeners.
@@ -84,22 +81,17 @@ func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream
 	c.events.AddHeaderSubscription(queueHeader)
 
 	for {
-		fmt.Println("==== start of response loop ====")
 		select {
 		case msg := <-newRequestCh:
 			if err := handleStreamRequest(msg, stream, lastHeader, db); err != nil {
 				return err
 			}
 		case newHeader := <-newHeadCh:
-			fmt.Println("==== preparing to send new header ====")
 			diff, err := buildBlockDiff(lastHeader, newHeader, db)
 			if err != nil {
-				fmt.Println("==== error ====")
-				fmt.Println(err)
 				return err
 			}
 			*lastHeader = *newHeader
-			fmt.Println("==== sending new block diff new header ====")
 			stream.Send(diff)
 
 		}

@@ -20,18 +20,14 @@ func buildBlockDiff(oldHead, newHead *types.Header, db ethdb.Database) (*pb.Bloc
 	if newHead == nil {
 		return buildAppliedBlockDiff(nil, db)
 	}
-	fmt.Println("==== hash cmp ====")
 	fmt.Println(oldHead.Hash().Hex())
 	fmt.Println(newHead.ParentHash.Hex())
-	fmt.Println("==== end hash cmp ====")
 
 	if newHead.ParentHash == oldHead.Hash() {
-		fmt.Println("==== build applied hash ====")
 		hash := newHead.Hash()
 		return buildAppliedBlockDiff(&hash, db)
 
 	} else {
-		fmt.Println("==== build reverted hash ====")
 		return buildRevertedBlockDiff(oldHead, newHead, db)
 	}
 }
@@ -73,7 +69,6 @@ func buildRevertedBlockDiff(oldHead, newHead *types.Header, db ethdb.Database) (
 		}
 		encoded[i] = b
 	}
-
 	diff := pb.BlockDiff_Reverted{
 		Reverted: &pb.RevertedBlock{
 			RevertedHash:         oldHead.Hash().Bytes(),
@@ -103,7 +98,6 @@ func cmpTxsAcrossFork(oldHead, newHead *types.Header, db ethdb.Database) (types.
 			add := getter.GetBlock(newHead.Hash(), newHead.Number.Uint64())
 
 			if rem == nil {
-				fmt.Println("block not found")
 				// This can happen if a setHead is performed, where we simply discard the old
 				// head from the chain.
 				// If that is the case, we don't have the lost transactions any more, and

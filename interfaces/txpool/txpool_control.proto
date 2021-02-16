@@ -8,10 +8,12 @@ message AccountInfoRequest {
   bytes block_hash = 1;
   bytes account = 2;
 }
+
 message AccountInfoReply {
   bytes balance = 1;
   bytes nonce = 2;
 }
+
 message BlockStreamRequest {
   oneof start_with {
     google.protobuf.Empty latest = 1;
