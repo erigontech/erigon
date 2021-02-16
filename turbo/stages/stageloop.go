@@ -165,7 +165,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return headerdownload.Forward(s, ctx, world.TX, hd)
+						return stagedsync.HeadersForward(s, ctx, world.TX, hd)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return u.Done(world.TX)
@@ -195,7 +195,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return bodydownload.Forward(s, ctx, world.TX, bd, bodyReqSend, penalise, updateHead, wakeUpChan, timeout)
+						return stagedsync.BodiesForward(s, ctx, world.TX, bd, bodyReqSend, penalise, updateHead, wakeUpChan, timeout)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return u.Done(world.TX)

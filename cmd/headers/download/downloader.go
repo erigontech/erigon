@@ -530,7 +530,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 }
 
 func (cs *ControlServerImpl) blockBodies(inreq *proto_sentry.InboundMessage) error {
-	var request eth.BlockBodiesData
+	var request []*types.Body
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodies: %v", err)
 	}
