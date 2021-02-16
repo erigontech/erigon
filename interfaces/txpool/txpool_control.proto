@@ -12,7 +12,6 @@ message AccountInfoReply {
   bytes balance = 1;
   bytes nonce = 2;
 }
-
 message BlockStreamRequest {
   oneof start_with {
     google.protobuf.Empty latest = 1;
@@ -26,13 +25,6 @@ message AccountInfo {
   bytes nonce = 3;
 }
 
-message AccountDiff {
-  oneof diff {
-    AccountInfo changed = 1;
-    bytes deleted = 2;
-  }
-}
-
 message AppliedBlock {
   bytes hash = 1;
   bytes parent_hash = 2;
@@ -44,7 +36,7 @@ message RevertedBlock {
   repeated bytes reverted_transactions = 2;
   bytes new_hash = 3;
   bytes new_parent = 4;
-  repeated AccountDiff new_state = 5;
+  repeated AccountInfo new_state = 5;
 }
 
 message BlockDiff {
