@@ -423,7 +423,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	var exclude [][]byte
 	collect := func(k []byte, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		//if bytes.HasPrefix(k, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) {
-		fmt.Printf("excl: %x\n", k)
+		//fmt.Printf("excl: %x\n", k)
 		//}
 		exclude = append(exclude, k)
 		return nil
