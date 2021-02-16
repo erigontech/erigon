@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 
@@ -21,11 +22,24 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 }
 
 func SpawnBlockHashStage(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
-	headNumber, err := stages.GetStageProgress(db, stages.Headers)
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = db.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
-	headHash := rawdb.ReadHeaderByNumber(db, headNumber).Hash()
+	headHash := rawdb.ReadHeaderByNumber(tx, headNumber).Hash()
 	if s.BlockNumber == headNumber {
 		s.Done()
 		return nil
@@ -38,7 +52,7 @@ func SpawnBlockHashStage(s *StageState, db ethdb.Database, tmpdir string, quit <
 	logPrefix := s.state.LogPrefix()
 	if err := etl.Transform(
 		logPrefix,
-		db,
+		tx,
 		dbutils.HeaderPrefix,
 		dbutils.HeaderNumberPrefix,
 		tmpdir,
@@ -52,5 +66,13 @@ func SpawnBlockHashStage(s *StageState, db ethdb.Database, tmpdir string, quit <
 	); err != nil {
 		return err
 	}
-	return s.DoneAndUpdate(db, headNumber)
+	if err := s.DoneAndUpdate(tx, headNumber); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

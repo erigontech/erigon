@@ -1,4 +1,4 @@
-package bodydownload
+package stagedsync
 
 import (
 	"context"
@@ -12,38 +12,21 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 )
 
-const (
-	logInterval = 30 * time.Second
-)
-
-// Forward progresses Bodies stage in the forward direction
-func Forward(
-	logPrefix string,
+// BodiesForward progresses Bodies stage in the forward direction
+func BodiesForward(
+	s *StageState,
 	ctx context.Context,
 	db ethdb.Database,
-	bd *BodyDownload,
-	bodyReqSend func(context.Context, *BodyRequest) []byte,
+	bd *bodydownload.BodyDownload,
+	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *big.Int),
 	wakeUpChan chan struct{}, timeout int) error {
-	// This will update bd.maxProgress
-	if _, _, _, err := bd.UpdateFromDb(db); err != nil {
-		return err
-	}
-	var headerProgress, bodyProgress uint64
-	var err error
-	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
-	if err != nil {
-		return err
-	}
-	bodyProgress, err = stages.GetStageProgress(db, stages.Bodies)
-	if err != nil {
-		return err
-	}
-	log.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
 	var tx ethdb.DbWithPendingMutations
+	var err error
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
 		tx = db.(ethdb.DbWithPendingMutations)
@@ -55,6 +38,21 @@ func Forward(
 		}
 		defer tx.Rollback()
 	}
+	// This will update bd.maxProgress
+	if _, _, _, err = bd.UpdateFromDb(tx); err != nil {
+		return err
+	}
+	var headerProgress, bodyProgress uint64
+	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		return err
+	}
+	bodyProgress, err = stages.GetStageProgress(tx, stages.Bodies)
+	if err != nil {
+		return err
+	}
+	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
 	batch := tx.NewBatch()
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
@@ -63,7 +61,7 @@ func Forward(
 	var prevWastedCount float64 = 0
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var blockNum uint64
-	var req *BodyRequest
+	var req *bodydownload.BodyRequest
 	var peer []byte
 	stopped := false
 	var headHash common.Hash
@@ -127,7 +125,7 @@ func Forward(
 			stopped = true
 		case <-logEvery.C:
 			deliveredCount, wastedCount := bd.DeliveryCounts()
-			logProgress(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, batch)
+			logProgressBodies(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, batch)
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
 			bd.PrintPeerMap()
@@ -140,23 +138,26 @@ func Forward(
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 	}
-	if !useExternalTx {
-		if _, err := tx.Commit(); err != nil {
-			return err
-		}
-	}
 	if headSet {
-		if headTd, err := rawdb.ReadTd(db, headHash, bodyProgress); err == nil {
+		if headTd, err := rawdb.ReadTd(tx, headHash, bodyProgress); err == nil {
 			updateHead(ctx, bodyProgress, headHash, headTd)
 		} else {
 			log.Error("Failed to get total difficulty", "hash", headHash, "height", bodyProgress, "error", err)
+		}
+	}
+	if err := s.DoneAndUpdate(tx, bodyProgress); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
 		}
 	}
 	log.Info("Processed", "highest", bodyProgress)
 	return nil
 }
 
-func logProgress(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64, batch ethdb.DbWithPendingMutations) {
+func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64, batch ethdb.DbWithPendingMutations) {
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	var m runtime.MemStats

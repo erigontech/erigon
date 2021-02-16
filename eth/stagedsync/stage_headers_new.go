@@ -1,4 +1,4 @@
-package headerdownload
+package stagedsync
 
 import (
 	"context"
@@ -16,41 +16,22 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
-const (
-	logInterval = 30 * time.Second
-)
-
-// Forward progresses Headers stage in the forward direction
-func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *HeaderDownload, headerReqSend func(context.Context, []*HeaderRequest), wakeUpChan chan struct{}) error {
-	var files []string
-	var buffer *HeaderBuffer
-	for {
-		files, buffer = hd.PrepareStageData()
-		if len(files) > 0 || buffer != nil && !buffer.IsEmpty() {
-			break
-		}
-		reqs, timer := hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-		headerReqSend(ctx, reqs)
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-timer.C:
-			//log.Info("RequestQueueTimer (headers) ticked")
-		case <-wakeUpChan:
-			//log.Info("headerLoop woken up by the incoming request")
-		}
+// HeadersForward progresses Headers stage in the forward direction
+func HeadersForward(s *StageState, ctx context.Context, db ethdb.Database, hd *headerdownload.HeaderDownload) error {
+	files, buffer := hd.PrepareStageData()
+	if len(files) == 0 && (buffer == nil || buffer.IsEmpty()) {
+		return nil
 	}
+
+	logPrefix := s.LogPrefix()
 
 	count := 0
 	var highest uint64
 	var headerProgress uint64
 	var err error
-	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
-	if err != nil {
-		return err
-	}
 	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
@@ -64,6 +45,10 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *Heade
 			return err
 		}
 		defer tx.Rollback()
+	}
+	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		return err
 	}
 	batch := tx.NewBatch()
 	defer batch.Rollback()
@@ -84,7 +69,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *Heade
 	var newCanonical bool
 	var forkNumber uint64
 	var canonicalBacktrack = make(map[common.Hash]common.Hash)
-	if err1 = ReadFilesAndBuffer(files, buffer, func(header *types.Header, blockHeight uint64) error {
+	if err1 = headerdownload.ReadFilesAndBuffer(files, buffer, func(header *types.Header, blockHeight uint64) error {
 		hash := header.Hash()
 		if hash == prevHash {
 			// Skip duplicates
@@ -109,8 +94,6 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *Heade
 			// Clear out parent map and move childMap to its place
 			if blockHeight == prevHeight+1 {
 				parentDiffs = childDiffs
-			} else if prevHeight > 0 {
-				return fmt.Errorf("[%s] header chain break, from %d to %d", logPrefix, prevHeight, blockHeight)
 			}
 			childDiffs = make(map[common.Hash]*big.Int)
 			prevHeight = blockHeight
@@ -122,7 +105,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *Heade
 				return fmt.Errorf("[%s] reading total difficulty of the parent header %d %x: %w", logPrefix, blockHeight-1, header.ParentHash, err)
 			}
 			if parentDiff == nil {
-				fmt.Printf("Could not find parentDiff for %d\n", header.Number)
+				return fmt.Errorf("[%s] could not find parentDiff for %d", logPrefix, header.Number)
 			}
 		}
 		cumulativeDiff := new(big.Int).Add(parentDiff, header.Difficulty)
@@ -183,7 +166,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *Heade
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock = logProgress(logPrefix, logBlock, blockHeight, batch)
+			logBlock = logProgressHeaders(logPrefix, logBlock, blockHeight, batch)
 		}
 		return nil
 	}); err1 != nil {
@@ -191,6 +174,9 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *Heade
 	}
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
+	}
+	if err := s.DoneAndUpdate(tx, highest); err != nil {
+		return err
 	}
 	if !useExternalTx {
 		if _, err := tx.Commit(); err != nil {
@@ -206,7 +192,7 @@ func Forward(logPrefix string, ctx context.Context, db ethdb.Database, hd *Heade
 	return nil
 }
 
-func logProgress(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
+func logProgressHeaders(logPrefix string, prev, now uint64, batch ethdb.DbWithPendingMutations) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)

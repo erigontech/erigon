@@ -40,6 +40,10 @@ type StageState struct {
 	BlockNumber uint64
 }
 
+func (s *StageState) LogPrefix() string {
+	return s.state.LogPrefix()
+}
+
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db ethdb.Putter, newBlockNum uint64) error {
 	return stages.SaveStageProgress(db, s.Stage, newBlockNum)

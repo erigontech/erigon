@@ -258,8 +258,9 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int, curren
 		}
 		if start == 0 || end > 0 {
 			// Check if the staged sync can start
-			if hd.checkInitiation(segment) {
+			if ready, height := hd.checkInitiation(segment); ready {
 				hd.stageReady = true
+				hd.stageHeight = height
 				// Signal at every opportunity to avoid deadlocks
 				select {
 				case hd.stageReadyCh <- struct{}{}:
@@ -271,6 +272,12 @@ func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int, curren
 		return fmt.Errorf("extendUp attachment tip not found for %x", tipHeader.ParentHash)
 	}
 	return nil
+}
+
+func (hd *HeaderDownload) Ready() (bool, uint64) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	return hd.stageReady, hd.stageHeight
 }
 
 func (hd *HeaderDownload) StageReadyChannel() chan struct{} {
@@ -967,15 +974,15 @@ func (hd *HeaderDownload) PrepareStageData() (files []string, buffer *HeaderBuff
 // CheckInitiation looks at the first header in the given segment, and assuming
 // that it has been added as a tip, checks whether the anchor parent hash
 // associated with this tip equals to pre-set value (0x00..00 for genesis)
-func (hd *HeaderDownload) checkInitiation(segment *ChainSegment) bool {
+func (hd *HeaderDownload) checkInitiation(segment *ChainSegment) (bool, uint64) {
 	tipHash := segment.Headers[0].Hash()
 	tip, exists := hd.getTip(tipHash)
 	if !exists {
 		fmt.Printf("checkInitialisation: tipHash %x does not exist\n", tipHash)
-		return false
+		return false, 0
 	}
 	if tip.anchor.parentHash != hd.initialHash {
-		return false
+		return false, 0
 	}
 	fmt.Printf("Tip %d %x has total difficulty %d, highest %d, len(hd.hardTips) %d\n", tip.blockHeight, tipHash, tip.cumulativeDifficulty.ToBig(), hd.highestTotalDifficulty.ToBig(), len(hd.hardTips))
 	if len(hd.hardTips) > 0 {
@@ -987,9 +994,9 @@ func (hd *HeaderDownload) checkInitiation(segment *ChainSegment) bool {
 	}
 	if tip.cumulativeDifficulty.Gt(&hd.highestTotalDifficulty) {
 		hd.highestTotalDifficulty.Set(&tip.cumulativeDifficulty)
-		return len(hd.hardTips) == 0
+		return len(hd.hardTips) == 0, tip.blockHeight
 	}
-	return false
+	return false, 0
 }
 
 // childTipValid checks whether child-tip relationship between child header and a tip (that is being extended), is correct
