@@ -619,9 +619,3 @@ Date:   Tue Feb 16 10:44:38 2021 +0200
 
     trie: fix bloom crash on fast sync restart
 
-commit 77787802fe8f8415638480066ecace73037f1eed
-Author: Alex Mazalov <mazalov@gmail.com>
-Date:   Mon Feb 15 18:47:47 2021 +0000
-
-    cmd/geth: fix js unclean shutdown (#22302)
-
