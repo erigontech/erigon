@@ -1439,8 +1439,7 @@ func UnmarshalIH(v []byte) (hasState, hasBranch, hasHash uint16, hashes, rootHas
 
 func MarshalIH(hasState, hasBranch, hasHash uint16, h []common.Hash, buf []byte) []byte {
 	buf = buf[:6+len(h)*common.HashLength]
-	meta := buf[:6]
-	hashes := buf[6:]
+	meta, hashes := buf[:6], buf[6:]
 	binary.BigEndian.PutUint16(meta, hasState)
 	binary.BigEndian.PutUint16(meta[2:], hasBranch)
 	binary.BigEndian.PutUint16(meta[4:], hasHash)
@@ -1456,14 +1455,15 @@ func IHStorageKey(addressHash []byte, incarnation uint64, prefix []byte) []byte 
 
 func IHValue(hasState, hasBranch, hasHash uint16, hashes []byte, rootHash []byte, buf []byte) []byte {
 	buf = buf[:len(hashes)+len(rootHash)+6]
-	binary.BigEndian.PutUint16(buf, hasState)
-	binary.BigEndian.PutUint16(buf[2:], hasBranch)
-	binary.BigEndian.PutUint16(buf[4:], hasHash)
+	meta, hashesList := buf[:6], buf[6:]
+	binary.BigEndian.PutUint16(meta, hasState)
+	binary.BigEndian.PutUint16(meta[2:], hasBranch)
+	binary.BigEndian.PutUint16(meta[4:], hasHash)
 	if len(rootHash) == 0 {
-		copy(buf[6:], hashes)
+		copy(hashesList, hashes)
 	} else {
-		copy(buf[6:], rootHash)
-		copy(buf[38:], hashes)
+		copy(hashesList, rootHash)
+		copy(hashesList[32:], hashes)
 	}
 	return buf
 }
