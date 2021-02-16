@@ -84,14 +84,12 @@ type StorageHashWriteItem struct {
 	i *StorageHashItem
 }
 type StorageHashItem struct {
-	sequence                     int
-	queuePos                     int
-	flags                        uint16
-	addrHash                     common.Hash
-	incarnation                  uint64
-	hasState, hasBranch, hasHash uint16
-	locHashPrefix                []byte
-	hashes                       []common.Hash
+	flags, hasState, hasBranch, hasHash uint16
+	sequence, queuePos                  int
+	addrHash                            common.Hash
+	incarnation                         uint64
+	locHashPrefix                       []byte
+	hashes                              []common.Hash
 }
 
 func (wi *StorageHashWriteItem) GetCacheItem() CacheItem     { return wi.i }
