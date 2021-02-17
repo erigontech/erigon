@@ -1032,13 +1032,17 @@ func (c *StorageIHCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasBran
 	if c.root != nil { // check if acc.storageRoot can be used
 		root := c.root
 		c.root = nil
-		c.kBuf = append(c.kBuf[:80], c.k[c.lvl]...)
+		if bytes.HasPrefix(c.accWithInc, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+			fmt.Printf("can use root: %x,%t\n", c.kBuf, c.canUse(c.kBuf))
+		}
 		if c.canUse(c.kBuf) { // if rd allow us, return. otherwise delete and go ahead.
 			c.cur = c.k[c.lvl]
 			c.skipState = true
 			return c.cur, root, false, nil
 		}
-		fmt.Printf("delete when no root: %x,%x\n", c.accWithInc, c.k[c.lvl])
+		if bytes.HasPrefix(c.accWithInc, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+			fmt.Printf("delete when no root: %x,%x\n", c.accWithInc, c.k[c.lvl])
+		}
 		err = c._deleteCurrent()
 		if err != nil {
 			return []byte{}, nil, false, err
