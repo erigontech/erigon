@@ -445,9 +445,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		//if bytes.HasPrefix(k, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) {
-		//fmt.Printf("excl: %x\n", k)
-		//}
+		if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+			fmt.Printf("excl: %x\n", k)
+		}
 		exclude = append(exclude, k)
 		return nil
 	}
@@ -685,9 +685,9 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		//if bytes.HasPrefix(k, common.FromHex("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb0000000000000001")) {
-		//	fmt.Printf("excl: %x\n", k)
-		//}
+		if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+			fmt.Printf("excl: %x\n", k)
+		}
 		exclude = append(exclude, k)
 		return nil
 	}
