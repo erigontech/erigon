@@ -207,7 +207,13 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 				seek = seek[:40+len(buf2)]
 				copy(seek, k[:40])
 				copy(seek[40:], buf2)
+				if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af38210000000000000001")) {
+					fmt.Printf("testing: %x,%d\n", seek, bitsToMatch)
+				}
 				if err := ethdb.Walk(storageC, seek, bitsToMatch, func(k, v []byte) (bool, error) {
+					if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af38210000000000000001")) {
+						fmt.Printf("testing2: %x\n", k)
+					}
 					found = true
 					return false, nil
 				}); err != nil {
