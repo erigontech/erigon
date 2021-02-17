@@ -316,8 +316,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 			}
 			if len(value) == 0 && len(v) > 0 { // self-destructed
 				deletedAccounts = append(deletedAccounts, newK)
-			}
-			if len(value) > 0 && len(v) > 0 { // turns incarnation to zero
+			} else if len(value) > 0 && len(v) > 0 { // turns incarnation to zero
 				var acc accounts.Account
 				if err := acc.DecodeForStorage(v); err != nil {
 					return err
