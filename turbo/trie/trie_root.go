@@ -1274,16 +1274,17 @@ func (c *StorageIHCursor) _unmarshal(k, v []byte) {
 }
 
 func (c *StorageIHCursor) DeleteAllIncarnations(accHash []byte) error {
+	fmt.Printf("DeleteAllIncarnations000: %x\n", accHash)
 	for k, _, err := c.c.Seek(accHash); k != nil; k, _, err = c.c.Next() {
 		if err != nil {
 			return err
 		}
-		if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
-			fmt.Printf("DeleteAllIncarnations: %x\n", k)
-		}
-
 		if !bytes.HasPrefix(k, accHash) {
 			break
+		}
+		fmt.Printf("--DeleteAllIncarnations: %x\n", k)
+		if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+			fmt.Printf("-----DeleteAllIncarnations: %x\n", k)
 		}
 		if err := c.shc(k[:40], k[40:], 0, 0, 0, nil, nil); err != nil {
 			return err
