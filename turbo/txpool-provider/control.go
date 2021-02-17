@@ -51,10 +51,8 @@ func (c *TxPoolControlServer) AccountInfo(ctx context.Context, request *pb.Accou
 }
 
 func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream pb.TxpoolControl_BlockStreamServer) error {
-	db := ethdb.NewObjectDatabase(c.kv)
-
-	// Tracks the last "latest" header sent in the stream.
 	var (
+		db           = ethdb.NewObjectDatabase(c.kv)
 		lastHeader   = new(types.Header)
 		newRequestCh = make(chan *pb.BlockStreamRequest)
 		newHeadCh    = make(chan *types.Header)
@@ -105,31 +103,40 @@ func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream
 
 // handleStreamRequest is function that can be spawned as a routine to respond to stream requests.
 func handleStreamRequest(request *pb.BlockStreamRequest, stream pb.TxpoolControl_BlockStreamServer, latest *types.Header, chainId *big.Int, db ethdb.Database) error {
+	var err error
+
 	if request.GetLatest() != nil {
-		diff, err := buildBlockDiff(nil, nil, chainId, db)
-		if err != nil {
+		var (
+			diff *pb.BlockDiff
+			head *types.Header
+		)
+
+		if diff, err = buildBlockDiff(nil, nil, chainId, db); err != nil {
 			return err
 		}
-		tmp, err := rawdb.ReadHeaderByHash(db, rawdb.ReadHeadHeaderHash(db))
-		if err != nil {
+		if head, err = rawdb.ReadHeaderByHash(db, rawdb.ReadHeadHeaderHash(db)); err != nil {
 			return err
 		}
-		*latest = *tmp
+
+		*latest = *head
 		stream.Send(diff)
 	} else {
-		hash := common.BytesToHash(request.GetBlockHash())
-		newHeader, err := rawdb.ReadHeaderByHash(db, hash)
-		if err != nil {
+		var (
+			diff                 *pb.BlockDiff
+			newHeader, oldHeader *types.Header
+			hash                 = common.BytesToHash(request.GetBlockHash())
+		)
+
+		if newHeader, err = rawdb.ReadHeaderByHash(db, hash); err != nil {
 			return err
 		}
-		oldHeader, err := rawdb.ReadHeaderByHash(db, newHeader.ParentHash)
-		if err != nil {
+		if oldHeader, err = rawdb.ReadHeaderByHash(db, newHeader.ParentHash); err != nil {
 			return err
 		}
-		diff, err := buildBlockDiff(newHeader, oldHeader, chainId, db)
-		if err != nil {
+		if diff, err = buildBlockDiff(newHeader, oldHeader, chainId, db); err != nil {
 			return err
 		}
+
 		stream.Send(diff)
 	}
 	return nil
