@@ -1032,6 +1032,7 @@ func (c *StorageIHCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasBran
 	if c.root != nil { // check if acc.storageRoot can be used
 		root := c.root
 		c.root = nil
+		c.kBuf = append(c.kBuf[:80], c.k[c.lvl]...)
 		if c.canUse(c.kBuf) { // if rd allow us, return. otherwise delete and go ahead.
 			c.cur = c.k[c.lvl]
 			c.skipState = true
