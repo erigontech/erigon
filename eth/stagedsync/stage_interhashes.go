@@ -376,13 +376,18 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	decode := changeset.Mapper[changeSetBucket].Decode
 	var deletedAccounts [][]byte
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, v := decode(dbKey, dbValue)
+		n, k, v := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
 		if !storage && len(v) == 0 { // self-destructed
 			deletedAccounts = append(deletedAccounts, newK)
+		}
+		if !storage {
+			if bytes.HasPrefix(newK, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+				fmt.Printf("cs: %d,%x,csv=%x\n", n, newK, v)
+			}
 		}
 		return next(k, newK, nil)
 	}
@@ -411,6 +416,9 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 		defer func(t time.Time) { fmt.Printf("stage_interhashes.go:404: %s\n", time.Since(t)) }(time.Now())
 		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
 		for _, k := range deletedAccounts {
+			if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+				fmt.Printf("deleted acc: %x\n", k)
+			}
 			if err := p.db.Walk(dbutils.TrieOfStorageBucket, k, 8*len(k), func(k, _ []byte) (bool, error) {
 				return true, p.db.Delete(dbutils.TrieOfStorageBucket, k, nil)
 			}); err != nil {
