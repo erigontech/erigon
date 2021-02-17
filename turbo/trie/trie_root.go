@@ -244,7 +244,6 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 				return EmptyRoot, err
 			}
 			if l.accountValue.Incarnation == 0 {
-				_ = ihStorage.DeleteAllIncarnations(k)
 				continue
 			}
 			copy(l.accAddrHashWithInc[:], k)
@@ -1274,20 +1273,6 @@ func (c *StorageIHCursor) _unmarshal(k, v []byte) {
 	c.childID[c.lvl] = int16(bits.TrailingZeros16(c.hasState[c.lvl]) - 1)
 }
 
-func (c *StorageIHCursor) DeleteAllIncarnations(accHash []byte) error {
-	for k, _, err := c.c.Seek(accHash); k != nil; k, _, err = c.c.Next() {
-		if err != nil {
-			return err
-		}
-		if !bytes.HasPrefix(k, accHash) {
-			break
-		}
-		if err := c.shc(k[:40], k[40:], 0, 0, 0, nil, nil); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 func (c *StorageIHCursor) _deleteCurrent() error {
 	if c.deleted[c.lvl] {
 		return nil
@@ -1846,7 +1831,6 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *Storage
 				return false, err
 			}
 			if l.accountValue.Incarnation == 0 {
-				_ = ihStorage.DeleteAllIncarnations(addrHash.Bytes())
 				return true, nil
 			}
 			copy(l.accAddrHashWithInc[:], addrHash.Bytes())
