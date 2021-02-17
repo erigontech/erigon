@@ -114,7 +114,7 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 					panic(err)
 				}
 				if !found {
-					panic(fmt.Errorf("key %x has state %016b, but there is no child %d,%x in state", k, hasBranch, i, seek))
+					panic(fmt.Errorf("key %x has state %016b, but there is no child %d,%x in state", k, hasState, i, seek))
 				}
 			}
 
@@ -214,7 +214,7 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 					panic(err)
 				}
 				if !found {
-					panic(fmt.Errorf("key %x has state %016b, but there is no child %d,%x in state", k, hasBranch, i, seek))
+					panic(fmt.Errorf("key %x has state %016b, but there is no child %d,%x in state", k, hasState, i, seek))
 				}
 			}
 
