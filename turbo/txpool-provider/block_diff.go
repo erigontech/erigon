@@ -100,7 +100,7 @@ func cmpTxsAcrossFork(oldHead, newHead *types.Header, db ethdb.Database) (types.
 		newNum := newHead.Number.Uint64()
 
 		// If the reorg is too deep, avoid doing it.
-		if depth := uint64(math.Abs(float64(oldNum) - float64(newNum))); depth <= 64 {
+		if depth := uint64(math.Abs(float64(oldNum) - float64(newNum))); depth <= 128 {
 			rem := getter.GetBlock(oldHead.Hash(), oldHead.Number.Uint64())
 			add := getter.GetBlock(newHead.Hash(), newHead.Number.Uint64())
 
