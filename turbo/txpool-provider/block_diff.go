@@ -16,49 +16,44 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/txpool-provider/pb"
 )
 
-func buildBlockDiff(oldHead, newHead *types.Header, db ethdb.Database) (*pb.BlockDiff, error) {
+func buildBlockDiff(oldHead, newHead *types.Header, chainId *big.Int, db ethdb.Database) (*pb.BlockDiff, error) {
 	if newHead == nil {
-		return buildAppliedBlockDiff(nil, db)
+		return buildLatestBlockDiff(chainId, db)
 	}
-	fmt.Println(oldHead.Hash().Hex())
-	fmt.Println(newHead.ParentHash.Hex())
-
 	if newHead.ParentHash == oldHead.Hash() {
-		hash := newHead.Hash()
-		return buildAppliedBlockDiff(&hash, db)
+		return buildAppliedBlockDiff(oldHead, newHead, chainId, db)
 
 	} else {
-		return buildRevertedBlockDiff(oldHead, newHead, db)
+		return buildRevertedBlockDiff(oldHead, newHead, chainId, db)
 	}
 }
 
-func buildAppliedBlockDiff(hash *common.Hash, db ethdb.Database) (*pb.BlockDiff, error) {
-	// if hash is nil, get the latest block
-	if hash == nil {
-		tmp := rawdb.ReadHeadBlockHash(db)
-		hash = &tmp
-	}
-	target, err := rawdb.ReadHeaderByHash(db, *hash)
+func buildLatestBlockDiff(chainId *big.Int, db ethdb.Database) (*pb.BlockDiff, error) {
+	latest, err := rawdb.ReadHeaderByHash(db, rawdb.ReadHeadBlockHash(db))
 	if err != nil {
 		return nil, err
 	}
-	parent, err := rawdb.ReadHeaderByHash(db, target.ParentHash)
+	parent, err := rawdb.ReadHeaderByHash(db, latest.ParentHash)
 	if err != nil {
 		return nil, err
 	}
-	included, discarded := cmpTxsAcrossFork(parent, target, db)
+	return buildAppliedBlockDiff(parent, latest, chainId, db)
+}
+
+func buildAppliedBlockDiff(oldHead, newHead *types.Header, chainId *big.Int, db ethdb.Database) (*pb.BlockDiff, error) {
+	included, discarded := cmpTxsAcrossFork(oldHead, newHead, db)
 	reverted := types.TxDifference(discarded, included)
 	diff := pb.BlockDiff_Applied{
 		Applied: &pb.AppliedBlock{
-			Hash:         hash.Bytes(),
-			ParentHash:   parent.Hash().Bytes(),
-			AccountDiffs: buildAccountDiff(append(included, reverted...), db),
+			Hash:         newHead.Hash().Bytes(),
+			ParentHash:   oldHead.Hash().Bytes(),
+			AccountDiffs: buildAccountDiff(append(included, reverted...), chainId, db),
 		},
 	}
 	return &pb.BlockDiff{Diff: &diff}, nil
 }
 
-func buildRevertedBlockDiff(oldHead, newHead *types.Header, db ethdb.Database) (*pb.BlockDiff, error) {
+func buildRevertedBlockDiff(oldHead, newHead *types.Header, chainId *big.Int, db ethdb.Database) (*pb.BlockDiff, error) {
 	included, discarded := cmpTxsAcrossFork(oldHead, newHead, db)
 	reverted := types.TxDifference(discarded, included)
 	encoded := make([][]byte, len(reverted))
@@ -75,7 +70,7 @@ func buildRevertedBlockDiff(oldHead, newHead *types.Header, db ethdb.Database) (
 			NewHash:              newHead.Hash().Bytes(),
 			NewParent:            newHead.ParentHash.Bytes(),
 			RevertedTransactions: encoded,
-			AccountDiffs:         buildAccountDiff(append(included, reverted...), db),
+			AccountDiffs:         buildAccountDiff(append(included, reverted...), chainId, db),
 		},
 	}
 	return &pb.BlockDiff{Diff: &diff}, nil
@@ -147,9 +142,8 @@ func cmpTxsAcrossFork(oldHead, newHead *types.Header, db ethdb.Database) (types.
 	return included, discarded
 }
 
-func buildAccountDiff(txs types.Transactions, db ethdb.Database) []*pb.AccountInfo {
-	addrs, nonces, balances := touchedAccounts(txs, db)
-
+func buildAccountDiff(txs types.Transactions, chainId *big.Int, db ethdb.Database) []*pb.AccountInfo {
+	addrs, nonces, balances := touchedAccounts(txs, chainId, db)
 	diffs := make([]*pb.AccountInfo, len(addrs))
 
 	for i, addr := range addrs {
@@ -165,12 +159,13 @@ func buildAccountDiff(txs types.Transactions, db ethdb.Database) []*pb.AccountIn
 	return diffs
 }
 
-func touchedAccounts(txs types.Transactions, db ethdb.Database) ([]common.Address, []uint64, []*big.Int) {
+func touchedAccounts(txs types.Transactions, chainId *big.Int, db ethdb.Database) ([]common.Address, []uint64, []*big.Int) {
 	m := make(map[common.Address]bool)
 	addrs := []common.Address{}
+	signer := types.NewEIP155Signer(chainId)
 
 	for _, tx := range txs {
-		from, _ := types.Sender(types.NewEIP155Signer(big.NewInt(1)), tx)
+		from, _ := types.Sender(signer, tx)
 		if _, value := m[from]; !value {
 			m[from] = true
 			addrs = append(addrs, from)

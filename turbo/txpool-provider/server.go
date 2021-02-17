@@ -9,11 +9,11 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/txpool-provider/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -21,14 +21,14 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
-func StartGrpc(kv ethdb.KV, eth core.Backend, events *remotedbserver.Events, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
+func StartGrpc(cc *params.ChainConfig, kv ethdb.KV, events *remotedbserver.Events, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
 	log.Info("Starting txpool provider RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
 	}
 
-	control := NewTxPoolControlServer(kv, events)
+	control := NewTxPoolControlServer(cc, kv, events)
 
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor

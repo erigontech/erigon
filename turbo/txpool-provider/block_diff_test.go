@@ -58,7 +58,7 @@ func TestAppliedBlock(t *testing.T) {
 
 	included, _ := cmpTxsAcrossFork(oldHead, newHead, db)
 
-	addrs, nonces, balances := touchedAccounts(included, db)
+	addrs, nonces, balances := touchedAccounts(included, gspec.Config.ChainID, db)
 
 	if len(addrs) != 1 {
 		t.Errorf("incorrect number of accounts touched, should be 1")
@@ -183,7 +183,7 @@ func TestRevertedBlock(t *testing.T) {
 	}
 
 	all := append(included, discarded...)
-	addrs, nonces, balances := touchedAccounts(all, db)
+	addrs, nonces, balances := touchedAccounts(all, gspec.Config.ChainID, db)
 
 	// This is just the order in which the function returns the account diff.
 	expectedAddrs := []common.Address{addr3, addr1, addr2}

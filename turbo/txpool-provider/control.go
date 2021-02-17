@@ -3,6 +3,7 @@ package txpoolprovider
 import (
 	"context"
 	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -10,18 +11,20 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/txpool-provider/pb"
 )
 
 type TxPoolControlServer struct {
 	pb.UnimplementedTxpoolControlServer
-	kv     ethdb.KV
-	events *remotedbserver.Events
+	chainConfig *params.ChainConfig
+	kv          ethdb.KV
+	events      *remotedbserver.Events
 }
 
-func NewTxPoolControlServer(kv ethdb.KV, events *remotedbserver.Events) *TxPoolControlServer {
-	return &TxPoolControlServer{kv: kv, events: events}
+func NewTxPoolControlServer(cc *params.ChainConfig, kv ethdb.KV, events *remotedbserver.Events) *TxPoolControlServer {
+	return &TxPoolControlServer{chainConfig: cc, kv: kv, events: events}
 }
 
 func (c *TxPoolControlServer) AccountInfo(ctx context.Context, request *pb.AccountInfoRequest) (*pb.AccountInfoReply, error) {
@@ -71,7 +74,7 @@ func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream
 	}
 
 	// Respond to the original request from the client.
-	if err := handleStreamRequest(request, stream, lastHeader, db); err != nil {
+	if err := handleStreamRequest(request, stream, lastHeader, c.chainConfig.ChainID, db); err != nil {
 		return err
 	}
 	fmt.Println(lastHeader.Hash().String())
@@ -83,11 +86,11 @@ func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream
 	for {
 		select {
 		case msg := <-newRequestCh:
-			if err := handleStreamRequest(msg, stream, lastHeader, db); err != nil {
+			if err := handleStreamRequest(msg, stream, lastHeader, c.chainConfig.ChainID, db); err != nil {
 				return err
 			}
 		case newHeader := <-newHeadCh:
-			diff, err := buildBlockDiff(lastHeader, newHeader, db)
+			diff, err := buildBlockDiff(lastHeader, newHeader, c.chainConfig.ChainID, db)
 			if err != nil {
 				return err
 			}
@@ -98,9 +101,9 @@ func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream
 	}
 }
 
-func handleStreamRequest(request *pb.BlockStreamRequest, stream pb.TxpoolControl_BlockStreamServer, latest *types.Header, db ethdb.Database) error {
+func handleStreamRequest(request *pb.BlockStreamRequest, stream pb.TxpoolControl_BlockStreamServer, latest *types.Header, chainId *big.Int, db ethdb.Database) error {
 	if request.GetLatest() != nil {
-		diff, err := buildBlockDiff(nil, nil, db)
+		diff, err := buildBlockDiff(nil, nil, chainId, db)
 		if err != nil {
 			return err
 		}
@@ -120,7 +123,7 @@ func handleStreamRequest(request *pb.BlockStreamRequest, stream pb.TxpoolControl
 		if err != nil {
 			return err
 		}
-		diff, err := buildBlockDiff(newHeader, oldHeader, db)
+		diff, err := buildBlockDiff(newHeader, oldHeader, chainId, db)
 		if err != nil {
 			return err
 		}

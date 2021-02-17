@@ -423,7 +423,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	}
 
 	if stack.Config().TxPoolProviderAddr != "" {
-		eth.poolProvider, err = txpoolprovider.StartGrpc(chainDb.KV(), eth, remoteEvents, stack.Config().TxPoolProviderAddr, nil)
+		eth.poolProvider, err = txpoolprovider.StartGrpc(chainConfig, chainDb.KV(), remoteEvents, stack.Config().TxPoolProviderAddr, nil)
 		if err != nil {
 			return nil, err
 		}
