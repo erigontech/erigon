@@ -569,9 +569,9 @@ func (r *RootHashAggregator) genStructStorage() error {
 		if r.shc == nil {
 			return nil
 		}
-		if bytes.HasPrefix(r.currAccK, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) && bytes.HasPrefix(keyHex, common.FromHex("")) {
-			fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex, hasHash, hasBranch, hashes == nil && rootHash == nil)
-		}
+		//if bytes.HasPrefix(r.currAccK, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) && bytes.HasPrefix(keyHex, common.FromHex("")) {
+		//	fmt.Printf("collect: %x,%x,%016b,%016b, del:%t\n", r.currAccK, keyHex, hasHash, hasBranch, hashes == nil && rootHash == nil)
+		//}
 		return r.shc(r.currAccK, keyHex, hasState, hasBranch, hasHash, hashes, rootHash)
 	}, data, r.groupsStorage, r.hasBranchStorage, r.hasHashStorage,
 		//false,
@@ -1032,16 +1032,10 @@ func (c *StorageIHCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasBran
 	if c.root != nil { // check if acc.storageRoot can be used
 		root := c.root
 		c.root = nil
-		if bytes.HasPrefix(c.accWithInc, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
-			fmt.Printf("can use root: %x,%t\n", c.kBuf, c.canUse(c.kBuf))
-		}
 		if c.canUse(c.kBuf) { // if rd allow us, return. otherwise delete and go ahead.
 			c.cur = c.k[c.lvl]
 			c.skipState = true
 			return c.cur, root, false, nil
-		}
-		if bytes.HasPrefix(c.accWithInc, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
-			fmt.Printf("delete when no root: %x,%x\n", c.accWithInc, c.k[c.lvl])
 		}
 		err = c._deleteCurrent()
 		if err != nil {
@@ -1284,6 +1278,10 @@ func (c *StorageIHCursor) DeleteAllIncarnations(accHash []byte) error {
 		if err != nil {
 			return err
 		}
+		if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+			fmt.Printf("DeleteAllIncarnations: %x\n", k)
+		}
+
 		if !bytes.HasPrefix(k, accHash) {
 			break
 		}
