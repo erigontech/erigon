@@ -319,7 +319,12 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 			if bytes.HasPrefix(newK, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
 				fmt.Printf("cs: %d,%x,csv=%x,dbv=%x\n", n, newK, v, value)
 			}
+		} else {
+			if bytes.HasPrefix(newK, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+				fmt.Printf("cs2: %d,%x,csv=%x\n", n, newK, v)
+			}
 		}
+
 		return next(dbKey, newK, nil)
 	}
 
@@ -387,6 +392,10 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 		if !storage {
 			if bytes.HasPrefix(newK, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
 				fmt.Printf("cs: %d,%x,csv=%x\n", n, newK, v)
+			}
+		} else {
+			if bytes.HasPrefix(newK, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+				fmt.Printf("cs2: %d,%x,csv=%x\n", n, newK, v)
 			}
 		}
 		return next(k, newK, nil)

@@ -34,6 +34,8 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 		defer c.Close()
 		defer trieAcc2.Close()
 		defer accC.Close()
+		k, v, _ := accC.Seek(common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821"))
+		fmt.Printf("acc: %x,%x\n", k, v)
 		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {
 			if errc != nil {
 				panic(errc)
