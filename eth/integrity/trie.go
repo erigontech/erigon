@@ -135,7 +135,7 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 		defer trieStorage.Close()
 		defer storageC.Close()
 		k, v, _ := storageC.Seek(common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821"))
-		fmt.Printf("acc: %x,%x\n", k, v)
+		fmt.Printf("storage: %x,%x\n", k, v)
 
 		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {
 			if errc != nil {
