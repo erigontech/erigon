@@ -429,9 +429,6 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 		defer func(t time.Time) { fmt.Printf("stage_interhashes.go:404: %s\n", time.Since(t)) }(time.Now())
 		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
 		for _, k := range deletedAccounts {
-			if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
-				fmt.Printf("deleted acc: %x\n", k)
-			}
 			if err := p.db.Walk(dbutils.TrieOfStorageBucket, k, 8*len(k), func(k, _ []byte) (bool, error) {
 				return true, p.db.Delete(dbutils.TrieOfStorageBucket, k, nil)
 			}); err != nil {
@@ -449,9 +446,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
-			fmt.Printf("excl: %x\n", k)
-		}
+		//if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+		//	fmt.Printf("excl: %x\n", k)
+		//}
 		exclude = append(exclude, k)
 		return nil
 	}
@@ -689,9 +686,9 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	p.TempDir = tmpdir
 	var exclude [][]byte
 	collect := func(k []byte, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
-			fmt.Printf("excl: %x\n", k)
-		}
+		//if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
+		//	fmt.Printf("excl: %x\n", k)
+		//}
 		exclude = append(exclude, k)
 		return nil
 	}
