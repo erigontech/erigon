@@ -8,6 +8,7 @@ message AccountInfoRequest {
   bytes block_hash = 1;
   bytes account = 2;
 }
+
 message AccountInfoReply {
   bytes balance = 1;
   bytes nonce = 2;
@@ -26,17 +27,10 @@ message AccountInfo {
   bytes nonce = 3;
 }
 
-message AccountDiff {
-  oneof diff {
-    AccountInfo changed = 1;
-    bytes deleted = 2;
-  }
-}
-
 message AppliedBlock {
   bytes hash = 1;
   bytes parent_hash = 2;
-  repeated AccountDiff account_diffs = 3;
+  repeated AccountInfo changed_accounts = 3;
 }
 
 message RevertedBlock {
@@ -44,7 +38,7 @@ message RevertedBlock {
   repeated bytes reverted_transactions = 2;
   bytes new_hash = 3;
   bytes new_parent = 4;
-  repeated AccountDiff new_state = 5;
+  repeated AccountInfo reverted_accounts = 5;
 }
 
 message BlockDiff {
