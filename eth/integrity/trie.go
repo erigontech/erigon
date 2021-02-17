@@ -34,8 +34,6 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 		defer c.Close()
 		defer trieAcc2.Close()
 		defer accC.Close()
-		k, v, _ := accC.Seek(common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821"))
-		fmt.Printf("acc: %x,%x\n", k, v)
 		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {
 			if errc != nil {
 				panic(errc)
@@ -134,8 +132,6 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 		defer c.Close()
 		defer trieStorage.Close()
 		defer storageC.Close()
-		k, v, _ := storageC.Seek(common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821"))
-		fmt.Printf("storage: %x,%x\n", k, v)
 
 		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {
 			if errc != nil {
@@ -212,19 +208,7 @@ func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
 				seek = seek[:40+len(buf2)]
 				copy(seek, k[:40])
 				copy(seek[40:], buf2)
-				if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
-					fmt.Printf("testing: %x,%d\n", seek, bitsToMatch)
-					if err := ethdb.Walk(storageC, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821"), 256, func(k, v []byte) (bool, error) {
-						fmt.Printf("testing2: %x\n", k)
-						return true, nil
-					}); err != nil {
-						panic(err)
-					}
-				}
 				if err := ethdb.Walk(storageC, seek, bitsToMatch, func(k, v []byte) (bool, error) {
-					if bytes.HasPrefix(k, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
-						fmt.Printf("testing3: %x\n", k)
-					}
 					found = true
 					return false, nil
 				}); err != nil {
