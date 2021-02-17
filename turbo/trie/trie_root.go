@@ -1037,6 +1037,11 @@ func (c *StorageIHCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasBran
 			c.skipState = true
 			return c.cur, root, false, nil
 		}
+		fmt.Printf("delete when no root: %x,%x\n", c.accWithInc, c.k[c.lvl])
+		err = c._deleteCurrent()
+		if err != nil {
+			return []byte{}, nil, false, err
+		}
 		err = c._preOrderTraversalStepNoInDepth()
 		if err != nil {
 			return []byte{}, nil, false, err
