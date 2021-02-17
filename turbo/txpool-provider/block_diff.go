@@ -16,12 +16,26 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/txpool-provider/pb"
 )
 
+// buildBlockDiff is a helper function which constructs a block diff to send to
+// subscribers.
+//
+// There are three different scenarios that must be handled:
+//
+// 1) The subscriber has requested to receive the latest block information. This
+//    is done by setting newHead to nil. The block diff will be generated
+//    against the head and its parent. This will always generate an
+//    AppliedBlock type of diff.
+// 2) The chain head has moved forward one block. In this case, the newest block
+//    was applied to the last head.
+// 3) The chain head has changed and its parent is not equal to the old head. In
+//    that case, the fork should be analyzed and all changes should be sent to
+//    the subscriber.
 func buildBlockDiff(oldHead, newHead *types.Header, chainId *big.Int, db ethdb.Database) (*pb.BlockDiff, error) {
 	if newHead == nil {
 		return buildLatestBlockDiff(chainId, db)
 	}
 	if newHead.ParentHash == oldHead.Hash() {
-		return buildAppliedBlockDiff(oldHead, newHead, chainId, db)
+		return buildAppliedBlockDiff(oldHead, newHead, chainId, db), nil
 
 	} else {
 		return buildRevertedBlockDiff(oldHead, newHead, chainId, db)
@@ -37,10 +51,10 @@ func buildLatestBlockDiff(chainId *big.Int, db ethdb.Database) (*pb.BlockDiff, e
 	if err != nil {
 		return nil, err
 	}
-	return buildAppliedBlockDiff(parent, latest, chainId, db)
+	return buildAppliedBlockDiff(parent, latest, chainId, db), nil
 }
 
-func buildAppliedBlockDiff(oldHead, newHead *types.Header, chainId *big.Int, db ethdb.Database) (*pb.BlockDiff, error) {
+func buildAppliedBlockDiff(oldHead, newHead *types.Header, chainId *big.Int, db ethdb.Database) *pb.BlockDiff {
 	included, discarded := cmpTxsAcrossFork(oldHead, newHead, db)
 	reverted := types.TxDifference(discarded, included)
 	diff := pb.BlockDiff_Applied{
@@ -50,7 +64,7 @@ func buildAppliedBlockDiff(oldHead, newHead *types.Header, chainId *big.Int, db 
 			AccountDiffs: buildAccountDiff(append(included, reverted...), chainId, db),
 		},
 	}
-	return &pb.BlockDiff{Diff: &diff}, nil
+	return &pb.BlockDiff{Diff: &diff}
 }
 
 func buildRevertedBlockDiff(oldHead, newHead *types.Header, chainId *big.Int, db ethdb.Database) (*pb.BlockDiff, error) {
@@ -76,6 +90,9 @@ func buildRevertedBlockDiff(oldHead, newHead *types.Header, chainId *big.Int, db
 	return &pb.BlockDiff{Diff: &diff}, nil
 }
 
+// cmpTxsAcrossFork returns i) a list of transactions that were included on the
+// old fork, but not on the canonical chain and ii) a list of transactions that
+// were included in both the old fork and the canonical chain.
 func cmpTxsAcrossFork(oldHead, newHead *types.Header, db ethdb.Database) (types.Transactions, types.Transactions) {
 	var discarded, included types.Transactions
 
@@ -142,6 +159,8 @@ func cmpTxsAcrossFork(oldHead, newHead *types.Header, db ethdb.Database) (types.
 	return included, discarded
 }
 
+// buildAccountDiff wraps the response from touchedAccounts(..) in a protobuf
+// compatible struct.
 func buildAccountDiff(txs types.Transactions, chainId *big.Int, db ethdb.Database) []*pb.AccountInfo {
 	addrs, nonces, balances := touchedAccounts(txs, chainId, db)
 	diffs := make([]*pb.AccountInfo, len(addrs))
@@ -159,6 +178,8 @@ func buildAccountDiff(txs types.Transactions, chainId *big.Int, db ethdb.Databas
 	return diffs
 }
 
+// buildAccountDiff iterates through EOAs which originate a transaction in the
+// list of transactions. Each account's latest nonce and balance is returned.
 func touchedAccounts(txs types.Transactions, chainId *big.Int, db ethdb.Database) ([]common.Address, []uint64, []*big.Int) {
 	m := make(map[common.Address]bool)
 	addrs := []common.Address{}

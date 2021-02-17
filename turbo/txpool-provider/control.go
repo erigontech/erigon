@@ -38,10 +38,12 @@ func (c *TxPoolControlServer) AccountInfo(ctx context.Context, request *pb.Accou
 	if err != nil {
 		return nil, err
 	}
+
 	acc, err := readAccountAtBlock(ctx, c.kv, addr, head.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
+
 	return &pb.AccountInfoReply{
 		Balance: acc.Balance.Bytes(),
 		Nonce:   i64tob(acc.Nonce),
@@ -68,6 +70,7 @@ func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream
 		}
 
 	}
+
 	queueHeader := func(h *types.Header) error {
 		newHeadCh <- h
 		return nil
@@ -77,7 +80,6 @@ func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream
 	if err := handleStreamRequest(request, stream, lastHeader, c.chainConfig.ChainID, db); err != nil {
 		return err
 	}
-	fmt.Println(lastHeader.Hash().String())
 
 	// Spawn listeners.
 	go queueRequest(newRequestCh)
@@ -101,6 +103,7 @@ func (c *TxPoolControlServer) BlockStream(request *pb.BlockStreamRequest, stream
 	}
 }
 
+// handleStreamRequest is function that can be spawned as a routine to respond to stream requests.
 func handleStreamRequest(request *pb.BlockStreamRequest, stream pb.TxpoolControl_BlockStreamServer, latest *types.Header, chainId *big.Int, db ethdb.Database) error {
 	if request.GetLatest() != nil {
 		diff, err := buildBlockDiff(nil, nil, chainId, db)
