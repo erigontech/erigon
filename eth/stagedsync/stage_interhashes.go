@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -317,7 +318,15 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 				deletedAccounts = append(deletedAccounts, newK)
 			}
 			if bytes.HasPrefix(newK, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
-				fmt.Printf("cs: %d,%x,csv=%x,dbv=%x\n", n, newK, v, value)
+				var acc accounts.Account
+				if err := acc.DecodeForStorage(v); err != nil {
+					return err
+				}
+				var acc2 accounts.Account
+				if err := acc2.DecodeForStorage(value); err != nil {
+					return err
+				}
+				fmt.Printf("cs: %d,%x,csv=%x,dbv=%x,incarnationCs=%d,incarnationDB=%d\n", n, newK, v, value, acc.Incarnation, acc2.Incarnation)
 			}
 		} else {
 			if bytes.HasPrefix(newK, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
@@ -391,7 +400,11 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 		}
 		if !storage {
 			if bytes.HasPrefix(newK, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
-				fmt.Printf("cs: %d,%x,csv=%x\n", n, newK, v)
+				var acc accounts.Account
+				if err := acc.DecodeForStorage(v); err != nil {
+					return err
+				}
+				fmt.Printf("cs: %d,%x,csv=%x,incarnation:%d\n", n, newK, v, acc.Incarnation)
 			}
 		} else {
 			if bytes.HasPrefix(newK, common.FromHex("94537c5bb46d62873557759260e8aebff5e3048f362d7bf90705cda631af3821")) {
