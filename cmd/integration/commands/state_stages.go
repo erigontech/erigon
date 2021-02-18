@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"sort"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -59,7 +60,28 @@ var loopIhCmd = &cobra.Command{
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
-		if err := loopIh(db, ctx); err != nil {
+		if unwind == 0 {
+			unwind = 1
+		}
+		if err := loopIh(db, ctx, unwind); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+
+		return nil
+	},
+}
+
+var loopExecCmd = &cobra.Command{
+	Use: "loop_exec",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+		if unwind == 0 {
+			unwind = 1
+		}
+		if err := loopExec(db, ctx, unwind); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -80,8 +102,15 @@ func init() {
 
 	withChaindata(loopIhCmd)
 	withBatchSize(loopIhCmd)
+	withUnwind(loopIhCmd)
 
 	rootCmd.AddCommand(loopIhCmd)
+
+	withChaindata(loopExecCmd)
+	withBatchSize(loopExecCmd)
+	withUnwind(loopExecCmd)
+
+	rootCmd.AddCommand(loopExecCmd)
 }
 
 func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
@@ -246,7 +275,7 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 	return nil
 }
 
-func loopIh(db ethdb.Database, ctx context.Context) error {
+func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	ch := ctx.Done()
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
@@ -267,7 +296,7 @@ func loopIh(db ethdb.Database, ctx context.Context) error {
 		return err
 	}
 	execStage := progress(stages.HashState)
-	to := execStage.BlockNumber - 10
+	to := execStage.BlockNumber - unwind
 	_ = st.SetCurrentStage(stages.HashState)
 	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: to}
 	if err = stagedsync.UnwindHashStateStage(u, progress(stages.HashState), tx, path.Join(datadir, etl.TmpDirName), ch); err != nil {
@@ -304,6 +333,70 @@ func loopIh(db ethdb.Database, ctx context.Context) error {
 		if err = st.Run(db, tx); err != nil {
 			return err
 		}
+		tx.Rollback()
+		tx, err = tx.Begin(ctx, ethdb.RW)
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
+	ch := ctx.Done()
+	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+	defer tx.Rollback()
+
+	cc, bc, st, progress := newSync(ch, db, tx, nil)
+	defer bc.Stop()
+	cc.SetDB(tx)
+
+	var err error
+	tx, err = tx.Begin(ctx, ethdb.RW)
+	if err != nil {
+		return err
+	}
+	st.DisableAllStages()
+	st.EnableStages(stages.TxLookup, stages.Finish)
+	_ = st.Run(db, tx)
+	_ = tx.CommitAndBegin(context.Background())
+
+	_ = clearUnwindStack(tx, context.Background())
+	st.DisableAllStages()
+	st.EnableStages(stages.Execution, stages.TxLookup, stages.Finish)
+	from := progress(stages.Execution).BlockNumber
+	to := from + unwind
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	_ = st.SetCurrentStage(stages.Execution)
+	// set block limit of execute stage
+	st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
+		if err := stagedsync.SpawnExecuteBlocksStage(
+			stageState, tx,
+			bc.Config(), cc, bc.GetVMConfig(),
+			ch,
+			stagedsync.ExecuteBlockStageParams{
+				ToBlock:       to, // limit execution to the specified block
+				WriteReceipts: true,
+				BatchSize:     int(batchSize),
+				ChangeSetHook: nil,
+			}); err != nil {
+			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
+		}
+		return nil
+	})
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		t := time.Now()
+		if err = st.Run(db, tx); err != nil {
+			return err
+		}
+		fmt.Printf("loop time: %s\n", time.Since(t))
 		tx.Rollback()
 		tx, err = tx.Begin(ctx, ethdb.RW)
 		if err != nil {

@@ -121,6 +121,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 	if params.ToBlock > 0 {
 		to = min(prevStageProgress, params.ToBlock)
 	}
+	fmt.Printf("prevStageProgress: %d,%d,%d\n", prevStageProgress, params.ToBlock, to)
 	if to <= s.BlockNumber {
 		s.Done()
 		return nil
