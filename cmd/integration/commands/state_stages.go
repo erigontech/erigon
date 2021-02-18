@@ -355,19 +355,17 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	if err != nil {
 		return err
 	}
-	st.DisableAllStages()
-	st.EnableStages(stages.TxLookup, stages.Finish)
-	_ = st.Run(db, tx)
-	_ = tx.CommitAndBegin(context.Background())
 
 	_ = clearUnwindStack(tx, context.Background())
+	_ = tx.CommitAndBegin(ctx)
 	st.DisableAllStages()
 	st.EnableStages(stages.Execution, stages.TxLookup, stages.Finish)
-	from := progress(stages.Execution).BlockNumber
-	to := from + unwind
+	_ = st.SetCurrentStage(stages.Execution)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	_ = st.SetCurrentStage(stages.Execution)
+
+	from := progress(stages.Execution).BlockNumber
+	to := from + unwind
 	// set block limit of execute stage
 	st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
 		if err := stagedsync.SpawnExecuteBlocksStage(
