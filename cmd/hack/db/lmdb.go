@@ -1,4 +1,4 @@
-package main
+package db
 
 import (
 	"bufio"
@@ -254,7 +254,7 @@ func change3(tx ethdb.Tx) (bool, error) {
 
 func launchReader(kv ethdb.KV, tx ethdb.Tx, expectVal string, startCh chan struct{}, errorCh chan error) (bool, error) {
 	tx.Rollback()
-	tx1, err := kv.Begin(context.Background(), nil, ethdb.RO)
+	tx1, err := kv.Begin(context.Background(), ethdb.RO)
 	if err != nil {
 		return false, err
 	}
@@ -327,7 +327,7 @@ func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...f
 			defer f.Close()
 			w := bufio.NewWriter(f)
 			defer w.Flush()
-			if err = textInfo(dir, w); err != nil {
+			if err = TextInfo(dir, w); err != nil {
 				return fmt.Errorf("textInfo for %s_%d: %w", filename, gi, err)
 			}
 			if err = w.Flush(); err != nil {
@@ -347,7 +347,7 @@ func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...f
 	return nil
 }
 
-func defrag() error {
+func Defrag() error {
 	emptyBucketCfg := make(dbutils.BucketsCfg)
 	if err := defragSteps("vis1", emptyBucketCfg, nothing); err != nil {
 		return err
@@ -441,7 +441,7 @@ func defrag() error {
 	return nil
 }
 
-func textInfo(chaindata string, visStream io.Writer) error {
+func TextInfo(chaindata string, visStream io.Writer) error {
 	log.Info("Text Info", "db", chaindata)
 	fmt.Fprintf(visStream, "digraph lmdb {\nrankdir=LR\n")
 	datafile := path.Join(chaindata, "data.mdb")

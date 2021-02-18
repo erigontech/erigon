@@ -110,6 +110,36 @@ func (g *RequestGenerator) traceCall(from common.Address, to *common.Address, ga
 		fmt.Fprintf(&sb, `,"data":"%s"`, data)
 	}
 	fmt.Fprintf(&sb, `},["trace", "stateDiff"],"0x%x"], "id":%d}`, bn, g.reqID)
+	//fmt.Fprintf(&sb, `},["trace"],"0x%x"], "id":%d}`, bn, g.reqID)
+	return sb.String()
+}
+
+func (g *RequestGenerator) traceCallMany(from []common.Address, to []*common.Address, gas []*hexutil.Big, gasPrice []*hexutil.Big, value []*hexutil.Big, data []hexutil.Bytes, bn int) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_callMany", "params": [[`)
+	for i, f := range from {
+		if i > 0 {
+			fmt.Fprintf(&sb, `,`)
+		}
+		fmt.Fprintf(&sb, `[{"from":"0x%x"`, f)
+		if to[i] != nil {
+			fmt.Fprintf(&sb, `,"to":"0x%x"`, *to[i])
+		}
+		if gas[i] != nil {
+			fmt.Fprintf(&sb, `,"gas":"%s"`, gas[i])
+		}
+		if gasPrice[i] != nil {
+			fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice[i])
+		}
+		if value[i] != nil {
+			fmt.Fprintf(&sb, `,"value":"%s"`, value[i])
+		}
+		if len(data[i]) > 0 {
+			fmt.Fprintf(&sb, `,"data":"%s"`, data[i])
+		}
+		fmt.Fprintf(&sb, `},["trace", "stateDiff"]]`)
+	}
+	fmt.Fprintf(&sb, `],"0x%x"], "id":%d}`, bn, g.reqID)
 	return sb.String()
 }
 

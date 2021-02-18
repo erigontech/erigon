@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -22,6 +23,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
@@ -46,9 +48,6 @@ type TraceCallParam struct {
 	Value    *hexutil.Big    `json:"value"`
 	Data     hexutil.Bytes   `json:"data"`
 }
-
-// TraceCallParams array of callMany structs
-type TraceCallParams []TraceCallParam
 
 // TraceCallResult is the response to `trace_call` method
 type TraceCallResult struct {
@@ -482,7 +481,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	traceResult := &TraceCallResult{}
+	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
 	for _, traceType := range traceTypes {
 		switch traceType {
@@ -518,7 +517,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	gp := new(core.GasPool).AddGas(msg.Gas())
 	var execResult *core.ExecutionResult
-	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */)
+	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 	if err != nil {
 		return nil, err
 	}
@@ -527,7 +526,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sdMap := make(map[common.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.CommitBlock(ctx, sd); err != nil {
+		if err = ibs.FinalizeTx(ctx, sd); err != nil {
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
@@ -546,22 +545,166 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	return traceResult, nil
 }
 
-// TODO(tjayrush) - try to use a concrete type here
-// TraceCallManyParam array of callMany structs
-// type TraceCallManyParam struct {
-// 	obj        TraceCallParam
-// 	traceTypes []string
-// }
-
-// TraceCallManyParams array of callMany structs
-// type TraceCallManyParams struct {
-// 	things []TraceCallManyParam
-// }
-
 // CallMany implements trace_callMany.
-func (api *TraceAPIImpl) CallMany(ctx context.Context, calls []interface{}, blockNr *rpc.BlockNumberOrHash) ([]interface{}, error) {
-	var stub []interface{}
-	return stub, fmt.Errorf(NotImplemented, "trace_callMany")
+func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, blockNrOrHash *rpc.BlockNumberOrHash) ([]*TraceCallResult, error) {
+	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	if err != nil {
+		return nil, err
+	}
+	defer dbtx.Rollback()
+
+	chainConfig, err := api.chainConfig(dbtx)
+	if err != nil {
+		return nil, err
+	}
+
+	if blockNrOrHash == nil {
+		var num = rpc.LatestBlockNumber
+		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
+	}
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, dbtx)
+	if err != nil {
+		return nil, err
+	}
+	var stateReader state.StateReader
+	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+		stateReader = state.NewPlainStateReader(dbtx)
+	} else {
+		stateReader = state.NewPlainDBState(dbtx, blockNumber)
+	}
+	stateCache := shards.NewStateCache(32, 0 /* no limit */)
+	cachedReader := state.NewCachedReader(stateReader, stateCache)
+	noop := state.NewNoopWriter()
+	cachedWriter := state.NewCachedWriter(noop, stateCache)
+
+	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
+	if header == nil {
+		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
+	}
+
+	// Setup context so it may be cancelled the call has completed
+	// or, in case of unmetered gas, setup a context with a timeout.
+	var cancel context.CancelFunc
+	if callTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, callTimeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+
+	// Make sure the context is cancelled when the call has completed
+	// this makes sure resources are cleaned up.
+	defer cancel()
+	var results []*TraceCallResult
+
+	dec := json.NewDecoder(bytes.NewReader(calls))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if tok != json.Delim('[') {
+		return nil, fmt.Errorf("expected array of [callparam, tracetypes]")
+	}
+	txIndex := 0
+	for dec.More() {
+		tok, err = dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		if tok != json.Delim('[') {
+			return nil, fmt.Errorf("expected [callparam, tracetypes]")
+		}
+		var args TraceCallParam
+		if err = dec.Decode(&args); err != nil {
+			return nil, err
+		}
+		var traceTypes []string
+		if err = dec.Decode(&traceTypes); err != nil {
+			return nil, err
+		}
+		tok, err = dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		if tok != json.Delim(']') {
+			return nil, fmt.Errorf("expected end of [callparam, tracetypes]")
+		}
+		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
+		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
+		for _, traceType := range traceTypes {
+			switch traceType {
+			case TraceTypeTrace:
+				traceTypeTrace = true
+			case TraceTypeStateDiff:
+				traceTypeStateDiff = true
+			case TraceTypeVmTrace:
+				traceTypeVmTrace = true
+			default:
+				return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
+			}
+		}
+		var ot OeTracer
+		if traceTypeTrace {
+			ot.r = traceResult
+			ot.traceAddr = []int{}
+		}
+
+		// Get a new instance of the EVM.
+		msg := args.ToMessage(api.gasCap)
+
+		evmCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+		ibs := state.New(cachedReader)
+		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
+
+		evm := vm.NewEVM(evmCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
+
+		gp := new(core.GasPool).AddGas(msg.Gas())
+		var execResult *core.ExecutionResult
+		// Clone the state cache before applying the changes, clone is discarded
+		var cloneReader state.StateReader
+		if traceTypeStateDiff {
+			cloneCache := stateCache.Clone()
+			cloneReader = state.NewCachedReader(stateReader, cloneCache)
+		}
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
+		if err != nil {
+			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
+		}
+		traceResult.Output = execResult.ReturnData
+		if traceTypeStateDiff {
+			initialIbs := state.New(cloneReader)
+			sdMap := make(map[common.Address]*StateDiffAccount)
+			traceResult.StateDiff = sdMap
+			sd := &StateDiff{sdMap: sdMap}
+			if err = ibs.FinalizeTx(ctx, sd); err != nil {
+				return nil, err
+			}
+			if err = ibs.CommitBlock(ctx, cachedWriter); err != nil {
+				return nil, err
+			}
+			sd.CompareStates(initialIbs, ibs)
+		} else {
+			if err = ibs.FinalizeTx(ctx, noop); err != nil {
+				return nil, err
+			}
+			if err = ibs.CommitBlock(ctx, cachedWriter); err != nil {
+				return nil, err
+			}
+		}
+
+		if traceTypeVmTrace {
+			return nil, fmt.Errorf("vmTrace not implemented yet")
+		}
+		results = append(results, traceResult)
+		txIndex++
+	}
+	tok, err = dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if tok != json.Delim(']') {
+		return nil, fmt.Errorf("expected end of array of [callparam, tracetypes]")
+	}
+	return results, nil
 }
 
 // RawTransaction implements trace_rawTransaction.

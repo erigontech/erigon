@@ -139,7 +139,7 @@ func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
 		// - The block is empty
 		// - All the transactions included are sent by the miner itself.
 		// In these cases, use the latest calculated price for samping.
-		if len(res.prices) == 0 {
+		if len(res.prices) == 0 && lastPrice != nil {
 			res.prices = []*big.Int{lastPrice}
 		}
 		// Besides, in order to collect enough data for sampling, if nothing

@@ -26,7 +26,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.db, world.tmpdir, world.QuitCh)
+						return SpawnBlockHashStage(s, world.db, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return u.Done(world.db)
@@ -71,7 +71,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							ReadChLen:       4,
 							Now:             time.Now(),
 						}
-						return SpawnRecoverSendersStage(cfg, s, world.TX, world.chainConfig, 0, world.tmpdir, world.QuitCh)
+						return SpawnRecoverSendersStage(cfg, s, world.TX, world.chainConfig, 0, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindSendersStage(u, s, world.TX)
@@ -112,10 +112,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, world.tmpdir, world.QuitCh)
+						return SpawnHashStateStage(s, world.TX, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, world.tmpdir, world.QuitCh)
+						return UnwindHashStateStage(u, s, world.TX, world.TmpDir, world.QuitCh)
 					},
 				}
 			},
@@ -160,10 +160,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							}
 							c.Close()
 						*/
-						return SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.tmpdir, world.QuitCh)
+						return SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, world.tmpdir, world.QuitCh)
+						return UnwindIntermediateHashesStage(u, s, world.TX, world.TmpDir, world.QuitCh)
 					},
 				}
 			},
@@ -177,7 +177,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnAccountHistoryIndex(s, world.TX, world.tmpdir, world.QuitCh)
+						return SpawnAccountHistoryIndex(s, world.TX, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindAccountHistoryIndex(u, s, world.TX, world.QuitCh)
@@ -194,7 +194,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.History,
 					DisabledDescription: "Enable by adding `h` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnStorageHistoryIndex(s, world.TX, world.tmpdir, world.QuitCh)
+						return SpawnStorageHistoryIndex(s, world.TX, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindStorageHistoryIndex(u, s, world.TX, world.QuitCh)
@@ -211,7 +211,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.Receipts,
 					DisabledDescription: "Enable by adding `r` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnLogIndex(s, world.TX, world.tmpdir, world.QuitCh)
+						return SpawnLogIndex(s, world.TX, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindLogIndex(u, s, world.TX, world.QuitCh)
@@ -228,7 +228,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.CallTraces,
 					DisabledDescription: "Work In Progress",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.tmpdir, world.QuitCh,
+						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
 								CacheSize: world.cacheSize,
 								BatchSize: world.batchSize,
@@ -253,10 +253,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					Disabled:            !world.storageMode.TxIndex,
 					DisabledDescription: "Enable by adding `t` to --storage-mode",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnTxLookup(s, world.TX, world.tmpdir, world.QuitCh)
+						return SpawnTxLookup(s, world.TX, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindTxLookup(u, s, world.TX, world.tmpdir, world.QuitCh)
+						return UnwindTxLookup(u, s, world.TX, world.TmpDir, world.QuitCh)
 					},
 				}
 			},

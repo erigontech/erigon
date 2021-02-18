@@ -27,7 +27,7 @@ func TestSequence(t *testing.T) {
 
 	for _, db := range writeDBs {
 		db := db
-		tx, err := db.Begin(ctx, nil, ethdb.RW)
+		tx, err := db.Begin(ctx, ethdb.RW)
 		require.NoError(t, err)
 		defer tx.Rollback()
 
@@ -87,7 +87,7 @@ func TestManagedTx(t *testing.T) {
 
 	for _, db := range writeDBs {
 		db := db
-		tx, err := db.Begin(ctx, nil, ethdb.RW)
+		tx, err := db.Begin(ctx, ethdb.RW)
 		require.NoError(t, err)
 		defer tx.Rollback()
 

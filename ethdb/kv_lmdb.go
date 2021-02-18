@@ -186,7 +186,7 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 
 	// Open or create buckets
 	if opts.flags&lmdb.Readonly != 0 {
-		tx, innerErr := db.Begin(context.Background(), nil, RO)
+		tx, innerErr := db.Begin(context.Background(), RO)
 		if innerErr != nil {
 			return nil, innerErr
 		}
@@ -320,46 +320,35 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(fileInfo.Size()), nil
 }
 
-func (db *LmdbKV) Begin(_ context.Context, parent Tx, flags TxFlags) (txn Tx, err error) {
+func (db *LmdbKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
-	isSubTx := parent != nil
-	if !isSubTx {
-		runtime.LockOSThread()
-		defer func() {
-			if err == nil {
-				db.wg.Add(1)
-			}
-		}()
-	}
+	runtime.LockOSThread()
+	defer func() {
+		if err == nil {
+			db.wg.Add(1)
+		}
+	}()
 
 	nativeFlags := uint(0)
 	if flags&RO != 0 {
 		nativeFlags |= lmdb.Readonly
 	}
-	var parentTx *lmdb.Txn
-	if parent != nil {
-		parentTx = parent.(*lmdbTx).tx
-	}
-	tx, err := db.env.BeginTxn(parentTx, nativeFlags)
+	tx, err := db.env.BeginTxn(nil, nativeFlags)
 	if err != nil {
-		if !isSubTx {
-			runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
-		}
+		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, err
 	}
 	tx.RawRead = true
 	return &lmdbTx{
-		db:      db,
-		tx:      tx,
-		isSubTx: isSubTx,
-		flags:   flags,
+		db:    db,
+		tx:    tx,
+		flags: flags,
 	}, nil
 }
 
 type lmdbTx struct {
-	isSubTx bool
 	flags   TxFlags
 	tx      *lmdb.Txn
 	db      *LmdbKV
@@ -434,7 +423,7 @@ func (db *LmdbKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	defer db.wg.Done()
 
 	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
-	tx, err := db.Begin(ctx, nil, RO)
+	tx, err := db.Begin(ctx, RO)
 	if err != nil {
 		return err
 	}
@@ -450,7 +439,7 @@ func (db *LmdbKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	db.wg.Add(1)
 	defer db.wg.Done()
 
-	tx, err := db.Begin(ctx, nil, RW)
+	tx, err := db.Begin(ctx, RW)
 	if err != nil {
 		return err
 	}
@@ -583,10 +572,8 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 	}
 	defer func() {
 		tx.tx = nil
-		if !tx.isSubTx {
-			tx.db.wg.Done()
-			runtime.UnlockOSThread()
-		}
+		tx.db.wg.Done()
+		runtime.UnlockOSThread()
 	}()
 	tx.closeCursors()
 
@@ -599,7 +586,7 @@ func (tx *lmdbTx) Commit(ctx context.Context) error {
 		log.Info("Batch", "commit", commitTook)
 	}
 
-	//if !tx.isSubTx && tx.db.opts.flags&lmdb.Readonly == 0 && !tx.db.opts.inMem { // call fsync only after main transaction commit
+	//if tx.db.opts.flags&lmdb.Readonly == 0 && !tx.db.opts.inMem { // call fsync only after main transaction commit
 	//	fsyncTimer := time.Now()
 	//	if err := tx.db.env.Sync(tx.flags&NoSync == 0); err != nil {
 	//		log.Warn("fsync after commit failed", "err", err)
@@ -621,10 +608,8 @@ func (tx *lmdbTx) Rollback() {
 	}
 	defer func() {
 		tx.tx = nil
-		if !tx.isSubTx {
-			tx.db.wg.Done()
-			runtime.UnlockOSThread()
-		}
+		tx.db.wg.Done()
+		runtime.UnlockOSThread()
 	}()
 	tx.closeCursors()
 	tx.tx.Abort()
@@ -1193,10 +1178,15 @@ func (c *LmdbCursor) Put(key []byte, value []byte) error {
 
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion {
-		return c.putDupSort(key, value)
+		if err := c.putDupSort(key, value); err != nil {
+			return err
+		}
+		return nil
 	}
-
-	return c.put(key, value)
+	if err := c.put(key, value); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {

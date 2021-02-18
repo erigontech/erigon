@@ -39,7 +39,7 @@ type (
 	// CanTransferFunc is the signature of a transfer guard function
 	CanTransferFunc func(IntraBlockState, common.Address, *uint256.Int) bool
 	// TransferFunc is the signature of a transfer function
-	TransferFunc func(IntraBlockState, common.Address, common.Address, *uint256.Int)
+	TransferFunc func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool)
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.
 	GetHashFunc func(uint64) common.Hash
@@ -215,7 +215,7 @@ func (evm *EVM) Interpreter() Interpreter {
 // parameters. It also handles any necessary value transfer required and takes
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
-func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	if evm.vmConfig.NoRecursion && evm.depth > 0 {
 		return nil, gas, nil
 	}
@@ -225,7 +225,9 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	}
 	// Fail if we're trying to transfer more than the available balance
 	if value.Sign() != 0 && !evm.Context.CanTransfer(evm.IntraBlockState, caller.Address(), value) {
-		return nil, gas, ErrInsufficientBalance
+		if !bailout {
+			return nil, gas, ErrInsufficientBalance
+		}
 	}
 	p, isPrecompile := evm.precompile(addr)
 
@@ -244,7 +246,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		}
 		evm.IntraBlockState.CreateAccount(addr, false)
 	}
-	evm.Transfer(evm.IntraBlockState, caller.Address(), to.Address(), value)
+	evm.Transfer(evm.IntraBlockState, caller.Address(), to.Address(), value, bailout)
 
 	// Capture the tracer start/end events in debug mode
 	if evm.vmConfig.Debug {
@@ -487,7 +489,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if evm.chainRules.IsEIP158 {
 		evm.IntraBlockState.SetNonce(address, 1)
 	}
-	evm.Transfer(evm.IntraBlockState, caller.Address(), address, value)
+	evm.Transfer(evm.IntraBlockState, caller.Address(), address, value, false /* bailout */)
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.

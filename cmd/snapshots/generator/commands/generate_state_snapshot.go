@@ -71,11 +71,11 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	sndb := ethdb.NewObjectDatabase(snkv)
 	mt := sndb.NewBatch()
 
-	tx, err := kv.Begin(context.Background(), nil, ethdb.RO)
+	tx, err := kv.Begin(context.Background(), ethdb.RO)
 	if err != nil {
 		return err
 	}
-	tx2, err := kv.Begin(context.Background(), nil, ethdb.RO)
+	tx2, err := kv.Begin(context.Background(), ethdb.RO)
 	if err != nil {
 		return err
 	}

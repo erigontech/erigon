@@ -25,15 +25,10 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-// generate the messages
-//go:generate protoc --go_out=. "./remote/kv.proto" -I=. -I=./../build/include/google
-//go:generate protoc --go_out=. "./remote/db.proto" -I=. -I=./../build/include/google
-//go:generate protoc --go_out=. "./remote/ethbackend.proto" -I=. -I=./../build/include/google
-
-// generate the services
-//go:generate protoc --go-grpc_out=. "./remote/kv.proto" -I=. -I=./../build/include/google
-//go:generate protoc --go-grpc_out=. "./remote/db.proto" -I=. -I=./../build/include/google
-//go:generate protoc --go-grpc_out=. "./remote/ethbackend.proto" -I=. -I=./../build/include/google
+// generate the messages and services
+//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/kv.proto" -I=. -I=./../build/include/google
+//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/db.proto" -I=. -I=./../build/include/google
+//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/ethbackend.proto" -I=. -I=./../build/include/google
 
 type remoteOpts struct {
 	DialAddress string
@@ -217,7 +212,7 @@ func (db *RemoteKV) DiskSize(ctx context.Context) (uint64, error) {
 	return sizeReply.Size, nil
 }
 
-func (db *RemoteKV) Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, error) {
+func (db *RemoteKV) Begin(ctx context.Context, flags TxFlags) (Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
@@ -228,7 +223,7 @@ func (db *RemoteKV) Begin(ctx context.Context, parent Tx, flags TxFlags) (Tx, er
 }
 
 func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	tx, err := db.Begin(ctx, nil, RO)
+	tx, err := db.Begin(ctx, RO)
 	if err != nil {
 		return err
 	}

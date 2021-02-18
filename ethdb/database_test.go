@@ -143,9 +143,9 @@ func testPutGet(db MinDatabase, t *testing.T) {
 }
 
 func testNoPanicAfterDbClosed(db Database, t *testing.T) {
-	tx, err := db.(HasKV).KV().Begin(context.Background(), nil, RO)
+	tx, err := db.(HasKV).KV().Begin(context.Background(), RO)
 	require.NoError(t, err)
-	writeTx, err := db.(HasKV).KV().Begin(context.Background(), nil, RW)
+	writeTx, err := db.(HasKV).KV().Begin(context.Background(), RW)
 	require.NoError(t, err)
 
 	closeCh := make(chan struct{}, 1)

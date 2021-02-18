@@ -34,7 +34,7 @@ type BlockGetter interface {
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, tx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.Context, *state.IntraBlockState, *state2.StateReader, error) {
+func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, dbtx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.Context, *state.IntraBlockState, *state2.StateReader, error) {
 	// Create the parent state database
 	block, err := blockGetter.GetBlockByHash(blockHash)
 	if err != nil {
@@ -48,7 +48,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		return nil, vm.Context{}, nil, nil, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
 
-	statedb, reader := state2.ComputeIntraBlockState(tx, parent)
+	statedb, reader := state2.ComputeIntraBlockState(dbtx, parent)
 
 	if txIndex == 0 && len(block.Transactions()) == 0 {
 		return nil, vm.Context{}, statedb, reader, nil
@@ -72,7 +72,7 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 		}
 		// Not yet the searched for transaction, execute on top of the current state
 		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{})
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas()), true /* refunds */); err != nil {
+		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas()), true /* refunds */, false /* gasBailout */); err != nil {
 			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
@@ -125,7 +125,7 @@ func TraceTx(ctx context.Context, message core.Message, vmctx vm.Context, ibs vm
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
 	}
-	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds)
+	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
 	if err != nil {
 		return nil, fmt.Errorf("tracing failed: %v", err)
 	}

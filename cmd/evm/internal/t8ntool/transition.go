@@ -212,7 +212,7 @@ func Main(ctx *cli.Context) error {
 	//postAlloc := state.DumpGenesisFormat(false, false, false)
 	collector := make(Alloc)
 
-	tx, err1 := db.Begin(context.Background(), nil, ethdb.RO)
+	tx, err1 := db.Begin(context.Background(), ethdb.RO)
 	if err1 != nil {
 		return fmt.Errorf("transition cannot open tx: %v", err1)
 	}
