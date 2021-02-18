@@ -360,7 +360,6 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	_ = tx.CommitAndBegin(ctx)
 	st.DisableAllStages()
 	st.EnableStages(stages.Execution, stages.Finish)
-	_ = st.SetCurrentStage(stages.Execution)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
@@ -390,6 +389,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 		default:
 		}
 
+		_ = st.SetCurrentStage(stages.Execution)
 		t := time.Now()
 		if err = st.Run(db, tx); err != nil {
 			return err
