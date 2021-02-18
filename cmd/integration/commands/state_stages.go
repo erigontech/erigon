@@ -359,7 +359,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	_ = clearUnwindStack(tx, context.Background())
 	_ = tx.CommitAndBegin(ctx)
 	st.DisableAllStages()
-	st.EnableStages(stages.Execution, stages.Finish)
+	st.EnableStages(stages.Execution)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
