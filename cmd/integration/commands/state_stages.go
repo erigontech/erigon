@@ -367,7 +367,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	to := from + unwind
 	// set block limit of execute stage
 	st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
-		if err := stagedsync.SpawnExecuteBlocksStage(
+		if err = stagedsync.SpawnExecuteBlocksStage(
 			stageState, tx,
 			bc.Config(), cc, bc.GetVMConfig(),
 			ch,
