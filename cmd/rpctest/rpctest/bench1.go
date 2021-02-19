@@ -29,7 +29,7 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockNum uin
 
 	resultsCh := make(chan CallResult, 1000)
 	defer close(resultsCh)
-	go vegetaWrite(false, resultsCh)
+	go vegetaWrite(false, []string{"eth_getBlockByNumber", "debug_storageRangeAt"}, resultsCh)
 
 	var res CallResult
 	reqGen := &RequestGenerator{
@@ -378,7 +378,7 @@ func Bench1(tgURL, gethURL string, needCompare bool, fullTest bool, blockNum uin
 // vegetaWrite (to be run as a goroutine) writing results of server calls into several files:
 // results to /$tmp$/turbo_geth_stress_test/results_*.csv
 // vegeta format going to files /$tmp$/turbo_geth_stress_test/vegeta_*.txt
-func vegetaWrite(enabled bool, resultsCh chan CallResult) {
+func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 	var err error
 	var files map[string]map[string]*os.File
 	var vegetaFiles map[string]map[string]*os.File
@@ -399,7 +399,7 @@ func vegetaWrite(enabled bool, resultsCh chan CallResult) {
 		}
 
 		for _, route := range []string{Geth, TurboGeth} {
-			for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
+			for _, method := range methods {
 				file := path.Join(dir, "results_"+route+"_"+method+".csv")
 				files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 				if err != nil {
@@ -409,7 +409,7 @@ func vegetaWrite(enabled bool, resultsCh chan CallResult) {
 		}
 
 		for _, route := range []string{Geth, TurboGeth} {
-			for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
+			for _, method := range methods {
 				file := path.Join(dir, "vegeta_"+route+"_"+method+".txt")
 				vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 				if err != nil {
