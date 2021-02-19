@@ -28,6 +28,8 @@ import (
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/hack/db"
+	"github.com/ledgerwatch/turbo-geth/cmd/hack/flow"
 	"github.com/ledgerwatch/turbo-geth/cmd/hack/tool"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -2079,13 +2081,13 @@ func main() {
 		}
 	}
 	if *action == "defrag" {
-		if err := flow.Defrag(); err != nil {
+		if err := db.Defrag(); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
 	if *action == "textInfo" {
 		sb := strings.Builder{}
-		if err := flow.TextInfo(*chaindata, &sb); err != nil {
+		if err := db.TextInfo(*chaindata, &sb); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

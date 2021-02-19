@@ -338,6 +338,25 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 	return (number % uint64(len(signers))) == uint64(offset)
 }
 
+func (s *Snapshot) Copy() *Snapshot {
+	snap := newSnapshot(s.config, s.snapStorage, s.Number, s.Hash, s.signers())
+
+	snap.Recents = make(map[uint64]common.Address, len(s.Recents))
+	for k, v := range s.Recents {
+		snap.Recents[k] = v
+	}
+
+	snap.Votes = make([]*Vote, len(s.Votes))
+	copy(snap.Votes, s.Votes)
+
+	snap.Tally = make(map[common.Address]Tally, len(s.Tally))
+	for k, v := range s.Tally {
+		snap.Tally[k] = v
+	}
+
+	return snap
+}
+
 type storage struct {
 	ch        chan *snapObj
 	chStatus  *uint32
@@ -427,6 +446,9 @@ func (st *storage) appendSnap(snap *snapObj, snaps []*snapObj, isSorted bool) ([
 
 func (st *storage) save(number uint64, hash common.Hash, s *Snapshot, force bool) error {
 	if !force {
+		if atomic.LoadUint32(st.chStatus) == 1 {
+			return nil
+		}
 		select {
 		case <-st.exit:
 		case st.ch <- &snapObj{number, hash, s}:

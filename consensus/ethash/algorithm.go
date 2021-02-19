@@ -19,6 +19,7 @@ package ethash
 import (
 	"encoding/binary"
 	"hash"
+	"io"
 	"math/big"
 	"reflect"
 	"runtime"
@@ -94,6 +95,28 @@ func calcDatasetSize(epoch int) uint64 {
 // reused between hash runs instead of requiring new ones to be created.
 type hasher func(dest []byte, data []byte)
 
+func hashSHA256(repeats int, seed []byte) {
+	h := sha3.NewLegacyKeccak256()
+	outputLen := h.Size()
+
+	for i := 0; i < repeats; i++ {
+		h.Reset()
+		h.Write(seed)
+		h.(io.Reader).Read(seed[:outputLen])
+	}
+}
+
+func hashSHA512(repeats int, seed []byte) {
+	h := sha3.NewLegacyKeccak512()
+	outputLen := h.Size()
+
+	for i := 0; i < repeats; i++ {
+		h.Reset()
+		h.Write(seed)
+		h.(io.Reader).Read(seed[:outputLen])
+	}
+}
+
 // makeHasher creates a repetitive hasher, allowing the same hash data structures to
 // be reused between hash runs instead of requiring new ones to be created. The returned
 // function is not thread safe!
@@ -123,10 +146,7 @@ func seedHash(block uint64) []byte {
 	if block < epochLength {
 		return seed
 	}
-	keccak256 := makeHasher(sha3.NewLegacyKeccak256())
-	for i := 0; i < int(block/epochLength); i++ {
-		keccak256(seed, seed)
-	}
+	hashSHA256(int(block/epochLength), seed)
 	return seed
 }
 

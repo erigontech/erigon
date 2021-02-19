@@ -368,6 +368,27 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	return c.applyAndStoreSnapshot(snap, header)
 }
 
+func (c *Clique) recentsAdd(hash common.Hash, s *Snapshot) {
+	c.recents.Add(hash, s.Copy())
+}
+
+func (c *Clique) recentsGet(hash common.Hash) (*Snapshot, bool) {
+	s, ok := c.recents.Get(hash)
+	if !ok {
+		return nil, false
+	}
+	sn := s.(*Snapshot)
+	if sn == nil {
+		return nil, false
+	}
+	return sn.Copy(), true
+}
+
+func (c *Clique) recentsHas(hash common.Hash) bool {
+	_, ok := c.recents.Get(hash)
+	return ok
+}
+
 type recoverer struct {
 	sigcache *lru.ARCCache
 	reqCh    chan recoverReq
@@ -506,7 +527,7 @@ func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, headers ...*types.Header)
 		}
 	}
 
-	c.recents.Add(snap.Hash, snap)
+	c.recentsAdd(snap.Hash, snap)
 	c.snapshotBlocks.Add(snap.Number, snap.Hash)
 
 	// If we've generated a new checkpoint snapshot, save to disk
@@ -569,8 +590,8 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	)
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
-		if s, ok := c.recents.Get(hash); ok {
-			snap = s.(*Snapshot)
+		if s, ok := c.recentsGet(hash); ok {
+			snap = s
 			break
 		}
 		// If an on-disk checkpoint snapshot can be found, use that

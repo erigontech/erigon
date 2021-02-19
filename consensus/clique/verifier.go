@@ -8,7 +8,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -140,8 +139,6 @@ func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.
 	}
 
 	if highestParentNum == -1 || parent.Number.Uint64() != number-1 || parent.HashCache() != header.ParentHash {
-		fmt.Println("ERRRR!!!111", highestParentNum, parent.Number.Uint64(), number-1, parent.HashCache().String(), header.ParentHash.String())
-		// ERRRR!!!111					 1 1 16 0xa7684ac44d48494670b2e0d9085b7750e7341620f0a271db146ed5e70c1db854 0x64f506765747d2ed4cc810b5acd1859ae7fecd42cf28cbb961f01be5660a2da9
 		return consensus.ErrUnknownAncestor
 	}
 	if parent.Time+c.config.Period > header.Time {
@@ -162,9 +159,8 @@ func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.
 	}
 
 	// All basic checks passed, verify the seal and return
-	t := time.Now()
 	err = c.verifySeal(header, snap)
-	fmt.Println("\tclique.VerifySeal", header.Number.Uint64(), time.Since(t), debug.Callers(10))
+
 	if err == nil {
 		if err = c.applyAndStoreSnapshot(snap, header); err != nil {
 			log.Error("can't store a snapshot", "block", header.Number.Uint64(), "hash", header.HashCache().String(), "err", err)
@@ -198,8 +194,8 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 		number := parents[i].Number.Uint64()
 
 		// If an in-memory snapshot was found, use that
-		if s, ok := c.recents.Get(p.HashCache()); ok {
-			snap = s.(*Snapshot)
+		if s, ok := c.recentsGet(p.HashCache()); ok {
+			snap = s
 			break
 		}
 
@@ -227,8 +223,7 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 	}
 
 	if snap == nil {
-		fmt.Println("NIL SNAP", len(parents))
-		return nil, consensus.ErrUnknownAncestor
+		return nil, fmt.Errorf("a nil snap for %d block: %w", parents[i].Number.Uint64(), consensus.ErrUnknownAncestor)
 	}
 
 	if len(parents) > 0 {
@@ -351,7 +346,7 @@ func (c *Verifier) checkSnapshot(num uint64) bool {
 		snapHash, ok = h.(common.Hash)
 		if ok {
 			// If an in-memory snapshot was found, use that
-			_, ok = c.recents.Get(snapHash)
+			ok = c.recentsHas(snapHash)
 			if ok {
 				return true
 			}

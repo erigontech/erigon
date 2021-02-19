@@ -31,7 +31,6 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -148,11 +147,7 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 					return
 				}
 
-				t := time.Now()
-
 				errors[index] = ethash.verifyHeaderWorker(chain, headers, seals, int(index))
-
-				fmt.Println("verify verifyHeaderWorker", time.Since(t))
 
 				select {
 				case done <- int(index):
@@ -196,7 +191,12 @@ func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, head
 		parent = headers[index-1]
 	}
 	if parent == nil {
-		log.Error("consensus.ErrUnknownAncestor", "index", index, "headers", len(headers), "index-1", headers[index-1].Number.Uint64(), "index", headers[index].Number.Uint64())
+		if index-1 >= 0 && index-1 <= len(headers)-1 {
+			log.Error("consensus.ErrUnknownAncestor", "index", index, "headers", len(headers), "index-1", headers[index-1].Number.Uint64(), "index", headers[index].Number.Uint64())
+		} else {
+			log.Error("consensus.ErrUnknownAncestor", "index", index, "headers", len(headers))
+		}
+
 		return consensus.ErrUnknownAncestor
 	}
 	if chain.GetHeader(headers[index].HashCache(), headers[index].Number.Uint64()) != nil {
@@ -315,11 +315,9 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	}
 	// Verify the engine specific seal securing the block
 	if seal {
-		t := time.Now()
 		if err := ethash.VerifySeal(nil, header); err != nil {
 			return err
 		}
-		fmt.Println("\tethash.VerifySeal", header.Number.Uint64(), time.Since(t), debug.Callers(10))
 	}
 	// If all checks passed, validate any special fields for hard forks
 	if err := misc.VerifyDAOHeaderExtraData(chain.Config(), header); err != nil {

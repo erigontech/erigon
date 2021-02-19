@@ -86,7 +86,7 @@ type FinishedRequest struct {
 const (
 	size        = 1000
 	storageSize = 60000
-	retry       = 100 * time.Millisecond
+	retry       = time.Second
 )
 
 func NewAPI(config *params.ChainConfig) *API {

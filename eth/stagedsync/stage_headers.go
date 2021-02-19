@@ -5,11 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
-	"os"
-	"runtime"
-	"runtime/pprof"
-	"runtime/trace"
-	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -288,61 +283,10 @@ Error: %v
 	return newCanonical, reorg, forkBlockNumber, nil
 }
 
-var onceStart = sync.Once{}
-var onceStop = sync.Once{}
-var profF *os.File
-var profOn = false
-
 func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*types.Header, seals []bool) error {
 	toVerify := len(headers)
 	if toVerify == 0 {
 		return nil
-	}
-
-	if profOn {
-		const blocksToProfile = 10000
-
-		if headers[0].Number.Uint64() < blocksToProfile {
-			onceStart.Do(func() {
-				f, err := os.Create("./cpu_extr.prof")
-				if err != nil {
-					fmt.Println("could not create CPU profile: ", err)
-					os.Exit(1)
-				}
-				if err := pprof.StartCPUProfile(f); err != nil {
-					fmt.Println("could not start CPU profile: ", err)
-					os.Exit(1)
-				}
-				profF = f
-
-				ft, err := os.Create("./trace.prof")
-				if err != nil {
-					fmt.Println("could not create trace profile: ", err)
-					os.Exit(1)
-				}
-				trace.Start(ft)
-			})
-		}
-
-		if headers[0].Number.Uint64() >= blocksToProfile && profF != nil {
-			onceStop.Do(func() {
-				pprof.StopCPUProfile()
-
-				f, err := os.Create("./mem_extr.prof")
-				if err != nil {
-					fmt.Println("could not create mem profile: ", err)
-					os.Exit(1)
-				}
-				runtime.GC()
-				if err := pprof.WriteHeapProfile(f); err != nil {
-					fmt.Println("could not create mem profile: ", err)
-					os.Exit(1)
-				}
-
-				trace.Stop()
-				fmt.Println("DONE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-			})
-		}
 	}
 
 	reqID := rand.Uint64()
