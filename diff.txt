@@ -443,9 +443,3 @@ Date:   Fri Feb 19 15:53:12 2021 +0100
     * les: move client balances to a new db
     
     * les: rename lespayDb to lesDb
-
-commit c5023e1dc56f3ced0e3a24733e533bf962515844
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Fri Feb 19 16:03:17 2021 +0200
-
-    travis, appveyor, build: bump Go to 1.16
