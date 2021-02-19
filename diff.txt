@@ -449,16 +449,3 @@ Author: Péter Szilágyi <peterke@gmail.com>
 Date:   Fri Feb 19 16:03:17 2021 +0200
 
     travis, appveyor, build: bump Go to 1.16
-
-commit ca76db6116b64bb10c83085a70898750668593d2
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Fri Feb 19 15:53:05 2021 +0200
-
-    cmd/utils: disable caching preimages by default
-
-commit c027507e036683f555f63baa4cd02a81696fea6c
-Author: Zsolt Felföldi <zsfelfoldi@gmail.com>
-Date:   Fri Feb 19 14:44:16 2021 +0100
-
-    les: renamed lespay to vflux (#22347)
-
