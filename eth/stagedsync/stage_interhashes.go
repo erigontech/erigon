@@ -143,8 +143,8 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 			return err
 		}
 		generationIHTook := time.Since(t)
+		fmt.Printf("root1: %x,%x\n", hash, expectedRootHash)
 		if checkRoot && hash != expectedRootHash {
-			fmt.Printf("root1: %x\n", hash)
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
 		log.Debug("Collection finished",
@@ -414,8 +414,8 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 			return err
 		}
 		generationIHTook := time.Since(t)
+		fmt.Printf("root2: %x,%x\n", hash, expectedRootHash)
 		if checkRoot && hash != expectedRootHash {
-			fmt.Printf("root2: %x\n", hash)
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
 		log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
