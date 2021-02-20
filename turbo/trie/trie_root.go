@@ -244,9 +244,6 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 			if err = l.accountValue.DecodeForStorage(v); err != nil {
 				return EmptyRoot, fmt.Errorf("fail DecodeForStorage: %w", err)
 			}
-			if bytes.HasPrefix(k, common.FromHex("d3a65b892403c89048818ede62c76c424a63eb22a174018d90253ea3e3231bbc")) {
-				fmt.Printf("alex: %x,%d\n", k, l.accountValue.Incarnation)
-			}
 			if err = l.receiver.Receive(AccountStreamItem, kHex, nil, &l.accountValue, nil, nil, false, 0); err != nil {
 				return EmptyRoot, err
 			}
@@ -271,9 +268,6 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					hexutil.DecompressNibbles(vS[:32], &l.kHexS)
 					if keyIsBefore(ihKS, l.kHexS) { // read until next AccTrie
 						break
-					}
-					if bytes.HasPrefix(kS, common.FromHex("d3a65b892403c89048818ede62c76c424a63eb22a174018d90253ea3e3231bbc0000000000000001")) {
-						fmt.Printf("alex2: %x,%x\n", kS, vS)
 					}
 					if err = l.receiver.Receive(StorageStreamItem, accWithInc, l.kHexS, nil, vS[32:], nil, false, 0); err != nil {
 						return EmptyRoot, err
@@ -368,16 +362,16 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	//r.traceIf("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb", "00")
-	if storageKey == nil {
-		//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
-		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-		//}
-	} else {
-		//if bytes.HasPrefix(accountKey, common.FromHex("876f5a0f54b30254d2bad26bb5a8da19cbe748fd033004095d9c96c8e667376b")) && bytes.HasPrefix(storageKey, common.FromHex("")) {
-		//fmt.Printf("%x\n", storageKey)
-		fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
-		//}
-	}
+	//if storageKey == nil {
+	//	//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
+	//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+	//	//}
+	//} else {
+	//	//if bytes.HasPrefix(accountKey, common.FromHex("876f5a0f54b30254d2bad26bb5a8da19cbe748fd033004095d9c96c8e667376b")) && bytes.HasPrefix(storageKey, common.FromHex("")) {
+	//	//fmt.Printf("%x\n", storageKey)
+	//	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
+	//	//}
+	//}
 
 	switch itemType {
 	case StorageStreamItem:
@@ -897,6 +891,7 @@ func (c *AccTrieCursor) _nextSiblingInDB() error {
 	if _, err := c._seek(c.next, []byte{}); err != nil {
 		return err
 	}
+	c.SkipState = c.SkipState && bytes.Equal(c.next, c.k[c.lvl])
 	return nil
 }
 
@@ -1108,14 +1103,14 @@ func (c *StorageTrieCursor) _seek(seek, prefix []byte) (bool, error) {
 	} else {
 		// optimistic .Next call, can use result in 2 cases:
 		// - no child found, means: len(k) <= c.lvl
-		// - looking for first child, means: c.childID[c.lvl] <= int16(bits.TrailingZeros16(c.hasBranch[c.lvl]))
+		// - looking for first child, means: c.childID[c.lvl] <= int8(bits.TrailingZeros16(c.hasBranch[c.lvl]))
 		// otherwise do .Seek call
 		//k, v, err = c.c.Next()
 		//if err != nil {
 		//	return false, err
 		//}
-		//if len(k) > c.lvl && c.childID[c.lvl] > int16(bits.TrailingZeros16(c.hasBranch[c.lvl])) {
-		c.is++
+		//if len(k) > c.lvl && c.childID[c.lvl] > int8(bits.TrailingZeros16(c.hasBranch[c.lvl])) {
+		//c.is++
 		k, v, err = c.c.Seek(seek)
 		//}
 	}
@@ -1222,6 +1217,7 @@ func (c *StorageTrieCursor) _nextSiblingInDB() error {
 	if _, err := c._seek(c.seek, []byte{}); err != nil {
 		return err
 	}
+	c.skipState = c.skipState && bytes.Equal(c.next, c.k[c.lvl])
 	return nil
 }
 

@@ -142,7 +142,6 @@ func keyTransformExtractAcc(transformKey func([]byte) ([]byte, error)) etl.Extra
 		if err != nil {
 			return err
 		}
-		fmt.Printf("cs0: %x,%x,%x\n", newK, k, v)
 		return next(k, newK, v)
 	}
 }
@@ -156,7 +155,6 @@ func keyTransformExtractStorage(transformKey func([]byte) ([]byte, error)) etl.E
 		if err != nil {
 			return err
 		}
-		fmt.Printf("cs1: %x,%x,%x\n", newK, k, v)
 		return next(k, newK, v)
 	}
 }
@@ -247,7 +245,6 @@ func getExtractFunc(db ethdb.Getter, cache *shards.StateCache, changeSetBucket s
 		if err != nil {
 			return err
 		}
-		fmt.Printf("cs4: %x,%x\n", newK, value)
 
 		if cache != nil {
 			if len(k) == 20 {
@@ -337,7 +334,6 @@ func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("cs5: %x,%x\n", newK, v)
 		return next(dbKey, newK, v)
 	}
 }
@@ -350,7 +346,6 @@ func getUnwindExtractAccounts(db ethdb.Getter, changeSetBucket string) etl.Extra
 		if err != nil {
 			return err
 		}
-		fmt.Printf("cs6: %x,%x\n", newK, v)
 		if len(v) == 0 {
 			return next(dbKey, newK, v)
 		}

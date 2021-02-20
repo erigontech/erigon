@@ -58,11 +58,6 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 		}
 	}
 
-	tx.Walk(dbutils.HashedStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
-		fmt.Printf("hs: %x,%x\n", k, v)
-		return true, nil
-	})
-
 	hash, err := rawdb.ReadCanonicalHash(tx, to)
 	if err != nil {
 		return err
@@ -462,10 +457,6 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 		defer tx.Rollback()
 	}
 
-	tx.Walk(dbutils.HashedStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
-		fmt.Printf("hs: %x,%x\n", k, v)
-		return true, nil
-	})
 	if cache != nil {
 		if err = cacheWarmUpIfNeed(tx, cache); err != nil {
 			return err
