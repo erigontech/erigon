@@ -194,7 +194,8 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 		number := parents[i].Number.Uint64()
 
 		// If an in-memory snapshot was found, use that
-		if s, ok := c.recentsGet(p.HashCache()); ok {
+		var ok bool
+		if s, ok = c.recentsGet(p.HashCache()); ok {
 			snap = s
 			break
 		}

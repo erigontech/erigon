@@ -610,20 +610,20 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		if number == 0 || (number%c.config.Epoch == 0 && len(headers) > params.FullImmutabilityThreshold) {
 			checkpoint := chain.GetHeaderByNumber(number)
 			if checkpoint != nil {
-				hash := checkpoint.HashCache()
+				checkpointHash := checkpoint.HashCache()
 
 				signers := make([]common.Address, (len(checkpoint.Extra)-extraVanity-extraSeal)/common.AddressLength)
 				for i := 0; i < len(signers); i++ {
 					copy(signers[i][:], checkpoint.Extra[extraVanity+i*common.AddressLength:])
 				}
 
-				snap = newSnapshot(c.config, c.snapStorage, number, hash, signers)
+				snap = newSnapshot(c.config, c.snapStorage, number, checkpointHash, signers)
 
 				if err := c.applyAndStoreSnapshot(snap); err != nil {
 					return nil, err
 				}
 
-				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
+				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", checkpointHash)
 				break
 			}
 		}

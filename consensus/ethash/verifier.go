@@ -19,5 +19,4 @@ func (ethash *Ethash) AncestorsNeededForVerification(_ *types.Header) int {
 }
 
 func (ethash *Ethash) PrepareHeaders(_ []*types.Header) {
-	return
 }

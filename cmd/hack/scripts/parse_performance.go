@@ -20,8 +20,8 @@ func main() {
 
 	if pathVal == nil {
 		log.Fatal("a path is required")
+		return
 	}
-
 	path := *pathVal
 
 	f, err := os.Open(path)
@@ -41,14 +41,12 @@ func main() {
 	var r *row
 	var totalTime time.Duration
 	var totalCount int
-	rows := make([]row, 0, 2048)
 
 	blocksPerMs := make([]float64, 0, 2048)
 
 	for scanner.Scan() {
 		r = newRow(scanner.Bytes(), prefix, countPrefix, elapsedPrefix)
 		if r != nil {
-			rows = append(rows, *r)
 			blocksPerMs = append(blocksPerMs, r.blocksPerMs)
 			totalTime += r.elapsed
 			totalCount += r.count
@@ -82,7 +80,7 @@ type row struct {
 }
 
 func newRow(s, hasPrefix, count, elapsed []byte) *row {
-	if bytes.Index(s, hasPrefix) == -1 {
+	if !bytes.Contains(s, hasPrefix) {
 		return nil
 	}
 

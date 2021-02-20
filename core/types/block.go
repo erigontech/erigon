@@ -88,8 +88,8 @@ type Header struct {
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
 
-	hash   atomic.Value   `json:"-"`
-	author common.Address `json:"-"`
+	hash   atomic.Value
+	author common.Address
 }
 
 // field type overrides for gencodec

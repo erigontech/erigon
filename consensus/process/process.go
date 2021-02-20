@@ -530,9 +530,5 @@ func (c *Consensus) inProcessing(reqID uint64, number uint64) bool {
 	}
 
 	_, ok = reqBlocks[number]
-	if !ok {
-		return false
-	}
-
-	return true
+	return ok
 }
