@@ -204,14 +204,14 @@ type OldestAppearedLoad struct {
 	lastKey       bytes.Buffer
 }
 
-func (l *OldestAppearedLoad) LoadFunc(k []byte, value []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+func (l *OldestAppearedLoad) LoadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 	if bytes.Equal(k, l.lastKey.Bytes()) {
 		return nil
 	}
 	l.lastKey.Reset()
 	//nolint:errcheck
 	l.lastKey.Write(k)
-	return l.innerLoadFunc(k, value, table, next)
+	return l.innerLoadFunc(k, v, table, next)
 }
 
 func NewPromoter(db ethdb.Database, cache *shards.StateCache, quitCh <-chan struct{}) *Promoter {
@@ -235,7 +235,7 @@ type Promoter struct {
 func getExtractFunc(db ethdb.Getter, cache *shards.StateCache, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		blk, k, v := decode(dbKey, dbValue)
+		_, k, _ := decode(dbKey, dbValue)
 		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
 		value, err := db.Get(dbutils.PlainStateBucket, k)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -287,15 +287,6 @@ func getExtractFunc(db ethdb.Getter, cache *shards.StateCache, changeSetBucket s
 			cache.TurnWritesToReads(cache.PrepareWrites())
 		}
 
-		if bytes.HasPrefix(newK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d00000000000000015e")) {
-			fmt.Printf("state put: %x,%x\n", newK, value)
-		}
-		if len(newK) == 20 {
-			if bytes.HasPrefix(newK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d")) {
-				fmt.Printf("acc: %d,sc=%x,db=%x\n", blk, v, value)
-			}
-		}
-
 		return next(dbKey, newK, value)
 	}
 }
@@ -338,13 +329,10 @@ func getExtractCode(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		blk, k, v := decode(dbKey, dbValue)
+		_, k, v := decode(dbKey, dbValue)
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
-		}
-		if bytes.HasPrefix(newK, common.FromHex("39ecf6acda0e336ec8a6db538c36a90519b661eb6b433730edbc3a6d522e846d00000000000000015e")) {
-			fmt.Printf("unwind state put: %d,%x,%x,%#v,%t\n", blk, newK, v, v, v == nil)
 		}
 		return next(dbKey, newK, v)
 	}
@@ -390,8 +378,12 @@ func getCodeUnwindExtractFunc(db ethdb.Getter, changeSetBucket string) etl.Extra
 		if len(v) == 0 {
 			return nil
 		}
-		var err error
-		var a accounts.Account
+		var (
+			a        accounts.Account
+			newK     []byte
+			codeHash []byte
+			err      error
+		)
 		if err = a.DecodeForStorage(v); err != nil {
 			return err
 		}
@@ -399,12 +391,11 @@ func getCodeUnwindExtractFunc(db ethdb.Getter, changeSetBucket string) etl.Extra
 			return nil
 		}
 		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
-		var codeHash []byte
 		codeHash, err = db.Get(dbutils.PlainContractCodeBucket, plainKey)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)
 		}
-		newK, err := transformContractCodeKey(plainKey)
+		newK, err = transformContractCodeKey(plainKey)
 		if err != nil {
 			return err
 		}

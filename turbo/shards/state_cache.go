@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"container/heap"
 	"fmt"
-	"math/bits"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -398,11 +397,13 @@ func NewStateCache(degree int, limit datasize.ByteSize) *StateCache {
 // Clone creates a clone cache which can be modified independently, but it shares the parts of the cache that are common
 func (sc *StateCache) Clone() *StateCache {
 	var clone StateCache
-	clone.readWrites = sc.readWrites.Clone()
-	clone.writes = sc.writes.Clone()
-	clone.limit = sc.limit
-	heap.Init(&clone.readQueue)
-	heap.Init(&clone.unprocQueue)
+	for i := range clone.readWrites {
+		clone.readWrites[i] = sc.readWrites[i].Clone()
+		clone.writes[i] = sc.writes[i].Clone()
+		clone.limit = sc.limit
+		heap.Init(&clone.readQueue[i])
+		heap.Init(&clone.unprocQueue[i])
+	}
 	return &clone
 }
 
@@ -524,11 +525,6 @@ func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool)
 }
 
 func (sc *StateCache) setRead(item CacheItem, absent bool) {
-	if ii, ok := item.(*AccountHashItem); ok {
-		if bits.OnesCount16(ii.branches) != len(ii.hashes) {
-			panic(2)
-		}
-	}
 	id := id(item)
 	if sc.readWrites[id].Get(item) != nil {
 		panic(fmt.Sprintf("item must not be present in the cache before doing setRead: %s", item))
@@ -596,6 +592,22 @@ func (sc *StateCache) GetAccountByHashedAddress(addrHash common.Hash) (*accounts
 		return nil, true
 	}
 	return nil, false
+}
+
+func (sc *StateCache) GetStorageByHashedAddress(addrHash common.Hash, incarnation uint64, locHash common.Hash) ([]byte, bool) {
+	key := StorageItem{
+		addrHash:    addrHash,
+		incarnation: incarnation,
+		locHash:     locHash,
+	}
+	if item, ok := sc.get(&key); ok {
+		if item != nil {
+			StReadHit.Inc(1)
+			return item.(*StorageItem).value.Bytes(), true
+		}
+		return nil, true
+	}
+	return nil, false
 
 }
 
@@ -613,16 +625,6 @@ func (sc *StateCache) SetAccountAbsent(address []byte) {
 }
 
 func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete bool) {
-	if ii, ok := item.(*AccountHashItem); ok {
-		if bits.OnesCount16(ii.branches) != len(ii.hashes) {
-			panic(2)
-		}
-	}
-	if ii, ok := writeItem.(*AccountHashWriteItem); ok {
-		if bits.OnesCount16(ii.ai.branches) != len(ii.ai.hashes) {
-			panic(2)
-		}
-	}
 	id := id(item)
 	// Check if this is going to be modification of the existing entry
 	if existing := sc.writes[id].Get(writeItem); existing != nil {

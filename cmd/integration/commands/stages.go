@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -27,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/ledgerwatch/turbo-geth/turbo/silkworm"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 	"github.com/spf13/cobra"
 )
 
@@ -63,15 +63,15 @@ var cmdStageExec = &cobra.Command{
 	},
 }
 
-var cmdStageIHash = &cobra.Command{
-	Use:   "stage_ih",
+var cmdStageTrie = &cobra.Command{
+	Use:   "stage_trie",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
-		if err := stageIHash(db, ctx); err != nil {
+		if err := stageTrie(db, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -249,14 +249,15 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageHashState)
 
-	withChaindata(cmdStageIHash)
-	withLmdbFlags(cmdStageIHash)
-	withReset(cmdStageIHash)
-	withBlock(cmdStageIHash)
-	withUnwind(cmdStageIHash)
-	withDatadir(cmdStageIHash)
+	withChaindata(cmdStageTrie)
+	withLmdbFlags(cmdStageTrie)
+	withReset(cmdStageTrie)
+	withBlock(cmdStageTrie)
+	withUnwind(cmdStageTrie)
+	withDatadir(cmdStageTrie)
+	withIntegrityChecks(cmdStageTrie)
 
-	rootCmd.AddCommand(cmdStageIHash)
+	rootCmd.AddCommand(cmdStageTrie)
 
 	withChaindata(cmdStageHistory)
 	withLmdbFlags(cmdStageHistory)
@@ -405,24 +406,28 @@ func stageExec(db ethdb.Database, ctx context.Context) error {
 		})
 }
 
-func stageIHash(db ethdb.Database, ctx context.Context) error {
+func stageTrie(db ethdb.Database, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	if err := migrations.NewMigrator().Apply(db, tmpdir); err != nil {
-		panic(err)
-	}
+	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+	defer tx.Rollback()
 
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
-		panic(err)
-	}
-
-	_, bc, _, progress := newSync(ctx.Done(), db, db, nil)
+	cc, bc, _, progress := newSync(ctx.Done(), db, tx, nil)
 	defer bc.Stop()
+	cc.SetDB(tx)
+
+	var err1 error
+	tx, err1 = tx.Begin(ctx, ethdb.RW)
+	if err1 != nil {
+		return err1
+	}
 
 	if reset {
-		if err := stagedsync.ResetIH(db); err != nil {
+		if err := stagedsync.ResetIH(tx); err != nil {
 			return err
+		}
+		if _, err := tx.Commit(); err != nil {
+			panic(err)
 		}
 		return nil
 	}
@@ -439,11 +444,22 @@ func stageIHash(db ethdb.Database, ctx context.Context) error {
 	if cacheSize > 0 {
 		cache = shards.NewStateCache(32, cacheSize)
 	}
+
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: stage5.BlockNumber - unwind}
-		return stagedsync.UnwindIntermediateHashesStage(u, stage5, db, cache, tmpdir, ch)
+		if err := stagedsync.UnwindIntermediateHashesStage(u, stage5, tx, cache, tmpdir, ch); err != nil {
+			return err
+		}
+	} else {
+		if err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, true /* checkRoot */, cache, tmpdir, ch); err != nil {
+			return err
+		}
 	}
-	return stagedsync.SpawnIntermediateHashesStage(stage5, db, true /* checkRoot */, cache, tmpdir, ch)
+	integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, ch)
+	if _, err := tx.Commit(); err != nil {
+		panic(err)
+	}
+	return nil
 }
 
 func stageHashState(db ethdb.Database, ctx context.Context) error {
@@ -691,16 +707,6 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 	var cache *shards.StateCache
 	if cacheSize > 0 {
 		cache = shards.NewStateCache(32, cacheSize)
-		if err2 := db.Walk(dbutils.TrieOfAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
-			if len(k) > 2 {
-				return true, nil
-			}
-			branches, children, hashes := trie.UnmarshalIH(v)
-			cache.SetAccountHashesRead(k, branches, children, hashes)
-			return true, nil
-		}); err2 != nil {
-			panic(err2)
-		}
 	}
 	st, err := stagedsync.New(
 		stagedsync.DefaultStages(),
@@ -725,7 +731,6 @@ func newSync(quitCh <-chan struct{}, db ethdb.Database, tx ethdb.Database, hook 
 		}
 		return s
 	}
-
 	return cc, bc, st, progress
 }
 

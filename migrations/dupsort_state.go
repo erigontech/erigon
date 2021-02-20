@@ -269,6 +269,12 @@ var splitIHBucket = Migration{
 			return err
 		}
 		syncHeadHeader := rawdb.ReadHeader(db, hash, to)
+		if syncHeadHeader == nil {
+			if err := CommitProgress(db, nil, true); err != nil {
+				return fmt.Errorf("committing the removal of table: %w", err)
+			}
+			return nil
+		}
 		expectedRootHash := syncHeadHeader.Root
 
 		if err := stagedsync.RegenerateIntermediateHashes(logPrefix, db, true, nil, tmpdir, expectedRootHash, nil); err != nil {

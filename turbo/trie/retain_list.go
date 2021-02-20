@@ -29,6 +29,12 @@ type RetainDecider interface {
 	IsCodeTouched(common.Hash) bool
 }
 
+type RetainDeciderWithMarker interface {
+	RetainDecider
+	AddKeyWithMarker(key []byte, marker bool)
+	RetainWithMarker(prefix []byte) (retain bool, nextMarkedKey []byte)
+}
+
 // RetainList encapsulates the list of keys that are required to be fully available, or loaded
 // (by using `BRANCH` opcode instead of `HASHER`) after processing of the sequence of key-value
 // pairs
@@ -38,7 +44,8 @@ type RetainList struct {
 	binary      bool // if true, use binary encoding instead of Hex
 	minLength   int  // Mininum length of prefixes for which `HashOnly` function can return `true`
 	lteIndex    int  // Index of the "LTE" key in the keys slice. Next one is "GT"
-	hexes       sortable
+	hexes       [][]byte
+	markers     []bool
 	codeTouches map[common.Hash]struct{}
 }
 
@@ -51,14 +58,30 @@ func NewBinaryRetainList(minLength int) *RetainList {
 	return &RetainList{minLength: minLength, codeTouches: make(map[common.Hash]struct{}), binary: true}
 }
 
+func (rl *RetainList) Len() int {
+	return len(rl.hexes)
+}
+func (rl *RetainList) Less(i, j int) bool {
+	return bytes.Compare(rl.hexes[i], rl.hexes[j]) < 0
+}
+func (rl *RetainList) Swap(i, j int) {
+	rl.hexes[i], rl.hexes[j] = rl.hexes[j], rl.hexes[i]
+	rl.markers[i], rl.markers[j] = rl.markers[j], rl.markers[i]
+}
+
 // AddKey adds a new key (in KEY encoding) to the list
 func (rl *RetainList) AddKey(key []byte) {
+	rl.AddKeyWithMarker(key, false)
+}
+
+func (rl *RetainList) AddKeyWithMarker(key []byte, marker bool) {
 	var nibbles = make([]byte, 2*len(key))
 	for i, b := range key {
 		nibbles[i*2] = b / 16
 		nibbles[i*2+1] = b % 16
 	}
 	rl.AddHex(nibbles)
+	rl.markers = append(rl.markers, marker)
 }
 
 // AddHex adds a new key (in HEX encoding) to the list
@@ -84,8 +107,11 @@ func (rl *RetainList) ensureInited() {
 	if rl.inited {
 		return
 	}
-	if !sort.IsSorted(rl.hexes) {
-		sort.Sort(rl.hexes)
+	if len(rl.markers) == 0 {
+		rl.markers = make([]bool, len(rl.hexes))
+	}
+	if !sort.IsSorted(rl) {
+		sort.Sort(rl)
 	}
 	rl.lteIndex = 0
 	rl.inited = true
@@ -122,6 +148,55 @@ func (rl *RetainList) Retain(prefix []byte) bool {
 		}
 	}
 	return false
+}
+
+func (rl *RetainList) RetainWithMarker(prefix []byte) (bool, []byte) {
+	rl.ensureInited()
+	if len(prefix) < rl.minLength {
+		return true, nil
+	}
+	// Adjust "GT" if necessary
+	var gtAdjusted bool
+	for rl.lteIndex < len(rl.hexes)-1 && bytes.Compare(rl.hexes[rl.lteIndex+1], prefix) <= 0 {
+		rl.lteIndex++
+		gtAdjusted = true
+	}
+	// Adjust "LTE" if necessary (normally will not be necessary)
+	for !gtAdjusted && rl.lteIndex > 0 && bytes.Compare(rl.hexes[rl.lteIndex], prefix) > 0 {
+		rl.lteIndex--
+	}
+	if rl.lteIndex < len(rl.hexes) {
+		if bytes.HasPrefix(rl.hexes[rl.lteIndex], prefix) {
+			return true, rl.nextMarkedItem(rl.lteIndex)
+		}
+	}
+	if rl.lteIndex < len(rl.hexes)-1 {
+		if bytes.HasPrefix(rl.hexes[rl.lteIndex+1], prefix) {
+			return true, rl.nextMarkedItem(rl.lteIndex + 1)
+		}
+	}
+
+	if rl.lteIndex < len(rl.hexes) {
+		if bytes.Compare(prefix, rl.hexes[rl.lteIndex]) <= 0 {
+			return false, rl.nextMarkedItem(rl.lteIndex)
+		}
+	}
+	if rl.lteIndex < len(rl.hexes)-1 {
+		if bytes.Compare(prefix, rl.hexes[rl.lteIndex+1]) <= 0 {
+			return false, rl.nextMarkedItem(rl.lteIndex + 1)
+		}
+	}
+
+	return false, nil
+}
+
+func (rl *RetainList) nextMarkedItem(index int) []byte {
+	for i := index; i < len(rl.markers); i++ {
+		if rl.markers[i] {
+			return rl.hexes[i]
+		}
+	}
+	return nil
 }
 
 // Rewind lets us reuse this list from the beginning

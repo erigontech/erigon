@@ -431,6 +431,7 @@ func (pm *ProtocolManager) handle(p *peer) error {
 
 	// Make sure that we first exchange headers and only then announce transactions
 	p.HandshakeOrderMux.Lock()
+
 	// Register the peer locally
 	if err := pm.peers.Register(p, pm.removePeer); err != nil {
 		p.Log().Error("Ethereum peer registration failed", "err", err)

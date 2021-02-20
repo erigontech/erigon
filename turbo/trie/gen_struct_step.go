@@ -17,7 +17,6 @@
 package trie
 
 import (
-	"bytes"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -48,8 +47,8 @@ type structInfoReceiver interface {
 type HashCollector func(keyHex []byte, hash []byte) error
 type StorageHashCollector func(accWithInc []byte, keyHex []byte, hash []byte) error
 
-type HashCollector2 func(keyHex []byte, branches, children uint16, hashes, rootHash []byte) error
-type StorageHashCollector2 func(accWithInc []byte, keyHex []byte, branches, children uint16, hashes, rootHash []byte) error
+type HashCollector2 func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error
+type StorageHashCollector2 func(accWithInc []byte, keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error
 
 func calcPrecLen(groups []uint16) int {
 	if len(groups) == 0 {
@@ -94,7 +93,9 @@ func (GenStructStepHashData) GenStructStepData() {}
 // `e` parameter is the trie builder, which uses the structure information to assemble trie on the stack and compute its hash.
 // `h` parameter is the hash collector, which is notified whenever branch node is constructed.
 // `data` parameter specified if a hash or a binary string or an account should be emitted.
-// `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack.
+// `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. Meaning - which children of given prefix have state.
+// `hasBranch` same as `groups`, but meaning - which children of given prefix have IntermediateHash.
+// `hasHash` same as `groups`, but meaning - which children of given prefix are branch nodes and their hashes can be saved and used on next trie resolution (as IntermediateHash).
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
@@ -105,9 +106,10 @@ func GenStructStep(
 	h HashCollector2,
 	data GenStructStepData,
 	groups []uint16,
-	branches []uint16,
+	hasBranch []uint16,
+	hasHash []uint16,
 	trace bool,
-) ([]uint16, []uint16, error) {
+) ([]uint16, []uint16, []uint16, error) {
 	for precLen, buildExtensions := calcPrecLen(groups), false; precLen >= 0; precLen, buildExtensions = calcPrecLen(groups), true {
 		var precExists = len(groups) > 0
 		// Calculate the prefix of the smallest prefix group containing curr
@@ -122,54 +124,64 @@ func GenStructStep(
 		} else {
 			maxLen = succLen
 		}
-		if trace || maxLen >= len(curr) {
-			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
-		}
+		//if trace || maxLen >= len(curr) {
+		//	fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
+		//}
+
 		// Add the digit immediately following the max common prefix and compute length of remainder length
 		extraDigit := curr[maxLen]
 		for maxLen >= len(groups) {
 			groups = append(groups, 0)
-			branches = append(branches, 0)
 		}
-		groups[maxLen] |= (uint16(1) << extraDigit)
+		groups[maxLen] |= 1 << extraDigit
 		remainderStart := maxLen
 		if len(succ) > 0 || precExists {
 			remainderStart++
 		}
 		remainderLen := len(curr) - remainderStart
-		//fmt.Printf("groups is now %b\n", groups)
+		for remainderStart+remainderLen >= len(hasBranch) {
+			hasBranch = append(hasBranch, 0)
+			hasHash = append(hasHash, 0)
+		}
+		//fmt.Printf("groups is now %x,%d,%b\n", extraDigit, maxLen, groups)
 
 		if !buildExtensions {
 			switch v := data.(type) {
 			case *GenStructStepHashData:
-				branches[maxLen] |= (uint16(1) << curr[maxLen])
-				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("050800")) {
-				//	fmt.Printf("set hash bit: %x,%b,%x; cur: %x,suc:%x\n", curr[:maxLen], branches[maxLen], curr[maxLen], curr, succ)
-				//}
+				if trace {
+					fmt.Printf("HashData before: %x, %t,%b,%b,%b\n", curr, v.IsBranch, hasHash, hasBranch, groups)
+				}
+				if v.IsBranch {
+					hasBranch[len(curr)-1] |= 1 << curr[len(curr)-1] // keep track of existing records in DB
+				}
+				hasHash[len(curr)-1] |= 1 << curr[len(curr)-1] // register myself in parent bitmap
+				if trace {
+					fmt.Printf("HashData: %x, %t,%b,%b,%b\n", curr, v.IsBranch, hasHash, hasBranch, groups)
+				}
 				/* building a hash */
 				if err := e.hash(v.Hash[:]); err != nil {
-					return nil, nil, err
+					return nil, nil, nil, err
 				}
 				buildExtensions = true
 			case *GenStructStepAccountData:
 				if retain(curr[:maxLen]) {
 					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
-						return nil, nil, err
+						return nil, nil, nil, err
 					}
 				} else {
 					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
-						return nil, nil, err
+						return nil, nil, nil, err
 					}
 				}
 			case *GenStructStepLeafData:
 				/* building leafs */
 				if retain(curr[:maxLen]) {
 					if err := e.leaf(remainderLen, curr, v.Value); err != nil {
-						return nil, nil, err
+						return nil, nil, nil, err
 					}
 				} else {
 					if err := e.leafHash(remainderLen, curr, v.Value); err != nil {
-						return nil, nil, err
+						return nil, nil, nil, err
 					}
 				}
 			default:
@@ -180,93 +192,114 @@ func GenStructStep(
 		if buildExtensions {
 			if remainderLen > 0 {
 				if trace {
-					fmt.Printf("Extension %x\n", curr[remainderStart:remainderStart+remainderLen])
+					fmt.Printf("Extension before: %x->%x,%b, %b, %b\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen], hasHash, hasBranch, groups)
+				}
+				from := remainderStart
+				if from == 0 {
+					from = 1
+				}
+				for i := from; i < remainderStart+remainderLen; i++ {
+					if 1<<curr[i]&hasBranch[i] != 0 {
+						hasBranch[from-1] |= 1 << curr[from-1]
+					}
+					if h != nil {
+						if err := h(curr[:i], 0, 0, 0, nil, nil); err != nil {
+							return nil, nil, nil, err
+						}
+					}
+				}
+				hasBranch = hasBranch[:from]
+				hasHash = hasHash[:from]
+				if trace {
+					fmt.Printf("Extension: %x, %b, %b, %b\n", curr[remainderStart:remainderStart+remainderLen], hasHash, hasBranch, groups)
 				}
 				/* building extensions */
 				if retain(curr[:maxLen]) {
 					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-						return nil, nil, err
+						return nil, nil, nil, err
 					}
 				} else {
 					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-						return nil, nil, err
+						return nil, nil, nil, err
 					}
 				}
 			}
 		}
+
 		// Check for the optional part
 		if precLen <= succLen && len(succ) > 0 {
-			return groups, branches, nil
+			return groups, hasBranch, hasHash, nil
 		}
-		// Close the immediately encompassing prefix group, if needed
-		if len(succ) > 0 || precExists {
-			var hashes []byte
-			if maxLen > 0 {
-				branches[maxLen-1] |= (uint16(1) << curr[maxLen-1])
-				//if bytes.HasPrefix(curr[:maxLen], common.FromHex("050800")) {
-				//	fmt.Printf("set branch bit: %x,%b,%x; cur: %x,suc:%x\n", curr[:maxLen], branches[maxLen-1], curr[maxLen-1], curr, succ)
-				//}
-			}
 
-			if bytes.HasPrefix(curr[:maxLen], common.FromHex("05")) {
-				e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
-			}
-			if h != nil {
-				if branches[maxLen] == 0 {
-					if err := h(curr[:maxLen], 0, 0, nil, nil); err != nil {
-						return nil, nil, err
-					}
-				} else {
-					//if bytes.HasPrefix(curr[:maxLen], common.FromHex("050800")) {
-					//	fmt.Printf("top hashes: %x,%b,%b\n", curr[:maxLen], branches[maxLen], groups[maxLen])
-					//}
-					hashes = e.topHashes(curr[:maxLen], branches[maxLen], groups[maxLen])
-					if maxLen > 0 {
-						if err := h(curr[:maxLen], branches[maxLen], groups[maxLen], hashes, nil); err != nil {
-							return nil, nil, err
-						}
+		var usefulHashes []byte
+		if h != nil {
+			if hasHash[maxLen] != 0 || hasBranch[maxLen] != 0 {
+				if trace {
+					fmt.Printf("why now: %x,%b,%b,%b\n", curr[:maxLen], hasHash, hasBranch, groups)
+				}
+				usefulHashes = e.topHashes(curr[:maxLen], hasHash[maxLen], groups[maxLen])
+				if maxLen != 0 {
+					hasBranch[maxLen-1] |= 1 << curr[maxLen-1] // register myself in parent bitmap
+					if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, nil); err != nil {
+						return nil, nil, nil, err
 					}
 				}
+			} else {
+				//TODO: looks like this can be safely removed, need more test
+				if err := h(curr[:maxLen], 0, 0, 0, nil, nil); err != nil {
+					return nil, nil, nil, err
+				}
+			}
+		}
+
+		// Close the immediately encompassing prefix group, if needed
+		if len(succ) > 0 || precExists {
+			if maxLen > 0 {
+				if trace {
+					fmt.Printf("Branch before: %x, %b, %b, %b\n", curr[:maxLen], hasHash, hasBranch, groups)
+				}
+				hasHash[maxLen-1] |= 1 << curr[maxLen-1]
+				if hasBranch[maxLen] != 0 {
+					hasBranch[maxLen-1] |= 1 << curr[maxLen-1]
+				}
+				if trace {
+					fmt.Printf("Branch: %x, %b, %b, %b\n", curr[:maxLen], hasHash, hasBranch, groups)
+				}
+			}
+
+			if trace && maxLen <= 3 {
+				e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
 			}
 			if retain(curr[:maxLen]) {
 				if err := e.branch(groups[maxLen]); err != nil {
-					return nil, nil, err
+					return nil, nil, nil, err
 				}
 			} else {
 				if err := e.branchHash(groups[maxLen]); err != nil {
-					return nil, nil, err
+					return nil, nil, nil, err
 				}
 			}
-			if h != nil && maxLen == 0 {
-				if branches[maxLen] > 0 {
-					if err := h(curr[:maxLen], branches[maxLen], groups[maxLen], hashes, e.topHash()); err != nil {
-						return nil, nil, err
-					}
-				}
+		}
+		if h != nil && maxLen == 0 && (hasHash[maxLen] != 0 || hasBranch[maxLen] != 0) {
+			if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, e.topHash()); err != nil {
+				return nil, nil, nil, err
 			}
-			if bytes.HasPrefix(curr[:maxLen], common.FromHex("05")) {
-				fmt.Printf("--- 1: 3, %x, , %x\n", curr[:maxLen], e.topHash())
-			}
-			branches = branches[:maxLen]
 		}
 		groups = groups[:maxLen]
-		if maxLen < len(branches) {
-			branches = branches[:maxLen+1]
-		}
+		hasBranch = hasBranch[:maxLen]
+		hasHash = hasHash[:maxLen]
 		// Check the end of recursion
 		if precLen == 0 {
-			return groups, branches, nil
+			return groups, hasBranch, hasHash, nil
 		}
 		// Identify preceding key for the buildExtensions invocation
+
 		curr = curr[:precLen]
 		for len(groups) > 0 && groups[len(groups)-1] == 0 {
 			groups = groups[:len(groups)-1]
-			//if len(branches) > succLen+1 {
-			branches = branches[:len(branches)-1]
-			//}
 		}
 	}
-	return nil, nil, nil
+	return nil, nil, nil, nil
 }
 
 func GenStructStepOld(
@@ -300,7 +333,7 @@ func GenStructStepOld(
 		for maxLen >= len(groups) {
 			groups = append(groups, 0)
 		}
-		groups[maxLen] |= (uint16(1) << extraDigit)
+		groups[maxLen] |= 1 << extraDigit
 		//fmt.Printf("groups is now %b\n", groups)
 		remainderStart := maxLen
 		if len(succ) > 0 || precExists {

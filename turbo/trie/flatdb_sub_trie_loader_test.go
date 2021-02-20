@@ -155,7 +155,7 @@ func TestTwoStorageItems(t *testing.T) {
 	hasher := newHasher(false)
 	defer returnHasherToPool(hasher)
 	rootRlp, err := hasher.hashChildren(root, 0)
-	require.NoError(err, "failed ot hash children")
+	require.NoError(err, "failed ot hash hasState")
 
 	// Resolve the root node
 
@@ -176,7 +176,7 @@ func TestTwoStorageItems(t *testing.T) {
 
 	//branchRlp, err := hasher.hashChildren(&branch, 0)
 	//if err != nil {
-	//	t.Errorf("failed ot hash children: %v", err)
+	//	t.Errorf("failed ot hash hasState: %v", err)
 	//}
 
 	resolver2 := NewSubTrieLoader(0)

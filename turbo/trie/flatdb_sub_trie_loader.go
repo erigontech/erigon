@@ -30,6 +30,7 @@ type StreamReceiver interface {
 		accountValue *accounts.Account,
 		storageValue []byte,
 		hash []byte,
+		hasBranch bool,
 		cutoff int,
 	) error
 
@@ -419,6 +420,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 	accountValue *accounts.Account,
 	storageValue []byte,
 	hash []byte,
+	hasBranch bool,
 	cutoff int,
 ) error {
 	switch itemType {
@@ -634,7 +636,7 @@ func (fstl *FlatDbSubTrieLoader) LoadSubTries() (SubTries, error) {
 
 		}
 		if fstl.itemPresent {
-			if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKey, &fstl.accountValue, fstl.storageValue, fstl.hashValue, fstl.streamCutoff); err != nil {
+			if err := fstl.receiver.Receive(fstl.itemType, fstl.accountKey, fstl.storageKey, &fstl.accountValue, fstl.storageValue, fstl.hashValue, false, fstl.streamCutoff); err != nil {
 				return SubTries{}, err
 			}
 			fstl.itemPresent = false
@@ -890,7 +892,7 @@ func (c *FilterCursor2) Seek(seek []byte) ([]byte, []byte, error) {
 	return c.k, c.v, nil
 }
 
-// IHCursor - holds logic related to iteration over IH bucket
+// AccTrieCursor - holds logic related to iteration over AccTrie bucket
 type IHCursor2 struct {
 	c *FilterCursor2
 }
@@ -926,4 +928,21 @@ func isSequenceOld(prev []byte, next []byte) bool {
 	}
 
 	return isSequence
+}
+
+func keyIsBeforeOrEqualDeprecated(k1, k2 []byte) (bool, []byte) {
+	if k1 == nil {
+		return false, k2
+	}
+
+	if k2 == nil {
+		return true, k1
+	}
+
+	switch bytes.Compare(k1, k2) {
+	case -1, 0:
+		return true, k1
+	default:
+		return false, k2
+	}
 }
