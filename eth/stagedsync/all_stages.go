@@ -27,10 +27,18 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.db, world.TmpDir, world.QuitCh)
+						db := world.db
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+							db = world.TX
+						}
+						return SpawnBlockHashStage(s, db, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						db := world.db
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+							db = world.TX
+						}
+						return u.Done(db)
 					},
 				}
 			},
@@ -42,13 +50,21 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						if _, err := core.InsertBodyChain("logPrefix", context.TODO(), world.TX, blocks, true /* newCanonical */); err != nil {
+						db := world.db
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+							db = world.TX
+						}
+						if _, err := core.InsertBodyChain("logPrefix", context.TODO(), db, blocks, true /* newCanonical */); err != nil {
 							return err
 						}
-						return s.DoneAndUpdate(world.TX, blockNum)
+						return s.DoneAndUpdate(db, blockNum)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						db := world.db
+						if hasTx, ok := world.TX.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+							db = world.TX
+						}
+						return u.Done(db)
 					},
 				}
 			},
@@ -319,7 +335,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	}
 	stageBuilders := createStageBuilders([]*types.Block{}, newHead, checkRoot)
 	cc := &core.TinyChainContext{}
-	cc.SetDB(nil)
+	cc.SetDB(db)
 	cc.SetEngine(engine)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
 	var cache *shards.StateCache // Turn off cache for now
@@ -390,6 +406,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	defer tx.Rollback()
 	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers)
 	if err != nil {
+		panic(err)
 		return false, err
 	}
 	if !newCanonical {
@@ -401,13 +418,18 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		}
 		return false, nil // No change of the chain
 	}
+
 	blockNum := blocks[len(blocks)-1].Number().Uint64()
 	if err = stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
 		return false, err
 	}
 	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)
+
+	// create empty TxDb object, it's not usable before .Begin() call which will use this object
+	// It allows inject tx object to stages now, define rollback now,
+	// but call .Begin() after hearer/body download stages
 	cc := &core.TinyChainContext{}
-	cc.SetDB(nil)
+	cc.SetDB(tx)
 	cc.SetEngine(engine)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
 	var cache *shards.StateCache // Turn off cache for now
@@ -416,7 +438,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		config,
 		cc,
 		vmConfig,
-		tx,
+		db,
 		tx,
 		"1",
 		storageMode,
@@ -430,14 +452,47 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		nil,
 	)
 	if err2 != nil {
+		panic(err2)
 		return false, err2
 	}
+
+	// begin tx at stage right after head/body download Or at first unwind stage
+	// it's temporary solution
+	//syncState.BeforeStageRun(stages.Senders, func() error {
+	//	var errTx error
+	//	log.Debug("Begin tx")
+	//	tx, errTx = tx.Begin(context.Background(), ethdb.RW)
+	//	return errTx
+	//})
+	//syncState.OnBeforeUnwind(func(id stages.SyncStage) error {
+	//	if syncState.IsBefore(id, stages.Bodies) || syncState.IsAfter(id, stages.TxPool) {
+	//		return nil
+	//	}
+	//	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+	//		return nil
+	//	}
+	//	var errTx error
+	//	log.Debug("Begin tx")
+	//	tx, errTx = tx.Begin(context.Background(), ethdb.RW)
+	//	return errTx
+	//})
+	//syncState.BeforeStageUnwind(stages.Bodies, func() error {
+	//	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
+	//		return nil
+	//	}
+	//	log.Info("Commit cycle")
+	//	_, errCommit := tx.Commit()
+	//	return errCommit
+	//})
+
 	if reorg {
 		if err = syncState.UnwindTo(forkblocknumber, tx); err != nil {
+			panic(err)
 			return false, err
 		}
 	}
-	if err = syncState.Run(tx, tx); err != nil {
+	if err = syncState.Run(db, tx); err != nil {
+		panic(err)
 		return false, err
 	}
 	if _, err1 = tx.Commit(); err1 != nil {

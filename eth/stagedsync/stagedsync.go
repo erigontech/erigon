@@ -112,6 +112,9 @@ func (stagedSync *StagedSync) Prepare(
 		state.unwindOrder[i] = stages[stageIndex]
 	}
 
+	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		db = tx
+	}
 	if err := state.LoadUnwindInfo(db); err != nil {
 		return nil, err
 	}
