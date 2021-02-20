@@ -1,0 +1,154 @@
+# github.com/anacrolix/go-libutp
+In file included from utp_api.cpp:26:
+utp_internal.h: In constructor ‘UTPSocketKey::UTPSocketKey(const PackedSockAddr&, uint32)’:
+utp_internal.h:79:32: warning: ‘void* memset(void*, int, size_t)’ clearing an object of non-trivial type ‘struct UTPSocketKey’; use assignment instead [-Wclass-memaccess]
+   79 |   memset(this, 0, sizeof(*this));
+      |                                ^
+utp_internal.h:74:8: note: ‘struct UTPSocketKey’ declared here
+   74 | struct UTPSocketKey {
+      |        ^~~~~~~~~~~~
+# github.com/anacrolix/go-libutp
+In file included from utp_callbacks.h:27,
+                 from utp_callbacks.cpp:25:
+utp_internal.h: In constructor ‘UTPSocketKey::UTPSocketKey(const PackedSockAddr&, uint32)’:
+utp_internal.h:79:32: warning: ‘void* memset(void*, int, size_t)’ clearing an object of non-trivial type ‘struct UTPSocketKey’; use assignment instead [-Wclass-memaccess]
+   79 |   memset(this, 0, sizeof(*this));
+      |                                ^
+utp_internal.h:74:8: note: ‘struct UTPSocketKey’ declared here
+   74 | struct UTPSocketKey {
+      |        ^~~~~~~~~~~~
+# github.com/anacrolix/go-libutp
+In file included from utp_internal.cpp:34:
+utp_internal.h: In constructor ‘UTPSocketKey::UTPSocketKey(const PackedSockAddr&, uint32)’:
+utp_internal.h:79:32: warning: ‘void* memset(void*, int, size_t)’ clearing an object of non-trivial type ‘struct UTPSocketKey’; use assignment instead [-Wclass-memaccess]
+   79 |   memset(this, 0, sizeof(*this));
+      |                                ^
+utp_internal.h:74:8: note: ‘struct UTPSocketKey’ declared here
+   74 | struct UTPSocketKey {
+      |        ^~~~~~~~~~~~
+=== RUN   TestVerifyHeadersEthash65536
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -283.849065ms	-1.05%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -847.096866ms	-3.14%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -1.272889632s	-4.55%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        3.465702844s	10.63%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -226.697123ms	-0.68%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -255.556632ms	-0.83%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -420.189357ms	-1.49%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -705.073325ms	-2.55%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -144.393489ms	-0.52%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -600.171839ms	-2.14%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -373.714795ms	-1.32%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        487.491574ms	1.71%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -1.315720606s	-4.75%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        25.216495ms	0.09%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -506.534433ms	-1.77%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -497.953519ms	-1.79%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -800.532794ms	-2.88%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -1.235439785s	-4.45%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -120.147428ms	-0.41%
+        
+    headers_verify_test.go:241: done 65536 of 65536
+intermediate result:
+    headers_verify_test.go:156: results:
+        -271.520709ms	-0.94%
+        
+    headers_verify_test.go:156: results:
+        -283.849065ms	-1.05%
+        -847.096866ms	-3.14%
+        -1.272889632s	-4.55%
+        3.465702844s	10.63%
+        -226.697123ms	-0.68%
+        -255.556632ms	-0.83%
+        -420.189357ms	-1.49%
+        -705.073325ms	-2.55%
+        -144.393489ms	-0.52%
+        -600.171839ms	-2.14%
+        -373.714795ms	-1.32%
+        487.491574ms	1.71%
+        -1.315720606s	-4.75%
+        25.216495ms	0.09%
+        -506.534433ms	-1.77%
+        -497.953519ms	-1.79%
+        -800.532794ms	-2.88%
+        -1.235439785s	-4.45%
+        -120.147428ms	-0.41%
+        -271.520709ms	-0.94%
+        
+--- PASS: TestVerifyHeadersEthash65536 (1184.48s)
+PASS
+ok  	github.com/ledgerwatch/turbo-geth/consensus/benchmarks	1184.574s

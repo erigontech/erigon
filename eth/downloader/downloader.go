@@ -1190,7 +1190,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64) error {
 				filled, proced, err := d.fillHeaderSkeleton(from, headers)
 				if err != nil {
 					p.log.Debug("Skeleton chain invalid", "err", err)
-					return fmt.Errorf("%w: %v", errInvalidChain, err)
+					return fmt.Errorf("fillHeaderSkeleton failed %w: %v", errInvalidChain, err)
 				}
 				headers = filled[proced:]
 				from += uint64(proced)
@@ -1703,7 +1703,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 						t := time.Now()
 						if err = stagedsync.VerifyHeaders(d.stateDB, chunk, d.consensusProcess, frequency); err != nil {
 							log.Warn("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
-							return fmt.Errorf("%w: %v", errInvalidChain, err)
+							return fmt.Errorf("stagedsync.VerifyHeaders failed %w: %v(actual error)", errInvalidChain, err)
 						}
 						elapsed := time.Since(t)
 						fmt.Println("VerifyHeaders", "count", len(chunk), "elapsed", elapsed, "number", chunk[n].Number, "hash", chunk[n].Hash().String(), "blk/sec", float64(len(chunk))/float64(elapsed))
@@ -1851,7 +1851,7 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 			// of the blocks delivered from the downloader, and the indexing will be off.
 			log.Debug("Downloaded item processing failed on sidechain import", "index", index, "err", err)
 		}
-		return 0, fmt.Errorf("%w: %v", errInvalidChain, err)
+		return 0, fmt.Errorf("importBlockResults failed %w: %v", errInvalidChain, err)
 	}
 	if d.getMode() == StagedSync && index > 0 && d.bodiesState != nil {
 		if err1 := d.bodiesState.Update(d.stateDB, blocks[index-1].NumberU64()); err1 != nil {

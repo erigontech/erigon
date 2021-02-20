@@ -289,10 +289,7 @@ func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*typ
 		return nil
 	}
 
-	reqID := rand.Uint64()
-	fmt.Println("\n\nIN verifyHeaders", reqID, len(headers))
-
-	engine.HeaderVerification() <- consensus.VerifyHeaderRequest{reqID, headers, seals, nil}
+	engine.HeaderVerification() <- consensus.VerifyHeaderRequest{rand.Uint64(), headers, seals, nil}
 
 	reqResponses := make(map[common.Hash]struct{}, len(headers))
 
@@ -303,13 +300,15 @@ func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*typ
 				return result.Err
 			}
 
-			reqResponses[result.Hash] = struct{}{}
+			if _, ok := reqResponses[result.Hash]; ok {
+				continue
+			}
 
+			reqResponses[result.Hash] = struct{}{}
 			if len(reqResponses) == toVerify {
 				return nil
 			}
 		case result := <-engine.HeaderRequest():
-			t := time.Now()
 			var err error
 
 			length := 1
@@ -352,8 +351,6 @@ func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*typ
 			}
 
 			engine.HeaderResponse() <- resp
-
-			fmt.Println("<-engine.HeaderRequest()", result.ID, result.Number, len(resp.Headers), time.Since(t))
 		}
 	}
 }

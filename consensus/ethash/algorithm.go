@@ -28,11 +28,12 @@ import (
 	"time"
 	"unsafe"
 
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/bitutil"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"golang.org/x/crypto/sha3"
 )
 
 const (
@@ -146,7 +147,31 @@ func seedHash(block uint64) []byte {
 	if block < epochLength {
 		return seed
 	}
-	hashSHA256(int(block/epochLength), seed)
+
+	h := common.NewHasher()
+
+	for i := 0; i < int(block/epochLength); i++ {
+		h.Sha.Reset()
+		//nolint:errcheck
+		h.Sha.Write(seed)
+		//nolint:errcheck
+		h.Sha.Read(seed)
+	}
+
+	common.ReturnHasherToPool(h)
+
+	return seed
+}
+
+func seedHashOld(block uint64) []byte {
+	seed := make([]byte, 32)
+	if block < epochLength {
+		return seed
+	}
+	keccak256 := makeHasher(sha3.NewLegacyKeccak256())
+	for i := 0; i < int(block/epochLength); i++ {
+		keccak256(seed, seed)
+	}
 	return seed
 }
 

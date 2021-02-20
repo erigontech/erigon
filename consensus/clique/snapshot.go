@@ -18,12 +18,14 @@ package clique
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -460,12 +462,18 @@ func (st *storage) save(number uint64, hash common.Hash, s *Snapshot, force bool
 	// a forced case (genesis)
 	ok, err := hasSnapshotData(st.db, number, hash)
 	if !ok || err != nil {
+		if err != nil {
+			fmt.Println("hasSnapshotData-err", err, ok, number, hash.String())
+		}
+		if !ok {
+			fmt.Println("hasSnapshotData-!ok", ok, number, hash.String(), debug.Callers(10))
+		}
 		blob, err := json.Marshal(s)
 		if err != nil {
 			return err
 		}
 
-		if err := st.db.Append(dbutils.CliqueBucket, dbutils.BlockBodyKey(number, hash), blob); err != nil {
+		if err := st.db.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(number, hash), blob); err != nil {
 			log.Error("can't store a snapshot", "block", number, "hash", hash, "err", err)
 			return err
 		}
@@ -503,7 +511,7 @@ func (st *storage) saveSnaps(snaps []*snapObj, isSorted bool) {
 			continue
 		}
 
-		if err := batch.Append(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), blob); err != nil {
+		if err := batch.Put(dbutils.CliqueBucket, dbutils.BlockBodyKey(snap.number, snap.hash), blob); err != nil {
 			log.Error("can't store a snapshot", "block", snap.number, "hash", snap.hash, "err", err)
 		}
 	}
