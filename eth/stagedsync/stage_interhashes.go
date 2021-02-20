@@ -154,22 +154,10 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 			return next(k, k, value)
 		}
 
-		if err := accTrieCollector.Load(logPrefix, db,
-			dbutils.TrieOfAccountsBucket,
-			load,
-			etl.TransformArgs{
-				Quit: quit,
-			},
-		); err != nil {
+		if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
-		if err := stTrieCollector.Load(logPrefix, db,
-			dbutils.TrieOfStorageBucket,
-			load,
-			etl.TransformArgs{
-				Quit: quit,
-			},
-		); err != nil {
+		if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
 	}
@@ -354,9 +342,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	p.TempDir = tmpdir
 	rl := trie.NewRetainList(0)
 	collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		//if bytes.HasPrefix(k, common.FromHex("787e45d6d33e9607a1922d74fbb2960c8446c640de964326c7be9d53514ade3d0000000000000001")) {
-		//	fmt.Printf("excl: %x,%t\n", k, len(v) == 0)
-		//}
 		rl.AddKeyWithMarker(k, len(v) == 0)
 		return nil
 	}
@@ -424,26 +409,14 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 			"root hash", hash.Hex(),
 			"gen AccTrie", generationIHTook,
 		)
-		load := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		load := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error { // hack to prevent use of APPEND
 			return next(k, k, value)
 		}
 
-		if err := accTrieCollector.Load(logPrefix, db,
-			dbutils.TrieOfAccountsBucket,
-			load,
-			etl.TransformArgs{
-				Quit: quit,
-			},
-		); err != nil {
+		if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
-		if err := stTrieCollector.Load(logPrefix, db,
-			dbutils.TrieOfStorageBucket,
-			load,
-			etl.TransformArgs{
-				Quit: quit,
-			},
-		); err != nil {
+		if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
 	}
@@ -499,7 +472,6 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	p.TempDir = tmpdir
 	rl := trie.NewRetainList(0)
 	collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		//fmt.Printf("excl: %x,%t\n", k, len(v) == 0)
 		rl.AddKeyWithMarker(k, len(v) == 0)
 		return nil
 	}
@@ -571,22 +543,10 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		load := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return next(k, k, value)
 		}
-		if err := accTrieCollector.Load(logPrefix, db,
-			dbutils.TrieOfAccountsBucket,
-			load,
-			etl.TransformArgs{
-				Quit: quit,
-			},
-		); err != nil {
+		if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
-		if err := stTrieCollector.Load(logPrefix, db,
-			dbutils.TrieOfStorageBucket,
-			load,
-			etl.TransformArgs{
-				Quit: quit,
-			},
-		); err != nil {
+		if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
 	}
