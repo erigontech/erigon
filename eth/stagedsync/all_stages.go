@@ -27,18 +27,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						db := world.db
-						if hasTx, ok := world.TX.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-							db = world.TX
-						}
-						return SpawnBlockHashStage(s, db, world.TmpDir, world.QuitCh)
+						return SpawnBlockHashStage(s, world.db, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						db := world.db
-						if hasTx, ok := world.TX.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-							db = world.TX
-						}
-						return u.Done(db)
+						return u.Done(world.db)
 					},
 				}
 			},
@@ -50,21 +42,13 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						db := world.db
-						if hasTx, ok := world.TX.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-							db = world.TX
-						}
-						if _, err := core.InsertBodyChain("logPrefix", context.TODO(), db, blocks, true /* newCanonical */); err != nil {
+						if _, err := core.InsertBodyChain("logPrefix", context.TODO(), world.TX, blocks, true /* newCanonical */); err != nil {
 							return err
 						}
-						return s.DoneAndUpdate(db, blockNum)
+						return s.DoneAndUpdate(world.TX, blockNum)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						db := world.db
-						if hasTx, ok := world.TX.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-							db = world.TX
-						}
-						return u.Done(db)
+						return u.Done(world.db)
 					},
 				}
 			},
@@ -335,7 +319,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	}
 	stageBuilders := createStageBuilders([]*types.Block{}, newHead, checkRoot)
 	cc := &core.TinyChainContext{}
-	cc.SetDB(db)
+	cc.SetDB(nil)
 	cc.SetEngine(engine)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
 	var cache *shards.StateCache // Turn off cache for now
@@ -406,7 +390,6 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	defer tx.Rollback()
 	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers)
 	if err != nil {
-		panic(err)
 		return false, err
 	}
 	if !newCanonical {
@@ -418,18 +401,13 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		}
 		return false, nil // No change of the chain
 	}
-
 	blockNum := blocks[len(blocks)-1].Number().Uint64()
 	if err = stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
 		return false, err
 	}
 	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)
-
-	// create empty TxDb object, it's not usable before .Begin() call which will use this object
-	// It allows inject tx object to stages now, define rollback now,
-	// but call .Begin() after hearer/body download stages
 	cc := &core.TinyChainContext{}
-	cc.SetDB(tx)
+	cc.SetDB(nil)
 	cc.SetEngine(engine)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
 	var cache *shards.StateCache // Turn off cache for now
@@ -438,7 +416,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		config,
 		cc,
 		vmConfig,
-		db,
+		tx,
 		tx,
 		"1",
 		storageMode,
@@ -456,8 +434,8 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		return false, err2
 	}
 
-	// begin tx at stage right after head/body download Or at first unwind stage
-	// it's temporary solution
+	//begin tx at stage right after head/body download Or at first unwind stage
+	//it's temporary solution
 	//syncState.BeforeStageRun(stages.Senders, func() error {
 	//	var errTx error
 	//	log.Debug("Begin tx")
@@ -491,7 +469,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 			return false, err
 		}
 	}
-	if err = syncState.Run(db, tx); err != nil {
+	if err = syncState.Run(tx, tx); err != nil {
 		panic(err)
 		return false, err
 	}
