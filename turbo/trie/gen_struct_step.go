@@ -267,7 +267,7 @@ func GenStructStep(
 				}
 			}
 
-			if trace && maxLen <= 3 {
+			if true {
 				e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
 			}
 			if retain(curr[:maxLen]) {
