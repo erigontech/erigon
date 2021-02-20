@@ -434,35 +434,6 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		return false, err2
 	}
 
-	//begin tx at stage right after head/body download Or at first unwind stage
-	//it's temporary solution
-	//syncState.BeforeStageRun(stages.Senders, func() error {
-	//	var errTx error
-	//	log.Debug("Begin tx")
-	//	tx, errTx = tx.Begin(context.Background(), ethdb.RW)
-	//	return errTx
-	//})
-	//syncState.OnBeforeUnwind(func(id stages.SyncStage) error {
-	//	if syncState.IsBefore(id, stages.Bodies) || syncState.IsAfter(id, stages.TxPool) {
-	//		return nil
-	//	}
-	//	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-	//		return nil
-	//	}
-	//	var errTx error
-	//	log.Debug("Begin tx")
-	//	tx, errTx = tx.Begin(context.Background(), ethdb.RW)
-	//	return errTx
-	//})
-	//syncState.BeforeStageUnwind(stages.Bodies, func() error {
-	//	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() == nil {
-	//		return nil
-	//	}
-	//	log.Info("Commit cycle")
-	//	_, errCommit := tx.Commit()
-	//	return errCommit
-	//})
-
 	if reorg {
 		if err = syncState.UnwindTo(forkblocknumber, tx); err != nil {
 			return false, err
