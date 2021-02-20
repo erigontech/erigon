@@ -13,7 +13,7 @@ import (
 
 // GetHeaderByNumber implements tg_getHeaderByNumber. Returns a block's header given a block number ignoring the block's transaction and uncle list (may be faster).
 func (api *TgImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockNumber) (*types.Header, error) {
-	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +29,7 @@ func (api *TgImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockN
 
 // GetHeaderByHash implements tg_getHeaderByHash. Returns a block's header given a block's hash.
 func (api *TgImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
-	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}

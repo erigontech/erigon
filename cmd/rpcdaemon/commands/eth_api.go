@@ -128,20 +128,18 @@ func (api *BaseAPI) chainConfigWithGenesis(db ethdb.Database) (*params.ChainConf
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
-	db           ethdb.KV
 	ethBackend   ethdb.Backend
-	dbReader     ethdb.Database
+	db           ethdb.Database
 	chainContext core.ChainContext
 	GasCap       uint64
 	filters      *rpcfilters.Filters
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(db ethdb.KV, dbReader ethdb.Database, eth ethdb.Backend, gascap uint64, filters *rpcfilters.Filters) *APIImpl {
+func NewEthAPI(db ethdb.Database, eth ethdb.Backend, gascap uint64, filters *rpcfilters.Filters) *APIImpl {
 	return &APIImpl{
 		BaseAPI:    &BaseAPI{},
 		db:         db,
-		dbReader:   dbReader,
 		ethBackend: eth,
 		GasCap:     gascap,
 		filters:    filters,
