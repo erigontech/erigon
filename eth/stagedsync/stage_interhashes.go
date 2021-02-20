@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -95,32 +96,9 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 
 	if cache != nil {
 		for i := 0; i < 16; i++ {
-			unfurl := trie.NewRetainList(0)
-			hashCollector := func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-				if len(keyHex) == 0 {
-					return nil
-				}
-				if hashes == nil && rootHash == nil {
-					cache.SetAccountHashDelete(keyHex)
-					return nil
-				}
-				newV := trie.CastTrieNodeValue(hashes, rootHash)
-				cache.SetAccountHashWrite(keyHex, hasState, hasBranch, hasHash, newV)
-				return nil
-			}
-			storageHashCollector := func(accWithInc []byte, keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-				addr, inc := common.BytesToHash(accWithInc[:32]), binary.BigEndian.Uint64(accWithInc[32:])
-				if hashes == nil && rootHash == nil {
-					cache.SetStorageHashDelete(addr, inc, keyHex, hasState, hasBranch, hasHash, nil)
-					return nil
-				}
-				newV := trie.CastTrieNodeValue(hashes, rootHash)
-				cache.SetStorageHashWrite(addr, inc, keyHex, hasState, hasBranch, hasHash, newV)
-				return nil
-			}
+			rl := trie.NewRetainList(0)
 			loader := trie.NewFlatDBTrieLoader(logPrefix)
-			// hashCollector in the line below will collect deletes
-			if err := loader.Reset(unfurl, hashCollector, storageHashCollector, false); err != nil {
+			if err := loader.Reset(rl, accountTrieCollectorForCache(cache), storageTrieCollectorForCache(cache), false); err != nil {
 				return err
 			}
 			_, err := loader.CalcSubTrieRootOnCache(db, []byte{uint8(i)}, cache, quit)
@@ -149,34 +127,8 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 			"root hash", hash.Hex(),
 			"gen AccTrie", generationIHTook,
 		)
-		//_ = cache.DebugPrintAccounts()
 		writes := cache.PrepareWrites()
-
-		newV := make([]byte, 0, 1024)
-		shards.WalkAccountHashesWrites(writes, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			newV = trie.MarshalTrieNodeTyped(hasState, hasBranch, hasHash, h, newV)
-			integrity.AssertSubset(prefix, hasBranch, hasState)
-			integrity.AssertSubset(prefix, hasHash, hasState)
-			if err := db.Put(dbutils.TrieOfAccountsBucket, prefix, newV); err != nil {
-				panic(err)
-			}
-		}, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			if err := db.Delete(dbutils.TrieOfAccountsBucket, prefix, nil); err != nil {
-				panic(err)
-			}
-		})
-		shards.WalkStorageHashesWrites(writes, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			k := trie.StorageKey(addrHash.Bytes(), incarnation, prefix)
-			newV = trie.MarshalTrieNodeTyped(hasState, hasBranch, hasHash, h, newV)
-			if err := db.Put(dbutils.TrieOfStorageBucket, k, newV); err != nil {
-				panic(err)
-			}
-		}, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			k := trie.StorageKey(addrHash.Bytes(), incarnation, prefix)
-			if err := db.Delete(dbutils.TrieOfStorageBucket, k, nil); err != nil {
-				panic(err)
-			}
-		})
+		flushTrieWritesToDB(writes, db)
 		cache.TurnWritesToReads(writes)
 	} else {
 		accTrieCollector, accTrieCollectorFunc := accountTrieCollector(tmpdir)
@@ -417,31 +369,8 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 
 	if cache != nil {
 		for i := 0; i < 16; i++ {
-			hashCollector := func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-				if len(keyHex) == 0 {
-					return nil
-				}
-				if hashes == nil && rootHash == nil {
-					cache.SetAccountHashDelete(keyHex)
-					return nil
-				}
-				newV := trie.CastTrieNodeValue(hashes, rootHash)
-				cache.SetAccountHashWrite(keyHex, hasState, hasBranch, hasHash, newV)
-				return nil
-			}
-			storageHashCollector := func(accWithInc []byte, keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-				addr, inc := common.BytesToHash(accWithInc[:32]), binary.BigEndian.Uint64(accWithInc[32:])
-				if hashes == nil && rootHash == nil {
-					cache.SetStorageHashDelete(addr, inc, keyHex, hasState, hasBranch, hasHash, nil)
-					return nil
-				}
-				newV := trie.CastTrieNodeValue(hashes, rootHash)
-				cache.SetStorageHashWrite(addr, inc, keyHex, hasState, hasBranch, hasHash, newV)
-				return nil
-			}
-			// hashCollector in the line below will collect deletes
 			loader := trie.NewFlatDBTrieLoader(logPrefix)
-			if err := loader.Reset(rl, hashCollector, storageHashCollector, false); err != nil {
+			if err := loader.Reset(rl, accountTrieCollectorForCache(cache), storageTrieCollectorForCache(cache), false); err != nil {
 				return err
 			}
 			_, err := loader.CalcSubTrieRootOnCache(db, []byte{uint8(i)}, cache, quit)
@@ -473,29 +402,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 		)
 
 		writes := cache.PrepareWrites()
-		newV := make([]byte, 0, 1024)
-		shards.WalkAccountHashesWrites(writes, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			newV = trie.MarshalTrieNodeTyped(hasState, hasBranch, hasHash, h, newV)
-			if err := db.Put(dbutils.TrieOfAccountsBucket, prefix, newV); err != nil {
-				panic(err)
-			}
-		}, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			if err := db.Delete(dbutils.TrieOfAccountsBucket, prefix, nil); err != nil {
-				panic(err)
-			}
-		})
-		shards.WalkStorageHashesWrites(writes, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			k := trie.StorageKey(addrHash.Bytes(), incarnation, prefix)
-			newV = trie.MarshalTrieNodeTyped(hasState, hasBranch, hasHash, h, newV)
-			if err := db.Put(dbutils.TrieOfStorageBucket, k, newV); err != nil {
-				panic(err)
-			}
-		}, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			k := trie.StorageKey(addrHash.Bytes(), incarnation, prefix)
-			if err := db.Delete(dbutils.TrieOfStorageBucket, k, nil); err != nil {
-				panic(err)
-			}
-		})
+		flushTrieWritesToDB(writes, db)
 		cache.TurnWritesToReads(writes)
 	} else {
 		accTrieCollector, accTrieCollectorFunc := accountTrieCollector(tmpdir)
@@ -605,31 +512,8 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 
 	if cache != nil {
 		for i := 0; i < 16; i++ {
-			hashCollector := func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-				if len(keyHex) == 0 {
-					return nil
-				}
-				if hashes == nil && rootHash == nil {
-					cache.SetAccountHashDelete(keyHex)
-					return nil
-				}
-				newV := trie.CastTrieNodeValue(hashes, rootHash)
-				cache.SetAccountHashWrite(keyHex, hasState, hasBranch, hasHash, newV)
-				return nil
-			}
-			storageHashCollector := func(accWithInc []byte, keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
-				addr, inc := common.BytesToHash(accWithInc[:32]), binary.BigEndian.Uint64(accWithInc[32:])
-				if hashes == nil && rootHash == nil {
-					cache.SetStorageHashDelete(addr, inc, keyHex, hasState, hasBranch, hasHash, nil)
-					return nil
-				}
-				newV := trie.CastTrieNodeValue(hashes, rootHash)
-				cache.SetStorageHashWrite(addr, inc, keyHex, hasState, hasBranch, hasHash, newV)
-				return nil
-			}
 			loader := trie.NewFlatDBTrieLoader(logPrefix)
-			// hashCollector in the line below will collect deletes
-			if err := loader.Reset(rl, hashCollector, storageHashCollector, false); err != nil {
+			if err := loader.Reset(rl, accountTrieCollectorForCache(cache), storageTrieCollectorForCache(cache), false); err != nil {
 				return err
 			}
 			_, err := loader.CalcSubTrieRootOnCache(db, []byte{uint8(i)}, cache, quit)
@@ -661,29 +545,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		)
 
 		writes := cache.PrepareWrites()
-		newV := make([]byte, 0, 1024)
-		shards.WalkAccountHashesWrites(writes, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			newV = trie.MarshalTrieNodeTyped(hasState, hasBranch, hasHash, h, newV)
-			if err := db.Put(dbutils.TrieOfAccountsBucket, prefix, newV); err != nil {
-				panic(err)
-			}
-		}, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			if err := db.Delete(dbutils.TrieOfAccountsBucket, prefix, nil); err != nil {
-				panic(err)
-			}
-		})
-		shards.WalkStorageHashesWrites(writes, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			k := trie.StorageKey(addrHash.Bytes(), incarnation, prefix)
-			newV = trie.MarshalTrieNodeTyped(hasState, hasBranch, hasHash, h, newV)
-			if err := db.Put(dbutils.TrieOfStorageBucket, k, newV); err != nil {
-				panic(err)
-			}
-		}, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
-			k := trie.StorageKey(addrHash.Bytes(), incarnation, prefix)
-			if err := db.Delete(dbutils.TrieOfStorageBucket, k, nil); err != nil {
-				panic(err)
-			}
-		})
+		flushTrieWritesToDB(writes, db)
 		cache.TurnWritesToReads(writes)
 
 	} else {
@@ -799,6 +661,34 @@ func cacheWarmUpIfNeed(db ethdb.Database, cache *shards.StateCache) error {
 	return nil
 }
 
+func accountTrieCollectorForCache(cache *shards.StateCache) trie.HashCollector2 {
+	return func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
+		if len(keyHex) == 0 {
+			return nil
+		}
+		if hashes == nil && rootHash == nil {
+			cache.SetAccountHashDelete(keyHex)
+			return nil
+		}
+		newV := trie.CastTrieNodeValue(hashes, rootHash)
+		cache.SetAccountHashWrite(keyHex, hasState, hasBranch, hasHash, newV)
+		return nil
+	}
+}
+
+func storageTrieCollectorForCache(cache *shards.StateCache) trie.StorageHashCollector2 {
+	return func(accWithInc []byte, keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
+		addr, inc := common.BytesToHash(accWithInc[:32]), binary.BigEndian.Uint64(accWithInc[32:])
+		if hashes == nil && rootHash == nil {
+			cache.SetStorageHashDelete(addr, inc, keyHex, hasState, hasBranch, hasHash, nil)
+			return nil
+		}
+		newV := trie.CastTrieNodeValue(hashes, rootHash)
+		cache.SetStorageHashWrite(addr, inc, keyHex, hasState, hasBranch, hasHash, newV)
+		return nil
+	}
+}
+
 func accountTrieCollector(tmpdir string) (*etl.Collector, trie.HashCollector2) {
 	collector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	newV := make([]byte, 0, 1024)
@@ -836,4 +726,32 @@ func storageTrieCollector(tmpdir string) (*etl.Collector, trie.StorageHashCollec
 		newV = trie.MarshalTrieNode(hasState, hasBranch, hasHash, hashes, rootHash, newV)
 		return storageIHCollector.Collect(newK, newV)
 	}
+}
+
+func flushTrieWritesToDB(writes [5]*btree.BTree, db ethdb.Database) {
+	newV := make([]byte, 0, 1024)
+	shards.WalkAccountHashesWrites(writes, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
+		newV = trie.MarshalTrieNodeTyped(hasState, hasBranch, hasHash, h, newV)
+		integrity.AssertSubset(prefix, hasBranch, hasState)
+		integrity.AssertSubset(prefix, hasHash, hasState)
+		if err := db.Put(dbutils.TrieOfAccountsBucket, prefix, newV); err != nil {
+			panic(err)
+		}
+	}, func(prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
+		if err := db.Delete(dbutils.TrieOfAccountsBucket, prefix, nil); err != nil {
+			panic(err)
+		}
+	})
+	shards.WalkStorageHashesWrites(writes, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
+		k := trie.StorageKey(addrHash.Bytes(), incarnation, prefix)
+		newV = trie.MarshalTrieNodeTyped(hasState, hasBranch, hasHash, h, newV)
+		if err := db.Put(dbutils.TrieOfStorageBucket, k, newV); err != nil {
+			panic(err)
+		}
+	}, func(addrHash common.Hash, incarnation uint64, prefix []byte, hasState, hasBranch, hasHash uint16, h []common.Hash) {
+		k := trie.StorageKey(addrHash.Bytes(), incarnation, prefix)
+		if err := db.Delete(dbutils.TrieOfStorageBucket, k, nil); err != nil {
+			panic(err)
+		}
+	})
 }
