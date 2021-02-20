@@ -202,23 +202,27 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 			return err
 		}
 		if !storage {
-			value, err := p.db.Get(dbutils.PlainStateBucket, k)
+			newValue, err := p.db.Get(dbutils.PlainStateBucket, k)
 			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 				return err
 			}
-			if len(value) == 0 && len(v) > 0 { // self-destructed
-				deletedAccounts = append(deletedAccounts, newK)
-			} else if len(value) > 0 && len(v) > 0 { // turns incarnation to zero
-				var acc accounts.Account
-				if err := acc.DecodeForStorage(v); err != nil {
+			if len(v) > 0 {
+				var oldAccount accounts.Account
+				if err := oldAccount.DecodeForStorage(v); err != nil {
 					return err
 				}
-				var dbAcc accounts.Account
-				if err := dbAcc.DecodeForStorage(value); err != nil {
-					return err
-				}
-				if dbAcc.Incarnation == 0 && acc.Incarnation > 0 {
-					deletedAccounts = append(deletedAccounts, newK)
+				if oldAccount.Incarnation > 0 {
+					if len(newValue) == 0 { // self-destructed
+						deletedAccounts = append(deletedAccounts, newK)
+					} else { // turns incarnation to zero
+						var newAccount accounts.Account
+						if err := newAccount.DecodeForStorage(newValue); err != nil {
+							return err
+						}
+						if newAccount.Incarnation < oldAccount.Incarnation {
+							deletedAccounts = append(deletedAccounts, newK)
+						}
+					}
 				}
 			}
 		}
@@ -281,23 +285,30 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 		if err != nil {
 			return err
 		}
-		if !storage {
-			if len(v) == 0 { // self-destructed
-				deletedAccounts = append(deletedAccounts, newK)
-			} else {
-				var acc accounts.Account
-				if err = acc.DecodeForStorage(v); err != nil {
-					return err
-				}
-				if acc.Incarnation == 0 {
-					deletedAccounts = append(deletedAccounts, newK)
-				}
-			}
-		}
 		// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
 		value, err := p.db.Get(dbutils.PlainStateBucket, k)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return err
+		}
+
+		if !storage && len(value) > 0 {
+			var oldAccount accounts.Account
+			if err = oldAccount.DecodeForStorage(value); err != nil {
+				return err
+			}
+			if oldAccount.Incarnation > 0 {
+				if len(v) == 0 { // self-destructed
+					deletedAccounts = append(deletedAccounts, newK)
+				} else {
+					var newAccount accounts.Account
+					if err = newAccount.DecodeForStorage(v); err != nil {
+						return err
+					}
+					if newAccount.Incarnation > oldAccount.Incarnation {
+						deletedAccounts = append(deletedAccounts, newK)
+					}
+				}
+			}
 		}
 		return next(k, newK, value)
 	}

@@ -82,7 +82,7 @@ var (
 	//value - code hash
 	ContractCodeBucket = "contractCode"
 
-	// Incarnations for deleted accounts
+	// IncarnationMapBucket for deleted accounts
 	//key - address
 	//value - incarnation of account when it was last deleted
 	IncarnationMapBucket = "incarnationMap"
