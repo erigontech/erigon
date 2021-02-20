@@ -36,6 +36,10 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, cache *shards.StateCa
 
 	log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
+		db.Walk(dbutils.PlainStateBucket, nil, 0, func(k, v []byte) (bool, error) {
+			fmt.Printf("plain: %x,%x\n", k, v)
+			return true, nil
+		})
 		if err := PromoteHashedStateCleanly(logPrefix, db, tmpdir, quit); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
