@@ -126,9 +126,9 @@ func FromDBFormat(addrSize int) func(dbKey, dbValue []byte) (blockN uint64, k, v
 			copy(k, dbKey)
 			copy(k[len(dbKey):], dbValue[:common.HashLength])
 			v = dbValue[common.HashLength:]
-			//if len(v) == 0 {
-			//	v = nil
-			//}
+			if len(v) == 0 {
+				v = nil
+			}
 		}
 
 		return blockN, k, v
