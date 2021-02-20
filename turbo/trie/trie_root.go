@@ -362,16 +362,16 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	//r.traceIf("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb", "00")
-	//if storageKey == nil {
-	//	//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
-	//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-	//	//}
-	//} else {
-	//	//if bytes.HasPrefix(accountKey, common.FromHex("876f5a0f54b30254d2bad26bb5a8da19cbe748fd033004095d9c96c8e667376b")) && bytes.HasPrefix(storageKey, common.FromHex("")) {
-	//	//fmt.Printf("%x\n", storageKey)
-	//	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
-	//	//}
-	//}
+	if storageKey == nil {
+		//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
+		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+		//}
+	} else {
+		//if bytes.HasPrefix(accountKey, common.FromHex("876f5a0f54b30254d2bad26bb5a8da19cbe748fd033004095d9c96c8e667376b")) && bytes.HasPrefix(storageKey, common.FromHex("")) {
+		//fmt.Printf("%x\n", storageKey)
+		fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
+		//}
+	}
 
 	switch itemType {
 	case StorageStreamItem:
@@ -1146,9 +1146,6 @@ func (c *StorageTrieCursor) _preOrderTraversalStep() error {
 func (c *StorageTrieCursor) _preOrderTraversalStepNoInDepth() error {
 	ok := c._nextSiblingInMem() || c._nextSiblingOfParentInMem()
 	if ok {
-		//if bytes.HasPrefix(c.accWithInc, common.FromHex("71fe2579f4a5be157546549260f5539cc9445fa20674a8bb637049f43fc1eac20000000000000001")) && bytes.HasPrefix(c.k[c.lvl], common.FromHex("")) {
-		//	fmt.Printf("_nextSibling1: %d,%x,%b,%x\n", c.lvl, c.k[c.lvl], c.hasBranch[c.lvl], c.childID[c.lvl])
-		//}
 		return nil
 	}
 	err := c._nextSiblingInDB()
