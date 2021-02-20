@@ -337,9 +337,7 @@ func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 		if err != nil {
 			return err
 		}
-		if bytes.HasPrefix(k, common.FromHex("1000000000000000000000000000000000000007")) {
-			fmt.Printf("cs: %x,%x\n", newK, v)
-		}
+		fmt.Printf("cs5: %x,%x\n", newK, v)
 		return next(dbKey, newK, v)
 	}
 }
@@ -352,9 +350,7 @@ func getUnwindExtractAccounts(db ethdb.Getter, changeSetBucket string) etl.Extra
 		if err != nil {
 			return err
 		}
-		if bytes.HasPrefix(k, common.FromHex("1000000000000000000000000000000000000007")) {
-			fmt.Printf("cs: %x,%x\n", newK, v)
-		}
+		fmt.Printf("cs6: %x,%x\n", newK, v)
 		if len(v) == 0 {
 			return next(dbKey, newK, v)
 		}
