@@ -155,6 +155,10 @@ func keyTransformExtractStorage(transformKey func([]byte) ([]byte, error)) etl.E
 		if err != nil {
 			return err
 		}
+
+		if bytes.HasPrefix(newK, common.FromHex("d3a65b892403c89048818ede62c76c424a63eb22a174018d90253ea3e3231bbc")) {
+			fmt.Printf("cs: %x,%x\n", newK, v)
+		}
 		return next(k, newK, v)
 	}
 }

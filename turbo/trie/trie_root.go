@@ -244,6 +244,9 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 			if err = l.accountValue.DecodeForStorage(v); err != nil {
 				return EmptyRoot, fmt.Errorf("fail DecodeForStorage: %w", err)
 			}
+			if bytes.HasPrefix(k, common.FromHex("d3a65b892403c89048818ede62c76c424a63eb22a174018d90253ea3e3231bbc")) {
+				fmt.Printf("alex: %x,%d\n", k, l.accountValue.Incarnation)
+			}
 			if err = l.receiver.Receive(AccountStreamItem, kHex, nil, &l.accountValue, nil, nil, false, 0); err != nil {
 				return EmptyRoot, err
 			}
@@ -268,6 +271,9 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					hexutil.DecompressNibbles(vS[:32], &l.kHexS)
 					if keyIsBefore(ihKS, l.kHexS) { // read until next AccTrie
 						break
+					}
+					if bytes.HasPrefix(kS, common.FromHex("d3a65b892403c89048818ede62c76c424a63eb22a174018d90253ea3e3231bbc0000000000000001")) {
+						fmt.Printf("alex2: %x,%x\n", kS, vS)
 					}
 					if err = l.receiver.Receive(StorageStreamItem, accWithInc, l.kHexS, nil, vS[32:], nil, false, 0); err != nil {
 						return EmptyRoot, err
