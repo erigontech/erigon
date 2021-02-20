@@ -529,10 +529,14 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 }
 
 func (tx *MdbxTx) ClearBucket(bucket string) error {
-	if err := tx.dropEvenIfBucketIsNotDeprecated(bucket); err != nil {
+	dbi := tx.db.buckets[bucket].DBI
+	if dbi == NonExistingDBI {
+		return nil
+	}
+	if err := tx.tx.Drop(mdbx.DBI(dbi), false); err != nil {
 		return err
 	}
-	return tx.CreateBucket(bucket)
+	return nil
 }
 
 func (tx *MdbxTx) DropBucket(bucket string) error {

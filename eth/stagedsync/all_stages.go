@@ -465,12 +465,10 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 
 	if reorg {
 		if err = syncState.UnwindTo(forkblocknumber, tx); err != nil {
-			panic(err)
 			return false, err
 		}
 	}
 	if err = syncState.Run(tx, tx); err != nil {
-		panic(err)
 		return false, err
 	}
 	if _, err1 = tx.Commit(); err1 != nil {
