@@ -135,6 +135,8 @@ func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.Extr
 
 func keyTransformExtractAcc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
 	return func(k, v []byte, next etl.ExtractNextFunc) error {
+		fmt.Printf("cs0: %x,%x\n", k, v)
+
 		if len(k) != 20 {
 			return nil
 		}
@@ -156,7 +158,7 @@ func keyTransformExtractStorage(transformKey func([]byte) ([]byte, error)) etl.E
 		if err != nil {
 			return err
 		}
-		fmt.Printf("cs: %x,%x,%x\n", newK, k, v)
+		fmt.Printf("cs1: %x,%x,%x\n", newK, k, v)
 		return next(k, newK, v)
 	}
 }
