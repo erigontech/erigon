@@ -314,6 +314,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 			return EmptyRoot, err
 		}
 	}
+	fmt.Printf("root: %x\n", l.receiver.Root())
 	return l.receiver.Root(), nil
 }
 
