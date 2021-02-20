@@ -142,7 +142,7 @@ func keyTransformExtractAcc(transformKey func([]byte) ([]byte, error)) etl.Extra
 		if err != nil {
 			return err
 		}
-		fmt.Printf("cs: %x,%x,%x\n", newK, k, v)
+		fmt.Printf("cs1: %x,%x,%x\n", newK, k, v)
 		return next(k, newK, v)
 	}
 }
@@ -247,6 +247,7 @@ func getExtractFunc(db ethdb.Getter, cache *shards.StateCache, changeSetBucket s
 		if err != nil {
 			return err
 		}
+		fmt.Printf("cs4: %x,%x\n", newK, value)
 
 		if cache != nil {
 			if len(k) == 20 {
