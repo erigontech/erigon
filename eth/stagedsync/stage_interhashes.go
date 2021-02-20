@@ -58,6 +58,11 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 		}
 	}
 
+	tx.Walk(dbutils.HashedStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
+		fmt.Printf("hs: %x,%x\n", k, v)
+		return true, nil
+	})
+
 	hash, err := rawdb.ReadCanonicalHash(tx, to)
 	if err != nil {
 		return err
@@ -95,7 +100,6 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 	_ = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.TrieOfAccountsBucket, dbutils.TrieOfStorageBucket)
 
 	if cache != nil {
-		panic(1)
 		for i := 0; i < 16; i++ {
 			rl := trie.NewRetainList(0)
 			loader := trie.NewFlatDBTrieLoader(logPrefix)
@@ -145,7 +149,6 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 		}
 		generationIHTook := time.Since(t)
 		if checkRoot && hash != expectedRootHash {
-			panic(1)
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
 		log.Debug("Collection finished",
@@ -366,8 +369,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 	}
 
 	if cache != nil {
-		panic(1)
-
 		for i := 0; i < 16; i++ {
 			loader := trie.NewFlatDBTrieLoader(logPrefix)
 			if err := loader.Reset(rl, accountTrieCollectorForCache(cache), storageTrieCollectorForCache(cache), false); err != nil {
@@ -461,6 +462,10 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Datab
 		defer tx.Rollback()
 	}
 
+	tx.Walk(dbutils.HashedStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
+		fmt.Printf("hs: %x,%x\n", k, v)
+		return true, nil
+	})
 	if cache != nil {
 		if err = cacheWarmUpIfNeed(tx, cache); err != nil {
 			return err
@@ -498,7 +503,6 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	}
 
 	if cache != nil {
-		panic(1)
 		for i := 0; i < 16; i++ {
 			loader := trie.NewFlatDBTrieLoader(logPrefix)
 			if err := loader.Reset(rl, accountTrieCollectorForCache(cache), storageTrieCollectorForCache(cache), false); err != nil {
@@ -550,8 +554,6 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		}
 		generationIHTook := time.Since(t)
 		if hash != expectedRootHash {
-			panic(1)
-
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
 		log.Info(fmt.Sprintf("[%s] Collection finished", logPrefix),
