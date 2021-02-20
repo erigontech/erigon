@@ -117,7 +117,7 @@ func TestIHCursor(t *testing.T) {
 	require.Equal(common.FromHex("30e00030"), ih.FirstNotCoveredPrefix())
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("05000100"), k)
-	require.True(ih.SkipState)
+	require.False(ih.SkipState)
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("05000f00"), k)
 	require.True(ih.SkipState)
