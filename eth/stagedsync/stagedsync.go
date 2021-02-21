@@ -87,7 +87,7 @@ func (stagedSync *StagedSync) Prepare(
 			TX:                    tx,
 			pid:                   pid,
 			storageMode:           storageMode,
-			tmpdir:                tmpdir,
+			TmpDir:                tmpdir,
 			QuitCh:                quitCh,
 			headersFetchers:       headersFetchers,
 			txPool:                txPool,

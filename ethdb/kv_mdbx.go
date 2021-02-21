@@ -245,6 +245,11 @@ type MdbxKV struct {
 	wg      *sync.WaitGroup
 }
 
+func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
+	opts := db.opts
+	return NewObjectDatabase(NewMDBX().Set(opts).MustOpen())
+}
+
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
@@ -268,11 +273,6 @@ func (db *MdbxKV) Close() {
 		}
 	}
 
-}
-
-func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
-	opts := db.opts
-	return NewObjectDatabase(NewMDBX().Set(opts).MustOpen())
 }
 
 func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
@@ -355,35 +355,6 @@ func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {
 	return chooseComparator2(tx.tx, mdbx.DBI(b.DBI), b)
 }
 
-func chooseComparator2(tx *mdbx.Txn, dbi mdbx.DBI, cnfCopy dbutils.BucketConfigItem) dbutils.CmpFunc {
-	if cnfCopy.CustomComparator == dbutils.DefaultCmp && cnfCopy.CustomDupComparator == dbutils.DefaultCmp {
-		if cnfCopy.Flags&mdbx.DupSort == 0 {
-			return dbutils.DefaultCmpFunc
-		}
-		return dbutils.DefaultDupCmpFunc
-	}
-	if cnfCopy.Flags&mdbx.DupSort == 0 {
-		return CustomCmpFunc2(tx, dbi)
-	}
-	return CustomDupCmpFunc2(tx, dbi)
-}
-
-func CustomCmpFunc2(tx *mdbx.Txn, dbi mdbx.DBI) dbutils.CmpFunc {
-	return func(k1, k2, v1, v2 []byte) int {
-		return tx.Cmp(dbi, k1, k2)
-	}
-}
-
-func CustomDupCmpFunc2(tx *mdbx.Txn, dbi mdbx.DBI) dbutils.CmpFunc {
-	return func(k1, k2, v1, v2 []byte) int {
-		cmp := tx.Cmp(dbi, k1, k2)
-		if cmp == 0 {
-			cmp = tx.DCmp(dbi, v1, v2)
-		}
-		return cmp
-	}
-}
-
 // Cmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
 func (tx *MdbxTx) Cmp(bucket string, a, b []byte) int {
 	return tx.tx.Cmp(mdbx.DBI(tx.db.buckets[bucket].DBI), a, b)
@@ -392,35 +363,6 @@ func (tx *MdbxTx) Cmp(bucket string, a, b []byte) int {
 // DCmp - this func follow bytes.Compare return style: The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
 func (tx *MdbxTx) DCmp(bucket string, a, b []byte) int {
 	return tx.tx.DCmp(mdbx.DBI(tx.db.buckets[bucket].DBI), a, b)
-}
-
-func (tx *MdbxTx) Sequence(bucket string, amount uint64) (uint64, error) {
-	// non-native for now
-	// return tx.tx.Sequence(mdbx.DBI(tx.db.buckets[bucket].DBI), amount)
-
-	c := tx.Cursor(dbutils.Sequence)
-	defer c.Close()
-	_, v, err := c.SeekExact([]byte(bucket))
-	if err != nil && !mdbx.IsNotFound(err) {
-		return 0, err
-	}
-
-	var currentV uint64 = 0
-	if len(v) > 0 {
-		currentV = binary.BigEndian.Uint64(v)
-	}
-
-	if amount == 0 {
-		return currentV, nil
-	}
-
-	newVBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
-	err = c.Put([]byte(bucket), newVBytes)
-	if err != nil {
-		return 0, err
-	}
-	return currentV, nil
 }
 
 // All buckets stored as keys of un-named bucket
@@ -531,6 +473,35 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 
 	tx.db.buckets[name] = cnfCopy
 	return nil
+}
+
+func chooseComparator2(tx *mdbx.Txn, dbi mdbx.DBI, cnfCopy dbutils.BucketConfigItem) dbutils.CmpFunc {
+	if cnfCopy.CustomComparator == dbutils.DefaultCmp && cnfCopy.CustomDupComparator == dbutils.DefaultCmp {
+		if cnfCopy.Flags&mdbx.DupSort == 0 {
+			return dbutils.DefaultCmpFunc
+		}
+		return dbutils.DefaultDupCmpFunc
+	}
+	if cnfCopy.Flags&mdbx.DupSort == 0 {
+		return CustomCmpFunc2(tx, dbi)
+	}
+	return CustomDupCmpFunc2(tx, dbi)
+}
+
+func CustomCmpFunc2(tx *mdbx.Txn, dbi mdbx.DBI) dbutils.CmpFunc {
+	return func(k1, k2, v1, v2 []byte) int {
+		return tx.Cmp(dbi, k1, k2)
+	}
+}
+
+func CustomDupCmpFunc2(tx *mdbx.Txn, dbi mdbx.DBI) dbutils.CmpFunc {
+	return func(k1, k2, v1, v2 []byte) int {
+		cmp := tx.Cmp(dbi, k1, k2)
+		if cmp == 0 {
+			cmp = tx.DCmp(dbi, v1, v2)
+		}
+		return cmp
+	}
 }
 
 func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
@@ -743,6 +714,35 @@ func (tx *MdbxTx) HasOne(bucket string, key []byte) (bool, error) {
 	}
 }
 
+func (tx *MdbxTx) Sequence(bucket string, amount uint64) (uint64, error) {
+	// non-native for now
+	// return tx.tx.Sequence(mdbx.DBI(tx.db.buckets[bucket].DBI), amount)
+
+	c := tx.Cursor(dbutils.Sequence)
+	defer c.Close()
+	_, v, err := c.SeekExact([]byte(bucket))
+	if err != nil && !mdbx.IsNotFound(err) {
+		return 0, err
+	}
+
+	var currentV uint64 = 0
+	if len(v) > 0 {
+		currentV = binary.BigEndian.Uint64(v)
+	}
+
+	if amount == 0 {
+		return currentV, nil
+	}
+
+	newVBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
+	err = c.Put([]byte(bucket), newVBytes)
+	if err != nil {
+		return 0, err
+	}
+	return currentV, nil
+}
+
 func (tx *MdbxTx) BucketSize(name string) (uint64, error) {
 	st, err := tx.BucketStat(name)
 	if err != nil {
@@ -937,6 +937,13 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 		}
 		if c.prefix != nil && !bytes.HasPrefix(k, c.prefix) {
 			k, v = nil, nil
+		}
+
+		if len(k) == to {
+			k2 := make([]byte, 0, len(k)+from-to)
+			k2 = append(append(k2, k...), v[:from-to]...)
+			v = v[from-to:]
+			k = k2
 		}
 		return k, v, nil
 	}
@@ -1188,6 +1195,7 @@ func (c *MdbxCursor) Put(key []byte, value []byte) error {
 			return err
 		}
 	}
+
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion {
 		if err := c.putDupSort(key, value); err != nil {

@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -50,6 +49,9 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.Database) (headHeight uint64, head
 	headTd, err = rawdb.ReadTd(db, headHash, headHeight)
 	if err != nil {
 		return 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %w", headHeight, headHash, headTd)
+	}
+	if headTd == nil {
+		headTd = new(big.Int)
 	}
 	return headHeight, headHash, headTd, nil
 }
@@ -141,7 +143,7 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 }
 
 // DeliverBody takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(bodies []*eth.BlockBody) (int, int) {
+func (bd *BodyDownload) DeliverBodies(bodies []*types.Body) (int, int) {
 	bd.lock.Lock()
 	defer bd.lock.Unlock()
 	reqMap := make(map[uint64]*BodyRequest)

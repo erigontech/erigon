@@ -311,6 +311,12 @@ func (s *State) UnwindStage(unwind *UnwindState, db ethdb.GetterPutter, tx ethdb
 	return nil
 }
 
+func (s *State) DisableAllStages() {
+	for i := range s.stages {
+		s.stages[i].Disabled = true
+	}
+}
+
 func (s *State) DisableStages(ids ...stages.SyncStage) {
 	for i := range s.stages {
 		for _, id := range ids {

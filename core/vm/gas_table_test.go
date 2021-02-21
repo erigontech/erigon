@@ -103,11 +103,11 @@ func TestEIP2200(t *testing.T) {
 
 			vmctx := Context{
 				CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
-				Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int) {},
+				Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {},
 			}
 			vmenv := NewEVM(vmctx, state, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}})
 
-			_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int))
+			_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}

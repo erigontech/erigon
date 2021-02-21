@@ -1,12 +1,15 @@
 package stagedsync
 
 import (
+	"context"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
@@ -18,22 +21,38 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 	return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
 }
 
-func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, tmpdir string, quit <-chan struct{}) error {
-	headHash := rawdb.ReadHeadHeaderHash(stateDB)
-	headNumber := rawdb.ReadHeaderNumber(stateDB, headHash)
-	if s.BlockNumber == *headNumber {
+func SpawnBlockHashStage(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
+	var tx ethdb.DbWithPendingMutations
+	var useExternalTx bool
+	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		tx = db.(ethdb.DbWithPendingMutations)
+		useExternalTx = true
+	} else {
+		var err error
+		tx, err = db.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		return fmt.Errorf("getting headers progress: %w", err)
+	}
+	headHash := rawdb.ReadHeaderByNumber(tx, headNumber).Hash()
+	if s.BlockNumber == headNumber {
 		s.Done()
 		return nil
 	}
 
 	startKey := make([]byte, 8)
 	binary.BigEndian.PutUint64(startKey, s.BlockNumber)
-	endKey := dbutils.HeaderKey(*headNumber, headHash) // Make sure we stop at head
+	endKey := dbutils.HeaderKey(headNumber, headHash) // Make sure we stop at head
 
 	logPrefix := s.state.LogPrefix()
 	if err := etl.Transform(
 		logPrefix,
-		stateDB,
+		tx,
 		dbutils.HeaderPrefix,
 		dbutils.HeaderNumberPrefix,
 		tmpdir,
@@ -47,5 +66,13 @@ func SpawnBlockHashStage(s *StageState, stateDB ethdb.Database, tmpdir string, q
 	); err != nil {
 		return err
 	}
-	return s.DoneAndUpdate(stateDB, *headNumber)
+	if err := s.DoneAndUpdate(tx, headNumber); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if _, err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

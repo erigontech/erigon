@@ -76,9 +76,9 @@ integration:
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
 headers:
-	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers
+	$(GOBUILD) -o $(GOBIN)/headers -tags 'mdbx' ./cmd/headers
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/integration\" to run headers download PoC."
+	@echo "Run \"$(GOBIN)/headers\" to run headers download PoC."
 
 db-tools:
 	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; make clean mdb_stat mdb_copy mdb_dump mdb_load; cp mdb_stat $(GOBIN); cp mdb_copy $(GOBIN); cp mdb_dump $(GOBIN); cp mdb_load $(GOBIN); cd ../../../../..; rm -rf vendor
@@ -141,7 +141,7 @@ lintci: ethdb/mdbx/dist/mdbx-static.o
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.29.0
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.36.0
 
 clean:
 	env GO111MODULE=on go clean -cache

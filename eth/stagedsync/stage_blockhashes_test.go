@@ -23,13 +23,20 @@ func TestBlockHashStage(t *testing.T) {
 	}
 	rawdb.WriteHeader(context.TODO(), db, origin)
 	rawdb.WriteHeadHeaderHash(db, origin.Hash())
+	if err := stages.SaveStageProgress(db, stages.Headers, origin.Number.Uint64()); err != nil {
+		t.Fatalf("setting headers progress: %v", err)
+	}
 	if err := rawdb.WriteCanonicalHash(db, origin.Hash(), 0); err != nil {
-		panic(err)
+		t.Fatalf("writing canonical hash: %v", err)
 	}
 
-	_, _, _, err := InsertHeaderChain("logPrefix", db, headers)
-	assert.NoError(t, err)
-	err = SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, db, "", nil)
+	if _, _, _, err := InsertHeaderChain("logPrefix", db, headers); err != nil {
+		t.Errorf("inserting header chain: %v", err)
+	}
+	if err := stages.SaveStageProgress(db, stages.Headers, headers[len(headers)-1].Number.Uint64()); err != nil {
+		t.Fatalf("setting headers progress: %v", err)
+	}
+	err := SpawnBlockHashStage(&StageState{Stage: stages.BlockHashes}, db, "", nil)
 	assert.NoError(t, err)
 	for _, h := range headers {
 		n := rawdb.ReadHeaderNumber(db, h.Hash())

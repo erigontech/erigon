@@ -8,9 +8,7 @@ option java_package = "io.turbo-geth.db";
 option java_outer_classname = "KV";
 
 // Provides methods to access key-value data
-service KV {
-  rpc Tx(stream Cursor) returns (stream Pair);
-}
+service KV { rpc Tx(stream Cursor) returns (stream Pair); }
 
 enum Op {
   FIRST = 0;
@@ -18,12 +16,10 @@ enum Op {
   SEEK = 2;
   SEEK_BOTH = 3;
   CURRENT = 4;
-  GET_MULTIPLE = 5;
   LAST = 6;
   LAST_DUP = 7;
   NEXT = 8;
   NEXT_DUP = 9;
-  NEXT_MULTIPLE = 10;
   NEXT_NO_DUP = 11;
   PREV = 12;
   PREV_DUP = 13;

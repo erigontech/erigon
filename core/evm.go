@@ -117,8 +117,10 @@ func CanTransfer(db vm.IntraBlockState, addr common.Address, amount *uint256.Int
 }
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
-func Transfer(db vm.IntraBlockState, sender, recipient common.Address, amount *uint256.Int) {
-	db.SubBalance(sender, amount)
+func Transfer(db vm.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) {
+	if !bailout {
+		db.SubBalance(sender, amount)
+	}
 	db.AddBalance(recipient, amount)
 }
 
