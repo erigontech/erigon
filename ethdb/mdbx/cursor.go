@@ -200,7 +200,8 @@ func (c *Cursor) getVal1(setkey []byte, op uint) error {
 	ret := C.mdbxgo_cursor_get1(
 		c._c,
 		(*C.char)(unsafe.Pointer(&setkey[0])), C.size_t(len(setkey)),
-		c.txn.key, c.txn.val,
+		c.txn.key,
+		c.txn.val,
 		C.MDBX_cursor_op(op),
 	)
 	return operrno("mdbx_cursor_get", ret)

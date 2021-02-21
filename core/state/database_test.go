@@ -798,10 +798,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	stats := BucketsStats{}
 
 	fmt.Println("==========================ACCOUNT===========================")
-	err = db.Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		if len(k) > 32 {
-			return true, nil
-		}
+	err = db.Walk(dbutils.HashedAccountsBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		acc := &accounts.Account{}
 		innerErr := acc.DecodeForStorage(v)
 		if innerErr != nil {
@@ -824,7 +821,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	}
 
 	fmt.Println("==========================STORAGE===========================")
-	err = db.Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = db.Walk(dbutils.HashedStorageBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		stats.Storage += uint64(len(v))
 		return true, nil
 	})
@@ -1207,7 +1204,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 	var startKey [common.HashLength + 8 + common.HashLength]byte
 	copy(startKey[:], addrHash)
-	err = db.Walk(dbutils.CurrentStateBucket, startKey[:], 8*common.HashLength, func(k, v []byte) (bool, error) {
+	err = db.Walk(dbutils.HashedStorageBucket, startKey[:], 8*common.HashLength, func(k, v []byte) (bool, error) {
 		fmt.Printf("%x: %x\n", k, v)
 		return true, nil
 	})
@@ -1358,6 +1355,7 @@ func TestWrongIncarnation2(t *testing.T) {
 }
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
+	t.Skip("TG doesn't use TrieDBState")
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
 	db := ethdb.NewMemDatabase()
@@ -1404,6 +1402,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 // TestCacheCodeSizeSeparately makes sure that we don't store CodeNodes for code sizes
 func TestCacheCodeSizeSeparately(t *testing.T) {
+	t.Skip("TG doesn't use TrieDBState")
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
@@ -1463,6 +1462,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 // TestCacheCodeSizeInTrie makes sure that we dont just read from the DB all the time
 func TestCacheCodeSizeInTrie(t *testing.T) {
+	t.Skip("TG doesn't use TrieDBState")
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 

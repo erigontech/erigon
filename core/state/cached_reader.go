@@ -22,7 +22,8 @@ func NewCachedReader(r StateReader, cache *shards.StateCache) *CachedReader {
 
 // ReadAccountData is called when an account needs to be fetched from the state
 func (cr *CachedReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	if a, ok := cr.cache.GetAccount(address.Bytes()); ok {
+	addrBytes := address.Bytes()
+	if a, ok := cr.cache.GetAccount(addrBytes); ok {
 		return a, nil
 	}
 	a, err := cr.r.ReadAccountData(address)
@@ -30,16 +31,17 @@ func (cr *CachedReader) ReadAccountData(address common.Address) (*accounts.Accou
 		return nil, err
 	}
 	if a == nil {
-		cr.cache.SetAccountAbsent(address.Bytes())
+		cr.cache.SetAccountAbsent(addrBytes)
 	} else {
-		cr.cache.SetAccountRead(address.Bytes(), a)
+		cr.cache.SetAccountRead(addrBytes, a)
 	}
 	return a, nil
 }
 
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
 func (cr *CachedReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	if s, ok := cr.cache.GetStorage(address.Bytes(), incarnation, key.Bytes()); ok {
+	addrBytes := address.Bytes()
+	if s, ok := cr.cache.GetStorage(addrBytes, incarnation, key.Bytes()); ok {
 		return s, nil
 	}
 	v, err := cr.r.ReadAccountStorage(address, incarnation, key)
@@ -47,9 +49,9 @@ func (cr *CachedReader) ReadAccountStorage(address common.Address, incarnation u
 		return nil, err
 	}
 	if len(v) == 0 {
-		cr.cache.SetStorageAbsent(address.Bytes(), incarnation, key.Bytes())
+		cr.cache.SetStorageAbsent(addrBytes, incarnation, key.Bytes())
 	} else {
-		cr.cache.SetStorageRead(address.Bytes(), incarnation, key.Bytes(), v)
+		cr.cache.SetStorageRead(addrBytes, incarnation, key.Bytes(), v)
 	}
 	return v, nil
 }

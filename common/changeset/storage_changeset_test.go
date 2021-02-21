@@ -30,7 +30,7 @@ func hashValueGenerator(j int) []byte {
 }
 
 func emptyValueGenerator(j int) []byte {
-	return []byte{}
+	return nil
 }
 
 func getTestDataAtIndex(i, j int, inc uint64, generator func(common.Address, uint64, common.Hash) []byte) []byte {
@@ -105,7 +105,6 @@ func doTestEncodingStorageNew(
 				t.Fatal("not equal", i)
 			}
 		}
-
 		if !reflect.DeepEqual(ch, ch2) {
 			for i, v := range ch.Changes {
 				if !bytes.Equal(v.Key, ch2.Changes[i].Key) || !bytes.Equal(v.Value, ch2.Changes[i].Value) {

@@ -37,6 +37,8 @@ type HashBuilder struct {
 	b         [1]byte   // Buffer for single byte
 	prefixBuf [8]byte
 	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
+
+	topHashesCopy []byte
 }
 
 // NewHashBuilder creates a new HashBuilder
@@ -56,6 +58,7 @@ func (hb *HashBuilder) Reset() {
 	if len(hb.nodeStack) > 0 {
 		hb.nodeStack = hb.nodeStack[:0]
 	}
+	hb.topHashesCopy = hb.topHashesCopy[:0]
 }
 
 func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
@@ -441,7 +444,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
-		if ((uint16(1) << digit) & set) != 0 {
+		if ((1 << digit) & set) != 0 {
 			if nodes[i] == nil {
 				f.Children[digit] = hashNode{hash: common.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
 			} else {
@@ -477,7 +480,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	totalSize := 17 // These are 17 length prefixes
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
-		if ((uint16(1) << digit) & set) != 0 {
+		if ((1 << digit) & set) != 0 {
 			if hashes[hashStackStride*i] == 0x80+common.HashLength {
 				totalSize += common.HashLength
 			} else {
@@ -492,11 +495,11 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	if _, err := hb.sha.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
-	// Output children hashes or embedded RLPs
+	// Output hasState hashes or embedded RLPs
 	i = 0
 	hb.b[0] = rlp.EmptyStringCode
 	for digit := uint(0); digit < 17; digit++ {
-		if ((uint16(1) << digit) & set) != 0 {
+		if ((1 << digit) & set) != 0 {
 			if hashes[hashStackStride*i] == byte(0x80+common.HashLength) {
 				if _, err := hb.sha.Write(hashes[hashStackStride*i : hashStackStride*i+hashStackStride]); err != nil {
 					return err
@@ -594,6 +597,35 @@ func (hb *HashBuilder) rootHash() common.Hash {
 
 func (hb *HashBuilder) topHash() []byte {
 	return hb.hashStack[len(hb.hashStack)-hashStackStride+1:]
+}
+
+func (hb *HashBuilder) printTopHashes(prefix []byte, _, children uint16) {
+	digits := bits.OnesCount16(children)
+	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
+	var i int
+	for digit := uint(0); digit < 16; digit++ {
+		if ((1 << digit) & children) != 0 {
+			fmt.Printf("topHash: %x%02x, %x\n", prefix, digit, hashes[hashStackStride*i+1:hashStackStride*(i+1)])
+			i++
+		}
+	}
+}
+
+func (hb *HashBuilder) topHashes(prefix []byte, hasHash, hasState uint16) []byte {
+	digits := bits.OnesCount16(hasState)
+	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
+	hb.topHashesCopy = hb.topHashesCopy[:0]
+	for i := 0; hasHash > 0; hasState, hasHash = hasState>>1, hasHash>>1 {
+		if 1&hasState == 0 {
+			continue
+		}
+
+		if 1&hasHash != 0 {
+			hb.topHashesCopy = append(hb.topHashesCopy, hashes[hashStackStride*i+1:hashStackStride*(i+1)]...)
+		}
+		i++
+	}
+	return hb.topHashesCopy
 }
 
 func (hb *HashBuilder) root() node {

@@ -45,7 +45,7 @@ func (b StorageChangeSetPlain) FindWithoutIncarnation(blockNumber uint64, addres
 	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.AddressLength, addressToFind, keyToFind)
 }
 
-// RewindData generates rewind data for all plain buckets between the timestamp
+// RewindDataPlain generates rewind data for all plain buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
 func RewindData(db ethdb.Getter, timestampSrc, timestampDst uint64) (map[string][]byte, map[string][]byte, error) {
 	// Collect list of buckets and keys that need to be considered

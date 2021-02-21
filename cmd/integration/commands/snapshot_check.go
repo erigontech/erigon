@@ -3,11 +3,12 @@ package commands
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -177,7 +178,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		expectedRootHash := syncHeadHeader.Root
 
 		tt := time.Now()
-		err = stagedsync.RegenerateIntermediateHashes("", tx, true, tmpDir, expectedRootHash, ctx.Done())
+		err = stagedsync.RegenerateIntermediateHashes("", tx, true, nil, tmpDir, expectedRootHash, ctx.Done())
 		if err != nil {
 			tx.Rollback()
 			return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
@@ -257,7 +258,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 			stagedsync.ExecuteBlockStageParams{
 				ToBlock:       blockNumber, // limit execution to the specified block
 				WriteReceipts: false,
-				BatchSize:     int(batchSize),
+				BatchSize:     batchSize,
 			})
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)
@@ -266,7 +267,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		stage5 := progress(stages.HashState)
 		stage5.BlockNumber = blockNumber - 1
 		log.Info("Stage5", "progress", stage5.BlockNumber)
-		err = stagedsync.SpawnHashStateStage(stage5, tx, tmpDir, ch)
+		err = stagedsync.SpawnHashStateStage(stage5, tx, nil, tmpDir, ch)
 		if err != nil {
 			return fmt.Errorf("spawnHashStateStage err %w", err)
 		}
@@ -274,7 +275,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		stage6 := progress(stages.IntermediateHashes)
 		stage6.BlockNumber = blockNumber - 1
 		log.Info("Stage6", "progress", stage6.BlockNumber)
-		if err = stagedsync.SpawnIntermediateHashesStage(stage5, tx, true, tmpDir, ch); err != nil {
+		if err = stagedsync.SpawnIntermediateHashesStage(stage5, tx, true, nil, tmpDir, ch); err != nil {
 			log.Error("Error on ih", "err", err, "block", blockNumber)
 			return fmt.Errorf("spawnIntermediateHashesStage %w", err)
 		}

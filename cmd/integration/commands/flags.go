@@ -24,6 +24,8 @@ var (
 	mapSizeStr         string
 	freelistReuse      int
 	migration          string
+	integritySlow      bool
+	integrityFast      bool
 	silkwormPath       string
 	file               string
 )
@@ -59,13 +61,13 @@ func withCompact(cmd *cobra.Command) {
 }
 
 func withReferenceChaindata(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&referenceChaindata, "reference_chaindata", "", "path to the 2nd (reference/etalon) db")
-	must(cmd.MarkFlagDirname("reference_chaindata"))
+	cmd.Flags().StringVar(&referenceChaindata, "chaindata.reference", "", "path to the 2nd (reference/etalon) db")
+	must(cmd.MarkFlagDirname("chaindata.reference"))
 }
 
 func withToChaindata(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&toChaindata, "to_chaindata", "", "target chaindata")
-	must(cmd.MarkFlagDirname("to_chaindata"))
+	cmd.Flags().StringVar(&toChaindata, "chaindata.to", "", "target chaindata")
+	must(cmd.MarkFlagDirname("chaindata.to"))
 }
 
 func withBlock(cmd *cobra.Command) {
@@ -77,7 +79,7 @@ func withUnwind(cmd *cobra.Command) {
 }
 
 func withUnwindEvery(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&unwindEvery, "unwind_every", 0, "each iteration test will move forward `--unwind_every` blocks, then unwind `--unwind` blocks")
+	cmd.Flags().Uint64Var(&unwindEvery, "unwind.every", 0, "each iteration test will move forward `--unwind.every` blocks, then unwind `--unwind` blocks")
 }
 
 func withReset(cmd *cobra.Command) {
@@ -95,6 +97,11 @@ func withDatadir(cmd *cobra.Command) {
 func withBatchSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&cacheSizeStr, "cacheSize", "0", "cache size for execution stage")
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", "512M", "batch size for execution stage")
+}
+
+func withIntegrityChecks(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", true, "enable slow data-integrity checks")
+	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", true, "enable fast data-integrity checks")
 }
 
 func withMigration(cmd *cobra.Command) {

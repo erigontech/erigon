@@ -90,7 +90,7 @@ func (hb *StarkStatsBuilder) branchHash(set uint16) error {
 	totalLen := 17 // These are 17 length prefixes
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
-		if ((uint16(1) << digit) & set) != 0 {
+		if ((1 << digit) & set) != 0 {
 			totalLen += inputSizes[i]
 			i++
 		}
