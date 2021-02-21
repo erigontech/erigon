@@ -16,7 +16,7 @@ type Forks struct {
 
 // Forks implements tg_forks. Returns the genesis block hash and a sorted list of all forks block numbers
 func (api *TgImpl) Forks(ctx context.Context) (Forks, error) {
-	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return Forks{}, err
 	}

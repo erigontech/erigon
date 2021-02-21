@@ -23,7 +23,7 @@ import (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
-	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	dbtx, err := api.db.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
@@ -50,13 +50,13 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
 func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error) {
 	// TODO: fixme: blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-	hash := rawdb.ReadHeadBlockHash(api.dbReader)
+	hash := rawdb.ReadHeadBlockHash(api.db)
 
 	return api.DoEstimateGas(ctx, args, rpc.BlockNumberOrHash{BlockHash: &hash}, big.NewInt(0).SetUint64(api.GasCap))
 }
 
 func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, gasCap *big.Int) (hexutil.Uint64, error) {
-	dbtx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	dbtx, err := api.db.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return 0, err
 	}

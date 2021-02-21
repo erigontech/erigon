@@ -8,16 +8,14 @@ import (
 )
 
 // APIList describes the list of available RPC apis
-func APIList(db ethdb.KV, eth ethdb.Backend, filters *filters.Filters, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
+func APIList(db ethdb.Database, eth ethdb.Backend, filters *filters.Filters, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
-	dbReader := ethdb.NewObjectDatabase(db)
-
-	ethImpl := NewEthAPI(db, dbReader, eth, cfg.Gascap, filters)
-	tgImpl := NewTgAPI(db, dbReader)
+	ethImpl := NewEthAPI(db, eth, cfg.Gascap, filters)
+	tgImpl := NewTgAPI(db)
 	netImpl := NewNetAPIImpl(eth)
-	debugImpl := NewPrivateDebugAPI(dbReader, cfg.Gascap)
-	traceImpl := NewTraceAPI(dbReader, &cfg)
+	debugImpl := NewPrivateDebugAPI(db, cfg.Gascap)
+	traceImpl := NewTraceAPI(db, &cfg)
 	web3Impl := NewWeb3APIImpl()
 	dbImpl := NewDBAPIImpl()   /* deprecated */
 	shhImpl := NewSHHAPIImpl() /* deprecated */
