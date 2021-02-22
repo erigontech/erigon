@@ -248,11 +248,6 @@ func GenStructStep(
 						return nil, nil, nil, err
 					}
 				}
-			} else {
-				//TODO: looks like this can be safely removed, need more test
-				if err := h(curr[:maxLen], 0, 0, 0, nil, nil); err != nil {
-					return nil, nil, nil, err
-				}
 			}
 		}
 
