@@ -171,13 +171,13 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 			Forks:   controlServer.forks,
 		},
 	}
-	//nolint:lostcancel
+	//nolint:govet
 	callCtx, _ := context.WithCancel(ctx)
 	if _, err = sentryClient.SetStatus(callCtx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
 		return fmt.Errorf("setting initial status message: %w", err)
 	}
 	go func() {
-		//nolint:lostcancel
+		//nolint:govet
 		callCtx, _ = context.WithCancel(ctx)
 		receiveClient, err2 := sentryClient.ReceiveMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
 		if err2 != nil {
@@ -195,7 +195,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 		}
 	}()
 	go func() {
-		//nolint:lostcancel
+		//nolint:govet
 		callCtx, _ = context.WithCancel(ctx)
 		receiveUploadClient, err3 := sentryClient.ReceiveUploadMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
 		if err3 != nil {
@@ -260,12 +260,12 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 			Forks:   controlServer.forks,
 		},
 	}
-	//nolint:lostcancel
+	//nolint:govet
 	callCtx, _ := context.WithCancel(ctx)
 	if _, err = sentryClient.SetStatus(callCtx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
 		return fmt.Errorf("setting initial status message: %w", err)
 	}
-	//nolint:lostcancel
+	//nolint:govet
 	callCtx, _ = context.WithCancel(ctx)
 	receiveClient, err2 := sentryClient.ReceiveMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
 	if err2 != nil {
@@ -282,7 +282,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 			log.Error("Receive loop terminated", "error", err)
 		}
 	}()
-	//nolint:lostcancel
+	//nolint:govet
 	callCtx, _ = context.WithCancel(ctx)
 	receiveUploadClient, err3 := sentryClient.ReceiveUploadMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
 	if err3 != nil {
@@ -403,7 +403,7 @@ func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash
 			Forks:   cs.forks,
 		},
 	}
-	//nolnit:lostcancel
+	//nolnit:govet
 	callCtx, _ := context.WithCancel(ctx)
 	if _, err := cs.sentryClient.SetStatus(callCtx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
 		log.Error("Update status message for the sentry", "error", err)
@@ -434,7 +434,7 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_se
 					Data: b,
 				},
 			}
-			//nolint:lostcancel
+			//nolint:govet
 			callCtx, _ := context.WithCancel(ctx)
 			_, err = cs.sentryClient.SendMessageById(callCtx, &outreq, &grpc.EmptyCallOption{})
 			if err != nil {
@@ -482,7 +482,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_sent
 				PeerId:  inreq.PeerId,
 				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
-			//nolint:lostcancel
+			//nolint:govet
 			callCtx, _ := context.WithCancel(ctx)
 			if _, err1 := cs.sentryClient.PenalizePeer(callCtx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 				log.Error("Could not send penalty", "err", err1)
@@ -495,7 +495,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_sent
 		PeerId:   inreq.PeerId,
 		MinBlock: heighestBlock,
 	}
-	//nolint:lostcancel
+	//nolint:govet
 	callCtx, _ := context.WithCancel(ctx)
 	if _, err1 := cs.sentryClient.PeerMinBlock(callCtx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
@@ -544,7 +544,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 		PeerId:   inreq.PeerId,
 		MinBlock: request.Block.NumberU64(),
 	}
-	//nolint:lostcancel
+	//nolint:govet
 	callCtx, _ := context.WithCancel(ctx)
 	if _, err1 := cs.sentryClient.PeerMinBlock(callCtx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
@@ -713,7 +713,7 @@ func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_s
 			Data: b,
 		},
 	}
-	//nolint:lostcancel
+	//nolint:govet
 	callCtx, _ := context.WithCancel(ctx)
 	_, err = cs.sentryClient.SendMessageById(callCtx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
@@ -769,7 +769,7 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 			Data: b,
 		},
 	}
-	//nolint:lostcancel
+	//nolint:govet
 	callCtx, _ := context.WithCancel(ctx)
 	_, err = cs.sentryClient.SendMessageById(callCtx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
@@ -828,7 +828,7 @@ func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdow
 				Data: bytes,
 			},
 		}
-		//nolint:lostcancel
+		//nolint:govet
 		callCtx, _ := context.WithCancel(ctx)
 		_, err1 := cs.sentryClient.SendMessageByMinBlock(callCtx, &outreq, &grpc.EmptyCallOption{})
 		if err1 != nil {
@@ -854,7 +854,7 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 			Data: bytes,
 		},
 	}
-	//nolint:lostcancel
+	//nolint:govet
 	callCtx, _ := context.WithCancel(ctx)
 	sentPeers, err1 := cs.sentryClient.SendMessageByMinBlock(callCtx, &outreq, &grpc.EmptyCallOption{})
 	if err1 != nil {
@@ -869,7 +869,7 @@ func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownl
 
 func (cs *ControlServerImpl) penalise(ctx context.Context, peer []byte) {
 	penalizeReq := proto_sentry.PenalizePeerRequest{PeerId: peer, Penalty: proto_sentry.PenaltyKind_Kick}
-	//nolint:lostcancel
+	//nolint:govet
 	callCtx, _ := context.WithCancel(ctx)
 	if _, err := cs.sentryClient.PenalizePeer(callCtx, &penalizeReq, &grpc.EmptyCallOption{}); err != nil {
 		log.Error("Could not penalise", "peer", peer, "error", err)
