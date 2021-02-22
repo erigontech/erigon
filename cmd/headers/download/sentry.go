@@ -651,6 +651,6 @@ func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto
 		}
 		//fmt.Printf("Sent upload message %s\n", streamMsg.msgName)
 	}
-	log.Warn("Finished receive uploac messages")
+	log.Warn("Finished receive upload messages")
 	return nil
 }
