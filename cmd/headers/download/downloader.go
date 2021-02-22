@@ -171,11 +171,13 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 			Forks:   controlServer.forks,
 		},
 	}
+	//nolint:lostcancel
 	callCtx, _ := context.WithCancel(ctx)
 	if _, err = sentryClient.SetStatus(callCtx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
 		return fmt.Errorf("setting initial status message: %w", err)
 	}
 	go func() {
+		//nolint:lostcancel
 		callCtx, _ = context.WithCancel(ctx)
 		receiveClient, err2 := sentryClient.ReceiveMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
 		if err2 != nil {
@@ -193,6 +195,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 		}
 	}()
 	go func() {
+		//nolint:lostcancel
 		callCtx, _ = context.WithCancel(ctx)
 		receiveUploadClient, err3 := sentryClient.ReceiveUploadMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
 		if err3 != nil {
