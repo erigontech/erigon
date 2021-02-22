@@ -11,6 +11,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -333,4 +334,35 @@ func (p Penalty) String() string {
 
 func (pp PeerPenalty) String() string {
 	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, pp.penalty, pp.err)
+}
+
+// HeaderInserter incapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
+// The headers are "fed" by repeatedly calling the FeedHeader function.
+type HeaderInserter struct {
+	logPrefix          string
+	tx                 ethdb.DbWithPendingMutations
+	batch              ethdb.DbWithPendingMutations
+	prevHash           common.Hash // Hash of previously seen header - to filter out potential duplicates
+	prevHeight         uint64
+	newCanonical       bool
+	forkNumber         uint64
+	canonicalBacktrack map[common.Hash]common.Hash
+	parentDiffs        map[common.Hash]*big.Int
+	childDiffs         map[common.Hash]*big.Int
+	highest            uint64
+	localTd            *big.Int
+	headerProgress     uint64
+}
+
+func NewHeaderInserter(logPrefix string, tx, batch ethdb.DbWithPendingMutations, localTd *big.Int, headerProgress uint64) *HeaderInserter {
+	return &HeaderInserter{
+		logPrefix:          logPrefix,
+		tx:                 tx,
+		batch:              batch,
+		localTd:            localTd,
+		headerProgress:     headerProgress,
+		canonicalBacktrack: make(map[common.Hash]common.Hash),
+		parentDiffs:        make(map[common.Hash]*big.Int),
+		childDiffs:         make(map[common.Hash]*big.Int),
+	}
 }

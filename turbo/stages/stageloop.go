@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -15,6 +16,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
+)
+
+const (
+	logInterval = 30 * time.Second
 )
 
 // StageLoop runs the continuous loop of staged sync
@@ -39,6 +44,9 @@ func StageLoop(
 		stagedsync.OptionalParameters{},
 	)
 	for {
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
 		var ready bool
 		var height uint64
 		// Keep requesting more headers until there is a heaviest chain
@@ -51,6 +59,8 @@ func StageLoop(
 			case <-timer.C: // When it is time to check on previously sent requests
 			case <-wakeUpChan: // When new message comes from the sentry
 			case <-hd.StageReadyChannel(): // When heaviest chain is ready
+			case <-logEvery.C:
+				logProgress(hd)
 			}
 		}
 
@@ -145,6 +155,19 @@ func StageLoop(
 			}
 		}
 	}
+}
+
+// logProgress prints out progress of downloading headers, which happens before every cycle of the staged sync
+func logProgress(hd *headerdownload.HeaderDownload) {
+	files, bufferSize := hd.Progress()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Info("Downloading block headers",
+		"files flushed", files,
+		"buffer size", common.StorageSize(bufferSize),
+		"alloc", common.StorageSize(m.Alloc),
+		"sys", common.StorageSize(m.Sys),
+		"numGC", int(m.NumGC))
 }
 
 func ReplacementStages(ctx context.Context,

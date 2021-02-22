@@ -3,19 +3,16 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"os"
 	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
@@ -28,8 +25,6 @@ func HeadersForward(s *StageState, ctx context.Context, db ethdb.Database, hd *h
 
 	logPrefix := s.LogPrefix()
 
-	count := 0
-	var highest uint64
 	var headerProgress uint64
 	var err error
 	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
@@ -62,96 +57,10 @@ func HeadersForward(s *StageState, ctx context.Context, db ethdb.Database, hd *h
 	if err1 != nil {
 		return err1
 	}
-	var parentDiffs = make(map[common.Hash]*big.Int)
-	var childDiffs = make(map[common.Hash]*big.Int)
-	var prevHash common.Hash // Hash of previously seen header - to filter out potential duplicates
-	var prevHeight uint64
-	var newCanonical bool
-	var forkNumber uint64
-	var canonicalBacktrack = make(map[common.Hash]common.Hash)
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, tx, batch, localTd, headerProgress)
 	if err1 = headerdownload.ReadFilesAndBuffer(files, buffer, func(header *types.Header, blockHeight uint64) error {
-		hash := header.Hash()
-		if hash == prevHash {
-			// Skip duplicates
-			return nil
-		}
-		if ch, err := rawdb.ReadCanonicalHash(tx, blockHeight); err == nil {
-			if ch == hash {
-				// Already canonical, skip
-				return nil
-			}
-		} else {
+		if err = headerInserter.FeedHeader(header, blockHeight); err != nil {
 			return err
-		}
-		if blockHeight < prevHeight {
-			return fmt.Errorf("[%s] headers are unexpectedly unsorted, got %d after %d", logPrefix, blockHeight, prevHeight)
-		}
-		if forkNumber == 0 {
-			forkNumber = blockHeight
-			logBlock = blockHeight - 1
-		}
-		if blockHeight > prevHeight {
-			// Clear out parent map and move childMap to its place
-			if blockHeight == prevHeight+1 {
-				parentDiffs = childDiffs
-			}
-			childDiffs = make(map[common.Hash]*big.Int)
-			prevHeight = blockHeight
-		}
-		parentDiff, ok := parentDiffs[header.ParentHash]
-		if !ok {
-			var err error
-			if parentDiff, err = rawdb.ReadTd(tx, header.ParentHash, blockHeight-1); err != nil {
-				return fmt.Errorf("[%s] reading total difficulty of the parent header %d %x: %w", logPrefix, blockHeight-1, header.ParentHash, err)
-			}
-			if parentDiff == nil {
-				return fmt.Errorf("[%s] could not find parentDiff for %d", logPrefix, header.Number)
-			}
-		}
-		cumulativeDiff := new(big.Int).Add(parentDiff, header.Difficulty)
-		childDiffs[hash] = cumulativeDiff
-		if !newCanonical && cumulativeDiff.Cmp(localTd) > 0 {
-			newCanonical = true
-			backHash := header.ParentHash
-			backNumber := blockHeight - 1
-			for pHash, pOk := canonicalBacktrack[backHash]; pOk; pHash, pOk = canonicalBacktrack[backHash] {
-				if err := rawdb.WriteCanonicalHash(batch, backHash, backNumber); err != nil {
-					return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, backNumber, backHash, err)
-				}
-				backHash = pHash
-				backNumber--
-			}
-			canonicalBacktrack = nil
-		}
-		if !newCanonical {
-			canonicalBacktrack[hash] = header.ParentHash
-		}
-		if newCanonical {
-			if err := rawdb.WriteCanonicalHash(batch, hash, blockHeight); err != nil {
-				return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, blockHeight, hash, err)
-			}
-			if blockHeight > headerProgress {
-				headerProgress = blockHeight
-				if err := stages.SaveStageProgress(batch, stages.Headers, blockHeight); err != nil {
-					return fmt.Errorf("[%s] saving Headers progress: %w", logPrefix, err)
-				}
-			}
-			//rawdb.WriteHeadHeaderHash(batch, hash)
-		}
-		data, err := rlp.EncodeToBytes(header)
-		if err != nil {
-			return fmt.Errorf("[%s] Failed to RLP encode header: %w", logPrefix, err)
-		}
-		if err = rawdb.WriteTd(batch, hash, blockHeight, cumulativeDiff); err != nil {
-			return fmt.Errorf("[%s] Failed to WriteTd: %w", logPrefix, err)
-		}
-		if err = batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
-			return fmt.Errorf("[%s] Failed to store header: %w", logPrefix, err)
-		}
-		prevHash = hash
-		count++
-		if blockHeight > highest {
-			highest = blockHeight
 		}
 		if batch.BatchSize() >= batch.IdealBatchSize() {
 			if err = batch.CommitAndBegin(context.Background()); err != nil {
@@ -175,7 +84,7 @@ func HeadersForward(s *StageState, ctx context.Context, db ethdb.Database, hd *h
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 	}
-	if err := s.DoneAndUpdate(tx, highest); err != nil {
+	if err := s.DoneAndUpdate(tx, headerInserter.GetHighest()); err != nil {
 		return err
 	}
 	if !useExternalTx {
@@ -183,7 +92,7 @@ func HeadersForward(s *StageState, ctx context.Context, db ethdb.Database, hd *h
 			return err
 		}
 	}
-	log.Info("Processed", "headers", count, "highest", highest)
+	log.Info("Processed", "highest", headerInserter.GetHighest())
 	for _, file := range files {
 		if err := os.Remove(file); err != nil {
 			log.Error("Could not remove", "file", file, "error", err)
