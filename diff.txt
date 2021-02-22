@@ -409,37 +409,3 @@ Author: Gary Rong <garyrong0905@gmail.com>
 Date:   Mon Feb 22 21:33:11 2021 +0800
 
     les: clean up server handler (#22357)
-
-commit 8f03e3b107c0f7a39de31a9e7deb658431a937ac
-Author: Zsolt Felföldi <zsfelfoldi@gmail.com>
-Date:   Sat Feb 20 10:40:38 2021 +0100
-
-    tests/fuzzers/les: add fuzzer for les server handler (#22282)
-    
-    * les: refactored server handler
-    
-    * tests/fuzzers/les: add fuzzer for les server handler
-    
-    * tests, les: update les fuzzer
-    
-    tests: update les fuzzer
-    
-    tests/fuzzer/les: release resources
-    
-    tests/fuzzer/les: pre-initialize all resources
-    
-    * les: refactored server handler and fuzzer
-    
-    Co-authored-by: rjl493456442 <garyrong0905@gmail.com>
-
-commit 8647233a8ec2a2410a078013ca12c38fdc229866
-Author: Zsolt Felföldi <zsfelfoldi@gmail.com>
-Date:   Fri Feb 19 15:53:12 2021 +0100
-
-    les: fix balance expiration (#22343)
-    
-    * les/lespay/server: fix balance expiration and add test
-    
-    * les: move client balances to a new db
-    
-    * les: rename lespayDb to lesDb
