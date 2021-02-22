@@ -564,7 +564,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	peerID := string(inreq.PeerId)
 	rwRaw, ok := ss.peerRwMap.Load(peerID)
 	if !ok {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %x", inreq.PeerId)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", inreq.PeerId)
 	}
 	rw, _ := rwRaw.(p2p.MsgReadWriter)
 	var msgcode uint64
