@@ -403,7 +403,7 @@ func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash
 			Forks:   cs.forks,
 		},
 	}
-	//nolnit:govet
+	//nolint:govet
 	callCtx, _ := context.WithCancel(ctx)
 	if _, err := cs.sentryClient.SetStatus(callCtx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
 		log.Error("Update status message for the sentry", "error", err)
@@ -532,6 +532,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 				PeerId:  inreq.PeerId,
 				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
+			//nolint:govet
 			callCtx, _ := context.WithCancel(ctx)
 			if _, err1 := cs.sentryClient.PenalizePeer(callCtx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 				log.Error("Could not send penalty", "err", err1)
