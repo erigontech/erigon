@@ -192,12 +192,12 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	var lastAddress []byte
 	_ = lastAddress
 	var lastTimestamp uint64
-	cs := tx.Cursor(dbutils.PlainStateBucket).Prefetch(CursorBatchSize)
+	cs := tx.Cursor(dbutils.PlainStateBucket)
 	sk, _, serr := cs.First()
 	if serr != nil {
 		panic(serr)
 	}
-	c := tx.Cursor(dbutils.AccountsHistoryBucket).Prefetch(CursorBatchSize)
+	c := tx.Cursor(dbutils.AccountsHistoryBucket)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			panic(err)
@@ -321,12 +321,12 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	_ = lastAddress
 	_ = lastLocation
 	var lastTimestamp uint64
-	cs := tx.Cursor(dbutils.PlainStateBucket).Prefetch(CursorBatchSize)
+	cs := tx.Cursor(dbutils.PlainStateBucket)
 	sk, _, serr := cs.First()
 	if serr != nil {
 		panic(serr)
 	}
-	c := tx.Cursor(dbutils.StorageHistoryBucket).Prefetch(CursorBatchSize)
+	c := tx.Cursor(dbutils.StorageHistoryBucket)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			panic(err)
@@ -491,8 +491,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	var blockNum uint64 = 0
 
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-
-		c := tx.Cursor(dbutils.HeaderPrefix).Prefetch(CursorBatchSize)
+		c := tx.Cursor(dbutils.HeaderPrefix)
 		if err := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
 			if len(k) != 40 {
 				return true, nil

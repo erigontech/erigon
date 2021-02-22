@@ -293,12 +293,6 @@ type snCursor2 struct {
 	currentKey []byte
 }
 
-func (s *snCursor2) Prefix(v []byte) Cursor {
-	s.dbCursor.Prefix(v)
-	s.snCursor.Prefix(v)
-	return s
-}
-
 func (s *snCursor2) Prefetch(v uint) Cursor {
 	panic("implement me")
 }
