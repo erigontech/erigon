@@ -220,7 +220,7 @@ func runPeer(
 	if err = forkFilter(status.ForkID); err != nil {
 		return errResp(eth.ErrForkIDRejected, "%v", err)
 	}
-	log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
+	//log.Info(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 	for {
 		if _, ok := peerRwMap.Load(peerID); !ok {
@@ -260,11 +260,11 @@ func runPeer(
 				return err
 			}
 		case eth.GetNodeDataMsg:
-			log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
+			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
-			log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
+			//log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
 		case eth.ReceiptsMsg:
-			log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
+			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
 			if err = ss.forwardMessage(msg, peerID, "NewBlockHashesMsg", proto_sentry.MessageId_NewBlockHashes); err != nil {
 				return err

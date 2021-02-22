@@ -52,8 +52,8 @@ func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header          {
 func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
 	lock.Lock()
 	defer lock.Unlock()
-	log.Info(hd.AnchorState())
-	log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
+	//log.Info(hd.AnchorState())
+	//log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	foundAnchor, start, anchorParent, invalidAnchors := hd.FindAnchors(segment)
 	if len(invalidAnchors) > 0 {
 		if _, err1 := hd.InvalidateAnchors(anchorParent, invalidAnchors); err1 != nil {
@@ -67,7 +67,7 @@ func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segme
 		return
 	}
 	if end == 0 {
-		log.Info("Duplicate segment")
+		//log.Info("Duplicate segment")
 		return
 	}
 	currentTime := uint64(time.Now().Unix())
@@ -90,7 +90,7 @@ func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segme
 				log.Error("Connect failed", "error", err1)
 			} else {
 				hd.AddSegmentToBuffer(segment, start, end)
-				log.Info("Connected", "start", start, "end", end)
+				//log.Info("Connected", "start", start, "end", end)
 			}
 		} else {
 			// ExtendDown
@@ -98,19 +98,17 @@ func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segme
 				log.Error("ExtendDown failed", "error", err1)
 			} else {
 				hd.AddSegmentToBuffer(segment, start, end)
-				log.Info("Extended Down", "start", start, "end", end)
+				//log.Info("Extended Down", "start", start, "end", end)
 			}
 		}
 	} else if foundTip {
-		if end == 0 {
-			log.Info("No action needed, tip already exists")
-		} else {
+		if end > 0 {
 			// ExtendUp
 			if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
 				log.Error("ExtendUp failed", "error", err1)
 			} else {
 				hd.AddSegmentToBuffer(segment, start, end)
-				log.Info("Extended Up", "start", start, "end", end)
+				//log.Info("Extended Up", "start", start, "end", end)
 			}
 		}
 	} else {
@@ -119,7 +117,7 @@ func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segme
 			log.Error("NewAnchor failed", "error", err1)
 		} else {
 			hd.AddSegmentToBuffer(segment, start, end)
-			log.Info("NewAnchor", "start", start, "end", end)
+			//log.Info("NewAnchor", "start", start, "end", end)
 		}
 	}
 }
@@ -360,7 +358,7 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		log.Error("Recovery from file failed, will start from scratch", "error", err1)
 	}
 	if !filesRecovered {
-		fmt.Printf("Inserting hard-coded tips\n")
+		//fmt.Printf("Inserting hard-coded tips\n")
 		hd.SetHardCodedTips(hardTips)
 	}
 	log.Info(hd.AnchorState())
@@ -402,7 +400,7 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_se
 	}
 	for _, announce := range request {
 		if !cs.hd.HasTip(announce.Hash) {
-			log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
+			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
 			b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
 				Amount:  1,
 				Reverse: false,
@@ -479,7 +477,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_sent
 	if _, err1 := cs.sentryClient.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
 	}
-	log.Info("HeadersMsg processed")
+	//log.Info("HeadersMsg processed")
 	return nil
 }
 
@@ -693,7 +691,7 @@ func (cs *ControlServerImpl) getBlockHeaders(ctx context.Context, inreq *proto_s
 	if err != nil {
 		return fmt.Errorf("send header response: %v", err)
 	}
-	log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", inreq.PeerId, query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
+	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", inreq.PeerId, query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
 	return nil
 }
 
@@ -747,7 +745,7 @@ func (cs *ControlServerImpl) getBlockBodies(ctx context.Context, inreq *proto_se
 	if err != nil {
 		return fmt.Errorf("send bodies response: %v", err)
 	}
-	log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}, responseLen %d", inreq.PeerId, hashesStr.String(), len(bodies)))
+	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg {%s}, responseLen %d", inreq.PeerId, hashesStr.String(), len(bodies)))
 	return nil
 }
 
