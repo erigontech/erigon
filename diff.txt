@@ -373,39 +373,3 @@ Author: Péter Szilágyi <peterke@gmail.com>
 Date:   Tue Feb 23 18:28:24 2021 +0200
 
     Dockerfile: bump to Go 1.16 base images
-
-commit 2d1a0e9b03f636babe8785dc833960a5d11e4403
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Feb 23 18:12:25 2021 +0200
-
-    accounts/abi/bind: fix up Go mod files for Go 1.16
-
-commit 142fbcfd6f4fad825e2ce2684f9d5a487ffb3f84
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Tue Feb 23 13:09:19 2021 +0100
-
-    internal/ethapi: reject non-replay-protected txs over RPC (#22339)
-    
-    This PR prevents users from submitting transactions without EIP-155 enabled. This behaviour can be overridden by specifying the flag --rpc.allow-unprotected-txs=true.
-
-commit c4a2b682ff3ea2465417671de76c4d1e9a29fef8
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Tue Feb 23 11:27:32 2021 +0100
-
-    cmd/geth: add db commands stats, compact, put, get, delete (#22014)
-    
-    This PR introduces:
-    
-    - db.put to put a value into the database
-    - db.get to read a value from the database
-    - db.delete to delete a value from the database
-    - db.stats to check compaction info from the database
-    - db.compact to trigger a db compaction
-    
-    It also moves inspectdb to db.inspect.
-
-commit 3ecfdccd9a0065365a00e7c8b60de7ee2df4e40b
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Mon Feb 22 21:33:11 2021 +0800
-
-    les: clean up server handler (#22357)
