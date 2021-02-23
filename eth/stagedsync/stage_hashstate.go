@@ -461,7 +461,7 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 
 	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", from, "to", to, "storage", storage, "codes", codes)
 	if p.cache != nil {
-		accountMap, storageMap, errRewind := changeset.RewindData(p.db, s.BlockNumber, u.UnwindPoint)
+		accountMap, storageMap, errRewind := changeset.RewindData(p.db, s.BlockNumber, u.UnwindPoint, p.quitCh)
 		if errRewind != nil {
 			return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 		}
