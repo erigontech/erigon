@@ -622,6 +622,10 @@ var (
 		Name:  "preload",
 		Usage: "Comma separated list of JavaScript files to preload into the console",
 	}
+	AllowUnprotectedTxs = cli.BoolFlag{
+		Name:  "rpc.allow-unprotected-txs",
+		Usage: "Allow for unprotected (non EIP155 signed) transactions to be submitted via RPC",
+	}
 
 	// Network Settings
 	MaxPeersFlag = cli.IntFlag{
@@ -952,6 +956,9 @@ func SplitAndTrim(input string) (ret []string) {
 
 	if ctx.GlobalIsSet(HTTPPathPrefixFlag.Name) {
 		cfg.HTTPPathPrefix = ctx.GlobalString(HTTPPathPrefixFlag.Name)
+	}
+	if ctx.GlobalIsSet(AllowUnprotectedTxs.Name) {
+		cfg.AllowUnprotectedTxs = ctx.GlobalBool(AllowUnprotectedTxs.Name)
 	}
 }
 
