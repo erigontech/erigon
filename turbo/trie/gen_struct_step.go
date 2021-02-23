@@ -236,17 +236,15 @@ func GenStructStep(
 		}
 
 		var usefulHashes []byte
-		if h != nil {
-			if hasHash[maxLen] != 0 || hasBranch[maxLen] != 0 {
-				if trace {
-					fmt.Printf("why now: %x,%b,%b,%b\n", curr[:maxLen], hasHash, hasBranch, groups)
-				}
-				usefulHashes = e.topHashes(curr[:maxLen], hasHash[maxLen], groups[maxLen])
-				if maxLen != 0 {
-					hasBranch[maxLen-1] |= 1 << curr[maxLen-1] // register myself in parent bitmap
-					if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, nil); err != nil {
-						return nil, nil, nil, err
-					}
+		if h != nil && (hasHash[maxLen] != 0 || hasBranch[maxLen] != 0 || (maxLen == 1 && groups[1] != 0)) { // top level must be in db
+			if trace {
+				fmt.Printf("why now: %x,%b,%b,%b\n", curr[:maxLen], hasHash, hasBranch, groups)
+			}
+			usefulHashes = e.topHashes(curr[:maxLen], hasHash[maxLen], groups[maxLen])
+			if maxLen != 0 {
+				hasBranch[maxLen-1] |= 1 << curr[maxLen-1] // register myself in parent bitmap
+				if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, nil); err != nil {
+					return nil, nil, nil, err
 				}
 			}
 		}
