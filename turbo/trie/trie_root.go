@@ -100,34 +100,34 @@ type FlatDBTrieLoader struct {
 
 // RootHashAggregator - calculates Merkle trie root hash from incoming data stream
 type RootHashAggregator struct {
-	trace            bool
-	wasIH            bool
-	wasIHStorage     bool
-	root             common.Hash
-	hc               HashCollector2
-	shc              StorageHashCollector2
-	currStorage      bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succStorage      bytes.Buffer
-	valueStorage     []byte // Current value to be used as the value tape for the hash builder
-	hadBranchStorage bool
-	hashAccount      common.Hash  // Current value to be used as the value tape for the hash builder
-	hashStorage      common.Hash  // Current value to be used as the value tape for the hash builder
-	curr             bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succ             bytes.Buffer
-	currAccK         []byte
-	value            []byte // Current value to be used as the value tape for the hash builder
-	hadBranchAcc     bool
-	groups           []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
-	hasBranch        []uint16
-	hasHash          []uint16
-	groupsStorage    []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
-	hasBranchStorage []uint16
-	hasHashStorage   []uint16
-	hb               *HashBuilder
-	hashData         GenStructStepHashData
-	a                accounts.Account
-	leafData         GenStructStepLeafData
-	accData          GenStructStepAccountData
+	trace          bool
+	wasIH          bool
+	wasIHStorage   bool
+	root           common.Hash
+	hc             HashCollector2
+	shc            StorageHashCollector2
+	currStorage    bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succStorage    bytes.Buffer
+	valueStorage   []byte // Current value to be used as the value tape for the hash builder
+	hadTreeStorage bool
+	hashAccount    common.Hash  // Current value to be used as the value tape for the hash builder
+	hashStorage    common.Hash  // Current value to be used as the value tape for the hash builder
+	curr           bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succ           bytes.Buffer
+	currAccK       []byte
+	value          []byte // Current value to be used as the value tape for the hash builder
+	hadTreeAcc     bool
+	groups         []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
+	hasTree        []uint16
+	hasHash        []uint16
+	groupsStorage  []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
+	hasTreeStorage []uint16
+	hasHashStorage []uint16
+	hb             *HashBuilder
+	hashData       GenStructStepHashData
+	a              accounts.Account
+	leafData       GenStructStepLeafData
+	accData        GenStructStepAccountData
 }
 
 func NewRootHashAggregator() *RootHashAggregator {
@@ -226,7 +226,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 	defer ss.Close()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	for ihK, ihV, hasBranch, err := accTrie.AtPrefix(prefix); ; ihK, ihV, hasBranch, err = accTrie.Next() { // no loop termination is at he end of loop
+	for ihK, ihV, hasTree, err := accTrie.AtPrefix(prefix); ; ihK, ihV, hasTree, err = accTrie.Next() { // no loop termination is at he end of loop
 		if err != nil {
 			return EmptyRoot, err
 		}
@@ -253,7 +253,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 			copy(l.accAddrHashWithInc[:], k)
 			binary.BigEndian.PutUint64(l.accAddrHashWithInc[32:], l.accountValue.Incarnation)
 			accWithInc := l.accAddrHashWithInc[:]
-			for ihKS, ihVS, hasBranchS, err2 := storageTrie.SeekToAccount(accWithInc); ; ihKS, ihVS, hasBranchS, err2 = storageTrie.Next() {
+			for ihKS, ihVS, hasTreeS, err2 := storageTrie.SeekToAccount(accWithInc); ; ihKS, ihVS, hasTreeS, err2 = storageTrie.Next() {
 				if err2 != nil {
 					return EmptyRoot, err2
 				}
@@ -279,7 +279,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 					break
 				}
 
-				if err = l.receiver.Receive(SHashStreamItem, accWithInc, ihKS, nil, nil, ihVS, hasBranchS, 0); err != nil {
+				if err = l.receiver.Receive(SHashStreamItem, accWithInc, ihKS, nil, nil, ihVS, hasTreeS, 0); err != nil {
 					return EmptyRoot, err
 				}
 				if len(ihKS) == 0 { // means we just sent acc.storageRoot
@@ -299,7 +299,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 			break
 		}
 
-		if err = l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV, hasBranch, 0); err != nil {
+		if err = l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV, hasTree, 0); err != nil {
 			return EmptyRoot, err
 		}
 	}
@@ -338,7 +338,7 @@ func (r *RootHashAggregator) Reset(hc HashCollector2, shc StorageHashCollector2,
 	r.succ.Reset()
 	r.value = nil
 	r.groups = r.groups[:0]
-	r.hasBranch = r.hasBranch[:0]
+	r.hasTree = r.hasTree[:0]
 	r.hasHash = r.hasHash[:0]
 	r.a.Reset()
 	r.hb.Reset()
@@ -358,7 +358,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	accountValue *accounts.Account,
 	storageValue []byte,
 	hash []byte,
-	hasBranch bool,
+	hasTree bool,
 	cutoff int,
 ) error {
 	//r.traceIf("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb", "00")
@@ -384,7 +384,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		r.saveValueStorage(false, hasBranch, storageValue, hash)
+		r.saveValueStorage(false, hasTree, storageValue, hash)
 	case SHashStreamItem:
 		if len(storageKey) == 0 { // this is ready-to-use storage root - no reason to call GenStructStep, also GenStructStep doesn't support empty prefixes
 			r.hb.hashStack = append(append(r.hb.hashStack, byte(80+common.HashLength)), hash...)
@@ -401,7 +401,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		r.saveValueStorage(true, hasBranch, storageValue, hash)
+		r.saveValueStorage(true, hasTree, storageValue, hash)
 	case AccountStreamItem:
 		r.advanceKeysAccount(accountKey, true /* terminator */)
 		if r.curr.Len() > 0 && !r.wasIH {
@@ -413,7 +413,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 			}
 			if r.currStorage.Len() > 0 {
 				r.groupsStorage = r.groupsStorage[:0]
-				r.hasBranchStorage = r.hasBranchStorage[:0]
+				r.hasTreeStorage = r.hasTreeStorage[:0]
 				r.hasHashStorage = r.hasHashStorage[:0]
 				r.currStorage.Reset()
 				r.succStorage.Reset()
@@ -428,7 +428,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		if err := r.saveValueAccount(false, hasBranch, accountValue, hash); err != nil {
+		if err := r.saveValueAccount(false, hasTree, accountValue, hash); err != nil {
 			return err
 		}
 	case AHashStreamItem:
@@ -442,7 +442,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 			}
 			if r.currStorage.Len() > 0 {
 				r.groupsStorage = r.groupsStorage[:0]
-				r.hasBranchStorage = r.hasBranchStorage[:0]
+				r.hasTreeStorage = r.hasTreeStorage[:0]
 				r.hasHashStorage = r.hasHashStorage[:0]
 				r.currStorage.Reset()
 				r.succStorage.Reset()
@@ -457,7 +457,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		if err := r.saveValueAccount(true, hasBranch, accountValue, hash); err != nil {
+		if err := r.saveValueAccount(true, hasTree, accountValue, hash); err != nil {
 			return err
 		}
 	case CutoffStreamItem:
@@ -474,7 +474,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 			}
 			if r.currStorage.Len() > 0 {
 				r.groupsStorage = r.groupsStorage[:0]
-				r.hasBranchStorage = r.hasBranchStorage[:0]
+				r.hasTreeStorage = r.hasTreeStorage[:0]
 				r.hasHashStorage = r.hasHashStorage[:0]
 				r.currStorage.Reset()
 				r.succStorage.Reset()
@@ -491,7 +491,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 		if r.curr.Len() > 0 {
 			if len(r.groups) > cutoff {
 				r.groups = r.groups[:cutoff]
-				r.hasBranch = r.hasBranch[:cutoff]
+				r.hasTree = r.hasTree[:cutoff]
 				r.hasHash = r.hasHash[:cutoff]
 			}
 		}
@@ -501,7 +501,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 			r.root = EmptyRoot
 		}
 		r.groups = r.groups[:0]
-		r.hasBranch = r.hasBranch[:0]
+		r.hasTree = r.hasTree[:0]
 		r.hasHash = r.hasHash[:0]
 		r.hb.Reset()
 		r.wasIH = false
@@ -561,18 +561,18 @@ func (r *RootHashAggregator) genStructStorage() error {
 	var data GenStructStepData
 	if r.wasIHStorage {
 		r.hashData.Hash = r.hashStorage
-		r.hashData.IsBranch = r.hadBranchStorage
+		r.hashData.HasTree = r.hadTreeStorage
 		data = &r.hashData
 	} else {
 		r.leafData.Value = rlphacks.RlpSerializableBytes(r.valueStorage)
 		data = &r.leafData
 	}
-	r.groupsStorage, r.hasBranchStorage, r.hasHashStorage, err = GenStructStep(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
+	r.groupsStorage, r.hasTreeStorage, r.hasHashStorage, err = GenStructStep(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		if r.shc == nil {
 			return nil
 		}
-		return r.shc(r.currAccK, keyHex, hasState, hasBranch, hasHash, hashes, rootHash)
-	}, data, r.groupsStorage, r.hasBranchStorage, r.hasHashStorage,
+		return r.shc(r.currAccK, keyHex, hasState, hasTree, hasHash, hashes, rootHash)
+	}, data, r.groupsStorage, r.hasTreeStorage, r.hasHashStorage,
 		r.trace,
 	)
 	if err != nil {
@@ -581,13 +581,13 @@ func (r *RootHashAggregator) genStructStorage() error {
 	return nil
 }
 
-func (r *RootHashAggregator) saveValueStorage(isIH, hasBranch bool, v, h []byte) {
+func (r *RootHashAggregator) saveValueStorage(isIH, hasTree bool, v, h []byte) {
 	// Remember the current value
 	r.wasIHStorage = isIH
 	r.valueStorage = nil
 	if isIH {
 		r.hashStorage.SetBytes(h)
-		r.hadBranchStorage = hasBranch
+		r.hadTreeStorage = hasTree
 	} else {
 		r.valueStorage = v
 	}
@@ -617,7 +617,7 @@ func (r *RootHashAggregator) genStructAccount() error {
 	var data GenStructStepData
 	if r.wasIH {
 		r.hashData.Hash = r.hashAccount
-		r.hashData.IsBranch = r.hadBranchAcc
+		r.hashData.HasTree = r.hadTreeAcc
 		data = &r.hashData
 	} else {
 		r.accData.Balance.Set(&r.a.Balance)
@@ -635,16 +635,16 @@ func (r *RootHashAggregator) genStructAccount() error {
 	r.currStorage.Reset()
 	r.succStorage.Reset()
 	var err error
-	if r.groups, r.hasBranch, r.hasHash, err = GenStructStep(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error {
+	if r.groups, r.hasTree, r.hasHash, err = GenStructStep(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		if r.hc == nil {
 			return nil
 		}
 
 		//if bytes.HasPrefix(keyHex, common.FromHex("060e")) {
-		//	fmt.Printf("collect: %x,%b,%b, del:%t\n", keyHex, hasHash, hasBranch, hashes == nil)
+		//	fmt.Printf("collect: %x,%b,%b, del:%t\n", keyHex, hasHash, hasTree, hashes == nil)
 		//}
-		return r.hc(keyHex, hasState, hasBranch, hasHash, hashes, rootHash)
-	}, data, r.groups, r.hasBranch, r.hasHash,
+		return r.hc(keyHex, hasState, hasTree, hasHash, hashes, rootHash)
+	}, data, r.groups, r.hasTree, r.hasHash,
 		false,
 		//r.trace,
 	); err != nil {
@@ -654,11 +654,11 @@ func (r *RootHashAggregator) genStructAccount() error {
 	return nil
 }
 
-func (r *RootHashAggregator) saveValueAccount(isIH, hasBranch bool, v *accounts.Account, h []byte) error {
+func (r *RootHashAggregator) saveValueAccount(isIH, hasTree bool, v *accounts.Account, h []byte) error {
 	r.wasIH = isIH
 	if isIH {
 		r.hashAccount.SetBytes(h)
-		r.hadBranchAcc = hasBranch
+		r.hadTreeAcc = hasTree
 		return nil
 	}
 	r.a.Copy(v)
@@ -676,12 +676,14 @@ func (r *RootHashAggregator) saveValueAccount(isIH, hasBranch bool, v *accounts.
 // AccTrieCursor - holds logic related to iteration over AccTrie bucket
 // has 2 basic operations:  _preOrderTraversalStep and _preOrderTraversalStepNoInDepth
 type AccTrieCursor struct {
-	SkipState                    bool
-	is, lvl                      int
-	k, v                         [64][]byte // store up to 64 levels of key/value pairs in nibbles format
-	hasState, hasBranch, hasHash [64]uint16 // branch hasState set, and any hasState set
-	childID, hashID              [64]int8   // meta info: current child in .hasState[lvl] field, max child id, current hash in .v[lvl]
-	deleted                      [64]bool   // helper to avoid multiple deletes of same key
+	SkipState       bool
+	is, lvl         int
+	k, v            [64][]byte // store up to 64 levels of key/value pairs in nibbles format
+	hasState        [64]uint16 // says that records in dbutil.HashedAccountsBucket exists by given prefix
+	hasTree         [64]uint16 // says that records in dbutil.TrieOfAccountsBucket exists by given prefix
+	hasHash         [64]uint16 // store ownership of hashes stored in .v
+	childID, hashID [64]int8   // meta info: current child in .hasState[lvl] field, max child id, current hash in .v[lvl]
+	deleted         [64]bool   // helper to avoid multiple deletes of same key
 
 	c               ethdb.Cursor
 	hc              HashCollector2
@@ -709,7 +711,7 @@ func AccTrie(canUse func([]byte) (bool, []byte), hc HashCollector2, c ethdb.Curs
 
 // _preOrderTraversalStep - goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
 func (c *AccTrieCursor) _preOrderTraversalStep() error {
-	if c._hasBranch() {
+	if c._hasTree() {
 		c.next = append(append(c.next[:0], c.k[c.lvl]...), byte(c.childID[c.lvl]))
 		ok, err := c._seek(c.next, c.next)
 		if err != nil {
@@ -740,7 +742,7 @@ func (c *AccTrieCursor) FirstNotCoveredPrefix() []byte {
 	return c.firstNotCoveredPrefix
 }
 
-func (c *AccTrieCursor) AtPrefix(prefix []byte) (k, v []byte, hasBranch bool, err error) {
+func (c *AccTrieCursor) AtPrefix(prefix []byte) (k, v []byte, hasTree bool, err error) {
 	c.SkipState = true
 	_, c.nextCreated = c.canUse([]byte{})
 	c.prev = append(c.prev[:0], c.cur...)
@@ -760,7 +762,7 @@ func (c *AccTrieCursor) AtPrefix(prefix []byte) (k, v []byte, hasBranch bool, er
 			c.SkipState = c.SkipState && keyIsBefore(c.kBuf, c.nextCreated)
 			c.nextCreated = nextCreated
 			c.cur = append(c.cur[:0], c.kBuf...)
-			return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
+			return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
 		}
 	}
 	err = c._deleteCurrent()
@@ -771,7 +773,7 @@ func (c *AccTrieCursor) AtPrefix(prefix []byte) (k, v []byte, hasBranch bool, er
 	return c._next()
 }
 
-func (c *AccTrieCursor) Next() (k, v []byte, hasBranch bool, err error) {
+func (c *AccTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 	c.SkipState = true
 	c.prev = append(c.prev[:0], c.cur...)
 	err = c._preOrderTraversalStepNoInDepth()
@@ -789,7 +791,7 @@ func (c *AccTrieCursor) Next() (k, v []byte, hasBranch bool, err error) {
 			c.SkipState = c.SkipState && keyIsBefore(c.kBuf, c.nextCreated)
 			c.nextCreated = nextCreated
 			c.cur = append(c.cur[:0], c.kBuf...)
-			return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
+			return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
 		}
 	}
 	err = c._deleteCurrent()
@@ -806,17 +808,17 @@ func (c *AccTrieCursor) _seek(seek []byte, withinPrefix []byte) (bool, error) {
 	if len(seek) == 0 {
 		k, v, err = c.c.First()
 	} else {
-		//TODO: write more common optimization - maintain .canUseNext variable by hasBranch info - similar to skipState
+		//TODO: write more common optimization - maintain .canUseNext variable by hasTree info - similar to skipState
 
 		// optimistic .Next call, can use result in 2 cases:
 		// - no child found, means: len(k) <= c.lvl
-		// - looking for first child, means: c.childID[c.lvl] <= int16(bits.TrailingZeros16(c.hasBranch[c.lvl]))
+		// - looking for first child, means: c.childID[c.lvl] <= int16(bits.TrailingZeros16(c.hasTree[c.lvl]))
 		// otherwise do .Seek call
 		//k, v, err = c.c.Next()
 		//if err != nil {
 		//	return false, err
 		//}
-		//if len(k) > c.lvl && c.childID[c.lvl] > int8(bits.TrailingZeros16(c.hasBranch[c.lvl])) {
+		//if len(k) > c.lvl && c.childID[c.lvl] > int8(bits.TrailingZeros16(c.hasTree[c.lvl])) {
 		//	c.is++
 		k, v, err = c.c.Seek(seek)
 		//}
@@ -843,7 +845,7 @@ func (c *AccTrieCursor) _nextSiblingInMem() bool {
 			c.hashID[c.lvl]++
 			return true
 		}
-		if c._hasBranch() {
+		if c._hasTree() {
 			return true
 		}
 		if c._hasState() {
@@ -901,12 +903,12 @@ func (c *AccTrieCursor) _unmarshal(k, v []byte) {
 		from, to = len(k)+1, c.lvl+2
 	}
 	for i := from; i < to; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
-		c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
+		c.k[i], c.hasState[i], c.hasTree[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
 	}
 	c.lvl = len(k)
 	c.k[c.lvl] = k
 	c.deleted[c.lvl] = false
-	c.hasState[c.lvl], c.hasBranch[c.lvl], c.hasHash[c.lvl], c.v[c.lvl], _ = UnmarshalTrieNode(v)
+	c.hasState[c.lvl], c.hasTree[c.lvl], c.hasHash[c.lvl], c.v[c.lvl], _ = UnmarshalTrieNode(v)
 	c.hashID[c.lvl] = -1
 	c.childID[c.lvl] = int8(bits.TrailingZeros16(c.hasState[c.lvl]) - 1)
 }
@@ -922,18 +924,18 @@ func (c *AccTrieCursor) _deleteCurrent() error {
 	return nil
 }
 
-func (c *AccTrieCursor) _hasState() bool  { return (1<<c.childID[c.lvl])&c.hasState[c.lvl] != 0 }
-func (c *AccTrieCursor) _hasBranch() bool { return (1<<c.childID[c.lvl])&c.hasBranch[c.lvl] != 0 }
-func (c *AccTrieCursor) _hasHash() bool   { return (1<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0 }
+func (c *AccTrieCursor) _hasState() bool { return (1<<c.childID[c.lvl])&c.hasState[c.lvl] != 0 }
+func (c *AccTrieCursor) _hasTree() bool  { return (1<<c.childID[c.lvl])&c.hasTree[c.lvl] != 0 }
+func (c *AccTrieCursor) _hasHash() bool  { return (1<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0 }
 func (c *AccTrieCursor) _hash(i int8) []byte {
 	return c.v[c.lvl][common.HashLength*int(i) : common.HashLength*(int(i)+1)]
 }
 
-func (c *AccTrieCursor) _next() (k, v []byte, hasBranch bool, err error) {
+func (c *AccTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	if err = common.Stopped(c.quit); err != nil {
 		return []byte{}, nil, false, err
 	}
-	c.SkipState = c.SkipState && c._hasBranch()
+	c.SkipState = c.SkipState && c._hasTree()
 	err = c._preOrderTraversalStep()
 	if err != nil {
 		return []byte{}, nil, false, err
@@ -952,7 +954,7 @@ func (c *AccTrieCursor) _next() (k, v []byte, hasBranch bool, err error) {
 				c.SkipState = c.SkipState && keyIsBefore(c.kBuf, c.nextCreated)
 				c.nextCreated = nextCreated
 				c.cur = append(c.cur[:0], c.kBuf...)
-				return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
+				return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
 			}
 		}
 		err = c._deleteCurrent()
@@ -960,7 +962,7 @@ func (c *AccTrieCursor) _next() (k, v []byte, hasBranch bool, err error) {
 			return []byte{}, nil, false, err
 		}
 
-		c.SkipState = c.SkipState && c._hasBranch()
+		c.SkipState = c.SkipState && c._hasTree()
 		err = c._preOrderTraversalStep()
 		if err != nil {
 			return []byte{}, nil, false, err
@@ -970,11 +972,11 @@ func (c *AccTrieCursor) _next() (k, v []byte, hasBranch bool, err error) {
 
 // StorageTrieCursor - holds logic related to iteration over AccTrie bucket
 type StorageTrieCursor struct {
-	is, lvl                      int
-	k, v                         [64][]byte
-	hasState, hasBranch, hasHash [64]uint16
-	deleted                      [64]bool
-	childID, hashID              [64]int8
+	is, lvl                    int
+	k, v                       [64][]byte
+	hasState, hasTree, hasHash [64]uint16
+	deleted                    [64]bool
+	childID, hashID            [64]int8
 
 	c         ethdb.Cursor
 	shc       StorageHashCollector2
@@ -1012,7 +1014,7 @@ func (c *StorageTrieCursor) FirstNotCoveredPrefix() []byte {
 	return c.firstNotCoveredPrefix
 }
 
-func (c *StorageTrieCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasBranch bool, err error) {
+func (c *StorageTrieCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasTree bool, err error) {
 	c.skipState = true
 	c.accWithInc = accWithInc
 	hexutil.DecompressNibbles(c.accWithInc, &c.kBuf)
@@ -1055,7 +1057,7 @@ func (c *StorageTrieCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasBr
 			c.skipState = c.skipState && keyIsBefore(c.kBuf, c.nextCreated)
 			c.nextCreated = nextCreated
 			c.cur = common.CopyBytes(c.kBuf[80:])
-			return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
+			return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
 		}
 	}
 	err = c._deleteCurrent()
@@ -1065,7 +1067,7 @@ func (c *StorageTrieCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasBr
 	return c._next()
 }
 
-func (c *StorageTrieCursor) Next() (k, v []byte, hasBranch bool, err error) {
+func (c *StorageTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 	c.skipState = true
 	c.prev = c.cur
 	err = c._preOrderTraversalStepNoInDepth()
@@ -1083,7 +1085,7 @@ func (c *StorageTrieCursor) Next() (k, v []byte, hasBranch bool, err error) {
 			c.skipState = c.skipState && keyIsBefore(c.kBuf, c.nextCreated)
 			c.nextCreated = nextCreated
 			c.cur = common.CopyBytes(c.kBuf[80:])
-			return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
+			return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
 		}
 	}
 	err = c._deleteCurrent()
@@ -1103,13 +1105,13 @@ func (c *StorageTrieCursor) _seek(seek, prefix []byte) (bool, error) {
 	} else {
 		// optimistic .Next call, can use result in 2 cases:
 		// - no child found, means: len(k) <= c.lvl
-		// - looking for first child, means: c.childID[c.lvl] <= int8(bits.TrailingZeros16(c.hasBranch[c.lvl]))
+		// - looking for first child, means: c.childID[c.lvl] <= int8(bits.TrailingZeros16(c.hasTree[c.lvl]))
 		// otherwise do .Seek call
 		//k, v, err = c.c.Next()
 		//if err != nil {
 		//	return false, err
 		//}
-		//if len(k) > c.lvl && c.childID[c.lvl] > int8(bits.TrailingZeros16(c.hasBranch[c.lvl])) {
+		//if len(k) > c.lvl && c.childID[c.lvl] > int8(bits.TrailingZeros16(c.hasTree[c.lvl])) {
 		//c.is++
 		k, v, err = c.c.Seek(seek)
 		//}
@@ -1130,7 +1132,7 @@ func (c *StorageTrieCursor) _seek(seek, prefix []byte) (bool, error) {
 
 // _preOrderTraversalStep - goToChild || nextSiblingInMem || nextSiblingOfParentInMem || nextSiblingInDB
 func (c *StorageTrieCursor) _preOrderTraversalStep() error {
-	if c._hasBranch() {
+	if c._hasTree() {
 		c.seek = append(append(c.seek[:40], c.k[c.lvl]...), byte(c.childID[c.lvl]))
 		ok, err := c._seek(c.seek, []byte{})
 		if err != nil {
@@ -1156,9 +1158,9 @@ func (c *StorageTrieCursor) _preOrderTraversalStepNoInDepth() error {
 	return nil
 }
 
-func (c *StorageTrieCursor) _hasState() bool  { return (1<<c.childID[c.lvl])&c.hasState[c.lvl] != 0 }
-func (c *StorageTrieCursor) _hasHash() bool   { return (1<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0 }
-func (c *StorageTrieCursor) _hasBranch() bool { return (1<<c.childID[c.lvl])&c.hasBranch[c.lvl] != 0 }
+func (c *StorageTrieCursor) _hasState() bool { return (1<<c.childID[c.lvl])&c.hasState[c.lvl] != 0 }
+func (c *StorageTrieCursor) _hasHash() bool  { return (1<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0 }
+func (c *StorageTrieCursor) _hasTree() bool  { return (1<<c.childID[c.lvl])&c.hasTree[c.lvl] != 0 }
 func (c *StorageTrieCursor) _hash(i int8) []byte {
 	return c.v[c.lvl][int(i)*common.HashLength : (int(i)+1)*common.HashLength]
 }
@@ -1170,7 +1172,7 @@ func (c *StorageTrieCursor) _nextSiblingInMem() bool {
 			c.hashID[c.lvl]++
 			return true
 		}
-		if c._hasBranch() {
+		if c._hasTree() {
 			return true
 		}
 		if c._hasState() {
@@ -1221,12 +1223,12 @@ func (c *StorageTrieCursor) _nextSiblingInDB() error {
 	return nil
 }
 
-func (c *StorageTrieCursor) _next() (k, v []byte, hasBranch bool, err error) {
+func (c *StorageTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	if err = common.Stopped(c.quit); err != nil {
 		return []byte{}, nil, false, err
 	}
 
-	c.skipState = c.skipState && c._hasBranch()
+	c.skipState = c.skipState && c._hasTree()
 	err = c._preOrderTraversalStep()
 	if err != nil {
 		return []byte{}, nil, false, err
@@ -1245,7 +1247,7 @@ func (c *StorageTrieCursor) _next() (k, v []byte, hasBranch bool, err error) {
 				c.skipState = c.skipState && keyIsBefore(c.kBuf, c.nextCreated)
 				c.nextCreated = nextCreated
 				c.cur = common.CopyBytes(c.kBuf[80:])
-				return c.cur, c._hash(c.hashID[c.lvl]), c._hasBranch(), nil
+				return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
 			}
 		}
 		err = c._deleteCurrent()
@@ -1253,7 +1255,7 @@ func (c *StorageTrieCursor) _next() (k, v []byte, hasBranch bool, err error) {
 			return []byte{}, nil, false, err
 		}
 
-		c.skipState = c.skipState && c._hasBranch()
+		c.skipState = c.skipState && c._hasTree()
 		err = c._preOrderTraversalStep()
 		if err != nil {
 			return []byte{}, nil, false, err
@@ -1267,13 +1269,13 @@ func (c *StorageTrieCursor) _unmarshal(k, v []byte) {
 		from, to = len(k)+1, c.lvl+2
 	}
 	for i := from; i < to; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
-		c.k[i], c.hasState[i], c.hasBranch[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
+		c.k[i], c.hasState[i], c.hasTree[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
 	}
 
 	c.lvl = len(k) - 40
 	c.k[c.lvl] = k[40:]
 	c.deleted[c.lvl] = false
-	c.hasState[c.lvl], c.hasBranch[c.lvl], c.hasHash[c.lvl], c.v[c.lvl], c.root = UnmarshalTrieNode(v)
+	c.hasState[c.lvl], c.hasTree[c.lvl], c.hasHash[c.lvl], c.v[c.lvl], c.root = UnmarshalTrieNode(v)
 	c.hashID[c.lvl] = -1
 	c.childID[c.lvl] = int8(bits.TrailingZeros16(c.hasState[c.lvl]) - 1)
 }
@@ -1398,17 +1400,17 @@ func keyIsBefore(k1, k2 []byte) bool {
 }
 
 func UnmarshalTrieNodeTyped(v []byte) (uint16, uint16, uint16, []common.Hash) {
-	hasState, hasBranch, hasHash := binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:])
+	hasState, hasTree, hasHash := binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:])
 	v = v[6:]
 	newV := make([]common.Hash, len(v)/common.HashLength)
 	for i := 0; i < len(newV); i++ {
 		newV[i].SetBytes(common.CopyBytes(v[i*common.HashLength : (i+1)*common.HashLength]))
 	}
-	return hasState, hasBranch, hasHash, newV
+	return hasState, hasTree, hasHash, newV
 }
 
-func UnmarshalTrieNode(v []byte) (hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) {
-	hasState, hasBranch, hasHash, hashes = binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:]), v[6:]
+func UnmarshalTrieNode(v []byte) (hasState, hasTree, hasHash uint16, hashes, rootHash []byte) {
+	hasState, hasTree, hasHash, hashes = binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:]), v[6:]
 	if bits.OnesCount16(hasHash)+1 == len(hashes)/common.HashLength {
 		rootHash = hashes[:32]
 		hashes = hashes[32:]
@@ -1416,11 +1418,11 @@ func UnmarshalTrieNode(v []byte) (hasState, hasBranch, hasHash uint16, hashes, r
 	return
 }
 
-func MarshalTrieNodeTyped(hasState, hasBranch, hasHash uint16, h []common.Hash, buf []byte) []byte {
+func MarshalTrieNodeTyped(hasState, hasTree, hasHash uint16, h []common.Hash, buf []byte) []byte {
 	buf = buf[:6+len(h)*common.HashLength]
 	meta, hashes := buf[:6], buf[6:]
 	binary.BigEndian.PutUint16(meta, hasState)
-	binary.BigEndian.PutUint16(meta[2:], hasBranch)
+	binary.BigEndian.PutUint16(meta[2:], hasTree)
 	binary.BigEndian.PutUint16(meta[4:], hasHash)
 	for i := 0; i < len(h); i++ {
 		copy(hashes[i*common.HashLength:(i+1)*common.HashLength], h[i].Bytes())
@@ -1432,11 +1434,11 @@ func StorageKey(addressHash []byte, incarnation uint64, prefix []byte) []byte {
 	return dbutils.GenerateCompositeStoragePrefix(addressHash, incarnation, prefix)
 }
 
-func MarshalTrieNode(hasState, hasBranch, hasHash uint16, hashes []byte, rootHash []byte, buf []byte) []byte {
+func MarshalTrieNode(hasState, hasTree, hasHash uint16, hashes []byte, rootHash []byte, buf []byte) []byte {
 	buf = buf[:len(hashes)+len(rootHash)+6]
 	meta, hashesList := buf[:6], buf[6:]
 	binary.BigEndian.PutUint16(meta, hasState)
-	binary.BigEndian.PutUint16(meta[2:], hasBranch)
+	binary.BigEndian.PutUint16(meta[2:], hasTree)
 	binary.BigEndian.PutUint16(meta[4:], hasHash)
 	if len(rootHash) == 0 {
 		copy(hashesList, hashes)
@@ -1463,15 +1465,15 @@ func CastTrieNodeValue(hashes []byte, rootHash []byte) []common.Hash {
 
 func collectMissedAccTrie(canUse func([]byte) (bool, []byte), prefix []byte, cache *shards.StateCache, quit <-chan struct{}) ([][]byte, error) {
 	var misses [][]byte
-	if err := cache.AccountTree(prefix, func(k []byte, v common.Hash, hasBranch, hasHash bool) (toChild bool, err error) {
-		if k == nil || !hasBranch || !hasHash {
-			return hasBranch, nil
+	if err := cache.AccountTree(prefix, func(k []byte, v common.Hash, hasTree, hasHash bool) (toChild bool, err error) {
+		if k == nil || !hasTree || !hasHash {
+			return hasTree, nil
 		}
 		if ok, _ := canUse(k); ok {
 			return false, nil
 		}
 
-		return hasBranch, common.Stopped(quit)
+		return hasTree, common.Stopped(quit)
 	}, func(k []byte) {
 		misses = append(misses, common.CopyBytes(k))
 	}); err != nil {
@@ -1492,8 +1494,8 @@ func loadAccTrieToCache(ih ethdb.Cursor, prefix []byte, misses [][]byte, cache *
 			if !bytes.HasPrefix(k, miss) || !bytes.HasPrefix(k, prefix) { // read all accounts until next AccTrie
 				break
 			}
-			hasState, hasBranch, hasHash, newV := UnmarshalTrieNodeTyped(v)
-			cache.SetAccountHashesRead(k, hasState, hasBranch, hasHash, newV)
+			hasState, hasTree, hasHash, newV := UnmarshalTrieNodeTyped(v)
+			cache.SetAccountHashesRead(k, hasState, hasTree, hasHash, newV)
 		}
 	}
 	return nil
@@ -1529,15 +1531,15 @@ func loadAccsToCache(accs ethdb.Cursor, accMisses [][]byte, canUse func([]byte) 
 				return true, nil
 			}
 
-			if err := cache.StorageTree([]byte{}, accountHash, incarnation, func(k []byte, v common.Hash, hasBranch, hasHash bool) (toChild bool, err error) {
-				if k == nil || !hasBranch || !hasHash {
-					return hasBranch, nil
+			if err := cache.StorageTree([]byte{}, accountHash, incarnation, func(k []byte, v common.Hash, hasTree, hasHash bool) (toChild bool, err error) {
+				if k == nil || !hasTree || !hasHash {
+					return hasTree, nil
 				}
 				if ok, _ = canUse(k); ok {
 					return false, nil
 				}
 
-				return hasBranch, common.Stopped(quit)
+				return hasTree, common.Stopped(quit)
 			}, func(k []byte) {
 				misses = append(misses, common.CopyBytes(k))
 			}); err != nil {
@@ -1581,16 +1583,16 @@ func loadStorageToCache(ss ethdb.Cursor, misses [][]byte, cache *shards.StateCac
 
 func collectMissedAccounts(canUse func([]byte) (bool, []byte), prefix []byte, cache *shards.StateCache, quit <-chan struct{}) ([][]byte, error) {
 	var misses [][]byte
-	if err := cache.AccountTree(prefix, func(k []byte, v common.Hash, hasBranch, hasHash bool) (toChild bool, err error) {
+	if err := cache.AccountTree(prefix, func(k []byte, v common.Hash, hasTree, hasHash bool) (toChild bool, err error) {
 		if k == nil {
-			return hasBranch, nil
+			return hasTree, nil
 		}
 
 		if !hasHash {
 			if !cache.HasAccountWithInPrefix(k) {
 				misses = append(misses, common.CopyBytes(k))
 			}
-			return hasBranch, nil
+			return hasTree, nil
 		}
 
 		if ok, _ := canUse(k); ok {
@@ -1600,7 +1602,7 @@ func collectMissedAccounts(canUse func([]byte) (bool, []byte), prefix []byte, ca
 		if !cache.HasAccountWithInPrefix(k) {
 			misses = append(misses, common.CopyBytes(k))
 		}
-		return hasBranch, common.Stopped(quit)
+		return hasTree, common.Stopped(quit)
 	}, func(k []byte) {
 		panic(fmt.Errorf("key %x not found in cache", k))
 	}); err != nil {
@@ -1638,7 +1640,7 @@ func (l *FlatDBTrieLoader) prep(accs, st, trieAcc ethdb.Cursor, prefix []byte, c
 	return nil
 }
 
-func (l *FlatDBTrieLoader) walkAccountTree(prefix []byte, cache *shards.StateCache, walker func(ihK []byte, ihV common.Hash, hasBranch, skipState bool, accSeek []byte) error) error {
+func (l *FlatDBTrieLoader) walkAccountTree(prefix []byte, cache *shards.StateCache, walker func(ihK []byte, ihV common.Hash, hasTree, skipState bool, accSeek []byte) error) error {
 	var canUse = func(prefix []byte) (bool, []byte) {
 		retain, nextCreated := l.rd.RetainWithMarker(prefix)
 		return !retain, nextCreated
@@ -1648,35 +1650,35 @@ func (l *FlatDBTrieLoader) walkAccountTree(prefix []byte, cache *shards.StateCac
 	_, nextCreated := canUse([]byte{})
 	var skipState bool
 
-	return cache.AccountTree(prefix, func(k []byte, h common.Hash, hasBranch, hasHash bool) (toChild bool, err error) {
+	return cache.AccountTree(prefix, func(k []byte, h common.Hash, hasTree, hasHash bool) (toChild bool, err error) {
 		if k == nil {
 			skipState = skipState && !dbutils.NextNibblesSubtree(prev, &l.accSeek)
-			return hasBranch, walker(k, h, hasBranch, skipState, l.accSeek)
+			return hasTree, walker(k, h, hasTree, skipState, l.accSeek)
 		}
-		if !hasBranch && !hasHash {
+		if !hasTree && !hasHash {
 			skipState = false
-			return hasBranch, nil
+			return hasTree, nil
 		}
 		if !hasHash {
-			return hasBranch, nil
+			return hasTree, nil
 		}
 
 		if ok, newNextCreated := canUse(k); ok {
 			skipState = skipState && keyIsBefore(k, nextCreated)
 			nextCreated = newNextCreated
 			l.accSeek = firstNotCoveredPrefix(prev, prefix, l.accSeek)
-			if err = walker(k, h, hasBranch, skipState, l.accSeek); err != nil {
+			if err = walker(k, h, hasTree, skipState, l.accSeek); err != nil {
 				return false, err
 			}
 			prev = append(prev[:0], k...)
 			skipState = true
 			return false, nil
 		}
-		skipState = skipState && hasBranch
+		skipState = skipState && hasTree
 
 		// TODO: delete by hash collector and add protection from double-delete
 		cache.SetAccountHashDelete(k[:len(k)-1])
-		return hasBranch, nil
+		return hasTree, nil
 	}, func(k []byte) {
 		panic(fmt.Errorf("key %x not found in cache", k))
 	})
@@ -1688,7 +1690,7 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *Storage
 	defer logEvery.Stop()
 	defer func(t time.Time) { fmt.Printf("trie_root.go:375: %s\n", time.Since(t)) }(time.Now())
 	i2, i4 := 0, 0
-	if err := l.walkAccountTree(prefix, cache, func(ihK []byte, ihV common.Hash, hasBranch, skipState bool, accSeek []byte) error {
+	if err := l.walkAccountTree(prefix, cache, func(ihK []byte, ihV common.Hash, hasTree, skipState bool, accSeek []byte) error {
 		if skipState {
 			goto SkipAccounts
 		}
@@ -1712,7 +1714,7 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *Storage
 			copy(l.accAddrHashWithInc[:], addrHash.Bytes())
 			binary.BigEndian.PutUint64(l.accAddrHashWithInc[32:], l.accountValue.Incarnation)
 			accWithInc := l.accAddrHashWithInc[:]
-			for ihKS, ihVS, hasBranchS, err2 := ihStorage.SeekToAccount(accWithInc); ; ihKS, ihVS, hasBranchS, err2 = ihStorage.Next() {
+			for ihKS, ihVS, hasTreeS, err2 := ihStorage.SeekToAccount(accWithInc); ; ihKS, ihVS, hasTreeS, err2 = ihStorage.Next() {
 				if err2 != nil {
 					return false, err2
 				}
@@ -1739,7 +1741,7 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *Storage
 					break
 				}
 
-				if err := l.receiver.Receive(SHashStreamItem, accWithInc, common.CopyBytes(ihKS), nil, nil, ihVS, hasBranchS, 0); err != nil {
+				if err := l.receiver.Receive(SHashStreamItem, accWithInc, common.CopyBytes(ihKS), nil, nil, ihVS, hasTreeS, 0); err != nil {
 					return false, err
 				}
 				if len(ihKS) == 0 { // means we just sent acc.storageRoot
@@ -1762,7 +1764,7 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *Storage
 			return nil
 		}
 
-		if err := l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV[:], hasBranch, 0); err != nil {
+		if err := l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV[:], hasTree, 0); err != nil {
 			return err
 		}
 		return nil
@@ -1836,11 +1838,11 @@ func (l *FlatDBTrieLoader) CalcSubTrieRootOnCache(db ethdb.Database, prefix []by
 
 func (l *FlatDBTrieLoader) CalcTrieRootOnCache(cache *shards.StateCache) (common.Hash, error) {
 	fmt.Printf("CalcTrieRootOnCache\n")
-	if err := l.walkAccountTree([]byte{}, cache, func(ihK []byte, ihV common.Hash, hasBranch, skipState bool, accSeek []byte) error {
+	if err := l.walkAccountTree([]byte{}, cache, func(ihK []byte, ihV common.Hash, hasTree, skipState bool, accSeek []byte) error {
 		if len(ihK) == 0 { // Loop termination
 			return nil
 		}
-		if err := l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV[:], hasBranch, 0); err != nil {
+		if err := l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV[:], hasTree, 0); err != nil {
 			return err
 		}
 		return nil
