@@ -1394,7 +1394,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 			}
 			if (stStorage+stAccounts)%100000 == 0 {
 				fmt.Printf("State records: %d\n", stStorage+stAccounts)
-			}
+			}w
 		}
 		return e
 	}); err != nil {
