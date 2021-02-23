@@ -52,7 +52,6 @@ func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header          {
 func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
 	lock.Lock()
 	defer lock.Unlock()
-	//log.Info(hd.AnchorState())
 	//log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	foundAnchor, start, anchorParent, invalidAnchors := hd.FindAnchors(segment)
 	if len(invalidAnchors) > 0 {
@@ -120,6 +119,7 @@ func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segme
 			//log.Info("NewAnchor", "start", start, "end", end)
 		}
 	}
+	//log.Info(hd.AnchorState())
 }
 
 func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
@@ -368,14 +368,11 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		log.Error("Recovery from DB failed", "error", err)
 	}
 	hardTips := headerdownload.InitHardCodedTips("mainnet")
-	filesRecovered, err1 := hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips)
-	if err1 != nil {
-		log.Error("Recovery from file failed, will start from scratch", "error", err1)
+	if err = hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips); err != nil {
+		log.Error("Recovery from file failed, will start from scratch", "error", err)
 	}
-	if !filesRecovered {
-		//fmt.Printf("Inserting hard-coded tips\n")
-		hd.SetHardCodedTips(hardTips)
-	}
+
+	hd.SetHardCodedTips(hardTips)
 	log.Info(hd.AnchorState())
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
 	cs := &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}), requestWakeUpBodies: make(chan struct{}), db: db}
