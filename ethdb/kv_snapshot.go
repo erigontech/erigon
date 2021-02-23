@@ -658,14 +658,6 @@ func GenStateData(data []KvData) (KV, error) {
 //
 //}
 //
-//func (c *cursorSnapshotDupsort) Prefix(v []byte) Cursor {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Prefetch(v uint) Cursor {
-//	panic("implement me")
-//}
-//
 //func (c *cursorSnapshotDupsort) First() ([]byte, []byte, error) {
 //	panic("implement me")
 //}
