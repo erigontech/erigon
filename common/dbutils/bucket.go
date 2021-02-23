@@ -90,19 +90,19 @@ var (
 	/*
 		TrieOfAccountsBucket and TrieOfStorageBucket
 		hasState,groups - mark prefixes existing in hashed_account table
-		hasBranch - mark prefixes existing in trie_account table (not related with branchNodes)
+		hasTree - mark prefixes existing in trie_account table (not related with branchNodes)
 		hasHash - mark prefixes which hashes are saved in current trie_account record (actually only hashes of branchNodes can be saved)
 		@see UnmarshalTrieNode
 		@see integrity.Trie
 
 		+-----------------------------------------------------------------------------------------------------+
-		| DB record: 0x0B, hasState: 0b1011, hasBranch: 0b1001, hasHash: 0b1001, hashes: [x,x]                |
+		| DB record: 0x0B, hasState: 0b1011, hasTree: 0b1001, hasHash: 0b1001, hashes: [x,x]                  |
 		+-----------------------------------------------------------------------------------------------------+
 		                |                                         |                                |
 		                v                                         |                                v
 		+---------------------------------------------+           |             +--------------------------------------+
 		| DB record: 0x0B00, hasState: 0b10001        |           |             | DB record: 0x0B03, hasState: 0b10010 |
-		| hasBranch: 0, hasHash: 0b10000, hashes: [x] |           |             | hasBranch: 0, hasHash: 0, hashes: [] |
+		| hasTree: 0, hasHash: 0b10000, hashes: [x]   |           |             | hasTree: 0, hasHash: 0, hashes: []   |
 		+---------------------------------------------+           |             +--------------------------------------+
 		        |               |                                 |                        |                  |
 		        v               v                                 v                        v                  v

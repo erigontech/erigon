@@ -30,7 +30,7 @@ type StreamReceiver interface {
 		accountValue *accounts.Account,
 		storageValue []byte,
 		hash []byte,
-		hasBranch bool,
+		hasTree bool,
 		cutoff int,
 	) error
 
@@ -420,7 +420,7 @@ func (dr *DefaultReceiver) Receive(itemType StreamItem,
 	accountValue *accounts.Account,
 	storageValue []byte,
 	hash []byte,
-	hasBranch bool,
+	hasTree bool,
 	cutoff int,
 ) error {
 	switch itemType {

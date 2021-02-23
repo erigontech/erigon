@@ -36,11 +36,11 @@ func TestIHCursor(t *testing.T) {
 	hash := common.HexToHash(fmt.Sprintf("%064d", 0))
 
 	newV := make([]byte, 0, 1024)
-	put := func(ks string, hasState, hasBranch, hasHash uint16, hashes []common.Hash) {
+	put := func(ks string, hasState, hasTree, hasHash uint16, hashes []common.Hash) {
 		k := common.FromHex(ks)
-		integrity.AssertSubset(k, hasBranch, hasState)
+		integrity.AssertSubset(k, hasTree, hasState)
 		integrity.AssertSubset(k, hasHash, hasState)
-		_ = db.Put(dbutils.TrieOfAccountsBucket, k, common.CopyBytes(trie.MarshalTrieNodeTyped(hasState, hasBranch, hasHash, hashes, newV)))
+		_ = db.Put(dbutils.TrieOfAccountsBucket, k, common.CopyBytes(trie.MarshalTrieNodeTyped(hasState, hasTree, hasHash, hashes, newV)))
 	}
 
 	put("00", 0b0000000000000010, 0b0000000000000000, 0b0000000000000010, []common.Hash{hash})

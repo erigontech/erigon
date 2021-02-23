@@ -47,8 +47,8 @@ type structInfoReceiver interface {
 type HashCollector func(keyHex []byte, hash []byte) error
 type StorageHashCollector func(accWithInc []byte, keyHex []byte, hash []byte) error
 
-type HashCollector2 func(keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error
-type StorageHashCollector2 func(accWithInc []byte, keyHex []byte, hasState, hasBranch, hasHash uint16, hashes, rootHash []byte) error
+type HashCollector2 func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
+type StorageHashCollector2 func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
 
 func calcPrecLen(groups []uint16) int {
 	if len(groups) == 0 {
@@ -77,8 +77,8 @@ type GenStructStepLeafData struct {
 func (GenStructStepLeafData) GenStructStepData() {}
 
 type GenStructStepHashData struct {
-	Hash     common.Hash
-	IsBranch bool
+	Hash    common.Hash
+	HasTree bool
 }
 
 func (GenStructStepHashData) GenStructStepData() {}
@@ -94,7 +94,7 @@ func (GenStructStepHashData) GenStructStepData() {}
 // `h` parameter is the hash collector, which is notified whenever branch node is constructed.
 // `data` parameter specified if a hash or a binary string or an account should be emitted.
 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. Meaning - which children of given prefix have state.
-// `hasBranch` same as `groups`, but meaning - which children of given prefix have IntermediateHash.
+// `hasTree` same as `groups`, but meaning - which children of given prefix have IntermediateHash.
 // `hasHash` same as `groups`, but meaning - which children of given prefix are branch nodes and their hashes can be saved and used on next trie resolution (as IntermediateHash).
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
@@ -106,7 +106,7 @@ func GenStructStep(
 	h HashCollector2,
 	data GenStructStepData,
 	groups []uint16,
-	hasBranch []uint16,
+	hasTree []uint16,
 	hasHash []uint16,
 	trace bool,
 ) ([]uint16, []uint16, []uint16, error) {
@@ -139,8 +139,8 @@ func GenStructStep(
 			remainderStart++
 		}
 		remainderLen := len(curr) - remainderStart
-		for remainderStart+remainderLen >= len(hasBranch) {
-			hasBranch = append(hasBranch, 0)
+		for remainderStart+remainderLen >= len(hasTree) {
+			hasTree = append(hasTree, 0)
 			hasHash = append(hasHash, 0)
 		}
 		//fmt.Printf("groups is now %x,%d,%b\n", extraDigit, maxLen, groups)
@@ -149,14 +149,14 @@ func GenStructStep(
 			switch v := data.(type) {
 			case *GenStructStepHashData:
 				if trace {
-					fmt.Printf("HashData before: %x, %t,%b,%b,%b\n", curr, v.IsBranch, hasHash, hasBranch, groups)
+					fmt.Printf("HashData before: %x, %t,%b,%b,%b\n", curr, v.HasTree, hasHash, hasTree, groups)
 				}
-				if v.IsBranch {
-					hasBranch[len(curr)-1] |= 1 << curr[len(curr)-1] // keep track of existing records in DB
+				if v.HasTree {
+					hasTree[len(curr)-1] |= 1 << curr[len(curr)-1] // keep track of existing records in DB
 				}
 				hasHash[len(curr)-1] |= 1 << curr[len(curr)-1] // register myself in parent bitmap
 				if trace {
-					fmt.Printf("HashData: %x, %t,%b,%b,%b\n", curr, v.IsBranch, hasHash, hasBranch, groups)
+					fmt.Printf("HashData: %x, %t,%b,%b,%b\n", curr, v.HasTree, hasHash, hasTree, groups)
 				}
 				/* building a hash */
 				if err := e.hash(v.Hash[:]); err != nil {
@@ -192,7 +192,7 @@ func GenStructStep(
 		if buildExtensions {
 			if remainderLen > 0 {
 				if trace {
-					fmt.Printf("Extension before: %x->%x,%b, %b, %b\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen], hasHash, hasBranch, groups)
+					fmt.Printf("Extension before: %x->%x,%b, %b, %b\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen], hasHash, hasTree, groups)
 				}
 				// can't use hash of extension node
 				// but must propagate hasBranch bits to keep tracking all existing DB records
@@ -203,8 +203,8 @@ func GenStructStep(
 				}
 				hasHash[from-1] &^= 1 << curr[from-1]
 				for i := from; i < remainderStart+remainderLen; i++ {
-					if 1<<curr[i]&hasBranch[i] != 0 {
-						hasBranch[from-1] |= 1 << curr[from-1]
+					if 1<<curr[i]&hasTree[i] != 0 {
+						hasTree[from-1] |= 1 << curr[from-1]
 					}
 					if h != nil {
 						if err := h(curr[:i], 0, 0, 0, nil, nil); err != nil {
@@ -212,10 +212,10 @@ func GenStructStep(
 						}
 					}
 				}
-				hasBranch = hasBranch[:from]
+				hasTree = hasTree[:from]
 				hasHash = hasHash[:from]
 				if trace {
-					fmt.Printf("Extension: %x, %b, %b, %b\n", curr[remainderStart:remainderStart+remainderLen], hasHash, hasBranch, groups)
+					fmt.Printf("Extension: %x, %b, %b, %b\n", curr[remainderStart:remainderStart+remainderLen], hasHash, hasTree, groups)
 				}
 				/* building extensions */
 				if retain(curr[:maxLen]) {
@@ -232,18 +232,18 @@ func GenStructStep(
 
 		// Check for the optional part
 		if precLen <= succLen && len(succ) > 0 {
-			return groups, hasBranch, hasHash, nil
+			return groups, hasTree, hasHash, nil
 		}
 
 		var usefulHashes []byte
-		if h != nil && (hasHash[maxLen] != 0 || hasBranch[maxLen] != 0 || (maxLen == 1 && groups[1] != 0)) { // top level must be in db
+		if h != nil && (hasHash[maxLen] != 0 || hasTree[maxLen] != 0 || (maxLen == 1 && groups[1] != 0)) { // top level must be in db
 			if trace {
-				fmt.Printf("why now: %x,%b,%b,%b\n", curr[:maxLen], hasHash, hasBranch, groups)
+				fmt.Printf("why now: %x,%b,%b,%b\n", curr[:maxLen], hasHash, hasTree, groups)
 			}
 			usefulHashes = e.topHashes(curr[:maxLen], hasHash[maxLen], groups[maxLen])
 			if maxLen != 0 {
-				hasBranch[maxLen-1] |= 1 << curr[maxLen-1] // register myself in parent bitmap
-				if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, nil); err != nil {
+				hasTree[maxLen-1] |= 1 << curr[maxLen-1] // register myself in parent bitmap
+				if err := h(curr[:maxLen], groups[maxLen], hasTree[maxLen], hasHash[maxLen], usefulHashes, nil); err != nil {
 					return nil, nil, nil, err
 				}
 			}
@@ -253,14 +253,14 @@ func GenStructStep(
 		if len(succ) > 0 || precExists {
 			if maxLen > 0 {
 				if trace {
-					fmt.Printf("Branch before: %x, %b, %b, %b\n", curr[:maxLen], hasHash, hasBranch, groups)
+					fmt.Printf("Branch before: %x, %b, %b, %b\n", curr[:maxLen], hasHash, hasTree, groups)
 				}
 				hasHash[maxLen-1] |= 1 << curr[maxLen-1]
-				if hasBranch[maxLen] != 0 {
-					hasBranch[maxLen-1] |= 1 << curr[maxLen-1]
+				if hasTree[maxLen] != 0 {
+					hasTree[maxLen-1] |= 1 << curr[maxLen-1]
 				}
 				if trace {
-					fmt.Printf("Branch: %x, %b, %b, %b\n", curr[:maxLen], hasHash, hasBranch, groups)
+					fmt.Printf("Branch: %x, %b, %b, %b\n", curr[:maxLen], hasHash, hasTree, groups)
 				}
 			}
 
@@ -277,17 +277,17 @@ func GenStructStep(
 				}
 			}
 		}
-		if h != nil && maxLen == 0 && (hasHash[maxLen] != 0 || hasBranch[maxLen] != 0) {
-			if err := h(curr[:maxLen], groups[maxLen], hasBranch[maxLen], hasHash[maxLen], usefulHashes, e.topHash()); err != nil {
+		if h != nil && maxLen == 0 && (hasHash[maxLen] != 0 || hasTree[maxLen] != 0) {
+			if err := h(curr[:maxLen], groups[maxLen], hasTree[maxLen], hasHash[maxLen], usefulHashes, e.topHash()); err != nil {
 				return nil, nil, nil, err
 			}
 		}
 		groups = groups[:maxLen]
-		hasBranch = hasBranch[:maxLen]
+		hasTree = hasTree[:maxLen]
 		hasHash = hasHash[:maxLen]
 		// Check the end of recursion
 		if precLen == 0 {
-			return groups, hasBranch, hasHash, nil
+			return groups, hasTree, hasHash, nil
 		}
 		// Identify preceding key for the buildExtensions invocation
 
