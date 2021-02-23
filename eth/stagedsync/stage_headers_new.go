@@ -27,7 +27,6 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 
 	var headerProgress uint64
 	var err error
-	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -45,6 +44,7 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 	if err != nil {
 		return err
 	}
+	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	batch := tx.NewBatch()
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
