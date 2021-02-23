@@ -32,7 +32,7 @@ System Requirements
 
 Recommend 2Tb drive: 1Tb state, 200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). 
 
-RAM: 16GB, 64-bit architecture, (Golang version >= 1.15.6](https://golang.org/doc/install)
+RAM: 16GB, 64-bit architecture, (Golang version >= 1.16](https://golang.org/doc/install)
 
 <code>🔬 more info on disk storage is here [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
 
