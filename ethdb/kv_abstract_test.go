@@ -174,61 +174,6 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.KV, readDBs []e
 	}
 }
 
-func testPrefixFilter(t *testing.T, db ethdb.KV, bucket1 string) {
-	assert := assert.New(t)
-
-	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(bucket1).Prefix([]byte{2})
-		counter := 0
-		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			counter++
-		}
-		assert.Equal(1, counter)
-
-		counter = 0
-		if err := ethdb.ForEach(c, func(k, _ []byte) (bool, error) {
-			counter++
-			return true, nil
-		}); err != nil {
-			return err
-		}
-		assert.Equal(1, counter)
-
-		k2, _, err2 := c.Seek([]byte{2})
-		assert.NoError(err2)
-		assert.Equal([]byte{2}, k2)
-
-		c = tx.Cursor(bucket1)
-		counter = 0
-		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			counter++
-		}
-		assert.Equal(13, counter)
-
-		counter = 0
-		if err := ethdb.ForEach(c, func(_, _ []byte) (bool, error) {
-			counter++
-			return true, nil
-		}); err != nil {
-			return err
-		}
-		assert.Equal(13, counter)
-
-		k2, _, err2 = c.Seek([]byte{2})
-		assert.NoError(err2)
-		assert.Equal([]byte{2}, k2)
-		return nil
-	}); err != nil {
-		assert.NoError(err)
-	}
-
-}
 func testCtxCancel(t *testing.T, db ethdb.KV, bucket1 string) {
 	assert := assert.New(t)
 	cancelableCtx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
