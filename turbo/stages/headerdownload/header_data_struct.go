@@ -231,6 +231,7 @@ type HeaderDownload struct {
 	stageReady             bool
 	stageReadyCh           chan struct{}
 	stageHeight            uint64
+	headersAdded           int
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -345,7 +346,7 @@ type HeaderInserter struct {
 	prevHash           common.Hash // Hash of previously seen header - to filter out potential duplicates
 	prevHeight         uint64
 	newCanonical       bool
-	forkNumber         uint64
+	unwindPoint        uint64
 	canonicalBacktrack map[common.Hash]common.Hash
 	parentDiffs        map[common.Hash]*big.Int
 	childDiffs         map[common.Hash]*big.Int
@@ -361,6 +362,7 @@ func NewHeaderInserter(logPrefix string, tx, batch ethdb.DbWithPendingMutations,
 		batch:              batch,
 		localTd:            localTd,
 		headerProgress:     headerProgress,
+		unwindPoint:        headerProgress,
 		canonicalBacktrack: make(map[common.Hash]common.Hash),
 		parentDiffs:        make(map[common.Hash]*big.Int),
 		childDiffs:         make(map[common.Hash]*big.Int),

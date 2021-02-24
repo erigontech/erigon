@@ -159,12 +159,13 @@ func StageLoop(
 
 // logProgress prints out progress of downloading headers, which happens before every cycle of the staged sync
 func logProgress(hd *headerdownload.HeaderDownload) {
-	files, bufferSize := hd.Progress()
+	files, bufferSize, headersAdded := hd.Progress()
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Downloading block headers",
 		"files flushed", files,
 		"buffer size", common.StorageSize(bufferSize),
+		"headers", headersAdded,
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys),
 		"numGC", int(m.NumGC))
@@ -188,7 +189,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.HeadersForward(s, ctx, world.TX, hd)
+						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return u.Done(world.TX)

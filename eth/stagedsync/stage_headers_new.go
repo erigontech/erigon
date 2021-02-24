@@ -17,7 +17,7 @@ import (
 )
 
 // HeadersForward progresses Headers stage in the forward direction
-func HeadersForward(s *StageState, ctx context.Context, db ethdb.Database, hd *headerdownload.HeaderDownload) error {
+func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Database, hd *headerdownload.HeaderDownload) error {
 	files, buffer := hd.PrepareStageData()
 	if len(files) == 0 && (buffer == nil || buffer.IsEmpty()) {
 		return nil
@@ -27,7 +27,6 @@ func HeadersForward(s *StageState, ctx context.Context, db ethdb.Database, hd *h
 
 	var headerProgress uint64
 	var err error
-	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	var tx ethdb.DbWithPendingMutations
 	var useExternalTx bool
 	if hasTx, ok := db.(ethdb.HasTx); ok && hasTx.Tx() != nil {
@@ -45,6 +44,7 @@ func HeadersForward(s *StageState, ctx context.Context, db ethdb.Database, hd *h
 	if err != nil {
 		return err
 	}
+	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	batch := tx.NewBatch()
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
@@ -80,6 +80,11 @@ func HeadersForward(s *StageState, ctx context.Context, db ethdb.Database, hd *h
 		return nil
 	}); err1 != nil {
 		return err1
+	}
+	if headerInserter.UnwindPoint() < headerProgress {
+		if err := u.UnwindTo(headerInserter.UnwindPoint(), tx); err != nil {
+			return fmt.Errorf("%s: failed to unwind to %d: %v", logPrefix, headerInserter.UnwindPoint(), err)
+		}
 	}
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
