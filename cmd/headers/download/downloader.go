@@ -235,7 +235,10 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, filesDir string, bufferSizeStr string, db ethdb.Database, timeout, window int) error {
 	ctx := rootContext()
 
-	sentryServer := &SentryServerImpl{}
+	sentryServer := &SentryServerImpl{
+		receiveCh:       make(chan StreamMsg, 1024),
+		receiveUploadCh: make(chan StreamMsg, 1024),
+	}
 	var err error
 	sentryServer.p2pServer, err = p2pServer(ctx, sentryServer, natSetting, port, staticPeers, discovery, netRestrict)
 	if err != nil {
