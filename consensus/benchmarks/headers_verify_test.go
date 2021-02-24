@@ -81,7 +81,7 @@ func testVerifyHandlersEthash(t *testing.T, toVerify int) {
 
 		results[i] = result{resEthash - resEthashProcess, performanceDiff}
 
-		fmt.Println("intermediate result:")
+		t.Log("intermediate result:")
 		printResults(t, []result{results[i]}, threshold)
 	}
 
@@ -89,6 +89,8 @@ func testVerifyHandlersEthash(t *testing.T, toVerify int) {
 }
 
 func printResults(t *testing.T, results []result, threshold float64) {
+	t.Helper()
+
 	msg := "results:\n"
 	for _, r := range results {
 		if r.percent < 0 && -r.percent > threshold {
@@ -102,18 +104,16 @@ func printResults(t *testing.T, results []result, threshold float64) {
 }
 
 func TestVerifyHeadersClique128(t *testing.T) {
+	t.Skip("too slow")
+
 	const toVerify = 129
 
 	testVerifyHeadersClique(t, toVerify)
 }
 
-func TestVerifyHeadersClique32K(t *testing.T) {
-	const toVerify = 65537 / 2
-
-	testVerifyHeadersClique(t, toVerify)
-}
-
 func TestVerifyHeadersClique1024(t *testing.T) {
+	t.Skip("too slow")
+
 	const toVerify = 1025
 
 	testVerifyHeadersClique(t, toVerify)
@@ -139,7 +139,7 @@ func testVerifyHeadersClique(t *testing.T, toVerify int) {
 
 		results[i] = result{resClique - resCliqueProcess, performanceDiff}
 
-		fmt.Println("intermediate result:")
+		t.Log("intermediate result:")
 		printResults(t, []result{results[i]}, threshold)
 	}
 

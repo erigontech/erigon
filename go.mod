@@ -1,6 +1,6 @@
 module github.com/ledgerwatch/turbo-geth
 
-go 1.16
+go 1.15
 
 require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
@@ -73,11 +73,11 @@ require (
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a
-	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
-	golang.org/x/sys v0.0.0-20210119212857-b64e53b001e4
+	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
+	golang.org/x/sys v0.0.0-20200909081042-eff7692f9009
 	golang.org/x/text v0.3.3
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
-	golang.org/x/tools v0.1.0
+	golang.org/x/tools v0.0.0-20200928182047-19e03678916f
 	gonum.org/v1/gonum v0.8.2
 	google.golang.org/grpc v1.34.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.0.1
