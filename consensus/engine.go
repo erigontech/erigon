@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -63,8 +64,50 @@ type API struct {
 	VerifiedBlocks   *lru.Cache // blockNumber->*types.Header
 	VerifiedBlocksMu sync.RWMutex
 
-	ProcessingRequests   map[uint64]map[uint64]*VerifyRequest // reqID->blockNumber->VerifyRequest
+	ProcessingRequests   map[uint64]*RequestStorage // reqID->blockNumber->*VerifyRequest
 	ProcessingRequestsMu sync.RWMutex
+}
+
+type RequestStorage struct {
+	Storage map[uint64]*VerifyRequest // blockNumber->VerifyRequest
+	l       uint64
+	sync.RWMutex
+}
+
+func NewRequestStorage() *RequestStorage {
+	return &RequestStorage{make(map[uint64]*VerifyRequest), 0, sync.RWMutex{}}
+}
+
+func (r *RequestStorage) Len() uint64 {
+	return atomic.LoadUint64(&r.l)
+}
+
+func (r *RequestStorage) Get(n uint64) (*VerifyRequest, bool) {
+	r.Lock()
+	req, ok := r.Storage[n]
+	r.Unlock()
+	return req, ok
+}
+
+func (r *RequestStorage) Has(n uint64) bool {
+	r.RLock()
+	_, ok := r.Storage[n]
+	r.RUnlock()
+	return ok
+}
+
+func (r *RequestStorage) Remove(n uint64) {
+	r.Lock()
+	delete(r.Storage, n)
+	atomic.AddUint64(&r.l, ^uint64(0))
+	r.Unlock()
+}
+
+func (r *RequestStorage) Add(n uint64, req *VerifyRequest) {
+	r.Lock()
+	r.Storage[n] = req
+	atomic.AddUint64(&r.l, 1)
+	r.Unlock()
 }
 
 type VerifyRequest struct {
@@ -100,7 +143,7 @@ func NewAPI(config *params.ChainConfig) *API {
 		HeadersRequests:       make(chan HeadersRequest, size),
 		HeaderResponses:       make(chan HeaderResponse, size),
 		VerifiedBlocks:        verifiedBlocks,
-		ProcessingRequests:    make(map[uint64]map[uint64]*VerifyRequest, size),
+		ProcessingRequests:    make(map[uint64]*RequestStorage, size),
 	}
 }
 

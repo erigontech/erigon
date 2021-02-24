@@ -166,20 +166,28 @@ type reqHeader struct {
 func (c *Consensus) cleanup() {
 	now := time.Now()
 
-	c.API.ProcessingRequestsMu.Lock()
-
+	c.API.ProcessingRequestsMu.RLock()
 	for reqID, reqBlocks := range c.API.ProcessingRequests {
-		for _, req := range reqBlocks {
+		c.API.ProcessingRequestsMu.RUnlock()
+
+		reqBlocks.RLock()
+		for _, req := range reqBlocks.Storage {
 			if req.Deadline.Before(now) {
 				c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.HashCache(), errRequestTimeout}
 
+				reqBlocks.RUnlock()
+
+				c.API.ProcessingRequestsMu.Lock()
 				delete(c.API.ProcessingRequests, reqID)
+				c.API.ProcessingRequestsMu.Unlock()
 				break
 			}
 		}
-	}
 
-	c.API.ProcessingRequestsMu.Unlock()
+		reqBlocks.RUnlock()
+		c.API.ProcessingRequestsMu.RLock()
+	}
+	c.API.ProcessingRequestsMu.RUnlock()
 }
 
 func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.Header) {
@@ -187,18 +195,19 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 		return
 	}
 
-	c.API.ProcessingRequestsMu.Lock()
+	c.API.ProcessingRequestsMu.RLock()
 	reqHeaders, ok := c.API.ProcessingRequests[reqID]
+	c.API.ProcessingRequestsMu.RUnlock()
 	if !ok {
-		c.API.ProcessingRequestsMu.Unlock()
 		return
 	}
 
-	nums := make([]uint64, 0, len(reqHeaders))
-	for num := range reqHeaders {
+	reqHeaders.RLock()
+	nums := make([]uint64, 0, reqHeaders.Len())
+	for num := range reqHeaders.Storage {
 		nums = append(nums, num)
 	}
-	c.API.ProcessingRequestsMu.Unlock()
+	reqHeaders.RUnlock()
 
 	sort.Slice(nums, func(i, j int) bool {
 		return nums[i] < nums[j]
@@ -211,9 +220,10 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 	knownByRequests := make(map[uint64]map[common.Hash]map[uint64]struct{}) // reqID -> parenthash -> blockToValidate
 
 	for _, num := range nums {
-		c.API.ProcessingRequestsMu.Lock()
-		req := reqHeaders[num]
-		c.API.ProcessingRequestsMu.Unlock()
+		req, ok := reqHeaders.Get(num)
+		if !ok {
+			continue
+		}
 
 		appendAncestors(req, headers, knownByRequests)
 
@@ -221,9 +231,7 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 	}
 
 	if len(nums) == 1 {
-		c.API.ProcessingRequestsMu.Lock()
-		req := reqHeaders[nums[0]]
-		c.API.ProcessingRequestsMu.Unlock()
+		req, _ := reqHeaders.Get(nums[0])
 
 		_ = c.verifyByRequest(reqID, req.Header, req.Seal, req.ParentsExpected, req.KnownParents)
 	} else {
@@ -250,9 +258,10 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 
 					num := nums[idx]
 
-					c.API.ProcessingRequestsMu.Lock()
-					req := reqHeaders[num]
-					c.API.ProcessingRequestsMu.Unlock()
+					req, ok := reqHeaders.Get(num)
+					if !ok {
+						continue
+					}
 
 					_ = c.verifyByRequest(reqID, req.Header, req.Seal, req.ParentsExpected, req.KnownParents)
 				}
@@ -296,19 +305,21 @@ func (c *Consensus) cleanupRequest(reqID uint64, number uint64) {
 	}
 
 	c.API.ProcessingRequestsMu.Lock()
-	defer c.API.ProcessingRequestsMu.Unlock()
-
 	reqBlocks, ok := c.API.ProcessingRequests[reqID]
+	c.API.ProcessingRequestsMu.Unlock()
+
 	if ok {
-		_, ok = reqBlocks[number]
+		_, ok = reqBlocks.Get(number)
 		if ok {
-			delete(reqBlocks, number)
+			reqBlocks.Remove(number)
 		} else {
 			return
 		}
 
-		if len(reqBlocks) == 0 {
+		if reqBlocks.Len() == 0 {
+			c.API.ProcessingRequestsMu.Lock()
 			delete(c.API.ProcessingRequests, reqID)
+			c.API.ProcessingRequestsMu.Unlock()
 		}
 	}
 }
@@ -327,16 +338,18 @@ func toVerifyRequest(reqID uint64, header *types.Header, seal bool, deadline *ti
 }
 
 func (c *Consensus) addVerifyHeaderRequest(reqID uint64, header *types.Header, seal bool, deadline *time.Time, knownParentsSlice []*types.Header, parentsToValidate int) {
-	c.API.ProcessingRequestsMu.Lock()
+	c.API.ProcessingRequestsMu.RLock()
 	blocks, ok := c.API.ProcessingRequests[reqID]
+	c.API.ProcessingRequestsMu.RUnlock()
+
 	if !ok {
-		blocks = make(map[uint64]*consensus.VerifyRequest)
+		c.API.ProcessingRequestsMu.Lock()
+		blocks = consensus.NewRequestStorage()
 		c.API.ProcessingRequests[reqID] = blocks
+		c.API.ProcessingRequestsMu.Unlock()
 	}
 
-	blocks[header.Number.Uint64()] = toVerifyRequest(reqID, header, seal, deadline, knownParentsSlice, parentsToValidate)
-
-	c.API.ProcessingRequestsMu.Unlock()
+	blocks.Add(header.Number.Uint64(), toVerifyRequest(reqID, header, seal, deadline, knownParentsSlice, parentsToValidate))
 }
 
 func appendAncestors(request *consensus.VerifyRequest, ancestors []*types.Header, knownByRequests map[uint64]map[common.Hash]map[uint64]struct{}) {
@@ -522,13 +535,14 @@ func (c *Consensus) VerifyResults() <-chan consensus.VerifyHeaderResponse {
 
 func (c *Consensus) inProcessing(reqID uint64, number uint64) bool {
 	c.API.ProcessingRequestsMu.RLock()
-	defer c.API.ProcessingRequestsMu.RUnlock()
-
 	reqBlocks, ok := c.API.ProcessingRequests[reqID]
+	c.API.ProcessingRequestsMu.RUnlock()
 	if !ok {
 		return false
 	}
 
-	_, ok = reqBlocks[number]
+	reqBlocks.RLock()
+	_, ok = reqBlocks.Storage[number]
+	reqBlocks.RUnlock()
 	return ok
 }
