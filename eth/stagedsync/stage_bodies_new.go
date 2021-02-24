@@ -128,7 +128,6 @@ func BodiesForward(
 			logProgressBodies(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, batch)
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
-			bd.PrintPeerMap()
 		case <-timer.C:
 		//log.Info("RequestQueueTime (bodies) ticked")
 		case <-wakeUpChan:

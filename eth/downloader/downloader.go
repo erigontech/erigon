@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -41,6 +42,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
 var (
@@ -166,8 +168,8 @@ type Downloader struct {
 
 	storageMode ethdb.StorageMode
 	tmpdir      string
-	cacheSize   int
-	batchSize   int
+	cacheSize   datasize.ByteSize
+	batchSize   datasize.ByteSize
 
 	headersState    *stagedsync.StageState
 	headersUnwinder stagedsync.Unwinder
@@ -288,7 +290,7 @@ func (d *Downloader) SetTmpDir(tmpdir string) {
 	d.tmpdir = tmpdir
 }
 
-func (d *Downloader) SetBatchSize(cacheSize, batchSize int) {
+func (d *Downloader) SetBatchSize(cacheSize, batchSize datasize.ByteSize) {
 	d.cacheSize = cacheSize
 	d.batchSize = batchSize
 }
@@ -551,6 +553,11 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		cc := &core.TinyChainContext{}
 		cc.SetDB(tx)
 		cc.SetEngine(d.blockchain.Engine())
+		var cache *shards.StateCache
+		if d.cacheSize > 0 {
+			cache = shards.NewStateCache(32, d.cacheSize)
+		}
+
 		d.stagedSyncState, err = d.stagedSync.Prepare(
 			d,
 			d.chainConfig,
@@ -561,7 +568,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			p.id,
 			d.storageMode,
 			d.tmpdir,
-			d.cacheSize,
+			cache,
 			d.batchSize,
 			d.quitCh,
 			fetchers,

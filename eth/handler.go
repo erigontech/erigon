@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -104,8 +105,8 @@ type ProtocolManager struct {
 
 	mode          downloader.SyncMode // Sync mode passed from the command line
 	tmpdir        string
-	cacheSize     int
-	batchSize     int
+	cacheSize     datasize.ByteSize
+	batchSize     datasize.ByteSize
 	currentHeight uint64 // Atomic variable to contain chain height
 }
 
@@ -174,7 +175,7 @@ func (pm *ProtocolManager) SetTmpDir(tmpdir string) {
 	}
 }
 
-func (pm *ProtocolManager) SetBatchSize(cacheSize, batchSize int) {
+func (pm *ProtocolManager) SetBatchSize(cacheSize, batchSize datasize.ByteSize) {
 	pm.cacheSize = cacheSize
 	pm.batchSize = batchSize
 	if pm.downloader != nil {
@@ -430,6 +431,7 @@ func (pm *ProtocolManager) handle(p *peer) error {
 
 	// Make sure that we first exchange headers and only then announce transactions
 	p.HandshakeOrderMux.Lock()
+
 	// Register the peer locally
 	if err := pm.peers.Register(p, pm.removePeer); err != nil {
 		p.Log().Error("Ethereum peer registration failed", "err", err)

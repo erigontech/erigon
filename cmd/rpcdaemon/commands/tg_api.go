@@ -31,15 +31,13 @@ type TgAPI interface {
 // TgImpl is implementation of the TgAPI interface
 type TgImpl struct {
 	*BaseAPI
-	db       ethdb.KV
-	dbReader ethdb.Database
+	db ethdb.Database
 }
 
 // NewTgAPI returns TgImpl instance
-func NewTgAPI(db ethdb.KV, dbReader ethdb.Database) *TgImpl {
+func NewTgAPI(db ethdb.Database) *TgImpl {
 	return &TgImpl{
-		BaseAPI:  &BaseAPI{},
-		db:       db,
-		dbReader: dbReader,
+		BaseAPI: &BaseAPI{},
+		db:      db,
 	}
 }

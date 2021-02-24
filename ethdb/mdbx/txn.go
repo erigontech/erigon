@@ -453,7 +453,7 @@ func (txn *Txn) StatDBI(dbi DBI) (*Stat, error) {
 	var _stat C.MDBX_stat
 	ret := C.mdbx_dbi_stat(txn._txn, C.MDBX_dbi(dbi), &_stat, C.size_t(unsafe.Sizeof(_stat)))
 	if ret != success {
-		return nil, operrno("mdbx_stat", ret)
+		return nil, operrno("mdbx_dbi_stat", ret)
 	}
 	stat := Stat{PSize: uint(_stat.ms_psize),
 		Depth:         uint(_stat.ms_depth),

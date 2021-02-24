@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -13,9 +14,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
-func SpawnHashStateStage(s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
+func SpawnHashStateStage(s *StageState, db ethdb.Database, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
 	logPrefix := s.state.LogPrefix()
 	to, err := s.ExecutionAt(db)
 	if err != nil {
@@ -38,7 +40,7 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, tmpdir string, quit <
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	} else {
-		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, db, tmpdir, quit); err != nil {
+		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, db, cache, tmpdir, quit); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	}
@@ -46,9 +48,9 @@ func SpawnHashStateStage(s *StageState, db ethdb.Database, tmpdir string, quit <
 	return s.DoneAndUpdate(db, to)
 }
 
-func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
+func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
 	logPrefix := s.state.LogPrefix()
-	if err := unwindHashStateStageImpl(logPrefix, u, s, db, tmpdir, quit); err != nil {
+	if err := unwindHashStateStageImpl(logPrefix, u, s, db, cache, tmpdir, quit); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 	if err := u.Done(db); err != nil {
@@ -57,10 +59,10 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, db ethdb.Database, tmpd
 	return nil
 }
 
-func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, stateDB ethdb.Database, tmpdir string, quit <-chan struct{}) error {
+func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, stateDB ethdb.Database, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
 	// Currently it does not require unwinding because it does not create any Intemediate Hash records
 	// and recomputes the state root from scratch
-	prom := NewPromoter(stateDB, quit)
+	prom := NewPromoter(stateDB, cache, quit)
 	prom.TempDir = tmpdir
 	if err := prom.Unwind(logPrefix, s, u, false /* storage */, true /* codes */); err != nil {
 		return err
@@ -79,9 +81,25 @@ func PromoteHashedStateCleanly(logPrefix string, db ethdb.Database, tmpdir strin
 		logPrefix,
 		db,
 		dbutils.PlainStateBucket,
-		dbutils.CurrentStateBucket,
+		dbutils.HashedAccountsBucket,
 		tmpdir,
-		keyTransformExtractFunc(transformPlainStateKey),
+		keyTransformExtractAcc(transformPlainStateKey),
+		etl.IdentityLoadFunc,
+		etl.TransformArgs{
+			Quit: quit,
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	err = etl.Transform(
+		logPrefix,
+		db,
+		dbutils.PlainStateBucket,
+		dbutils.HashedStorageBucket,
+		tmpdir,
+		keyTransformExtractStorage(transformPlainStateKey),
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit: quit,
@@ -107,6 +125,32 @@ func PromoteHashedStateCleanly(logPrefix string, db ethdb.Database, tmpdir strin
 
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
 	return func(k, v []byte, next etl.ExtractNextFunc) error {
+		newK, err := transformKey(k)
+		if err != nil {
+			return err
+		}
+		return next(k, newK, v)
+	}
+}
+
+func keyTransformExtractAcc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
+	return func(k, v []byte, next etl.ExtractNextFunc) error {
+		if len(k) != 20 {
+			return nil
+		}
+		newK, err := transformKey(k)
+		if err != nil {
+			return err
+		}
+		return next(k, newK, v)
+	}
+}
+
+func keyTransformExtractStorage(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
+	return func(k, v []byte, next etl.ExtractNextFunc) error {
+		if len(k) == 20 {
+			return nil
+		}
 		newK, err := transformKey(k)
 		if err != nil {
 			return err
@@ -160,20 +204,21 @@ type OldestAppearedLoad struct {
 	lastKey       bytes.Buffer
 }
 
-func (l *OldestAppearedLoad) LoadFunc(k []byte, value []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+func (l *OldestAppearedLoad) LoadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 	if bytes.Equal(k, l.lastKey.Bytes()) {
 		return nil
 	}
 	l.lastKey.Reset()
 	//nolint:errcheck
 	l.lastKey.Write(k)
-	return l.innerLoadFunc(k, value, table, next)
+	return l.innerLoadFunc(k, v, table, next)
 }
 
-func NewPromoter(db ethdb.Database, quitCh <-chan struct{}) *Promoter {
+func NewPromoter(db ethdb.Database, cache *shards.StateCache, quitCh <-chan struct{}) *Promoter {
 	return &Promoter{
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
+		cache:            cache,
 		TempDir:          os.TempDir(),
 		quitCh:           quitCh,
 	}
@@ -181,12 +226,13 @@ func NewPromoter(db ethdb.Database, quitCh <-chan struct{}) *Promoter {
 
 type Promoter struct {
 	db               ethdb.Database
+	cache            *shards.StateCache
 	ChangeSetBufSize uint64
 	TempDir          string
 	quitCh           <-chan struct{}
 }
 
-func getExtractFunc(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
+func getExtractFunc(db ethdb.Getter, cache *shards.StateCache, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, _ := decode(dbKey, dbValue)
@@ -199,6 +245,48 @@ func getExtractFunc(db ethdb.Getter, changeSetBucket string) etl.ExtractFunc {
 		if err != nil {
 			return err
 		}
+
+		if cache != nil {
+			if len(k) == 20 {
+				_, inCache := cache.GetAccount(k)
+				if len(value) == 0 {
+					if inCache {
+						cache.SetAccountDelete(k)
+					} else {
+						cache.SetAccountAbsent(k)
+					}
+				} else {
+					acc := &accounts.Account{}
+					err = acc.DecodeForStorage(value)
+					if err != nil {
+						return err
+					}
+					if inCache {
+						cache.SetAccountWrite(k, acc)
+					} else {
+						cache.SetAccountRead(k, acc)
+					}
+				}
+			} else {
+				stK, inc, stHash := k[:20], binary.BigEndian.Uint64(k[20:28]), k[28:]
+				_, inCache := cache.GetStorage(stK, inc, stHash)
+				if len(value) == 0 {
+					if inCache {
+						cache.SetStorageDelete(stK, inc, stHash)
+					} else {
+						cache.SetStorageAbsent(stK, inc, stHash)
+					}
+				} else {
+					if inCache {
+						cache.SetStorageWrite(stK, inc, stHash, value)
+					} else {
+						cache.SetStorageRead(stK, inc, stHash, value)
+					}
+				}
+			}
+			cache.TurnWritesToReads(cache.PrepareWrites())
+		}
+
 		return next(dbKey, newK, value)
 	}
 }
@@ -258,11 +346,9 @@ func getUnwindExtractAccounts(db ethdb.Getter, changeSetBucket string) etl.Extra
 		if err != nil {
 			return err
 		}
-
 		if len(v) == 0 {
 			return next(dbKey, newK, v)
 		}
-
 		var acc accounts.Account
 		if err = acc.DecodeForStorage(v); err != nil {
 			return err
@@ -279,7 +365,6 @@ func getUnwindExtractAccounts(db ethdb.Getter, changeSetBucket string) etl.Extra
 
 		value := make([]byte, acc.EncodingLengthForStorage())
 		acc.EncodeForStorage(value)
-
 		return next(dbKey, newK, value)
 	}
 }
@@ -291,8 +376,12 @@ func getCodeUnwindExtractFunc(db ethdb.Getter, changeSetBucket string) etl.Extra
 		if len(v) == 0 {
 			return nil
 		}
-		var err error
-		var a accounts.Account
+		var (
+			a        accounts.Account
+			newK     []byte
+			codeHash []byte
+			err      error
+		)
 		if err = a.DecodeForStorage(v); err != nil {
 			return err
 		}
@@ -300,12 +389,11 @@ func getCodeUnwindExtractFunc(db ethdb.Getter, changeSetBucket string) etl.Extra
 			return nil
 		}
 		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
-		var codeHash []byte
 		codeHash, err = db.Get(dbutils.PlainContractCodeBucket, plainKey)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)
 		}
-		newK, err := transformContractCodeKey(plainKey)
+		newK, err = transformContractCodeKey(plainKey)
 		if err != nil {
 			return err
 		}
@@ -333,11 +421,15 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 		loadBucket = dbutils.ContractCodeBucket
 		extract = getExtractCode(p.db, changeSetBucket)
 	} else {
-		loadBucket = dbutils.CurrentStateBucket
-		extract = getExtractFunc(p.db, changeSetBucket)
+		if storage {
+			loadBucket = dbutils.HashedStorageBucket
+		} else {
+			loadBucket = dbutils.HashedAccountsBucket
+		}
+		extract = getExtractFunc(p.db, p.cache, changeSetBucket)
 	}
 
-	return etl.Transform(
+	if err := etl.Transform(
 		logPrefix,
 		p.db,
 		changeSetBucket,
@@ -350,7 +442,11 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 			ExtractStartKey: startkey,
 			Quit:            p.quitCh,
 		},
-	)
+	); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, codes bool) error {
@@ -364,6 +460,53 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	to := u.UnwindPoint
 
 	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", from, "to", to, "storage", storage, "codes", codes)
+	if p.cache != nil {
+		accountMap, storageMap, errRewind := changeset.RewindData(p.db, s.BlockNumber, u.UnwindPoint, p.quitCh)
+		if errRewind != nil {
+			return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
+		}
+		for key, value := range accountMap {
+			_, inCache := p.cache.GetAccount([]byte(key))
+			if len(value) > 0 {
+				var acc accounts.Account
+				if err := acc.DecodeForStorage(value); err != nil {
+					return err
+				}
+				recoverCodeHashPlain(&acc, p.db, key)
+				if inCache {
+					p.cache.SetAccountWrite([]byte(key), &acc)
+				} else {
+					p.cache.SetAccountRead([]byte(key), &acc)
+				}
+			} else {
+				if inCache {
+					p.cache.SetAccountDelete([]byte(key))
+				} else {
+					p.cache.SetAccountAbsent([]byte(key))
+				}
+			}
+		}
+
+		for key, value := range storageMap {
+			k := []byte(key)
+			stK, inc, stH := k[:20], binary.BigEndian.Uint64(k[20:28]), k[28:]
+			_, inCache := p.cache.GetStorage(stK, inc, stH)
+			if len(value) > 0 {
+				if inCache {
+					p.cache.SetStorageWrite(stK, inc, stH, value)
+				} else {
+					p.cache.SetStorageRead(stK, inc, stH, value)
+				}
+			} else {
+				if inCache {
+					p.cache.SetStorageDelete(stK, inc, stH)
+				} else {
+					p.cache.SetStorageAbsent(stK, inc, stH)
+				}
+			}
+		}
+		p.cache.TurnWritesToReads(p.cache.PrepareWrites())
+	}
 
 	startkey := dbutils.EncodeBlockNumber(to + 1)
 
@@ -376,10 +519,11 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 		l.innerLoadFunc = etl.IdentityLoadFunc
 	} else {
 		l.innerLoadFunc = etl.IdentityLoadFunc
-		loadBucket = dbutils.CurrentStateBucket
 		if storage {
+			loadBucket = dbutils.HashedStorageBucket
 			extractFunc = getUnwindExtractStorage(changeSetBucket)
 		} else {
+			loadBucket = dbutils.HashedAccountsBucket
 			extractFunc = getUnwindExtractAccounts(p.db, changeSetBucket)
 		}
 	}
@@ -406,8 +550,8 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	)
 }
 
-func promoteHashedStateIncrementally(logPrefix string, s *StageState, from, to uint64, db ethdb.Database, tmpdir string, quit <-chan struct{}) error {
-	prom := NewPromoter(db, quit)
+func promoteHashedStateIncrementally(logPrefix string, s *StageState, from, to uint64, db ethdb.Database, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
+	prom := NewPromoter(db, cache, quit)
 	prom.TempDir = tmpdir
 	if err := prom.Promote(logPrefix, s, from, to, false /* storage */, true /* codes */); err != nil {
 		return err

@@ -293,12 +293,6 @@ type snCursor2 struct {
 	currentKey []byte
 }
 
-func (s *snCursor2) Prefix(v []byte) Cursor {
-	s.dbCursor.Prefix(v)
-	s.snCursor.Prefix(v)
-	return s
-}
-
 func (s *snCursor2) Prefetch(v uint) Cursor {
 	panic("implement me")
 }
@@ -662,14 +656,6 @@ func GenStateData(data []KvData) (KV, error) {
 
 //type cursorSnapshotDupsort struct {
 //
-//}
-//
-//func (c *cursorSnapshotDupsort) Prefix(v []byte) Cursor {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Prefetch(v uint) Cursor {
-//	panic("implement me")
 //}
 //
 //func (c *cursorSnapshotDupsort) First() ([]byte, []byte, error) {

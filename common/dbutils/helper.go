@@ -52,17 +52,19 @@ func NextSubtree(in []byte) ([]byte, bool) {
 	return nil, false
 }
 
-// NextSubtree does []byte++. Returns false if overflow.
-func NextSubtreeHex(in []byte) ([]byte, bool) {
-	r := make([]byte, len(in))
+// NextNibblesSubtree does []byte++. Returns false if overflow.
+func NextNibblesSubtree(in []byte, out *[]byte) bool {
+	r := (*out)[:len(in)]
 	copy(r, in)
 	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 15 {
+		if r[i] != 15 { // max value of nibbles
 			r[i]++
-			return r, true
+			*out = r
+			return true
 		}
 
 		r = r[:i] // make it shorter, because in tries after 11ff goes 12, but not 1200
 	}
-	return nil, false
+	*out = r
+	return false
 }

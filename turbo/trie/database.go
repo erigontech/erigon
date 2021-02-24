@@ -95,7 +95,7 @@ type Database struct {
 	flushsize  common.StorageSize // Data storage flushed since last commit
 
 	dirtiesSize   common.StorageSize // Storage size of the dirty node cache (exc. metadata)
-	childrenSize  common.StorageSize // Storage size of the external children tracking
+	childrenSize  common.StorageSize // Storage size of the external hasState tracking
 	preimagesSize common.StorageSize // Storage size of the preimages cache
 
 	lock sync.RWMutex
@@ -183,7 +183,7 @@ func (n *cachedNode) forChilds(onChild func(hash common.Hash)) {
 }
 
 // gatherChildj
-// retrieves all the hashnode children.
+// retrieves all the hashnode hasState.
 func gatherChildren(n node, children *[]common.Hash) {
 	// intentinally left blank to simplify further rebasing
 }
@@ -239,7 +239,7 @@ func (db *Database) DiskDB() ethdb.Database {
 // InsertBlob writes a new reference tracked blob to the memory database if it's
 // yet unknown. This method should only be used for non-trie nodes that require
 // reference counting, since trie nodes are garbage collected directly through
-// their embedded children.
+// their embedded hasState.
 func (db *Database) InsertBlob(hash common.Hash, blob []byte) {
 	// Turbo-Geth: Intentionally left blank
 }
@@ -365,7 +365,7 @@ func (db *Database) dereference(child common.Hash, parent common.Hash) {
 			db.dirties[node.flushPrev].flushNext = node.flushNext
 			db.dirties[node.flushNext].flushPrev = node.flushPrev
 		}
-		// Dereference all children and delete the node
+		// Dereference all hasState and delete the node
 		node.forChilds(func(hash common.Hash) {
 			db.dereference(hash, child)
 		})
@@ -388,7 +388,7 @@ func (db *Database) Cap(limit common.StorageSize) error {
 	return nil
 }
 
-// Commit iterates over all the children of a particular node, writes them out
+// Commit iterates over all the hasState of a particular node, writes them out
 // to disk, forcefully tearing down all references in both directions. As a side
 // effect, all pre-images accumulated up to this point are also written.
 //

@@ -29,7 +29,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
@@ -448,17 +447,6 @@ func Get(tx Tx, bucket string, key []byte) ([]byte, error) {
 		return nil, ErrKeyNotFound
 	}
 	return dat, err
-}
-
-func HackAddRootToAccountBytes(accNoRoot []byte, root []byte) (accWithRoot []byte, err error) {
-	var acc accounts.Account
-	if err := acc.DecodeForStorage(accNoRoot); err != nil {
-		return nil, err
-	}
-	acc.Root = common.BytesToHash(root)
-	accWithRoot = make([]byte, acc.EncodingLengthForStorage())
-	acc.EncodeForStorage(accWithRoot)
-	return accWithRoot, nil
 }
 
 func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {

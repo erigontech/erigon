@@ -49,7 +49,7 @@ func DeriveSha(list DerivableList) common.Hash {
 
 	hexWriter := &hexWriter{&succ}
 
-	var groups []uint16
+	var groups, branches, hashes []uint16
 	var leafData trie.GenStructStepLeafData
 
 	traverseInLexOrder(list, func(i int, next int) {
@@ -69,7 +69,7 @@ func DeriveSha(list DerivableList) common.Hash {
 		if curr.Len() > 0 {
 			value.Write(list.GetRlp(i))
 			leafData.Value = rlphacks.RlpEncodedBytes(value.Bytes())
-			groups, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &leafData, groups, false)
+			groups, branches, hashes, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &leafData, groups, branches, hashes, false)
 		}
 	})
 

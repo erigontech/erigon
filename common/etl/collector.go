@@ -159,7 +159,6 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 		}
 		defer tx.Rollback()
 	}
-
 	currentTable := &currentTableReader{tx, bucket}
 	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
 	var lastKey []byte
@@ -213,17 +212,17 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.Database, bucket string, pro
 			if isDupSort {
 				if bytes.Equal(k, pervK) {
 					if err := tx.AppendDup(bucket, k, v); err != nil {
-						return fmt.Errorf("%s: append: k=%x, %w", logPrefix, k, err)
+						return fmt.Errorf("%s: bucket: %s, appendDup: k=%x, pervK=%x %w", logPrefix, bucket, k, pervK, err)
 					}
 				} else {
 					if err := tx.Append(bucket, k, v); err != nil {
-						return fmt.Errorf("%s: append: k=%x, %w", logPrefix, k, err)
+						return fmt.Errorf("%s: bucket: %s, append: k=%x, pervK=%x, %w", logPrefix, bucket, k, pervK, err)
 					}
 				}
 				pervK = k
 			} else {
 				if err := tx.Append(bucket, k, v); err != nil {
-					return fmt.Errorf("%s: append: k=%x, %w", logPrefix, k, err)
+					return fmt.Errorf("%s: bucket: %s, append: k=%x, %w", logPrefix, bucket, k, err)
 				}
 			}
 

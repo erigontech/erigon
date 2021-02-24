@@ -594,7 +594,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	// Make sure the context is cancelled when the call has completed
 	// this makes sure resources are cleaned up.
 	defer cancel()
-	var results []*TraceCallResult
+	results := []*TraceCallResult{}
 
 	dec := json.NewDecoder(bytes.NewReader(calls))
 	tok, err := dec.Token()
@@ -678,10 +678,10 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 			if err = ibs.FinalizeTx(ctx, sd); err != nil {
 				return nil, err
 			}
+			sd.CompareStates(initialIbs, ibs)
 			if err = ibs.CommitBlock(ctx, cachedWriter); err != nil {
 				return nil, err
 			}
-			sd.CompareStates(initialIbs, ibs)
 		} else {
 			if err = ibs.FinalizeTx(ctx, noop); err != nil {
 				return nil, err

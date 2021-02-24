@@ -480,11 +480,14 @@ func (hd *HeaderDownload) hardCodedHeader(header *types.Header, currentTime uint
 func (hd *HeaderDownload) AddSegmentToBuffer(segment *ChainSegment, start, end int) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	if end > start {
-		fmt.Printf("Adding segment [%d-%d] to the buffer\n", segment.Headers[end-1].Number.Uint64(), segment.Headers[start].Number.Uint64())
-	}
+	/*
+		if end > start {
+			fmt.Printf("Adding segment [%d-%d] to the buffer\n", segment.Headers[end-1].Number.Uint64(), segment.Headers[start].Number.Uint64())
+		}
+	*/
 	for i, headerRaw := range segment.HeadersRaw[start:end] {
 		hd.buffer.AddHeader(headerRaw, segment.Headers[start+i].Number.Uint64())
+		hd.headersAdded++
 	}
 }
 
@@ -492,6 +495,7 @@ func (hd *HeaderDownload) AddHeaderToBuffer(headerRaw []byte, blockHeight uint64
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.buffer.AddHeader(headerRaw, blockHeight)
+	hd.headersAdded++
 }
 
 func (hd *HeaderDownload) AnchorState() string {
@@ -642,14 +646,18 @@ func DecodeTips(encodings []string) map[common.Hash]HeaderRecord {
 func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]HeaderRecord) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	var maxHeight uint64
 	for tipHash, headerRecord := range hardTips {
 		height := headerRecord.Header.Number.Uint64()
-		if height < hd.highestInDb {
+		if height <= hd.highestInDb {
 			// No need for this hard coded header anymore
 			continue
 		}
-		if height > hd.maxHardTipHeight {
-			hd.maxHardTipHeight = height
+		if height <= hd.maxHardTipHeight {
+			continue
+		}
+		if height > maxHeight {
+			maxHeight = height
 		}
 		if err := hd.hardCodedHeader(headerRecord.Header, uint64(time.Now().Unix())); err != nil {
 			log.Error("Failed to insert hard coded header", "block number", height, "error", err)
@@ -657,6 +665,9 @@ func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]HeaderRecord
 			hd.buffer.AddHeader(headerRecord.Raw, height)
 		}
 		hd.hardTips[tipHash] = headerRecord
+	}
+	if maxHeight > hd.maxHardTipHeight {
+		hd.maxHardTipHeight = maxHeight
 	}
 }
 
@@ -786,18 +797,18 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) e
 	return nil
 }
 
-func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]HeaderRecord) (bool, error) {
+func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[common.Hash]HeaderRecord) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if _, err := os.Stat(hd.filesDir); os.IsNotExist(err) {
 		log.Warn("Temp file directory does not exist, will be created", "path", hd.filesDir)
 		if err1 := os.MkdirAll(hd.filesDir, os.ModePerm); err1 != nil {
-			return false, fmt.Errorf("could not create temp directory: %w", err1)
+			return fmt.Errorf("could not create temp directory: %w", err1)
 		}
 	}
 	fileInfos, err := ioutil.ReadDir(hd.filesDir)
 	if err != nil {
-		return false, err
+		return err
 	}
 	var files = make([]string, len(fileInfos))
 	for i, fileInfo := range fileInfos {
@@ -810,16 +821,18 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 	var childDiffs = make(map[common.Hash]*uint256.Int)
 	var prevHash common.Hash // Hash of previously seen header - to filter out potential duplicates
 	var tips = make(map[common.Hash]struct{})
+	var maxHardTipHeight uint64
 	for _, headerRecord := range hardTips {
-		if headerRecord.Header.Number.Uint64() > hd.maxHardTipHeight {
-			hd.maxHardTipHeight = headerRecord.Header.Number.Uint64()
+		if headerRecord.Header.Number.Uint64() > maxHardTipHeight {
+			maxHardTipHeight = headerRecord.Header.Number.Uint64()
 		}
 	}
+	var maxHeight uint64
 	if err = ReadFilesAndBuffer(files, nil,
 		func(header *types.Header, blockHeight uint64) error {
 			hash := header.Hash()
 			if hash == prevHash {
-				fmt.Printf("Duplicate header: %d %x\n", header.Number.Uint64(), hash)
+				//fmt.Printf("Duplicate header: %d %x\n", header.Number.Uint64(), hash)
 				return nil
 			}
 			if blockHeight > prevHeight {
@@ -856,10 +869,10 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 				childAnchors[hash] = parentAnchor
 				childDiffs[hash] = cumulativeDiff
 			} else {
-				anchor := &Anchor{hardCoded: blockHeight <= hd.maxHardTipHeight, hash: hash, tipQueue: &AnchorTipQueue{}, anchorID: hd.nextAnchorID}
+				anchor := &Anchor{hardCoded: blockHeight <= maxHardTipHeight, hash: hash, tipQueue: &AnchorTipQueue{}, anchorID: hd.nextAnchorID}
 				hd.nextAnchorID++
 				heap.Init(anchor.tipQueue)
-				fmt.Printf("Undeclared anchor for %d %x, inserting as empty to parentHash %x\n", blockHeight, hash, parentHash)
+				//fmt.Printf("Undeclared anchor for %d %x, inserting as empty to parentHash %x\n", blockHeight, hash, parentHash)
 				diff, overflow := uint256.FromBig(header.Difficulty)
 				if overflow {
 					return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
@@ -879,19 +892,25 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 				childAnchors[hash] = anchor
 				childDiffs[hash] = cumulativeDiff
 			}
+			if blockHeight > maxHeight {
+				maxHeight = blockHeight
+			}
 			prevHash = hash
 			return nil
 		}); err != nil {
-		return false, err
+		return err
+	}
+	if maxHeight > hd.maxHardTipHeight {
+		hd.maxHardTipHeight = maxHeight
 	}
 	for tipHash := range tips {
 		if headerRecord, ok := hardTips[tipHash]; ok {
 			hd.hardTips[tipHash] = headerRecord
-			fmt.Printf("Adding %d %x to hard-coded tips\n", headerRecord.Header.Number.Uint64(), tipHash)
+			//fmt.Printf("Adding %d %x to hard-coded tips\n", headerRecord.Header.Number.Uint64(), tipHash)
 		}
 	}
 	hd.files = files
-	return len(hd.anchors) > 0, nil
+	return nil
 }
 
 func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) ([]*HeaderRequest, *time.Timer) {
@@ -952,8 +971,14 @@ func (hd *HeaderDownload) FlushBuffer() error {
 	} else {
 		return err
 	}
-	fmt.Printf("Successfully flushed the buffer\n")
+	//fmt.Printf("Successfully flushed the buffer\n")
 	return nil
+}
+
+func (hd *HeaderDownload) Progress() (files int, buffer int, headersAdded int) {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return len(hd.files), len(hd.buffer.buffer), hd.headersAdded
 }
 
 func (hd *HeaderDownload) PrepareStageData() (files []string, buffer *HeaderBuffer) {
@@ -978,20 +1003,22 @@ func (hd *HeaderDownload) checkInitiation(segment *ChainSegment) (bool, uint64) 
 	tipHash := segment.Headers[0].Hash()
 	tip, exists := hd.getTip(tipHash)
 	if !exists {
-		fmt.Printf("checkInitialisation: tipHash %x does not exist\n", tipHash)
+		//fmt.Printf("checkInitialisation: tipHash %x does not exist\n", tipHash)
 		return false, 0
 	}
 	if tip.anchor.parentHash != hd.initialHash {
 		return false, 0
 	}
-	fmt.Printf("Tip %d %x has total difficulty %d, highest %d, len(hd.hardTips) %d\n", tip.blockHeight, tipHash, tip.cumulativeDifficulty.ToBig(), hd.highestTotalDifficulty.ToBig(), len(hd.hardTips))
-	if len(hd.hardTips) > 0 {
-		fmt.Printf("Hard tips:")
-		for _, headerRecord := range hd.hardTips {
-			fmt.Printf(" %d", headerRecord.Header.Number.Uint64())
+	//fmt.Printf("Tip %d %x has total difficulty %d, highest %d, len(hd.hardTips) %d\n", tip.blockHeight, tipHash, tip.cumulativeDifficulty.ToBig(), hd.highestTotalDifficulty.ToBig(), len(hd.hardTips))
+	/*
+		if len(hd.hardTips) > 0 {
+			fmt.Printf("Hard tips:")
+			for _, headerRecord := range hd.hardTips {
+				fmt.Printf(" %d", headerRecord.Header.Number.Uint64())
+			}
+			fmt.Printf("\n")
 		}
-		fmt.Printf("\n")
-	}
+	*/
 	if tip.cumulativeDifficulty.Gt(&hd.highestTotalDifficulty) {
 		hd.highestTotalDifficulty.Set(&tip.cumulativeDifficulty)
 		return len(hd.hardTips) == 0, tip.blockHeight
@@ -1109,13 +1136,112 @@ func (hd *HeaderDownload) limitTips() {
 // its extension (parent) is correct
 // (excluding Proof Of Work validity)
 func (hd *HeaderDownload) anchorParentValid(anchor *Anchor, parent *types.Header) bool {
-	if anchor.blockHeight != parent.Number.Uint64()+1 {
-		fmt.Printf("anchor.blockHeight(%d) != parent.Number+1(%d)\n", anchor.blockHeight, parent.Number.Uint64()+1)
-		return false
-	}
+	//if anchor.blockHeight != parent.Number.Uint64()+1 {
+	//fmt.Printf("anchor.blockHeight(%d) != parent.Number+1(%d)\n", anchor.blockHeight, parent.Number.Uint64()+1)
+	//	return false
+	//}
 	childDifficulty := hd.calcDifficultyFunc(anchor.timestamp, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
-	if anchor.difficulty.ToBig().Cmp(childDifficulty) != 0 {
-		fmt.Printf("anchor.difficulty (%s) != childDifficulty (%s)\n", anchor.difficulty.ToBig(), childDifficulty)
-	}
+	//if anchor.difficulty.ToBig().Cmp(childDifficulty) != 0 {
+	//fmt.Printf("anchor.difficulty (%s) != childDifficulty (%s)\n", anchor.difficulty.ToBig(), childDifficulty)
+	//}
 	return anchor.difficulty.ToBig().Cmp(childDifficulty) == 0
+}
+
+func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) error {
+	hash := header.Hash()
+	if hash == hi.prevHash {
+		// Skip duplicates
+		return nil
+	}
+	if blockHeight < hi.prevHeight {
+		return fmt.Errorf("[%s] headers are unexpectedly unsorted, got %d after %d", hi.logPrefix, blockHeight, hi.prevHeight)
+	}
+	if oldH := rawdb.ReadHeader(hi.batch, hash, blockHeight); oldH != nil {
+		// Already inserted, skip
+		return nil
+	}
+	// Load parent header
+	parent := rawdb.ReadHeader(hi.batch, header.ParentHash, blockHeight-1)
+	if parent == nil {
+		log.Error(fmt.Sprintf("Could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight))
+		// Skip headers without parents
+		return nil
+	}
+	// Parent's total difficulty
+	parentTd, err := rawdb.ReadTd(hi.batch, header.ParentHash, blockHeight-1)
+	if err != nil {
+		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
+	}
+	// Calculate total difficulty of this header using parent's total difficulty
+	td := new(big.Int).Add(parentTd, header.Difficulty)
+	// Now we can decide wether this header will create a change in the canonical head
+	if td.Cmp(hi.localTd) > 0 {
+		hi.newCanonical = true
+		// Find the forking point - i.e. the latest header on the canonical chain which is an ancestor of this one
+		// Most common case - forking point is the height of the parent header
+		var forkingPoint uint64
+		ch, err1 := rawdb.ReadCanonicalHash(hi.batch, blockHeight-1)
+		if err1 != nil {
+			return fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err1)
+		}
+		if ch == header.ParentHash {
+			forkingPoint = blockHeight - 1
+		} else {
+			// Going further back and updating canonical hashes along the way
+			if err = rawdb.WriteCanonicalHash(hi.batch, header.ParentHash, blockHeight-1); err != nil {
+				return fmt.Errorf("[%s] marking canonical header %d %x: %w", hi.logPrefix, blockHeight-1, header.ParentHash, err)
+			}
+			ancestorHash := parent.ParentHash
+			ancestorHeight := blockHeight - 2
+			for ch, err = rawdb.ReadCanonicalHash(hi.batch, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(hi.batch, ancestorHeight) {
+				if err = rawdb.WriteCanonicalHash(hi.batch, ancestorHash, ancestorHeight); err != nil {
+					return fmt.Errorf("[%s] marking canonical header %d %x: %w", hi.logPrefix, ancestorHeight, ancestorHash, err)
+				}
+				ancestor := rawdb.ReadHeader(hi.batch, ancestorHash, ancestorHeight)
+				ancestorHash = ancestor.ParentHash
+				ancestorHeight--
+			}
+			if err != nil {
+				return fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
+			}
+			// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
+			forkingPoint = ancestorHeight
+		}
+		if err = rawdb.WriteCanonicalHash(hi.batch, hash, blockHeight); err != nil {
+			return fmt.Errorf("[%s] marking canonical header %d %x: %w", hi.logPrefix, blockHeight, hash, err)
+		}
+		// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
+		if forkingPoint < hi.unwindPoint {
+			hi.unwindPoint = forkingPoint
+		}
+	}
+	data, err2 := rlp.EncodeToBytes(header)
+	if err2 != nil {
+		return fmt.Errorf("[%s] failed to RLP encode header: %w", hi.logPrefix, err2)
+	}
+	if err = rawdb.WriteTd(hi.batch, hash, blockHeight, td); err != nil {
+		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
+	}
+	if err = hi.batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
+		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
+	}
+	if blockHeight > hi.headerProgress {
+		hi.headerProgress = blockHeight
+		if err = stages.SaveStageProgress(hi.batch, stages.Headers, blockHeight); err != nil {
+			return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
+		}
+	}
+	hi.prevHash = hash
+	if blockHeight > hi.highest {
+		hi.highest = blockHeight
+	}
+	return nil
+}
+
+func (hi *HeaderInserter) GetHighest() uint64 {
+	return hi.highest
+}
+
+func (hi *HeaderInserter) UnwindPoint() uint64 {
+	return hi.unwindPoint
 }

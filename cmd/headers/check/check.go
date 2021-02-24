@@ -21,12 +21,8 @@ func Check(filesDir string) error {
 		3600, /* newAnchor future limit */
 		3600, /* newAnchor past limit */
 	)
-	if recovered, err := hd.RecoverFromFiles(uint64(time.Now().Unix()), make(map[common.Hash]headerdownload.HeaderRecord)); err != nil || !recovered {
-		if err != nil {
-			log.Error("Recovery from file failed, will start from scratch", "error", err)
-		} else {
-			log.Info("Nothing recovered")
-		}
+	if err := hd.RecoverFromFiles(uint64(time.Now().Unix()), make(map[common.Hash]headerdownload.HeaderRecord)); err != nil {
+		log.Error("Recovery from file failed, will start from scratch", "error", err)
 	}
 	log.Info(hd.AnchorState())
 	return nil

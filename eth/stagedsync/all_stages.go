@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
 func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool) StageBuilders {
@@ -91,7 +92,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
-								CacheSize:             world.cacheSize,
+								Cache:                 world.cache,
 								BatchSize:             world.batchSize,
 								ChangeSetHook:         world.changeSetHook,
 								ReaderBuilder:         world.stateReaderBuilder,
@@ -100,7 +101,15 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindExecutionStage(u, s, world.TX, world.storageMode.Receipts)
+						return UnwindExecutionStage(u, s, world.TX, world.QuitCh, ExecuteBlockStageParams{
+							WriteReceipts:         world.storageMode.Receipts,
+							Cache:                 world.cache,
+							BatchSize:             world.batchSize,
+							ChangeSetHook:         world.changeSetHook,
+							ReaderBuilder:         world.stateReaderBuilder,
+							WriterBuilder:         world.stateWriterBuilder,
+							SilkwormExecutionFunc: world.silkwormExecutionFunc,
+						})
 					},
 				}
 			},
@@ -112,10 +121,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, world.TmpDir, world.QuitCh)
+						return SpawnHashStateStage(s, world.TX, world.cache, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, world.TmpDir, world.QuitCh)
+						return UnwindHashStateStage(u, s, world.TX, world.cache, world.TmpDir, world.QuitCh)
 					},
 				}
 			},
@@ -160,10 +169,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							}
 							c.Close()
 						*/
-						return SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.TmpDir, world.QuitCh)
+						return SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, world.TmpDir, world.QuitCh)
+						return UnwindIntermediateHashesStage(u, s, world.TX, world.cache, world.TmpDir, world.QuitCh)
 					},
 				}
 			},
@@ -230,14 +239,14 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
-								CacheSize: world.cacheSize,
+								Cache:     world.cache,
 								BatchSize: world.batchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh,
 							CallTracesStageParams{
-								CacheSize: world.cacheSize,
+								Cache:     world.cache,
 								BatchSize: world.batchSize,
 							})
 					},
@@ -313,6 +322,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	cc.SetDB(nil)
 	cc.SetEngine(engine)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
+	var cache *shards.StateCache // Turn off cache for now
 	syncState, err1 := stagedSync.Prepare(
 		nil,
 		config,
@@ -323,7 +333,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		"1",
 		ethdb.DefaultStorageMode,
 		"",
-		0*1024, // Turn off cache for now
+		cache,
 		8*1024,
 		nil,
 		nil,
@@ -400,6 +410,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	cc.SetDB(nil)
 	cc.SetEngine(cons)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
+	var cache *shards.StateCache // Turn off cache for now
 	syncState, err2 := stagedSync.Prepare(
 		nil,
 		config,
@@ -410,7 +421,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		"1",
 		storageMode,
 		"",
-		0*1024, // Turn off cache for now
+		cache,
 		8*1024,
 		nil,
 		nil,
@@ -419,8 +430,10 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		nil,
 	)
 	if err2 != nil {
+		panic(err2)
 		return false, err2
 	}
+
 	if reorg {
 		if err = syncState.UnwindTo(forkblocknumber, tx); err != nil {
 			return false, err
