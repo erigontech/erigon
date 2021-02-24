@@ -272,7 +272,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	callCtx, _ = context.WithCancel(ctx)
 	receiveClient, err2 := sentryClient.ReceiveMessages(callCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
 	if err2 != nil {
-		return fmt.Errorf("receive messages failed: %w", err2)
+		log.Error("receive messages failed", "error", err2)
 	}
 	go func() {
 		inreq, err := receiveClient.Recv()
