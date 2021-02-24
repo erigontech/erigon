@@ -175,8 +175,6 @@ func (c *Consensus) cleanup() {
 			if req.Deadline.Before(now) {
 				c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, req.Header.HashCache(), errRequestTimeout}
 
-				reqBlocks.RUnlock()
-
 				c.API.ProcessingRequestsMu.Lock()
 				delete(c.API.ProcessingRequests, reqID)
 				c.API.ProcessingRequestsMu.Unlock()
