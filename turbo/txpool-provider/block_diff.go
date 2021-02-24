@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
 	"github.com/ledgerwatch/turbo-geth/turbo/txpool-provider/pb"
@@ -178,7 +179,9 @@ func touchedAccounts(txs types.Transactions, chainId *big.Int, db ethdb.Database
 
 	for i, addr := range addrs {
 		acc := new(accounts.Account)
-		rawdb.PlainReadAccount(db, addr, acc)
+		if _, err := rawdb.PlainReadAccount(db, addr, acc); err != nil {
+			log.Error("unable to read account", "addr", addr)
+		}
 		nonces[i] = acc.Nonce
 		balances[i] = acc.Balance.ToBig()
 	}
