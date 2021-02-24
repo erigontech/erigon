@@ -26,24 +26,32 @@ type result struct {
 }
 
 func TestVerifyHeadersEthash128(t *testing.T) {
+	t.Skip("too slow")
+
 	const toVerify = 129
 
 	testVerifyHandlersEthash(t, toVerify)
 }
 
 func TestVerifyHeadersEthash256(t *testing.T) {
+	t.Skip("too slow")
+
 	const toVerify = 257
 
 	testVerifyHandlersEthash(t, toVerify)
 }
 
 func TestVerifyHeadersEthash512(t *testing.T) {
+	t.Skip("too slow")
+
 	const toVerify = 513
 
 	testVerifyHandlersEthash(t, toVerify)
 }
 
 func TestVerifyHeadersEthash1024(t *testing.T) {
+	t.Skip("too slow")
+
 	const toVerify = 1025
 
 	testVerifyHandlersEthash(t, toVerify)
@@ -80,15 +88,12 @@ func testVerifyHandlersEthash(t *testing.T, toVerify int) {
 		performanceDiff := float64(resEthash-resEthashProcess) / float64(resEthash) * 100
 
 		results[i] = result{resEthash - resEthashProcess, performanceDiff}
-
-		t.Log("intermediate result:")
-		printResults(t, []result{results[i]}, threshold)
 	}
 
-	printResults(t, results, threshold)
+	checkResults(t, results, threshold)
 }
 
-func printResults(t *testing.T, results []result, threshold float64) {
+func checkResults(t *testing.T, results []result, threshold float64) {
 	t.Helper()
 
 	msg := "results:\n"
@@ -138,12 +143,9 @@ func testVerifyHeadersClique(t *testing.T, toVerify int) {
 		performanceDiff := float64(resClique-resCliqueProcess) / float64(resClique) * 100
 
 		results[i] = result{resClique - resCliqueProcess, performanceDiff}
-
-		t.Log("intermediate result:")
-		printResults(t, []result{results[i]}, threshold)
 	}
 
-	printResults(t, results, threshold)
+	checkResults(t, results, threshold)
 }
 
 type engineConstructor func(db ethdb.Database) consensus.Engine
