@@ -159,7 +159,7 @@ Error: %v
 		if lastHeader.Number.Uint64() < *headNumber {
 			newCanonical = true
 		} else if lastHeader.Number.Uint64() == *headNumber {
-			newCanonical = rand.Float64() < 0.5
+			newCanonical = rand.Float64() < 0.5 //nolint
 		}
 	}
 
@@ -289,7 +289,8 @@ func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*typ
 		return nil
 	}
 
-	engine.HeaderVerification() <- consensus.VerifyHeaderRequest{rand.Uint64(), headers, seals, nil}
+	id := rand.Uint64() //nolint
+	engine.HeaderVerification() <- consensus.VerifyHeaderRequest{id, headers, seals, nil}
 
 	reqResponses := make(map[common.Hash]struct{}, len(headers))
 
