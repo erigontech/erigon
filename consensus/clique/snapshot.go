@@ -18,14 +18,12 @@ package clique
 
 import (
 	"bytes"
-	"fmt"
 	"sort"
 	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -463,10 +461,11 @@ func (st *storage) save(number uint64, hash common.Hash, s *Snapshot, force bool
 	ok, err := hasSnapshotData(st.db, number, hash)
 	if !ok || err != nil {
 		if err != nil {
-			fmt.Println("hasSnapshotData-err", err, ok, number, hash.String())
-		}
-		if !ok {
-			fmt.Println("hasSnapshotData-!ok", ok, number, hash.String(), debug.Callers(10))
+			log.Debug("error while hasSnapshotData",
+				"number", number,
+				"hash", hash.String(),
+				"error", err,
+				"has", ok)
 		}
 		blob, err := json.Marshal(s)
 		if err != nil {
