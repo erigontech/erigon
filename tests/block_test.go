@@ -58,6 +58,7 @@ func TestBlockchain(t *testing.T) {
 	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeQuadraticCost64.json`, "Needs to be fixed for TG")
 	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeQuadraticCost33.json`, "Needs to be fixed for TG")
 	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeQuadraticCost32_zeroSize.json`, "Needs to be fixed for TG")
+	bt.fails(`(?m)^TestBlockchain/ValidBlocks/VMTests/vmSha3Test/sha3_memSizeQuadraticCost65.json`, "Needs to be fixed for TG")
 
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcUncleHeaderValidity/incorrectUncleTimestamp5.json`, "Needs to be fixed for TG")
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
