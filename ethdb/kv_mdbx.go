@@ -116,11 +116,9 @@ func (opts MdbxOpts) Open() (KV, error) {
 		logger = log.New("mdbx", path.Base(opts.path))
 	}
 
-	opts.dirtyListMaxPages = 128 * 1024
 	if opts.mapSize == 0 {
 		if opts.inMem {
 			opts.mapSize = 64 * datasize.MB
-			opts.dirtyListMaxPages = 4 * 1024
 		} else {
 			opts.mapSize = LMDBDefaultMapSize
 		}
@@ -142,6 +140,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 	if opts.inMem {
 		flags ^= mdbx.Durable
 		flags |= mdbx.NoMetaSync | mdbx.SafeNoSync
+		opts.dirtyListMaxPages = 8 * 1024
 	}
 
 	err = env.Open(opts.path, flags, 0664)
