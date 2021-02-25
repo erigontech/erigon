@@ -27,11 +27,12 @@ import (
 	"time"
 	"unsafe"
 
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/bitutil"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"golang.org/x/crypto/sha3"
 )
 
 const (
@@ -119,6 +120,27 @@ func makeHasher(h hash.Hash) hasher {
 // seedHash is the seed to use for generating a verification cache and the mining
 // dataset.
 func seedHash(block uint64) []byte {
+	seed := make([]byte, 32)
+	if block < epochLength {
+		return seed
+	}
+
+	h := common.NewHasher()
+
+	for i := 0; i < int(block/epochLength); i++ {
+		h.Sha.Reset()
+		//nolint:errcheck
+		h.Sha.Write(seed)
+		//nolint:errcheck
+		h.Sha.Read(seed)
+	}
+
+	common.ReturnHasherToPool(h)
+
+	return seed
+}
+
+func seedHashOld(block uint64) []byte {
 	seed := make([]byte, 32)
 	if block < epochLength {
 		return seed

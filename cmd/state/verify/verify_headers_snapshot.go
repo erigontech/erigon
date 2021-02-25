@@ -42,8 +42,8 @@ func HeadersSnapshot(snapshotPath string) error {
 					log.Error("invalid header number", "p", prevHeader.Number.Uint64(), "c", header.Number.Uint64())
 					return errors.New("invalid header number")
 				}
-				if prevHeader.Hash() != header.ParentHash {
-					log.Error("invalid parent hash", "p", prevHeader.Hash(), "c", header.ParentHash)
+				if prevHeader.HashCache() != header.ParentHash {
+					log.Error("invalid parent hash", "p", prevHeader.HashCache(), "c", header.ParentHash)
 					return errors.New("invalid parent hash")
 				}
 			}

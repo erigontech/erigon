@@ -14,12 +14,14 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/cmd/pics/contracts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -346,6 +348,7 @@ func initialState1() error {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts1 := bind.NewKeyedTransactor(key1)
 	transactOpts2 := bind.NewKeyedTransactor(key2)
@@ -498,8 +501,11 @@ func initialState1() error {
 
 	// BLOCK 1
 	snapshotDB = db.MemCopy()
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, gspec.Config, exit)
+	defer close(exit)
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -513,7 +519,7 @@ func initialState1() error {
 
 	// BLOCK 2
 	snapshotDB = db.MemCopy()
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[1], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -527,7 +533,7 @@ func initialState1() error {
 	// BLOCK 3
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[2], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[2], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -549,7 +555,7 @@ func initialState1() error {
 	// BLOCK 4
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[3], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[3], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -564,7 +570,7 @@ func initialState1() error {
 	// BLOCK 5
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[4], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[4], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -581,7 +587,7 @@ func initialState1() error {
 	// BLOCK 6
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[5], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[5], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -602,7 +608,7 @@ func initialState1() error {
 	// BLOCK 7
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[6], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[6], true /* rootCheck */); err != nil {
 		return err
 	}
 
@@ -619,7 +625,7 @@ func initialState1() error {
 	// BLOCK 8
 	snapshotDB = db.MemCopy()
 
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[7], true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[7], true /* rootCheck */); err != nil {
 		return err
 	}
 

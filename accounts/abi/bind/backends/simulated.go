@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/bloombits"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -67,7 +68,9 @@ var (
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
 	database   *ethdb.ObjectDatabase // In memory database to store our testing data
-	engine     consensus.Engine
+	engine     *process.Consensus
+	cons       consensus.Engine
+	exit       chan struct{}
 	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
 
 	mu              sync.Mutex
@@ -94,6 +97,10 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
+
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, genesis.Config, exit)
+
 	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
@@ -104,7 +111,9 @@ func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
-		engine:       engine,
+		engine:       eng,
+		cons:         engine,
+		exit:         exit,
 		blockchain:   blockchain,
 		config:       genesis.Config,
 		txCacher:     txCacher,
@@ -122,6 +131,9 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
 
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, genesis.Config, exit)
+
 	txCacher := core.NewTxSenderCacher(1)
 	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil, txCacher)
 	if err != nil {
@@ -131,7 +143,9 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	backend := &SimulatedBackend{
 		prependBlock: genesisBlock,
 		database:     database,
-		engine:       engine,
+		engine:       eng,
+		cons:         engine,
+		exit:         exit,
 		blockchain:   blockchain,
 		config:       genesis.Config,
 		txCacher:     txCacher,
@@ -155,6 +169,7 @@ func (b *SimulatedBackend) DB() ethdb.Database {
 func (b *SimulatedBackend) Close() error {
 	b.blockchain.Stop()
 	b.database.Close()
+	common.SafeClose(b.exit)
 	return nil
 }
 
@@ -164,7 +179,7 @@ func (b *SimulatedBackend) Commit() {
 	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.blockchain.Engine(), b.pendingBlock, false /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.cons, b.engine, b.pendingBlock, false /* checkRoot */); err != nil {
 		panic(err)
 	}
 	//nolint:prealloc
