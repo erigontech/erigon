@@ -694,8 +694,8 @@ type AccTrieCursor struct {
 	canUse                func([]byte) (bool, []byte) // if this function returns true - then this AccTrie can be used as is and don't need continue PostorderTraversal, but switch to sibling instead
 	nextCreated           []byte
 
-	kBuf []byte
-	quit <-chan struct{}
+	kBuf, kBuf2 []byte
+	quit        <-chan struct{}
 }
 
 func AccTrie(canUse func([]byte) (bool, []byte), hc HashCollector2, c ethdb.Cursor, quit <-chan struct{}) *AccTrieCursor {
@@ -782,7 +782,7 @@ func (c *AccTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 	}
 	if c.k[c.lvl] == nil {
 		c.cur = nil
-		c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf)
+		c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf2)
 		return nil, nil, false, nil
 	}
 	if c._hasHash() {
@@ -944,7 +944,7 @@ func (c *AccTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	for {
 		if c.k[c.lvl] == nil {
 			c.cur = nil
-			c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf)
+			c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf2)
 			return nil, nil, false, nil
 		}
 
@@ -1075,7 +1075,7 @@ func (c *StorageTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 		return []byte{}, nil, false, err
 	}
 	if c.k[c.lvl] == nil {
-		c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf)
+		c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf2)
 		c.cur = nil
 		return nil, nil, false, nil
 	}
@@ -1238,7 +1238,7 @@ func (c *StorageTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	for {
 		if c.k[c.lvl] == nil {
 			c.cur = nil
-			c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf)
+			c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf2)
 			return nil, nil, false, nil
 		}
 
