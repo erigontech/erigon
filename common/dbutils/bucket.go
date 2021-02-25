@@ -128,7 +128,6 @@ Invariants:
 - if hasState has bit - then HashedAccount table must have record according to this bit
 - each TrieAccount record must cover some state (means hasState is always > 0)
 - TrieAccount records with length=1 can satisfy (hasBranch==0&&hasHash==0) condition
-- TrieStorage record of account.root (length=40) must hasTree!=0
 - Other records in TrieAccount and TrieStorage must (hasTree!=0 || hasHash!=0)
 */
 var TrieOfAccountsBucket = "trie_account"
