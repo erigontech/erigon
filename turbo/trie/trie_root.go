@@ -314,6 +314,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(db ethdb.Database, prefix []byte, quit <
 			return EmptyRoot, err
 		}
 	}
+	fmt.Printf("seeks: %d,%d\n", accTrie.is, storageTrie.is)
 	return l.receiver.Root(), nil
 }
 
@@ -820,7 +821,7 @@ func (c *AccTrieCursor) _seek(seek []byte, withinPrefix []byte) (bool, error) {
 		//	return false, err
 		//}
 		//if len(k) > c.lvl && c.childID[c.lvl] > int8(bits.TrailingZeros16(c.hasTree[c.lvl])) {
-		//	c.is++
+		c.is++
 		k, v, err = c.c.Seek(seek)
 		//}
 	}
@@ -1115,7 +1116,7 @@ func (c *StorageTrieCursor) _seek(seek, prefix []byte) (bool, error) {
 		//	return false, err
 		//}
 		//if len(k) > c.lvl && c.childID[c.lvl] > int8(bits.TrailingZeros16(c.hasTree[c.lvl])) {
-		//c.is++
+		c.is++
 		k, v, err = c.c.Seek(seek)
 		//}
 	}
