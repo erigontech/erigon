@@ -649,6 +649,7 @@ func accountTrieCollector(tmpdir string) (*etl.Collector, trie.HashCollector2) {
 		}
 		assertSubset(hasTree, hasState)
 		assertSubset(hasHash, hasState)
+		fmt.Printf("collected: %x\n", keyHex)
 		newV = trie.MarshalTrieNode(hasState, hasTree, hasHash, hashes, rootHash, newV)
 		return collector.Collect(keyHex, newV)
 	}
@@ -662,6 +663,10 @@ func storageTrieCollector(tmpdir string) (*etl.Collector, trie.StorageHashCollec
 		newK = append(append(newK[:0], accWithInc...), keyHex...)
 		if hashes == nil {
 			return storageIHCollector.Collect(newK, nil)
+		}
+		if len(keyHex) > 0 && (hasHash == 0 && hasTree == 0) {
+			fmt.Printf("filtered: %x,%b,%b,%b\n", keyHex, hasState, hasTree, hasHash)
+			return nil
 		}
 		if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
 			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/common.HashLength))

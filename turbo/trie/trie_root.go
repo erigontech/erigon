@@ -362,16 +362,16 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	cutoff int,
 ) error {
 	//r.traceIf("9c3dc2561d472d125d8f87dde8f2e3758386463ade768ae1a1546d34101968bb", "00")
-	//if storageKey == nil {
-	//	//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
-	//	fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
-	//	//}
-	//} else {
-	//	//if bytes.HasPrefix(accountKey, common.FromHex("876f5a0f54b30254d2bad26bb5a8da19cbe748fd033004095d9c96c8e667376b")) && bytes.HasPrefix(storageKey, common.FromHex("")) {
-	//	//fmt.Printf("%x\n", storageKey)
-	//	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
-	//	//}
-	//}
+	if storageKey == nil {
+		//if bytes.HasPrefix(accountKey, common.FromHex("08050d07")) {
+		fmt.Printf("1: %d, %x, %x\n", itemType, accountKey, hash)
+		//}
+	} else {
+		//if bytes.HasPrefix(accountKey, common.FromHex("876f5a0f54b30254d2bad26bb5a8da19cbe748fd033004095d9c96c8e667376b")) && bytes.HasPrefix(storageKey, common.FromHex("")) {
+		//fmt.Printf("%x\n", storageKey)
+		fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
+		//}
+	}
 
 	switch itemType {
 	case StorageStreamItem:
@@ -1034,8 +1034,8 @@ func (c *StorageTrieCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasTr
 	if c.root != nil { // check if acc.storageRoot can be used
 		root := c.root
 		c.root = nil
-
-		if ok1, nextCreated := c.canUse(c.kBuf); ok1 {
+		ok1, nextCreated := c.canUse(c.kBuf)
+		if ok1 {
 			c.skipState = true
 			c.nextCreated = nextCreated
 			c.cur = c.k[c.lvl]
@@ -1081,7 +1081,8 @@ func (c *StorageTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 	}
 	if c._hasHash() {
 		c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-		if ok, nextCreated := c.canUse(c.kBuf); ok {
+		ok, nextCreated := c.canUse(c.kBuf)
+		if ok {
 			c.skipState = c.skipState && keyIsBefore(c.kBuf, c.nextCreated)
 			c.nextCreated = nextCreated
 			c.cur = common.CopyBytes(c.kBuf[80:])
