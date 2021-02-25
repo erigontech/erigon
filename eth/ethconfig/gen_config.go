@@ -29,6 +29,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		LightIngress            int                    `toml:",omitempty"`
 		LightEgress             int                    `toml:",omitempty"`
 		StorageMode             string
+		LightNoPrune            bool                   `toml:",omitempty"`
+		LightNoSyncServe        bool                   `toml:",omitempty"`
 		ArchiveSyncInterval     int
 		LightServ               int `toml:",omitempty"`
 		LightPeers              int `toml:",omitempty"`
@@ -112,6 +114,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		LightIngress            *int                   `toml:",omitempty"`
 		LightEgress             *int                   `toml:",omitempty"`
 		Mode                    *string
+		LightNoPrune            *bool                  `toml:",omitempty"`
+		LightNoSyncServe        *bool                  `toml:",omitempty"`
 		ArchiveSyncInterval     *int
 		LightServ               *int `toml:",omitempty"`
 		LightPeers              *int `toml:",omitempty"`
