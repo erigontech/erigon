@@ -664,11 +664,6 @@ func storageTrieCollector(tmpdir string) (*etl.Collector, trie.StorageHashCollec
 			return storageIHCollector.Collect(newK, nil)
 		}
 		if len(keyHex) > 0 && hasHash == 0 && hasTree == 0 {
-			//fmt.Printf("filtered: %x,%b,%b,%b\n", keyHex, hasState, hasTree, hasHash)
-			return nil
-		}
-		if len(keyHex) == 0 && hasHash == 0 && hasTree == 0 {
-			fmt.Printf("filtered: %x,%b,%b,%b\n", keyHex, hasState, hasTree, hasHash)
 			return nil
 		}
 		if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
