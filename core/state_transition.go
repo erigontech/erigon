@@ -271,6 +271,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		} else {
 			return nil, fmt.Errorf("%w: address %v", ErrInsufficientFundsForTransfer, msg.From().Hex())
 		}
+
+	// Set up the initial access list.
+	if st.evm.ChainConfig().IsBerlin(st.evm.Context.BlockNumber) {
+		st.state.PrepareAccessList(msg.From(), msg.To(), st.evm.ActivePrecompiles(), msg.AccessList())
 	}
 
 	var (
