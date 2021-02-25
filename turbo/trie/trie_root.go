@@ -694,8 +694,8 @@ type AccTrieCursor struct {
 	canUse                func([]byte) (bool, []byte) // if this function returns true - then this AccTrie can be used as is and don't need continue PostorderTraversal, but switch to sibling instead
 	nextCreated           []byte
 
-	kBuf, kBuf2 []byte
-	quit        <-chan struct{}
+	kBuf []byte
+	quit <-chan struct{}
 }
 
 func AccTrie(canUse func([]byte) (bool, []byte), hc HashCollector2, c ethdb.Cursor, quit <-chan struct{}) *AccTrieCursor {
@@ -703,7 +703,8 @@ func AccTrie(canUse func([]byte) (bool, []byte), hc HashCollector2, c ethdb.Curs
 		c:                     c,
 		canUse:                canUse,
 		firstNotCoveredPrefix: make([]byte, 0, 64),
-		next:                  make([]byte, 64),
+		next:                  make([]byte, 0, 64),
+		kBuf:                  make([]byte, 0, 64),
 		hc:                    hc,
 		quit:                  quit,
 	}
@@ -782,7 +783,7 @@ func (c *AccTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 	}
 	if c.k[c.lvl] == nil {
 		c.cur = nil
-		c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf2)
+		c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
 		return nil, nil, false, nil
 	}
 	if c._hasHash() {
@@ -944,7 +945,7 @@ func (c *AccTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	for {
 		if c.k[c.lvl] == nil {
 			c.cur = nil
-			c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf2)
+			c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
 			return nil, nil, false, nil
 		}
 
@@ -992,15 +993,16 @@ type StorageTrieCursor struct {
 
 	accWithInc []byte
 	kBuf       []byte
-	kBuf2      []byte
 	quit       <-chan struct{}
 }
 
 func StorageTrie(canUse func(prefix []byte) (bool, []byte), shc StorageHashCollector2, c ethdb.Cursor, quit <-chan struct{}) *StorageTrieCursor {
 	ih := &StorageTrieCursor{c: c, canUse: canUse,
-		firstNotCoveredPrefix: make([]byte, 0, 64), next: make([]byte, 64),
-		shc:  shc,
-		quit: quit,
+		firstNotCoveredPrefix: make([]byte, 0, 64),
+		next:                  make([]byte, 0, 64),
+		kBuf:                  make([]byte, 0, 64),
+		shc:                   shc,
+		quit:                  quit,
 	}
 	return ih
 }
@@ -1075,7 +1077,7 @@ func (c *StorageTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 		return []byte{}, nil, false, err
 	}
 	if c.k[c.lvl] == nil {
-		c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf2)
+		c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
 		c.cur = nil
 		return nil, nil, false, nil
 	}
@@ -1190,8 +1192,8 @@ func (c *StorageTrieCursor) _nextSiblingOfParentInMem() bool {
 			for ; c.k[nonNilLvl] == nil && nonNilLvl > 0; nonNilLvl-- {
 			}
 			c.seek = append(append(c.seek[:40], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-			c.kBuf2 = append(append(c.kBuf2[:0], c.k[nonNilLvl]...), uint8(c.childID[nonNilLvl]))
-			ok, err := c._seek(c.seek, c.kBuf2)
+			c.next = append(append(c.next[:0], c.k[nonNilLvl]...), uint8(c.childID[nonNilLvl]))
+			ok, err := c._seek(c.seek, c.next)
 			if err != nil {
 				panic(err)
 			}
@@ -1238,7 +1240,7 @@ func (c *StorageTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	for {
 		if c.k[c.lvl] == nil {
 			c.cur = nil
-			c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.kBuf2)
+			c.skipState = c.skipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
 			return nil, nil, false, nil
 		}
 
