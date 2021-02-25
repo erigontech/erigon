@@ -242,8 +242,10 @@ func GenStructStep(
 				fmt.Printf("why now: %x,%b,%b,%b\n", curr[:maxLen], hasHash, hasTree, groups)
 			}
 			usefulHashes = e.topHashes(curr[:maxLen], hasHash[maxLen], groups[maxLen])
-			if maxLen > 1 {
+			if maxLen != 0 {
 				hasTree[maxLen-1] |= 1 << curr[maxLen-1] // register myself in parent bitmap
+			}
+			if maxLen > 1 {
 				if err := h(curr[:maxLen], groups[maxLen], hasTree[maxLen], hasHash[maxLen], usefulHashes, nil); err != nil {
 					return nil, nil, nil, err
 				}
@@ -278,9 +280,13 @@ func GenStructStep(
 				}
 			}
 		}
-		if h != nil && maxLen <= 1 && (hasHash[maxLen] != 0 || hasTree[maxLen] != 0 || groups[maxLen] != 0) {
-			if err := h(curr[:maxLen], groups[maxLen], hasTree[maxLen], hasHash[maxLen], usefulHashes, e.topHash()); err != nil {
-				return nil, nil, nil, err
+		if h != nil {
+			send := maxLen == 0 && (hasTree[maxLen] != 0)       // account.root - store only if have useful info
+			send = send || (maxLen == 1 && groups[maxLen] != 0) // first level of trie_account - store in any case
+			if send {
+				if err := h(curr[:maxLen], groups[maxLen], hasTree[maxLen], hasHash[maxLen], usefulHashes, e.topHash()); err != nil {
+					return nil, nil, nil, err
+				}
 			}
 		}
 		groups = groups[:maxLen]

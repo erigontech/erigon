@@ -641,7 +641,7 @@ func accountTrieCollector(tmpdir string) (*etl.Collector, trie.HashCollector2) {
 		if len(keyHex) == 0 {
 			return nil
 		}
-		if hashes == nil {
+		if hasState == 0 {
 			return collector.Collect(keyHex, nil)
 		}
 		if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
@@ -649,7 +649,6 @@ func accountTrieCollector(tmpdir string) (*etl.Collector, trie.HashCollector2) {
 		}
 		assertSubset(hasTree, hasState)
 		assertSubset(hasHash, hasState)
-		fmt.Printf("collected: %x\n", keyHex)
 		newV = trie.MarshalTrieNode(hasState, hasTree, hasHash, hashes, rootHash, newV)
 		return collector.Collect(keyHex, newV)
 	}
@@ -661,10 +660,14 @@ func storageTrieCollector(tmpdir string) (*etl.Collector, trie.StorageHashCollec
 	newV := make([]byte, 0, 1024)
 	return storageIHCollector, func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		newK = append(append(newK[:0], accWithInc...), keyHex...)
-		if hashes == nil {
+		if hasState == 0 {
 			return storageIHCollector.Collect(newK, nil)
 		}
-		if len(keyHex) > 0 && (hasHash == 0 && hasTree == 0) {
+		if len(keyHex) > 0 && hasHash == 0 && hasTree == 0 {
+			//fmt.Printf("filtered: %x,%b,%b,%b\n", keyHex, hasState, hasTree, hasHash)
+			return nil
+		}
+		if len(keyHex) == 0 && hasHash == 0 && hasTree == 0 {
 			fmt.Printf("filtered: %x,%b,%b,%b\n", keyHex, hasState, hasTree, hasHash)
 			return nil
 		}
