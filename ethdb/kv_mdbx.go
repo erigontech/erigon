@@ -26,19 +26,21 @@ import (
 var _ DbCopier = &MdbxKV{}
 
 type MdbxOpts struct {
-	inMem            bool
-	exclusive        bool
-	flags            uint
-	path             string
-	bucketsCfg       BucketConfigsFunc
-	mapSize          datasize.ByteSize
-	maxFreelistReuse uint
+	inMem             bool
+	exclusive         bool
+	flags             uint
+	path              string
+	bucketsCfg        BucketConfigsFunc
+	mapSize           datasize.ByteSize
+	dirtyListMaxPages uint64
+	maxFreelistReuse  uint
 }
 
 func NewMDBX() MdbxOpts {
 	return MdbxOpts{
-		bucketsCfg: DefaultBucketConfigs,
-		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
+		bucketsCfg:        DefaultBucketConfigs,
+		flags:             mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
+		dirtyListMaxPages: 128 * 1024,
 	}
 }
 
@@ -114,9 +116,11 @@ func (opts MdbxOpts) Open() (KV, error) {
 		logger = log.New("mdbx", path.Base(opts.path))
 	}
 
+	opts.dirtyListMaxPages = 128 * 1024
 	if opts.mapSize == 0 {
 		if opts.inMem {
 			opts.mapSize = 64 * datasize.MB
+			opts.dirtyListMaxPages = 4 * 1024
 		} else {
 			opts.mapSize = LMDBDefaultMapSize
 		}
@@ -160,7 +164,7 @@ func (opts MdbxOpts) Open() (KV, error) {
 	if err = env.SetOption(mdbx.OptDpReverseLimit, 4*1024); err != nil {
 		return nil, err
 	}
-	if err = env.SetOption(mdbx.OptTxnDpLimit, 128*1024); err != nil {
+	if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtyListMaxPages); err != nil {
 		return nil, err
 	}
 
