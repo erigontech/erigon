@@ -92,7 +92,7 @@ func VerifyHeaders(db ethdb.Database, headers []*types.Header, engine consensus.
 	return verifyHeaders(db, engine, headers, seals)
 }
 
-func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header) (bool, bool, uint64, error) {
+func InsertHeaderChain(logPrefix string, verificationTime time.Duration, db ethdb.Database, headers []*types.Header) (bool, bool, uint64, error) {
 	start := time.Now()
 
 	// ignore headers that we already have
@@ -267,6 +267,7 @@ Error: %v
 	ctx := []interface{}{
 		"count", len(headers), "elapsed", common.PrettyDuration(since),
 		"number", lastHeader.Number, "hash", lastHeader.HashCache(),
+		"verification blk/sec", float64(len(headers)) / verificationTime.Seconds(),
 		"blk/sec", float64(len(headers)) / since.Seconds(),
 	}
 	if timestamp := time.Unix(int64(lastHeader.Time), 0); time.Since(timestamp) > time.Minute {

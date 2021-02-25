@@ -355,10 +355,12 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 
 func InsertHeadersInStages(db ethdb.Database, engine consensus.EngineAPI, headers []*types.Header) (bool, bool, uint64, error) {
 	blockNum := headers[len(headers)-1].Number.Uint64()
+	start := time.Now()
 	if err := VerifyHeaders(db, headers, engine, 1); err != nil {
 		return false, false, 0, err
 	}
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers)
+	verificationTime := time.Since(start)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", verificationTime, db, headers)
 	if err != nil {
 		return false, false, 0, err
 	}
@@ -380,15 +382,17 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		headers[i] = block.Header()
 	}
 	// Header verification happens outside of the transaction
+	start := time.Now()
 	if err := VerifyHeaders(db, headers, engine, 1); err != nil {
 		return false, err
 	}
+	verificationTime := time.Since(start)
 	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
 		return false, fmt.Errorf("starting transaction for importing the blocks: %v", err1)
 	}
 	defer tx.Rollback()
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", verificationTime, tx, headers)
 	if err != nil {
 		return false, err
 	}
