@@ -210,15 +210,16 @@ func (p *StateProcessor) PostProcess(block *types.Block, tds *state.TrieDbState,
 	return nil
 }
 
-// ApplyTransaction attempts to apply a transaction to the given state database
+// applyTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
+func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, evm *vm.EVM) (*types.Receipt, error) {
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
 	if err != nil {
 		return nil, err
 	}
+
 	ctx := config.WithEIPsFlags(context.Background(), header.Number)
 	// Create a new context to be used in the EVM environment
 	context := NewEVMBlockContext(msg, header, bc, author)
@@ -231,20 +232,9 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 	vmenv := vm.NewEVM(context, txContext, statedb, config, cfg)
 
-	if config.IsYoloV3(header.Number) {
-		statedb.AddAddressToAccessList(msg.From())
-		if dst := msg.To(); dst != nil {
-			statedb.AddAddressToAccessList(*dst)
-			// If it's a create-tx, the destination will be added inside evm.create
-		}
-		for _, addr := range evm.ActivePrecompiles() {
-			statedb.AddAddressToAccessList(addr)
-		}
-	}
-
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, statedb)
-	// Apply the transaction to the current state (included in the env)
+	// If the transaction created a contract, store the creation address in the receipt.
 	result, err := ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, err
@@ -256,11 +246,17 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 
 	*usedGas += result.UsedGas
 
-	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx
+	// Set the receipt logs and create the bloom filter.
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
 	var receipt *types.Receipt
 	if !cfg.NoReceipts {
-		receipt = types.NewReceipt(result.Failed(), *usedGas)
+		// by the tx.
+		receipt = &types.Receipt{Type: tx.Type(), PostState: root, CumulativeGasUsed: *usedGas}
+		if result.Failed() {
+			receipt.Status = types.ReceiptStatusFailed
+		} else {
+			receipt.Status = types.ReceiptStatusSuccessful
+		}
 		receipt.TxHash = tx.Hash()
 		receipt.GasUsed = result.UsedGas
 		// if the transaction created a contract, store the creation address in the receipt.
@@ -270,6 +266,8 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 		// Set the receipt logs and create a bloom for filtering
 		receipt.Logs = statedb.GetLogs(tx.Hash())
 		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+		receipt.BlockNumber = header.Number
+		receipt.TransactionIndex = uint(statedb.TxIndex())
 	}
 	return receipt, err
 }

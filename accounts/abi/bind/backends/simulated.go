@@ -644,7 +644,10 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	sender, err := types.Sender(types.NewEIP155Signer(b.config.ChainID), tx)
+	// Check transaction validity.
+	block := b.blockchain.CurrentBlock()
+	signer := types.MakeSigner(b.blockchain.Config(), block.Number())
+	sender, err := types.Sender(signer, tx)
 	if err != nil {
 		return fmt.Errorf("invalid transaction: %v", err)
 	}
@@ -664,7 +667,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
-	blocks, receipts, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
+	blocks, receipts, err := core.GenerateChain(b.config, block, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.blockchain, tx)
 		}
@@ -818,6 +821,7 @@ func (m callMsg) GasPrice() *uint256.Int { return m.CallMsg.GasPrice }
 func (m callMsg) Gas() uint64            { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int    { return m.CallMsg.Value }
 func (m callMsg) Data() []byte           { return m.CallMsg.Data }
+func (m callMsg) AccessList() types.AccessList { return m.CallMsg.AccessList }
 
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.

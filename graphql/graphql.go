@@ -250,12 +250,8 @@ func (t *Transaction) From(ctx context.Context, args BlockNumberArgs) (*Account,
 	if err != nil || tx == nil {
 		return nil, err
 	}
-	var signer types.Signer = types.HomesteadSigner{}
-	if tx.Protected() {
-		signer = types.NewEIP155Signer(tx.ChainID().ToBig())
-	}
+	signer := types.LatestSigner(t.backend.ChainConfig())
 	from, _ := types.Sender(signer, tx)
-
 	return &Account{
 		backend:       t.backend,
 		address:       from,
@@ -1026,7 +1022,7 @@ func (r *Resolver) Transaction(ctx context.Context, args struct{ Hash common.Has
 
 func (r *Resolver) SendRawTransaction(ctx context.Context, args struct{ Data hexutil.Bytes }) (common.Hash, error) {
 	tx := new(types.Transaction)
-	if err := rlp.DecodeBytes(args.Data, tx); err != nil {
+	if err := tx.UnmarshalBinary(args.Data); err != nil {
 		return common.Hash{}, err
 	}
 	hash, err := ethapi.SubmitTransaction(ctx, r.backend, tx)

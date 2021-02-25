@@ -65,7 +65,7 @@ func newTestBackend(t *testing.T) *testBackend {
 			Config: params.TestChainConfig,
 			Alloc:  core.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
-		signer = types.NewEIP155Signer(gspec.Config.ChainID)
+		signer = types.LatestSigner(gspec.Config)
 	)
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()

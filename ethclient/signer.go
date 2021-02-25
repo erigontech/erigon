@@ -58,8 +58,8 @@ func (s *senderFromServer) SenderWithContext(_ *secp256k1.Context, tx *types.Tra
 	return s.addr, nil
 }
 
-func (s *senderFromServer) ChainID() *uint256.Int {
-	return u256.Num0
+func (s *senderFromServer) ChainID() *big.Int {
+	panic("can't sign with senderFromServer")
 }
 
 func (s *senderFromServer) Hash(tx *types.Transaction) common.Hash {
