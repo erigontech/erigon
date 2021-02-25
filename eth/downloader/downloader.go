@@ -1713,7 +1713,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 							return fmt.Errorf("stagedsync.VerifyHeaders failed %w: %v(actual error)", errInvalidChain, err)
 						}
 						elapsed := time.Since(t)
-						fmt.Println("VerifyHeaders", "count", len(chunk), "elapsed", elapsed, "number", chunk[n].Number, "hash", chunk[n].Hash().String(), "blk/ms", float64(len(chunk))/float64(elapsed.Microseconds()))
+						//fmt.Println("VerifyHeaders", "count", len(chunk), "elapsed", elapsed, "number", chunk[n].Number, "hash", chunk[n].Hash().String(), "blk/ms", float64(len(chunk))/float64(elapsed.Microseconds()))
 
 						var reorg bool
 						var forkBlockNumber uint64
