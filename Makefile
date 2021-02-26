@@ -78,7 +78,7 @@ headers:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/headers\" to run headers download PoC."
 
-db-tools:
+db-tools: mdbx
 	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; make clean mdb_stat mdb_copy mdb_dump mdb_load; cp mdb_stat $(GOBIN); cp mdb_copy $(GOBIN); cp mdb_dump $(GOBIN); cp mdb_load $(GOBIN); cd ../../../../..; rm -rf vendor
 	$(GOBUILD) -o $(GOBIN)/lmdbgo_copy github.com/ledgerwatch/lmdb-go/cmd/lmdb_copy
 	$(GOBUILD) -o $(GOBIN)/lmdbgo_stat github.com/ledgerwatch/lmdb-go/cmd/lmdb_stat
