@@ -133,6 +133,11 @@ func CollectProcessMetrics(refresh time.Duration) {
 		ruNvcsw.Update(cpuStats.Usage.Nvcsw)
 		ruNivcsw.Update(cpuStats.Usage.Nivcsw)
 
+		memstats.PauseTotalNs = 0
+		memstats.Mallocs = 0
+		memstats.Frees = 0
+		memstats.HeapSys = 0
+		memstats.Alloc = 0
 		runtime.ReadMemStats(memstats)
 		memPauses.Mark(int64(memstats.PauseTotalNs))
 		memAllocs.Mark(int64(memstats.Mallocs))
@@ -140,6 +145,10 @@ func CollectProcessMetrics(refresh time.Duration) {
 		memHeld.Update(int64(memstats.HeapSys))
 		memUsed.Update(int64(memstats.Alloc))
 
+		diskstats.ReadCount = 0
+		diskstats.ReadBytes = 0
+		diskstats.WriteCount = 0
+		diskstats.WriteBytes = 0
 		if ReadDiskStats(diskstats) == nil {
 			diskReads.Mark(diskstats.ReadCount)
 			diskReadBytes.Mark(diskstats.ReadBytes)
