@@ -139,15 +139,15 @@ func CollectProcessMetrics(refresh time.Duration) {
 		ruNivcsw.Update(cpuStats[location1].Usage.Nivcsw)
 
 		runtime.ReadMemStats(memstats[location1])
-		memPauses.Mark(int64(memstats[location1].PauseTotalNs - memstats[location2].PauseTotalNs))
-		memAllocs.Mark(int64(memstats[location1].Mallocs - memstats[location2].Mallocs))
-		memFrees.Mark(int64(memstats[location1].Frees - memstats[location2].Frees))
-		memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
+		memPauses.Mark(int64(memstats[location1].PauseTotalNs))
+		memAllocs.Mark(int64(memstats[location1].Mallocs))
+		memFrees.Mark(int64(memstats[location1].Frees))
+		memHeld.Update(int64(memstats[location1].HeapSys))
 		memUsed.Update(int64(memstats[location1].Alloc))
 
 		if ReadDiskStats(diskstats[location1]) == nil {
-			diskReads.Mark(diskstats[location1].ReadCount - diskstats[location2].ReadCount)
-			diskReadBytes.Mark(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
+			diskReads.Mark(diskstats[location1].ReadCount)
+			diskReadBytes.Mark(diskstats[location1].ReadBytes)
 			diskWrites.Mark(diskstats[location1].WriteCount - diskstats[location2].WriteCount)
 			diskWriteBytes.Mark(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
 
