@@ -9,13 +9,13 @@ endif
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 
-OS = $(shell uname -s)
+OS = $(shell go env GOHOSTOS)
 ARCH = $(shell uname -m)
 
-ifeq ($(OS),Darwin)
+ifeq ($(OS),darwin)
 PROTOC_OS := osx
 endif
-ifeq ($(OS),Linux)
+ifeq ($(OS),linux)
 PROTOC_OS = linux
 endif
 
@@ -192,8 +192,14 @@ grpc:
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
 
+prometheus-deps:
+	# pre-requirement: https://github.com/iovisor/bcc/blob/master/INSTALL.md
+	go get -u -v github.com/cloudflare/ebpf_exporter/...
+	go install github.com/cloudflare/ebpf_exporter/cmd/ebpf_exporter
+
 prometheus:
 	docker-compose up prometheus grafana
+
 
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out

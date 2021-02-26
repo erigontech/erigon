@@ -45,7 +45,7 @@ require (
 	github.com/influxdata/influxdb v1.8.2
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/json-iterator/go v1.1.10
-	github.com/julienschmidt/httprouter v1.2.0
+	github.com/julienschmidt/httprouter v1.3.0
 	github.com/karalabe/usb v0.0.0-20191104083709-911d15fe12a9
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/ledgerwatch/lmdb-go v1.17.4
@@ -58,7 +58,7 @@ require (
 	github.com/pborman/uuid v1.2.1
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
 	github.com/peterh/liner v1.2.0
-	github.com/prometheus/client_golang v1.7.1
+	github.com/prometheus/client_golang v1.9.0
 	github.com/prometheus/tsdb v0.10.0
 	github.com/rs/cors v1.7.0
 	github.com/shirou/gopsutil v2.20.8+incompatible
@@ -74,7 +74,7 @@ require (
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a
 	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
-	golang.org/x/sys v0.0.0-20200909081042-eff7692f9009
+	golang.org/x/sys v0.0.0-20201214210602-f9fddec55a1e
 	golang.org/x/text v0.3.3
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
 	golang.org/x/tools v0.0.0-20200928182047-19e03678916f
