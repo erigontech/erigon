@@ -35,7 +35,7 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 4,
+        "h": 5,
         "w": 8,
         "x": 0,
         "y": 0
@@ -140,7 +140,7 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 4,
+        "h": 5,
         "w": 8,
         "x": 8,
         "y": 0
@@ -245,7 +245,7 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 4,
+        "h": 5,
         "w": 8,
         "x": 16,
         "y": 0
@@ -353,7 +353,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 4
+        "y": 5
       },
       "hiddenSeries": false,
       "id": 143,
@@ -483,7 +483,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 4
+        "y": 5
       },
       "hiddenSeries": false,
       "id": 148,
@@ -582,7 +582,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 4
+        "y": 5
       },
       "hiddenSeries": false,
       "id": 142,
@@ -781,7 +781,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 9
+        "y": 10
       },
       "id": 134,
       "title": "Exec",
@@ -806,7 +806,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 10
+        "y": 11
       },
       "hiddenSeries": false,
       "id": 144,
@@ -910,7 +910,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 10
+        "y": 11
       },
       "hiddenSeries": false,
       "id": 112,
@@ -1012,7 +1012,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 10
+        "y": 11
       },
       "hiddenSeries": false,
       "id": 140,
@@ -1090,242 +1090,6 @@
         "align": false,
         "alignLevel": null
       }
-    },
-    {
-      "collapsed": true,
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 15
-      },
-      "id": 146,
-      "panels": [
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "Prometheus",
-          "fieldConfig": {
-            "defaults": {
-              "custom": {}
-            },
-            "overrides": []
-          },
-          "fill": 1,
-          "fillGradient": 0,
-          "gridPos": {
-            "h": 3,
-            "w": 4,
-            "x": 0,
-            "y": 18
-          },
-          "hiddenSeries": false,
-          "id": 122,
-          "legend": {
-            "alignAsTable": true,
-            "avg": true,
-            "current": false,
-            "hideEmpty": false,
-            "hideZero": false,
-            "max": false,
-            "min": false,
-            "rightSide": false,
-            "show": true,
-            "sort": "avg",
-            "sortDesc": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "nullPointMode": "null",
-          "options": {
-            "alertThreshold": true
-          },
-          "percentage": false,
-          "pluginVersion": "7.4.3",
-          "pointradius": 2,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "trie_subtrieloader_flatdb{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "trie_subtrieloader_flatdb: {{quantile}}, {{instance}}",
-              "refId": "B"
-            },
-            {
-              "expr": "trie_subtrieloader_witnessdb{quantile=\"$quantile\",instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "trie_subtrieloader_witnessdb: {{quantile}}, {{instance}}",
-              "refId": "C"
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Merkle Root calculation (stage 5)",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": 6,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "$$hashKey": "object:431",
-              "format": "ns",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "$$hashKey": "object:432",
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": false
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "Prometheus",
-          "fieldConfig": {
-            "defaults": {
-              "custom": {}
-            },
-            "overrides": []
-          },
-          "fill": 1,
-          "fillGradient": 0,
-          "gridPos": {
-            "h": 3,
-            "w": 4,
-            "x": 4,
-            "y": 18
-          },
-          "hiddenSeries": false,
-          "id": 132,
-          "legend": {
-            "avg": false,
-            "current": false,
-            "max": false,
-            "min": false,
-            "show": true,
-            "total": false,
-            "values": false
-          },
-          "lines": false,
-          "linewidth": 1,
-          "nullPointMode": "null",
-          "options": {
-            "alertThreshold": true
-          },
-          "percentage": false,
-          "pluginVersion": "7.4.3",
-          "pointradius": 2,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "sum(delta(cache_acc_read_hits{instance=~\"$instance\"}[30s])/delta(cache_acc_read_total{instance=~\"$instance\"}[30s]))",
-              "instant": false,
-              "interval": "",
-              "legendFormat": "acc_hit_ratio",
-              "refId": "A"
-            },
-            {
-              "expr": "sum(delta(cache_st_read_hits{instance=~\"$instance\"}[30s])/delta(cache_st_read_total{instance=~\"$instance\"}[30s]))",
-              "instant": false,
-              "interval": "",
-              "legendFormat": "st_hit_ratio",
-              "refId": "B"
-            },
-            {
-              "expr": "sum(delta(cache_writes_hits{instance=~\"$instance\"}[30s])/delta(cache_writes_total{instance=~\"$instance\"}[30s]))",
-              "instant": false,
-              "interval": "",
-              "legendFormat": "all_hit_ratio",
-              "refId": "C"
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Cache Hit Rates",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "$$hashKey": "object:60",
-              "format": "percent",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "$$hashKey": "object:61",
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        }
-      ],
-      "title": "Hidden",
-      "type": "row"
     },
     {
       "collapsed": false,
@@ -1957,6 +1721,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:1032",
           "format": "ns",
           "label": null,
           "logBase": 1,
@@ -1965,6 +1730,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:1033",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -2029,7 +1795,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "system_cpu_sysload{instance=~\"$instance\"}",
+          "expr": "rate(system_cpu_sysload{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -2037,7 +1803,7 @@
           "refId": "A"
         },
         {
-          "expr": "system_cpu_syswait{instance=~\"$instance\"}",
+          "expr": "rate(system_cpu_syswait{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -2045,11 +1811,11 @@
           "refId": "B"
         },
         {
-          "expr": "system_cpu_procload{instance=\"$instance\"}",
+          "expr": "rate(system_cpu_procload{instance=\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "geth",
+          "legendFormat": "current process: {{instance}}",
           "refId": "C"
         }
       ],
@@ -2073,6 +1839,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:844",
           "format": "percent",
           "label": null,
           "logBase": 1,
@@ -2081,6 +1848,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:845",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -2093,20 +1861,6 @@
         "align": false,
         "alignLevel": null
       }
-    },
-    {
-      "collapsed": false,
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 32
-      },
-      "id": 82,
-      "panels": [],
-      "title": "System",
-      "type": "row"
     },
     {
       "aliasColors": {},
@@ -2123,10 +1877,10 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 6,
+        "h": 5,
         "w": 8,
-        "x": 0,
-        "y": 33
+        "x": 8,
+        "y": 27
       },
       "hiddenSeries": false,
       "id": 128,
@@ -2177,7 +1931,7 @@
       "title": "GO Goroutines and Threads",
       "tooltip": {
         "shared": true,
-        "sort": 0,
+        "sort": 2,
         "value_type": "individual"
       },
       "type": "graph",
@@ -2190,6 +1944,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:1192",
           "format": "none",
           "label": null,
           "logBase": 1,
@@ -2198,6 +1953,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:1193",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -2212,13 +1968,263 @@
       }
     },
     {
+      "collapsed": true,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 146,
+      "panels": [
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "fill": 1,
+          "fillGradient": 0,
+          "gridPos": {
+            "h": 3,
+            "w": 4,
+            "x": 0,
+            "y": 18
+          },
+          "hiddenSeries": false,
+          "id": 122,
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": false,
+            "hideEmpty": false,
+            "hideZero": false,
+            "max": false,
+            "min": false,
+            "rightSide": false,
+            "show": true,
+            "sort": "avg",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
+          "percentage": false,
+          "pluginVersion": "7.4.3",
+          "pointradius": 2,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "trie_subtrieloader_flatdb{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "trie_subtrieloader_flatdb: {{quantile}}, {{instance}}",
+              "refId": "B"
+            },
+            {
+              "expr": "trie_subtrieloader_witnessdb{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "trie_subtrieloader_witnessdb: {{quantile}}, {{instance}}",
+              "refId": "C"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Merkle Root calculation (stage 5)",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": 6,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "$$hashKey": "object:431",
+              "format": "ns",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "$$hashKey": "object:432",
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": false
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "fill": 1,
+          "fillGradient": 0,
+          "gridPos": {
+            "h": 3,
+            "w": 4,
+            "x": 4,
+            "y": 18
+          },
+          "hiddenSeries": false,
+          "id": 132,
+          "legend": {
+            "avg": false,
+            "current": false,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+          },
+          "lines": false,
+          "linewidth": 1,
+          "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
+          "percentage": false,
+          "pluginVersion": "7.4.3",
+          "pointradius": 2,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "sum(delta(cache_acc_read_hits{instance=~\"$instance\"}[30s])/delta(cache_acc_read_total{instance=~\"$instance\"}[30s]))",
+              "instant": false,
+              "interval": "",
+              "legendFormat": "acc_hit_ratio",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(delta(cache_st_read_hits{instance=~\"$instance\"}[30s])/delta(cache_st_read_total{instance=~\"$instance\"}[30s]))",
+              "instant": false,
+              "interval": "",
+              "legendFormat": "st_hit_ratio",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(delta(cache_writes_hits{instance=~\"$instance\"}[30s])/delta(cache_writes_total{instance=~\"$instance\"}[30s]))",
+              "instant": false,
+              "interval": "",
+              "legendFormat": "all_hit_ratio",
+              "refId": "C"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Cache Hit Rates",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "$$hashKey": "object:60",
+              "format": "percent",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "$$hashKey": "object:61",
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        }
+      ],
+      "title": "Hidden",
+      "type": "row"
+    },
+    {
       "collapsed": false,
       "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 33
+      },
+      "id": 82,
+      "panels": [],
+      "title": "System",
+      "type": "row"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
       },
       "id": 75,
       "panels": [],
@@ -2243,7 +2249,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 40
+        "y": 35
       },
       "hiddenSeries": false,
       "id": 96,
@@ -2352,7 +2358,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 40
+        "y": 35
       },
       "hiddenSeries": false,
       "id": 77,
@@ -2457,7 +2463,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 41
       },
       "id": 4,
       "panels": [],
@@ -2500,7 +2506,7 @@
         "h": 3,
         "w": 4,
         "x": 0,
-        "y": 47
+        "y": 42
       },
       "id": 108,
       "interval": null,
@@ -2578,7 +2584,7 @@
         "h": 3,
         "w": 4,
         "x": 4,
-        "y": 47
+        "y": 42
       },
       "id": 111,
       "interval": null,
@@ -2656,7 +2662,7 @@
         "h": 3,
         "w": 4,
         "x": 8,
-        "y": 47
+        "y": 42
       },
       "id": 109,
       "interval": null,
@@ -2734,7 +2740,7 @@
         "h": 3,
         "w": 4,
         "x": 12,
-        "y": 47
+        "y": 42
       },
       "id": 113,
       "interval": null,
@@ -2812,7 +2818,7 @@
         "h": 3,
         "w": 4,
         "x": 16,
-        "y": 47
+        "y": 42
       },
       "id": 114,
       "interval": null,
@@ -2890,7 +2896,7 @@
         "h": 3,
         "w": 4,
         "x": 20,
-        "y": 47
+        "y": 42
       },
       "id": 115,
       "interval": null,
@@ -2951,7 +2957,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 50
+        "y": 45
       },
       "hiddenSeries": false,
       "id": 110,
@@ -3066,7 +3072,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 50
+        "y": 45
       },
       "hiddenSeries": false,
       "id": 116,
@@ -3181,7 +3187,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 51
       },
       "hiddenSeries": false,
       "id": 117,
@@ -3356,7 +3362,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 63
+        "y": 58
       },
       "id": 126,
       "panels": [],
@@ -3385,7 +3391,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 64
+        "y": 59
       },
       "hiddenSeries": false,
       "id": 130,
@@ -3479,7 +3485,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 65
       },
       "id": 138,
       "panels": [],
@@ -3504,7 +3510,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 71
+        "y": 66
       },
       "hiddenSeries": false,
       "id": 136,
@@ -3739,7 +3745,7 @@
     ]
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-15m",
     "to": "now"
   },
   "timepicker": {
@@ -3769,5 +3775,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 97
+  "version": 101
 }
