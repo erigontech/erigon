@@ -61,17 +61,12 @@ func CollectProcessMetrics(refresh time.Duration) {
 	if !Enabled {
 		return
 	}
-	refreshFreq := int64(refresh / time.Second)
 
 	// Create the various data collectors
-	cpuStats := make([]*CPUStats, 2)
-	memstats := make([]*runtime.MemStats, 2)
-	diskstats := make([]*DiskStats, 2)
-	for i := 0; i < len(memstats); i++ {
-		cpuStats[i] = new(CPUStats)
-		memstats[i] = new(runtime.MemStats)
-		diskstats[i] = new(DiskStats)
-	}
+	cpuStats := &CPUStats{}
+	memstats := &runtime.MemStats{}
+	diskstats := &DiskStats{}
+
 	// Define the various metrics to collect
 	var (
 		cpuSysLoad    = GetOrRegisterGauge("system/cpu/sysload", DefaultRegistry)
@@ -118,41 +113,41 @@ func CollectProcessMetrics(refresh time.Duration) {
 	)
 
 	// Iterate loading the different stats and updating the meters
-	for i := 1; ; i++ {
-		location1 := i % 2
-		location2 := (i - 1) % 2
+	for {
+		//location1 := i % 2
+		//location2 := (i - 1) % 2
 
-		ReadCPUStats(cpuStats[location1])
-		cpuSysLoad.Update((cpuStats[location1].GlobalTime - cpuStats[location2].GlobalTime) / refreshFreq)
-		cpuSysWait.Update((cpuStats[location1].GlobalWait - cpuStats[location2].GlobalWait) / refreshFreq)
-		cpuProcLoad.Update((cpuStats[location1].LocalTime - cpuStats[location2].LocalTime) / refreshFreq)
+		ReadCPUStats(cpuStats)
+		cpuSysLoad.Update(cpuStats.GlobalTime)
+		cpuSysWait.Update(cpuStats.GlobalWait)
+		cpuProcLoad.Update(cpuStats.LocalTime)
 		cpuThreads.Update(int64(threadCreateProfile.Count()))
 		cpuGoroutines.Update(int64(runtime.NumGoroutine()))
 
 		// getrusage(2)
-		ruMaxrss.Update(cpuStats[location1].Usage.Maxrss)
-		ruMinflt.Update(cpuStats[location1].Usage.Minflt)
-		ruMajflt.Update(cpuStats[location1].Usage.Majflt)
-		ruInblock.Update(cpuStats[location1].Usage.Inblock)
-		ruOutblock.Update(cpuStats[location1].Usage.Oublock)
-		ruNvcsw.Update(cpuStats[location1].Usage.Nvcsw)
-		ruNivcsw.Update(cpuStats[location1].Usage.Nivcsw)
+		ruMaxrss.Update(cpuStats.Usage.Maxrss)
+		ruMinflt.Update(cpuStats.Usage.Minflt)
+		ruMajflt.Update(cpuStats.Usage.Majflt)
+		ruInblock.Update(cpuStats.Usage.Inblock)
+		ruOutblock.Update(cpuStats.Usage.Oublock)
+		ruNvcsw.Update(cpuStats.Usage.Nvcsw)
+		ruNivcsw.Update(cpuStats.Usage.Nivcsw)
 
-		runtime.ReadMemStats(memstats[location1])
-		memPauses.Mark(int64(memstats[location1].PauseTotalNs))
-		memAllocs.Mark(int64(memstats[location1].Mallocs))
-		memFrees.Mark(int64(memstats[location1].Frees))
-		memHeld.Update(int64(memstats[location1].HeapSys))
-		memUsed.Update(int64(memstats[location1].Alloc))
+		runtime.ReadMemStats(memstats)
+		memPauses.Mark(int64(memstats.PauseTotalNs))
+		memAllocs.Mark(int64(memstats.Mallocs))
+		memFrees.Mark(int64(memstats.Frees))
+		memHeld.Update(int64(memstats.HeapSys))
+		memUsed.Update(int64(memstats.Alloc))
 
-		if ReadDiskStats(diskstats[location1]) == nil {
-			diskReads.Mark(diskstats[location1].ReadCount)
-			diskReadBytes.Mark(diskstats[location1].ReadBytes)
-			diskWrites.Mark(diskstats[location1].WriteCount)
-			diskWriteBytes.Mark(diskstats[location1].WriteBytes)
+		if ReadDiskStats(diskstats) == nil {
+			diskReads.Mark(diskstats.ReadCount)
+			diskReadBytes.Mark(diskstats.ReadBytes)
+			diskWrites.Mark(diskstats.WriteCount)
+			diskWriteBytes.Mark(diskstats.WriteBytes)
 
-			diskReadBytesCounter.Inc(diskstats[location1].ReadBytes)
-			diskWriteBytesCounter.Inc(diskstats[location1].WriteBytes)
+			diskReadBytesCounter.Inc(diskstats.ReadBytes)
+			diskWriteBytesCounter.Inc(diskstats.WriteBytes)
 		}
 
 		goGoroutines.Update(int64(runtime.NumGoroutine()))
