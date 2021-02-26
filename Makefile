@@ -9,13 +9,13 @@ endif
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 
-OS = $(shell go env GOHOSTOS)
+OS = $(shell uname -s)
 ARCH = $(shell uname -m)
 
-ifeq ($(OS),darwin)
+ifeq ($(OS),Darwin)
 PROTOC_OS := osx
 endif
-ifeq ($(OS),linux)
+ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
