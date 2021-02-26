@@ -148,11 +148,11 @@ func CollectProcessMetrics(refresh time.Duration) {
 		if ReadDiskStats(diskstats[location1]) == nil {
 			diskReads.Mark(diskstats[location1].ReadCount)
 			diskReadBytes.Mark(diskstats[location1].ReadBytes)
-			diskWrites.Mark(diskstats[location1].WriteCount - diskstats[location2].WriteCount)
-			diskWriteBytes.Mark(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
+			diskWrites.Mark(diskstats[location1].WriteCount)
+			diskWriteBytes.Mark(diskstats[location1].WriteBytes)
 
-			diskReadBytesCounter.Inc(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
-			diskWriteBytesCounter.Inc(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
+			diskReadBytesCounter.Inc(diskstats[location1].ReadBytes)
+			diskWriteBytesCounter.Inc(diskstats[location1].WriteBytes)
 		}
 
 		goGoroutines.Update(int64(runtime.NumGoroutine()))
