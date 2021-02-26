@@ -19,6 +19,8 @@
 package metrics
 
 import (
+	"syscall"
+
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/shirou/gopsutil/cpu"
 )
@@ -35,5 +37,11 @@ func ReadCPUStats(stats *CPUStats) {
 	timeStat := timeStats[0]
 	stats.GlobalTime = int64((timeStat.User + timeStat.Nice + timeStat.System) * cpu.ClocksPerSec)
 	stats.GlobalWait = int64((timeStat.Iowait) * cpu.ClocksPerSec)
-	stats.LocalTime = getProcessCPUTime()
+
+	stats.Usage = getRUsage()
+	stats.LocalTime = cpuTimeFromUsage(stats.Usage)
+}
+
+func cpuTimeFromUsage(usage syscall.Rusage) int64 {
+	return int64(usage.Utime.Sec+usage.Stime.Sec)*100 + int64(usage.Utime.Usec+usage.Stime.Usec)/10000 //nolint:unconvert
 }

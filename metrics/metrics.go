@@ -96,6 +96,39 @@ func CollectProcessMetrics(refresh time.Duration) {
 		// copy from prometheus client
 		goGoroutines = GetOrRegisterGauge("go/goroutines", DefaultRegistry)
 		goThreads    = GetOrRegisterGauge("go/threads", DefaultRegistry)
+
+		//struct rusage {
+		//	struct timeval ru_utime; /* user CPU time used */
+		//	struct timeval ru_stime; /* system CPU time used */
+		//	long   ru_maxrss;        /* maximum resident set size */
+		//	long   ru_ixrss;         /* integral shared memory size */
+		//	long   ru_idrss;         /* integral unshared data size */
+		//	long   ru_isrss;         /* integral unshared stack size */
+		//	long   ru_minflt;        /* page reclaims (soft page faults) */
+		//	long   ru_majflt;        /* page faults (hard page faults) */
+		//	long   ru_nswap;         /* swaps */
+		//	long   ru_inblock;       /* block input operations */
+		//	long   ru_oublock;       /* block output operations */
+		//	long   ru_msgsnd;        /* IPC messages sent */
+		//	long   ru_msgrcv;        /* IPC messages received */
+		//	long   ru_nsignals;      /* signals received */
+		//	long   ru_nvcsw;         /* voluntary context switches */
+		//	long   ru_nivcsw;        /* involuntary context switches */
+		//};
+		ruMaxrss   = GetOrRegisterGauge("ru/maxrss", DefaultRegistry)
+		ruIxrss    = GetOrRegisterGauge("ru/ixrss", DefaultRegistry)
+		ruIdrss    = GetOrRegisterGauge("ru/idrss", DefaultRegistry)
+		ruIsrss    = GetOrRegisterGauge("ru/isrss", DefaultRegistry)
+		ruMinflt   = GetOrRegisterGauge("ru/minflt", DefaultRegistry)
+		ruMajflt   = GetOrRegisterGauge("ru/majflt", DefaultRegistry)
+		ruNswap    = GetOrRegisterGauge("ru/nswap", DefaultRegistry)
+		ruInblock  = GetOrRegisterGauge("ru/inblock", DefaultRegistry)
+		ruOutblock = GetOrRegisterGauge("ru/outblock", DefaultRegistry)
+		ruMsgsnd   = GetOrRegisterGauge("ru/msgsnd", DefaultRegistry)
+		ruMsgrcv   = GetOrRegisterGauge("ru/msgrcv", DefaultRegistry)
+		ruNsignal  = GetOrRegisterGauge("ru/nsignal", DefaultRegistry)
+		ruNvcsw    = GetOrRegisterGauge("ru/nvcsw", DefaultRegistry)
+		ruNivcsw   = GetOrRegisterGauge("ru/nivcsw", DefaultRegistry)
 	)
 
 	// Iterate loading the different stats and updating the meters
@@ -109,6 +142,22 @@ func CollectProcessMetrics(refresh time.Duration) {
 		cpuProcLoad.Update((cpuStats[location1].LocalTime - cpuStats[location2].LocalTime) / refreshFreq)
 		cpuThreads.Update(int64(threadCreateProfile.Count()))
 		cpuGoroutines.Update(int64(runtime.NumGoroutine()))
+
+		// getrusage(2)
+		ruMaxrss.Update(cpuStats[location1].Usage.Maxrss)
+		ruIsrss.Update(cpuStats[location1].Usage.Isrss)
+		ruIdrss.Update(cpuStats[location1].Usage.Idrss)
+		ruIxrss.Update(cpuStats[location1].Usage.Ixrss)
+		ruMinflt.Update(cpuStats[location1].Usage.Minflt)
+		ruMajflt.Update(cpuStats[location1].Usage.Majflt)
+		ruNswap.Update(cpuStats[location1].Usage.Nswap)
+		ruInblock.Update(cpuStats[location1].Usage.Inblock)
+		ruOutblock.Update(cpuStats[location1].Usage.Oublock)
+		ruMsgsnd.Update(cpuStats[location1].Usage.Msgsnd)
+		ruMsgrcv.Update(cpuStats[location1].Usage.Msgrcv)
+		ruNsignal.Update(cpuStats[location1].Usage.Nsignals)
+		ruNvcsw.Update(cpuStats[location1].Usage.Nvcsw)
+		ruNivcsw.Update(cpuStats[location1].Usage.Nivcsw)
 
 		runtime.ReadMemStats(memstats[location1])
 		memPauses.Mark(int64(memstats[location1].PauseTotalNs - memstats[location2].PauseTotalNs))
