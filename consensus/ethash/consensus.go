@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
@@ -36,6 +37,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -91,17 +93,14 @@ func (ethash *Ethash) Author(header *types.Header) (common.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules of the
 // stock Ethereum ethash engine.
 func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
-	// If we're running a full engine faking, accept any input as valid
-	if ethash.config.PowMode == ModeFullFake {
-		return nil
-	}
 	// Short circuit if the header is known, or its parent not
 	number := header.Number.Uint64()
-	if chain.GetHeader(header.Hash(), number) != nil {
+	if chain.GetHeader(header.HashCache(), number) != nil {
 		return nil
 	}
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
+		log.Error("consensus.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return consensus.ErrUnknownAncestor
 	}
 	// Sanity checks passed, do a proper verification
@@ -112,13 +111,8 @@ func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *ty
 // concurrently. The method returns a quit channel to abort the operations and
 // a results channel to retrieve the async verifications.
 func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (func(), <-chan error) {
-	// If we're running a full engine faking, accept any input as valid
-	if ethash.config.PowMode == ModeFullFake || len(headers) == 0 {
-		results := make(chan error, len(headers))
-		for i := 0; i < len(headers); i++ {
-			results <- nil
-		}
-		return func() {}, results
+	if len(headers) == 0 {
+		return func() {}, make(chan error)
 	}
 
 	// Spawn as many workers as allowed threads
@@ -129,25 +123,34 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 
 	// Create a task channel and spawn the verifiers
 	var (
-		inputs = make(chan int)
 		done   = make(chan int, workers)
 		errors = make([]error, len(headers))
 		abort  = make(chan struct{})
 	)
+
 	wg := sync.WaitGroup{}
 	cancel := func() {
 		close(abort)
 		wg.Wait()
 	}
 
+	input := new(int64)
+
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for index := range inputs {
-				errors[index] = ethash.verifyHeaderWorker(chain, headers, seals, index)
+			var index int64
+			for {
+				index = atomic.AddInt64(input, 1) - 1
+				if int(index) > len(headers)-1 {
+					return
+				}
+
+				errors[index] = ethash.verifyHeaderWorker(chain, headers, seals, int(index))
+
 				select {
-				case done <- index:
+				case done <- int(index):
 				case <-abort:
 					return
 				}
@@ -157,23 +160,17 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 
 	errorsOut := make(chan error, len(headers))
 	go func() {
-		defer close(inputs)
 		var (
-			in, out = 0, 0
+			out     = 0
 			checked = make([]bool, len(headers))
-			inputs  = inputs
 		)
 		for {
 			select {
-			case inputs <- in:
-				if in++; in == len(headers) {
-					// Reached end of headers. Stop sending to workers.
-					inputs = nil
-				}
 			case index := <-done:
 				for checked[index] = true; checked[out]; out++ {
 					errorsOut <- errors[out]
 					if out == len(headers)-1 {
+						close(errorsOut)
 						return
 					}
 				}
@@ -182,6 +179,7 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 			}
 		}
 	}()
+
 	return cancel, errorsOut
 }
 
@@ -189,13 +187,19 @@ func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, head
 	var parent *types.Header
 	if index == 0 {
 		parent = chain.GetHeader(headers[0].ParentHash, headers[0].Number.Uint64()-1)
-	} else if headers[index-1].Hash() == headers[index].ParentHash {
+	} else if headers[index-1].HashCache() == headers[index].ParentHash {
 		parent = headers[index-1]
 	}
 	if parent == nil {
+		if index-1 >= 0 && index-1 <= len(headers)-1 {
+			log.Error("consensus.ErrUnknownAncestor", "index", index, "headers", len(headers), "index-1", headers[index-1].Number.Uint64(), "index", headers[index].Number.Uint64())
+		} else {
+			log.Error("consensus.ErrUnknownAncestor", "index", index, "headers", len(headers))
+		}
+
 		return consensus.ErrUnknownAncestor
 	}
-	if chain.GetHeader(headers[index].Hash(), headers[index].Number.Uint64()) != nil {
+	if chain.GetHeader(headers[index].HashCache(), headers[index].Number.Uint64()) != nil {
 		return nil // known block
 	}
 	return ethash.verifyHeader(chain, headers[index], parent, false, seals[index])
@@ -204,10 +208,6 @@ func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, head
 // VerifyUncles verifies that the given block's uncles conform to the consensus
 // rules of the stock Ethereum ethash engine.
 func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
-	// If we're running a full engine faking, accept any input as valid
-	if ethash.config.PowMode == ModeFullFake {
-		return nil
-	}
 	// Verify that there are at most 2 uncles included in this block
 	if len(block.Uncles()) > maxUncles {
 		return errTooManyUncles
@@ -215,6 +215,18 @@ func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, block *types.Blo
 	if len(block.Uncles()) == 0 {
 		return nil
 	}
+	uncles, ancestors := getUncles(chain, block)
+
+	// Verify each of the uncles that it's recent, but not an ancestor
+	for _, uncle := range block.Uncles() {
+		if err := ethash.VerifyUncle(chain, block, uncle, uncles, ancestors, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func getUncles(chain consensus.ChainReader, block *types.Block) (mapset.Set, map[common.Hash]*types.Header) {
 	// Gather the set of past uncles and ancestors
 	uncles, ancestors := mapset.NewSet(), make(map[common.Hash]*types.Header)
 
@@ -224,36 +236,34 @@ func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, block *types.Blo
 		if ancestor == nil {
 			break
 		}
-		ancestors[ancestor.Hash()] = ancestor.Header()
+		ancestors[ancestor.HashCache()] = ancestor.Header()
 		for _, uncle := range ancestor.Uncles() {
-			uncles.Add(uncle.Hash())
+			uncles.Add(uncle.HashCache())
 		}
 		parent, number = ancestor.ParentHash(), number-1
 	}
-	ancestors[block.Hash()] = block.Header()
-	uncles.Add(block.Hash())
+	ancestors[block.HashCache()] = block.Header()
+	uncles.Add(block.HashCache())
+	return uncles, ancestors
+}
 
-	// Verify each of the uncles that it's recent, but not an ancestor
-	for _, uncle := range block.Uncles() {
-		// Make sure every uncle is rewarded only once
-		hash := uncle.Hash()
-		if uncles.Contains(hash) {
-			return errDuplicateUncle
-		}
-		uncles.Add(hash)
-
-		// Make sure the uncle has a valid ancestry
-		if ancestors[hash] != nil {
-			return errUncleIsAncestor
-		}
-		if ancestors[uncle.ParentHash] == nil || uncle.ParentHash == block.ParentHash() {
-			return errDanglingUncle
-		}
-		if err := ethash.verifyHeader(chain, uncle, ancestors[uncle.ParentHash], true, true); err != nil {
-			return err
-		}
+func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Block, uncle *types.Header, uncles mapset.Set, ancestors map[common.Hash]*types.Header, seal bool) error {
+	// Make sure every uncle is rewarded only once
+	hash := uncle.HashCache()
+	if uncles.Contains(hash) {
+		return errDuplicateUncle
 	}
-	return nil
+	uncles.Add(hash)
+
+	// Make sure the uncle has a valid ancestry
+	if ancestors[hash] != nil {
+		return errUncleIsAncestor
+	}
+	if ancestors[uncle.ParentHash] == nil || uncle.ParentHash == block.ParentHash() {
+		return errDanglingUncle
+	}
+
+	return ethash.verifyHeader(chain, uncle, ancestors[uncle.ParentHash], true, seal)
 }
 
 // verifyHeader checks whether a header conforms to the consensus rules of the
@@ -274,7 +284,7 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		return errOlderBlockTime
 	}
 	// Verify the block's difficulty based on its timestamp and parent's difficulty
-	expected := ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
+	expected := ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number, parent.HashCache(), parent.UncleHash)
 
 	if expected.Cmp(header.Difficulty) != 0 {
 		return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, expected)
@@ -305,7 +315,7 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	}
 	// Verify the engine specific seal securing the block
 	if seal {
-		if err := ethash.VerifySeal(chain, header); err != nil {
+		if err := ethash.VerifySeal(nil, header); err != nil {
 			return err
 		}
 	}
@@ -502,26 +512,19 @@ func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty, parentNum
 
 // VerifySeal implements consensus.Engine, checking whether the given block satisfies
 // the PoW difficulty requirements.
-func (ethash *Ethash) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
-	return ethash.verifySeal(chain, header, false)
+func (ethash *Ethash) VerifySeal(_ consensus.ChainHeaderReader, header *types.Header) error {
+	return ethash.verifySeal(header, false)
 }
 
 // verifySeal checks whether a block satisfies the PoW difficulty requirements,
 // either using the usual ethash cache for it, or alternatively using a full DAG
 // to make remote mining fast.
-func (ethash *Ethash) verifySeal(chain consensus.ChainHeaderReader, header *types.Header, fulldag bool) error { //nolint:unparam
-	// If we're running a fake PoW, accept any seal as valid
-	if ethash.config.PowMode == ModeFake || ethash.config.PowMode == ModeFullFake {
-		time.Sleep(ethash.fakeDelay)
-		if ethash.fakeFail == header.Number.Uint64() {
-			return errInvalidPoW
-		}
-		return nil
-	}
+func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //nolint:unparam
 	// If we're running a shared PoW, delegate verification to it
 	if ethash.shared != nil {
-		return ethash.shared.verifySeal(chain, header, fulldag)
+		return ethash.shared.verifySeal(header, fulldag)
 	}
+
 	// Ensure that we have a valid difficulty for the block
 	if header.Difficulty.Sign() <= 0 {
 		return errInvalidDifficulty
@@ -579,7 +582,7 @@ func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.H
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
-	header.Difficulty = ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number, parent.Hash(), parent.UncleHash)
+	header.Difficulty = ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number, parent.HashCache(), parent.UncleHash)
 	return nil
 }
 

@@ -248,6 +248,7 @@ var (
 	// This configuration is intentionally not using keyed fields to force anyone
 	// adding flags to the config to also have to set these fields.
 	AllCliqueProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, &CliqueConfig{Period: 0, Epoch: 30000}}
+	CliqueSnapshot           = &SnapshotConfig{10, 1024, 16384}
 
 	TestChainConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, new(EthashConfig), nil}
 	TestRules       = TestChainConfig.Rules(new(big.Int))
@@ -375,6 +376,12 @@ func (c *ChainConfig) String() string {
 		c.YoloV2Block,
 		engine,
 	)
+}
+
+type SnapshotConfig struct {
+	CheckpointInterval uint64 // Number of blocks after which to save the vote snapshot to the database
+	InmemorySnapshots  int    // Number of recent vote snapshots to keep in memory
+	InmemorySignatures int    // Number of recent block signatures to keep in memory
 }
 
 // IsHomestead returns whether num is either equal to the homestead block or greater.

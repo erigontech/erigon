@@ -27,34 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
-// ChainHeaderReader defines a small collection of methods needed to access the local
-// blockchain during header verification.
-type ChainHeaderReader interface {
-	// Config retrieves the blockchain's chain configuration.
-	Config() *params.ChainConfig
-
-	// CurrentHeader retrieves the current header from the local chain.
-	CurrentHeader() *types.Header
-
-	// GetHeader retrieves a block header from the database by hash and number.
-	GetHeader(hash common.Hash, number uint64) *types.Header
-
-	// GetHeaderByNumber retrieves a block header from the database by number.
-	GetHeaderByNumber(number uint64) *types.Header
-
-	// GetHeaderByHash retrieves a block header from the database by its hash.
-	GetHeaderByHash(hash common.Hash) *types.Header
-}
-
-// ChainReader defines a small collection of methods needed to access the local
-// blockchain during header and/or uncle verification.
-type ChainReader interface {
-	ChainHeaderReader
-
-	// GetBlock retrieves a block from the database by hash and number.
-	GetBlock(hash common.Hash, number uint64) *types.Block
-}
-
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {
 	// Author retrieves the Ethereum address of the account that minted the given
@@ -119,6 +91,8 @@ type Engine interface {
 
 	// Close terminates any background threads maintained by the consensus engine.
 	Close() error
+
+	Verifier
 }
 
 // PoW is a consensus engine based on proof-of-work.
@@ -127,4 +101,12 @@ type PoW interface {
 
 	// Hashrate returns the current mining hashrate of a PoW consensus engine.
 	Hashrate() float64
+}
+
+// chain is only needed to get Config
+type Verifier interface {
+	Verify(chain ChainHeaderReader, header *types.Header, parents []*types.Header, uncle bool, seal bool) error
+	AncestorsNeededForVerification(header *types.Header) int
+
+	PrepareHeaders(headers []*types.Header)
 }

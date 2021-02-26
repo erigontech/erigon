@@ -33,20 +33,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
-
-	ethereum "github.com/ledgerwatch/turbo-geth"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/davecgh/go-spew/spew"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/bloombits"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -69,6 +68,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
 )
 
 // Ethereum implements the Ethereum full node service.
@@ -87,7 +88,7 @@ type Ethereum struct {
 	privateAPI *grpc.Server
 
 	eventMux       *event.TypeMux
-	engine         consensus.Engine
+	engine         *process.RemoteEngine
 	accountManager *accounts.Manager
 
 	bloomRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
@@ -286,7 +287,6 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		chainKV:        chainDb.KV(),
 		eventMux:       stack.EventMux(),
 		accountManager: stack.AccountManager(),
-		engine:         CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
 		networkID:      config.NetworkID,
 		gasPrice:       config.Miner.GasPrice,
 		etherbase:      config.Miner.Etherbase,
@@ -294,6 +294,16 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		p2pServer:      stack.Server(),
 		torrentClient:  torrentClient,
 	}
+
+	var consensusConfig interface{}
+
+	if chainConfig.Clique != nil {
+		consensusConfig = &config.Clique
+	} else {
+		consensusConfig = &config.Ethash
+	}
+
+	eth.engine = CreateConsensusEngine(stack, chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, chainDb)
 
 	log.Info("Initialising Ethereum protocol", "versions", ProtocolVersions, "network", config.NetworkID)
 
@@ -521,34 +531,45 @@ func makeExtraData(extra []byte) []byte {
 }
 
 // CreateConsensusEngine creates the required type of consensus engine instance for an Ethereum service
-func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) consensus.Engine {
-	// If proof-of-authority is requested, set it up
-	if chainConfig.Clique != nil {
-		return clique.New(chainConfig.Clique, db)
-	}
+func CreateConsensusEngine(_ *node.Node, chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool, db ethdb.Database) *process.RemoteEngine {
+	var eng consensus.Engine
 	// Otherwise assume proof-of-work
-	switch config.PowMode {
-	case ethash.ModeFake:
-		log.Warn("Ethash used in fake mode")
-		return ethash.NewFaker()
-	case ethash.ModeTest:
-		log.Warn("Ethash used in test mode")
-		return ethash.NewTester(nil, noverify)
-	case ethash.ModeShared:
-		log.Warn("Ethash used in shared mode")
-		return ethash.NewShared()
-	default:
-		engine := ethash.New(ethash.Config{
-			CachesInMem:      config.CachesInMem,
-			CachesLockMmap:   config.CachesLockMmap,
-			DatasetDir:       config.DatasetDir,
-			DatasetsInMem:    config.DatasetsInMem,
-			DatasetsOnDisk:   config.DatasetsOnDisk,
-			DatasetsLockMmap: config.DatasetsLockMmap,
-		}, notify, noverify)
-		engine.SetThreads(-1) // Disable CPU mining
-		return engine
+
+	switch consensusCfg := config.(type) {
+	case *ethash.Config:
+		switch consensusCfg.PowMode {
+		case ethash.ModeFake:
+			log.Warn("Ethash used in fake mode")
+			eng = ethash.NewFaker()
+		case ethash.ModeTest:
+			log.Warn("Ethash used in test mode")
+			eng = ethash.NewTester(nil, noverify)
+		case ethash.ModeShared:
+			log.Warn("Ethash used in shared mode")
+			eng = ethash.NewShared()
+		default:
+			engine := ethash.New(ethash.Config{
+				CachesInMem:      consensusCfg.CachesInMem,
+				CachesLockMmap:   consensusCfg.CachesLockMmap,
+				DatasetDir:       consensusCfg.DatasetDir,
+				DatasetsInMem:    consensusCfg.DatasetsInMem,
+				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
+				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
+			}, notify, noverify)
+			engine.SetThreads(-1) // Disable CPU mining
+			eng = engine
+		}
+	case *params.SnapshotConfig:
+		if chainConfig.Clique != nil {
+			eng = clique.NewCliqueVerifier(clique.New(chainConfig.Clique, consensusCfg, db))
+		}
 	}
+
+	if eng == nil {
+		panic("unknown config" + spew.Sdump(config))
+	}
+
+	return process.NewRemoteEngine(eng, chainConfig)
 }
 
 // APIs return the collection of RPC services the ethereum package offers.
@@ -693,7 +714,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool {
 	// is A, F and G sign the block of round5 and reject the block of opponents
 	// and in the round6, the last available signer B is offline, the whole
 	// network is stuck.
-	if _, ok := s.engine.(*clique.Clique); ok {
+	if _, ok := s.engine.Engine.(*clique.Clique); ok {
 		return false
 	}
 	return s.isLocalBlock(block)
@@ -716,7 +737,7 @@ func (s *Ethereum) StartMining(threads int) error {
 	type threaded interface {
 		SetThreads(threads int)
 	}
-	if th, ok := s.engine.(threaded); ok {
+	if th, ok := s.engine.Engine.(threaded); ok {
 		log.Info("Updated mining threads", "threads", threads)
 		if threads == 0 {
 			threads = -1 // Disable the miner from within
@@ -737,7 +758,7 @@ func (s *Ethereum) StartMining(threads int) error {
 			log.Error("Cannot start mining without etherbase", "err", err)
 			return fmt.Errorf("etherbase missing: %v", err)
 		}
-		if clique, ok := s.engine.(*clique.Clique); ok {
+		if clique, ok := s.engine.Engine.(*clique.Clique); ok {
 			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
 			if wallet == nil || err != nil {
 				log.Error("Etherbase account unavailable locally", "err", err)
@@ -761,7 +782,7 @@ func (s *Ethereum) StopMining() {
 	type threaded interface {
 		SetThreads(threads int)
 	}
-	if th, ok := s.engine.(threaded); ok {
+	if th, ok := s.engine.Engine.(threaded); ok {
 		th.SetThreads(-1)
 	}
 	// Stop the block creating itself

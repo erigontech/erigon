@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands/contracts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -52,7 +53,13 @@ func createTestDb() (ethdb.Database, error) {
 
 	engine := ethash.NewFaker()
 
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
+
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts1 := bind.NewKeyedTransactor(key1)
 	transactOpts2 := bind.NewKeyedTransactor(key2)
@@ -175,7 +182,7 @@ func createTestDb() (ethdb.Database, error) {
 		return nil, err
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* rootCheck */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks, true /* rootCheck */); err != nil {
 		return nil, err
 	}
 

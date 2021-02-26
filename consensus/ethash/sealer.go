@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	crand "crypto/rand"
-	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
@@ -34,6 +33,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+
+	json "github.com/json-iterator/go"
 )
 
 const (
@@ -49,17 +50,6 @@ var (
 // Seal implements consensus.Engine, attempting to find a nonce that satisfies
 // the block's difficulty requirements.
 func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainHeaderReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
-	// If we're running a fake PoW, simply return a 0 nonce immediately
-	if ethash.config.PowMode == ModeFake || ethash.config.PowMode == ModeFullFake {
-		header := block.Header()
-		header.Nonce, header.MixDigest = types.BlockNonce{}, common.Hash{}
-		select {
-		case results <- consensus.ResultWithContext{Cancel: ctx, Block: block.WithSeal(header)}:
-		default:
-			ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "fake", "sealhash", ethash.SealHash(block.Header()))
-		}
-		return nil
-	}
 	// If we're running a shared PoW, delegate sealing to it
 	if ethash.shared != nil {
 		return ethash.shared.Seal(ctx, chain, block, results, stop)
@@ -409,7 +399,7 @@ func (s *remoteSealer) submitWork(ctx consensus.Cancel, nonce types.BlockNonce, 
 
 	start := time.Now()
 	if !s.noverify {
-		if err := s.ethash.verifySeal(nil, header, true); err != nil {
+		if err := s.ethash.verifySeal(header, true); err != nil {
 			s.ethash.config.Log.Warn("Invalid proof-of-work submitted", "sealhash", sealhash, "elapsed", common.PrettyDuration(time.Since(start)), "err", err)
 			return false
 		}
