@@ -99,6 +99,7 @@ ethdb/mdbx/dist/mdbx-static.o:
 		&& make clean && make config.h \
 		&& echo '#define MDBX_DEBUG 0' >> config.h \
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
+        && echo '#define MDBX_ENABLE_MADVISE 0' >> config.h \
         && echo '#define MDBX_TXN_CHECKOWNER 1' >> config.h \
         && echo '#define MDBX_ENV_CHECKPID 1' >> config.h \
         && echo '#define MDBX_DISABLE_PAGECHECKS 0' >> config.h \
@@ -191,11 +192,6 @@ grpc:
 
 simulator-genesis:
 	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
-
-prometheus-deps:
-	# pre-requirement: https://github.com/iovisor/bcc/blob/master/INSTALL.md
-	go get -u -v github.com/cloudflare/ebpf_exporter/...
-	go install github.com/cloudflare/ebpf_exporter/cmd/ebpf_exporter
 
 prometheus:
 	docker-compose up prometheus grafana
