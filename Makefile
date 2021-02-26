@@ -32,9 +32,7 @@ geth:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
-tg:
-	@echo "Building mdbx"
-	cd ethdb/mdbx/dist/ && make clean && make mdbx-static.o && cat config.h
+tg: mdbx
 	$(GOBUILD) -o $(GOBIN)/tg -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
@@ -93,7 +91,7 @@ db-tools:
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
 	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
 
-ethdb/mdbx/dist/mdbx-static.o:
+mdbx:
 	echo "Building mdbx"
 	cd ethdb/mdbx/dist/ \
 		&& make clean && make config.h \
@@ -103,21 +101,22 @@ ethdb/mdbx/dist/mdbx-static.o:
         && echo '#define MDBX_TXN_CHECKOWNER 1' >> config.h \
         && echo '#define MDBX_ENV_CHECKPID 1' >> config.h \
         && echo '#define MDBX_DISABLE_PAGECHECKS 0' >> config.h \
+        && cat config.h \
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
-test: ethdb/mdbx/dist/mdbx-static.o
+test: mdbx
 	$(GOTEST)
 
 test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
 
 
-test-mdbx: ethdb/mdbx/dist/mdbx-static.o
+test-mdbx: mdbx
 	TEST_DB=mdbx $(GOTEST)
 
 lint: lintci
 
-lintci: ethdb/mdbx/dist/mdbx-static.o
+lintci: mdbx
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
