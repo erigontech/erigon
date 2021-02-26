@@ -117,6 +117,9 @@ func CollectProcessMetrics(refresh time.Duration) {
 		//location1 := i % 2
 		//location2 := (i - 1) % 2
 
+		cpuStats.GlobalTime = 0
+		cpuStats.GlobalWait = 0
+		cpuStats.LocalTime = 0
 		ReadCPUStats(cpuStats)
 		cpuSysLoad.Update(cpuStats.GlobalTime)
 		cpuSysWait.Update(cpuStats.GlobalWait)
