@@ -145,10 +145,10 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		}
 		chainDb = ethdb.MustOpen("simulator")
 	} else {
-		//err = stack.ApplyMigrations("chaindata", tmpdir)
-		//if err != nil {
-		//	return nil, fmt.Errorf("failed stack.ApplyMigrations: %w", err)
-		//}
+		err = stack.ApplyMigrations("chaindata", tmpdir)
+		if err != nil {
+			return nil, fmt.Errorf("failed stack.ApplyMigrations: %w", err)
+		}
 
 		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", 0, 0, "", "")
 		if err != nil {

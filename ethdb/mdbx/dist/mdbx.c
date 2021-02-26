@@ -14244,7 +14244,6 @@ static __cold int mdbx_setup_dxb(MDBX_env *env, const int lck_rc) {
 #if defined(MADV_DONTNEED)
     mdbx_notice("open-MADV_%s %u..%u", "DONTNEED", env->me_discarded_tail->weak,
                 bytes2pgno(env, env->me_dxb_mmap.current));
-    mdbx_notice("open-1-%u", MDBX_PGL_LIMIT);
     err =
         madvise(env->me_map + used_aligned2os_bytes,
                 env->me_dxb_mmap.current - used_aligned2os_bytes, MADV_DONTNEED)
