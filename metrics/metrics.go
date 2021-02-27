@@ -87,10 +87,10 @@ func CollectProcessMetrics(refresh time.Duration) {
 		memHeld   = GetOrRegisterGauge("system/memory/held", DefaultRegistry)
 		memUsed   = GetOrRegisterGauge("system/memory/used", DefaultRegistry)
 
-		diskReads      = GetOrRegisterMeter("system/disk/readcount", DefaultRegistry)
-		diskReadBytes  = GetOrRegisterMeter("system/disk/readbytes", DefaultRegistry)
-		diskWrites     = GetOrRegisterMeter("system/disk/writecount", DefaultRegistry)
-		diskWriteBytes = GetOrRegisterMeter("system/disk/writebytes", DefaultRegistry)
+		diskReadBytes   = GetOrRegisterMeter("system/disk/readbytes", DefaultRegistry)
+		diskWriteBytes  = GetOrRegisterMeter("system/disk/writebytes", DefaultRegistry)
+		diskReadBytes2  = GetOrRegisterMeter("system/disk/readbytes2", DefaultRegistry)
+		diskWriteBytes2 = GetOrRegisterMeter("system/disk/writebytes2", DefaultRegistry)
 
 		// copy from prometheus client
 		goGoroutines = GetOrRegisterGauge("go/goroutines", DefaultRegistry)
@@ -98,8 +98,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 
 		ruMinflt   = GetOrRegisterGauge("ru/minflt", DefaultRegistry)
 		ruMajflt   = GetOrRegisterGauge("ru/majflt", DefaultRegistry)
-		ruMinflt2  = GetOrRegisterGauge("ru/minflt2", DefaultRegistry)
-		ruMajflt2  = GetOrRegisterGauge("ru/majflt2", DefaultRegistry)
 		ruInblock  = GetOrRegisterGauge("ru/inblock", DefaultRegistry)
 		ruOutblock = GetOrRegisterGauge("ru/outblock", DefaultRegistry)
 		ruNvcsw    = GetOrRegisterGauge("ru/nvcsw", DefaultRegistry)
@@ -157,8 +155,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 			ruMinflt.Update(int64(pf.MinorFaults))
 			ruMajflt.Update(int64(pf.MajorFaults))
 		}
-		ruMinflt2.Update(int64(cpuStats[location1].Usage.Minflt))
-		ruMajflt2.Update(int64(cpuStats[location1].Usage.Majflt))
 		ruInblock.Update(cpuStats[location1].Usage.Inblock)
 		ruOutblock.Update(cpuStats[location1].Usage.Oublock)
 		if cs, _ := p.NumCtxSwitches(); cs != nil {
@@ -173,17 +169,13 @@ func CollectProcessMetrics(refresh time.Duration) {
 		memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
 		memUsed.Update(int64(memstats[location1].Alloc))
 
-		//if io, _ := p.IOCounters(); io != nil {
-		//	diskReads.Mark(int64(io.ReadCount))
-		//	diskWrites.Mark(int64(io.WriteCount))
-		//	diskReadBytes.Mark(int64(io.ReadBytes))
-		//	diskWriteBytes.Mark(int64(io.WriteBytes))
-		//}
+		if io, _ := p.IOCounters(); io != nil {
+			diskReadBytes2.Mark(int64(io.ReadBytes))
+			diskWriteBytes2.Mark(int64(io.WriteBytes))
+		}
 
 		if ReadDiskStats(diskstats[location1]) == nil {
-			diskReads.Mark(diskstats[location1].ReadCount - diskstats[location2].ReadCount)
 			diskReadBytes.Mark(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
-			diskWrites.Mark(diskstats[location1].WriteCount - diskstats[location2].WriteCount)
 			diskWriteBytes.Mark(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
 		}
 		goGoroutines.Update(int64(runtime.NumGoroutine()))
