@@ -87,12 +87,10 @@ func CollectProcessMetrics(refresh time.Duration) {
 		memHeld   = GetOrRegisterGauge("system/memory/held", DefaultRegistry)
 		memUsed   = GetOrRegisterGauge("system/memory/used", DefaultRegistry)
 
-		diskReads             = GetOrRegisterMeter("system/disk/readcount", DefaultRegistry)
-		diskReadBytes         = GetOrRegisterMeter("system/disk/readdata", DefaultRegistry)
-		diskReadBytesCounter  = GetOrRegisterCounter("system/disk/readbytes", DefaultRegistry)
-		diskWrites            = GetOrRegisterMeter("system/disk/writecount", DefaultRegistry)
-		diskWriteBytes        = GetOrRegisterMeter("system/disk/writedata", DefaultRegistry)
-		diskWriteBytesCounter = GetOrRegisterCounter("system/disk/writebytes", DefaultRegistry)
+		diskReads      = GetOrRegisterMeter("system/disk/readcount", DefaultRegistry)
+		diskReadBytes  = GetOrRegisterMeter("system/disk/readbytes", DefaultRegistry)
+		diskWrites     = GetOrRegisterMeter("system/disk/writecount", DefaultRegistry)
+		diskWriteBytes = GetOrRegisterMeter("system/disk/writebytes", DefaultRegistry)
 
 		// copy from prometheus client
 		goGoroutines = GetOrRegisterGauge("go/goroutines", DefaultRegistry)
@@ -162,13 +160,14 @@ func CollectProcessMetrics(refresh time.Duration) {
 		memUsed.Update(int64(memstats[location1].Alloc))
 
 		diskReads.Mark(int64(io.ReadCount))
+		diskWrites.Mark(int64(io.WriteCount))
+		diskReadBytes.Mark(int64(io.ReadBytes))
+		diskWriteBytes.Mark(int64(io.WriteBytes))
 		if ReadDiskStats(diskstats[location1]) == nil {
-			diskReadBytes.Mark(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
-			diskWrites.Mark(diskstats[location1].WriteCount - diskstats[location2].WriteCount)
-			diskWriteBytes.Mark(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
-
-			diskReadBytesCounter.Inc(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
-			diskWriteBytesCounter.Inc(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
+			//diskReadBytes.Mark(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
+			//diskWriteBytes.Mark(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
+			//diskReadBytesCounter.Inc(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
+			//diskWriteBytesCounter.Inc(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
 		}
 
 		goGoroutines.Update(int64(runtime.NumGoroutine()))
