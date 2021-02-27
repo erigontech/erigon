@@ -139,7 +139,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 		//if m, _ := p.MemoryMaps(true); m != nil && len(*m) > 0 {
 		//	mm := (*m)[0]
 		//}
-		//p.RlimitUsage()
 		if m, _ := p.MemoryInfo(); m != nil {
 			memRSS.Update(int64(m.RSS))
 			memVMS.Update(int64(m.VMS))
