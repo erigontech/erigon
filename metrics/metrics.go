@@ -165,12 +165,12 @@ func CollectProcessMetrics(refresh time.Duration) {
 		memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
 		memUsed.Update(int64(memstats[location1].Alloc))
 
-		if io, _ := p.IOCounters(); io != nil {
-			diskReads.Mark(int64(io.ReadCount))
-			diskWrites.Mark(int64(io.WriteCount))
-			diskReadBytes.Mark(int64(io.ReadBytes))
-			diskWriteBytes.Mark(int64(io.WriteBytes))
-		}
+		//if io, _ := p.IOCounters(); io != nil {
+		//	diskReads.Mark(int64(io.ReadCount))
+		//	diskWrites.Mark(int64(io.WriteCount))
+		//	diskReadBytes.Mark(int64(io.ReadBytes))
+		//	diskWriteBytes.Mark(int64(io.WriteBytes))
+		//}
 
 		if ReadDiskStats(diskstats[location1]) == nil {
 			diskReads.Mark(diskstats[location1].ReadCount - diskstats[location2].ReadCount)
