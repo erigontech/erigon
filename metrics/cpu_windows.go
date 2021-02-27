@@ -22,6 +22,7 @@ func getProcessCPUTime() int64 {
 	return 0
 }
 
-func getRUsage() (usage syscall.Rusage) {
+func getRUsage(p *process.Process) (usage syscall.Rusage) {
+p.
 	return
 }
