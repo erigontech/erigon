@@ -96,10 +96,12 @@ func CollectProcessMetrics(refresh time.Duration) {
 		goGoroutines = GetOrRegisterGauge("go/goroutines", DefaultRegistry)
 		goThreads    = GetOrRegisterGauge("go/threads", DefaultRegistry)
 
-		ruMinflt = GetOrRegisterGauge("ru/minflt", DefaultRegistry)
-		ruMajflt = GetOrRegisterGauge("ru/majflt", DefaultRegistry)
-		ruNvcsw  = GetOrRegisterGauge("ru/nvcsw", DefaultRegistry)
-		ruNivcsw = GetOrRegisterGauge("ru/nivcsw", DefaultRegistry)
+		ruMinflt   = GetOrRegisterGauge("ru/minflt", DefaultRegistry)
+		ruMajflt   = GetOrRegisterGauge("ru/majflt", DefaultRegistry)
+		ruInblock  = GetOrRegisterGauge("ru/inblock", DefaultRegistry)
+		ruOutblock = GetOrRegisterGauge("ru/outblock", DefaultRegistry)
+		ruNvcsw    = GetOrRegisterGauge("ru/nvcsw", DefaultRegistry)
+		ruNivcsw   = GetOrRegisterGauge("ru/nivcsw", DefaultRegistry)
 
 		memRSS    = GetOrRegisterGauge("mem/rss", DefaultRegistry)
 		memVMS    = GetOrRegisterGauge("mem/vms", DefaultRegistry)
@@ -153,6 +155,8 @@ func CollectProcessMetrics(refresh time.Duration) {
 			ruMinflt.Update(int64(pf.MinorFaults))
 			ruMajflt.Update(int64(pf.MajorFaults))
 		}
+		ruInblock.Update(cpuStats[location1].Usage.Inblock)
+		ruOutblock.Update(cpuStats[location1].Usage.Oublock)
 		if cs, _ := p.NumCtxSwitches(); cs != nil {
 			ruNvcsw.Update(cs.Voluntary)
 			ruNivcsw.Update(cs.Involuntary)
