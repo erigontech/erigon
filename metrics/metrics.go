@@ -137,6 +137,9 @@ func CollectProcessMetrics(refresh time.Duration) {
 			cpuSysLoad.Update((cpuStats[location1].GlobalTime - cpuStats[location2].GlobalTime) / refreshFreq)
 			cpuSysWait.Update((cpuStats[location1].GlobalWait - cpuStats[location2].GlobalWait) / refreshFreq)
 			cpuProcLoad.Update((cpuStats[location1].LocalTime - cpuStats[location2].LocalTime) / refreshFreq)
+
+			ruInblock.Update(cpuStats[location1].RUsage.Inblock)
+			ruOutblock.Update(cpuStats[location1].RUsage.Oublock)
 		}
 
 		cpuThreads.Update(int64(threadCreateProfile.Count()))
@@ -189,8 +192,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 			ruMinflt.Update(int64(pf.MinorFaults))
 			ruMajflt.Update(int64(pf.MajorFaults))
 		}
-		ruInblock.Update(cpuStats[location1].RUsage.Inblock)
-		ruOutblock.Update(cpuStats[location1].RUsage.Oublock)
 		if cs, _ := p.NumCtxSwitches(); cs != nil {
 			ruNvcsw.Update(cs.Voluntary)
 			ruNivcsw.Update(cs.Involuntary)
