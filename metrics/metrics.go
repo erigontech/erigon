@@ -96,16 +96,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 		goGoroutines = GetOrRegisterGauge("go/goroutines", DefaultRegistry)
 		goThreads    = GetOrRegisterGauge("go/threads", DefaultRegistry)
 
-		//struct rusage {
-		//	struct timeval ru_utime; /* user CPU time used */
-		//	struct timeval ru_stime; /* system CPU time used */
-		//	long   ru_maxrss;        /* maximum resident set size (kilobytes) */
-		//	long   ru_minflt;        /* page reclaims (soft page faults) */
-		//	long   ru_majflt;        /* page faults (hard page faults) */
-		//	long   ru_nvcsw;         /* voluntary context switches */
-		//	long   ru_nivcsw;        /* involuntary context switches */
-		//};
-		ruMaxrss = GetOrRegisterGauge("ru/maxrss", DefaultRegistry)
 		ruMinflt = GetOrRegisterGauge("ru/minflt", DefaultRegistry)
 		ruMajflt = GetOrRegisterGauge("ru/majflt", DefaultRegistry)
 		ruNvcsw  = GetOrRegisterGauge("ru/nvcsw", DefaultRegistry)
@@ -145,8 +135,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 		//sw, _ := mem.SwapMemory()
 		//mi, _ := p.CPUPercent()
 
-		// getrusage(2)
-		ruMaxrss.Update(cpuStats[location1].Usage.Maxrss)
 		//mi, _ := p.MemoryInfoEx()
 		//if m, _ := p.MemoryMaps(true); m != nil && len(*m) > 0 {
 		//	mm := (*m)[0]
