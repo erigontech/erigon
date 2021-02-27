@@ -126,7 +126,9 @@ func CollectProcessMetrics(refresh time.Duration) {
 		location1 := i % 2
 		location2 := (i - 1) % 2
 
-		ReadCPUStats(cpuStats[location1])
+		//ReadCPUStats(cpuStats[location1])
+		mi, _ := p.Times()
+		ReadCPUStats2(mi, cpuStats[location1])
 		cpuSysLoad.Update((cpuStats[location1].GlobalTime - cpuStats[location2].GlobalTime) / refreshFreq)
 		cpuSysWait.Update((cpuStats[location1].GlobalWait - cpuStats[location2].GlobalWait) / refreshFreq)
 		cpuProcLoad.Update((cpuStats[location1].LocalTime - cpuStats[location2].LocalTime) / refreshFreq)
@@ -139,9 +141,9 @@ func CollectProcessMetrics(refresh time.Duration) {
 		//mm, _ := p.MemoryMaps(true)
 		//mi, _ := p.MemoryInfoEx()
 		//mi, _ := p.CPUPercent()
+		//
 		//mi, _ := p.NumCtxSwitches()
 		//mi, _ := p.PageFaults()
-		//mi, _ := p.Times()
 
 		// getrusage(2)
 		ruMaxrss.Update(cpuStats[location1].Usage.Maxrss)
@@ -159,16 +161,18 @@ func CollectProcessMetrics(refresh time.Duration) {
 		memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
 		memUsed.Update(int64(memstats[location1].Alloc))
 
-		diskReads.Mark(int64(io.ReadCount))
-		diskWrites.Mark(int64(io.WriteCount))
-		diskReadBytes.Mark(int64(io.ReadBytes))
-		diskWriteBytes.Mark(int64(io.WriteBytes))
-		if ReadDiskStats(diskstats[location1]) == nil {
-			//diskReadBytes.Mark(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
-			//diskWriteBytes.Mark(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
-			//diskReadBytesCounter.Inc(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
-			//diskWriteBytesCounter.Inc(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
+		if io != nil {
+			diskReads.Mark(int64(io.ReadCount))
+			diskWrites.Mark(int64(io.WriteCount))
+			diskReadBytes.Mark(int64(io.ReadBytes))
+			diskWriteBytes.Mark(int64(io.WriteBytes))
 		}
+		//if ReadDiskStats(diskstats[location1]) == nil {
+		//diskReadBytes.Mark(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
+		//diskWriteBytes.Mark(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
+		//diskReadBytesCounter.Inc(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
+		//diskWriteBytesCounter.Inc(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
+		//}
 
 		goGoroutines.Update(int64(runtime.NumGoroutine()))
 		n, _ := runtime.ThreadCreateProfile(nil)

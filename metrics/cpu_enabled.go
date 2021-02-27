@@ -43,6 +43,13 @@ func ReadCPUStats(stats *CPUStats) {
 	stats.LocalTime = cpuTimeFromUsage(stats.Usage)
 }
 
+func ReadCPUStats2(in *cpu.TimesStat, stats *CPUStats) {
+	// requesting all cpu times will always return an array with only one time stats entry
+	stats.GlobalTime = int64((in.User + in.Nice + in.System) * cpu.ClocksPerSec)
+	stats.GlobalWait = int64((in.Iowait) * cpu.ClocksPerSec)
+	stats.LocalTime = int64(in.Total())
+}
+
 func cpuTimeFromUsage(usage syscall.Rusage) int64 {
 	return int64(usage.Utime.Sec+usage.Stime.Sec)*100 + int64(usage.Utime.Usec+usage.Stime.Usec)/10000 //nolint:unconvert
 }
