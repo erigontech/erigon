@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1614402189100,
+  "iteration": 1614418517020,
   "links": [],
   "panels": [
     {
@@ -274,7 +274,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(db_commit_big_batch_count{instance=~\"$instance\"}[30s])",
+          "expr": "increase(db_commit_big_batch_count{instance=~\"$instance\"}[2m])",
           "interval": "",
           "legendFormat": "commit: {{instance}}",
           "refId": "A"
@@ -373,49 +373,49 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(mem_rss{instance=~\"$instance\"}[1m])",
+          "expr": "mem_rss{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "rss: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "rate(mem_vms{instance=~\"$instance\"}[1m])",
+          "expr": "mem_vms{instance=~\"$instance\"}",
           "hide": true,
           "interval": "",
           "legendFormat": "vms: {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "rate(mem_hwm{instance=~\"$instance\"}[1m])",
+          "expr": "mem_hwm{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "hwm: {{instance}}",
           "refId": "C"
         },
         {
-          "expr": "rate(mem_data{instance=~\"$instance\"}[1m])",
+          "expr": "mem_data{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "data: {{instance}}",
           "refId": "D"
         },
         {
-          "expr": "rate(mem_stack{instance=~\"$instance\"}[1m])",
+          "expr": "mem_stack{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "stack: {{instance}}",
           "refId": "E"
         },
         {
-          "expr": "rate(mem_locked{instance=~\"$instance\"}[1m])",
+          "expr": "mem_locked{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "locked: {{instance}}",
           "refId": "F"
         },
         {
-          "expr": "rate(mem_swap{instance=~\"$instance\"}[1m])",
+          "expr": "mem_swap{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "swap: {{instance}}",
@@ -630,6 +630,20 @@
           "interval": "",
           "legendFormat": "hard: {{instance}}",
           "refId": "B"
+        },
+        {
+          "expr": "rate(ru_minflt2{instance=~\"$instance\"}[1m])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "soft2: {{instance}}",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(ru_majflt2{instance=~\"$instance\"}[1m])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "hard2: {{instance}}",
+          "refId": "D"
         }
       ],
       "thresholds": [],
@@ -1018,20 +1032,22 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(system_disk_readcount{instance=~\"$instance\"}[5m])",
+          "expr": "rate(ru_inblock{instance=~\"$instance\"}[1m])",
           "format": "time_series",
+          "hide": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "read: {{instance}}",
-          "refId": "A"
+          "legendFormat": "in: {{instance}}",
+          "refId": "C"
         },
         {
-          "expr": "rate(system_disk_writecount{instance=~\"$instance\"}[5m])",
+          "expr": "rate(ru_outblock{instance=~\"$instance\"}[1m])",
           "format": "time_series",
+          "hide": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "write: {{instance}}",
-          "refId": "B"
+          "legendFormat": "out: {{instance}}",
+          "refId": "D"
         }
       ],
       "thresholds": [],
@@ -1128,7 +1144,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(system_disk_readbytes{instance=~\"$instance\"}[5m])",
+          "expr": "rate(system_disk_readbytes{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -1136,7 +1152,7 @@
           "refId": "A"
         },
         {
-          "expr": "rate(system_disk_writebytes{instance=~\"$instance\"}[5m])",
+          "expr": "rate(system_disk_writebytes{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -1238,7 +1254,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(system_cpu_sysload{instance=~\"$instance\"}[5m])",
+          "expr": "system_cpu_sysload{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -1246,7 +1262,7 @@
           "refId": "A"
         },
         {
-          "expr": "rate(system_cpu_syswait{instance=~\"$instance\"}[5m])",
+          "expr": "system_cpu_syswait{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -1254,7 +1270,7 @@
           "refId": "B"
         },
         {
-          "expr": "rate(system_cpu_procload{instance=\"$instance\"}[1m])",
+          "expr": "system_cpu_procload{instance=\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -1483,7 +1499,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Mem: system - obtained from OS,  alloc - allocated",
+      "title": "Process Mem: system - obtained from OS,  alloc - allocated",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -1595,7 +1611,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Mem: allocate objects/sec, free",
+      "title": "Process Mem: allocate objects/sec, free",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -1635,195 +1651,49 @@
       }
     },
     {
-      "datasource": null,
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
       "gridPos": {
-        "h": 1,
-        "w": 24,
+        "h": 5,
+        "w": 8,
         "x": 0,
         "y": 23
       },
-      "id": 134,
-      "title": "Exec",
-      "type": "row"
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": "Prometheus",
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 5,
-        "w": 8,
-        "x": 6,
-        "y": 24
-      },
       "hiddenSeries": false,
-      "id": 143,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "hideEmpty": true,
-        "hideZero": true,
-        "max": false,
-        "min": false,
-        "rightSide": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.4.3",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "rate(lmdb_put_direct_count{instance=~\"$instance\"}[1m])",
-          "interval": "",
-          "legendFormat": "lmdb_put_direct_rps: {{instance}}",
-          "refId": "E"
-        },
-        {
-          "expr": "rate(lmdb_put_rewrite_count{instance=~\"$instance\"}[1m])",
-          "interval": "",
-          "legendFormat": "lmdb_put_rewrite_rps: {{instance}}",
-          "refId": "F"
-        },
-        {
-          "expr": "rate(mdbx_put_direct_count{instance=~\"$instance\"}[1m])",
-          "interval": "",
-          "legendFormat": "mdbx_put_direct_rps: {{instance}}",
-          "refId": "G"
-        },
-        {
-          "expr": "rate(mdbx_put_rewrite_count{instance=~\"$instance\"}[1m])",
-          "interval": "",
-          "legendFormat": "mdbx_put_rewrite_rps: {{instance}}",
-          "refId": "H"
-        },
-        {
-          "expr": "rate(lmdb_seek_exact_count{instance=~\"$instance\"}[1m])",
-          "interval": "",
-          "legendFormat": "lmdb_seek_exact_count: {{instance}}",
-          "refId": "K"
-        },
-        {
-          "expr": "rate(mdbx_seek_exact_count{instance=~\"$instance\"}[1m])",
-          "interval": "",
-          "legendFormat": "mdbx_seek_exact_count: {{instance}}",
-          "refId": "L"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "AutoDupsort Call/Sec",
-      "tooltip": {
-        "shared": true,
-        "sort": 2,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:139",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:140",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": "Prometheus",
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 5,
-        "w": 8,
-        "x": 16,
-        "y": 24
-      },
-      "hiddenSeries": false,
-      "id": 142,
+      "id": 157,
       "legend": {
         "alignAsTable": false,
         "avg": true,
         "current": false,
-        "hideEmpty": true,
-        "hideZero": true,
         "max": false,
         "min": false,
         "rightSide": false,
         "show": true,
-        "sort": "avg",
-        "sortDesc": true,
         "total": false,
         "values": true
       },
       "lines": true,
       "linewidth": 1,
+      "links": [],
       "nullPointMode": "null",
       "options": {
         "alertThreshold": true
       },
       "percentage": false,
       "pluginVersion": "7.4.3",
-      "pointradius": 2,
+      "pointradius": 5,
       "points": false,
       "renderer": "flot",
       "seriesOverrides": [],
@@ -1832,125 +1702,91 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "lmdb_put_direct{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "instant": false,
+          "expr": "vmem_total{instance=~\"$instance\"}",
+          "format": "time_series",
           "interval": "",
-          "legendFormat": "lmdb_put_direct: {{quantile}}, {{instance}}",
+          "intervalFactor": 1,
+          "legendFormat": "total: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "mdbx_put_direct{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "vmem_available{instance=~\"$instance\"}",
+          "format": "time_series",
+          "hide": false,
           "interval": "",
-          "legendFormat": "mdbx_put_direct: {{quantile}}, {{instance}}",
-          "refId": "C"
-        },
-        {
-          "expr": "lmdb_put_both_range{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "instant": false,
-          "interval": "",
-          "legendFormat": "lmdb_put_both_range: {{quantile}}, {{instance}}",
+          "intervalFactor": 1,
+          "legendFormat": "available: {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "mdbx_put_both_range{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "vmem_used{instance=~\"$instance\"}",
+          "format": "time_series",
+          "hide": false,
           "interval": "",
-          "legendFormat": "mdbx_put_both_range: {{quantile}}, {{instance}}",
+          "intervalFactor": 1,
+          "legendFormat": "used: {{instance}}",
+          "refId": "C"
+        },
+        {
+          "expr": "vmem_buffers{instance=~\"$instance\"}",
+          "format": "time_series",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "buffers: {{instance}}",
           "refId": "D"
         },
         {
-          "expr": "lmdb_seek_exact{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "vmem_cached{instance=~\"$instance\"}",
+          "format": "time_series",
           "hide": false,
           "interval": "",
-          "legendFormat": "lmdb_seek_exact: {{quantile}}, {{instance}}",
-          "refId": "I"
-        },
-        {
-          "expr": "mdbx_seek_exact{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "mdbx_seek_exact: {{quantile}}, {{instance}}",
-          "refId": "J"
-        },
-        {
-          "expr": "lmdb_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "interval": "",
-          "legendFormat": "lmdb_put_no_overwrite: {{quantile}}, {{instance}}",
-          "refId": "F"
-        },
-        {
-          "expr": "mdbx_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "interval": "",
-          "legendFormat": "mdbx_put_no_overwrite: {{quantile}}, {{instance}}",
+          "intervalFactor": 1,
+          "legendFormat": "cached: {{instance}}",
           "refId": "E"
         },
         {
-          "expr": "lmdb_put_upsert{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "vmem_writeback{instance=~\"$instance\"}",
+          "format": "time_series",
+          "hide": false,
           "interval": "",
-          "legendFormat": "lmdb_put_upsert: {{quantile}}, {{instance}}",
+          "intervalFactor": 1,
+          "legendFormat": "writeback: {{instance}}",
+          "refId": "F"
+        },
+        {
+          "expr": "vmem_dirty{instance=~\"$instance\"}",
+          "format": "time_series",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "dirty: {{instance}}",
           "refId": "G"
         },
         {
-          "expr": "mdbx_put_upsert{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "vmem_shared{instance=~\"$instance\"}",
+          "format": "time_series",
+          "hide": false,
           "interval": "",
-          "legendFormat": "mdbx_put_upsert: {{quantile}}, {{instance}}",
+          "intervalFactor": 1,
+          "legendFormat": "shared: {{instance}}",
           "refId": "H"
         },
         {
-          "expr": "lmdb_put_current2{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "interval": "",
-          "legendFormat": "lmdb_put_current2: {{quantile}}, {{instance}}",
-          "refId": "K"
-        },
-        {
-          "expr": "mdbx_put_current2{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "interval": "",
-          "legendFormat": "mdbx_put_current2: {{quantile}}, {{instance}}",
-          "refId": "L"
-        },
-        {
-          "expr": "mdbx_put_upsert2{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "interval": "",
-          "legendFormat": "lmdb_put_upsert2: {{quantile}}, {{instance}}",
-          "refId": "M"
-        },
-        {
-          "expr": "mdbx_put_upsert2{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "interval": "",
-          "legendFormat": "mdbx_put_upsert2: {{quantile}}, {{instance}}",
-          "refId": "N"
-        },
-        {
-          "expr": "lmdb_del_current{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "interval": "",
-          "legendFormat": "lmdb_put_current: {{quantile}}, {{instance}}",
-          "refId": "O"
-        },
-        {
-          "expr": "mdbx_del_current{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "interval": "",
-          "legendFormat": "mdbx_del_current: {{quantile}}, {{instance}}",
-          "refId": "P"
-        },
-        {
-          "expr": "lmdb_seek_exact2{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "vmem_mapped{instance=~\"$instance\"}",
+          "format": "time_series",
           "hide": false,
           "interval": "",
-          "legendFormat": "lmdb_seek_exact2: {{quantile}}, {{instance}}",
-          "refId": "Q"
-        },
-        {
-          "expr": "mdbx_seek_exact2{quantile=\"$quantile\",instance=~\"$instance\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "mdbx_seek_exact2: {{quantile}}, {{instance}}",
-          "refId": "R"
+          "intervalFactor": 1,
+          "legendFormat": "mapped: {{instance}}",
+          "refId": "I"
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "AutoDupsort Put latency",
+      "title": "Host VMem",
       "tooltip": {
         "shared": true,
         "sort": 2,
@@ -1966,8 +1802,8 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:139",
-          "format": "ns",
+          "$$hashKey": "object:290",
+          "format": "decbytes",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -1975,19 +1811,31 @@
           "show": true
         },
         {
-          "$$hashKey": "object:140",
+          "$$hashKey": "object:291",
           "format": "short",
           "label": null,
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": false
+          "show": true
         }
       ],
       "yaxis": {
         "align": false,
         "alignLevel": null
       }
+    },
+    {
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 134,
+      "title": "Exec",
+      "type": "row"
     },
     {
       "collapsed": false,
@@ -2032,7 +1880,7 @@
             "h": 3,
             "w": 4,
             "x": 0,
-            "y": 18
+            "y": 31
           },
           "hiddenSeries": false,
           "id": 122,
@@ -2129,6 +1977,349 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "Prometheus",
+          "description": "",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "fill": 1,
+          "fillGradient": 0,
+          "gridPos": {
+            "h": 5,
+            "w": 8,
+            "x": 6,
+            "y": 31
+          },
+          "hiddenSeries": false,
+          "id": 143,
+          "legend": {
+            "avg": false,
+            "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": false,
+            "min": false,
+            "rightSide": false,
+            "show": true,
+            "total": false,
+            "values": false
+          },
+          "lines": true,
+          "linewidth": 1,
+          "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
+          "percentage": false,
+          "pluginVersion": "7.4.3",
+          "pointradius": 2,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "rate(lmdb_put_direct_count{instance=~\"$instance\"}[1m])",
+              "interval": "",
+              "legendFormat": "lmdb_put_direct_rps: {{instance}}",
+              "refId": "E"
+            },
+            {
+              "expr": "rate(lmdb_put_rewrite_count{instance=~\"$instance\"}[1m])",
+              "interval": "",
+              "legendFormat": "lmdb_put_rewrite_rps: {{instance}}",
+              "refId": "F"
+            },
+            {
+              "expr": "rate(mdbx_put_direct_count{instance=~\"$instance\"}[1m])",
+              "interval": "",
+              "legendFormat": "mdbx_put_direct_rps: {{instance}}",
+              "refId": "G"
+            },
+            {
+              "expr": "rate(mdbx_put_rewrite_count{instance=~\"$instance\"}[1m])",
+              "interval": "",
+              "legendFormat": "mdbx_put_rewrite_rps: {{instance}}",
+              "refId": "H"
+            },
+            {
+              "expr": "rate(lmdb_seek_exact_count{instance=~\"$instance\"}[1m])",
+              "interval": "",
+              "legendFormat": "lmdb_seek_exact_count: {{instance}}",
+              "refId": "K"
+            },
+            {
+              "expr": "rate(mdbx_seek_exact_count{instance=~\"$instance\"}[1m])",
+              "interval": "",
+              "legendFormat": "mdbx_seek_exact_count: {{instance}}",
+              "refId": "L"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "AutoDupsort Call/Sec",
+          "tooltip": {
+            "shared": true,
+            "sort": 2,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "$$hashKey": "object:139",
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "$$hashKey": "object:140",
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "Prometheus",
+          "description": "",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "fill": 1,
+          "fillGradient": 0,
+          "gridPos": {
+            "h": 5,
+            "w": 8,
+            "x": 16,
+            "y": 31
+          },
+          "hiddenSeries": false,
+          "id": 142,
+          "legend": {
+            "alignAsTable": false,
+            "avg": true,
+            "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": false,
+            "min": false,
+            "rightSide": false,
+            "show": true,
+            "sort": "avg",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
+          "percentage": false,
+          "pluginVersion": "7.4.3",
+          "pointradius": 2,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "lmdb_put_direct{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "instant": false,
+              "interval": "",
+              "legendFormat": "lmdb_put_direct: {{quantile}}, {{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "mdbx_put_direct{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "mdbx_put_direct: {{quantile}}, {{instance}}",
+              "refId": "C"
+            },
+            {
+              "expr": "lmdb_put_both_range{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "instant": false,
+              "interval": "",
+              "legendFormat": "lmdb_put_both_range: {{quantile}}, {{instance}}",
+              "refId": "B"
+            },
+            {
+              "expr": "mdbx_put_both_range{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "mdbx_put_both_range: {{quantile}}, {{instance}}",
+              "refId": "D"
+            },
+            {
+              "expr": "lmdb_seek_exact{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "lmdb_seek_exact: {{quantile}}, {{instance}}",
+              "refId": "I"
+            },
+            {
+              "expr": "mdbx_seek_exact{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "mdbx_seek_exact: {{quantile}}, {{instance}}",
+              "refId": "J"
+            },
+            {
+              "expr": "lmdb_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "lmdb_put_no_overwrite: {{quantile}}, {{instance}}",
+              "refId": "F"
+            },
+            {
+              "expr": "mdbx_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "mdbx_put_no_overwrite: {{quantile}}, {{instance}}",
+              "refId": "E"
+            },
+            {
+              "expr": "lmdb_put_upsert{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "lmdb_put_upsert: {{quantile}}, {{instance}}",
+              "refId": "G"
+            },
+            {
+              "expr": "mdbx_put_upsert{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "mdbx_put_upsert: {{quantile}}, {{instance}}",
+              "refId": "H"
+            },
+            {
+              "expr": "lmdb_put_current2{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "lmdb_put_current2: {{quantile}}, {{instance}}",
+              "refId": "K"
+            },
+            {
+              "expr": "mdbx_put_current2{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "mdbx_put_current2: {{quantile}}, {{instance}}",
+              "refId": "L"
+            },
+            {
+              "expr": "mdbx_put_upsert2{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "lmdb_put_upsert2: {{quantile}}, {{instance}}",
+              "refId": "M"
+            },
+            {
+              "expr": "mdbx_put_upsert2{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "mdbx_put_upsert2: {{quantile}}, {{instance}}",
+              "refId": "N"
+            },
+            {
+              "expr": "lmdb_del_current{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "lmdb_put_current: {{quantile}}, {{instance}}",
+              "refId": "O"
+            },
+            {
+              "expr": "mdbx_del_current{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "interval": "",
+              "legendFormat": "mdbx_del_current: {{quantile}}, {{instance}}",
+              "refId": "P"
+            },
+            {
+              "expr": "lmdb_seek_exact2{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "lmdb_seek_exact2: {{quantile}}, {{instance}}",
+              "refId": "Q"
+            },
+            {
+              "expr": "mdbx_seek_exact2{quantile=\"$quantile\",instance=~\"$instance\"}",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "mdbx_seek_exact2: {{quantile}}, {{instance}}",
+              "refId": "R"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "AutoDupsort Put latency",
+          "tooltip": {
+            "shared": true,
+            "sort": 2,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "$$hashKey": "object:139",
+              "format": "ns",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "$$hashKey": "object:140",
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": false
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "Prometheus",
           "fieldConfig": {
             "defaults": {
               "custom": {}
@@ -2141,7 +2332,7 @@
             "h": 3,
             "w": 4,
             "x": 4,
-            "y": 18
+            "y": 36
           },
           "hiddenSeries": false,
           "id": 132,
@@ -3781,7 +3972,7 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-2h",
     "to": "now"
   },
   "timepicker": {
@@ -3811,5 +4002,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 116
+  "version": 128
 }
