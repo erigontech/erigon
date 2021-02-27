@@ -155,6 +155,7 @@ func CollectProcessMetrics(refresh time.Duration) {
 		//if m, _ := p.MemoryMaps(true); m != nil && len(*m) > 0 {
 		//	mm := (*m)[0]
 		//}
+		//p.RlimitUsage()
 		if m, _ := p.MemoryInfo(); m != nil {
 			memRSS.Update(int64(m.RSS))
 			memVMS.Update(int64(m.VMS))
@@ -174,7 +175,7 @@ func CollectProcessMetrics(refresh time.Duration) {
 		}
 
 		runtime.ReadMemStats(memstats[location1])
-		memPauses.Mark(int64(memstats[location1].PauseTotalNs - memstats[location2].PauseTotalNs))
+		memPauses.Mark(int64(memstats[location1].PauseTotalNs))
 		memAllocs.Mark(int64(memstats[location1].Mallocs - memstats[location2].Mallocs))
 		memFrees.Mark(int64(memstats[location1].Frees - memstats[location2].Frees))
 		memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
