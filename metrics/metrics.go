@@ -102,18 +102,14 @@ func CollectProcessMetrics(refresh time.Duration) {
 		//	long   ru_maxrss;        /* maximum resident set size (kilobytes) */
 		//	long   ru_minflt;        /* page reclaims (soft page faults) */
 		//	long   ru_majflt;        /* page faults (hard page faults) */
-		//	long   ru_inblock;       /* block input operations */
-		//	long   ru_oublock;       /* block output operations */
 		//	long   ru_nvcsw;         /* voluntary context switches */
 		//	long   ru_nivcsw;        /* involuntary context switches */
 		//};
-		ruMaxrss   = GetOrRegisterGauge("ru/maxrss", DefaultRegistry)
-		ruMinflt   = GetOrRegisterGauge("ru/minflt", DefaultRegistry)
-		ruMajflt   = GetOrRegisterGauge("ru/majflt", DefaultRegistry)
-		ruInblock  = GetOrRegisterGauge("ru/inblock", DefaultRegistry)
-		ruOutblock = GetOrRegisterGauge("ru/outblock", DefaultRegistry)
-		ruNvcsw    = GetOrRegisterGauge("ru/nvcsw", DefaultRegistry)
-		ruNivcsw   = GetOrRegisterGauge("ru/nivcsw", DefaultRegistry)
+		ruMaxrss = GetOrRegisterGauge("ru/maxrss", DefaultRegistry)
+		ruMinflt = GetOrRegisterGauge("ru/minflt", DefaultRegistry)
+		ruMajflt = GetOrRegisterGauge("ru/majflt", DefaultRegistry)
+		ruNvcsw  = GetOrRegisterGauge("ru/nvcsw", DefaultRegistry)
+		ruNivcsw = GetOrRegisterGauge("ru/nivcsw", DefaultRegistry)
 
 		memRSS    = GetOrRegisterGauge("mem/rss", DefaultRegistry)
 		memVMS    = GetOrRegisterGauge("mem/vms", DefaultRegistry)
@@ -151,8 +147,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 
 		// getrusage(2)
 		ruMaxrss.Update(cpuStats[location1].Usage.Maxrss)
-		ruInblock.Update(cpuStats[location1].Usage.Inblock)
-		ruOutblock.Update(cpuStats[location1].Usage.Oublock)
 		//mi, _ := p.MemoryInfoEx()
 		//if m, _ := p.MemoryMaps(true); m != nil && len(*m) > 0 {
 		//	mm := (*m)[0]
@@ -189,12 +183,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 			diskReadBytes.Mark(int64(io.ReadBytes))
 			diskWriteBytes.Mark(int64(io.WriteBytes))
 		}
-		//if ReadDiskStats(diskstats[location1]) == nil {
-		//diskReadBytes.Mark(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
-		//diskWriteBytes.Mark(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
-		//diskReadBytesCounter.Inc(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
-		//diskWriteBytesCounter.Inc(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
-		//}
 
 		goGoroutines.Update(int64(runtime.NumGoroutine()))
 		n, _ := runtime.ThreadCreateProfile(nil)
