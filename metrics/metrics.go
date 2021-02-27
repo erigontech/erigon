@@ -175,7 +175,7 @@ func CollectProcessMetrics(refresh time.Duration) {
 		}
 
 		runtime.ReadMemStats(memstats[location1])
-		memPauses.Mark(int64(memstats[location1].PauseTotalNs))
+		memPauses.Mark(int64(memstats[location1].PauseTotalNs - memstats[location2].PauseTotalNs))
 		memAllocs.Mark(int64(memstats[location1].Mallocs - memstats[location2].Mallocs))
 		memFrees.Mark(int64(memstats[location1].Frees - memstats[location2].Frees))
 		memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
