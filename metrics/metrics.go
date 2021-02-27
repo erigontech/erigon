@@ -132,7 +132,7 @@ func CollectProcessMetrics(refresh time.Duration) {
 		location2 := (i - 1) % 2
 
 		//ReadCPUStats(cpuStats[location1])
-		ReadCPUStats2(p, cpuStats[location1])
+		ReadCPUStats(p, cpuStats[location1])
 		cpuSysLoad.Update((cpuStats[location1].GlobalTime - cpuStats[location2].GlobalTime) / refreshFreq)
 		cpuSysWait.Update((cpuStats[location1].GlobalWait - cpuStats[location2].GlobalWait) / refreshFreq)
 		cpuProcLoad.Update((cpuStats[location1].LocalTime - cpuStats[location2].LocalTime) / refreshFreq)

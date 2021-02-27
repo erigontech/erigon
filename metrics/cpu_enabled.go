@@ -21,37 +21,18 @@ package metrics
 import (
 	"syscall"
 
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
-// ReadCPUStats retrieves the current CPU stats.
-func ReadCPUStats(stats *CPUStats) {
-	// passing false to request all cpu times
-	timeStats, err := cpu.Times(false)
-	if err != nil {
-		log.Error("Could not read cpu stats", "err", err)
-		return
-	}
-
-	// requesting all cpu times will always return an array with only one time stats entry
-	timeStat := timeStats[0]
-	stats.GlobalTime = int64((timeStat.User + timeStat.Nice + timeStat.System) * cpu.ClocksPerSec)
-	stats.GlobalWait = int64((timeStat.Iowait) * cpu.ClocksPerSec)
-
-	stats.RUsage = getRUsage(nil)
-	stats.LocalTime = cpuTimeFromUsage(stats.RUsage)
-}
-
-func ReadCPUStats2(p *process.Process, stats *CPUStats) {
+func ReadCPUStats(p *process.Process, stats *CPUStats) {
 	if m, _ := p.Times(); m != nil {
 		// requesting all cpu times will always return an array with only one time stats entry
 		stats.GlobalTime = int64((m.User + m.Nice + m.System) * cpu.ClocksPerSec)
 		stats.GlobalWait = int64((m.Iowait) * cpu.ClocksPerSec)
-		stats.LocalTime = int64(m.Total())
 	}
 	stats.RUsage = getRUsage(p)
+	stats.LocalTime = cpuTimeFromUsage(stats.RUsage)
 }
 
 func cpuTimeFromUsage(usage syscall.Rusage) int64 {
