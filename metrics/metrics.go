@@ -114,6 +114,14 @@ func CollectProcessMetrics(refresh time.Duration) {
 		ruOutblock = GetOrRegisterGauge("ru/outblock", DefaultRegistry)
 		ruNvcsw    = GetOrRegisterGauge("ru/nvcsw", DefaultRegistry)
 		ruNivcsw   = GetOrRegisterGauge("ru/nivcsw", DefaultRegistry)
+
+		memRSS    = GetOrRegisterGauge("mem/rss", DefaultRegistry)
+		memVMS    = GetOrRegisterGauge("mem/vms", DefaultRegistry)
+		memHVM    = GetOrRegisterGauge("mem/hvm", DefaultRegistry)
+		memData   = GetOrRegisterGauge("mem/data", DefaultRegistry)
+		memStack  = GetOrRegisterGauge("mem/stack", DefaultRegistry)
+		memLocked = GetOrRegisterGauge("mem/locked", DefaultRegistry)
+		memSwap   = GetOrRegisterGauge("mem/swap", DefaultRegistry)
 	)
 
 	p, _ := process.NewProcess(int32(os.Getpid()))
@@ -137,22 +145,33 @@ func CollectProcessMetrics(refresh time.Duration) {
 
 		//vm, _ := mem.VirtualMemory()
 		//sw, _ := mem.SwapMemory()
-		io, _ := p.IOCounters()
-		//mm, _ := p.MemoryMaps(true)
-		//mi, _ := p.MemoryInfoEx()
 		//mi, _ := p.CPUPercent()
-		//
-		//mi, _ := p.NumCtxSwitches()
-		//mi, _ := p.PageFaults()
 
 		// getrusage(2)
 		ruMaxrss.Update(cpuStats[location1].Usage.Maxrss)
-		ruMinflt.Update(cpuStats[location1].Usage.Minflt)
-		ruMajflt.Update(cpuStats[location1].Usage.Majflt)
 		ruInblock.Update(cpuStats[location1].Usage.Inblock)
 		ruOutblock.Update(cpuStats[location1].Usage.Oublock)
-		ruNvcsw.Update(cpuStats[location1].Usage.Nvcsw)
-		ruNivcsw.Update(cpuStats[location1].Usage.Nivcsw)
+		//mi, _ := p.MemoryInfoEx()
+		//if m, _ := p.MemoryMaps(true); m != nil && len(*m) > 0 {
+		//	mm := (*m)[0]
+		//}
+		if m, _ := p.MemoryInfo(); m != nil {
+			memRSS.Update(int64(m.RSS))
+			memVMS.Update(int64(m.VMS))
+			memHVM.Update(int64(m.HWM))
+			memData.Update(int64(m.Data))
+			memStack.Update(int64(m.Stack))
+			memLocked.Update(int64(m.Locked))
+			memSwap.Update(int64(m.Swap))
+		}
+		if pf, _ := p.PageFaults(); pf != nil {
+			ruMinflt.Update(int64(pf.MinorFaults))
+			ruMajflt.Update(int64(pf.MajorFaults))
+		}
+		if cs, _ := p.NumCtxSwitches(); cs != nil {
+			ruNvcsw.Update(cs.Voluntary)
+			ruNivcsw.Update(cs.Involuntary)
+		}
 
 		runtime.ReadMemStats(memstats[location1])
 		memPauses.Mark(int64(memstats[location1].PauseTotalNs - memstats[location2].PauseTotalNs))
@@ -161,7 +180,7 @@ func CollectProcessMetrics(refresh time.Duration) {
 		memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
 		memUsed.Update(int64(memstats[location1].Alloc))
 
-		if io != nil {
+		if io, _ := p.IOCounters(); io != nil {
 			diskReads.Mark(int64(io.ReadCount))
 			diskWrites.Mark(int64(io.WriteCount))
 			diskReadBytes.Mark(int64(io.ReadBytes))
