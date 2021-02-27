@@ -98,6 +98,8 @@ func CollectProcessMetrics(refresh time.Duration) {
 
 		ruMinflt   = GetOrRegisterGauge("ru/minflt", DefaultRegistry)
 		ruMajflt   = GetOrRegisterGauge("ru/majflt", DefaultRegistry)
+		ruMinflt2  = GetOrRegisterGauge("ru/minflt2", DefaultRegistry)
+		ruMajflt2  = GetOrRegisterGauge("ru/majflt2", DefaultRegistry)
 		ruInblock  = GetOrRegisterGauge("ru/inblock", DefaultRegistry)
 		ruOutblock = GetOrRegisterGauge("ru/outblock", DefaultRegistry)
 		ruNvcsw    = GetOrRegisterGauge("ru/nvcsw", DefaultRegistry)
@@ -152,9 +154,11 @@ func CollectProcessMetrics(refresh time.Duration) {
 			memSwap.Update(int64(m.Swap))
 		}
 		if pf, _ := p.PageFaults(); pf != nil {
-			ruMinflt.Update(int64(pf.MinorFaults))
-			ruMajflt.Update(int64(pf.MajorFaults))
+			ruMinflt2.Update(int64(pf.MinorFaults))
+			ruMajflt2.Update(int64(pf.MajorFaults))
 		}
+		ruMinflt.Update(cpuStats[location1].Usage.Minflt)
+		ruMajflt.Update(cpuStats[location1].Usage.Majflt)
 		ruInblock.Update(cpuStats[location1].Usage.Inblock)
 		ruOutblock.Update(cpuStats[location1].Usage.Oublock)
 		if cs, _ := p.NumCtxSwitches(); cs != nil {
