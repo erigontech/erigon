@@ -40,8 +40,8 @@ func ReadCPUStats(stats *CPUStats) {
 	stats.GlobalTime = int64((timeStat.User + timeStat.Nice + timeStat.System) * cpu.ClocksPerSec)
 	stats.GlobalWait = int64((timeStat.Iowait) * cpu.ClocksPerSec)
 
-	stats.Usage = getRUsage(nil)
-	stats.LocalTime = cpuTimeFromUsage(stats.Usage)
+	stats.RUsage = getRUsage(nil)
+	stats.LocalTime = cpuTimeFromUsage(stats.RUsage)
 }
 
 func ReadCPUStats2(p *process.Process, stats *CPUStats) {
@@ -51,7 +51,7 @@ func ReadCPUStats2(p *process.Process, stats *CPUStats) {
 		stats.GlobalWait = int64((m.Iowait) * cpu.ClocksPerSec)
 		stats.LocalTime = int64(m.Total())
 	}
-	stats.Usage = getRUsage(p)
+	stats.RUsage = getRUsage(p)
 }
 
 func cpuTimeFromUsage(usage syscall.Rusage) int64 {

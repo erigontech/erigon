@@ -89,8 +89,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 
 		diskReadBytes  = GetOrRegisterMeter("system/disk/readbytes", DefaultRegistry)
 		diskWriteBytes = GetOrRegisterMeter("system/disk/writebytes", DefaultRegistry)
-		//diskReadBytes2  = GetOrRegisterMeter("system/disk/readbytes2", DefaultRegistry)
-		//diskWriteBytes2 = GetOrRegisterMeter("system/disk/writebytes2", DefaultRegistry)
 
 		// copy from prometheus client
 		goGoroutines = GetOrRegisterGauge("go/goroutines", DefaultRegistry)
@@ -155,8 +153,8 @@ func CollectProcessMetrics(refresh time.Duration) {
 			ruMinflt.Update(int64(pf.MinorFaults))
 			ruMajflt.Update(int64(pf.MajorFaults))
 		}
-		ruInblock.Update(cpuStats[location1].Usage.Inblock)
-		ruOutblock.Update(cpuStats[location1].Usage.Oublock)
+		ruInblock.Update(cpuStats[location1].RUsage.Inblock)
+		ruOutblock.Update(cpuStats[location1].RUsage.Oublock)
 		if cs, _ := p.NumCtxSwitches(); cs != nil {
 			ruNvcsw.Update(cs.Voluntary)
 			ruNivcsw.Update(cs.Involuntary)
@@ -175,11 +173,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 			diskReadBytes.Mark(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
 			diskWriteBytes.Mark(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
 		}
-
-		//if ReadDiskStats(diskstats[location1]) == nil {
-		//	diskReadBytes.Mark(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
-		//	diskWriteBytes.Mark(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
-		//}
 		goGoroutines.Update(int64(runtime.NumGoroutine()))
 		n, _ := runtime.ThreadCreateProfile(nil)
 		goThreads.Update(int64(n))
