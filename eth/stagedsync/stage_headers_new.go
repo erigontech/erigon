@@ -136,8 +136,6 @@ func fixCanonicalChain(logPrefix string, height uint64, tx ethdb.DbWithPendingMu
 	for ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
 			return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, ancestorHeight, ancestorHash, err)
-		} else {
-			fmt.Printf("Canonical %d %x\n", ancestorHeight, ancestorHash)
 		}
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
 		ancestorHash = ancestor.ParentHash
@@ -172,8 +170,6 @@ func HeadersUnwind(u *UnwindState, s *StageState, db ethdb.Database) error {
 	for blockHeight := headerProgress; blockHeight > u.UnwindPoint; blockHeight-- {
 		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
 			return err
-		} else {
-			fmt.Printf("Deleted canonical %d\n", blockHeight)
 		}
 	}
 	if err = u.Skip(tx); err != nil {
