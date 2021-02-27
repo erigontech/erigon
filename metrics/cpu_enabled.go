@@ -22,7 +22,7 @@ import (
 	"syscall"
 
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/shirou/gopsutil/cpu"
+	"github.com/shirou/gopsutil/v3/cpu"
 )
 
 // ReadCPUStats retrieves the current CPU stats.
@@ -33,6 +33,7 @@ func ReadCPUStats(stats *CPUStats) {
 		log.Error("Could not read cpu stats", "err", err)
 		return
 	}
+
 	// requesting all cpu times will always return an array with only one time stats entry
 	timeStat := timeStats[0]
 	stats.GlobalTime = int64((timeStat.User + timeStat.Nice + timeStat.System) * cpu.ClocksPerSec)

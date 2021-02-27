@@ -20,7 +20,7 @@ import (
 
 	"github.com/urfave/cli"
 
-	gopsutil "github.com/shirou/gopsutil/mem"
+	gopsutil "github.com/shirou/gopsutil/v3/mem"
 )
 
 // TurboGethNode represents a single node, that runs sync and p2p network.

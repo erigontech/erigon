@@ -6,7 +6,6 @@ require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/JekaMas/notify v0.9.4
 	github.com/RoaringBitmap/roaring v0.5.6-0.20201124195327-6ec715d630bc
-	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.5.7
 	github.com/anacrolix/log v0.7.0
 	github.com/anacrolix/torrent v1.15.2
@@ -28,7 +27,6 @@ require (
 	github.com/fatih/color v1.7.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
-	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.0
 	github.com/golang/protobuf v1.4.3
@@ -61,7 +59,7 @@ require (
 	github.com/prometheus/client_golang v1.9.0
 	github.com/prometheus/tsdb v0.10.0
 	github.com/rs/cors v1.7.0
-	github.com/shirou/gopsutil v2.20.8+incompatible
+	github.com/shirou/gopsutil/v3 v3.21.1
 	github.com/spf13/cobra v1.1.1
 	github.com/status-im/keycard-go v0.0.0-20200402102358-957c09536969
 	github.com/stretchr/testify v1.6.1
