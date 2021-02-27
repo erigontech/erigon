@@ -125,10 +125,11 @@ func ReadHeadHeaderHash(db databaseReader) common.Hash {
 }
 
 // WriteHeadHeaderHash stores the hash of the current canonical head header.
-func WriteHeadHeaderHash(db DatabaseWriter, hash common.Hash) {
+func WriteHeadHeaderHash(db DatabaseWriter, hash common.Hash) error {
 	if err := db.Put(dbutils.HeadHeaderKey, []byte(dbutils.HeadHeaderKey), hash.Bytes()); err != nil {
-		log.Crit("Failed to store last header's hash", "err", err)
+		return fmt.Errorf("failed to store last header's hash: %w", err)
 	}
+	return nil
 }
 
 // ReadHeadBlockHash retrieves the hash of the current canonical head block.

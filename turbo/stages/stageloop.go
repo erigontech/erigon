@@ -192,7 +192,7 @@ func ReplacementStages(ctx context.Context,
 						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
-						return u.Done(world.DB)
+						return stagedsync.HeadersUnwind(u, s, world.TX)
 					},
 				}
 			},
