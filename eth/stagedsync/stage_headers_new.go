@@ -36,18 +36,18 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 	if err != nil {
 		return err
 	}
+	logPrefix := s.LogPrefix()
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
 	hash, err1 := rawdb.ReadCanonicalHash(tx, headerProgress)
 	if err1 != nil {
 		return err1
 	}
-	logPrefix := s.LogPrefix()
 	if hash == (common.Hash{}) {
 		if err = fixCanonicalChain(logPrefix, headerProgress, tx); err != nil {
 			return err
 		}
 		if !useExternalTx {
-			if _, err := tx.Commit(); err != nil {
+			if _, err = tx.Commit(); err != nil {
 				return err
 			}
 		}
