@@ -35,7 +35,6 @@ import (
 
 var (
 	dbGetTimer = metrics.NewRegisteredTimer("db/get", nil)
-	dbPutTimer = metrics.NewRegisteredTimer("db/put", nil)
 )
 
 type DbCopier interface {
