@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
@@ -63,11 +62,6 @@ func (m *TxDb) Sequence(bucket string, amount uint64) (res uint64, err error) {
 }
 
 func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
-	if metrics.Enabled {
-		if bucket == dbutils.PlainStateBucket {
-			defer dbPutTimer.UpdateSince(time.Now())
-		}
-	}
 	m.len += uint64(len(key) + len(value))
 	return m.cursor(bucket).Put(key, value)
 }
@@ -113,7 +107,7 @@ func (m *TxDb) KV() KV {
 	panic("not allowed to get KV interface because you will loose transaction, please use .Tx() method")
 }
 
-// Can only be called from the worker thread
+// Last can only be called from the transaction thread
 func (m *TxDb) Last(bucket string) ([]byte, []byte, error) {
 	return m.cursor(bucket).Last()
 }
