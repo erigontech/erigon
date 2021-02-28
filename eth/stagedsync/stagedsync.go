@@ -85,7 +85,7 @@ func (stagedSync *StagedSync) Prepare(
 			chainConfig:           chainConfig,
 			chainContext:          chainContext,
 			vmConfig:              vmConfig,
-			db:                    db,
+			DB:                    db,
 			TX:                    tx,
 			pid:                   pid,
 			storageMode:           storageMode,

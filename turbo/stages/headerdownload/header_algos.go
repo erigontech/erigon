@@ -1187,16 +1187,10 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 		if ch == header.ParentHash {
 			forkingPoint = blockHeight - 1
 		} else {
-			// Going further back and updating canonical hashes along the way
-			if err = rawdb.WriteCanonicalHash(hi.batch, header.ParentHash, blockHeight-1); err != nil {
-				return fmt.Errorf("[%s] marking canonical header %d %x: %w", hi.logPrefix, blockHeight-1, header.ParentHash, err)
-			}
+			// Going further back
 			ancestorHash := parent.ParentHash
 			ancestorHeight := blockHeight - 2
 			for ch, err = rawdb.ReadCanonicalHash(hi.batch, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(hi.batch, ancestorHeight) {
-				if err = rawdb.WriteCanonicalHash(hi.batch, ancestorHash, ancestorHeight); err != nil {
-					return fmt.Errorf("[%s] marking canonical header %d %x: %w", hi.logPrefix, ancestorHeight, ancestorHash, err)
-				}
 				ancestor := rawdb.ReadHeader(hi.batch, ancestorHash, ancestorHeight)
 				ancestorHash = ancestor.ParentHash
 				ancestorHeight--
@@ -1207,8 +1201,8 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 			// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
 			forkingPoint = ancestorHeight
 		}
-		if err = rawdb.WriteCanonicalHash(hi.batch, hash, blockHeight); err != nil {
-			return fmt.Errorf("[%s] marking canonical header %d %x: %w", hi.logPrefix, blockHeight, hash, err)
+		if err = rawdb.WriteHeadHeaderHash(hi.batch, hash); err != nil {
+			return fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
 		}
 		// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
 		if forkingPoint < hi.unwindPoint {

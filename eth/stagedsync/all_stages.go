@@ -27,10 +27,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.db, world.TmpDir, world.QuitCh)
+						return SpawnBlockHashStage(s, world.DB, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						return u.Done(world.DB)
 					},
 				}
 			},
@@ -48,7 +48,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 						return s.DoneAndUpdate(world.TX, blockNum)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						return u.Done(world.DB)
 					},
 				}
 			},

@@ -207,7 +207,11 @@ func (s *State) Run(db ethdb.GetterPutter, tx ethdb.GetterPutter) error {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Memory", "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
-	log.Info("Timings", timings...)
+	if len(timings) > 50 {
+		log.Info("Timings (first 50)", timings[:50]...)
+	} else {
+		log.Info("Timings", timings...)
+	}
 	if err := printBucketsSize(tx); err != nil {
 		return err
 	}
