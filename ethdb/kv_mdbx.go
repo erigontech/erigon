@@ -559,10 +559,7 @@ func (tx *MdbxTx) ClearBucket(bucket string) error {
 	if dbi == NonExistingDBI {
 		return nil
 	}
-	if err := tx.tx.Drop(mdbx.DBI(dbi), false); err != nil {
-		return err
-	}
-	return nil
+	return tx.tx.Drop(mdbx.DBI(dbi), false)
 }
 
 func (tx *MdbxTx) DropBucket(bucket string) error {
