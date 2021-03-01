@@ -893,7 +893,6 @@ func (c *AccTrieCursor) _nextSiblingInDB() error {
 	if _, err := c._seek(c.next, []byte{}); err != nil {
 		return err
 	}
-	//c.SkipState = c.SkipState && bytes.Equal(c.next, c.k[c.lvl])
 	return nil
 }
 
@@ -1225,7 +1224,6 @@ func (c *StorageTrieCursor) _nextSiblingInDB() error {
 	if _, err := c._seek(c.seek, []byte{}); err != nil {
 		return err
 	}
-	//c.skipState = c.skipState && bytes.Equal(c.next, c.k[c.lvl])
 	return nil
 }
 
