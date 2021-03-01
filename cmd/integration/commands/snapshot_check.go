@@ -8,10 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ledgerwatch/lmdb-go/lmdb"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
-
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -195,7 +193,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		log.Info("Commit", "t", time.Since(tt))
 	}
 
-	cc, bc, st, progress := newSync(ctx.Done(), db, db, nil)
+	cc, bc, st, cache, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 	st.DisableStages(stages.Headers,
 		stages.BlockHashes,
@@ -239,12 +237,6 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	var cacheSize datasize.ByteSize
-	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
-	var cache *shards.StateCache
-	if cacheSize > 0 {
-		cache = shards.NewStateCache(32, cacheSize)
-	}
 
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {

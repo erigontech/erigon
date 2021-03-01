@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 	"github.com/spf13/cobra"
 )
 
@@ -117,6 +116,9 @@ func init() {
 }
 
 func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+
 	sm, err1 := ethdb.GetStorageModeFromDB(db)
 	if err1 != nil {
 		panic(err1)
@@ -146,22 +148,13 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, progress := newSync(ch, db, tx, changeSetHook)
+	cc, bc, st, cache, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
 	cc.SetDB(tx)
 
 	tx, err1 = tx.Begin(ctx, ethdb.RW)
 	if err1 != nil {
 		return err1
-	}
-
-	var batchSize datasize.ByteSize
-	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	var cacheSize datasize.ByteSize
-	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
-	var cache *shards.StateCache
-	if cacheSize > 0 {
-		cache = shards.NewStateCache(32, cacheSize)
 	}
 
 	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
@@ -294,7 +287,7 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, progress := newSync(ch, db, tx, nil)
+	cc, bc, st, cache, progress := newSync(ch, db, tx, nil)
 	defer bc.Stop()
 	cc.SetDB(tx)
 
@@ -302,13 +295,6 @@ func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	tx, err = tx.Begin(ctx, ethdb.RW)
 	if err != nil {
 		return err
-	}
-
-	var cacheSize datasize.ByteSize
-	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
-	var cache *shards.StateCache
-	if cacheSize > 0 {
-		cache = shards.NewStateCache(32, cacheSize)
 	}
 
 	_ = clearUnwindStack(tx, context.Background())
@@ -367,7 +353,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, progress := newSync(ch, db, tx, nil)
+	cc, bc, st, cache, progress := newSync(ch, db, tx, nil)
 	defer bc.Stop()
 	cc.SetDB(tx)
 
@@ -383,12 +369,6 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	st.EnableStages(stages.Execution)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	var cacheSize datasize.ByteSize
-	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
-	var cache *shards.StateCache
-	if cacheSize > 0 {
-		cache = shards.NewStateCache(32, cacheSize)
-	}
 
 	from := progress(stages.Execution).BlockNumber
 	to := from + unwind
