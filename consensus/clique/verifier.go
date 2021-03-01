@@ -224,7 +224,11 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 	}
 
 	if snap == nil {
-		return nil, fmt.Errorf("a nil snap for %d block: %w", parents[i].Number.Uint64(), consensus.ErrUnknownAncestor)
+		if len(parents) > 0 {
+			return nil, fmt.Errorf("a nil snap for %d block: %w", parents[i].Number.Uint64(), consensus.ErrUnknownAncestor)
+		}
+
+		return nil, consensus.ErrUnknownAncestor
 	}
 
 	if len(parents) > 0 {
