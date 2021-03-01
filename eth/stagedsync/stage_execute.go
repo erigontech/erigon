@@ -114,7 +114,6 @@ func executeBlockWithGo(block *types.Block, tx ethdb.DbWithPendingMutations, cac
 }
 
 func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig *params.ChainConfig, chainContext *core.TinyChainContext, vmConfig *vm.Config, quit <-chan struct{}, params ExecuteBlockStageParams) error {
-	params.Cache = nil
 	prevStageProgress, errStart := stages.GetStageProgress(stateDB, stages.Senders)
 	if errStart != nil {
 		return errStart
@@ -159,7 +158,6 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		batch = tx.NewBatch()
 		defer batch.Rollback()
 	}
-	fmt.Printf("%+v\n", params.Cache)
 	if !useSilkworm && params.Cache != nil {
 		batch = tx
 		cache = params.Cache
