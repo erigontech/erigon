@@ -27,6 +27,7 @@ import (
 )
 
 func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bool, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
+	cache = nil
 	to, err := s.ExecutionAt(db)
 	if err != nil {
 		return err
@@ -436,6 +437,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 }
 
 func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, db ethdb.Database, cache *shards.StateCache, tmpdir string, quit <-chan struct{}) error {
+	cache = nil
 	hash, err := rawdb.ReadCanonicalHash(db, u.UnwindPoint)
 	if err != nil {
 		return fmt.Errorf("read canonical hash: %w", err)

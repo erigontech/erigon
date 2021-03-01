@@ -159,6 +159,7 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 		batch = tx.NewBatch()
 		defer batch.Rollback()
 	}
+	fmt.Printf("%+v\n", params.Cache)
 	if !useSilkworm && params.Cache != nil {
 		batch = tx
 		cache = params.Cache
@@ -242,9 +243,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					}
 					chainContext.SetDB(tx)
 				}
-				//start = time.Now()
+				start = time.Now()
 				cache.TurnWritesToReads(writes)
-				//log.Info("TurnWritesToReads", "in", time.Since(start))
+				log.Info("TurnWritesToReads", "in", time.Since(start))
 			}
 		}
 

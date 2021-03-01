@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/lmdb-go/lmdb"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -25,6 +26,7 @@ import (
 func init() {
 	withChaindata(cmdSnapshotCheck)
 	withBlock(cmdSnapshotCheck)
+	withBatchSize(cmdSnapshotCheck)
 	cmdSnapshotCheck.Flags().StringVar(&tmpDBPath, "tmp_db", "", "path to temporary db(for debug)")
 	withChaindata(dbCopyCmd)
 	rootCmd.AddCommand(dbCopyCmd)
@@ -234,8 +236,15 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 	}
 
 	ch := ctx.Done()
+
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
+	var cache *shards.StateCache
+	if cacheSize > 0 {
+		cache = shards.NewStateCache(32, cacheSize)
+	}
 
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
@@ -259,6 +268,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 				ToBlock:       blockNumber, // limit execution to the specified block
 				WriteReceipts: false,
 				BatchSize:     batchSize,
+				Cache:         cache,
 			})
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)

@@ -155,6 +155,15 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		return err1
 	}
 
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
+	var cache *shards.StateCache
+	if cacheSize > 0 {
+		cache = shards.NewStateCache(32, cacheSize)
+	}
+
 	st.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 	_ = st.SetCurrentStage(stages.Execution)
 
@@ -172,8 +181,6 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		stopAt = 1
 	}
 
-	var batchSize datasize.ByteSize
-	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
 		case <-ctx.Done():
@@ -215,6 +222,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 				stagedsync.ExecuteBlockStageParams{
 					ToBlock:       execToBlock, // limit execution to the specified block
 					WriteReceipts: sm.Receipts,
+					Cache:         cache,
 					BatchSize:     batchSize,
 					ChangeSetHook: changeSetHook,
 				}); err != nil {
@@ -375,6 +383,12 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	st.EnableStages(stages.Execution)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+	var cacheSize datasize.ByteSize
+	must(cacheSize.UnmarshalText([]byte(cacheSizeStr)))
+	var cache *shards.StateCache
+	if cacheSize > 0 {
+		cache = shards.NewStateCache(32, cacheSize)
+	}
 
 	from := progress(stages.Execution).BlockNumber
 	to := from + unwind
@@ -388,6 +402,7 @@ func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
 				ToBlock:       to, // limit execution to the specified block
 				WriteReceipts: true,
 				BatchSize:     batchSize,
+				Cache:         cache,
 				ChangeSetHook: nil,
 			}); err != nil {
 			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
