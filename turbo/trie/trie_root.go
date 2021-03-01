@@ -757,18 +757,12 @@ func (c *AccTrieCursor) AtPrefix(prefix []byte) (k, v []byte, hasTree bool, err 
 		c.SkipState = false
 		return nil, nil, false, nil
 	}
-	if c._hasHash() {
-		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-		if ok, nextCreated := c.canUse(c.kBuf); ok {
-			c.SkipState = c.SkipState && keyIsBefore(c.kBuf, c.nextCreated)
-			c.nextCreated = nextCreated
-			c.cur = append(c.cur[:0], c.kBuf...)
-			return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
-		}
-	}
-	err = c._deleteCurrent()
+	ok, err = c._consume()
 	if err != nil {
 		return []byte{}, nil, false, err
+	}
+	if ok {
+		return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
 	}
 
 	return c._next()
@@ -786,18 +780,12 @@ func (c *AccTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 		c.SkipState = c.SkipState && !dbutils.NextNibblesSubtree(c.prev, &c.next)
 		return nil, nil, false, nil
 	}
-	if c._hasHash() {
-		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-		if ok, nextCreated := c.canUse(c.kBuf); ok {
-			c.SkipState = c.SkipState && keyIsBefore(c.kBuf, c.nextCreated)
-			c.nextCreated = nextCreated
-			c.cur = append(c.cur[:0], c.kBuf...)
-			return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
-		}
-	}
-	err = c._deleteCurrent()
+	ok, err := c._consume()
 	if err != nil {
 		return []byte{}, nil, false, err
+	}
+	if ok {
+		return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
 	}
 
 	return c._next()
@@ -933,7 +921,26 @@ func (c *AccTrieCursor) _hash(i int8) []byte {
 	return c.v[c.lvl][common.HashLength*int(i) : common.HashLength*(int(i)+1)]
 }
 
+func (c *AccTrieCursor) _consume() (bool, error) {
+	if c._hasHash() {
+		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+		if ok, nextCreated := c.canUse(c.kBuf); ok {
+			c.SkipState = c.SkipState && keyIsBefore(c.kBuf, c.nextCreated)
+			c.nextCreated = nextCreated
+			c.cur = append(c.cur[:0], c.kBuf...)
+			return true, nil
+		}
+	}
+
+	if err := c._deleteCurrent(); err != nil {
+		return false, err
+	}
+
+	return false, nil
+}
+
 func (c *AccTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
+	var ok bool
 	if err = common.Stopped(c.quit); err != nil {
 		return []byte{}, nil, false, err
 	}
@@ -950,18 +957,12 @@ func (c *AccTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 			return nil, nil, false, nil
 		}
 
-		if c._hasHash() {
-			c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-			if ok, nextCreated := c.canUse(c.kBuf); ok {
-				c.SkipState = c.SkipState && keyIsBefore(c.kBuf, c.nextCreated)
-				c.nextCreated = nextCreated
-				c.cur = append(c.cur[:0], c.kBuf...)
-				return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
-			}
-		}
-		err = c._deleteCurrent()
+		ok, err = c._consume()
 		if err != nil {
 			return []byte{}, nil, false, err
+		}
+		if ok {
+			return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
 		}
 
 		c.SkipState = c.SkipState && c._hasTree()
@@ -1055,19 +1056,14 @@ func (c *StorageTrieCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasTr
 		}
 	}
 
-	if c._hasHash() {
-		c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-		if ok, nextCreated := c.canUse(c.kBuf); ok {
-			c.skipState = c.skipState && keyIsBefore(c.kBuf, c.nextCreated)
-			c.nextCreated = nextCreated
-			c.cur = common.CopyBytes(c.kBuf[80:])
-			return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
-		}
-	}
-	err = c._deleteCurrent()
+	ok, err = c._consume()
 	if err != nil {
 		return []byte{}, nil, false, err
 	}
+	if ok {
+		return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
+	}
+
 	return c._next()
 }
 
@@ -1083,6 +1079,18 @@ func (c *StorageTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 		c.cur = nil
 		return nil, nil, false, nil
 	}
+
+	ok, err := c._consume()
+	if err != nil {
+		return []byte{}, nil, false, err
+	}
+	if ok {
+		return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
+	}
+	return c._next()
+}
+
+func (c *StorageTrieCursor) _consume() (bool, error) {
 	if c._hasHash() {
 		c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
 		ok, nextCreated := c.canUse(c.kBuf)
@@ -1090,15 +1098,14 @@ func (c *StorageTrieCursor) Next() (k, v []byte, hasTree bool, err error) {
 			c.skipState = c.skipState && keyIsBefore(c.kBuf, c.nextCreated)
 			c.nextCreated = nextCreated
 			c.cur = common.CopyBytes(c.kBuf[80:])
-			return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
+			return true, nil
 		}
 	}
-	err = c._deleteCurrent()
-	if err != nil {
-		return []byte{}, nil, false, err
-	}
 
-	return c._next()
+	if err := c._deleteCurrent(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func (c *StorageTrieCursor) _seek(seek, prefix []byte) (bool, error) {
@@ -1228,13 +1235,12 @@ func (c *StorageTrieCursor) _nextSiblingInDB() error {
 }
 
 func (c *StorageTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
+	var ok bool
 	if err = common.Stopped(c.quit); err != nil {
 		return []byte{}, nil, false, err
 	}
-
 	c.skipState = c.skipState && c._hasTree()
-	err = c._preOrderTraversalStep()
-	if err != nil {
+	if err = c._preOrderTraversalStep(); err != nil {
 		return []byte{}, nil, false, err
 	}
 
@@ -1245,18 +1251,12 @@ func (c *StorageTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 			return nil, nil, false, nil
 		}
 
-		if c._hasHash() {
-			c.kBuf = append(append(c.kBuf[:80], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-			if ok, nextCreated := c.canUse(c.kBuf); ok {
-				c.skipState = c.skipState && keyIsBefore(c.kBuf, c.nextCreated)
-				c.nextCreated = nextCreated
-				c.cur = common.CopyBytes(c.kBuf[80:])
-				return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
-			}
-		}
-		err = c._deleteCurrent()
+		ok, err = c._consume()
 		if err != nil {
 			return []byte{}, nil, false, err
+		}
+		if ok {
+			return c.cur, c._hash(c.hashID[c.lvl]), c._hasTree(), nil
 		}
 
 		c.skipState = c.skipState && c._hasTree()
