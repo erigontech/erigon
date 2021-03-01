@@ -235,6 +235,7 @@ type HeaderDownload struct {
 	stageHeight            uint64
 	headersAdded           int
 	tipMap                 *roaring64.Bitmap // Bitmap of tips (bit is set if there is at least one tip on such block height)
+	hardCodedPhaseDone     bool
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header

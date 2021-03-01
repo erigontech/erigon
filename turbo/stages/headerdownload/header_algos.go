@@ -1260,6 +1260,11 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 		log.Error("Could not flush the buffer, will discard the data", "error", err1)
 		return
 	}
+	if !hd.hardCodedPhaseDone && !foundAnchor {
+		// During the first phase (downloading hard-coded headers), only extension from an anchor is allowed
+		log.Info("Only anchor extensions allowed in the first phase", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
+		return
+	}
 	// There are 4 cases
 	if foundAnchor {
 		if foundTip {
