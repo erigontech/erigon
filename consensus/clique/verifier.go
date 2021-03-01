@@ -3,11 +3,9 @@ package clique
 import (
 	"bytes"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -24,22 +22,15 @@ func NewCliqueVerifier(c *Clique) *Verifier {
 }
 
 func (c *Verifier) Verify(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, _ bool, _ bool) error {
+	t := time.Now()
+	defer func() {
+		fmt.Println("in Verifier.verifyByRequest", header.Number.Uint64(), time.Since(t))
+	}()
 	return c.verifyHeader(header, parents, chain.Config())
 }
 
 func (c *Verifier) AncestorsNeededForVerification(header *types.Header) int {
-	return c.findPrevCheckpoint(header.Number.Uint64())
-}
-
-func (c *Verifier) PrepareHeaders(hs []*types.Header) {
-	addrs, err := c.recoverSig.ecrecovers(hs)
-	if err != nil {
-		return
-	}
-
-	for i := range hs {
-		hs[i].SetAuthor(addrs[i])
-	}
+	return c.findPrevCheckpoint(header.Number.Uint64(), header.Hash(), header.ParentHash)
 }
 
 // verifyHeader checks whether a header conforms to the consensus rules.The
@@ -47,6 +38,7 @@ func (c *Verifier) PrepareHeaders(hs []*types.Header) {
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
 func (c *Verifier) verifyHeader(header *types.Header, parents []*types.Header, config *params.ChainConfig) error {
+	t := time.Now()
 	if header.Number == nil {
 		return errUnknownBlock
 	}
@@ -105,13 +97,20 @@ func (c *Verifier) verifyHeader(header *types.Header, parents []*types.Header, c
 		}
 	}
 
+	fmt.Println("verifyHeader-1", header.Number.Uint64(), time.Since(t))
+	t = time.Now()
+
 	// If all checks passed, validate any special fields for hard forks
 	if err := misc.VerifyForkHashes(config, header, false); err != nil {
 		return err
 	}
+	fmt.Println("verifyHeader-1-VerifyForkHashes", header.Number.Uint64(), time.Since(t))
+	t = time.Now()
 
 	// All basic checks passed, verify cascading fields
-	return c.verifyCascadingFields(header, parents)
+	err := c.verifyCascadingFields(header, parents)
+	fmt.Println("verifyHeader-2-verifyCascadingFields", header.Number.Uint64(), time.Since(t))
+	return err
 }
 
 // verifyCascadingFields verifies all the header fields that are not standalone,
@@ -122,11 +121,14 @@ func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.
 	// The genesis block is the always valid dead-end
 	number := header.Number.Uint64()
 
+	t := time.Now()
 	// Retrieve the snapshot needed to verify this header and cache it
 	snap, err := c.snapshot(parents)
 	if err != nil {
 		return err
 	}
+	fmt.Println("verifyCascadingFields-1-snapshot", time.Since(t))
+	t = time.Now()
 
 	// Ensure that the block's timestamp isn't too close to its parent
 	parent := new(types.Header)
@@ -158,14 +160,20 @@ func (c *Verifier) verifyCascadingFields(header *types.Header, parents []*types.
 		}
 	}
 
+	fmt.Println("verifyCascadingFields-2", time.Since(t))
+	t = time.Now()
+
 	// All basic checks passed, verify the seal and return
 	err = c.verifySeal(header, snap)
+	fmt.Println("verifyCascadingFields-3-verifySeal", time.Since(t))
+	t = time.Now()
 
 	if err == nil {
 		if err = c.applyAndStoreSnapshot(snap, header); err != nil {
 			log.Error("can't store a snapshot", "block", header.Number.Uint64(), "hash", header.HashCache().String(), "err", err)
 		}
 	}
+	fmt.Println("verifyCascadingFields-4-applyAndStoreSnapshot", time.Since(t))
 
 	return err
 }
@@ -183,9 +191,10 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 	var snap *Snapshot
 	var err error
 
-	if !sort.SliceIsSorted(parents, headersSortFunc(parents)) {
-		sort.Slice(parents, headersSortFunc(parents))
-	}
+	t := time.Now()
+	types.SortHeadersDesc(parents)
+	fmt.Println("snapshot-1", time.Since(t))
+	t = time.Now()
 
 	var i int
 	var s *Snapshot
@@ -222,6 +231,8 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 			break
 		}
 	}
+	fmt.Println("snapshot-2", time.Since(t))
+	t = time.Now()
 
 	if snap == nil {
 		return nil, fmt.Errorf("a nil snap for %d block: %w", parents[i].Number.Uint64(), consensus.ErrUnknownAncestor)
@@ -244,10 +255,14 @@ func (c *Verifier) snapshot(parents []*types.Header) (*Snapshot, error) {
 		parents = []*types.Header{}
 	}
 
+	fmt.Println("snapshot-3", time.Since(t))
+	t = time.Now()
+
 	err = c.applyAndStoreSnapshot(snap, parents...)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("snapshot-4-applyAndStoreSnapshot", time.Since(t))
 
 	return snap, nil
 }
@@ -310,15 +325,26 @@ func (c *Verifier) verifySeal(header *types.Header, snap *Snapshot) error {
 	return nil
 }
 
-func (c *Verifier) findPrevCheckpoint(num uint64) int {
+func (c *Verifier) findPrevCheckpoint(num uint64, hash common.Hash, parentHash common.Hash) int {
 	if num == 0 {
 		// If we're at the genesis, snapshot the initial state.
 		return 0
 	}
 
 	var n int
+	var ok bool
+
 	for n = int(num); n >= 0; n-- {
-		if ok := c.checkSnapshot(uint64(n)); ok {
+		switch n {
+		case int(num):
+			ok = c.checkSnapshot(uint64(n), &hash)
+		case int(num) - 1:
+			ok = c.checkSnapshot(uint64(n), &parentHash)
+		default:
+			ok = c.checkSnapshot(uint64(n), nil)
+		}
+
+		if ok {
 			break
 		}
 	}
@@ -333,56 +359,6 @@ func (c *Verifier) findPrevCheckpoint(num uint64) int {
 	}
 
 	return ancestors
-}
-
-func (c *Verifier) checkSnapshot(num uint64) bool {
-	var (
-		h        interface{}
-		ok       bool
-		snapHash common.Hash
-		err      error
-	)
-
-	if h, ok = c.snapshotBlocks.Get(num); ok {
-		snapHash, ok = h.(common.Hash)
-		if ok {
-			// If an in-memory snapshot was found, use that
-			ok = c.recentsHas(snapHash)
-			if ok {
-				return true
-			}
-
-			// If an on-disk checkpoint snapshot can be found, use that
-			ok, err = hasSnapshotData(c.db, num, snapHash)
-			if err != nil {
-				log.Error("while getting a snapshot", "block", num, "snapHash", snapHash, "err", err)
-				ok = false
-			}
-
-			if ok {
-				return true
-			}
-		}
-	}
-
-	if !ok {
-		err = c.db.Walk(dbutils.CliqueBucket, dbutils.EncodeBlockNumber(num), dbutils.NumberLength*8, func(k, v []byte) (bool, error) {
-			_, _, err = dbutils.DecodeBlockBodyKey(k)
-			if err != nil {
-				return false, err
-			}
-
-			ok = true
-			return false, nil
-		})
-
-		if err != nil {
-			log.Error("while getting a snapshot", "block", num, "err", err)
-			return false
-		}
-	}
-
-	return ok
 }
 
 func isSnapshot(number uint64, epoch, checkpointInterval uint64) bool {

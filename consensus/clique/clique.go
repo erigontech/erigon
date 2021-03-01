@@ -34,6 +34,8 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -147,7 +149,7 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 	// If the signature's already cached, return that
 	hash := header.HashCache()
 
-	// fixme попробовать убрать
+	// fixme try to remove. It could be that hit rate is extremely low.
 	if address, known := sigcache.Get(hash); known {
 		return address.(common.Address), nil
 	}
@@ -298,6 +300,16 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
 func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
+	if len(parents) > 0 {
+		fmt.Println("in Clique.verifyByRequest", header.Number.Uint64(), len(parents), parents[0].Number.Uint64(), parents[len(parents)-1].Number.Uint64())
+	} else {
+		fmt.Println("in Clique.verifyByRequest", header.Number.Uint64(), len(parents))
+	}
+	t := time.Now()
+	defer func() {
+		fmt.Println("in Clique.verifyByRequest-Done", header.Number.Uint64(), time.Since(t))
+	}()
+
 	if header.Number == nil {
 		return errUnknownBlock
 	}
@@ -521,14 +533,35 @@ func (r *recoverer) ecrecovers(h []*types.Header) ([]common.Address, error) {
 }
 
 func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, headers ...*types.Header) error {
+	num := snap.Number + uint64(len(headers))
+	hash := snap.Hash
+
+	if len(headers) > 0 {
+		hash = headers[len(headers)-1].Hash()
+	}
+
+	if hash != (common.Hash{}) {
+		if ok := c.findSnapshot(num, &hash); ok {
+			fmt.Println("SHORTCUT~~~", debug.Callers(3))
+			return nil
+		}
+	}
+
+	t := time.Now()
 	if len(headers) > 0 {
 		if err := snap.apply(c.recoverSig, headers...); err != nil {
 			return err
 		}
 	}
+	fmt.Println("applyAndStoreSnapshot-1", snap.Number, len(headers), time.Since(t), debug.Callers(3))
+	t = time.Now()
 
 	c.recentsAdd(snap.Hash, snap)
+	fmt.Println("applyAndStoreSnapshot-2", snap.Number, len(headers), time.Since(t))
+	t = time.Now()
 	c.snapshotBlocks.Add(snap.Number, snap.Hash)
+	fmt.Println("applyAndStoreSnapshot-3", snap.Number, time.Since(t))
+	t = time.Now()
 
 	// If we've generated a new checkpoint snapshot, save to disk
 	if isSnapshot(snap.Number, c.config.Epoch, c.snapshotConfig.CheckpointInterval) {
@@ -537,6 +570,8 @@ func (c *Clique) applyAndStoreSnapshot(snap *Snapshot, headers ...*types.Header)
 		}
 		log.Trace("Stored a snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
+
+	fmt.Println("applyAndStoreSnapshot-4", snap.Number, time.Since(t))
 
 	return nil
 }
@@ -992,4 +1027,66 @@ func (c *Clique) AncestorsNeededForVerification(_ *types.Header) int {
 
 func (c *Clique) PrepareHeaders(_ []*types.Header) {
 	panic("not implemented")
+}
+
+func (c *Clique) checkSnapshot(num uint64, hash *common.Hash) bool {
+	if ok := c.findSnapshot(num, hash); !ok {
+		return c.lookupSnapshot(num)
+	}
+
+	return true
+}
+
+func (c *Clique) findSnapshot(num uint64, hash *common.Hash) bool {
+	var (
+		h        interface{}
+		ok       bool
+		snapHash common.Hash
+		err      error
+	)
+
+	if h, ok = c.snapshotBlocks.Get(num); ok {
+		snapHash, ok = h.(common.Hash)
+		if ok {
+			if hash != nil && *hash != snapHash {
+				ok = false
+
+				fmt.Println("!!!!!!!!!!!!! NOT EQUAL HASH")
+			} else {
+				// If an in-memory snapshot was found, use that
+				ok = c.recentsHas(snapHash)
+			}
+		}
+	}
+
+	if !ok && hash != nil {
+		// If an on-disk checkpoint snapshot can be found, use that
+		ok, err = hasSnapshotData(c.db, num, *hash)
+		if err != nil {
+			log.Error("while getting a snapshot", "block", num, "snapHash", *hash, "err", err)
+			ok = false
+		}
+	}
+
+	return ok
+}
+
+func (c *Clique) lookupSnapshot(num uint64) bool {
+	var ok bool
+	err := c.db.Walk(dbutils.CliqueBucket, dbutils.EncodeBlockNumber(num), dbutils.NumberLength*8, func(k, v []byte) (bool, error) {
+		_, _, errInner := dbutils.DecodeBlockBodyKey(k)
+		if errInner != nil {
+			return false, errInner
+		}
+
+		ok = true
+		return false, nil
+	})
+
+	if err != nil {
+		log.Error("while getting a snapshot", "block", num, "err", err)
+		return false
+	}
+
+	return ok
 }

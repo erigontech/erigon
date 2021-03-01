@@ -2,9 +2,11 @@ package benchmarks
 
 import (
 	"fmt"
-	"sort"
+	"io"
 	"testing"
 	"time"
+
+	"github.com/davecgh/go-spew/spew"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -50,8 +52,6 @@ func TestVerifyHeadersEthash512(t *testing.T) {
 }
 
 func TestVerifyHeadersEthash1024(t *testing.T) {
-	t.Skip("too slow")
-
 	const toVerify = 1025
 
 	testVerifyHandlersEthash(t, toVerify)
@@ -74,6 +74,7 @@ func testVerifyHandlersEthash(t *testing.T, toVerify int) {
 	}
 
 	results := make([]result, repeats)
+	resultsEthash := make([]time.Duration, repeats)
 
 	for i := 0; i < repeats; i++ {
 		resEthash := verifyByEngine(t, headers, core.DefaultGenesisBlock(), func(_ ethdb.Database) consensus.Engine {
@@ -83,6 +84,8 @@ func testVerifyHandlersEthash(t *testing.T, toVerify int) {
 			return engine
 		})
 
+		resultsEthash[i] = resEthash / time.Duration(len(headers))
+
 		resEthashProcess := verifyByEngineProcess(t, headers, core.DefaultGenesisBlock(), &ethConfig)
 
 		performanceDiff := float64(resEthash-resEthashProcess) / float64(resEthash) * 100
@@ -91,6 +94,8 @@ func testVerifyHandlersEthash(t *testing.T, toVerify int) {
 	}
 
 	checkResults(t, results, threshold)
+
+	spew.Dump(resultsEthash)
 }
 
 func checkResults(t *testing.T, results []result, threshold float64) {
@@ -117,19 +122,23 @@ func TestVerifyHeadersClique128(t *testing.T) {
 }
 
 func TestVerifyHeadersClique1024(t *testing.T) {
-	t.Skip("too slow")
-
 	const toVerify = 1025
 
 	testVerifyHeadersClique(t, toVerify)
+}
+
+func TestVerifyHeadersCliqueOnly1024(t *testing.T) {
+	const toVerify = 1025
+
+	testVerifyHeadersCliqueOnly(t, toVerify)
 }
 
 func testVerifyHeadersClique(t *testing.T, toVerify int) {
 	hardTips := headerdownload.DecodeTips(verifyHardCodedHeadersClique[:toVerify])
 	headers := toHeaders(hardTips)
 
-	const threshold = 25 // percent
-	const repeats = 20
+	const threshold = 10 // percent
+	const repeats = 5
 
 	results := make([]result, repeats)
 
@@ -146,6 +155,22 @@ func testVerifyHeadersClique(t *testing.T, toVerify int) {
 	}
 
 	checkResults(t, results, threshold)
+}
+
+func testVerifyHeadersCliqueOnly(t *testing.T, toVerify int) {
+	hardTips := headerdownload.DecodeTips(verifyHardCodedHeadersClique[:toVerify])
+	headers := toHeaders(hardTips)
+
+	const repeats = 5
+
+	var resCliqueProcess time.Duration
+
+	for i := 0; i < repeats; i++ {
+		resCliqueProcess = verifyByEngineProcess(t, headers, core.DefaultRinkebyGenesisBlock(), params.CliqueSnapshot)
+	}
+
+	fmt.Sprint(io.Discard, resCliqueProcess)
+
 }
 
 type engineConstructor func(db ethdb.Database) consensus.Engine
@@ -287,9 +312,7 @@ func toHeaders(tips map[common.Hash]headerdownload.HeaderRecord) []*types.Header
 		headers = append(headers, record.Header)
 	}
 
-	sort.SliceStable(headers, func(i, j int) bool {
-		return headers[i].Number.Cmp(headers[j].Number) <= 0
-	})
+	types.SortHeadersAsc(headers)
 
 	return headers
 }

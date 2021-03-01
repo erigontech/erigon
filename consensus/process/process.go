@@ -2,6 +2,8 @@ package process
 
 import (
 	"errors"
+	"fmt"
+	"math/big"
 	"runtime"
 	"sort"
 	"sync"
@@ -63,14 +65,12 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 					}
 
 					// copy slices and sort. had a data race with downloader
-					reqHeaders := make([]reqHeader, len(req.Headers))
+					reqHeaders := make([]ReqHeader, len(req.Headers))
 					for i := range req.Headers {
-						reqHeaders[i] = reqHeader{req.Headers[i], req.Seal[i]}
+						reqHeaders[i] = ReqHeader{req.Headers[i], req.Seal[i]}
 					}
 
-					sort.Slice(reqHeaders, func(i, j int) bool {
-						return reqHeaders[i].header.Number.Cmp(reqHeaders[j].header.Number) == -1
-					})
+					SortHeadersAsc(reqHeaders)
 
 					req.Headers = make([]*types.Header, len(reqHeaders))
 					req.Seal = make([]bool, len(reqHeaders))
@@ -158,9 +158,53 @@ func NewConsensusProcess(v consensus.Verifier, config *params.ChainConfig, exit 
 	return c
 }
 
-type reqHeader struct {
+type ReqHeader struct {
 	header *types.Header
 	seal   bool
+}
+
+// Counting in-place sort
+func SortHeadersAsc(hs []ReqHeader) {
+	if len(hs) == 0 {
+		return
+	}
+
+	minIdx := 0
+	min := hs[minIdx].header.Number
+	sorted := true
+	var res int
+
+	for i := 1; i < len(hs); i++ {
+		res = hs[i].header.Number.Cmp(min)
+		if res < 0 {
+			min = hs[i].header.Number
+			minIdx = i
+		}
+		if res != 0 {
+			sorted = false
+		}
+	}
+
+	if sorted {
+		return
+	}
+
+	startIDx := 0
+	if minIdx == 0 {
+		startIDx = 1
+	}
+
+	var newIdx int
+	diffWithMin := big.NewInt(0)
+	bigI := big.NewInt(0)
+
+	for i := startIDx; i < len(hs); i++ {
+		bigI.SetInt64(int64(i))
+		for diffWithMin.Sub(hs[i].header.Number, min).Cmp(bigI) != 0 {
+			newIdx = int(diffWithMin.Int64())
+			hs[newIdx], hs[i] = hs[i], hs[newIdx]
+		}
+	}
 }
 
 func (c *Consensus) cleanup() {
@@ -272,13 +316,17 @@ func (c *Consensus) VerifyRequestsCommonAncestor(reqID uint64, headers []*types.
 
 func (c *Consensus) verifyByRequest(reqID uint64, header *types.Header, seal bool, parentsExpected int, knownParents []*types.Header) error {
 	if len(knownParents) != parentsExpected {
+		fmt.Println("verifyByRequest errNotAllParents", reqID, header.Number.Uint64())
 		return errNotAllParents
 	}
 
+	fmt.Println("verify", reqID, header.Number.Uint64(), len(knownParents))
+	t := time.Now()
 	err := c.Server.Verify(c.API.Chain, header, knownParents, false, seal)
 	if err == nil {
 		c.API.CacheHeader(header)
 	}
+	fmt.Println("in verifyByRequest-1", reqID, header.Number.Uint64(), time.Since(t))
 
 	c.API.VerifyHeaderResponses <- consensus.VerifyHeaderResponse{reqID, header.HashCache(), err}
 
@@ -402,8 +450,13 @@ func (c *Consensus) requestParentHeaders(reqID uint64, header *types.Header, req
 	from := reqHeaders[0].Number.Uint64()
 	to := reqHeaders[len(reqHeaders)-1].Number.Uint64()
 
+	fmt.Println("FROM", from, "TO", to)
+
 	headerIdx := int(headerNumber - from)
-	if parentsToValidate <= headerIdx {
+	if parentsToValidate < headerIdx {
+		// 8 8
+		// 11 15
+		fmt.Println("c.innerValidate <-", reqID, header.Number, reqHeaders[headerIdx].Number.Uint64(), parentsToValidate, headerIdx, from)
 		c.innerValidate <- &validateHeaderRequest{reqID, header, seal, reqHeaders[headerIdx-parentsToValidate : headerIdx]}
 		return nil, 0, nil
 	}

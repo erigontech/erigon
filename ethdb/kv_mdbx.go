@@ -13,6 +13,7 @@ import (
 	"path"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -141,12 +142,14 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
+	status := statusOK
 	db := &MdbxKV{
 		opts:    opts,
 		env:     env,
 		log:     logger,
 		wg:      &sync.WaitGroup{},
 		buckets: dbutils.BucketsCfg{},
+		status:  &status,
 	}
 	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
@@ -243,18 +246,33 @@ type MdbxKV struct {
 	log     log.Logger
 	buckets dbutils.BucketsCfg
 	wg      *sync.WaitGroup
+	status  *uint32
 }
+
+const (
+	statusOK uint32 = iota
+	statusClosed
+)
 
 func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
 	opts := db.opts
 	return NewObjectDatabase(NewMDBX().Set(opts).MustOpen())
 }
 
+var idID = new(uint64)
+
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
+	if ok := atomic.CompareAndSwapUint32(db.status, statusOK, statusClosed); !ok {
+		return
+	}
+
 	if db.env != nil {
+		closeID := atomic.AddUint64(idID, 1) - 1
+		fmt.Println("!!!Close", closeID, db.wg == nil)
 		db.wg.Wait()
+		fmt.Println("!!!Close-DONE", closeID, db.wg == nil)
 	}
 
 	if db.env != nil {
@@ -272,7 +290,6 @@ func (db *MdbxKV) Close() {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	}
-
 }
 
 func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
@@ -284,12 +301,16 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *MdbxKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
-	if db.env == nil {
+	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
 		return nil, fmt.Errorf("db closed")
 	}
 	runtime.LockOSThread()
 	defer func() {
 		if err == nil {
+			if atomic.LoadUint32(db.status) != statusOK {
+				err = fmt.Errorf("db closed")
+				return
+			}
 			db.wg.Add(1)
 		}
 	}()
@@ -384,7 +405,7 @@ func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
 }
 
 func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
-	if db.env == nil {
+	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
 		return fmt.Errorf("db closed")
 	}
 	db.wg.Add(1)
@@ -401,7 +422,7 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 }
 
 func (db *MdbxKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
-	if db.env == nil {
+	if db.env == nil || atomic.LoadUint32(db.status) != statusOK {
 		return fmt.Errorf("db closed")
 	}
 	db.wg.Add(1)
