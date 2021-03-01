@@ -1,5 +1,4 @@
 GOBIN = $(CURDIR)/build/bin
-GOBUILD = env GO111MODULE=on go build -trimpath
 GOTEST = go test ./... -p 1 --tags 'mdbx'
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
@@ -8,6 +7,8 @@ LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
 endif
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
+GIT_BRANCH ?= $(shell git branch --show-current)
+GOBUILD = env GO111MODULE=on go build -trimpath -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -22,59 +23,59 @@ endif
 all: tg hack tester rpctest state pics rpcdaemon integration db-tools
 
 docker:
-	docker build -t turbo-geth:latest  --build-arg git_commit='${GIT_COMMIT}' .
+	docker build -t turbo-geth:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' .
 
 docker-compose:
 	docker-compose up
 
 geth:
-	$(GOBUILD) -o $(GOBIN)/tg -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
+	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 tg: mdbx
-	$(GOBUILD) -o $(GOBIN)/tg -tags "mdbx" -ldflags "-X main.gitCommit=${GIT_COMMIT}" ./cmd/tg
+	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
 
 hack:
-	$(GOBUILD) -o $(GOBIN)/hack  -tags "mdbx" ./cmd/hack
+	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/hack\" to launch hack."
 
 tester:
-	$(GOBUILD) -o $(GOBIN)/tester -tags 'mdbx' ./cmd/tester
+	$(GOBUILD) -o $(GOBIN)/tester ./cmd/tester
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tester\" to launch tester."
 
 rpctest:
-	$(GOBUILD) -o $(GOBIN)/rpctest -tags 'mdbx' ./cmd/rpctest
+	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
 
 state:
-	$(GOBUILD) -o $(GOBIN)/state -tags 'mdbx' ./cmd/state
+	$(GOBUILD) -o $(GOBIN)/stats ./cmd/state
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/state\" to launch state."
 
 
 pics:
-	$(GOBUILD) -o $(GOBIN)/pics -tags 'mdbx' ./cmd/pics
+	$(GOBUILD) -o $(GOBIN)/pics ./cmd/pics
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
 rpcdaemon:
-	$(GOBUILD) -o $(GOBIN)/rpcdaemon -ldflags "-X commands.gitCommit=${GIT_COMMIT}" -tags 'mdbx' ./cmd/rpcdaemon
+	$(GOBUILD) -o $(GOBIN)/rpcdaemon ./cmd/rpcdaemon
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
 integration:
-	$(GOBUILD) -o $(GOBIN)/integration -tags 'mdbx' ./cmd/integration
+	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
 headers:
-	$(GOBUILD) -o $(GOBIN)/headers -tags 'mdbx' ./cmd/headers
+	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/headers\" to run headers download PoC."
 
