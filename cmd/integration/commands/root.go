@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/spf13/cobra"
 )
@@ -28,20 +29,26 @@ func RootCommand() *cobra.Command {
 }
 
 func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
+	db := ethdb.NewObjectDatabase(openKV(path, false))
 	if applyMigrations {
-		db := ethdb.NewObjectDatabase(openKV(path, true))
-		if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
+		has, err := migrations.NewMigrator().HasPendingMigrations(db)
+		if err != nil {
 			panic(err)
 		}
-		db.Close()
+		if has {
+			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
+			db.Close()
+			db = ethdb.NewObjectDatabase(openKV(path, true))
+			if err := migrations.NewMigrator().Apply(db, datadir); err != nil {
+				panic(err)
+			}
+			db.Close()
+			db = ethdb.NewObjectDatabase(openKV(path, false))
+		}
 	}
-
-	db := ethdb.NewObjectDatabase(openKV(path, false))
-	err := SetSnapshotKV(db, snapshotDir, snapshotMode)
-	if err != nil {
+	if err := SetSnapshotKV(db, snapshotDir, snapshotMode); err != nil {
 		panic(err)
 	}
-
 	return db
 }
 
