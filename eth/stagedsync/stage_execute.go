@@ -241,9 +241,9 @@ func SpawnExecuteBlocksStage(s *StageState, stateDB ethdb.Database, chainConfig 
 					}
 					chainContext.SetDB(tx)
 				}
-				start = time.Now()
+				//start = time.Now()
 				cache.TurnWritesToReads(writes)
-				log.Info("TurnWritesToReads", "in", time.Since(start))
+				//log.Info("TurnWritesToReads", "in", time.Since(start))
 			}
 		}
 
