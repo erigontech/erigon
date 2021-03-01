@@ -409,17 +409,6 @@ func TestExtendUp(t *testing.T) {
 	} else {
 		t.Errorf("prepend: %v", err)
 	}
-
-	var h7 types.Header
-	h7.Number = big.NewInt(7)
-	h7.Difficulty = big.NewInt(6010)
-	h7.ParentHash = common.HexToHash("0x4354543543959438594359348990345893408")
-	// Introduce hard-coded tip
-	if anchor, err := hd.addHeaderAsAnchor(&h7, true /* hardCoded */); err == nil {
-		hd.addHardCodedTip(10, 5555, h7.Hash(), anchor, *new(uint256.Int).SetUint64(2000))
-	} else {
-		t.Fatalf("settings up h7 (anchor): %v", err)
-	}
 }
 
 func TestExtendDown(t *testing.T) {

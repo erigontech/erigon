@@ -2,6 +2,8 @@
 
 This process is a collection of data structures and algorithms to perform the task of obtaining a consistent and verified header chain from peers over the network.
 
+## Two phases of header downloading
+
 ## Data structures
 
 All data structures, except for the files, are kept in operating memory (RAM), and do not survive an interruption, a crash, or a powerdown. Therefore,

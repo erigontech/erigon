@@ -452,10 +452,9 @@ func (hd *HeaderDownload) hardCodedHeader(header *types.Header, currentTime uint
 		tip := &Tip{
 			anchor:               anchor,
 			cumulativeDifficulty: *diff,
-			timestamp:            header.Time,
 			blockHeight:          header.Number.Uint64(),
-			uncleHash:            header.UncleHash,
 			difficulty:           *diff,
+			header:               header,
 		}
 		tipHash := header.Hash()
 		hd.tips[tipHash] = tip
@@ -1032,7 +1031,7 @@ func (hd *HeaderDownload) childTipValid(child *types.Header, tipHash common.Hash
 	if tip.blockHeight+1 != child.Number.Uint64() {
 		return false, WrongChildBlockHeightPenalty
 	}
-	childDifficulty := hd.calcDifficultyFunc(child.Time, tip.timestamp, tip.difficulty.ToBig(), big.NewInt(int64(tip.blockHeight)), tipHash, tip.uncleHash)
+	childDifficulty := hd.calcDifficultyFunc(child.Time, tip.header.Time, tip.difficulty.ToBig(), big.NewInt(int64(tip.blockHeight)), tipHash, tip.header.UncleHash)
 	if child.Difficulty.Cmp(childDifficulty) != 0 {
 		return false, WrongChildDifficultyPenalty
 	}
@@ -1068,10 +1067,9 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 		tip := &Tip{
 			anchor:               anchor,
 			cumulativeDifficulty: cumulativeDifficulty,
-			timestamp:            header.Time,
 			difficulty:           *diff,
 			blockHeight:          height,
-			uncleHash:            header.UncleHash,
+			header:               header,
 		}
 		hd.tips[tipHash] = tip
 		heap.Push(anchor.tipQueue, AnchorTipItem{hash: tipHash, height: height, hard: hardCodedTip})
@@ -1083,17 +1081,6 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 	hd.anchorTree.ReplaceOrInsert(anchor)
 	hd.limitTips()
 	return nil
-}
-
-// addHardCodedTip adds a hard-coded tip for which cimulative difficulty is known and no prepend is allowed
-func (hd *HeaderDownload) addHardCodedTip(blockHeight uint64, timestamp uint64, hash common.Hash, anchor *Anchor, cumulativeDifficulty uint256.Int) {
-	tip := &Tip{
-		anchor:               anchor,
-		cumulativeDifficulty: cumulativeDifficulty,
-		timestamp:            timestamp,
-		blockHeight:          blockHeight,
-	}
-	hd.tips[hash] = tip
 }
 
 func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, hardCoded bool) (*Anchor, error) {
@@ -1238,4 +1225,78 @@ func (hi *HeaderInserter) GetHighest() uint64 {
 
 func (hi *HeaderInserter) UnwindPoint() uint64 {
 	return hi.unwindPoint
+}
+
+//nolint:interfacer
+func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	//log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
+	foundAnchor, start, anchorParent, invalidAnchors := hd.FindAnchors(segment)
+	if len(invalidAnchors) > 0 {
+		if _, err1 := hd.InvalidateAnchors(anchorParent, invalidAnchors); err1 != nil {
+			log.Error("Invalidation of anchor failed", "error", err1)
+		}
+		log.Warn(fmt.Sprintf("Invalidated anchors %v for %x", invalidAnchors, anchorParent))
+	}
+	foundTip, end, penalty := hd.FindTip(segment, start) // We ignore penalty because we will check it as part of PoW check
+	if penalty != NoPenalty {
+		log.Error(fmt.Sprintf("FindTip penalty %d", penalty))
+		return
+	}
+	if end == 0 {
+		//log.Info("Duplicate segment")
+		return
+	}
+	currentTime := uint64(time.Now().Unix())
+	var hardCoded bool
+	if hardCoded1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
+		hardCoded = hardCoded1
+	} else {
+		//log.Error("VerifySeals", "error", err1)
+		return
+	}
+	if err1 := hd.FlushBuffer(); err1 != nil {
+		log.Error("Could not flush the buffer, will discard the data", "error", err1)
+		return
+	}
+	// There are 4 cases
+	if foundAnchor {
+		if foundTip {
+			// Connect
+			if err1 := hd.Connect(segment, start, end, currentTime); err1 != nil {
+				log.Error("Connect failed", "error", err1)
+			} else {
+				hd.AddSegmentToBuffer(segment, start, end)
+				//log.Info("Connected", "start", start, "end", end)
+			}
+		} else {
+			// ExtendDown
+			if err1 := hd.ExtendDown(segment, start, end, hardCoded, currentTime); err1 != nil {
+				log.Error("ExtendDown failed", "error", err1)
+			} else {
+				hd.AddSegmentToBuffer(segment, start, end)
+				//log.Info("Extended Down", "start", start, "end", end)
+			}
+		}
+	} else if foundTip {
+		if end > 0 {
+			// ExtendUp
+			if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
+				log.Error("ExtendUp failed", "error", err1)
+			} else {
+				hd.AddSegmentToBuffer(segment, start, end)
+				//log.Info("Extended Up", "start", start, "end", end)
+			}
+		}
+	} else {
+		// NewAnchor
+		if err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
+			log.Error("NewAnchor failed", "error", err1)
+		} else {
+			hd.AddSegmentToBuffer(segment, start, end)
+			//log.Info("NewAnchor", "start", start, "end", end)
+		}
+	}
+	//log.Info(hd.AnchorState())
 }

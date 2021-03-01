@@ -48,80 +48,6 @@ func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header           { panic("") }
 func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header          { panic("") }
 
-//nolint:interfacer
-func processSegment(lock *sync.RWMutex, hd *headerdownload.HeaderDownload, segment *headerdownload.ChainSegment) {
-	lock.Lock()
-	defer lock.Unlock()
-	//log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
-	foundAnchor, start, anchorParent, invalidAnchors := hd.FindAnchors(segment)
-	if len(invalidAnchors) > 0 {
-		if _, err1 := hd.InvalidateAnchors(anchorParent, invalidAnchors); err1 != nil {
-			log.Error("Invalidation of anchor failed", "error", err1)
-		}
-		log.Warn(fmt.Sprintf("Invalidated anchors %v for %x", invalidAnchors, anchorParent))
-	}
-	foundTip, end, penalty := hd.FindTip(segment, start) // We ignore penalty because we will check it as part of PoW check
-	if penalty != headerdownload.NoPenalty {
-		log.Error(fmt.Sprintf("FindTip penalty %d", penalty))
-		return
-	}
-	if end == 0 {
-		//log.Info("Duplicate segment")
-		return
-	}
-	currentTime := uint64(time.Now().Unix())
-	var hardCoded bool
-	if hardCoded1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
-		hardCoded = hardCoded1
-	} else {
-		//log.Error("VerifySeals", "error", err1)
-		return
-	}
-	if err1 := hd.FlushBuffer(); err1 != nil {
-		log.Error("Could not flush the buffer, will discard the data", "error", err1)
-		return
-	}
-	// There are 4 cases
-	if foundAnchor {
-		if foundTip {
-			// Connect
-			if err1 := hd.Connect(segment, start, end, currentTime); err1 != nil {
-				log.Error("Connect failed", "error", err1)
-			} else {
-				hd.AddSegmentToBuffer(segment, start, end)
-				//log.Info("Connected", "start", start, "end", end)
-			}
-		} else {
-			// ExtendDown
-			if err1 := hd.ExtendDown(segment, start, end, hardCoded, currentTime); err1 != nil {
-				log.Error("ExtendDown failed", "error", err1)
-			} else {
-				hd.AddSegmentToBuffer(segment, start, end)
-				//log.Info("Extended Down", "start", start, "end", end)
-			}
-		}
-	} else if foundTip {
-		if end > 0 {
-			// ExtendUp
-			if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
-				log.Error("ExtendUp failed", "error", err1)
-			} else {
-				hd.AddSegmentToBuffer(segment, start, end)
-				//log.Info("Extended Up", "start", start, "end", end)
-			}
-		}
-	} else {
-		// NewAnchor
-		if err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
-			log.Error("NewAnchor failed", "error", err1)
-		} else {
-			hd.AddSegmentToBuffer(segment, start, end)
-			//log.Info("NewAnchor", "start", start, "end", end)
-		}
-	}
-	//log.Info(hd.AnchorState())
-}
-
 func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.SentryClient, error) {
 	log.Info("Starting Sentry client", "connecting to sentry", sentryAddr)
 	// CREATING GRPC CLIENT CONNECTION
@@ -490,7 +416,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_sent
 	if segments, penalty, err := cs.hd.SplitIntoSegments(headersRaw, headers); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			for _, segment := range segments {
-				processSegment(&cs.lock, cs.hd, segment)
+				cs.hd.ProcessSegment(segment)
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
@@ -541,7 +467,7 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 	}
 	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
-			processSegment(&cs.lock, cs.hd, segments[0]) // There is only one segment in this case
+			cs.hd.ProcessSegment(segments[0]) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,

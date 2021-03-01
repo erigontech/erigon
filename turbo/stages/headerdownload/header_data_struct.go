@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -85,10 +86,11 @@ func (a *Anchor) tipStretch() uint64 {
 type Tip struct {
 	anchor               *Anchor
 	cumulativeDifficulty uint256.Int
-	timestamp            uint64
 	difficulty           uint256.Int
 	blockHeight          uint64
-	uncleHash            common.Hash
+	header               *types.Header
+	verified             bool   // Whether this tip has been verified by the consensus engine
+	next                 []*Tip // Allows iteration over tips in ascending block height order
 }
 
 // First item in ChainSegment is the anchor
@@ -232,6 +234,7 @@ type HeaderDownload struct {
 	stageReadyCh           chan struct{}
 	stageHeight            uint64
 	headersAdded           int
+	tipMap                 *roaring64.Bitmap // Bitmap of tips (bit is set if there is at least one tip on such block height)
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
