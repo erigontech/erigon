@@ -113,9 +113,7 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 }
 
 // FindAnchors attempts to find anchors to which given chain segment can be attached to
-func (hd *HeaderDownload) FindAnchors(segment *ChainSegment) (found bool, start int, anchorParent common.Hash, invalidAnchors []int) {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
+func (hd *HeaderDownload) findAnchors(segment *ChainSegment) (found bool, start int, anchorParent common.Hash, invalidAnchors []int) {
 	// Walk the segment from children towards parents
 	for i, header := range segment.Headers {
 		// Check if the header can be attached to an anchor of a working tree
@@ -133,9 +131,7 @@ func (hd *HeaderDownload) FindAnchors(segment *ChainSegment) (found bool, start 
 }
 
 // InvalidateAnchors removes trees with given anchor hashes (belonging to the given anchor parent)
-func (hd *HeaderDownload) InvalidateAnchors(anchorParent common.Hash, invalidAnchors []int) (tombstones []common.Hash, err error) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
+func (hd *HeaderDownload) invalidateAnchors(anchorParent common.Hash, invalidAnchors []int) (tombstones []common.Hash, err error) {
 	if len(invalidAnchors) > 0 {
 		if anchors, attaching := hd.anchors[anchorParent]; attaching {
 			j := 0
@@ -168,9 +164,7 @@ func (hd *HeaderDownload) InvalidateAnchors(anchorParent common.Hash, invalidAnc
 
 // FindTip attempts to find tip of a tree that given chain segment can be attached to
 // the given chain segment may be found invalid relative to a working tree, in this case penalty for peer is returned
-func (hd *HeaderDownload) FindTip(segment *ChainSegment, start int) (found bool, end int, penalty Penalty) {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
+func (hd *HeaderDownload) findTip(segment *ChainSegment, start int) (found bool, end int, penalty Penalty) {
 	if _, duplicate := hd.getTip(segment.Headers[start].Hash()); duplicate {
 		return false, 0, NoPenalty
 	}
@@ -191,54 +185,17 @@ func (hd *HeaderDownload) FindTip(segment *ChainSegment, start int) (found bool,
 // VerifySeals verifies Proof Of Work for the part of the given chain segment
 // It reports first verification error, or returns the powDepth that the anchor of this
 // chain segment should have, if created
-func (hd *HeaderDownload) VerifySeals(segment *ChainSegment, anchorFound, tipFound bool, start, end int, currentTime uint64) (hardCoded bool, err error) {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-	if !anchorFound && !tipFound {
-		anchorHeader := segment.Headers[end-1]
-		if anchorHeader.Time > currentTime+hd.newAnchorFutureLimit {
-			return false, fmt.Errorf("detached segment too far in the future")
-		}
-		if anchorHeader.Time+hd.newAnchorPastLimit < currentTime {
-			return false, fmt.Errorf("detached segment too far in the past")
-		}
-		// Check that anchor is not in the middle of known range of headers
-		blockNumber := anchorHeader.Number.Uint64()
-		for _, anchors := range hd.anchors {
-			for _, anchor := range anchors {
-				if blockNumber >= anchor.blockHeight && blockNumber < anchor.maxTipHeight {
-					return false, fmt.Errorf("detached segment in the middle of known segment")
-				}
-			}
+func (hd *HeaderDownload) verifySeals(segment *ChainSegment, start, end int) error {
+	for _, header := range segment.Headers[start:end] {
+		if err := hd.verifySealFunc(header); err != nil {
+			return err
 		}
 	}
-
-	if anchorFound {
-		if anchors, ok := hd.anchors[segment.Headers[start].Hash()]; ok {
-			for _, anchor := range anchors {
-				if anchor.hardCoded {
-					hardCoded = true
-					break
-				}
-			}
-		} else {
-			return false, fmt.Errorf("verifySeals anchors were not found for %x", segment.Headers[start].Hash())
-		}
-	}
-	if !anchorFound || !hardCoded {
-		for _, header := range segment.Headers[start:end] {
-			if err := hd.verifySealFunc(header); err != nil {
-				return false, err
-			}
-		}
-	}
-	return hardCoded, nil
+	return nil
 }
 
 // ExtendUp extends a working tree up from the tip, using given chain segment
-func (hd *HeaderDownload) ExtendUp(segment *ChainSegment, start, end int, currentTime uint64) error {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
+func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int, currentTime uint64) error {
 	// Find attachment tip again
 	tipHeader := segment.Headers[end-1]
 	if attachmentTip, attaching := hd.getTip(tipHeader.ParentHash); attaching {
@@ -286,9 +243,7 @@ func (hd *HeaderDownload) StageReadyChannel() chan struct{} {
 
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the tips from the attached anchors to it
-func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, hardCoded bool, currentTime uint64) error {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
+func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int, hardCoded bool, currentTime uint64) error {
 	// Find attachement anchors again
 	anchorHeader := segment.Headers[start]
 	if anchors, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
@@ -355,9 +310,7 @@ func (hd *HeaderDownload) ExtendDown(segment *ChainSegment, start, end int, hard
 }
 
 // Connect connects some working trees using anchors of some, and a tip of another
-func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, currentTime uint64) error {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
+func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int, currentTime uint64) error {
 	// Find attachment tip again
 	tipHeader := segment.Headers[end-1]
 	// Find attachement anchors again
@@ -412,12 +365,16 @@ func (hd *HeaderDownload) Connect(segment *ChainSegment, start, end int, current
 	}
 	// If we connect to the hard-coded tip, we remove it. Once there is only one hard-coded tip left, it is clear that everything is connected
 	delete(hd.hardTips, tipHeader.ParentHash)
+	if !hd.hardCodedPhaseDone && len(hd.hardTips) == 0 {
+		fmt.Printf("=====================================================\n")
+		fmt.Printf("HARD CODED PHASE DONE\n")
+		fmt.Printf("=====================================================\n")
+		hd.hardCodedPhaseDone = true
+	}
 	return nil
 }
 
-func (hd *HeaderDownload) NewAnchor(segment *ChainSegment, start, end int, currentTime uint64) error {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
+func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, currentTime uint64) error {
 	anchorHeader := segment.Headers[end-1]
 	var anchor *Anchor
 	var err error
@@ -476,9 +433,7 @@ func (hd *HeaderDownload) hardCodedHeader(header *types.Header, currentTime uint
 }
 
 // AddSegmentToBuffer adds another segment to the buffer and return true if the buffer is now full
-func (hd *HeaderDownload) AddSegmentToBuffer(segment *ChainSegment, start, end int) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
+func (hd *HeaderDownload) addSegmentToBuffer(segment *ChainSegment, start, end int) {
 	/*
 		if end > start {
 			fmt.Printf("Adding segment [%d-%d] to the buffer\n", segment.Headers[end-1].Number.Uint64(), segment.Headers[start].Number.Uint64())
@@ -500,6 +455,10 @@ func (hd *HeaderDownload) AddHeaderToBuffer(headerRaw []byte, blockHeight uint64
 func (hd *HeaderDownload) AnchorState() string {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
+	return hd.anchorState()
+}
+
+func (hd *HeaderDownload) anchorState() string {
 	//nolint:prealloc
 	var ss []string
 	for anchorParent, anchors := range hd.anchors {
@@ -667,6 +626,9 @@ func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]HeaderRecord
 	}
 	if maxHeight > hd.maxHardTipHeight {
 		hd.maxHardTipHeight = maxHeight
+	}
+	if len(hd.hardTips) == 0 {
+		hd.hardCodedPhaseDone = true
 	}
 }
 
@@ -949,9 +911,7 @@ func (hd *HeaderDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64
 	hd.RequestQueueTimer = time.NewTimer(time.Duration(nextTopTime-currentTime) * time.Second)
 }
 
-func (hd *HeaderDownload) FlushBuffer() error {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
+func (hd *HeaderDownload) flushBuffer() error {
 	if len(hd.buffer.buffer) < hd.bufferLimit {
 		// Not flushing the buffer unless it is full
 		return nil
@@ -1231,33 +1191,32 @@ func (hi *HeaderInserter) UnwindPoint() uint64 {
 func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	//log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
-	foundAnchor, start, anchorParent, invalidAnchors := hd.FindAnchors(segment)
+	log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
+	foundAnchor, start, anchorParent, invalidAnchors := hd.findAnchors(segment)
 	if len(invalidAnchors) > 0 {
-		if _, err1 := hd.InvalidateAnchors(anchorParent, invalidAnchors); err1 != nil {
-			log.Error("Invalidation of anchor failed", "error", err1)
+		if _, err := hd.invalidateAnchors(anchorParent, invalidAnchors); err != nil {
+			log.Error("Invalidation of anchor failed", "error", err)
 		}
 		log.Warn(fmt.Sprintf("Invalidated anchors %v for %x", invalidAnchors, anchorParent))
 	}
-	foundTip, end, penalty := hd.FindTip(segment, start) // We ignore penalty because we will check it as part of PoW check
+	foundTip, end, penalty := hd.findTip(segment, start) // We ignore penalty because we will check it as part of PoW check
 	if penalty != NoPenalty {
 		log.Error(fmt.Sprintf("FindTip penalty %d", penalty))
 		return
 	}
 	if end == 0 {
-		//log.Info("Duplicate segment")
+		log.Info("Duplicate segment")
 		return
 	}
 	currentTime := uint64(time.Now().Unix())
-	var hardCoded bool
-	if hardCoded1, err1 := hd.VerifySeals(segment, foundAnchor, foundTip, start, end, currentTime); err1 == nil {
-		hardCoded = hardCoded1
-	} else {
-		//log.Error("VerifySeals", "error", err1)
-		return
+	if hd.hardCodedPhaseDone {
+		if err := hd.verifySeals(segment, start, end); err != nil {
+			log.Error("VerifySeals", "error", err)
+			return
+		}
 	}
-	if err1 := hd.FlushBuffer(); err1 != nil {
-		log.Error("Could not flush the buffer, will discard the data", "error", err1)
+	if err := hd.flushBuffer(); err != nil {
+		log.Error("Could not flush the buffer, will discard the data", "error", err)
 		return
 	}
 	if !hd.hardCodedPhaseDone && !foundAnchor {
@@ -1269,39 +1228,39 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 	if foundAnchor {
 		if foundTip {
 			// Connect
-			if err1 := hd.Connect(segment, start, end, currentTime); err1 != nil {
+			if err1 := hd.connect(segment, start, end, currentTime); err1 != nil {
 				log.Error("Connect failed", "error", err1)
 			} else {
-				hd.AddSegmentToBuffer(segment, start, end)
-				//log.Info("Connected", "start", start, "end", end)
+				hd.addSegmentToBuffer(segment, start, end)
+				log.Info("Connected", "start", start, "end", end)
 			}
 		} else {
 			// ExtendDown
-			if err1 := hd.ExtendDown(segment, start, end, hardCoded, currentTime); err1 != nil {
+			if err1 := hd.extendDown(segment, start, end, !hd.hardCodedPhaseDone, currentTime); err1 != nil {
 				log.Error("ExtendDown failed", "error", err1)
 			} else {
-				hd.AddSegmentToBuffer(segment, start, end)
-				//log.Info("Extended Down", "start", start, "end", end)
+				hd.addSegmentToBuffer(segment, start, end)
+				log.Info("Extended Down", "start", start, "end", end)
 			}
 		}
 	} else if foundTip {
 		if end > 0 {
 			// ExtendUp
-			if err1 := hd.ExtendUp(segment, start, end, currentTime); err1 != nil {
+			if err1 := hd.extendUp(segment, start, end, currentTime); err1 != nil {
 				log.Error("ExtendUp failed", "error", err1)
 			} else {
-				hd.AddSegmentToBuffer(segment, start, end)
-				//log.Info("Extended Up", "start", start, "end", end)
+				hd.addSegmentToBuffer(segment, start, end)
+				log.Info("Extended Up", "start", start, "end", end)
 			}
 		}
 	} else {
 		// NewAnchor
-		if err1 := hd.NewAnchor(segment, start, end, currentTime); err1 != nil {
+		if err1 := hd.newAnchor(segment, start, end, currentTime); err1 != nil {
 			log.Error("NewAnchor failed", "error", err1)
 		} else {
-			hd.AddSegmentToBuffer(segment, start, end)
-			//log.Info("NewAnchor", "start", start, "end", end)
+			hd.addSegmentToBuffer(segment, start, end)
+			log.Info("NewAnchor", "start", start, "end", end)
 		}
 	}
-	//log.Info(hd.AnchorState())
+	log.Info(hd.anchorState())
 }
