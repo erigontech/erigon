@@ -70,12 +70,26 @@ var cmdCompareStates = &cobra.Command{
 	},
 }
 
-var cmdToMdbx = &cobra.Command{
-	Use:   "to_mdbx",
+var cmdLmdbToMdbx = &cobra.Command{
+	Use:   "lmdb_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
-		err := toMdbx(ctx, chaindata, toChaindata)
+		err := lmdbToMdbx(ctx, chaindata, toChaindata)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		return nil
+	},
+}
+
+var cmdLmdbToLmdb = &cobra.Command{
+	Use:   "lmdb_to_lmdb",
+	Short: "copy data from '--chaindata' to '--chaindata.to'",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		err := lmdbToLmdb(ctx, chaindata, toChaindata)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -125,11 +139,17 @@ func init() {
 
 	rootCmd.AddCommand(cmdCompareStates)
 
-	withChaindata(cmdToMdbx)
-	withToChaindata(cmdToMdbx)
-	withBucket(cmdToMdbx)
+	withChaindata(cmdLmdbToMdbx)
+	withToChaindata(cmdLmdbToMdbx)
+	withBucket(cmdLmdbToMdbx)
 
-	rootCmd.AddCommand(cmdToMdbx)
+	rootCmd.AddCommand(cmdLmdbToMdbx)
+
+	withChaindata(cmdLmdbToLmdb)
+	withToChaindata(cmdLmdbToLmdb)
+	withBucket(cmdLmdbToLmdb)
+
+	rootCmd.AddCommand(cmdLmdbToLmdb)
 
 	withChaindata(cmdMdbxToMdbx)
 	withToChaindata(cmdMdbxToMdbx)
@@ -380,12 +400,17 @@ MainLoop:
 	return nil
 }
 
-func toMdbx(ctx context.Context, from, to string) error {
+func lmdbToMdbx(ctx context.Context, from, to string) error {
 	_ = os.RemoveAll(to)
-	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint {
-		return (flags | lmdb.Readonly) ^ lmdb.NoReadahead
-	}).MustOpen()
+	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint { return (flags | lmdb.Readonly) ^ lmdb.NoReadahead }).MustOpen()
 	dst := ethdb.NewMDBX().Path(to).MustOpen()
+	return kv2kv(ctx, src, dst)
+}
+
+func lmdbToLmdb(ctx context.Context, from, to string) error {
+	_ = os.RemoveAll(to)
+	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint { return (flags | lmdb.Readonly) ^ lmdb.NoReadahead }).MustOpen()
+	dst := ethdb.NewLMDB().Path(to).MustOpen()
 	return kv2kv(ctx, src, dst)
 }
 

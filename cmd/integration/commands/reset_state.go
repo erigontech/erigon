@@ -4,15 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
-	"sync"
 	"text/tabwriter"
-	"time"
 
-	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -272,84 +266,5 @@ func printStages(db ethdb.Getter) error {
 		}
 		fmt.Fprintf(w, "%s \t %d\n", string(stage), progress)
 	}
-	return nil
-}
-
-func copyCompact() error {
-	from := chaindata
-	backup := from + "_backup"
-	to := chaindata + "_copy"
-
-	log.Info("Start db copy-compact")
-
-	env, errOpen := lmdb.NewEnv()
-	if errOpen != nil {
-		return errOpen
-	}
-
-	if err := env.Open(from, lmdb.Readonly, 0644); err != nil {
-		return err
-	}
-	_ = os.RemoveAll(to)
-	if err := os.MkdirAll(to, 0744); err != nil {
-		return fmt.Errorf("could not create dir: %s, %w", to, err)
-	}
-
-	f1, err := os.Stat(path.Join(from, "data.mdb"))
-	if err != nil {
-		return err
-	}
-
-	err = env.SetMapSize(f1.Size() + int64((1 * datasize.GB).Bytes()))
-	if err != nil {
-		return err
-	}
-
-	f, err := os.Stat(path.Join(from, "data.mdb"))
-	if err != nil {
-		return err
-	}
-
-	ctx, stopLogging := context.WithCancel(context.Background())
-	defer stopLogging()
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		for {
-			time.Sleep(20 * time.Second)
-
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			f2, err := os.Stat(path.Join(to, "data.mdb"))
-			if err != nil {
-				log.Error("Progress check failed", "err", err)
-				return
-			}
-			log.Info("Progress", "done", common.StorageSize(f2.Size()), "from", common.StorageSize(f.Size()))
-		}
-	}()
-
-	if err := env.CopyFlag(to, lmdb.CopyCompact); err != nil {
-		return fmt.Errorf("%w, from: %s, to: %s", err, from, to)
-	}
-
-	stopLogging()
-	wg.Wait()
-	if err := os.Rename(from, backup); err != nil {
-		return err
-	}
-	if err := os.Rename(to, from); err != nil {
-		return err
-	}
-	if err := os.RemoveAll(backup); err != nil {
-		return err
-	}
-
 	return nil
 }
