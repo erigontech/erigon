@@ -17,7 +17,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
-
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/prometheus/tsdb/fileutil"
@@ -548,10 +547,11 @@ func (tx *lmdbTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 }
 
 func (tx *lmdbTx) ClearBucket(bucket string) error {
-	if err := tx.dropEvenIfBucketIsNotDeprecated(bucket); err != nil {
-		return err
+	dbi := tx.db.buckets[bucket].DBI
+	if dbi == NonExistingDBI {
+		return nil
 	}
-	return tx.CreateBucket(bucket)
+	return tx.tx.Drop(lmdb.DBI(dbi), false)
 }
 
 func (tx *lmdbTx) DropBucket(bucket string) error {

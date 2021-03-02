@@ -83,8 +83,8 @@ type Ethereum struct {
 	dialCandidates  enode.Iterator
 
 	// DB interfaces
-	chainDb    *ethdb.ObjectDatabase // Block chain database
-	chainKV    ethdb.KV              // Same as chainDb, but different interface
+	chainDb    ethdb.Database // Block chain database
+	chainKV    ethdb.KV       // Same as chainDb, but different interface
 	privateAPI *grpc.Server
 
 	eventMux       *event.TypeMux
@@ -137,7 +137,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
 
 	// Assemble the Ethereum object
-	var chainDb *ethdb.ObjectDatabase
+	var chainDb ethdb.Database
 	var err error
 	if config.EnableDebugProtocol {
 		if err = os.RemoveAll("simulator"); err != nil {
@@ -145,12 +145,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		}
 		chainDb = ethdb.MustOpen("simulator")
 	} else {
-		err = stack.ApplyMigrations("chaindata", tmpdir)
-		if err != nil {
-			return nil, fmt.Errorf("failed stack.ApplyMigrations: %w", err)
-		}
-
-		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", 0, 0, "", "")
+		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", tmpdir)
 		if err != nil {
 			return nil, err
 		}
@@ -231,13 +226,13 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			if innerErr != nil {
 				return nil, innerErr
 			}
-			snapshotKV := chainDb.KV()
+			snapshotKV := chainDb.(ethdb.HasKV).KV()
 
 			snapshotKV, innerErr = snapshotsync.WrapBySnapshotsFromDownloader(snapshotKV, downloadedSnapshots)
 			if innerErr != nil {
 				return nil, innerErr
 			}
-			chainDb.SetKV(snapshotKV)
+			chainDb.(ethdb.HasKV).SetKV(snapshotKV)
 			innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, downloadedSnapshots)
 			if innerErr != nil {
 				return nil, innerErr
@@ -260,7 +255,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			err = torrentClient.AddSnapshotsTorrents(context.Background(), chainDb, config.NetworkID, config.SnapshotMode)
 			if err == nil {
 				torrentClient.Download()
-				snapshotKV := chainDb.KV()
+				snapshotKV := chainDb.(ethdb.HasKV).KV()
 				mp, innerErr := torrentClient.GetSnapshots(chainDb, config.NetworkID)
 				if innerErr != nil {
 					return nil, innerErr
@@ -270,7 +265,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 				if innerErr != nil {
 					return nil, innerErr
 				}
-				chainDb.SetKV(snapshotKV)
+				chainDb.(ethdb.HasKV).SetKV(snapshotKV)
 				innerErr = snapshotsync.PostProcessing(chainDb, config.SnapshotMode, mp)
 				if innerErr != nil {
 					return nil, innerErr
@@ -284,7 +279,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 	eth := &Ethereum{
 		config:         config,
 		chainDb:        chainDb,
-		chainKV:        chainDb.KV(),
+		chainKV:        chainDb.(ethdb.HasKV).KV(),
 		eventMux:       stack.EventMux(),
 		accountManager: stack.AccountManager(),
 		networkID:      config.NetworkID,
@@ -418,12 +413,12 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, &creds, remoteEvents)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, stack.Config().PrivateApiAddr, &creds, remoteEvents)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.KV(), eth, stack.Config().PrivateApiAddr, nil, remoteEvents)
+			eth.privateAPI, err = remotedbserver.StartGrpc(chainDb.(ethdb.HasKV).KV(), eth, stack.Config().PrivateApiAddr, nil, remoteEvents)
 			if err != nil {
 				return nil, err
 			}

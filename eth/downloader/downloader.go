@@ -117,7 +117,7 @@ type Downloader struct {
 	queue      *queue   // Scheduler for selecting the hashes to download
 	peers      *peerSet // Set of active peers from which download can proceed
 
-	stateDB *ethdb.ObjectDatabase // Database to state sync into (and deduplicate via)
+	stateDB ethdb.Database // Database to state sync into (and deduplicate via)
 	//stateBloom *trie.SyncBloom       // Bloom filter for fast trie node existence checks
 
 	// Statistics
@@ -250,7 +250,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode, eng *process.RemoteEngine) *Downloader {
+func New(checkpoint uint64, stateDB ethdb.Database, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode, eng *process.RemoteEngine) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}

@@ -8,9 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ledgerwatch/lmdb-go/lmdb"
-
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -25,10 +24,8 @@ import (
 func init() {
 	withChaindata(cmdSnapshotCheck)
 	withBlock(cmdSnapshotCheck)
+	withBatchSize(cmdSnapshotCheck)
 	cmdSnapshotCheck.Flags().StringVar(&tmpDBPath, "tmp_db", "", "path to temporary db(for debug)")
-	withChaindata(dbCopyCmd)
-	rootCmd.AddCommand(dbCopyCmd)
-	rootCmd.AddCommand(cmdSnapshotCheck)
 }
 
 var tmpDBPath string
@@ -193,7 +190,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		log.Info("Commit", "t", time.Since(tt))
 	}
 
-	cc, bc, st, progress := newSync(ctx.Done(), db, db, nil)
+	cc, bc, st, cache, progress := newSync(ctx.Done(), db, db, nil)
 	defer bc.Stop()
 	st.DisableStages(stages.Headers,
 		stages.BlockHashes,
@@ -234,6 +231,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 	}
 
 	ch := ctx.Done()
+
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
@@ -259,6 +257,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 				ToBlock:       blockNumber, // limit execution to the specified block
 				WriteReceipts: false,
 				BatchSize:     batchSize,
+				Cache:         cache,
 			})
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)
@@ -289,11 +288,4 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 	}
 
 	return nil
-}
-
-var dbCopyCmd = &cobra.Command{
-	Use: "copy_compact",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return copyCompact()
-	},
 }

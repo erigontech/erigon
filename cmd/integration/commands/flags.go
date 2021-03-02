@@ -10,7 +10,6 @@ var (
 	database           string
 	snapshotMode       string
 	snapshotDir        string
-	compact            bool
 	toChaindata        string
 	referenceChaindata string
 	block              uint64
@@ -54,10 +53,6 @@ func withFile(cmd *cobra.Command) {
 func withLmdbFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
 	cmd.Flags().IntVar(&freelistReuse, "maxFreelistReuse", 0, "Find a big enough contiguous page range for large values in freelist is hard just allocate new pages and even don't try to search if value is bigger than this limit. Measured in pages.")
-}
-
-func withCompact(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&compact, "compact", false, "compact db file. if remove much data form LMDB it slows down tx.Commit because it performs `realloc()` of free_list every commit")
 }
 
 func withReferenceChaindata(cmd *cobra.Command) {

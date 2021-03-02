@@ -84,28 +84,8 @@ func (opts MdbxOpts) WithBucketsConfig(f BucketConfigsFunc) MdbxOpts {
 }
 
 func (opts MdbxOpts) Open() (KV, error) {
-	env, err := mdbx.NewEnv()
-	if err != nil {
-		return nil, err
-	}
-
-	err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024)
-	if err != nil {
-		return nil, err
-	}
-	err = env.SetOption(mdbx.OptMaxReaders, 256)
-	if err != nil {
-		return nil, err
-	}
-
-	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
-
-	err = env.SetMaxDBs(100)
-	if err != nil {
-		return nil, err
-	}
-
 	var logger log.Logger
+	var err error
 	if opts.inMem {
 		logger = log.New("mdbx", "inMem")
 		opts.path, err = ioutil.TempDir(os.TempDir(), "mdbx")
@@ -116,24 +96,46 @@ func (opts MdbxOpts) Open() (KV, error) {
 		logger = log.New("mdbx", path.Base(opts.path))
 	}
 
-	if opts.mapSize == 0 {
-		if opts.inMem {
-			opts.mapSize = 64 * datasize.MB
-		} else {
-			opts.mapSize = LMDBDefaultMapSize
-		}
+	env, err := mdbx.NewEnv()
+	if err != nil {
+		return nil, err
 	}
-
-	if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(5*datasize.GB), -1, -1); err != nil {
+	err = env.SetMaxDBs(100)
+	if err != nil {
+		return nil, err
+	}
+	err = env.SetOption(mdbx.OptMaxReaders, 256)
+	if err != nil {
 		return nil, err
 	}
 
-	if opts.maxFreelistReuse == 0 {
-		opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
-	}
+	if opts.flags&mdbx.Accede == 0 {
+		err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024)
+		if err != nil {
+			return nil, err
+		}
 
-	if err = os.MkdirAll(opts.path, 0744); err != nil {
-		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
+
+		if opts.mapSize == 0 {
+			if opts.inMem {
+				opts.mapSize = 64 * datasize.MB
+			} else {
+				opts.mapSize = LMDBDefaultMapSize
+			}
+		}
+
+		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
+			return nil, err
+		}
+
+		if opts.maxFreelistReuse == 0 {
+			opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
+		}
+
+		if err = os.MkdirAll(opts.path, 0744); err != nil {
+			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		}
 	}
 
 	var flags = opts.flags
@@ -148,23 +150,25 @@ func (opts MdbxOpts) Open() (KV, error) {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
 	}
 
-	// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
-	// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
-	// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
-	if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
-		return nil, err
-	}
-	//if err = env.SetOption(mdbx.OptSpillMaxDenominator, 0); err != nil {
-	//	return nil, err
-	//}
-	if err = env.SetOption(mdbx.OptTxnDpInitial, 4*1024); err != nil {
-		return nil, err
-	}
-	if err = env.SetOption(mdbx.OptDpReverseLimit, 4*1024); err != nil {
-		return nil, err
-	}
-	if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtyListMaxPages); err != nil {
-		return nil, err
+	if opts.flags&mdbx.Accede == 0 {
+		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
+		// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
+		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
+		if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
+			return nil, err
+		}
+		//if err = env.SetOption(mdbx.OptSpillMaxDenominator, 0); err != nil {
+		//	return nil, err
+		//}
+		if err = env.SetOption(mdbx.OptTxnDpInitial, 4*1024); err != nil {
+			return nil, err
+		}
+		if err = env.SetOption(mdbx.OptDpReverseLimit, 4*1024); err != nil {
+			return nil, err
+		}
+		if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtyListMaxPages); err != nil {
+			return nil, err
+		}
 	}
 
 	db := &MdbxKV{
@@ -559,10 +563,7 @@ func (tx *MdbxTx) ClearBucket(bucket string) error {
 	if dbi == NonExistingDBI {
 		return nil
 	}
-	if err := tx.tx.Drop(mdbx.DBI(dbi), false); err != nil {
-		return err
-	}
-	return nil
+	return tx.tx.Drop(mdbx.DBI(dbi), false)
 }
 
 func (tx *MdbxTx) DropBucket(bucket string) error {

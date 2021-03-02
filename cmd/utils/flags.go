@@ -24,6 +24,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -33,6 +34,7 @@ import (
 	"time"
 
 	pcsclite "github.com/gballet/go-libpcsclite"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 
@@ -1736,8 +1738,10 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
 func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
+	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
+
 	name := "chaindata"
-	chainDb, err := stack.OpenDatabase(name)
+	chainDb, err := stack.OpenDatabase(name, tmpdir)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}
