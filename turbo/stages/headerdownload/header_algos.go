@@ -183,8 +183,7 @@ func (hd *HeaderDownload) findTip(segment *ChainSegment, start int) (found bool,
 }
 
 // VerifySeals verifies Proof Of Work for the part of the given chain segment
-// It reports first verification error, or returns the powDepth that the anchor of this
-// chain segment should have, if created
+// It reports first verification error, or returns nil
 func (hd *HeaderDownload) verifySeals(segment *ChainSegment, start, end int) error {
 	for _, header := range segment.Headers[start:end] {
 		if err := hd.verifySealFunc(header); err != nil {
@@ -878,6 +877,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) ([]*He
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.requestQueue.Len() == 0 {
+		fmt.Printf("Request queue is empty\n")
 		return nil, hd.RequestQueueTimer
 	}
 	var prevTopTime uint64 = hd.requestQueue.Front().Value.(RequestQueueItem).waitUntil
@@ -1205,7 +1205,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 		return
 	}
 	if end == 0 {
-		log.Info("Duplicate segment")
+		//log.Info("Duplicate segment")
 		return
 	}
 	currentTime := uint64(time.Now().Unix())
@@ -1228,16 +1228,16 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 	if foundAnchor {
 		if foundTip {
 			// Connect
-			if err1 := hd.connect(segment, start, end, currentTime); err1 != nil {
-				log.Error("Connect failed", "error", err1)
+			if err := hd.connect(segment, start, end, currentTime); err != nil {
+				log.Error("Connect failed", "error", err)
 			} else {
 				hd.addSegmentToBuffer(segment, start, end)
 				log.Info("Connected", "start", start, "end", end)
 			}
 		} else {
 			// ExtendDown
-			if err1 := hd.extendDown(segment, start, end, !hd.hardCodedPhaseDone, currentTime); err1 != nil {
-				log.Error("ExtendDown failed", "error", err1)
+			if err := hd.extendDown(segment, start, end, !hd.hardCodedPhaseDone, currentTime); err != nil {
+				log.Error("ExtendDown failed", "error", err)
 			} else {
 				hd.addSegmentToBuffer(segment, start, end)
 				log.Info("Extended Down", "start", start, "end", end)
@@ -1246,8 +1246,8 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 	} else if foundTip {
 		if end > 0 {
 			// ExtendUp
-			if err1 := hd.extendUp(segment, start, end, currentTime); err1 != nil {
-				log.Error("ExtendUp failed", "error", err1)
+			if err := hd.extendUp(segment, start, end, currentTime); err != nil {
+				log.Error("ExtendUp failed", "error", err)
 			} else {
 				hd.addSegmentToBuffer(segment, start, end)
 				log.Info("Extended Up", "start", start, "end", end)
@@ -1255,12 +1255,18 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 		}
 	} else {
 		// NewAnchor
-		if err1 := hd.newAnchor(segment, start, end, currentTime); err1 != nil {
-			log.Error("NewAnchor failed", "error", err1)
+		if err := hd.newAnchor(segment, start, end, currentTime); err != nil {
+			log.Error("NewAnchor failed", "error", err)
 		} else {
 			hd.addSegmentToBuffer(segment, start, end)
 			log.Info("NewAnchor", "start", start, "end", end)
 		}
 	}
 	log.Info(hd.anchorState())
+}
+
+func (hd *HeaderDownload) HardCodedPhaseDone() bool {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.hardCodedPhaseDone
 }

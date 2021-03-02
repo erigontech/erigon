@@ -352,6 +352,10 @@ func (cs *ControlServerImpl) updateHead(ctx context.Context, height uint64, hash
 }
 
 func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_sentry.InboundMessage) error {
+	if !cs.hd.HardCodedPhaseDone() {
+		// Not ready to receive new block hashes yet
+		return nil
+	}
 	var request eth.NewBlockHashesData
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode NewBlockHashes: %v", err)
@@ -446,6 +450,10 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, inreq *proto_sent
 }
 
 func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.InboundMessage) error {
+	if !cs.hd.HardCodedPhaseDone() {
+		// Not ready to receive new block hashes yet
+		return nil
+	}
 	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
 	_, err := rlpStream.List() // Now stream is at the beginning of the block record
@@ -752,7 +760,7 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 
 func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdownload.HeaderRequest) {
 	for _, req := range reqs {
-		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
+		log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
 		bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
 			Amount:  uint64(req.Length),
 			Reverse: true,
