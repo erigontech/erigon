@@ -337,14 +337,14 @@ func (s *stepCounter) CaptureStart(_ int, from common.Address, to common.Address
 	return nil
 }
 
-func (s *stepCounter) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rStack *stack.ReturnStack, rData []byte, contract *vm.Contract, depth int, err error) error {
+func (s *stepCounter) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rData []byte, contract *vm.Contract, depth int, err error) error {
 	s.steps++
 	// Enable this for more output
 	//s.inner.CaptureState(env, pc, op, gas, cost, memory, stack, rStack, contract, depth, err)
 	return nil
 }
 
-func (s *stepCounter) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rStack *stack.ReturnStack, contract *vm.Contract, depth int, err error) error {
+func (s *stepCounter) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
 
@@ -357,52 +357,6 @@ func (s *stepCounter) CaptureSelfDestruct(from common.Address, to common.Address
 
 func (s *stepCounter) CaptureAccountRead(account common.Address) error {
 	return nil
-}
-
-func (s *stepCounter) CaptureAccountWrite(account common.Address) error {
-	return nil
-}
-
-func TestJumpSub1024Limit(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	var (
-		tds     = state.NewTrieDbState(common.Hash{}, db, 0)
-		state   = state.New(tds)
-		address = common.HexToAddress("0x0a")
-	)
-	// Code is
-	// 0 beginsub
-	// 1 push 0
-	// 3 jumpsub
-	//
-	// The code recursively calls itself. It should error when the returns-stack
-	// grows above 1023
-	state.SetCode(address, []byte{
-		byte(vm.PUSH1), 3,
-		byte(vm.JUMPSUB),
-		byte(vm.BEGINSUB),
-		byte(vm.PUSH1), 3,
-		byte(vm.JUMPSUB),
-	})
-	tracer := stepCounter{inner: vm.NewJSONLogger(nil, os.Stdout)}
-	// Enable 2315
-	_, _, err := Call(address, nil, &Config{State: state,
-		GasLimit:    20000,
-		ChainConfig: params.AllEthashProtocolChanges,
-		EVMConfig: vm.Config{
-			ExtraEips: []int{2315},
-			Debug:     true,
-			//Tracer:    vm.NewJSONLogger(nil, os.Stdout),
-			Tracer: &tracer,
-		}})
-	exp := "return stack limit reached"
-	if err.Error() != exp {
-		t.Fatalf("expected %v, got %v", exp, err)
-	}
-	if exp, got := 2048, tracer.steps; exp != got {
-		t.Fatalf("expected %d steps, got %d", exp, got)
-	}
 }
 
 func TestReturnSubShallow(t *testing.T) {
