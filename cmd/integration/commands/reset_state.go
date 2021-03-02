@@ -36,11 +36,6 @@ var cmdResetState = &cobra.Command{
 			log.Error(err.Error())
 			return err
 		}
-		if compact {
-			if err := copyCompact(); err != nil {
-				return err
-			}
-		}
 
 		return nil
 	},
@@ -66,7 +61,6 @@ var cmdClearUnwindStack = &cobra.Command{
 
 func init() {
 	withChaindata(cmdResetState)
-	withCompact(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
 
