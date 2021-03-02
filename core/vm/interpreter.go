@@ -70,7 +70,6 @@ type Interpreter interface {
 type callCtx struct {
 	memory   *Memory
 	stack    *stack.Stack
-	rstack   *stack.ReturnStack
 	contract *Contract
 }
 
@@ -165,11 +164,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
 		locStack    = stack.New()
-		returns     = stack.NewReturnStack() // local returns stack
+		stack       = newstack()  // local stack
 		callContext = &callCtx{
 			memory:   mem,
 			stack:    locStack,
-			rstack:   returns,
 			contract: contract,
 		}
 		// For optimisation reason we're using uint64 as the program counter.
@@ -188,7 +186,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// they are returned to the pools
 	defer func() {
 		stack.ReturnNormalStack(locStack)
-		stack.ReturnRStack(returns)
 	}()
 	contract.Input = input
 

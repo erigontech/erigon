@@ -232,7 +232,7 @@ func TestAddMod(t *testing.T) {
 // getResult is a convenience function to generate the expected values
 func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcase {
 	var (
-		env           = NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
+		env         = NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
 		rstack      = stack.NewReturnStack()
 		stack       = stack.New()
 		pc          = uint64(0)

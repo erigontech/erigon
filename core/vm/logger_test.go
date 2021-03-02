@@ -63,7 +63,7 @@ func TestStoreCapture(t *testing.T) {
 	stack.Push(uint256.NewInt().SetUint64(1))
 	stack.Push(uint256.NewInt())
 	var index common.Hash
-	if err := logger.CaptureState(env, 0, SSTORE, 0, 0, mem, stack, rstack, nil, contract, 0, nil); err != nil {
+	if err := logger.CaptureState(env, 0, SSTORE, 0, 0, mem, stack, nil, contract, 0, nil); err != nil {
 		t.Fatalf("error while caturing state %v", err)
 	}
 	if len(logger.storage[contract.Address()]) == 0 {

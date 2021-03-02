@@ -152,10 +152,10 @@ func TestHaltBetweenSteps(t *testing.T) {
 	env := vm.NewEVM(vm.BlockContext{BlockNumber: big.NewInt(1)}, vm.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(), 0, false /* skipAnalysis */)
 
-	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, nil, contract, 0, nil) //nolint:errcheck
+	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, contract, 0, nil) //nolint:errcheck
 	timeout := errors.New("stahp")
 	tracer.Stop(timeout)
-	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, nil, contract, 0, nil) //nolint:errcheck
+	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, contract, 0, nil) //nolint:errcheck
 
 	if _, err := tracer.GetResult(); err.Error() != timeout.Error() {
 		t.Errorf("Expected timeout error, got %v", err)
