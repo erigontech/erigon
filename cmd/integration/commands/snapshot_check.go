@@ -26,9 +26,6 @@ func init() {
 	withBlock(cmdSnapshotCheck)
 	withBatchSize(cmdSnapshotCheck)
 	cmdSnapshotCheck.Flags().StringVar(&tmpDBPath, "tmp_db", "", "path to temporary db(for debug)")
-	withChaindata(dbCopyCmd)
-	rootCmd.AddCommand(dbCopyCmd)
-	rootCmd.AddCommand(cmdSnapshotCheck)
 }
 
 var tmpDBPath string
@@ -291,11 +288,4 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 	}
 
 	return nil
-}
-
-var dbCopyCmd = &cobra.Command{
-	Use: "copy_compact",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return copyCompact()
-	},
 }
