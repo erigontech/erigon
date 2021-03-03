@@ -201,7 +201,7 @@ func GenStructStep(
 				if from == 0 {
 					from = 1
 				}
-				hasHash[from-1] ^= 1 << curr[from-1]
+				hasHash[from-1] &^= 1 << curr[from-1]
 				for i := from; i < remainderStart+remainderLen; i++ {
 					if 1<<curr[i]&hasBranch[i] != 0 {
 						hasBranch[from-1] |= 1 << curr[from-1]
