@@ -130,15 +130,3 @@ Date:   Wed Mar 3 18:04:50 2021 +0800
     
     * cmd/utils: set the txlookuplimit to 0
 
-commit c539a052bd5a31dfaeabf65d789b691f5d03f300
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed Mar 3 18:04:25 2021 +0800
-
-    params: update chts (#22418)
-
-commit 0540d3c6f60d1cba6a3dd384790f5d1fa0d799bd
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Wed Mar 3 08:42:59 2021 +0100
-
-    cmd/geth: put allowUnsecureTx flag in RPC section (#22412)
-
