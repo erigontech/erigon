@@ -108,9 +108,3 @@ Date:   Wed Mar 3 22:08:14 2021 +0800
     
     * cmd/geth: remove whisper configs
 
-commit b24804d88cdbd38edc85ee9f2afaa9e6cb7a767e
-Author: Zsolt Felföldi <zsfelfoldi@gmail.com>
-Date:   Wed Mar 3 15:05:24 2021 +0100
-
-    les: fix nodiscover option on the client side (#22422)
-
