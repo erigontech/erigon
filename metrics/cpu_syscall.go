@@ -25,14 +25,12 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
-func getRUsage(_ *process.Process) (usage syscall.Rusage) {
-	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &usage); err != nil {
+func getRUsage(p *process.Process) (inBlock, outBlocks, nvcsw, nivcsw int64) {
+	var ru syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
 		log.Warn("Failed to retrieve CPU time", "err", err)
 		return
 	}
-	return
-}
+	return ru.Inblock, ru.Oublock, ru.Nvcsw, ru.Nivcsw
 
-func cpuTimeFromUsage(usage syscall.Rusage) int64 {
-	return int64(usage.Utime.Sec+usage.Stime.Sec)*100 + int64(usage.Utime.Usec+usage.Stime.Usec)/10000 //nolint:unconvert
 }

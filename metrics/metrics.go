@@ -78,7 +78,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 	var (
 		cpuSysLoad    = GetOrRegisterGauge("system/cpu/sysload", DefaultRegistry)
 		cpuSysWait    = GetOrRegisterGauge("system/cpu/syswait", DefaultRegistry)
-		cpuProcLoad   = GetOrRegisterGauge("system/cpu/procload", DefaultRegistry)
 		cpuThreads    = GetOrRegisterGauge("system/cpu/threads", DefaultRegistry)
 		cpuGoroutines = GetOrRegisterGauge("system/cpu/goroutines", DefaultRegistry)
 
@@ -135,12 +134,12 @@ func CollectProcessMetrics(refresh time.Duration) {
 		ReadCPUStats(p, cpuStats[location1])
 		cpuSysLoad.Update((cpuStats[location1].GlobalTime - cpuStats[location2].GlobalTime) / refreshFreq)
 		cpuSysWait.Update((cpuStats[location1].GlobalWait - cpuStats[location2].GlobalWait) / refreshFreq)
-		cpuProcLoad.Update((cpuStats[location1].LocalTime - cpuStats[location2].LocalTime) / refreshFreq)
 
-		ruInblock.Update(cpuStats[location1].RUsage.Inblock)
-		ruOutblock.Update(cpuStats[location1].RUsage.Oublock)
-		ruNvcsw.Update(cpuStats[location1].RUsage.Nvcsw)
-		ruNivcsw.Update(cpuStats[location1].RUsage.Nivcsw)
+		inblock, outblokc, nvcsw, nivcsw := getRUsage(p)
+		ruInblock.Update(inblock)
+		ruOutblock.Update(outblokc)
+		ruNvcsw.Update(nvcsw)
+		ruNivcsw.Update(nivcsw)
 
 		cpuThreads.Update(int64(threadCreateProfile.Count()))
 		cpuGoroutines.Update(int64(runtime.NumGoroutine()))

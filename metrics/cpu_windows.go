@@ -16,10 +16,10 @@
 
 package metrics
 
-func getRUsage(_ *process.Process) (usage syscall.Rusage) {
-	return
-}
+import (
+	"github.com/shirou/gopsutil/v3/process"
+)
 
-func cpuTimeFromUsage(usage syscall.Rusage) int64 {
-	return 0
+func getRUsage(p *process.Process) (inBlock, outBlocks, nvcsw, nivcsw int64) {
+	return 0, 0, 0, 0
 }
