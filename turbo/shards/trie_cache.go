@@ -207,7 +207,7 @@ func (shi *StorageHashItem) HasPrefix(prefix CacheItem) bool {
 
 func (sc *StateCache) SetAccountHashesRead(prefix []byte, hasState, hasTree, hasHash uint16, hashes []common.Hash) {
 	if bits.OnesCount16(hasHash) != len(hashes) {
-		panic(fmt.Errorf("invariant bits.OnesCount16(hasTree) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)))
+		panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)))
 	}
 	assertSubset(hasTree, hasState)
 	assertSubset(hasHash, hasState)
@@ -227,7 +227,7 @@ func (sc *StateCache) SetAccountHashesRead(prefix []byte, hasState, hasTree, has
 
 func (sc *StateCache) SetAccountHashWrite(prefix []byte, hasState, hasTree, hasHash uint16, hashes []common.Hash) {
 	if bits.OnesCount16(hasHash) != len(hashes) {
-		panic(fmt.Errorf("invariant bits.OnesCount16(hasTree) == len(hashes) failed: %d, %d", bits.OnesCount16(hasTree), len(hashes)))
+		panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)))
 	}
 	assertSubset(hasTree, hasState)
 	assertSubset(hasHash, hasState)

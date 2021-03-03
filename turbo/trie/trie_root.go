@@ -1406,14 +1406,17 @@ func keyIsBefore(k1, k2 []byte) bool {
 	return bytes.Compare(k1, k2) < 0
 }
 
-func UnmarshalTrieNodeTyped(v []byte) (uint16, uint16, uint16, []common.Hash) {
-	hasState, hasTree, hasHash := binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:])
-	v = v[6:]
-	newV := make([]common.Hash, len(v)/common.HashLength)
-	for i := 0; i < len(newV); i++ {
-		newV[i].SetBytes(common.CopyBytes(v[i*common.HashLength : (i+1)*common.HashLength]))
+func UnmarshalTrieNodeTyped(v []byte) (hasState, hasTree, hasHash uint16, hashes []common.Hash, rootHash common.Hash) {
+	hasState, hasTree, hasHash, v = binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:]), v[6:]
+	if bits.OnesCount16(hasHash)+1 == len(v)/common.HashLength {
+		rootHash.SetBytes(common.CopyBytes(v[:32]))
+		v = v[32:]
 	}
-	return hasState, hasTree, hasHash, newV
+	hashes = make([]common.Hash, len(v)/common.HashLength)
+	for i := 0; i < len(hashes); i++ {
+		hashes[i].SetBytes(common.CopyBytes(v[i*common.HashLength : (i+1)*common.HashLength]))
+	}
+	return
 }
 
 func UnmarshalTrieNode(v []byte) (hasState, hasTree, hasHash uint16, hashes, rootHash []byte) {
@@ -1441,7 +1444,7 @@ func StorageKey(addressHash []byte, incarnation uint64, prefix []byte) []byte {
 	return dbutils.GenerateCompositeStoragePrefix(addressHash, incarnation, prefix)
 }
 
-func MarshalTrieNode(hasState, hasTree, hasHash uint16, hashes []byte, rootHash []byte, buf []byte) []byte {
+func MarshalTrieNode(hasState, hasTree, hasHash uint16, hashes, rootHash []byte, buf []byte) []byte {
 	buf = buf[:len(hashes)+len(rootHash)+6]
 	meta, hashesList := buf[:6], buf[6:]
 	binary.BigEndian.PutUint16(meta, hasState)
@@ -1456,7 +1459,7 @@ func MarshalTrieNode(hasState, hasTree, hasHash uint16, hashes []byte, rootHash 
 	return buf
 }
 
-func CastTrieNodeValue(hashes []byte, rootHash []byte) []common.Hash {
+func CastTrieNodeValue(hashes, rootHash []byte) []common.Hash {
 	to := make([]common.Hash, len(hashes)/common.HashLength+len(rootHash)/common.HashLength)
 	i := 0
 	if len(rootHash) > 0 {
@@ -1500,7 +1503,7 @@ func loadAccTrieToCache(ih ethdb.Cursor, prefix []byte, misses [][]byte, cache *
 			if !bytes.HasPrefix(k, miss) || !bytes.HasPrefix(k, prefix) { // read all accounts until next AccTrie
 				break
 			}
-			hasState, hasTree, hasHash, newV := UnmarshalTrieNodeTyped(v)
+			hasState, hasTree, hasHash, newV, _ := UnmarshalTrieNodeTyped(v)
 			cache.SetAccountHashesRead(k, hasState, hasTree, hasHash, newV)
 		}
 	}

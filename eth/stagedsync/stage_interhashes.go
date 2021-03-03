@@ -597,7 +597,7 @@ func cacheWarmUpIfNeed(db ethdb.Database, cache *shards.StateCache) error {
 		if len(k) > 2 {
 			return true, nil
 		}
-		hasState, hasTree, hasHash, hashes := trie.UnmarshalTrieNodeTyped(v)
+		hasState, hasTree, hasHash, hashes, _ := trie.UnmarshalTrieNodeTyped(v)
 		cache.SetAccountHashesRead(k, hasState, hasTree, hasHash, hashes)
 		return true, nil
 	}); err != nil {
@@ -607,15 +607,15 @@ func cacheWarmUpIfNeed(db ethdb.Database, cache *shards.StateCache) error {
 }
 
 func accountTrieCollectorForCache(cache *shards.StateCache) trie.HashCollector2 {
-	return func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+	return func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, _ []byte) error {
 		if len(keyHex) == 0 {
 			return nil
 		}
-		if hashes == nil && rootHash == nil {
+		if hasState == 0 {
 			cache.SetAccountHashDelete(keyHex)
 			return nil
 		}
-		newV := trie.CastTrieNodeValue(hashes, rootHash)
+		newV := trie.CastTrieNodeValue(hashes, nil)
 		cache.SetAccountHashWrite(keyHex, hasState, hasTree, hasHash, newV)
 		return nil
 	}
@@ -624,7 +624,7 @@ func accountTrieCollectorForCache(cache *shards.StateCache) trie.HashCollector2 
 func storageTrieCollectorForCache(cache *shards.StateCache) trie.StorageHashCollector2 {
 	return func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		addr, inc := common.BytesToHash(accWithInc[:32]), binary.BigEndian.Uint64(accWithInc[32:])
-		if hashes == nil && rootHash == nil {
+		if hasState == 0 {
 			cache.SetStorageHashDelete(addr, inc, keyHex, hasState, hasTree, hasHash, nil)
 			return nil
 		}
