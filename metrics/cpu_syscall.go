@@ -32,3 +32,7 @@ func getRUsage(_ *process.Process) (usage syscall.Rusage) {
 	}
 	return
 }
+
+func cpuTimeFromUsage(usage syscall.Rusage) int64 {
+	return int64(usage.Utime.Sec+usage.Stime.Sec)*100 + int64(usage.Utime.Usec+usage.Stime.Usec)/10000 //nolint:unconvert
+}
