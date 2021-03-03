@@ -58,6 +58,3 @@ jobs:
 
 
       - run: docker build .
-      - run:
-          name: Cross-compile
-          command: GOOS=windows GOARCH=amd64 make all
