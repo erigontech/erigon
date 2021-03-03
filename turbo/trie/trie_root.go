@@ -1479,7 +1479,6 @@ func collectMissedAccTrie(canUse func([]byte) (bool, []byte), prefix []byte, cac
 		if ok, _ := canUse(k); ok {
 			return false, nil
 		}
-
 		return hasTree, common.Stopped(quit)
 	}, func(k []byte) {
 		misses = append(misses, common.CopyBytes(k))
@@ -1590,6 +1589,7 @@ func loadStorageToCache(ss ethdb.Cursor, misses [][]byte, cache *shards.StateCac
 
 func collectMissedAccounts(canUse func([]byte) (bool, []byte), prefix []byte, cache *shards.StateCache, quit <-chan struct{}) ([][]byte, error) {
 	var misses [][]byte
+
 	if err := cache.AccountTree(prefix, func(k []byte, v common.Hash, hasTree, hasHash bool) (toChild bool, err error) {
 		if k == nil {
 			return hasTree, nil
@@ -1647,14 +1647,14 @@ func (l *FlatDBTrieLoader) prep(accs, st, trieAcc ethdb.Cursor, prefix []byte, c
 	return nil
 }
 
-func (l *FlatDBTrieLoader) walkAccountTree(prefix []byte, cache *shards.StateCache, walker func(ihK []byte, ihV common.Hash, hasTree, skipState bool, accSeek []byte) error) error {
+func (l *FlatDBTrieLoader) walkAccountTree(prefix []byte, cache *shards.StateCache, walker func(ihK []byte, ihV common.Hash, hasTree, skipState bool, accSeek []byte) error, onMiss func(k []byte)) error {
 	var canUse = func(prefix []byte) (bool, []byte) {
 		retain, nextCreated := l.rd.RetainWithMarker(prefix)
 		return !retain, nextCreated
 	}
 
 	var prev []byte
-	_, nextCreated := canUse([]byte{})
+	_, nextCreated := canUse(prefix)
 	var skipState bool
 
 	return cache.AccountTree(prefix, func(k []byte, h common.Hash, hasTree, hasHash bool) (toChild bool, err error) {
@@ -1686,9 +1686,7 @@ func (l *FlatDBTrieLoader) walkAccountTree(prefix []byte, cache *shards.StateCac
 		// TODO: delete by hash collector and add protection from double-delete
 		cache.SetAccountHashDelete(k[:len(k)-1])
 		return hasTree, nil
-	}, func(k []byte) {
-		panic(fmt.Errorf("key %x not found in cache", k))
-	})
+	}, onMiss)
 }
 
 func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *StorageTrieCursor, prefix []byte, cache *shards.StateCache, quit <-chan struct{}) (common.Hash, error) {
@@ -1775,6 +1773,8 @@ func (l *FlatDBTrieLoader) post(storages ethdb.CursorDupSort, ihStorage *Storage
 			return err
 		}
 		return nil
+	}, func(k []byte) {
+		panic(fmt.Errorf("key %x not found in cache", k))
 	}); err != nil {
 		return EmptyRoot, err
 	}
@@ -1853,6 +1853,8 @@ func (l *FlatDBTrieLoader) CalcTrieRootOnCache(cache *shards.StateCache) (common
 			return err
 		}
 		return nil
+	}, func(k []byte) {
+		panic(fmt.Errorf("key %x not found in cache", k))
 	}); err != nil {
 		return EmptyRoot, err
 	}

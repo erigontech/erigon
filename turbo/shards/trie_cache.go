@@ -385,9 +385,9 @@ func (sc *StateCache) AccountTree(prefix []byte, walker func(k []byte, h common.
 		hasStateItem, hasTreeItem, hasHashItem uint16
 		hashItem                               []common.Hash
 	)
-	var isChild = func() bool { return (1<<id[lvl])&hasState[lvl] != 0 }
-	var isBranch = func() bool { return (1<<id[lvl])&hasTree[lvl] != 0 }
-	var isHash = func() bool { return (1<<id[lvl])&hasHash[lvl] != 0 }
+	var _hasChild = func() bool { return (1<<id[lvl])&hasState[lvl] != 0 }
+	var _hasTree = func() bool { return (1<<id[lvl])&hasTree[lvl] != 0 }
+	var _hasHash = func() bool { return (1<<id[lvl])&hasHash[lvl] != 0 }
 	var _unmarshal = func() {
 		from, to := lvl+1, len(k)
 		if lvl >= len(k) {
@@ -402,15 +402,15 @@ func (sc *StateCache) AccountTree(prefix []byte, walker func(k []byte, h common.
 	}
 	var _nextSiblingInMem = func() bool {
 		for id[lvl]++; id[lvl] < int16(bits.Len16(hasState[lvl])); id[lvl]++ { // go to sibling
-			if !isChild() {
+			if !_hasChild() {
 				continue
 			}
 
-			if isHash() {
+			if _hasHash() {
 				hashID[lvl]++
 				return true
 			}
-			if isBranch() {
+			if _hasTree() {
 				return true
 			}
 		}
@@ -432,9 +432,9 @@ func (sc *StateCache) AccountTree(prefix []byte, walker func(k []byte, h common.
 				nonNilLvl := lvl - 1
 				for ; k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
 				}
-				cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
+				next = append(append(next[:0], k[lvl]...), uint8(id[lvl]))
 				buf = append(append(buf[:0], k[nonNilLvl]...), uint8(id[nonNilLvl]))
-				if _seek(cur, buf) {
+				if _seek(next, buf) {
 					return true
 				}
 				lvl = nonNilLvl + 1
@@ -461,13 +461,13 @@ func (sc *StateCache) AccountTree(prefix []byte, walker func(k []byte, h common.
 
 	for k[lvl] != nil && bytes.HasPrefix(k[lvl], prefix) { // go to sibling in cache
 		cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
-		toChild, err := walker(cur, hashes[lvl][hashID[lvl]], isBranch(), isHash())
+		toChild, err := walker(cur, hashes[lvl][hashID[lvl]], _hasTree(), _hasHash())
 		if err != nil {
 			return err
 		}
 
 		// preOrderTraversalStep
-		if toChild && isBranch() {
+		if toChild && _hasTree() {
 			next = append(append(next[:0], k[lvl]...), uint8(id[lvl]))
 			ihK, hasStateItem, hasTreeItem, hasHashItem, hashItem, ok = sc.GetAccountHash(next)
 			if ok {
@@ -503,9 +503,9 @@ func (sc *StateCache) StorageTree(prefix []byte, accHash common.Hash, incarnatio
 		hasStateItem, hasTreeItem, hasHashItem uint16
 		hashItem                               []common.Hash
 	)
-	var isChild = func() bool { return (1<<id[lvl])&hasState[lvl] != 0 }
-	var isBranch = func() bool { return (1<<id[lvl])&hasTree[lvl] != 0 }
-	var isHash = func() bool { return (1<<id[lvl])&hasHash[lvl] != 0 }
+	var _hasChild = func() bool { return (1<<id[lvl])&hasState[lvl] != 0 }
+	var _hasBranch = func() bool { return (1<<id[lvl])&hasTree[lvl] != 0 }
+	var _hasHash = func() bool { return (1<<id[lvl])&hasHash[lvl] != 0 }
 	var _unmarshal = func() {
 		from, to := lvl+1, len(k)
 		if lvl >= len(k) {
@@ -520,15 +520,15 @@ func (sc *StateCache) StorageTree(prefix []byte, accHash common.Hash, incarnatio
 	}
 	var _nextSiblingInMem = func() bool {
 		for id[lvl]++; id[lvl] < int16(bits.Len16(hasState[lvl])); id[lvl]++ { // go to sibling
-			if !isChild() {
+			if !_hasChild() {
 				continue
 			}
 
-			if isHash() {
+			if _hasHash() {
 				hashID[lvl]++
 				return true
 			}
-			if isBranch() {
+			if _hasBranch() {
 				return true
 			}
 		}
@@ -550,9 +550,9 @@ func (sc *StateCache) StorageTree(prefix []byte, accHash common.Hash, incarnatio
 				nonNilLvl := lvl - 1
 				for ; k[nonNilLvl] == nil && nonNilLvl > 1; nonNilLvl-- {
 				}
-				cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
+				next = append(append(next[:0], k[lvl]...), uint8(id[lvl]))
 				buf = append(append(buf[:0], k[nonNilLvl]...), uint8(id[nonNilLvl]))
-				if _seek(cur, buf) {
+				if _seek(next, buf) {
 					return true
 				}
 				lvl = nonNilLvl + 1
@@ -579,12 +579,12 @@ func (sc *StateCache) StorageTree(prefix []byte, accHash common.Hash, incarnatio
 
 	for k[lvl] != nil && bytes.HasPrefix(k[lvl], prefix) { // go to sibling in cache
 		cur = append(append(cur[:0], k[lvl]...), uint8(id[lvl]))
-		toChild, err := walker(cur, hashes[lvl][hashID[lvl]], isBranch(), isHash())
+		toChild, err := walker(cur, hashes[lvl][hashID[lvl]], _hasBranch(), _hasHash())
 		if err != nil {
 			return err
 		}
 
-		if toChild && isBranch() {
+		if toChild && _hasBranch() {
 			next = append(append(next[:0], k[lvl]...), uint8(id[lvl]))
 			ihK, hasStateItem, hasTreeItem, hasHashItem, hashItem, ok = sc.GetStorageHash(accHash, incarnation, next)
 			if ok {
