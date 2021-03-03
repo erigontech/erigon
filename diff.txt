@@ -114,19 +114,3 @@ Date:   Wed Mar 3 15:05:24 2021 +0100
 
     les: fix nodiscover option on the client side (#22422)
 
-commit ba999105ef89473cfe39e5e53354f7099e67a290
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Wed Mar 3 12:05:27 2021 +0200
-
-    core/forkid, params: unset Berlin fork number (#22413)
-
-commit 07e907c7d4ce01fff663aa7b5a378f647518996f
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed Mar 3 18:04:50 2021 +0800
-
-    cmd/utils: fix txlookuplimit for archive node (#22419)
-    
-    * cmd/utils: fix exclusive check for archive node
-    
-    * cmd/utils: set the txlookuplimit to 0
-
