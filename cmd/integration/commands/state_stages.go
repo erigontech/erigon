@@ -3,7 +3,6 @@ package commands
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -465,16 +464,11 @@ func checkChangeSet(db ethdb.Database, blockNum uint64, expectedAccountChanges *
 }
 
 func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) error {
-	currentKey := dbutils.EncodeBlockNumber(blockNum)
-
-	vv, ok := changeset.Mapper[changeSetBucket]
-	if !ok {
-		return errors.New("unknown bucket type")
-	}
-
-	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, address, v []byte) (bool, error) {
-		var k = address
-		bm, innerErr := bitmapdb.Get64(db, vv.IndexBucket, k, blockN-1, blockN+1)
+	indexBucket := changeset.Mapper[changeSetBucket].IndexBucket
+	blockNumBytes := dbutils.EncodeBlockNumber(blockNum)
+	if err := changeset.Walk(db, changeSetBucket, blockNumBytes, 0, func(blockN uint64, address, v []byte) (bool, error) {
+		k := dbutils.CompositeKeyWithoutIncarnation(address)
+		bm, innerErr := bitmapdb.Get64(db, indexBucket, k, blockN-1, blockN+1)
 		if innerErr != nil {
 			return false, innerErr
 		}
