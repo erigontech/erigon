@@ -194,10 +194,14 @@ func GenStructStep(
 				if trace {
 					fmt.Printf("Extension before: %x->%x,%b, %b, %b\n", curr[:remainderStart], curr[remainderStart:remainderStart+remainderLen], hasHash, hasBranch, groups)
 				}
+				// can't use hash of extension node
+				// but must propagate hasBranch bits to keep tracking all existing DB records
+				// groups bit also require propagation, but it's done automatically
 				from := remainderStart
 				if from == 0 {
 					from = 1
 				}
+				hasHash[from-1] &^= 1 << curr[from-1]
 				for i := from; i < remainderStart+remainderLen; i++ {
 					if 1<<curr[i]&hasBranch[i] != 0 {
 						hasBranch[from-1] |= 1 << curr[from-1]
