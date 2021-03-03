@@ -25,7 +25,7 @@ func TestTest1(t *testing.T) {
 	if err1 != nil {
 		t.Fatalf("Cannot create directory: %s", path)
 	}
-	err1 = env.Open(path, 0, 0664)sd
+	err1 = env.Open(path, 0, 0664)
 	defer env.Close()
 	if err1 != nil {
 		t.Fatalf("Cannot open environment: %s", err1)
