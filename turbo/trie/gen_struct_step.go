@@ -210,6 +210,7 @@ func GenStructStep(
 				}
 				hasBranch = hasBranch[:from]
 				hasHash = hasHash[:from]
+				hasHash[from-1] ^= 1 << curr[from-1]
 				if trace {
 					fmt.Printf("Extension: %x, %b, %b, %b\n", curr[remainderStart:remainderStart+remainderLen], hasHash, hasBranch, groups)
 				}
