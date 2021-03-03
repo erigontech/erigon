@@ -87,24 +87,4 @@ Date:   Wed Mar 3 17:44:17 2021 +0100
 
     params: release geth 1.10.0 stable
 
-commit cd316d7c7158f1ffc99910c8c07b951ec05ed067
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Wed Mar 3 15:50:07 2021 +0100
-
-    tests: update to latest tests (#22290)
-    
-    This updates the consensus tests to commit 31d6630 and
-    adds support for access list transactions in the test runner.
-    
-    Co-authored-by: Martin Holst Swende <martin@swende.se>
-
-commit 5a81dd97d5f3347457e640631564fa5b893720c2
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Wed Mar 3 22:08:14 2021 +0800
-
-    cmd: retire whisper flags (#22421)
-    
-    * cmd: retire whisper flags
-    
-    * cmd/geth: remove whisper configs
 
