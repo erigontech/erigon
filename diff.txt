@@ -142,21 +142,3 @@ Date:   Wed Mar 3 08:42:59 2021 +0100
 
     cmd/geth: put allowUnsecureTx flag in RPC section (#22412)
 
-commit 430f69e01eb33a1b2f4f3c9372da14d01aaba62e
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Mar 2 23:51:03 2021 +0200
-
-    core/vm/runtime: more unshipping
-
-commit 7834e4a278038e57b741ee826b3a46ff9d809fcc
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Mar 2 23:40:57 2021 +0200
-
-    core, eth: unship EIP 2315
-
-commit 19d7a37abb9f3b9bf1a94baf6bd8c7d5042e54f8
-Author: Gary Rong <garyrong0905@gmail.com>
-Date:   Mon Mar 1 17:26:10 2021 +0800
-
-    core/rawdb: fix the transaction indexer (#22395)
-
