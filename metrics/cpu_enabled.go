@@ -19,8 +19,6 @@
 package metrics
 
 import (
-	"syscall"
-
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/process"
 )
@@ -31,10 +29,4 @@ func ReadCPUStats(p *process.Process, stats *CPUStats) {
 		stats.GlobalTime = int64((m.User + m.Nice + m.System) * cpu.ClocksPerSec)
 		stats.GlobalWait = int64((m.Iowait) * cpu.ClocksPerSec)
 	}
-	stats.RUsage = getRUsage(p)
-	stats.LocalTime = cpuTimeFromUsage(stats.RUsage)
-}
-
-func cpuTimeFromUsage(usage syscall.Rusage) int64 {
-	return int64(usage.Utime.Sec+usage.Stime.Sec)*100 + int64(usage.Utime.Usec+usage.Stime.Usec)/10000 //nolint:unconvert
 }
