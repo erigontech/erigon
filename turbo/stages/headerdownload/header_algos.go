@@ -364,11 +364,13 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int, current
 	}
 	// If we connect to the hard-coded tip, we remove it. Once there is only one hard-coded tip left, it is clear that everything is connected
 	delete(hd.hardTips, tipHeader.ParentHash)
-	if !hd.hardCodedPhaseDone && len(hd.hardTips) == 0 {
+	if !hd.hardCodedPhaseDone && len(hd.hardTips) == 1 {
 		fmt.Printf("=====================================================\n")
 		fmt.Printf("HARD CODED PHASE DONE\n")
 		fmt.Printf("=====================================================\n")
 		hd.hardCodedPhaseDone = true
+	} else {
+		fmt.Printf("Hard coded tips: %d\n", len(hd.hardTips))
 	}
 	return nil
 }
@@ -1131,7 +1133,7 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 		if err1 != nil {
 			return fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err1)
 		}
-		if ch == header.ParentHash {
+		if ch == (common.Hash{}) || ch == header.ParentHash {
 			forkingPoint = blockHeight - 1
 		} else {
 			// Going further back
@@ -1189,9 +1191,9 @@ func (hi *HeaderInserter) UnwindPoint() uint64 {
 
 //nolint:interfacer
 func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
+	//log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	log.Info("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	foundAnchor, start, anchorParent, invalidAnchors := hd.findAnchors(segment)
 	if len(invalidAnchors) > 0 {
 		if _, err := hd.invalidateAnchors(anchorParent, invalidAnchors); err != nil {
@@ -1232,7 +1234,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 				log.Error("Connect failed", "error", err)
 			} else {
 				hd.addSegmentToBuffer(segment, start, end)
-				log.Info("Connected", "start", start, "end", end)
+				//log.Info("Connected", "start", start, "end", end)
 			}
 		} else {
 			// ExtendDown
@@ -1240,7 +1242,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 				log.Error("ExtendDown failed", "error", err)
 			} else {
 				hd.addSegmentToBuffer(segment, start, end)
-				log.Info("Extended Down", "start", start, "end", end)
+				//log.Info("Extended Down", "start", start, "end", end)
 			}
 		}
 	} else if foundTip {
@@ -1250,7 +1252,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 				log.Error("ExtendUp failed", "error", err)
 			} else {
 				hd.addSegmentToBuffer(segment, start, end)
-				log.Info("Extended Up", "start", start, "end", end)
+				//log.Info("Extended Up", "start", start, "end", end)
 			}
 		}
 	} else {
@@ -1259,10 +1261,10 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 			log.Error("NewAnchor failed", "error", err)
 		} else {
 			hd.addSegmentToBuffer(segment, start, end)
-			log.Info("NewAnchor", "start", start, "end", end)
+			//log.Info("NewAnchor", "start", start, "end", end)
 		}
 	}
-	log.Info(hd.anchorState())
+	//log.Info(hd.anchorState())
 }
 
 func (hd *HeaderDownload) HardCodedPhaseDone() bool {
