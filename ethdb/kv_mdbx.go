@@ -110,6 +110,14 @@ func (opts MdbxOpts) Open() (KV, error) {
 	}
 
 	if opts.flags&mdbx.Accede == 0 {
+		if opts.mapSize == 0 {
+			if opts.inMem {
+				opts.mapSize = 64 * datasize.MB
+			} else {
+				opts.mapSize = LMDBDefaultMapSize
+			}
+		}
+
 		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
 			return nil, err
 		}
@@ -120,14 +128,6 @@ func (opts MdbxOpts) Open() (KV, error) {
 		}
 
 		//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
-
-		if opts.mapSize == 0 {
-			if opts.inMem {
-				opts.mapSize = 64 * datasize.MB
-			} else {
-				opts.mapSize = LMDBDefaultMapSize
-			}
-		}
 
 		if opts.maxFreelistReuse == 0 {
 			opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
