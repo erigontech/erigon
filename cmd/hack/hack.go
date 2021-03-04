@@ -1532,38 +1532,30 @@ func supply(chaindata string) error {
 func extractCode(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	destDb := ethdb.MustOpen("codes")
-	defer destDb.Close()
-	return destDb.KV().Update(context.Background(), func(tx1 ethdb.Tx) error {
-		c1 := tx1.Cursor(dbutils.PlainContractCodeBucket)
-		return db.KV().View(context.Background(), func(tx ethdb.Tx) error {
-			c := tx.Cursor(dbutils.PlainContractCodeBucket)
-			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-				if err != nil {
-					return err
-				}
-				if err = c1.Append(k, v); err != nil {
-					return err
-				}
+	var contractCount int
+	if err1 := db.KV().View(context.Background(), func(tx ethdb.Tx) error {
+		c := tx.Cursor(dbutils.CodeBucket)
+		// This is a mapping of CodeHash => Byte code
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
 			}
-			c1 = tx1.Cursor(dbutils.CodeBucket)
-			c = tx.Cursor(dbutils.CodeBucket)
-			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-				if err != nil {
-					return err
-				}
-				if err = c1.Append(k, v); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	})
+         fmt.Printf("%x,%x",k,v);
+         contractCount++
+		}
+		return nil
+	}); err1 != nil {
+		return err1
+	}
+   fmt.Fprintf(os.Stderr, "contractCount: %d\n", contractCount);
+	return nil
 }
+
 
 func iterateOverCode(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
+	var contractCount int
 	var contractKeyTotalLength int
 	var contractValTotalLength int
 	var codeHashTotalLength int
@@ -1586,12 +1578,14 @@ func iterateOverCode(chaindata string) error {
 			}
 			codeHashTotalLength += len(k)
 			codeTotalLength += len(v)
+	      contractCount++
 		}
 		return nil
 	}); err1 != nil {
 		return err1
 	}
-	fmt.Printf("contractKeyTotalLength: %d, contractValTotalLength: %d, codeHashTotalLength: %d, codeTotalLength: %d\n", contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
+	fmt.Printf("contractCount: %d,contractKeyTotalLength: %d, contractValTotalLength: %d, codeHashTotalLength: %d, codeTotalLength: %d\n",
+	   contractCount, contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
 	return nil
 }
 
