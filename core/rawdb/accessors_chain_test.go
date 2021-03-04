@@ -388,6 +388,8 @@ func TestBlockReceiptStorage(t *testing.T) {
 	if err := WriteBody(db, hash, 0, body); err != nil {
 		t.Fatal(err)
 	}
+	// Insert the body that corresponds to the receipts
+	WriteSenders(context.Background(), db, hash, 0, body.SendersFromTxs())
 
 	// Insert the receipt slice into the database and check presence
 	if err := WriteReceipts(db, 0, receipts); err != nil {

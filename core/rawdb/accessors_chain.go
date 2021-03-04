@@ -405,6 +405,20 @@ func WriteBody(db ethdb.Database, hash common.Hash, number uint64, body *types.B
 	return nil
 }
 
+func WriteSenders(ctx context.Context, db DatabaseWriter, hash common.Hash, number uint64, senders []common.Address) error {
+	if common.IsCanceled(ctx) {
+		return ctx.Err()
+	}
+	data := make([]byte, common.AddressLength*len(senders))
+	for i, sender := range senders {
+		copy(data[i*common.AddressLength:], sender[:])
+	}
+	if err := db.Put(dbutils.Senders, dbutils.BlockBodyKey(number, hash), data); err != nil {
+		return fmt.Errorf("failed to store block senders: %w", err)
+	}
+	return nil
+}
+
 // DeleteBody removes all block body data associated with a hash.
 func DeleteBody(db DatabaseDeleter, hash common.Hash, number uint64) {
 	if err := db.Delete(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), nil); err != nil {
