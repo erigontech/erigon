@@ -1540,17 +1540,16 @@ func extractCode(chaindata string) error {
 			if err != nil {
 				return err
 			}
-         fmt.Printf("%x,%x",k,v);
-         contractCount++
+			fmt.Printf("%x,%x", k, v)
+			contractCount++
 		}
 		return nil
 	}); err1 != nil {
 		return err1
 	}
-   fmt.Fprintf(os.Stderr, "contractCount: %d\n", contractCount);
+	fmt.Fprintf(os.Stderr, "contractCount: %d\n", contractCount)
 	return nil
 }
-
 
 func iterateOverCode(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
@@ -1578,14 +1577,14 @@ func iterateOverCode(chaindata string) error {
 			}
 			codeHashTotalLength += len(k)
 			codeTotalLength += len(v)
-	      contractCount++
+			contractCount++
 		}
 		return nil
 	}); err1 != nil {
 		return err1
 	}
 	fmt.Printf("contractCount: %d,contractKeyTotalLength: %d, contractValTotalLength: %d, codeHashTotalLength: %d, codeTotalLength: %d\n",
-	   contractCount, contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
+		contractCount, contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
 	return nil
 }
 
