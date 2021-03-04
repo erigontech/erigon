@@ -366,16 +366,19 @@ func ReadBody(db ethdb.Database, hash common.Hash, number uint64) *types.Body {
 	return body
 }
 
-func ReadSenders(db databaseReader, hash common.Hash, number uint64) []common.Address {
+func ReadSenders(db databaseReader, hash common.Hash, number uint64) ([]common.Address, error) {
 	data, err := db.Get(dbutils.Senders, dbutils.BlockBodyKey(number, hash))
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		log.Error("ReadSenders failed", "err", err)
+	if err != nil {
+		if errors.Is(err, ethdb.ErrKeyNotFound) {
+			return nil, fmt.Errorf("Sneders not found for block: %d, %x\n", number, hash)
+		}
+		return nil, fmt.Errorf("ReadSenders failed: %w", err)
 	}
 	senders := make([]common.Address, len(data)/common.AddressLength)
 	for i := 0; i < len(senders); i++ {
 		copy(senders[i][:], data[i*common.AddressLength:])
 	}
-	return senders
+	return senders, nil
 }
 
 // WriteBody - writes body in Network format, later staged sync will convert it into Storage format
@@ -536,8 +539,12 @@ func ReadReceipts(db ethdb.Database, hash common.Hash, number uint64) types.Rece
 		log.Error("Missing body but have receipt", "hash", hash, "number", number)
 		return nil
 	}
-	senders := ReadSenders(db, hash, number)
-	if err := receipts.DeriveFields(hash, number, body.Transactions, senders); err != nil {
+	senders, err := ReadSenders(db, hash, number)
+	if err != nil {
+		log.Error("Failed to read Senders", "hash", hash, "number", number, "err", err)
+		return nil
+	}
+	if err = receipts.DeriveFields(hash, number, body.Transactions, senders); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", hash, "number", number, "err", err)
 		return nil
 	}

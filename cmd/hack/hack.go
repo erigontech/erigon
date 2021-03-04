@@ -1616,7 +1616,10 @@ func mint(chaindata string, block uint64) error {
 			prevBlock = blockNumber
 			body := rawdb.ReadBody(db, blockHash, blockNumber)
 			header := rawdb.ReadHeader(db, blockHash, blockNumber)
-			senders := rawdb.ReadSenders(db, blockHash, blockNumber)
+			senders, errSenders := rawdb.ReadSenders(db, blockHash, blockNumber)
+			if errSenders != nil {
+				return errSenders
+			}
 			var ethSpent uint256.Int
 			var ethSpentTotal uint256.Int
 			var totalGas uint256.Int

@@ -80,11 +80,14 @@ func TestSenders(t *testing.T) {
 	}
 
 	{
-		senders := rawdb.ReadSenders(db, common.HexToHash("01"), 1)
+		senders, err := rawdb.ReadSenders(db, common.HexToHash("01"), 1)
+		assert.NoError(t, err)
 		assert.Equal(t, 2, len(senders))
-		senders = rawdb.ReadSenders(db, common.HexToHash("02"), 2)
+		senders, err = rawdb.ReadSenders(db, common.HexToHash("02"), 2)
+		assert.NoError(t, err)
 		assert.Equal(t, 3, len(senders))
-		senders = rawdb.ReadSenders(db, common.HexToHash("03"), 3)
+		senders, err = rawdb.ReadSenders(db, common.HexToHash("03"), 3)
+		assert.NoError(t, err)
 		assert.Equal(t, 0, len(senders))
 	}
 	{
