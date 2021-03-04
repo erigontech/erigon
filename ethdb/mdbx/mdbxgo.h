@@ -46,6 +46,4 @@ int mdbxgo_dcmp(MDBX_txn *txn, MDBX_dbi dbi, char *adata, size_t an, char *bdata
 
 MDBX_cmp_func *mdbxgo_get_cmp_exclude_suffix32();
 
-MDBX_debug_func *mdbxgo_stderr_logger();
-
 #endif

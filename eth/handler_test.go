@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -472,7 +473,11 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
 	defer blockchain.Stop()
-	pm, err := NewProtocolManager(config, cht, syncmode, DefaultConfig.NetworkID, new(event.TypeMux), &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, ethash.NewFaker(), blockchain, db, nil, nil)
+
+	eng := process.NewRemoteEngine(ethash.NewFaker(), params.TestChainConfig)
+	defer eng.Close()
+
+	pm, err := NewProtocolManager(config, cht, syncmode, DefaultConfig.NetworkID, new(event.TypeMux), &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, eng, blockchain, db, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
 	}
@@ -558,13 +563,16 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 		gspec   = &core.Genesis{Config: config}
 		genesis = gspec.MustCommit(db)
 	)
+	eng := process.NewRemoteEngine(pow, config)
+	defer eng.Close()
+
 	blockchain, err := core.NewBlockChain(db, nil, config, pow, vm.Config{}, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
 	defer blockchain.Stop()
 	cht := &params.TrustedCheckpoint{}
-	pm, err := NewProtocolManager(config, cht, downloader.StagedSync, DefaultConfig.NetworkID, evmux, &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, pow, blockchain, db, nil, nil)
+	pm, err := NewProtocolManager(config, cht, downloader.StagedSync, DefaultConfig.NetworkID, evmux, &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, eng, blockchain, db, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
 	}
@@ -1350,7 +1358,11 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
 	defer blockchain.Stop()
-	pm, err := NewProtocolManager(config, nil, downloader.StagedSync, DefaultConfig.NetworkID, new(event.TypeMux), new(testTxPool), engine, blockchain, db, nil, nil)
+
+	eng := process.NewRemoteEngine(engine, config)
+	defer eng.Close()
+
+	pm, err := NewProtocolManager(config, nil, downloader.StagedSync, DefaultConfig.NetworkID, new(event.TypeMux), new(testTxPool), eng, blockchain, db, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
 	}

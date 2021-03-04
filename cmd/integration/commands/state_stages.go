@@ -3,10 +3,10 @@ package commands
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"path"
 	"sort"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/eth/integrity"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -24,13 +25,16 @@ import (
 
 var stateStags = &cobra.Command{
 	Use: "state_stages",
-	Short: `Move all StateStages (which happen after senders) forward. 
-			Stops at StageSenders progress or at "--block".
-			Each iteration test will move forward "--unwind_every" blocks, then unwind "--unwind" blocks.
-			Use reset_state command to re-run this test.
-			When finish all cycles, does comparison to "--reference_chaindata" if flag provided.
+	Short: `Run all StateStages (which happen after senders) in loop.
+Examples: 
+--unwind=1 --unwind.every=10  # 10 blocks forward, 1 block back, 10 blocks forward, ...
+--unwind=10 --unwind.every=1  # 1 block forward, 10 blocks back, 1 blocks forward, ...
+--unwind=10  # 10 blocks back, then stop
+--integrity.fast=false --integrity.slow=false # Performs DB integrity checks each step. You can disable slow or fast checks.
+--block # Stop at exact blocks
+--chaindata.reference # When finish all cycles, does comparison to this db file.
 		`,
-	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind_every=100000 --block=2000000",
+	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := utils.RootContext()
 		db := openDatabase(chaindata, true)
@@ -59,7 +63,28 @@ var loopIhCmd = &cobra.Command{
 		db := openDatabase(chaindata, true)
 		defer db.Close()
 
-		if err := loopIh(db, ctx); err != nil {
+		if unwind == 0 {
+			unwind = 1
+		}
+		if err := loopIh(db, ctx, unwind); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+
+		return nil
+	},
+}
+
+var loopExecCmd = &cobra.Command{
+	Use: "loop_exec",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := utils.RootContext()
+		db := openDatabase(chaindata, true)
+		defer db.Close()
+		if unwind == 0 {
+			unwind = 1
+		}
+		if err := loopExec(db, ctx, unwind); err != nil {
 			log.Error("Error", "err", err)
 			return err
 		}
@@ -75,16 +100,27 @@ func init() {
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
 	withBatchSize(stateStags)
+	withIntegrityChecks(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 
 	withChaindata(loopIhCmd)
 	withBatchSize(loopIhCmd)
+	withUnwind(loopIhCmd)
 
 	rootCmd.AddCommand(loopIhCmd)
+
+	withChaindata(loopExecCmd)
+	withBatchSize(loopExecCmd)
+	withUnwind(loopExecCmd)
+
+	rootCmd.AddCommand(loopExecCmd)
 }
 
 func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+
 	sm, err1 := ethdb.GetStorageModeFromDB(db)
 	if err1 != nil {
 		panic(err1)
@@ -114,7 +150,7 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, progress := newSync(ch, db, tx, changeSetHook)
+	cc, bc, st, cache, progress := newSync(ch, db, tx, changeSetHook)
 	defer bc.Stop()
 	cc.SetDB(tx)
 
@@ -140,8 +176,6 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		stopAt = 1
 	}
 
-	var batchSize datasize.ByteSize
-	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 	for (!backward && execAtBlock < stopAt) || (backward && execAtBlock > stopAt) {
 		select {
 		case <-ctx.Done():
@@ -173,7 +207,6 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 				unwind = 0
 			}
 		}
-		fmt.Printf("alex: %d\n", execToBlock)
 
 		// set block limit of execute stage
 		st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
@@ -184,7 +217,8 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 				stagedsync.ExecuteBlockStageParams{
 					ToBlock:       execToBlock, // limit execution to the specified block
 					WriteReceipts: sm.Receipts,
-					BatchSize:     int(batchSize),
+					Cache:         cache,
+					BatchSize:     batchSize,
 					ChangeSetHook: changeSetHook,
 				}); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
@@ -195,8 +229,12 @@ func syncBySmallSteps(db ethdb.Database, ctx context.Context) error {
 		if err := st.Run(db, tx); err != nil {
 			return err
 		}
-		if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
-			return err
+
+		if integrityFast {
+			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History); err != nil {
+				return err
+			}
+			integrity.Trie(tx.(ethdb.HasTx).Tx(), integritySlow, ch)
 		}
 
 		if err := tx.CommitAndBegin(context.Background()); err != nil {
@@ -246,12 +284,12 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 	return nil
 }
 
-func loopIh(db ethdb.Database, ctx context.Context) error {
+func loopIh(db ethdb.Database, ctx context.Context, unwind uint64) error {
 	ch := ctx.Done()
 	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
 	defer tx.Rollback()
 
-	cc, bc, st, progress := newSync(ch, db, tx, nil)
+	cc, bc, st, cache, progress := newSync(ch, db, tx, nil)
 	defer bc.Stop()
 	cc.SetDB(tx)
 
@@ -267,20 +305,19 @@ func loopIh(db ethdb.Database, ctx context.Context) error {
 		return err
 	}
 	execStage := progress(stages.HashState)
-	to := execStage.BlockNumber - 10
+	to := execStage.BlockNumber - unwind
 	_ = st.SetCurrentStage(stages.HashState)
 	u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: to}
-	if err = stagedsync.UnwindHashStateStage(u, progress(stages.HashState), tx, path.Join(datadir, etl.TmpDirName), ch); err != nil {
+	if err = stagedsync.UnwindHashStateStage(u, progress(stages.HashState), tx, cache, path.Join(datadir, etl.TmpDirName), ch); err != nil {
 		return err
 	}
 	_ = st.SetCurrentStage(stages.IntermediateHashes)
 	u = &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: to}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, progress(stages.IntermediateHashes), tx, path.Join(datadir, etl.TmpDirName), ch); err != nil {
+	if err = stagedsync.UnwindIntermediateHashesStage(u, progress(stages.IntermediateHashes), tx, cache, path.Join(datadir, etl.TmpDirName), ch); err != nil {
 		return err
 	}
 	_ = clearUnwindStack(tx, context.Background())
 	_ = tx.CommitAndBegin(context.Background())
-	_ = printAllStages(tx, context.Background())
 
 	st.DisableStages(stages.IntermediateHashes)
 	_ = st.SetCurrentStage(stages.HashState)
@@ -288,7 +325,6 @@ func loopIh(db ethdb.Database, ctx context.Context) error {
 		return err
 	}
 	_ = tx.CommitAndBegin(context.Background())
-	_ = printAllStages(tx, context.Background())
 
 	st.DisableStages(stages.HashState)
 	st.EnableStages(stages.IntermediateHashes)
@@ -301,9 +337,74 @@ func loopIh(db ethdb.Database, ctx context.Context) error {
 		}
 
 		_ = st.SetCurrentStage(stages.IntermediateHashes)
+		t := time.Now()
 		if err = st.Run(db, tx); err != nil {
 			return err
 		}
+		log.Warn("loop", "time", time.Since(t).String())
+		tx.Rollback()
+		tx, err = tx.Begin(ctx, ethdb.RW)
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func loopExec(db ethdb.Database, ctx context.Context, unwind uint64) error {
+	ch := ctx.Done()
+	var tx ethdb.DbWithPendingMutations = ethdb.NewTxDbWithoutTransaction(db, ethdb.RW)
+	defer tx.Rollback()
+
+	cc, bc, st, cache, progress := newSync(ch, db, tx, nil)
+	defer bc.Stop()
+	cc.SetDB(tx)
+
+	var err error
+	tx, err = tx.Begin(ctx, ethdb.RW)
+	if err != nil {
+		return err
+	}
+
+	_ = clearUnwindStack(tx, context.Background())
+	_ = tx.CommitAndBegin(ctx)
+	st.DisableAllStages()
+	st.EnableStages(stages.Execution)
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+
+	from := progress(stages.Execution).BlockNumber
+	to := from + unwind
+	// set block limit of execute stage
+	st.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder) error {
+		if err = stagedsync.SpawnExecuteBlocksStage(
+			stageState, tx,
+			bc.Config(), cc, bc.GetVMConfig(),
+			ch,
+			stagedsync.ExecuteBlockStageParams{
+				ToBlock:       to, // limit execution to the specified block
+				WriteReceipts: true,
+				BatchSize:     batchSize,
+				Cache:         cache,
+				ChangeSetHook: nil,
+			}); err != nil {
+			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
+		}
+		return nil
+	})
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		_ = st.SetCurrentStage(stages.Execution)
+		t := time.Now()
+		if err = st.Run(db, tx); err != nil {
+			return err
+		}
+		fmt.Printf("loop time: %s\n", time.Since(t))
 		tx.Rollback()
 		tx, err = tx.Begin(ctx, ethdb.RW)
 		if err != nil {
@@ -366,16 +467,11 @@ func checkChangeSet(db ethdb.Database, blockNum uint64, expectedAccountChanges *
 }
 
 func checkHistory(db ethdb.Database, changeSetBucket string, blockNum uint64) error {
-	currentKey := dbutils.EncodeBlockNumber(blockNum)
-
-	vv, ok := changeset.Mapper[changeSetBucket]
-	if !ok {
-		return errors.New("unknown bucket type")
-	}
-
-	if err := changeset.Walk(db, changeSetBucket, currentKey, 0, func(blockN uint64, address, v []byte) (bool, error) {
-		var k = address
-		bm, innerErr := bitmapdb.Get64(db, vv.IndexBucket, k, blockN-1, blockN+1)
+	indexBucket := changeset.Mapper[changeSetBucket].IndexBucket
+	blockNumBytes := dbutils.EncodeBlockNumber(blockNum)
+	if err := changeset.Walk(db, changeSetBucket, blockNumBytes, 0, func(blockN uint64, address, v []byte) (bool, error) {
+		k := dbutils.CompositeKeyWithoutIncarnation(address)
+		bm, innerErr := bitmapdb.Get64(db, indexBucket, k, blockN-1, blockN+1)
 		if innerErr != nil {
 			return false, innerErr
 		}

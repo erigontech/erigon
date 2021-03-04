@@ -34,8 +34,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -312,13 +313,10 @@ func accountSavings(db ethdb.KV) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
 	tool.Check(db.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket)
+		c := tx.Cursor(dbutils.HashedAccountsBucket)
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
-			}
-			if len(k) != 32 {
-				continue
 			}
 			if bytes.Contains(v, trie.EmptyRoot.Bytes()) {
 				emptyRoots++
@@ -1011,7 +1009,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 	var fixedbits = 8 * common.HashLength
 	copy(startkey, addrHash[:])
-	if err := ethDb.Walk(dbutils.CurrentStateBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
+	if err := ethDb.Walk(dbutils.HashedStorageBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 		copy(incarnationBytes[:], k[common.HashLength:])
 		found = true
 		return false, nil
@@ -1031,18 +1029,15 @@ func repairCurrent() {
 	defer historyDb.Close()
 	currentDb := ethdb.MustOpen("statedb")
 	defer currentDb.Close()
-	tool.Check(historyDb.ClearBuckets(dbutils.CurrentStateBucket))
+	tool.Check(historyDb.ClearBuckets(dbutils.HashedStorageBucket))
 	tool.Check(historyDb.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		newB := tx.Cursor(dbutils.CurrentStateBucket)
+		newB := tx.Cursor(dbutils.HashedStorageBucket)
 		count := 0
 		if err := currentDb.KV().View(context.Background(), func(ctx ethdb.Tx) error {
-			c := ctx.Cursor(dbutils.CurrentStateBucket)
+			c := ctx.Cursor(dbutils.HashedStorageBucket)
 			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 				if err != nil {
 					return err
-				}
-				if len(k) == 32 {
-					continue
 				}
 				tool.Check(newB.Put(k, v))
 				count++
@@ -1176,6 +1171,7 @@ func (r *Receiver) Receive(
 	accountValue *accounts.Account,
 	storageValue []byte,
 	hash []byte,
+	hasBranch bool,
 	cutoff int,
 ) error {
 	for r.currentIdx < len(r.unfurlList) {
@@ -1191,19 +1187,19 @@ func (r *Receiver) Receive(
 			c = -1
 		}
 		if c > 0 {
-			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
+			return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, hasBranch, cutoff)
 		}
 		if len(k) > common.HashLength {
 			v := r.storageMap[ks]
 			if len(v) > 0 {
-				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.StorageStreamItem, nil, k, nil, v, nil, hasBranch, 0); err != nil {
 					return err
 				}
 			}
 		} else {
 			v := r.accountMap[ks]
 			if v != nil {
-				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, 0); err != nil {
+				if err := r.defaultReceiver.Receive(trie.AccountStreamItem, k, nil, v, nil, nil, hasBranch, 0); err != nil {
 					return err
 				}
 			}
@@ -1214,7 +1210,7 @@ func (r *Receiver) Receive(
 		}
 	}
 	// We ran out of modifications, simply pass through
-	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, cutoff)
+	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, hasBranch, cutoff)
 }
 
 func (r *Receiver) Result() trie.SubTries {
@@ -1222,46 +1218,20 @@ func (r *Receiver) Result() trie.SubTries {
 }
 
 func regenerate(chaindata string) error {
-	var m runtime.MemStats
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	tool.Check(db.ClearBuckets(
-		dbutils.IntermediateTrieHashBucket,
-	))
-	headHash := rawdb.ReadHeadBlockHash(db)
-	headNumber := rawdb.ReadHeaderNumber(db, headHash)
-	headHeader := rawdb.ReadHeader(db, headHash, *headNumber)
-	log.Info("Regeneration started")
-	collector := etl.NewCollector(".", etl.NewSortableBuffer(etl.BufferOptimalSize))
-	hashCollector := func(keyHex []byte, hash []byte) error {
-		if len(keyHex)%2 != 0 || len(keyHex) == 0 {
-			return nil
-		}
-		var k []byte
-		trie.CompressNibbles(keyHex, &k)
-		if hash == nil {
-			return collector.Collect(k, nil)
-		}
-		return collector.Collect(k, common.CopyBytes(hash))
-	}
-	loader := trie.NewFlatDbSubTrieLoader()
-	if err := loader.Reset(db, trie.NewRetainList(0), trie.NewRetainList(0), hashCollector /* HashCollector */, [][]byte{nil}, []int{0}, false); err != nil {
+	tool.Check(stagedsync.ResetIH(db))
+	to, err := stages.GetStageProgress(db, stages.HashState)
+	if err != nil {
 		return err
 	}
-	if subTries, err := loader.LoadSubTries(); err == nil {
-		runtime.ReadMemStats(&m)
-		log.Info("Loaded initial trie", "root", fmt.Sprintf("%x", subTries.Hashes[0]),
-			"expected root", fmt.Sprintf("%x", headHeader.Root),
-			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
-	} else {
+	hash, err := rawdb.ReadCanonicalHash(db, to)
+	if err != nil {
 		return err
 	}
-	/*
-		quitCh := make(chan struct{})
-		if err := collector.Load(db, dbutils.IntermediateTrieHashBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
-			return err
-		}
-	*/
+	syncHeadHeader := rawdb.ReadHeader(db, hash, to)
+	expectedRootHash := syncHeadHeader.Root
+	tool.Check(stagedsync.RegenerateIntermediateHashes("", db, true, nil, "", expectedRootHash, nil))
 	log.Info("Regeneration ended")
 	return nil
 }
@@ -1639,7 +1609,10 @@ func mint(chaindata string, block uint64) error {
 			prevBlock = blockNumber
 			body := rawdb.ReadBody(db, blockHash, blockNumber)
 			header := rawdb.ReadHeader(db, blockHash, blockNumber)
-			senders := rawdb.ReadSenders(db, blockHash, blockNumber)
+			senders, errSenders := rawdb.ReadSenders(db, blockHash, blockNumber)
+			if errSenders != nil {
+				return errSenders
+			}
 			var ethSpent uint256.Int
 			var ethSpentTotal uint256.Int
 			var totalGas uint256.Int
@@ -1836,7 +1809,13 @@ func applyBlock(chaindata string, hash common.Hash) error {
 	}
 	block := types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 	fmt.Printf("Formed block %d %x\n", block.NumberU64(), block.Hash())
-	if _, err = stagedsync.InsertBlockInStages(db, params.MainnetChainConfig, &vm.Config{}, ethash.NewFaker(), block, true /* checkRoot */); err != nil {
+
+	exit := make(chan struct{})
+	cons := ethash.NewFaker()
+	eng := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+
+	if _, err = stagedsync.InsertBlockInStages(db, params.MainnetChainConfig, &vm.Config{}, cons, eng, block, true /* checkRoot */); err != nil {
 		return err
 	}
 	if err = rawdb.WriteCanonicalHash(db, hash, block.NumberU64()); err != nil {
@@ -1864,6 +1843,57 @@ func fixUnwind(chaindata string) error {
 	} else {
 		fmt.Printf("Inc: %x\n", i)
 	}
+	return nil
+}
+
+func snapSizes(chaindata string) error {
+	db := ethdb.MustOpen(chaindata)
+	defer db.Close()
+
+	tx, err := db.KV().Begin(context.Background(), ethdb.RO)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	c := tx.Cursor(dbutils.CliqueBucket)
+	defer c.Close()
+
+	sizes := make(map[int]int)
+	differentValues := make(map[string]struct{})
+
+	var (
+		total uint64
+		k, v  []byte
+	)
+
+	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		sizes[len(v)]++
+		differentValues[string(v)] = struct{}{}
+		total += uint64(len(v) + len(k))
+	}
+
+	var lens = make([]int, len(sizes))
+
+	i := 0
+	for l := range sizes {
+		lens[i] = l
+		i++
+	}
+	sort.Ints(lens)
+
+	for _, l := range lens {
+		fmt.Printf("%6d - %d\n", l, sizes[l])
+	}
+
+	fmt.Printf("Different keys %d\n", len(differentValues))
+	fmt.Printf("Total size: %d bytes\n", total)
+
+	size, err := tx.BucketSize(dbutils.CliqueBucket)
+	fmt.Printf("Total bucket size: %d bytes: %v\n", size, err)
 	return nil
 }
 
@@ -2043,6 +2073,11 @@ func main() {
 	}
 	if *action == "fixUnwind" {
 		if err := fixUnwind(*chaindata); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+	if *action == "snapSizes" {
+		if err := snapSizes(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

@@ -57,7 +57,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	var begin, end uint64
 	var logs []*types.Log //nolint:prealloc
 
-	tx, beginErr := api.dbReader.Begin(ctx, ethdb.RO)
+	tx, beginErr := api.db.Begin(ctx, ethdb.RO)
 	if beginErr != nil {
 		return returnLogs(logs), beginErr
 	}
@@ -194,7 +194,7 @@ func getTopicsBitmap(c ethdb.Getter, topics [][]common.Hash, from, to uint32) (*
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
-	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+	tx, err := api.db.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return nil, err
 	}
@@ -202,8 +202,8 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 
 	// Retrieve the transaction and assemble its EVM context
 	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, hash)
-	if tx == nil {
-		return nil, fmt.Errorf("transaction %#x not found", hash)
+	if txn == nil {
+		return nil, nil
 	}
 
 	cc, err := api.chainConfig(tx)

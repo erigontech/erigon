@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -69,6 +70,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 
 	var contractAddress common.Address
@@ -114,12 +116,15 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, gspec.Config, exit)
+	defer common.SafeClose(exit)
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database

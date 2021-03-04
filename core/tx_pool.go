@@ -208,7 +208,7 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 type TxPool struct {
 	config       TxPoolConfig
 	chainconfig  *params.ChainConfig
-	chaindb      *ethdb.ObjectDatabase
+	chaindb      ethdb.Database
 	gasPrice     *big.Int
 	txFeed       event.Feed
 	scope        event.SubscriptionScope
@@ -251,7 +251,7 @@ type txpoolResetRequest struct {
 
 // NewTxPool creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
-func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb *ethdb.ObjectDatabase, senderCacher *TxSenderCacher) *TxPool {
+func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb ethdb.Database, senderCacher *TxSenderCacher) *TxPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 

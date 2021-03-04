@@ -78,7 +78,7 @@ func newBucketWriter(db ethdb.Database, bucket string) *bucketWriter {
 }
 
 func copyDatabase(fromDB ethdb.Database, toDB ethdb.Database) error {
-	for _, bucket := range []string{dbutils.CurrentStateBucket, dbutils.CodeBucket, dbutils.DatabaseInfoBucket} {
+	for _, bucket := range []string{dbutils.HashedAccountsBucket, dbutils.HashedStorageBucket, dbutils.CodeBucket, dbutils.DatabaseInfoBucket} {
 		fmt.Printf(" - copying bucket '%s'...\n", string(bucket))
 		writer := newBucketWriter(toDB, bucket)
 
@@ -124,15 +124,12 @@ func loadSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 func loadCodes(db ethdb.KV, codeDb ethdb.Database) error {
 	var account accounts.Account
 	err := db.Update(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket)
+		c := tx.Cursor(dbutils.HashedAccountsBucket)
 		cb := tx.Cursor(dbutils.CodeBucket)
 
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
-			}
-			if len(k) != 32 {
-				continue
 			}
 			if err := account.DecodeForStorage(v); err != nil {
 				return err
@@ -158,11 +155,11 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 	diskDb := ethdb.MustOpen(filename)
 	defer diskDb.Close()
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		c := tx.Cursor(dbutils.CurrentStateBucket)
+		c := tx.Cursor(dbutils.HashedAccountsBucket)
 		preimage := tx.Cursor(dbutils.PreimagePrefix)
 		count := 0
 		if err := diskDb.KV().View(context.Background(), func(txDisk ethdb.Tx) error {
-			cDisk := txDisk.Cursor(dbutils.CurrentStateBucket)
+			cDisk := txDisk.Cursor(dbutils.HashedAccountsBucket)
 			for k, v, err := cDisk.First(); k != nil; k, v, err = cDisk.Next() {
 				if err != nil {
 					return err
@@ -187,7 +184,7 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				}
 			}
 			count = 0
-			cDisk = txDisk.Cursor(dbutils.CurrentStateBucket)
+			cDisk = txDisk.Cursor(dbutils.HashedAccountsBucket)
 			for k, v, err := cDisk.First(); k != nil; k, v, err = cDisk.Next() {
 				if err != nil {
 					return err
@@ -209,7 +206,7 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 				}
 			}
 			count = 0
-			c := tx.Cursor(dbutils.CurrentStateBucket)
+			c := tx.Cursor(dbutils.HashedAccountsBucket)
 			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 				if err != nil {
 					return err
@@ -233,7 +230,7 @@ func compare_snapshot(stateDb ethdb.Database, db ethdb.KV, filename string) {
 					fmt.Printf("Compared %d records\n", count)
 				}
 			}
-			c = tx.Cursor(dbutils.CurrentStateBucket)
+			c = tx.Cursor(dbutils.HashedAccountsBucket)
 			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 				if err != nil {
 					return err
@@ -287,7 +284,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 	startTime = time.Now()
 	roots := make(map[common.Hash]*accounts.Account)
 	incarnationMap := make(map[uint64]int)
-	if err := stateDb.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
+	if err := stateDb.Walk(dbutils.HashedAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
 		var addrHash common.Hash
 		copy(addrHash[:], k[:32])
 		if _, ok := roots[addrHash]; !ok {

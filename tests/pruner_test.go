@@ -400,6 +400,7 @@ func TestStoragePruning(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts1 := bind.NewKeyedTransactor(key1)
 	transactOpts2 := bind.NewKeyedTransactor(key2)
@@ -723,10 +724,7 @@ func getStat(db ethdb.Database) (stateStats, error) {
 		return stateStats{}, err
 	}
 
-	err = db.Walk(dbutils.CurrentStateBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
-		if len(key) > 32 {
-			return true, nil
-		}
+	err = db.Walk(dbutils.HashedAccountsBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		stat.AccountsInState++
 		return true, nil
 	})

@@ -1,5 +1,6 @@
 package ethdb
 
+import "C"
 import (
 	"bytes"
 	"context"
@@ -10,6 +11,7 @@ import (
 	"path"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -171,6 +173,7 @@ func (opts LmdbOpts) Open() (kv KV, err error) {
 		env:           env,
 		log:           logger,
 		wg:            &sync.WaitGroup{},
+		closing:       new(uint32),
 		buckets:       dbutils.BucketsCfg{},
 	}
 
@@ -276,6 +279,7 @@ type LmdbKV struct {
 	log           log.Logger
 	buckets       dbutils.BucketsCfg
 	wg            *sync.WaitGroup
+	closing       *uint32
 	exclusiveLock fileutil.Releaser
 }
 
@@ -287,8 +291,9 @@ func (db *LmdbKV) NewDbWithTheSameParameters() *ObjectDatabase {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *LmdbKV) Close() {
-	if db.env != nil {
+	if db.env != nil && atomic.CompareAndSwapUint32(db.closing, 0, 1) {
 		db.wg.Wait()
+		defer atomic.StoreUint32(db.closing, 0)
 	}
 
 	if db.exclusiveLock != nil {
@@ -542,10 +547,11 @@ func (tx *lmdbTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 }
 
 func (tx *lmdbTx) ClearBucket(bucket string) error {
-	if err := tx.dropEvenIfBucketIsNotDeprecated(bucket); err != nil {
-		return err
+	dbi := tx.db.buckets[bucket].DBI
+	if dbi == NonExistingDBI {
+		return nil
 	}
-	return tx.CreateBucket(bucket)
+	return tx.tx.Drop(lmdb.DBI(dbi), false)
 }
 
 func (tx *lmdbTx) DropBucket(bucket string) error {
@@ -816,7 +822,7 @@ func (c *LmdbCursor) initCursor() error {
 	var err error
 	c.c, err = tx.tx.OpenCursor(c.dbi)
 	if err != nil {
-		return err
+		return fmt.Errorf("table: %s, %w", c.bucketName, err)
 	}
 
 	// add to auto-cleanup on end of transactions
@@ -1121,7 +1127,7 @@ func (c *LmdbCursor) deleteDupSort(key []byte) error {
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
 	if len(key) != from && len(key) >= to {
-		return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", c.bucketName, from, to, key)
+		return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x,%d", c.bucketName, from, to, key, len(key))
 	}
 
 	if len(key) == from {
@@ -1193,7 +1199,7 @@ func (c *LmdbCursor) putDupSort(key []byte, value []byte) error {
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
 	if len(key) != from && len(key) >= to {
-		return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", c.bucketName, from, to, key)
+		return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x,%d", c.bucketName, from, to, key, len(key))
 	}
 
 	if len(key) != from {
@@ -1299,7 +1305,7 @@ func (c *LmdbCursor) Append(k []byte, v []byte) error {
 	if b.AutoDupSortKeysConversion {
 		from, to := b.DupFromLen, b.DupToLen
 		if len(k) != from && len(k) >= to {
-			return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", c.bucketName, from, to, k)
+			return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x,%d", c.bucketName, from, to, k, len(k))
 		}
 
 		if len(k) == from {
@@ -1339,14 +1345,6 @@ type LmdbDupSortCursor struct {
 func (c *LmdbDupSortCursor) initCursor() error {
 	if c.c != nil {
 		return nil
-	}
-
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		return fmt.Errorf("class LmdbDupSortCursor not compatible with AutoDupSortKeysConversion buckets")
-	}
-
-	if c.bucketCfg.Flags&lmdb.DupSort == 0 {
-		return fmt.Errorf("class LmdbDupSortCursor can be used only if bucket created with flag lmdb.DupSort")
 	}
 
 	return c.LmdbCursor.initCursor()

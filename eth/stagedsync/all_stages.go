@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
 func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool) StageBuilders {
@@ -26,10 +27,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.db, world.TmpDir, world.QuitCh)
+						return SpawnBlockHashStage(s, world.DB, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						return u.Done(world.DB)
 					},
 				}
 			},
@@ -47,7 +48,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 						return s.DoneAndUpdate(world.TX, blockNum)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						return u.Done(world.DB)
 					},
 				}
 			},
@@ -91,7 +92,7 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
-								CacheSize:             world.cacheSize,
+								Cache:                 world.cache,
 								BatchSize:             world.batchSize,
 								ChangeSetHook:         world.changeSetHook,
 								ReaderBuilder:         world.stateReaderBuilder,
@@ -100,7 +101,15 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindExecutionStage(u, s, world.TX, world.storageMode.Receipts)
+						return UnwindExecutionStage(u, s, world.TX, world.QuitCh, ExecuteBlockStageParams{
+							WriteReceipts:         world.storageMode.Receipts,
+							Cache:                 world.cache,
+							BatchSize:             world.batchSize,
+							ChangeSetHook:         world.changeSetHook,
+							ReaderBuilder:         world.stateReaderBuilder,
+							WriterBuilder:         world.stateWriterBuilder,
+							SilkwormExecutionFunc: world.silkwormExecutionFunc,
+						})
 					},
 				}
 			},
@@ -112,10 +121,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, world.TmpDir, world.QuitCh)
+						return SpawnHashStateStage(s, world.TX, world.cache, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, world.TmpDir, world.QuitCh)
+						return UnwindHashStateStage(u, s, world.TX, world.cache, world.TmpDir, world.QuitCh)
 					},
 				}
 			},
@@ -160,10 +169,10 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 							}
 							c.Close()
 						*/
-						return SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.TmpDir, world.QuitCh)
+						return SpawnIntermediateHashesStage(s, world.TX, checkRoot /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, world.TmpDir, world.QuitCh)
+						return UnwindIntermediateHashesStage(u, s, world.TX, world.cache, world.TmpDir, world.QuitCh)
 					},
 				}
 			},
@@ -230,14 +239,14 @@ func createStageBuilders(blocks []*types.Block, blockNum uint64, checkRoot bool)
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
-								CacheSize: world.cacheSize,
+								Cache:     world.cache,
 								BatchSize: world.batchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh,
 							CallTracesStageParams{
-								CacheSize: world.cacheSize,
+								Cache:     world.cache,
 								BatchSize: world.batchSize,
 							})
 					},
@@ -313,6 +322,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	cc.SetDB(nil)
 	cc.SetEngine(engine)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
+	var cache *shards.StateCache // Turn off cache for now
 	syncState, err1 := stagedSync.Prepare(
 		nil,
 		config,
@@ -323,7 +333,7 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 		"1",
 		ethdb.DefaultStorageMode,
 		"",
-		0*1024, // Turn off cache for now
+		cache,
 		8*1024,
 		nil,
 		nil,
@@ -343,12 +353,14 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	return nil
 }
 
-func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, headers []*types.Header) (bool, bool, uint64, error) {
+func InsertHeadersInStages(db ethdb.Database, engine consensus.EngineAPI, headers []*types.Header) (bool, bool, uint64, error) {
 	blockNum := headers[len(headers)-1].Number.Uint64()
-	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
+	start := time.Now()
+	if err := VerifyHeaders(db, headers, engine, 1); err != nil {
 		return false, false, 0, err
 	}
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers)
+	verificationTime := time.Since(start)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", verificationTime, db, headers)
 	if err != nil {
 		return false, false, 0, err
 	}
@@ -361,7 +373,7 @@ func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine
 	return newCanonical, reorg, forkblocknumber, nil
 }
 
-func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, blocks []*types.Block, checkRoot bool) (bool, error) {
+func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, config *params.ChainConfig, vmConfig *vm.Config, cons consensus.Engine, engine consensus.EngineAPI, blocks []*types.Block, checkRoot bool) (bool, error) {
 	if len(blocks) == 0 {
 		return false, nil
 	}
@@ -370,15 +382,17 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		headers[i] = block.Header()
 	}
 	// Header verification happens outside of the transaction
-	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
+	start := time.Now()
+	if err := VerifyHeaders(db, headers, engine, 1); err != nil {
 		return false, err
 	}
+	verificationTime := time.Since(start)
 	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
 		return false, fmt.Errorf("starting transaction for importing the blocks: %v", err1)
 	}
 	defer tx.Rollback()
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", verificationTime, tx, headers)
 	if err != nil {
 		return false, err
 	}
@@ -398,8 +412,9 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)
 	cc := &core.TinyChainContext{}
 	cc.SetDB(nil)
-	cc.SetEngine(engine)
+	cc.SetEngine(cons)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
+	var cache *shards.StateCache // Turn off cache for now
 	syncState, err2 := stagedSync.Prepare(
 		nil,
 		config,
@@ -410,7 +425,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		"1",
 		storageMode,
 		"",
-		0*1024, // Turn off cache for now
+		cache,
 		8*1024,
 		nil,
 		nil,
@@ -419,22 +434,26 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		nil,
 	)
 	if err2 != nil {
+		panic(err2)
 		return false, err2
 	}
+
 	if reorg {
 		if err = syncState.UnwindTo(forkblocknumber, tx); err != nil {
 			return false, err
 		}
 	}
+
 	if err = syncState.Run(tx, tx); err != nil {
 		return false, err
 	}
-	if _, err1 = tx.Commit(); err1 != nil {
+
+	if _, err = tx.Commit(); err != nil {
 		return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
 	}
 	return true, nil
 }
 
-func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, block *types.Block, checkRoot bool) (bool, error) {
-	return InsertBlocksInStages(db, ethdb.DefaultStorageMode, config, vmConfig, engine, []*types.Block{block}, checkRoot)
+func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, cons consensus.Engine, engine consensus.EngineAPI, block *types.Block, checkRoot bool) (bool, error) {
+	return InsertBlocksInStages(db, ethdb.DefaultStorageMode, config, vmConfig, cons, engine, []*types.Block{block}, checkRoot)
 }

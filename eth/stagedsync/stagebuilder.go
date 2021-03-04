@@ -6,6 +6,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -14,6 +15,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
 type ChainEventNotifier interface {
@@ -27,13 +29,13 @@ type StageParameters struct {
 	chainConfig  *params.ChainConfig
 	chainContext *core.TinyChainContext
 	vmConfig     *vm.Config
-	db           ethdb.Database
+	DB           ethdb.Database
 	// TX is a current transaction that staged sync runs in. It contains all the latest changes that DB has.
 	// It can be used for both reading and writing.
 	TX          ethdb.Database
 	pid         string
-	batchSize   int // Batch size for the execution stage
-	cacheSize   int // Cache size for the execution stage
+	batchSize   datasize.ByteSize // Batch size for the execution stage
+	cache       *shards.StateCache
 	storageMode ethdb.StorageMode
 	TmpDir      string
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
@@ -106,7 +108,7 @@ func DefaultStages() StageBuilders {
 						return SpawnHeaderDownloadStage(s, u, world.d, world.headersFetchers)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						return u.Done(world.DB)
 					},
 				}
 			},
@@ -118,10 +120,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.BlockHashes,
 					Description: "Write block hashes",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnBlockHashStage(s, world.db, world.TmpDir, world.QuitCh)
+						return SpawnBlockHashStage(s, world.DB, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return u.Done(world.db)
+						return u.Done(world.DB)
 					},
 				}
 			},
@@ -136,7 +138,7 @@ func DefaultStages() StageBuilders {
 						return spawnBodyDownloadStage(s, u, world.d, world.pid, world.prefetchedBlocks)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return unwindBodyDownloadStage(u, world.db)
+						return unwindBodyDownloadStage(u, world.DB)
 					},
 				}
 			},
@@ -180,7 +182,7 @@ func DefaultStages() StageBuilders {
 							world.QuitCh,
 							ExecuteBlockStageParams{
 								WriteReceipts:         world.storageMode.Receipts,
-								CacheSize:             world.cacheSize,
+								Cache:                 world.cache,
 								BatchSize:             world.batchSize,
 								ChangeSetHook:         world.changeSetHook,
 								ReaderBuilder:         world.stateReaderBuilder,
@@ -189,7 +191,15 @@ func DefaultStages() StageBuilders {
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindExecutionStage(u, s, world.TX, world.storageMode.Receipts)
+						return UnwindExecutionStage(u, s, world.TX, world.QuitCh, ExecuteBlockStageParams{
+							WriteReceipts:         world.storageMode.Receipts,
+							Cache:                 world.cache,
+							BatchSize:             world.batchSize,
+							ChangeSetHook:         world.changeSetHook,
+							ReaderBuilder:         world.stateReaderBuilder,
+							WriterBuilder:         world.stateWriterBuilder,
+							SilkwormExecutionFunc: world.silkwormExecutionFunc,
+						})
 					},
 				}
 			},
@@ -201,10 +211,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.HashState,
 					Description: "Hash the key in the state",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnHashStateStage(s, world.TX, world.TmpDir, world.QuitCh)
+						return SpawnHashStateStage(s, world.TX, world.cache, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindHashStateStage(u, s, world.TX, world.TmpDir, world.QuitCh)
+						return UnwindHashStateStage(u, s, world.TX, world.cache, world.TmpDir, world.QuitCh)
 					},
 				}
 			},
@@ -216,10 +226,10 @@ func DefaultStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnIntermediateHashesStage(s, world.TX, true /* checkRoot */, world.TmpDir, world.QuitCh)
+						return SpawnIntermediateHashesStage(s, world.TX, true /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
-						return UnwindIntermediateHashesStage(u, s, world.TX, world.TmpDir, world.QuitCh)
+						return UnwindIntermediateHashesStage(u, s, world.TX, world.cache, world.TmpDir, world.QuitCh)
 					},
 				}
 			},
@@ -286,14 +296,14 @@ func DefaultStages() StageBuilders {
 					ExecFunc: func(s *StageState, u Unwinder) error {
 						return SpawnCallTraces(s, world.TX, world.chainConfig, world.chainContext, world.TmpDir, world.QuitCh,
 							CallTracesStageParams{
-								CacheSize: world.cacheSize,
+								Cache:     world.cache,
 								BatchSize: world.batchSize,
 							})
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindCallTraces(u, s, world.TX, world.chainConfig, world.chainContext, world.QuitCh,
 							CallTracesStageParams{
-								CacheSize: world.cacheSize,
+								Cache:     world.cache,
 								BatchSize: world.batchSize,
 							})
 					},

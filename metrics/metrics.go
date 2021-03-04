@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/shirou/gopsutil/v3/process"
 )
 
 // Enabled is checked by the constructor functions for all of the
@@ -76,7 +78,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 	var (
 		cpuSysLoad    = GetOrRegisterGauge("system/cpu/sysload", DefaultRegistry)
 		cpuSysWait    = GetOrRegisterGauge("system/cpu/syswait", DefaultRegistry)
-		cpuProcLoad   = GetOrRegisterGauge("system/cpu/procload", DefaultRegistry)
 		cpuThreads    = GetOrRegisterGauge("system/cpu/threads", DefaultRegistry)
 		cpuGoroutines = GetOrRegisterGauge("system/cpu/goroutines", DefaultRegistry)
 
@@ -86,29 +87,104 @@ func CollectProcessMetrics(refresh time.Duration) {
 		memHeld   = GetOrRegisterGauge("system/memory/held", DefaultRegistry)
 		memUsed   = GetOrRegisterGauge("system/memory/used", DefaultRegistry)
 
-		diskReads             = GetOrRegisterMeter("system/disk/readcount", DefaultRegistry)
-		diskReadBytes         = GetOrRegisterMeter("system/disk/readdata", DefaultRegistry)
-		diskReadBytesCounter  = GetOrRegisterCounter("system/disk/readbytes", DefaultRegistry)
-		diskWrites            = GetOrRegisterMeter("system/disk/writecount", DefaultRegistry)
-		diskWriteBytes        = GetOrRegisterMeter("system/disk/writedata", DefaultRegistry)
-		diskWriteBytesCounter = GetOrRegisterCounter("system/disk/writebytes", DefaultRegistry)
+		diskReadBytes  = GetOrRegisterMeter("system/disk/readbytes", DefaultRegistry)
+		diskWriteBytes = GetOrRegisterMeter("system/disk/writebytes", DefaultRegistry)
 
 		// copy from prometheus client
 		goGoroutines = GetOrRegisterGauge("go/goroutines", DefaultRegistry)
 		goThreads    = GetOrRegisterGauge("go/threads", DefaultRegistry)
+
+		ruMinflt   = GetOrRegisterGauge("ru/minflt", DefaultRegistry)
+		ruMajflt   = GetOrRegisterGauge("ru/majflt", DefaultRegistry)
+		ruInblock  = GetOrRegisterGauge("ru/inblock", DefaultRegistry)
+		ruOutblock = GetOrRegisterGauge("ru/outblock", DefaultRegistry)
+		ruNvcsw    = GetOrRegisterGauge("ru/nvcsw", DefaultRegistry)
+		ruNivcsw   = GetOrRegisterGauge("ru/nivcsw", DefaultRegistry)
+
+		memRSS    = GetOrRegisterGauge("mem/rss", DefaultRegistry)
+		memVMS    = GetOrRegisterGauge("mem/vms", DefaultRegistry)
+		memHVM    = GetOrRegisterGauge("mem/hvm", DefaultRegistry)
+		memData   = GetOrRegisterGauge("mem/data", DefaultRegistry)
+		memStack  = GetOrRegisterGauge("mem/stack", DefaultRegistry)
+		memLocked = GetOrRegisterGauge("mem/locked", DefaultRegistry)
+		memSwap   = GetOrRegisterGauge("mem/swap", DefaultRegistry)
+
+		vmemTotal     = GetOrRegisterGauge("vmem/total", DefaultRegistry)
+		vmemAvailable = GetOrRegisterGauge("vmem/available", DefaultRegistry)
+		vmemUsed      = GetOrRegisterGauge("vmem/used", DefaultRegistry)
+		vmemBuffers   = GetOrRegisterGauge("vmem/buffers", DefaultRegistry)
+		vmemCached    = GetOrRegisterGauge("vmem/cached", DefaultRegistry)
+		vmemWriteBack = GetOrRegisterGauge("vmem/writeback", DefaultRegistry)
+		vmemDirty     = GetOrRegisterGauge("vmem/dirty", DefaultRegistry)
+		vmemShared    = GetOrRegisterGauge("vmem/shared", DefaultRegistry)
+		vmemMapped    = GetOrRegisterGauge("vmem/mapped", DefaultRegistry)
 	)
+
+	p, _ := process.NewProcess(int32(os.Getpid()))
+	if p == nil {
+		return
+	}
 
 	// Iterate loading the different stats and updating the meters
 	for i := 1; ; i++ {
 		location1 := i % 2
 		location2 := (i - 1) % 2
 
-		ReadCPUStats(cpuStats[location1])
+		//ReadCPUStats(cpuStats[location1])
+		ReadCPUStats(p, cpuStats[location1])
 		cpuSysLoad.Update((cpuStats[location1].GlobalTime - cpuStats[location2].GlobalTime) / refreshFreq)
 		cpuSysWait.Update((cpuStats[location1].GlobalWait - cpuStats[location2].GlobalWait) / refreshFreq)
-		cpuProcLoad.Update((cpuStats[location1].LocalTime - cpuStats[location2].LocalTime) / refreshFreq)
+
+		inblock, outblokc, nvcsw, nivcsw := getRUsage(p)
+		ruInblock.Update(inblock)
+		ruOutblock.Update(outblokc)
+		ruNvcsw.Update(nvcsw)
+		ruNivcsw.Update(nivcsw)
+
 		cpuThreads.Update(int64(threadCreateProfile.Count()))
 		cpuGoroutines.Update(int64(runtime.NumGoroutine()))
+
+		if m, _ := mem.VirtualMemory(); m != nil {
+			vmemTotal.Update(int64(m.Total))
+			vmemAvailable.Update(int64(m.Available))
+			vmemUsed.Update(int64(m.Used))
+			vmemBuffers.Update(int64(m.Buffers))
+			vmemCached.Update(int64(m.Cached))
+			vmemWriteBack.Update(int64(m.WriteBack))
+			vmemDirty.Update(int64(m.Dirty))
+			vmemShared.Update(int64(m.Shared))
+			vmemMapped.Update(int64(m.Mapped))
+			//Slab           uint64 `json:"slab"`
+			//Sreclaimable   uint64 `json:"sreclaimable"`
+			//Sunreclaim     uint64 `json:"sunreclaim"`
+			//PageTables     uint64 `json:"pageTables"`
+			//SwapCached     uint64 `json:"swapCached"`
+			//CommitLimit    uint64 `json:"commitLimit"`
+			//CommittedAS    uint64 `json:"committedAS"`
+			//HighTotal      uint64 `json:"highTotal"`
+			//HighFree       uint64 `json:"highFree"`
+			//LowTotal       uint64 `json:"lowTotal"`
+			//LowFree        uint64 `json:"lowFree"`
+			//SwapTotal      uint64 `json:"swapTotal"`
+			//SwapFree       uint64 `json:"swapFree"`
+			//VmallocTotal   uint64 `json:"vmallocTotal"`
+			//VmallocUsed    uint64 `json:"vmallocUsed"`
+			//VmallocChunk   uint64 `json:"vmallocChunk"`
+		}
+
+		if m, _ := p.MemoryInfo(); m != nil {
+			memRSS.Update(int64(m.RSS))
+			memVMS.Update(int64(m.VMS))
+			memHVM.Update(int64(m.HWM))
+			memData.Update(int64(m.Data))
+			memStack.Update(int64(m.Stack))
+			memLocked.Update(int64(m.Locked))
+			memSwap.Update(int64(m.Swap))
+		}
+		if pf, _ := p.PageFaults(); pf != nil {
+			ruMinflt.Update(int64(pf.MinorFaults))
+			ruMajflt.Update(int64(pf.MajorFaults))
+		}
 
 		runtime.ReadMemStats(memstats[location1])
 		memPauses.Mark(int64(memstats[location1].PauseTotalNs - memstats[location2].PauseTotalNs))
@@ -117,16 +193,12 @@ func CollectProcessMetrics(refresh time.Duration) {
 		memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
 		memUsed.Update(int64(memstats[location1].Alloc))
 
-		if ReadDiskStats(diskstats[location1]) == nil {
-			diskReads.Mark(diskstats[location1].ReadCount - diskstats[location2].ReadCount)
+		if io, _ := p.IOCounters(); io != nil {
+			diskstats[location1].ReadBytes = int64(io.ReadBytes)
+			diskstats[location1].WriteBytes = int64(io.WriteBytes)
 			diskReadBytes.Mark(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
-			diskWrites.Mark(diskstats[location1].WriteCount - diskstats[location2].WriteCount)
 			diskWriteBytes.Mark(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
-
-			diskReadBytesCounter.Inc(diskstats[location1].ReadBytes - diskstats[location2].ReadBytes)
-			diskWriteBytesCounter.Inc(diskstats[location1].WriteBytes - diskstats[location2].WriteBytes)
 		}
-
 		goGoroutines.Update(int64(runtime.NumGoroutine()))
 		n, _ := runtime.ThreadCreateProfile(nil)
 		goThreads.Update(int64(n))

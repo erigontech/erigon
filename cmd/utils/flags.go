@@ -24,6 +24,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -33,6 +34,10 @@ import (
 	"time"
 
 	pcsclite "github.com/gballet/go-libpcsclite"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/spf13/cobra"
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -58,8 +63,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/spf13/cobra"
-	"github.com/urfave/cli"
 )
 
 const localhost = "127.0.0.1"
@@ -743,6 +746,22 @@ var (
 		Usage: "External EVM configuration (default = built-in interpreter)",
 		Value: "",
 	}
+
+	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
+		Name:  "clique.checkpoint",
+		Usage: "number of blocks after which to save the vote snapshot to the database",
+		Value: 10,
+	}
+	CliqueSnapshotInmemorySnapshotsFlag = cli.IntFlag{
+		Name:  "clique.snapshots",
+		Usage: "number of recent vote snapshots to keep in memory",
+		Value: 1024,
+	}
+	CliqueSnapshotInmemorySignaturesFlag = cli.IntFlag{
+		Name:  "clique.signatures",
+		Usage: "number of recent block signatures to keep in memory",
+		Value: 16384,
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -1350,6 +1369,12 @@ func setEthash(ctx *cli.Context, cfg *eth.Config) {
 	}
 }
 
+func setClique(ctx *cli.Context, cfg *params.SnapshotConfig) {
+	cfg.CheckpointInterval = ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name)
+	cfg.InmemorySnapshots = ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name)
+	cfg.InmemorySignatures = ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name)
+}
+
 func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
@@ -1463,6 +1488,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	setGPO(ctx, &cfg.GPO, false)
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, cfg)
+	setClique(ctx, &cfg.Clique)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
@@ -1712,8 +1738,10 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
 func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
+	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
+
 	name := "chaindata"
-	chainDb, err := stack.OpenDatabase(name)
+	chainDb, err := stack.OpenDatabase(name, tmpdir)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}
@@ -1747,7 +1775,13 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readOnly bool) (chainConfig *
 	}
 	var engine consensus.Engine
 	if config.Clique != nil {
-		engine = clique.New(config.Clique, chainDb)
+		snapshotConfig := &params.SnapshotConfig{
+			CheckpointInterval: ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name),
+			InmemorySnapshots:  ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name),
+			InmemorySignatures: ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name),
+		}
+
+		engine = clique.New(config.Clique, snapshotConfig, chainDb)
 	} else {
 		engine = ethash.NewFaker()
 		if !ctx.GlobalBool(FakePoWFlag.Name) {

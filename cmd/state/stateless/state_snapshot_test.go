@@ -63,32 +63,37 @@ func TestCopyDatabase(t *testing.T) {
 	doTestcase(t, map[string]testData{})
 
 	doTestcase(t, map[string]testData{
-		string(dbutils.CurrentStateBucket): generateData(string(dbutils.CurrentStateBucket)),
+		dbutils.HashedAccountsBucket: generateData(dbutils.HashedAccountsBucket),
+		dbutils.HashedStorageBucket:  generateData(dbutils.HashedStorageBucket),
 	})
 
 	doTestcase(t, map[string]testData{
-		string(dbutils.CodeBucket): generateData(string(dbutils.CodeBucket)),
+		dbutils.CodeBucket: generateData(dbutils.CodeBucket),
 	})
 
 	doTestcase(t, map[string]testData{
-		string(dbutils.CurrentStateBucket): generateData(string(dbutils.CurrentStateBucket)),
-		string(dbutils.CodeBucket):         generateData(string(dbutils.CodeBucket)),
+		dbutils.HashedAccountsBucket: generateData(dbutils.HashedAccountsBucket),
+		dbutils.HashedStorageBucket:  generateData(dbutils.HashedStorageBucket),
+		dbutils.CodeBucket:           generateData(dbutils.CodeBucket),
 	})
 
 	doTestcase(t, map[string]testData{
-		string(dbutils.CurrentStateBucket): generateData(string(dbutils.CurrentStateBucket)),
-		string(dbutils.CodeBucket):         generateData(string(dbutils.CodeBucket)),
+		dbutils.HashedAccountsBucket: generateData(dbutils.HashedAccountsBucket),
+		dbutils.HashedStorageBucket:  generateData(dbutils.HashedStorageBucket),
+		dbutils.CodeBucket:           generateData(dbutils.CodeBucket),
 	})
 
 	doTestcase(t, map[string]testData{
-		string(dbutils.CurrentStateBucket): generateData(string(dbutils.CurrentStateBucket)),
-		string(dbutils.CodeBucket):         generateData(string(dbutils.CodeBucket)),
+		dbutils.HashedAccountsBucket: generateData(dbutils.HashedAccountsBucket),
+		dbutils.HashedStorageBucket:  generateData(dbutils.HashedStorageBucket),
+		dbutils.CodeBucket:           generateData(dbutils.CodeBucket),
 	})
 
 	doTestcase(t, map[string]testData{
-		string(dbutils.CurrentStateBucket): generateData(string(dbutils.CurrentStateBucket)),
-		string(dbutils.CodeBucket):         generateData(string(dbutils.CodeBucket)),
-		string(dbutils.DatabaseInfoBucket): generateData(string(dbutils.DatabaseInfoBucket)),
+		dbutils.HashedAccountsBucket: generateData(dbutils.HashedAccountsBucket),
+		dbutils.HashedStorageBucket:  generateData(dbutils.HashedStorageBucket),
+		dbutils.CodeBucket:           generateData(dbutils.CodeBucket),
+		dbutils.DatabaseInfoBucket:   generateData(dbutils.DatabaseInfoBucket),
 	})
 
 }

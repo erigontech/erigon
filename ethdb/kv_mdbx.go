@@ -26,19 +26,21 @@ import (
 var _ DbCopier = &MdbxKV{}
 
 type MdbxOpts struct {
-	inMem            bool
-	exclusive        bool
-	flags            uint
-	path             string
-	bucketsCfg       BucketConfigsFunc
-	mapSize          datasize.ByteSize
-	maxFreelistReuse uint
+	inMem             bool
+	exclusive         bool
+	flags             uint
+	path              string
+	bucketsCfg        BucketConfigsFunc
+	mapSize           datasize.ByteSize
+	dirtyListMaxPages uint64
+	maxFreelistReuse  uint
 }
 
 func NewMDBX() MdbxOpts {
 	return MdbxOpts{
-		bucketsCfg: DefaultBucketConfigs,
-		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
+		bucketsCfg:        DefaultBucketConfigs,
+		flags:             mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable, // | mdbx.LifoReclaim,
+		dirtyListMaxPages: 128 * 1024,
 	}
 }
 
@@ -82,24 +84,8 @@ func (opts MdbxOpts) WithBucketsConfig(f BucketConfigsFunc) MdbxOpts {
 }
 
 func (opts MdbxOpts) Open() (KV, error) {
-	env, err := mdbx.NewEnv()
-	if err != nil {
-		return nil, err
-	}
-
-	err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024)
-	if err != nil {
-		return nil, err
-	}
-
-	//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
-
-	err = env.SetMaxDBs(100)
-	if err != nil {
-		return nil, err
-	}
-
 	var logger log.Logger
+	var err error
 	if opts.inMem {
 		logger = log.New("mdbx", "inMem")
 		opts.path, err = ioutil.TempDir(os.TempDir(), "mdbx")
@@ -110,35 +96,79 @@ func (opts MdbxOpts) Open() (KV, error) {
 		logger = log.New("mdbx", path.Base(opts.path))
 	}
 
-	if opts.mapSize == 0 {
-		if opts.inMem {
-			opts.mapSize = 64 * datasize.MB
-		} else {
-			opts.mapSize = LMDBDefaultMapSize
-		}
+	env, err := mdbx.NewEnv()
+	if err != nil {
+		return nil, err
 	}
-
-	if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, -1); err != nil {
+	err = env.SetMaxDBs(100)
+	if err != nil {
+		return nil, err
+	}
+	err = env.SetOption(mdbx.OptMaxReaders, 256)
+	if err != nil {
 		return nil, err
 	}
 
-	if opts.maxFreelistReuse == 0 {
-		opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
-	}
+	if opts.flags&mdbx.Accede == 0 {
+		err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024)
+		if err != nil {
+			return nil, err
+		}
 
-	if err = os.MkdirAll(opts.path, 0744); err != nil {
-		return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		//_ = env.SetDebug(mdbx.LogLvlExtra, mdbx.DbgAssert, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
+
+		if opts.mapSize == 0 {
+			if opts.inMem {
+				opts.mapSize = 64 * datasize.MB
+			} else {
+				opts.mapSize = LMDBDefaultMapSize
+			}
+		}
+
+		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, 4*1024); err != nil {
+			return nil, err
+		}
+
+		if opts.maxFreelistReuse == 0 {
+			opts.maxFreelistReuse = LMDBDefaultMaxFreelistReuse
+		}
+
+		if err = os.MkdirAll(opts.path, 0744); err != nil {
+			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
+		}
 	}
 
 	var flags = opts.flags
 	if opts.inMem {
 		flags ^= mdbx.Durable
 		flags |= mdbx.NoMetaSync | mdbx.SafeNoSync
+		opts.dirtyListMaxPages = 8 * 1024
 	}
 
 	err = env.Open(opts.path, flags, 0664)
 	if err != nil {
 		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
+	}
+
+	if opts.flags&mdbx.Accede == 0 {
+		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
+		// But TG app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
+		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
+		if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
+			return nil, err
+		}
+		//if err = env.SetOption(mdbx.OptSpillMaxDenominator, 0); err != nil {
+		//	return nil, err
+		//}
+		if err = env.SetOption(mdbx.OptTxnDpInitial, 4*1024); err != nil {
+			return nil, err
+		}
+		if err = env.SetOption(mdbx.OptDpReverseLimit, 4*1024); err != nil {
+			return nil, err
+		}
+		if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtyListMaxPages); err != nil {
+			return nil, err
+		}
 	}
 
 	db := &MdbxKV{
@@ -529,10 +559,11 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 }
 
 func (tx *MdbxTx) ClearBucket(bucket string) error {
-	if err := tx.dropEvenIfBucketIsNotDeprecated(bucket); err != nil {
-		return err
+	dbi := tx.db.buckets[bucket].DBI
+	if dbi == NonExistingDBI {
+		return nil
 	}
-	return tx.CreateBucket(bucket)
+	return tx.tx.Drop(mdbx.DBI(dbi), false)
 }
 
 func (tx *MdbxTx) DropBucket(bucket string) error {
@@ -758,7 +789,11 @@ func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 	if name == "root" {
 		return tx.tx.StatDBI(mdbx.DBI(1))
 	}
-	return tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
+	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[name].DBI))
+	if err != nil {
+		return nil, fmt.Errorf("bucket: %s, %w", name, err)
+	}
+	return st, nil
 }
 
 func (tx *MdbxTx) Cursor(bucket string) Cursor {
@@ -835,7 +870,7 @@ func (c *MdbxCursor) initCursor() error {
 	var err error
 	c.c, err = tx.tx.OpenCursor(c.dbi)
 	if err != nil {
-		return err
+		return fmt.Errorf("table: %s, %w", c.bucketName, err)
 	}
 
 	// add to auto-cleanup on end of transactions
@@ -977,7 +1012,6 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 			return []byte{}, nil, err
 		}
 	}
-
 	if len(k) == to {
 		k2 := make([]byte, 0, len(k)+from-to)
 		k2 = append(append(k2, k...), v[:from-to]...)
@@ -1141,7 +1175,7 @@ func (c *MdbxCursor) deleteDupSort(key []byte) error {
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
 	if len(key) != from && len(key) >= to {
-		return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", c.bucketName, from, to, key)
+		return fmt.Errorf("delete from dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x,%d", c.bucketName, from, to, key, len(key))
 	}
 
 	if len(key) == from {
@@ -1213,7 +1247,7 @@ func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
 	if len(key) != from && len(key) >= to {
-		return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", c.bucketName, from, to, key)
+		return fmt.Errorf("put dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x,%d", c.bucketName, from, to, key, len(key))
 	}
 
 	if len(key) != from {
@@ -1319,7 +1353,7 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 	if b.AutoDupSortKeysConversion {
 		from, to := b.DupFromLen, b.DupToLen
 		if len(k) != from && len(k) >= to {
-			return fmt.Errorf("dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x", c.bucketName, from, to, k)
+			return fmt.Errorf("append dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x,%d", c.bucketName, from, to, k, len(k))
 		}
 
 		if len(k) == from {
@@ -1369,14 +1403,6 @@ func (c *MdbxDupSortCursor) Internal() *mdbx.Cursor {
 func (c *MdbxDupSortCursor) initCursor() error {
 	if c.c != nil {
 		return nil
-	}
-
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		return fmt.Errorf("class MdbxDupSortCursor not compatible with AutoDupSortKeysConversion buckets")
-	}
-
-	if c.bucketCfg.Flags&mdbx.DupSort == 0 {
-		return fmt.Errorf("class MdbxDupSortCursor can be used only if bucket created with flag mdbx.DupSort")
 	}
 
 	return c.MdbxCursor.initCursor()

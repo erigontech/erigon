@@ -27,11 +27,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -86,6 +87,9 @@ type Header struct {
 	Extra       []byte         `json:"extraData"        gencodec:"required"`
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
+
+	hash   atomic.Value
+	author common.Address
 }
 
 // field type overrides for gencodec
@@ -103,6 +107,25 @@ type headerMarshaling struct {
 // RLP encoding.
 func (h *Header) Hash() common.Hash {
 	return rlpHash(h)
+}
+
+func (h *Header) HashCache() common.Hash {
+	if hash := h.hash.Load(); hash != nil && hash != (common.Hash{}) {
+		return hash.(common.Hash)
+	}
+
+	v := rlpHash(h)
+	h.hash.Store(v)
+
+	return v
+}
+
+func (h *Header) Author() common.Address {
+	return h.author
+}
+
+func (h *Header) SetAuthor(addr common.Address) {
+	h.author = addr
 }
 
 var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
@@ -442,6 +465,15 @@ func (b *Block) Hash() common.Hash {
 		return hash.(common.Hash)
 	}
 	v := b.header.Hash()
+	b.hash.Store(v)
+	return v
+}
+
+func (b *Block) HashCache() common.Hash {
+	if hash := b.hash.Load(); hash != nil {
+		return hash.(common.Hash)
+	}
+	v := b.header.HashCache()
 	b.hash.Store(v)
 	return v
 }

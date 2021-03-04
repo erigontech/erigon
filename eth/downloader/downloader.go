@@ -26,9 +26,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -40,6 +42,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
 var (
@@ -114,7 +117,7 @@ type Downloader struct {
 	queue      *queue   // Scheduler for selecting the hashes to download
 	peers      *peerSet // Set of active peers from which download can proceed
 
-	stateDB *ethdb.ObjectDatabase // Database to state sync into (and deduplicate via)
+	stateDB ethdb.Database // Database to state sync into (and deduplicate via)
 	//stateBloom *trie.SyncBloom       // Bloom filter for fast trie node existence checks
 
 	// Statistics
@@ -165,8 +168,8 @@ type Downloader struct {
 
 	storageMode ethdb.StorageMode
 	tmpdir      string
-	cacheSize   int
-	batchSize   int
+	cacheSize   datasize.ByteSize
+	batchSize   datasize.ByteSize
 
 	headersState    *stagedsync.StageState
 	headersUnwinder stagedsync.Unwinder
@@ -174,8 +177,9 @@ type Downloader struct {
 	bodiesState    *stagedsync.StageState
 	bodiesUnwinder stagedsync.Unwinder
 
-	stagedSyncState *stagedsync.State
-	stagedSync      *stagedsync.StagedSync
+	stagedSyncState  *stagedsync.State
+	stagedSync       *stagedsync.StagedSync
+	consensusProcess *process.RemoteEngine
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -246,30 +250,31 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDB *ethdb.ObjectDatabase, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode) *Downloader {
+func New(checkpoint uint64, stateDB ethdb.Database, mux *event.TypeMux, chainConfig *params.ChainConfig, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, sm ethdb.StorageMode, eng *process.RemoteEngine) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
 	dl := &Downloader{
-		mode:          uint32(StagedSync),
-		stateDB:       stateDB,
-		mux:           mux,
-		queue:         newQueue(blockCacheMaxItems, blockCacheInitialItems),
-		peers:         newPeerSet(),
-		rttEstimate:   uint64(rttMaxEstimate),
-		rttConfidence: uint64(1000000),
-		chainConfig:   chainConfig,
-		blockchain:    chain,
-		lightchain:    lightchain,
-		dropPeer:      dropPeer,
-		headerCh:      make(chan dataPack, 1),
-		bodyCh:        make(chan dataPack, 1),
-		receiptCh:     make(chan dataPack, 1),
-		bodyWakeCh:    make(chan bool, 1),
-		receiptWakeCh: make(chan bool, 1),
-		headerProcCh:  make(chan []*types.Header, 1),
-		quitCh:        make(chan struct{}),
-		storageMode:   sm,
+		mode:             uint32(StagedSync),
+		stateDB:          stateDB,
+		mux:              mux,
+		queue:            newQueue(blockCacheMaxItems, blockCacheInitialItems),
+		peers:            newPeerSet(),
+		rttEstimate:      uint64(rttMaxEstimate),
+		rttConfidence:    uint64(1000000),
+		chainConfig:      chainConfig,
+		blockchain:       chain,
+		lightchain:       lightchain,
+		dropPeer:         dropPeer,
+		headerCh:         make(chan dataPack, 1),
+		bodyCh:           make(chan dataPack, 1),
+		receiptCh:        make(chan dataPack, 1),
+		bodyWakeCh:       make(chan bool, 1),
+		receiptWakeCh:    make(chan bool, 1),
+		headerProcCh:     make(chan []*types.Header, 1),
+		quitCh:           make(chan struct{}),
+		storageMode:      sm,
+		consensusProcess: eng,
 	}
 	go dl.qosTuner()
 	return dl
@@ -285,7 +290,7 @@ func (d *Downloader) SetTmpDir(tmpdir string) {
 	d.tmpdir = tmpdir
 }
 
-func (d *Downloader) SetBatchSize(cacheSize, batchSize int) {
+func (d *Downloader) SetBatchSize(cacheSize, batchSize datasize.ByteSize) {
 	d.cacheSize = cacheSize
 	d.batchSize = batchSize
 }
@@ -548,6 +553,11 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 		cc := &core.TinyChainContext{}
 		cc.SetDB(tx)
 		cc.SetEngine(d.blockchain.Engine())
+		var cache *shards.StateCache
+		if d.cacheSize > 0 {
+			cache = shards.NewStateCache(32, d.cacheSize)
+		}
+
 		d.stagedSyncState, err = d.stagedSync.Prepare(
 			d,
 			d.chainConfig,
@@ -558,7 +568,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 			p.id,
 			d.storageMode,
 			d.tmpdir,
-			d.cacheSize,
+			cache,
 			d.batchSize,
 			d.quitCh,
 			fetchers,
@@ -708,6 +718,8 @@ func (d *Downloader) Terminate() {
 
 	// Cancel any pending download requests
 	d.Cancel()
+
+	d.consensusProcess.Close()
 }
 
 // fetchHeight retrieves the head header of the remote peer to aid in estimating
@@ -1185,7 +1197,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64) error {
 				filled, proced, err := d.fillHeaderSkeleton(from, headers)
 				if err != nil {
 					p.log.Debug("Skeleton chain invalid", "err", err)
-					return fmt.Errorf("%w: %v", errInvalidChain, err)
+					return fmt.Errorf("fillHeaderSkeleton failed %w: %v", errInvalidChain, err)
 				}
 				headers = filled[proced:]
 				from += uint64(proced)
@@ -1694,14 +1706,19 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, blockNumber uin
 					var err error
 					var newCanonical bool
 					if mode == StagedSync {
-						if err = stagedsync.VerifyHeaders(d.stateDB, chunk, d.chainConfig, d.blockchain.Engine(), frequency); err != nil {
+
+						t := time.Now()
+						if err = stagedsync.VerifyHeaders(d.stateDB, chunk, d.consensusProcess, frequency); err != nil {
 							log.Warn("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "parent", chunk[n].ParentHash, "err", err)
-							return fmt.Errorf("%w: %v", errInvalidChain, err)
+							return fmt.Errorf("stagedsync.VerifyHeaders failed %w: %v(actual error)", errInvalidChain, err)
 						}
+						elapsed := time.Since(t)
+						//fmt.Println("VerifyHeaders", "count", len(chunk), "elapsed", elapsed, "number", chunk[n].Number, "hash", chunk[n].Hash().String(), "blk/ms", float64(len(chunk))/float64(elapsed.Microseconds()))
+
 						var reorg bool
 						var forkBlockNumber uint64
 						logPrefix := d.stagedSyncState.LogPrefix()
-						newCanonical, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, d.stateDB, chunk)
+						newCanonical, reorg, forkBlockNumber, err = stagedsync.InsertHeaderChain(logPrefix, elapsed, d.stateDB, chunk)
 						if reorg && d.headersUnwinder != nil {
 							// Need to unwind further stages
 							if err1 := d.headersUnwinder.UnwindTo(forkBlockNumber, d.stateDB); err1 != nil {
@@ -1841,7 +1858,7 @@ func (d *Downloader) importBlockResults(logPrefix string, results []*fetchResult
 			// of the blocks delivered from the downloader, and the indexing will be off.
 			log.Debug("Downloaded item processing failed on sidechain import", "index", index, "err", err)
 		}
-		return 0, fmt.Errorf("%w: %v", errInvalidChain, err)
+		return 0, fmt.Errorf("importBlockResults failed %w: %v", errInvalidChain, err)
 	}
 	if d.getMode() == StagedSync && index > 0 && d.bodiesState != nil {
 		if err1 := d.bodiesState.Update(d.stateDB, blocks[index-1].NumberU64()); err1 != nil {

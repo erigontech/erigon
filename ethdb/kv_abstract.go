@@ -122,9 +122,6 @@ type BucketMigrator interface {
 //    ... logic
 // }
 type Cursor interface {
-	Prefix(v []byte) Cursor // Prefix returns only keys with given prefix, useful RemoteKV - because filtering done by server
-	Prefetch(v uint) Cursor // Prefetch enables data streaming - used only by RemoteKV
-
 	First() ([]byte, []byte, error)               // First - position at first key/data item
 	Seek(seek []byte) ([]byte, []byte, error)     // Seek - position at first key greater than or equal to specified key
 	SeekExact(key []byte) ([]byte, []byte, error) // SeekExact - position at first key greater than or equal to specified key

@@ -74,7 +74,7 @@ type (
 )
 
 // nilValueNode is used when collapsing internal trie nodes for hashing, since
-// unset children need to serialize correctly.
+// unset hasState need to serialize correctly.
 var nilValueNode = valueNode(nil)
 
 func NewShortNode(key []byte, value node) *shortNode {

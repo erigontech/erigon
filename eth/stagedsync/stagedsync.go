@@ -3,10 +3,12 @@ package stagedsync
 import (
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/turbo/shards"
 )
 
 const prof = false // whether to profile
@@ -55,8 +57,8 @@ func (stagedSync *StagedSync) Prepare(
 	pid string,
 	storageMode ethdb.StorageMode,
 	tmpdir string,
-	cacheSize int,
-	batchSize int,
+	cache *shards.StateCache,
+	batchSize datasize.ByteSize,
 	quitCh <-chan struct{},
 	headersFetchers []func() error,
 	txPool *core.TxPool,
@@ -83,7 +85,7 @@ func (stagedSync *StagedSync) Prepare(
 			chainConfig:           chainConfig,
 			chainContext:          chainContext,
 			vmConfig:              vmConfig,
-			db:                    db,
+			DB:                    db,
 			TX:                    tx,
 			pid:                   pid,
 			storageMode:           storageMode,
@@ -93,7 +95,7 @@ func (stagedSync *StagedSync) Prepare(
 			txPool:                txPool,
 			poolStart:             poolStart,
 			changeSetHook:         changeSetHook,
-			cacheSize:             cacheSize,
+			cache:                 cache,
 			batchSize:             batchSize,
 			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
 			stateReaderBuilder:    readerBuilder,
@@ -110,6 +112,9 @@ func (stagedSync *StagedSync) Prepare(
 		state.unwindOrder[i] = stages[stageIndex]
 	}
 
+	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
+		db = tx
+	}
 	if err := state.LoadUnwindInfo(db); err != nil {
 		return nil, err
 	}

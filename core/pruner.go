@@ -86,11 +86,6 @@ func (p *BasicPruner) pruningLoop(db ethdb.Database) {
 				log.Error("Pruning error", "err", err)
 				return
 			}
-			err = PruneStorageOfSelfDestructedAccounts(db)
-			if err != nil {
-				log.Error("PruneStorageOfSelfDestructedAccounts error", "err", err)
-				return
-			}
 			p.LastPrunedBlockNum = to
 		}
 	}
@@ -138,38 +133,6 @@ func (p *BasicPruner) WriteLastPrunedBlockNum(num uint64) {
 	if err := p.db.Put(dbutils.DatabaseInfoBucket, dbutils.LastPrunedBlockKey, b); err != nil {
 		log.Crit("Failed to store last pruned block's num", "err", err)
 	}
-}
-
-func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
-	keysToRemove := newKeysToRemove()
-	if err := db.Walk(dbutils.IntermediateTrieHashBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		if len(v) > 0 && len(k) != common.HashLength { // marker of self-destructed account is - empty value
-			return true, nil
-		}
-
-		if err := db.Walk(dbutils.CurrentStateBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
-			keysToRemove.StorageKeys = append(keysToRemove.StorageKeys, common.CopyBytes(k))
-			return true, nil
-		}); err != nil {
-			return false, err
-		}
-
-		if err := db.Walk(dbutils.IntermediateTrieHashBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
-			keysToRemove.IntermediateTrieHashKeys = append(keysToRemove.IntermediateTrieHashKeys, common.CopyBytes(k))
-			return true, nil
-		}); err != nil {
-			return false, err
-		}
-
-		return true, nil
-	}); err != nil {
-		return err
-	}
-
-	//return batchDelete(db, keysToRemove)
-	log.Debug("PruneStorageOfSelfDestructedAccounts can remove rows amount", "storage_bucket", len(keysToRemove.StorageKeys), "intermediate_bucket", len(keysToRemove.IntermediateTrieHashKeys))
-
-	return nil
 }
 
 func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
@@ -280,10 +243,9 @@ func LimitIterator(k *keysToRemove, limit int) *limitIterator {
 	i.batches = []Batch{
 		{bucket: dbutils.AccountsHistoryBucket, keys: i.k.AccountHistoryKeys},
 		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
-		{bucket: dbutils.CurrentStateBucket, keys: i.k.StorageKeys},
+		{bucket: dbutils.HashedStorageBucket, keys: i.k.StorageKeys},
 		{bucket: dbutils.PlainAccountChangeSetBucket, keys: i.k.AccountChangeSet},
 		{bucket: dbutils.PlainStorageChangeSetBucket, keys: i.k.StorageChangeSet},
-		{bucket: dbutils.IntermediateTrieHashBucket, keys: i.k.IntermediateTrieHashKeys},
 	}
 
 	return i

@@ -560,37 +560,8 @@ func (n *Node) EventMux() *event.TypeMux {
 // OpenDatabase opens an existing database with the given name (or creates one if no
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(name string) (*ethdb.ObjectDatabase, error) {
-	return n.OpenDatabaseWithFreezer(name, 0, 0, "", "")
-}
-
-func (n *Node) ApplyMigrations(name string, tmpdir string) error {
-	if n.config.DataDir == "" {
-		return nil
-	}
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	dbPath, err := n.config.ResolvePath(name)
-	if err != nil {
-		return err
-	}
-	var kv ethdb.KV
-
-	if n.config.MDBX {
-		kv, err = ethdb.NewMDBX().Path(dbPath).Exclusive().Open()
-		if err != nil {
-			return fmt.Errorf("failed to open kv inside stack.ApplyMigrations: %w", err)
-		}
-	} else {
-		kv, err = ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Exclusive().Open()
-		if err != nil {
-			return fmt.Errorf("failed to open kv inside stack.ApplyMigrations: %w", err)
-		}
-	}
-	defer kv.Close()
-
-	return migrations.NewMigrator().Apply(ethdb.NewObjectDatabase(kv), tmpdir)
+func (n *Node) OpenDatabase(name string, tmpdir string) (*ethdb.ObjectDatabase, error) {
+	return n.OpenDatabaseWithFreezer(name, tmpdir)
 }
 
 // OpenDatabaseWithFreezer opens an existing database with the given name (or
@@ -599,7 +570,7 @@ func (n *Node) ApplyMigrations(name string, tmpdir string) error {
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
 // NOTE: kept for compatibility and for easier rebases (turbo-geth)
-func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*ethdb.ObjectDatabase, error) {
+func (n *Node) OpenDatabaseWithFreezer(name string, tmpdir string) (*ethdb.ObjectDatabase, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -612,28 +583,64 @@ func (n *Node) OpenDatabaseWithFreezer(name string, _, _ int, _, _ string) (*eth
 		fmt.Printf("Opening In-memory Database (LMDB): %s\n", name)
 		db = ethdb.NewMemDatabase()
 	} else {
+		dbPath, err := n.config.ResolvePath(name)
+		if err != nil {
+			return nil, err
+		}
+
+		var openFunc func(exclusive bool) (*ethdb.ObjectDatabase, error)
 		if n.config.MDBX {
 			log.Info("Opening Database (MDBX)", "mapSize", n.config.LMDBMapSize.HR())
-			dbPath, err := n.config.ResolvePath(name)
-			if err != nil {
-				return nil, err
+			openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
+				opts := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize)
+				if exclusive {
+					opts = opts.Exclusive()
+				}
+				kv, err1 := opts.Open()
+				if err1 != nil {
+					return nil, err1
+				}
+				return ethdb.NewObjectDatabase(kv), nil
 			}
-			kv, err := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize).Open()
-			if err != nil {
-				return nil, err
-			}
-			db = ethdb.NewObjectDatabase(kv)
 		} else {
 			log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR(), "maxFreelistReuse", n.config.LMDBMaxFreelistReuse)
-			dbPath, err := n.config.ResolvePath(name)
+			openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
+				opts := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse)
+				if exclusive {
+					opts = opts.Exclusive()
+				}
+				kv, err1 := opts.Open()
+				if err1 != nil {
+					return nil, err1
+				}
+				return ethdb.NewObjectDatabase(kv), nil
+			}
+		}
+
+		db, err = openFunc(false)
+		if err != nil {
+			return nil, err
+		}
+		migrator := migrations.NewMigrator()
+		has, err := migrator.HasPendingMigrations(db)
+		if err != nil {
+			return nil, err
+		}
+		if has {
+			log.Info("Re-Opening DB in exclusive mode to apply migrations")
+			db.Close()
+			db, err = openFunc(true)
 			if err != nil {
 				return nil, err
 			}
-			kv, err := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).MaxFreelistReuse(n.config.LMDBMaxFreelistReuse).Open()
+			if err = migrator.Apply(db, tmpdir); err != nil {
+				return nil, err
+			}
+			db.Close()
+			db, err = openFunc(false)
 			if err != nil {
 				return nil, err
 			}
-			db = ethdb.NewObjectDatabase(kv)
 		}
 	}
 

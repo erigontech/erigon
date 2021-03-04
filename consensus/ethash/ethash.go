@@ -30,10 +30,9 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unsafe"
 
-	mmap "github.com/edsrzf/mmap-go"
+	"github.com/edsrzf/mmap-go"
 
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -51,8 +50,8 @@ var (
 	// two256 is a big integer representing 2^256
 	two256 = new(big.Int).Exp(big.NewInt(2), big.NewInt(256), big.NewInt(0))
 
-	// sharedEthash is a full instance that can be shared between multiple users.
-	sharedEthash = New(Config{3, false, "", 1, 0, false, ModeNormal, nil}, nil, false)
+	sharedEthashOnce sync.Once
+	sharedEthash     *Ethash
 
 	// algorithmRevision is the data structure version used for file naming.
 	algorithmRevision = 23
@@ -60,6 +59,14 @@ var (
 	// dumpMagic is a dataset dump header to sanity check a data dump.
 	dumpMagic = []uint32{0xbaddcafe, 0xfee1dead}
 )
+
+// sharedEthash is a full instance that can be shared between multiple users.
+func GetSharedEthash() *Ethash {
+	sharedEthashOnce.Do(func() {
+		sharedEthash = New(Config{3, false, "", 1, 0, false, ModeNormal, nil}, nil, false)
+	})
+	return sharedEthash
+}
 
 // isLittleEndian returns whether the local system is running in little or big
 // endian byte order.
@@ -399,6 +406,7 @@ const (
 	ModeNormal Mode = iota
 	ModeShared
 	ModeTest
+
 	ModeFake
 	ModeFullFake
 )
@@ -432,9 +440,7 @@ type Ethash struct {
 	remote   *remoteSealer
 
 	// The fields below are hooks for testing
-	shared    *Ethash       // Shared PoW verifier to avoid cache regeneration
-	fakeFail  uint64        // Block number which fails PoW check even in fake mode
-	fakeDelay time.Duration // Time delay to sleep for before returning from verify
+	shared *Ethash // Shared PoW verifier to avoid cache regeneration
 
 	lock      sync.Mutex // Ensures thread safety for the in-memory caches and mining fields
 	closeOnce sync.Once  // Ensures exit channel will not be closed twice.
@@ -479,59 +485,10 @@ func NewTester(notify []string, noverify bool) *Ethash {
 	return ethash
 }
 
-// NewFaker creates a ethash consensus engine with a fake PoW scheme that accepts
-// all blocks' seal as valid, though they still have to conform to the Ethereum
-// consensus rules.
-func NewFaker() *Ethash {
-	return &Ethash{
-		config: Config{
-			PowMode: ModeFake,
-			Log:     log.Root(),
-		},
-	}
-}
-
-// NewFakeFailer creates a ethash consensus engine with a fake PoW scheme that
-// accepts all blocks as valid apart from the single one specified, though they
-// still have to conform to the Ethereum consensus rules.
-func NewFakeFailer(fail uint64) *Ethash {
-	return &Ethash{
-		config: Config{
-			PowMode: ModeFake,
-			Log:     log.Root(),
-		},
-		fakeFail: fail,
-	}
-}
-
-// NewFakeDelayer creates a ethash consensus engine with a fake PoW scheme that
-// accepts all blocks as valid, but delays verifications by some time, though
-// they still have to conform to the Ethereum consensus rules.
-func NewFakeDelayer(delay time.Duration) *Ethash {
-	return &Ethash{
-		config: Config{
-			PowMode: ModeFake,
-			Log:     log.Root(),
-		},
-		fakeDelay: delay,
-	}
-}
-
-// NewFullFaker creates an ethash consensus engine with a full fake scheme that
-// accepts all blocks as valid, without checking any consensus rules whatsoever.
-func NewFullFaker() *Ethash {
-	return &Ethash{
-		config: Config{
-			PowMode: ModeFullFake,
-			Log:     log.Root(),
-		},
-	}
-}
-
 // NewShared creates a full sized ethash PoW shared between all requesters running
 // in the same process.
 func NewShared() *Ethash {
-	return &Ethash{shared: sharedEthash}
+	return &Ethash{shared: GetSharedEthash()}
 }
 
 // Close closes the exit channel to notify all backend threads exiting.
@@ -638,7 +595,7 @@ func (ethash *Ethash) SetThreads(threads int) {
 // hashrate of all remote miner.
 func (ethash *Ethash) Hashrate() float64 {
 	// Short circuit if we are run the ethash in normal/test mode.
-	if ethash.config.PowMode != ModeNormal && ethash.config.PowMode != ModeTest {
+	if (ethash.config.PowMode != ModeNormal && ethash.config.PowMode != ModeTest) || ethash.remote == nil {
 		return ethash.hashrate.Rate1()
 	}
 	var res = make(chan uint64, 1)

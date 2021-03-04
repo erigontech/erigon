@@ -15,7 +15,7 @@ func TestDupSortHashState(t *testing.T) {
 	require, db := require.New(t), ethdb.NewMemDatabase()
 
 	err := db.KV().Update(context.Background(), func(tx ethdb.Tx) error {
-		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.CurrentStateBucketOld1)
+		return tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HashedStorageBucket)
 	})
 	require.NoError(err)
 
@@ -23,9 +23,7 @@ func TestDupSortHashState(t *testing.T) {
 	inc := string(common.FromHex("0000000000000001"))
 	storageKey := accKey + inc + accKey
 
-	err = db.Put(dbutils.CurrentStateBucketOld1, []byte(accKey), []byte{1})
-	require.NoError(err)
-	err = db.Put(dbutils.CurrentStateBucketOld1, []byte(storageKey), []byte{2})
+	err = db.Put(dbutils.HashedStorageBucket, []byte(storageKey), []byte{2})
 	require.NoError(err)
 
 	migrator := NewMigrator()
@@ -35,18 +33,14 @@ func TestDupSortHashState(t *testing.T) {
 
 	// test high-level data access didn't change
 	i := 0
-	err = db.Walk(dbutils.CurrentStateBucket, nil, 0, func(k, v []byte) (bool, error) {
+	err = db.Walk(dbutils.HashedStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
 		i++
 		return true, nil
 	})
 	require.NoError(err)
-	require.Equal(2, i)
+	require.Equal(1, i)
 
-	v, err := db.Get(dbutils.CurrentStateBucket, []byte(accKey))
-	require.NoError(err)
-	require.Equal([]byte{1}, v)
-
-	v, err = db.Get(dbutils.CurrentStateBucket, []byte(storageKey))
+	v, err := db.Get(dbutils.HashedStorageBucket, []byte(storageKey))
 	require.NoError(err)
 	require.Equal([]byte{2}, v)
 
@@ -54,13 +48,9 @@ func TestDupSortHashState(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.CurrentStateBucket)
+	c := tx.(ethdb.HasTx).Tx().CursorDupSort(dbutils.HashedStorageBucket)
 	// test low-level data layout
 	require.NoError(err)
-
-	_, v, err = c.SeekExact([]byte(accKey))
-	require.NoError(err)
-	require.Equal([]byte{1}, v)
 
 	keyLen := common.HashLength + common.IncarnationLength
 	k, v, err := c.SeekBothRange([]byte(storageKey)[:keyLen], []byte(storageKey)[keyLen:])

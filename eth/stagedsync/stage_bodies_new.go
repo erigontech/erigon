@@ -51,6 +51,12 @@ func BodiesForward(
 	if err != nil {
 		return err
 	}
+	penalties := true
+	if headerProgress-bodyProgress <= 16 {
+		// When processing small number of blocks, we can afford wasting more bandwidth but get blocks quicker
+		timeout = 1
+		penalties = false
+	}
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
 	batch := tx.NewBatch()
@@ -67,9 +73,11 @@ func BodiesForward(
 	var headHash common.Hash
 	var headSet bool
 	for !stopped {
-		penaltyPeers := bd.GetPenaltyPeers()
-		for _, penaltyPeer := range penaltyPeers {
-			penalise(ctx, penaltyPeer)
+		if penalties {
+			penaltyPeers := bd.GetPenaltyPeers()
+			for _, penaltyPeer := range penaltyPeers {
+				penalise(ctx, penaltyPeer)
+			}
 		}
 		if req == nil {
 			currentTime := uint64(time.Now().Unix())
@@ -79,13 +87,25 @@ func BodiesForward(
 		if req != nil {
 			peer = bodyReqSend(ctx, req)
 		}
-		for req != nil && peer != nil {
+		if req != nil && peer != nil {
+			if !penalties {
+				log.Info("Sent", "req", fmt.Sprintf("[%d-%d]", req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]), "peer", string(peer))
+			}
 			currentTime := uint64(time.Now().Unix())
 			bd.RequestSent(req, currentTime+uint64(timeout), peer)
+		}
+		for req != nil && peer != nil {
+			currentTime := uint64(time.Now().Unix())
 			req, blockNum = bd.RequestMoreBodies(db, blockNum, currentTime)
 			peer = nil
 			if req != nil {
 				peer = bodyReqSend(ctx, req)
+			}
+			if req != nil && peer != nil {
+				if !penalties {
+					log.Info("Sent", "req", fmt.Sprintf("[%d-%d]", req.BlockNums[0], req.BlockNums[len(req.BlockNums)-1]), "peer", string(peer))
+				}
+				bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			}
 		}
 		d := bd.GetDeliveries()
@@ -128,7 +148,6 @@ func BodiesForward(
 			logProgressBodies(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, batch)
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
-			bd.PrintPeerMap()
 		case <-timer.C:
 		//log.Info("RequestQueueTime (bodies) ticked")
 		case <-wakeUpChan:

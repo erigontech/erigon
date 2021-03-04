@@ -965,6 +965,47 @@ func TestTxn_Stat(t *testing.T) {
 	}
 }
 
+func TestTxn_StatOnEmpty(t *testing.T) {
+	env := setup(t)
+	path, err := env.Path()
+	if err != nil {
+		env.Close()
+		t.Error(err)
+		return
+	}
+	defer os.RemoveAll(path)
+	defer env.Close()
+
+	var dbi DBI
+	err = env.Update(func(txn *Txn) (err error) {
+		dbi, err = txn.OpenDBISimple("testdb", Create|DupSort)
+		return err
+	})
+	if err != nil {
+		t.Errorf("%s", err)
+		return
+	}
+	env.CloseDBI(dbi)
+
+	err = env.Update(func(txn *Txn) (err error) {
+		dbi, err = txn.OpenDBISimple("testdb", 0)
+		return err
+	})
+	if err != nil {
+		t.Errorf("%s", err)
+		return
+	}
+
+	err = env.Update(func(txn *Txn) (err error) {
+		err = txn.Drop(dbi, true)
+		return err
+	})
+	if err != nil {
+		t.Errorf("%s", err)
+		return
+	}
+}
+
 func TestSequence(t *testing.T) {
 	env := setup(t)
 	path, err := env.Path()

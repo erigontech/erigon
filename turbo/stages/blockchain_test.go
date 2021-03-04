@@ -38,6 +38,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -102,12 +103,19 @@ func newCanonical(engine consensus.Engine, n int, full bool) (*ethdb.ObjectDatab
 	if full {
 		// Full block-chain requested
 		blocks := makeBlockChain(genesis, n, engine, db, canonicalSeed)
-		_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, engine, blocks, true /* checkRoot */)
+		exit := make(chan struct{})
+		eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+		defer common.SafeClose(exit)
+		_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, engine, eng, blocks, true /* checkRoot */)
 		return db, blockchain, err
 	}
 	// Header-only chain requested
 	headers := makeHeaderChain(genesis.Header(), n, engine, db, canonicalSeed)
-	_, _, _, err = stagedsync.InsertHeadersInStages(db, params.AllEthashProtocolChanges, ethash.NewFaker(), headers)
+
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	_, _, _, err = stagedsync.InsertHeadersInStages(db, eng, headers)
 	return db, blockchain, err
 }
 
@@ -168,7 +176,11 @@ func testFork(t *testing.T, chainDb ethdb.Database, i, n int, full bool, compara
 		if err != nil {
 			t.Fatalf("Failed to read TD for current block: %v", err)
 		}
-		if _, err = stagedsync.InsertBlocksInStages(chainDb, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, ethash.NewFaker(), blockChainB, true /* checkRoot */); err != nil {
+		exit1 := make(chan struct{})
+		cons1 := ethash.NewFaker()
+		eng1 := process.NewConsensusProcess(cons1, params.AllEthashProtocolChanges, exit1)
+		defer common.SafeClose(exit1)
+		if _, err = stagedsync.InsertBlocksInStages(chainDb, ethdb.DefaultStorageMode, params.AllEthashProtocolChanges, &vm.Config{}, cons1, eng1, blockChainB, true /* checkRoot */); err != nil {
 			t.Fatalf("failed to insert forking chain: %v", err)
 		}
 		currentBlockHash = blockChainB[len(blockChainB)-1].Hash()
@@ -195,7 +207,10 @@ func testFork(t *testing.T, chainDb ethdb.Database, i, n int, full bool, compara
 		if err != nil {
 			t.Fatalf("Failed to read TD for current header: %v", err)
 		}
-		if _, _, _, err = stagedsync.InsertHeadersInStages(chainDb, params.AllEthashProtocolChanges, ethash.NewFaker(), headerChainB); err != nil {
+		exit1 := make(chan struct{})
+		eng1 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit1)
+		defer common.SafeClose(exit1)
+		if _, _, _, err = stagedsync.InsertHeadersInStages(chainDb, eng1, headerChainB); err != nil {
 			t.Fatalf("failed to insert forking chain: %v", err)
 		}
 		currentHeader = headerChainB[len(headerChainB)-1]
@@ -221,7 +236,10 @@ func testFork(t *testing.T, chainDb ethdb.Database, i, n int, full bool, compara
 // testBlockChainImport tries to process a chain of blocks, writing them into
 // the database if successful.
 func testBlockChainImport(chain types.Blocks, blockchain *core.BlockChain) error {
-	if _, err := stagedsync.InsertBlocksInStages(blockchain.ChainDb(), ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, blockchain.Engine(), chain, true /* checkRoot */); err != nil {
+	exit1 := make(chan struct{})
+	eng1 := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit1)
+	defer common.SafeClose(exit1)
+	if _, err := stagedsync.InsertBlocksInStages(blockchain.ChainDb(), ethdb.DefaultStorageMode, blockchain.Config(), &vm.Config{}, blockchain.Engine(), eng1, chain, true /* checkRoot */); err != nil {
 		return err
 	}
 	return nil
@@ -230,7 +248,10 @@ func testBlockChainImport(chain types.Blocks, blockchain *core.BlockChain) error
 // testHeaderChainImport tries to process a chain of header, writing them into
 // the database if successful.
 func testHeaderChainImport(chain []*types.Header, blockchain *core.BlockChain) error {
-	if _, _, _, err := stagedsync.InsertHeadersInStages(blockchain.ChainDb(), blockchain.Config(), blockchain.Engine(), chain); err != nil {
+	exit1 := make(chan struct{})
+	eng1 := process.NewConsensusProcess(blockchain.Engine(), params.AllEthashProtocolChanges, exit1)
+	defer common.SafeClose(exit1)
+	if _, _, _, err := stagedsync.InsertHeadersInStages(blockchain.ChainDb(), eng1, chain); err != nil {
 		return err
 	}
 	return nil
@@ -460,10 +481,19 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 		t.Fatalf("generate chain: %v", err)
 	}
 	if full {
-		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), easyBlocks, true /* checkRoot */); err != nil {
+		exit1 := make(chan struct{})
+		cons1 := ethash.NewFaker()
+		eng1 := process.NewConsensusProcess(cons1, params.AllEthashProtocolChanges, exit1)
+		defer common.SafeClose(exit1)
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, cons1, eng1, easyBlocks, true /* checkRoot */); err != nil {
 			t.Fatalf("failed to insert easy chain: %v", err)
 		}
-		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, ethash.NewFaker(), diffBlocks, true /* checkRoot */); err != nil {
+
+		exit2 := make(chan struct{})
+		cons2 := ethash.NewFaker()
+		eng2 := process.NewConsensusProcess(cons2, params.AllEthashProtocolChanges, exit2)
+		defer common.SafeClose(exit2)
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, cons2, eng2, diffBlocks, true /* checkRoot */); err != nil {
 			t.Fatalf("failed to insert difficult chain: %v", err)
 		}
 	} else {
@@ -475,10 +505,18 @@ func testReorg(t *testing.T, first, second []int64, td int64, full bool) {
 		for i, block := range diffBlocks {
 			diffHeaders[i] = block.Header()
 		}
-		if _, _, _, err = stagedsync.InsertHeadersInStages(db, params.TestChainConfig, ethash.NewFaker(), easyHeaders); err != nil {
+
+		exit1 := make(chan struct{})
+		eng1 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit1)
+		defer common.SafeClose(exit1)
+		if _, _, _, err = stagedsync.InsertHeadersInStages(db, eng1, easyHeaders); err != nil {
 			t.Fatalf("failed to insert easy chain: %v", err)
 		}
-		if _, _, _, err = stagedsync.InsertHeadersInStages(db, params.TestChainConfig, ethash.NewFaker(), diffHeaders); err != nil {
+
+		exit2 := make(chan struct{})
+		eng2 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit2)
+		defer common.SafeClose(exit2)
+		if _, _, _, err = stagedsync.InsertHeadersInStages(db, eng2, diffHeaders); err != nil {
 			t.Fatalf("failed to insert difficult chain: %v", err)
 		}
 	}
@@ -1023,7 +1061,11 @@ func TestChainTxReorgs(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 	// Import the chain. This runs all block validation rules.
-	if _, err1 := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err1 != nil {
+	exit1 := make(chan struct{})
+	cons1 := ethash.NewFaker()
+	eng1 := process.NewConsensusProcess(cons1, params.AllEthashProtocolChanges, exit1)
+	defer common.SafeClose(exit1)
+	if _, err1 := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons1, eng1, chain, true /* checkRoot */); err1 != nil {
 		t.Fatalf("failed to insert original chain: %v", err1)
 	}
 
@@ -1049,7 +1091,11 @@ func TestChainTxReorgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
+	exit2 := make(chan struct{})
+	cons2 := ethash.NewFaker()
+	eng2 := process.NewConsensusProcess(cons2, params.AllEthashProtocolChanges, exit2)
+	defer common.SafeClose(exit2)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons2, eng2, chain, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 
@@ -1127,7 +1173,11 @@ func TestLogReorgs(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	if _, err1 := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err1 != nil {
+	exit1 := make(chan struct{})
+	cons1 := ethash.NewFaker()
+	eng1 := process.NewConsensusProcess(cons1, params.AllEthashProtocolChanges, exit1)
+	defer common.SafeClose(exit1)
+	if _, err1 := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons1, eng1, chain, true /* checkRoot */); err1 != nil {
 		t.Fatalf("failed to insert chain: %v", err1)
 	}
 
@@ -1143,7 +1193,12 @@ func TestLogReorgs(t *testing.T) {
 		}
 		close(done)
 	}()
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
+
+	exit2 := make(chan struct{})
+	cons2 := ethash.NewFaker()
+	eng2 := process.NewConsensusProcess(cons2, params.AllEthashProtocolChanges, exit2)
+	defer common.SafeClose(exit2)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons2, eng2, chain, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 	// In turbo-geth, RemoveLogsEvent is not working yet
@@ -1229,17 +1284,29 @@ func TestLogRebirth(t *testing.T) {
 		t.Fatalf("generate new blocks: %v", err)
 	}
 
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
+	exit1 := make(chan struct{})
+	cons1 := ethash.NewFaker()
+	eng1 := process.NewConsensusProcess(cons1, params.AllEthashProtocolChanges, exit1)
+	defer common.SafeClose(exit1)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons1, eng1, chain, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert chain: %v", err)
 	}
 	checkLogEvents(t, newLogCh, rmLogsCh, 1, 0)
 
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), forkChain, true /* checkRoot */); err != nil {
+	exit2 := make(chan struct{})
+	cons2 := ethash.NewFaker()
+	eng2 := process.NewConsensusProcess(cons2, params.AllEthashProtocolChanges, exit2)
+	defer common.SafeClose(exit2)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons2, eng2, forkChain, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 	checkLogEvents(t, newLogCh, rmLogsCh, 1, 1)
 
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), newBlocks[2:], true /* checkRoot */); err != nil {
+	exit3 := make(chan struct{})
+	cons3 := ethash.NewFaker()
+	eng3 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit3)
+	defer common.SafeClose(exit1)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons3, eng3, newBlocks[2:], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 	checkLogEvents(t, newLogCh, rmLogsCh, 1, 1)
@@ -1290,16 +1357,30 @@ func TestSideLogRebirth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate side chain: %v", err)
 	}
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
-		t.Fatalf("failed to insert forked chain: %v", err)
-	}
-	checkLogEvents(t, newLogCh, rmLogsCh, 0, 0)
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), sideChain[:2], true /* checkRoot */); err != nil {
+
+	exit1 := make(chan struct{})
+	cons1 := ethash.NewFaker()
+	eng1 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit1)
+	defer common.SafeClose(exit1)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons1, eng1, chain, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 	checkLogEvents(t, newLogCh, rmLogsCh, 0, 0)
 
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), sideChain[2:], true /* checkRoot */); err != nil {
+	exit2 := make(chan struct{})
+	cons2 := ethash.NewFaker()
+	eng2 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit2)
+	defer common.SafeClose(exit2)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons2, eng2, sideChain[:2], true /* checkRoot */); err != nil {
+		t.Fatalf("failed to insert forked chain: %v", err)
+	}
+	checkLogEvents(t, newLogCh, rmLogsCh, 0, 0)
+
+	exit3 := make(chan struct{})
+	cons3 := ethash.NewFaker()
+	eng3 := process.NewConsensusProcess(ethash.NewFaker(), params.AllEthashProtocolChanges, exit3)
+	defer common.SafeClose(exit3)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons3, eng3, sideChain[2:], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 	checkLogEvents(t, newLogCh, rmLogsCh, 1, 0)
@@ -1538,7 +1619,11 @@ func TestEIP155Transition(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */); err != nil {
+	exit1 := make(chan struct{})
+	cons1 := ethash.NewFaker()
+	eng1 := process.NewConsensusProcess(cons1, params.AllEthashProtocolChanges, exit1)
+	defer common.SafeClose(exit1)
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons1, eng1, blocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	block := blockchain.GetBlockByNumber(1)
@@ -1553,7 +1638,12 @@ func TestEIP155Transition(t *testing.T) {
 	if !block.Transactions()[1].Protected() {
 		t.Error("Expected block[3].txs[1] to be replay protected")
 	}
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks[4:], true /* checkRoot */); err != nil {
+
+	exit2 := make(chan struct{})
+	cons2 := ethash.NewFaker()
+	eng2 := process.NewConsensusProcess(cons2, params.AllEthashProtocolChanges, exit2)
+	defer common.SafeClose(exit2)
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons2, eng2, blocks[4:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1578,7 +1668,12 @@ func TestEIP155Transition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
-	_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
+
+	exit3 := make(chan struct{})
+	cons3 := ethash.NewFaker()
+	eng3 := process.NewConsensusProcess(cons3, params.AllEthashProtocolChanges, exit3)
+	defer common.SafeClose(exit3)
+	_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons3, eng3, blocks, true /* checkRoot */)
 	if !errors.Is(err, types.ErrInvalidChainId) {
 		t.Errorf("expected error: %v, got %v", types.ErrInvalidChainId, err)
 	}
@@ -1671,7 +1766,11 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 		return fmt.Errorf("generate blocks: %v", err)
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.StorageMode{History: history, Receipts: receipts, TxIndex: txlookup}, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */); err != nil {
+	exit2 := make(chan struct{})
+	cons2 := ethash.NewFaker()
+	eng2 := process.NewConsensusProcess(cons2, params.AllEthashProtocolChanges, exit2)
+	defer common.SafeClose(exit2)
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.StorageMode{History: history, Receipts: receipts, TxIndex: txlookup}, gspec.Config, &vm.Config{}, cons2, eng2, blocks, true /* checkRoot */); err != nil {
 		return err
 	}
 
@@ -1793,7 +1892,11 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// account must exist pre eip 161
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks[0], true /* checkRoot */); err != nil {
+	exit1 := make(chan struct{})
+	cons1 := ethash.NewFaker()
+	eng1 := process.NewConsensusProcess(cons1, params.AllEthashProtocolChanges, exit1)
+	defer common.SafeClose(exit1)
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, cons1, eng1, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	if st := state.New(state.NewDbStateReader(db)); !st.Exist(theAddr) {
@@ -1801,7 +1904,11 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	}
 
 	// account needs to be deleted post eip 161
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks[1], true /* checkRoot */); err != nil {
+	exit2 := make(chan struct{})
+	cons2 := ethash.NewFaker()
+	eng2 := process.NewConsensusProcess(cons2, params.AllEthashProtocolChanges, exit2)
+	defer common.SafeClose(exit2)
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, cons2, eng2, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	if st := state.New(state.NewDbStateReader(db)); st.Exist(theAddr) {
@@ -1809,7 +1916,11 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	}
 
 	// account mustn't be created post eip 161
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks[2], true /* checkRoot */); err != nil {
+	exit3 := make(chan struct{})
+	cons3 := ethash.NewFaker()
+	eng3 := process.NewConsensusProcess(cons3, params.AllEthashProtocolChanges, exit3)
+	defer common.SafeClose(exit3)
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, cons3, eng3, blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	if st := state.New(state.NewDbStateReader(db)); st.Exist(theAddr) {
@@ -1868,7 +1979,11 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), blocks, true /* checkRoot */)
+	exit1 := make(chan struct{})
+	cons1 := ethash.NewFaker()
+	eng1 := process.NewConsensusProcess(cons1, params.AllEthashProtocolChanges, exit1)
+	defer common.SafeClose(exit1)
+	_, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons1, eng1, blocks, true /* checkRoot */)
 	assert.NoError(t, err)
 
 	st := state.New(state.NewDbStateReader(db))
@@ -1948,14 +2063,17 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	}
 	// Import the canonical and fork chain side by side, verifying the current block
 	// and current header consistency
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
 	for i := 0; i < len(blocks); i++ {
-		if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks[i:i+1], true /* checkRoot */); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, eng, blocks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 		if chain.CurrentBlock().Hash() != chain.CurrentHeader().Hash() {
 			t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, chain.CurrentBlock().Number(), chain.CurrentBlock().Hash().Bytes()[:4], chain.CurrentHeader().Number, chain.CurrentHeader().Hash().Bytes()[:4])
 		}
-		if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, forks[i:i+1], true /* checkRoot */); err != nil {
+		if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, eng, forks[i:i+1], true /* checkRoot */); err != nil {
 			t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
 		}
 		if chain.CurrentBlock().Hash() != chain.CurrentHeader().Hash() {
@@ -2020,20 +2138,24 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	}
 
 	// Import the shared chain and the original canonical one
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, shared, true /* checkRoot */); err != nil {
+	exit1 := make(chan struct{})
+	cons1 := ethash.NewFaker()
+	eng1 := process.NewConsensusProcess(cons1, params.AllEthashProtocolChanges, exit1)
+	defer common.SafeClose(exit1)
+	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, cons1, eng1, shared, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert shared chain: %v", err)
 	}
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, original, true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, cons1, eng1, original, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert original chain: %v", err)
 	}
 	// Import the competitor chain without exceeding the canonical's TD and ensure
 	// we have not processed any of the blocks (protection against malicious blocks)
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, competitor[:len(competitor)-2], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, cons1, eng1, competitor[:len(competitor)-2], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert competitor chain: %v", err)
 	}
 	// Import the head of the competitor chain, triggering the reorg and ensure we
 	// successfully reprocess all the stashed away blocks.
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, competitor[len(competitor)-2:], true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, cons1, eng1, competitor[len(competitor)-2:], true /* checkRoot */); err != nil {
 		t.Fatalf("failed to finalize competitor chain: %v", err)
 	}
 }
@@ -2218,12 +2340,17 @@ func TestLowDiffLongChain(t *testing.T) {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
 	defer chain.Stop()
-	if _, err := stagedsync.InsertBlocksInStages(diskDB, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+
+	exit := make(chan struct{})
+	cons := ethash.NewFaker()
+	eng := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err := stagedsync.InsertBlocksInStages(diskDB, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, cons, eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
 	// And now import the fork
-	if _, err := stagedsync.InsertBlocksInStages(diskDB, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, fork, true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(diskDB, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, cons, eng, fork, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	head := chain.CurrentBlock()
@@ -2872,7 +2999,10 @@ func TestDeleteCreateRevert(t *testing.T) {
 	defer diskdb.Close()
 	gspec.MustCommit(diskdb)
 
-	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err := stagedsync.InsertBlocksInStages(diskdb, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 }
@@ -2980,7 +3110,11 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	exit := make(chan struct{})
+	cons := ethash.NewFaker()
+	eng := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, cons, eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	statedb := state.New(state.NewDbStateReader(db))
@@ -3064,7 +3198,11 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
+	exit := make(chan struct{})
+	cons := ethash.NewFaker()
+	eng := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, params.TestChainConfig, &vm.Config{}, cons, eng, blocks, true /* checkRoot */); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	statedb := state.New(state.NewDbStateReader(db))
@@ -3104,6 +3242,11 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		aaStorage = make(map[common.Hash]common.Hash)          // Initial storage in AA
 		aaCode    = []byte{byte(vm.PC), byte(vm.SELFDESTRUCT)} // Code for AA (simple selfdestruct)
 	)
+
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
+
 	// Populate two slots
 	aaStorage[common.HexToHash("01")] = common.HexToHash("01")
 	aaStorage[common.HexToHash("02")] = common.HexToHash("02")
@@ -3242,7 +3385,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}
 	for i, block := range blocks {
 		blockNum := i + 1
-		if _, err := stagedsync.InsertBlockInStages(db, params.TestChainConfig, &vm.Config{}, engine, block, true /* checkRoot */); err != nil {
+		if _, err := stagedsync.InsertBlockInStages(db, params.TestChainConfig, &vm.Config{}, engine, eng, block, true /* checkRoot */); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 		statedb := state.New(state.NewDbStateReader(db))
@@ -3307,6 +3450,10 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		bb      = common.HexToAddress("0x000000000000000000000000000000000000bbbb")
 	)
+
+	exit := make(chan struct{})
+	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
+	defer common.SafeClose(exit)
 
 	// The bb-code needs to CREATE2 the aa contract. It consists of
 	// both initcode and deployment code
@@ -3385,7 +3532,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	// First block tries to create, but fails
 	{
 		block := blocks[0]
-		if _, err := stagedsync.InsertBlockInStages(diskdb, params.TestChainConfig, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+		if _, err := stagedsync.InsertBlockInStages(diskdb, params.TestChainConfig, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 		}
 		statedb = state.New(state.NewPlainStateReader(diskdb))
@@ -3395,7 +3542,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}
 	// Import the rest of the blocks
 	for _, block := range blocks[1:] {
-		if _, err := stagedsync.InsertBlockInStages(diskdb, params.TestChainConfig, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
+		if _, err := stagedsync.InsertBlockInStages(diskdb, params.TestChainConfig, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 		}
 	}
