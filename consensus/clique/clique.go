@@ -377,17 +377,17 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		if number == 0 || (number%c.config.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil)) {
 			checkpoint := chain.GetHeaderByNumber(number)
 			if checkpoint != nil {
-				hash := checkpoint.Hash()
+				checkpointHash := checkpoint.Hash()
 
 				signers := make([]common.Address, (len(checkpoint.Extra)-extraVanity-extraSeal)/common.AddressLength)
 				for i := 0; i < len(signers); i++ {
 					copy(signers[i][:], checkpoint.Extra[extraVanity+i*common.AddressLength:])
 				}
-				snap = newSnapshot(c.config, c.signatures, number, hash, signers)
+				snap = newSnapshot(c.config, c.signatures, number, checkpointHash, signers)
 				if err := snap.store(c.db); err != nil {
 					return nil, err
 				}
-				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
+				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", checkpointHash)
 				break
 			}
 		}

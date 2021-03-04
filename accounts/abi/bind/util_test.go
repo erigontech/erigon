@@ -80,14 +80,14 @@ func TestWaitDeployed(t *testing.T) {
 		}()
 
 		// Send and mine the transaction.
-		if err := backend.SendTransaction(ctx, tx); err != nil {
+		if err = backend.SendTransaction(ctx, tx); err != nil {
 			t.Fatalf("test %q: failed to set tx: %v", name, err)
 		}
 		backend.Commit()
 
 		select {
 		case <-mined:
-			if err != test.wantErr {
+			if errors.Is(err, test.wantErr) {
 				t.Errorf("test %q: error mismatch: want %q, got %q", name, test.wantErr, err)
 			}
 			if address != test.wantAddress {
