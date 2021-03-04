@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1614759230474,
+  "iteration": 1614835325703,
   "links": [],
   "panels": [
     {
@@ -69,7 +69,7 @@
       "renderer": "flot",
       "seriesOverrides": [],
       "spaceLength": 10,
-      "stack": true,
+      "stack": false,
       "steppedLine": false,
       "targets": [
         {
@@ -175,7 +175,7 @@
       "renderer": "flot",
       "seriesOverrides": [],
       "spaceLength": 10,
-      "stack": true,
+      "stack": false,
       "steppedLine": false,
       "targets": [
         {
@@ -279,7 +279,7 @@
       "renderer": "flot",
       "seriesOverrides": [],
       "spaceLength": 10,
-      "stack": true,
+      "stack": false,
       "steppedLine": false,
       "targets": [
         {
@@ -468,13 +468,13 @@
       "hiddenSeries": false,
       "id": 140,
       "legend": {
-        "avg": false,
-        "current": false,
+        "avg": true,
+        "current": true,
         "max": false,
         "min": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -495,7 +495,7 @@
         {
           "expr": "rate(db_get_count{instance=~\"$instance\"}[1m])",
           "interval": "",
-          "legendFormat": "get/sec: {{instance}}",
+          "legendFormat": "get: {{instance}}",
           "refId": "A"
         }
       ],
@@ -565,13 +565,13 @@
       "hiddenSeries": false,
       "id": 156,
       "legend": {
-        "avg": false,
-        "current": false,
+        "avg": true,
+        "current": true,
         "max": false,
         "min": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -756,7 +756,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "mem: resident set size (growth per sec)",
+      "title": "mem: resident set size",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -1733,14 +1733,6 @@
           "intervalFactor": 1,
           "legendFormat": "iowait: {{instance}}",
           "refId": "B"
-        },
-        {
-          "expr": "system_cpu_procload{instance=\"$instance\"}",
-          "format": "time_series",
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "current process: {{instance}}",
-          "refId": "C"
         }
       ],
       "thresholds": [],
@@ -3992,5 +3984,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 14
+  "version": 27
 }
