@@ -42,7 +42,6 @@ require (
 	github.com/huin/goupnp v1.0.0
 	github.com/influxdata/influxdb v1.8.2
 	github.com/jackpal/go-nat-pmp v1.0.2
-	github.com/json-iterator/go v1.1.10 // indirect
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/karalabe/usb v0.0.0-20191104083709-911d15fe12a9
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
