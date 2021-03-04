@@ -25,11 +25,14 @@ import (
 
 var stateStags = &cobra.Command{
 	Use: "state_stages",
-	Short: `Move all StateStages (which happen after senders) forward. 
-			Stops at StageSenders progress or at "--block".
-			Each iteration test will move forward "--unwind.every" blocks, then unwind "--unwind" blocks.
-			Use reset_state command to re-run this test.
-			When finish all cycles, does comparison to "--chaindata.reference" if flag provided.
+	Short: `Run all StateStages (which happen after senders) in loop.
+Examples: 
+--unwind=1 --unwind.every=10  # 10 blocks forward, 1 block back, 10 blocks forward, ...
+--unwind=10 --unwind.every=1  # 1 block forward, 10 blocks back, 1 blocks forward, ...
+--unwind=10  # 10 blocks back, then stop
+--integrity.fast=false --integrity.slow=false # Performs DB integrity checks each step. You can disable slow or fast checks.
+--block # Stop at exact blocks
+--chaindata.reference # When finish all cycles, does comparison to this db file.
 		`,
 	Example: "go run ./cmd/integration state_stages --chaindata=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
