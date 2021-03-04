@@ -166,6 +166,7 @@ Error: %v
 		if lastHeader.Number.Uint64() < *headNumber {
 			newCanonical = true
 		} else if lastHeader.Number.Uint64() == *headNumber {
+			//nolint:gosec
 			newCanonical = mrand.Float64() < 0.5
 		}
 	}
