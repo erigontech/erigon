@@ -80,7 +80,9 @@ func TestWaitDeployed(t *testing.T) {
 		}()
 
 		// Send and mine the transaction.
-		backend.SendTransaction(ctx, tx)
+		if err := backend.SendTransaction(ctx, tx); err != nil {
+			t.Fatalf("test %q: failed to set tx: %v", name, err)
+		}
 		backend.Commit()
 
 		select {
