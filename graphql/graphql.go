@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/filters"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
@@ -709,6 +710,48 @@ type BlockFilterCriteria struct {
 	Topics *[][]common.Hash
 }
 
+// runFilter accepts a filter and executes it, returning all its results as
+// `Log` objects.
+func runFilter(ctx context.Context, be ethapi.Backend, filter *filters.Filter) ([]*Log, error) {
+	logs, err := filter.Logs(ctx)
+	if err != nil || logs == nil {
+		return nil, err
+	}
+	ret := make([]*Log, 0, len(logs))
+	for _, log := range logs {
+		ret = append(ret, &Log{
+			backend:     be,
+			transaction: &Transaction{backend: be, hash: log.TxHash},
+			log:         log,
+		})
+	}
+	return ret, nil
+}
+
+func (b *Block) Logs(ctx context.Context, args struct{ Filter BlockFilterCriteria }) ([]*Log, error) {
+	var addresses []common.Address
+	if args.Filter.Addresses != nil {
+		addresses = *args.Filter.Addresses
+	}
+	var topics [][]common.Hash
+	if args.Filter.Topics != nil {
+		topics = *args.Filter.Topics
+	}
+	hash := b.hash
+	if hash == (common.Hash{}) {
+		header, err := b.resolveHeader(ctx)
+		if err != nil {
+			return nil, err
+		}
+		hash = header.Hash()
+	}
+	// Construct the range filter
+	filter := filters.NewBlockFilter(b.backend, hash, addresses, topics)
+
+	// Run the filter and return all the logs
+	return runFilter(ctx, b.backend, filter)
+}
+
 func (b *Block) Account(ctx context.Context, args struct {
 	Address common.Address
 }) (*Account, error) {
@@ -971,6 +1014,29 @@ type FilterCriteria struct {
 	// {{A}, {B}}         matches topic A in first position, B in second position
 	// {{A, B}}, {C, D}}  matches topic (A OR B) in first position, (C OR D) in second position
 	Topics *[][]common.Hash
+}
+
+func (r *Resolver) Logs(ctx context.Context, args struct{ Filter FilterCriteria }) ([]*Log, error) {
+	// Convert the RPC block numbers into internal representations
+	begin := rpc.LatestBlockNumber.Int64()
+	if args.Filter.FromBlock != nil {
+		begin = int64(*args.Filter.FromBlock)
+	}
+	end := rpc.LatestBlockNumber.Int64()
+	if args.Filter.ToBlock != nil {
+		end = int64(*args.Filter.ToBlock)
+	}
+	var addresses []common.Address
+	if args.Filter.Addresses != nil {
+		addresses = *args.Filter.Addresses
+	}
+	var topics [][]common.Hash
+	if args.Filter.Topics != nil {
+		topics = *args.Filter.Topics
+	}
+	// Construct the range filter
+	filter := filters.NewRangeFilter(filters.Backend(r.backend), begin, end, addresses, topics)
+	return runFilter(ctx, r.backend, filter)
 }
 
 func (r *Resolver) GasPrice(ctx context.Context) (hexutil.Big, error) {
