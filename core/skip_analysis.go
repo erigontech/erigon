@@ -21,7 +21,7 @@ import (
 )
 
 // MainnetNotCheckedFrom is the first block number not yet checked for invalid jumps
-const MainnetNotCheckedFrom uint64 = 11922110
+const MainnetNotCheckedFrom uint64 = 11971378
 
 // SkipAnalysis function tells us whether we can skip performing jumpdest analysis
 // for the historical blocks (on mainnet now but perhaps on the testsnets
