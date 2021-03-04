@@ -366,16 +366,19 @@ func ReadBody(db ethdb.Database, hash common.Hash, number uint64) *types.Body {
 	return body
 }
 
-func ReadSenders(db databaseReader, hash common.Hash, number uint64) []common.Address {
+func ReadSenders(db databaseReader, hash common.Hash, number uint64) ([]common.Address, error) {
 	data, err := db.Get(dbutils.Senders, dbutils.BlockBodyKey(number, hash))
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		log.Error("ReadSenders failed", "err", err)
+	if err != nil {
+		if errors.Is(err, ethdb.ErrKeyNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("readSenders failed: %w", err)
 	}
 	senders := make([]common.Address, len(data)/common.AddressLength)
 	for i := 0; i < len(senders); i++ {
 		copy(senders[i][:], data[i*common.AddressLength:])
 	}
-	return senders
+	return senders, nil
 }
 
 // WriteBody - writes body in Network format, later staged sync will convert it into Storage format
@@ -402,17 +405,18 @@ func WriteBody(db ethdb.Database, hash common.Hash, number uint64, body *types.B
 	return nil
 }
 
-func WriteSenders(ctx context.Context, db DatabaseWriter, hash common.Hash, number uint64, senders []common.Address) {
+func WriteSenders(ctx context.Context, db DatabaseWriter, hash common.Hash, number uint64, senders []common.Address) error {
 	if common.IsCanceled(ctx) {
-		return
+		return ctx.Err()
 	}
 	data := make([]byte, common.AddressLength*len(senders))
 	for i, sender := range senders {
 		copy(data[i*common.AddressLength:], sender[:])
 	}
 	if err := db.Put(dbutils.Senders, dbutils.BlockBodyKey(number, hash), data); err != nil {
-		log.Crit("Failed to store block senders", "err", err)
+		return fmt.Errorf("failed to store block senders: %w", err)
 	}
+	return nil
 }
 
 // DeleteBody removes all block body data associated with a hash.
@@ -536,8 +540,12 @@ func ReadReceipts(db ethdb.Database, hash common.Hash, number uint64) types.Rece
 		log.Error("Missing body but have receipt", "hash", hash, "number", number)
 		return nil
 	}
-	senders := ReadSenders(db, hash, number)
-	if err := receipts.DeriveFields(hash, number, body.Transactions, senders); err != nil {
+	senders, err := ReadSenders(db, hash, number)
+	if err != nil {
+		log.Error("Failed to read Senders", "hash", hash, "number", number, "err", err)
+		return nil
+	}
+	if err = receipts.DeriveFields(hash, number, body.Transactions, senders); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", hash, "number", number, "err", err)
 		return nil
 	}

@@ -300,6 +300,9 @@ func (r Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions
 	if len(txs) != len(r) {
 		return errors.New("transaction and receipt count mismatch")
 	}
+	if len(senders) != len(txs) {
+		return errors.New("transaction and senders count mismatch")
+	}
 	for i := 0; i < len(r); i++ {
 		// The transaction hash can be retrieved from the transaction itself
 		r[i].TxHash = txs[i].Hash()

@@ -109,6 +109,7 @@ func BenchmarkFilters(b *testing.B) {
 }
 
 func TestFilters(t *testing.T) {
+	t.Skip("Log filter not used in turbo-get, please see implementation of eth_getLogs in RPCDaemon for more details")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	var (
@@ -174,6 +175,9 @@ func TestFilters(t *testing.T) {
 	for i, block := range chain {
 		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
 			panic(err)
+		}
+		if err := rawdb.WriteSenders(context.Background(), db, block.Hash(), 0, block.Body().SendersFromTxs()); err != nil {
+			t.Fatal(err)
 		}
 		if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
 			panic(err)
