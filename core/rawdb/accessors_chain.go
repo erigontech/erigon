@@ -370,7 +370,7 @@ func ReadSenders(db databaseReader, hash common.Hash, number uint64) ([]common.A
 	data, err := db.Get(dbutils.Senders, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
 		if errors.Is(err, ethdb.ErrKeyNotFound) {
-			return nil, fmt.Errorf("senders not found for block: %d, %x\n", number, hash)
+			return nil, fmt.Errorf("senders not found for block: %d, %x", number, hash)
 		}
 		return nil, fmt.Errorf("readSenders failed: %w", err)
 	}
