@@ -67,17 +67,3 @@ Date:   Thu Mar 4 13:04:50 2021 +0200
 
     build: fix PPA failure due to updated debsrc
 
-commit 9230ca4924ef3a75f1653d828a2cd845d54977e6
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Mar 4 10:44:37 2021 +0200
-
-    Revert "core/forkid, params: unset Berlin fork number (#22413)"
-    
-    This reverts commit ba999105ef89473cfe39e5e53354f7099e67a290.
-
-commit 63385374ec0e0a513ff30b9360471769e937244a
-Author: Felix Lange <fjl@twurst.com>
-Date:   Wed Mar 3 18:01:31 2021 +0100
-
-    params: begin v1.10.1 release cycle
-
