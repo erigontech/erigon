@@ -52,18 +52,4 @@ Date:   Thu Mar 4 13:57:02 2021 +0200
 
     build: add support for Ubuntu Hirsute Hippo
 
-commit 89026d5d70835a6587577fcd96f1d49c5aa4e909
-Merge: 63385374e de61da99c
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Mar 4 13:12:03 2021 +0200
-
-    Merge pull request #22431 from karalabe/builder-fix-ppa
-    
-    build: fix PPA failure due to updated debsrc
-
-commit de61da99c49146200b0f0db07dd2be6afe1232ec
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Mar 4 13:04:50 2021 +0200
-
-    build: fix PPA failure due to updated debsrc
 
