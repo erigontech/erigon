@@ -109,6 +109,7 @@ func BenchmarkFilters(b *testing.B) {
 }
 
 func TestFilters(t *testing.T) {
+	t.Skip("Log filter not used in turbo-get, please see implementation of eth_getLogs in RPCDaemon for more details")
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	var (
