@@ -175,6 +175,9 @@ func TestFilters(t *testing.T) {
 		if err := rawdb.WriteBlock(context.Background(), db, block); err != nil {
 			panic(err)
 		}
+		if err := rawdb.WriteSenders(context.Background(), db, block.Hash(), 0, block.Body().SendersFromTxs()); err != nil {
+			t.Fatal(err)
+		}
 		if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
 			panic(err)
 		}
