@@ -28,7 +28,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -112,7 +112,7 @@ type ProtocolManager struct {
 
 // NewProtocolManager returns a new Ethereum sub protocol manager. The Ethereum sub protocol manages peers capable
 // with the Ethereum network.
-func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine *process.RemoteEngine, blockchain *core.BlockChain, chaindb ethdb.Database, whitelist map[uint64]common.Hash, stagedSync *stagedsync.StagedSync) (*ProtocolManager, error) {
+func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCheckpoint, mode downloader.SyncMode, networkID uint64, mux *event.TypeMux, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb ethdb.Database, whitelist map[uint64]common.Hash, stagedSync *stagedsync.StagedSync) (*ProtocolManager, error) {
 	// Create the protocol manager with the base fields
 	if stagedSync == nil {
 		stagedSync = stagedsync.New(stagedsync.DefaultStages(), stagedsync.DefaultUnwindOrder(), stagedsync.OptionalParameters{})
@@ -183,7 +183,7 @@ func (pm *ProtocolManager) SetBatchSize(cacheSize, batchSize datasize.ByteSize) 
 	}
 }
 
-func initPm(manager *ProtocolManager, engine *process.RemoteEngine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, chaindb ethdb.Database) {
+func initPm(manager *ProtocolManager, engine consensus.Engine, chainConfig *params.ChainConfig, blockchain *core.BlockChain, chaindb ethdb.Database) {
 	sm, err := ethdb.GetStorageModeFromDB(chaindb)
 	if err != nil {
 		log.Error("Get storage mode", "err", err)
@@ -192,7 +192,7 @@ func initPm(manager *ProtocolManager, engine *process.RemoteEngine, chainConfig 
 	if manager.downloader != nil {
 		manager.downloader.Cancel()
 	}
-	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm, engine)
+	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, manager.eventMux, chainConfig, blockchain, nil, manager.removePeer, sm)
 	manager.downloader.SetTmpDir(manager.tmpdir)
 	manager.downloader.SetBatchSize(manager.cacheSize, manager.batchSize)
 	manager.downloader.SetStagedSync(manager.stagedSync)

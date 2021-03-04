@@ -19,7 +19,6 @@ package ethash
 import (
 	"bytes"
 	"encoding/binary"
-	"io"
 	"io/ioutil"
 	"os"
 	"reflect"
@@ -812,34 +811,4 @@ func benchmarkHashimotoFullMmap(b *testing.B, name string, lock bool) {
 func BenchmarkHashimotoFullMmap(b *testing.B) {
 	benchmarkHashimotoFullMmap(b, "WithLock", true)
 	benchmarkHashimotoFullMmap(b, "WithoutLock", false)
-}
-
-func BenchmarkSeedHash(b *testing.B) {
-	var res []byte
-	const repeats = 100
-	for n := 0; n < repeats; n++ {
-		for i := uint64(0); i < uint64(b.N); i++ {
-			res = seedHash(i*epochLength + 1)
-		}
-	}
-
-	_, err := io.Copy(ioutil.Discard, bytes.NewBuffer(res))
-	if err != nil {
-		b.Error(err)
-	}
-}
-
-func BenchmarkSeedHashOld(b *testing.B) {
-	var res []byte
-	const repeats = 100
-	for n := 0; n < repeats; n++ {
-		for i := uint64(0); i < uint64(b.N); i++ {
-			res = seedHashOld(i*epochLength + 1)
-		}
-	}
-
-	_, err := io.Copy(ioutil.Discard, bytes.NewBuffer(res))
-	if err != nil {
-		b.Error(err)
-	}
 }

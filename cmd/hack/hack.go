@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -1816,13 +1815,7 @@ func applyBlock(chaindata string, hash common.Hash) error {
 	}
 	block := types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 	fmt.Printf("Formed block %d %x\n", block.NumberU64(), block.Hash())
-
-	exit := make(chan struct{})
-	cons := ethash.NewFaker()
-	eng := process.NewConsensusProcess(cons, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-
-	if _, err = stagedsync.InsertBlockInStages(db, params.MainnetChainConfig, &vm.Config{}, cons, eng, block, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, params.MainnetChainConfig, &vm.Config{}, ethash.NewFaker(), block, true /* checkRoot */); err != nil {
 		return err
 	}
 	if err = rawdb.WriteCanonicalHash(db, hash, block.NumberU64()); err != nil {
@@ -1850,57 +1843,6 @@ func fixUnwind(chaindata string) error {
 	} else {
 		fmt.Printf("Inc: %x\n", i)
 	}
-	return nil
-}
-
-func snapSizes(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-
-	tx, err := db.KV().Begin(context.Background(), ethdb.RO)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	c := tx.Cursor(dbutils.CliqueBucket)
-	defer c.Close()
-
-	sizes := make(map[int]int)
-	differentValues := make(map[string]struct{})
-
-	var (
-		total uint64
-		k, v  []byte
-	)
-
-	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		sizes[len(v)]++
-		differentValues[string(v)] = struct{}{}
-		total += uint64(len(v) + len(k))
-	}
-
-	var lens = make([]int, len(sizes))
-
-	i := 0
-	for l := range sizes {
-		lens[i] = l
-		i++
-	}
-	sort.Ints(lens)
-
-	for _, l := range lens {
-		fmt.Printf("%6d - %d\n", l, sizes[l])
-	}
-
-	fmt.Printf("Different keys %d\n", len(differentValues))
-	fmt.Printf("Total size: %d bytes\n", total)
-
-	size, err := tx.BucketSize(dbutils.CliqueBucket)
-	fmt.Printf("Total bucket size: %d bytes: %v\n", size, err)
 	return nil
 }
 
@@ -2080,11 +2022,6 @@ func main() {
 	}
 	if *action == "fixUnwind" {
 		if err := fixUnwind(*chaindata); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	if *action == "snapSizes" {
-		if err := snapSizes(*chaindata); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}

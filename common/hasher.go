@@ -19,7 +19,6 @@ type Hasher struct {
 }
 
 var hasherPool = make(chan *Hasher, 128)
-var hasherPool512 = make(chan *Hasher, 128)
 
 func NewHasher() *Hasher {
 	var h *Hasher
@@ -27,16 +26,6 @@ func NewHasher() *Hasher {
 	case h = <-hasherPool:
 	default:
 		h = &Hasher{Sha: sha3.NewLegacyKeccak256().(keccakState)}
-	}
-	return h
-}
-
-func NewHasher512() *Hasher {
-	var h *Hasher
-	select {
-	case h = <-hasherPool512:
-	default:
-		h = &Hasher{Sha: sha3.NewLegacyKeccak512().(keccakState)}
 	}
 	return h
 }

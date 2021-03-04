@@ -30,7 +30,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -1770,13 +1769,7 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 		genesis = new(core.Genesis).MustCommit(db)
 		engine  = ethash.NewFullFaker()
 	)
-
 	chainConfig := params.AllEthashProtocolChanges
-
-	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, chainConfig, exit)
-	defer common.SafeClose(exit)
-
 	// If sidechain blocks are needed, make a light chain and import it
 	var sideblocks types.Blocks
 	var err error
@@ -1795,17 +1788,16 @@ func testSetHead(t *testing.T, tt *rewindTest) {
 	}, false); err != nil {
 		t.Fatalf("error when generating chain err=%v", err)
 	}
-
 	if tt.sidechainBlocks > 0 {
-		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, eng, sideblocks, true /* checkRoot */); err != nil {
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, sideblocks, true /* checkRoot */); err != nil {
 			t.Fatalf("Failed to import side chain: %v", err)
 		}
 	}
 
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, eng, canonblocks[:tt.commitBlock], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, canonblocks[:tt.commitBlock], true /* checkRoot */); err != nil {
 		t.Fatalf("Failed to import canonical chain start: %v", err)
 	}
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, eng, canonblocks[tt.commitBlock:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, chainConfig, &vm.Config{}, engine, canonblocks[tt.commitBlock:], true /* checkRoot */); err != nil {
 		t.Fatalf("Failed to import canonical chain start: %v", err)
 	}
 

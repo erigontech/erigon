@@ -42,7 +42,7 @@ require (
 	github.com/huin/goupnp v1.0.0
 	github.com/influxdata/influxdb v1.8.2
 	github.com/jackpal/go-nat-pmp v1.0.2
-	github.com/json-iterator/go v1.1.10
+	github.com/json-iterator/go v1.1.10 // indirect
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/karalabe/usb v0.0.0-20191104083709-911d15fe12a9
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
@@ -76,7 +76,6 @@ require (
 	golang.org/x/text v0.3.3
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
 	golang.org/x/tools v0.0.0-20200928182047-19e03678916f
-	gonum.org/v1/gonum v0.8.2
 	google.golang.org/grpc v1.34.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.0.1
 	google.golang.org/protobuf v1.25.0

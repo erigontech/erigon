@@ -22,9 +22,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -102,11 +100,7 @@ func ExampleGenerateChain() {
 	}
 
 	// Import the chain. This runs all block validation rules.
-	exit := make(chan struct{})
-	cons := ethash.NewFaker()
-	eng := process.NewConsensusProcess(ethash.NewFaker(), gspec.Config, exit)
-	defer common.SafeClose(exit)
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, cons, eng, chain, true /* checkRoot */); err != nil {
+	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
 		fmt.Printf("insert error%v\n", err)
 		return
 	}

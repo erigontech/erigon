@@ -25,7 +25,6 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -406,6 +405,7 @@ func TestClique(t *testing.T) {
 		}
 		// Create a pristine blockchain with the genesis injected
 		db := ethdb.NewMemDatabase()
+		defer db.Close()
 		genesis.MustCommit(db)
 
 		// Assemble a chain of headers from the cast votes
@@ -414,18 +414,13 @@ func TestClique(t *testing.T) {
 			Period: 1,
 			Epoch:  tt.epoch,
 		}
-		engine := New(config.Clique, params.CliqueSnapshot, db)
+		engine := New(config.Clique, db)
 		engine.fakeDiff = true
-
-		exit := make(chan struct{})
-		eng := process.NewConsensusProcess(NewCliqueVerifier(engine), params.AllEthashProtocolChanges, exit)
 
 		txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, txCacher)
 		if err != nil {
 			t.Errorf("test %d: failed to create test chain: %v", i, err)
-			common.SafeClose(exit)
-			engine.Close()
 			continue
 		}
 
@@ -471,23 +466,19 @@ func TestClique(t *testing.T) {
 		// Pass all the headers through clique and ensure tallying succeeds
 		failed := false
 		for j := 0; j < len(batches)-1; j++ {
-			if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, eng, batches[j], true /* checkRoot */); err != nil {
+			if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[j], true /* checkRoot */); err != nil {
 				t.Errorf("test %d: failed to import batch %d, %v", i, j, err)
 				failed = true
 				break
 			}
 		}
 		if failed {
-			common.SafeClose(exit)
-			engine.Close()
 			continue
 		}
-		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, eng, batches[len(batches)-1], true /* checkRoot */); !errors.Is(err, tt.failure) {
+		if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, &config, &vm.Config{}, engine, batches[len(batches)-1], true /* checkRoot */); !errors.Is(err, tt.failure) {
 			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 		}
 		if tt.failure != nil {
-			common.SafeClose(exit)
-			engine.Close()
 			continue
 		}
 		// No failure was produced or requested, generate the final voting snapshot
@@ -496,8 +487,6 @@ func TestClique(t *testing.T) {
 		snap, err := engine.snapshot(chain, head.NumberU64(), head.Hash(), nil)
 		if err != nil {
 			t.Errorf("test %d: failed to retrieve voting snapshot: %v", i, err)
-			common.SafeClose(exit)
-			engine.Close()
 			continue
 		}
 		// Verify the final list of signers against the expected ones
@@ -515,8 +504,6 @@ func TestClique(t *testing.T) {
 		result := snap.signers()
 		if len(result) != len(signers) {
 			t.Errorf("test %d: signers mismatch: have %x, want %x", i, result, signers)
-			common.SafeClose(exit)
-			engine.Close()
 			continue
 		}
 		for j := 0; j < len(result); j++ {
@@ -524,7 +511,6 @@ func TestClique(t *testing.T) {
 				t.Errorf("test %d, signer %d: signer mismatch: have %x, want %x", i, j, result[j], signers[j])
 			}
 		}
-		common.SafeClose(exit)
-		engine.Close()
+		db.Close()
 	}
 }

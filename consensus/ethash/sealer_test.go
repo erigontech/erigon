@@ -17,6 +17,7 @@
 package ethash
 
 import (
+	"encoding/json"
 	"io/ioutil"
 	"math/big"
 	"net/http"
@@ -27,8 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-
-	json "github.com/json-iterator/go"
 )
 
 // Tests whether remote HTTP servers are correctly notified of new work.

@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/u256"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -70,13 +69,9 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	var chain []*types.Block
 	// Fresh database
 	db := ethdb.NewMemDatabase()
-
-	eng := process.NewRemoteEngine(engine, params.TestChainConfig)
-	defer eng.Close()
-
 	// Regenerate genesis block in the fresh database
 	gspec.MustCommit(db)
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, eng, vm.Config{}, nil, nil)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -87,14 +82,11 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 		return nil, nil, fmt.Errorf("generate chain: %w", err)
 	}
 
-	exit := make(chan struct{})
-	engAPI := process.NewConsensusProcess(eng, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, eng, engAPI, chain, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain, true /* checkRoot */); err != nil {
 		return nil, nil, err
 	}
 	cht := &params.TrustedCheckpoint{}
-	pm, err := NewProtocolManager(gspec.Config, cht, mode, DefaultConfig.NetworkID, evmux, &testTxPool{added: newtx, pool: make(map[common.Hash]*types.Transaction)}, eng, blockchain, db, nil, nil)
+	pm, err := NewProtocolManager(gspec.Config, cht, mode, DefaultConfig.NetworkID, evmux, &testTxPool{added: newtx, pool: make(map[common.Hash]*types.Transaction)}, engine, blockchain, db, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
