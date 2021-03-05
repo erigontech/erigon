@@ -240,6 +240,10 @@ func (hd *HeaderDownload) StageReadyChannel() chan struct{} {
 	return hd.stageReadyCh
 }
 
+func (hd *HeaderDownload) HardCodedPhaseChannel() chan struct{} {
+	return hd.hardCodedPhaseCh
+}
+
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the tips from the attached anchors to it
 func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int, hardCoded bool, currentTime uint64) error {
@@ -369,6 +373,11 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int, current
 		fmt.Printf("HARD CODED PHASE DONE\n")
 		fmt.Printf("=====================================================\n")
 		hd.hardCodedPhaseDone = true
+		// Signal at every opportunity to avoid deadlocks
+		select {
+		case hd.hardCodedPhaseCh <- struct{}{}:
+		default:
+		}
 	} else {
 		fmt.Printf("Hard coded tips: %d\n", len(hd.hardTips))
 	}
@@ -875,42 +884,25 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 	return nil
 }
 
-func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) ([]*HeaderRequest, *time.Timer) {
+func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) *HeaderRequest {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	if hd.requestQueue.Len() == 0 {
-		fmt.Printf("Request queue is empty\n")
-		return nil, hd.RequestQueueTimer
-	}
-	var prevTopTime uint64 = hd.requestQueue.Front().Value.(RequestQueueItem).waitUntil
-	var requests []*HeaderRequest
-	for peek := hd.requestQueue.Front(); peek != nil && peek.Value.(RequestQueueItem).waitUntil <= currentTime; peek = hd.requestQueue.Front() {
-		hd.requestQueue.Remove(peek)
-		item := peek.Value.(RequestQueueItem)
-		if anchors, present := hd.anchors[item.anchorParent]; present {
-			// Anchor still exists after the timeout
-			requests = append(requests, &HeaderRequest{Hash: item.anchorParent, Number: anchors[0].blockHeight - 1, Length: 192})
-			hd.requestQueue.PushBack(RequestQueueItem{anchorParent: item.anchorParent, waitUntil: currentTime + timeout})
-		}
-	}
-	hd.resetRequestQueueTimer(prevTopTime, currentTime)
-	return requests, hd.RequestQueueTimer
-}
 
-func (hd *HeaderDownload) resetRequestQueueTimer(prevTopTime, currentTime uint64) {
-	var nextTopTime uint64
-	if hd.requestQueue.Len() > 0 {
-		nextTopTime = hd.requestQueue.Front().Value.(RequestQueueItem).waitUntil
+	if hd.requestQueue.Len() == 0 {
+		return nil
 	}
-	if nextTopTime == prevTopTime {
-		return // Nothing changed
+	peek := hd.requestQueue.Front()
+	if peek.Value.(RequestQueueItem).waitUntil > currentTime {
+		return nil
 	}
-	if nextTopTime <= currentTime {
-		nextTopTime = currentTime
+	hd.requestQueue.Remove(peek)
+	item := peek.Value.(RequestQueueItem)
+	if anchors, present := hd.anchors[item.anchorParent]; present {
+		// Anchor still exists after the timeout
+		hd.requestQueue.PushBack(RequestQueueItem{anchorParent: item.anchorParent, waitUntil: currentTime + timeout})
+		return &HeaderRequest{Hash: item.anchorParent, Number: anchors[0].blockHeight - 1, Length: 192}
 	}
-	hd.RequestQueueTimer.Stop()
-	//fmt.Printf("Recreating RequestQueueTimer for delay %d seconds\n", nextTopTime-currentTime)
-	hd.RequestQueueTimer = time.NewTimer(time.Duration(nextTopTime-currentTime) * time.Second)
+	return nil
 }
 
 func (hd *HeaderDownload) flushBuffer() error {
@@ -1025,7 +1017,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 	height := header.Number.Uint64()
 	tipHash := header.Hash()
 	hd.anchorTree.Delete(anchor)
-	if height > hd.maxHardTipHeight || hardCodedTip {
+	if hd.hardCodedPhaseDone || hardCodedTip {
 		tip := &Tip{
 			anchor:               anchor,
 			cumulativeDifficulty: cumulativeDifficulty,
@@ -1221,6 +1213,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 		log.Error("Could not flush the buffer, will discard the data", "error", err)
 		return
 	}
+	hd.topSeenHeight = segment.Headers[len(segment.Headers)-1].Number.Uint64()
 	if !hd.hardCodedPhaseDone && !foundAnchor {
 		// During the first phase (downloading hard-coded headers), only extension from an anchor is allowed
 		log.Info("Only anchor extensions allowed in the first phase", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
@@ -1271,4 +1264,10 @@ func (hd *HeaderDownload) HardCodedPhaseDone() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.hardCodedPhaseDone
+}
+
+func (hd *HeaderDownload) TopSeenHeight() uint64 {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.topSeenHeight
 }

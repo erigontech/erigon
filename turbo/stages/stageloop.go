@@ -28,7 +28,7 @@ func StageLoop(
 	db ethdb.Database,
 	hd *headerdownload.HeaderDownload,
 	bd *bodydownload.BodyDownload,
-	headerReqSend func(context.Context, []*headerdownload.HeaderRequest),
+	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(context.Context, uint64, common.Hash, *big.Int),
@@ -39,7 +39,7 @@ func StageLoop(
 		return fmt.Errorf("setup genesis block: %w", err)
 	}
 	sync := stagedsync.New(
-		ReplacementStages(ctx, hd, bd, headerReqSend, bodyReqSend, penalise, updateHead, wakeUpChan, timeout),
+		ReplacementStages(ctx, hd, bd, bodyReqSend, penalise, updateHead, wakeUpChan, timeout),
 		ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
@@ -50,18 +50,60 @@ func StageLoop(
 		var ready bool
 		var height uint64
 		// Keep requesting more headers until there is a heaviest chain
-		for ready, height = hd.Ready(); !ready; ready, height = hd.Ready() {
-			reqs, timer := hd.RequestMoreHeaders(uint64(time.Now().Unix()), 5 /*timeout */)
-			headerReqSend(ctx, reqs)
-			select {
-			case <-ctx.Done(): // When terminate signal is sent or Ctrl-C is pressed
-				return nil
-			case <-timer.C: // When it is time to check on previously sent requests
-			case <-wakeUpChan: // When new message comes from the sentry
-			case <-hd.StageReadyChannel(): // When heaviest chain is ready
-			case <-logEvery.C:
-				logProgress(hd)
+		timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
+		var req *headerdownload.HeaderRequest
+		var peer []byte
+		if hd.HardCodedPhaseDone() {
+			for ready, height = hd.Ready(); !ready; ready, height = hd.Ready() {
+				currentTime := uint64(time.Now().Unix())
+				req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
+				if req != nil {
+					peer = headerReqSend(ctx, req)
+				}
+				for req != nil && peer != nil {
+					req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
+					if req != nil {
+						peer = headerReqSend(ctx, req)
+					}
+				}
+				timer.Stop()
+				timer = time.NewTimer(1 * time.Second)
+				select {
+				case <-ctx.Done(): // When terminate signal is sent or Ctrl-C is pressed
+					return nil
+				case <-timer.C: // When it is time to check on previously sent requests
+				case <-wakeUpChan: // When new message comes from the sentry
+				case <-hd.StageReadyChannel(): // When heaviest chain is ready
+				case <-logEvery.C:
+					logProgress(hd)
+				}
 			}
+		} else {
+			for !hd.HardCodedPhaseDone() {
+				currentTime := uint64(time.Now().Unix())
+				req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
+				if req != nil {
+					peer = headerReqSend(ctx, req)
+				}
+				for req != nil && peer != nil {
+					req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
+					if req != nil {
+						peer = headerReqSend(ctx, req)
+					}
+				}
+				timer.Stop()
+				timer = time.NewTimer(1 * time.Second)
+				select {
+				case <-ctx.Done(): // When terminate signal is sent or Ctrl-C is pressed
+					return nil
+				case <-timer.C: // When it is time to check on previously sent requests
+				case <-wakeUpChan: // When new message comes from the sentry
+				case <-hd.HardCodedPhaseChannel(): // When hard coded phase done
+				case <-logEvery.C:
+					logProgress(hd)
+				}
+			}
+			height = hd.TopSeenHeight()
 		}
 
 		origin, err := stages.GetStageProgress(db, stages.Headers)
@@ -174,7 +216,6 @@ func logProgress(hd *headerdownload.HeaderDownload) {
 func ReplacementStages(ctx context.Context,
 	hd *headerdownload.HeaderDownload,
 	bd *bodydownload.BodyDownload,
-	headerReqSend func(context.Context, []*headerdownload.HeaderRequest),
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(context.Context, uint64, common.Hash, *big.Int),

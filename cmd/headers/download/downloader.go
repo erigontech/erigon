@@ -159,7 +159,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 		db,
 		controlServer.hd,
 		controlServer.bd,
-		controlServer.sendRequests,
+		controlServer.sendHeaderRequest,
 		controlServer.sendBodyRequest,
 		controlServer.penalise,
 		controlServer.updateHead,
@@ -249,7 +249,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		db,
 		controlServer.hd,
 		controlServer.bd,
-		controlServer.sendRequests,
+		controlServer.sendHeaderRequest,
 		controlServer.sendBodyRequest,
 		controlServer.penalise,
 		controlServer.updateHead,
@@ -752,34 +752,36 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 	}
 }
 
-func (cs *ControlServerImpl) sendRequests(ctx context.Context, reqs []*headerdownload.HeaderRequest) {
-	for _, req := range reqs {
-		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
-		bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
-			Amount:  uint64(req.Length),
-			Reverse: true,
-			Skip:    0,
-			Origin:  eth.HashOrNumber{Hash: req.Hash},
-		})
-		if err != nil {
-			log.Error("Could not encode header request", "err", err)
-			continue
-		}
-		outreq := proto_sentry.SendMessageByMinBlockRequest{
-			MinBlock: req.Number,
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_GetBlockHeaders,
-				Data: bytes,
-			},
-		}
-		//nolint:govet
-		callCtx, _ := context.WithCancel(ctx)
-		_, err1 := cs.sentryClient.SendMessageByMinBlock(callCtx, &outreq, &grpc.EmptyCallOption{})
-		if err1 != nil {
-			log.Error("Could not send header request", "err", err1)
-			continue
-		}
+func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
+	//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
+	bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
+		Amount:  uint64(req.Length),
+		Reverse: true,
+		Skip:    0,
+		Origin:  eth.HashOrNumber{Hash: req.Hash},
+	})
+	if err != nil {
+		log.Error("Could not encode header request", "err", err)
+		return nil
 	}
+	outreq := proto_sentry.SendMessageByMinBlockRequest{
+		MinBlock: req.Number,
+		Data: &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_GetBlockHeaders,
+			Data: bytes,
+		},
+	}
+	//nolint:govet
+	callCtx, _ := context.WithCancel(ctx)
+	sentPeers, err1 := cs.sentryClient.SendMessageByMinBlock(callCtx, &outreq, &grpc.EmptyCallOption{})
+	if err1 != nil {
+		log.Error("Could not send header request", "err", err1)
+		return nil
+	}
+	if sentPeers == nil || len(sentPeers.Peers) == 0 {
+		return nil
+	}
+	return sentPeers.Peers[0]
 }
 
 func (cs *ControlServerImpl) sendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) []byte {

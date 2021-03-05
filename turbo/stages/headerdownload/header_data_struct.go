@@ -6,7 +6,6 @@ import (
 	"io"
 	"math/big"
 	"sync"
-	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
@@ -227,15 +226,16 @@ type HeaderDownload struct {
 	requestQueue           *list.List
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
-	RequestQueueTimer      *time.Timer
 	highestInDb            uint64 // Height of the highest block header in the database
 	initialHash            common.Hash
 	stageReady             bool
 	stageReadyCh           chan struct{}
 	stageHeight            uint64
+	hardCodedPhaseCh       chan struct{}
 	headersAdded           int
 	tipMap                 *roaring64.Bitmap // Bitmap of tips (bit is set if there is at least one tip on such block height)
 	hardCodedPhaseDone     bool
+	topSeenHeight          uint64
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -308,8 +308,8 @@ func NewHeaderDownload(
 		newAnchorPastLimit:   newAnchorPastLimit,
 		hardTips:             make(map[common.Hash]HeaderRecord),
 		tips:                 make(map[common.Hash]*Tip),
-		stageReadyCh:         make(chan struct{}),
-		RequestQueueTimer:    time.NewTimer(time.Hour),
+		stageReadyCh:         make(chan struct{}, 1), // channel needs to have capacity at least 1, so that the signal is not lost
+		hardCodedPhaseCh:     make(chan struct{}, 1),
 	}
 	return hd
 }
