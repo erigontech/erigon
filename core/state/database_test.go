@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -77,7 +76,6 @@ func TestCreate2Revive(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -142,10 +140,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -155,7 +150,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	var it *contracts.ReviveDeployEventIterator
@@ -182,7 +177,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -191,7 +186,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[3], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	it, err = revive.FilterDeployEvent(nil)
@@ -252,7 +247,6 @@ func TestCreate2Polymorth(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -351,10 +345,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 1
-	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -364,7 +355,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	var it *contracts.PolyDeployEventIterator
@@ -390,7 +381,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -399,7 +390,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[3], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	it, err = poly.FilterDeployEvent(nil)
@@ -424,7 +415,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 5
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[4], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[4], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	it, err = poly.FilterDeployEvent(nil)
@@ -476,7 +467,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -516,7 +506,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 
@@ -546,10 +535,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// BLOCK 1
-	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[0:1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[0:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -564,7 +550,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	st.GetState(contractAddress, &key0, &correctValueX)
 
 	// BLOCKS 2 + 3
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[1:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -574,7 +560,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, longerBlocks[1:4], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerBlocks[1:4], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -617,7 +603,6 @@ func TestReorgOverStateChange(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -651,7 +636,6 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
@@ -680,10 +664,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 
 	// BLOCK 1
-	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[:1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -698,12 +679,12 @@ func TestReorgOverStateChange(t *testing.T) {
 	st.GetState(contractAddress, &key0, &correctValueX)
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[1:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, longerBlocks[1:3], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerBlocks[1:3], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	st = state.New(state.NewDbStateReader(db))
@@ -765,7 +746,6 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
 
 	var selfDestruct = make([]*contracts.Selfdestruct, numOfContracts)
 	var err error
@@ -811,10 +791,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -927,7 +904,6 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -962,10 +938,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	}
 
 	// BLOCK 1
-	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[:1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1066,7 +1039,6 @@ func TestEip2200Gas(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -1110,10 +1082,7 @@ func TestEip2200Gas(t *testing.T) {
 	balanceBefore := st.GetBalance(address)
 
 	// BLOCK 1
-	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1155,7 +1124,6 @@ func TestWrongIncarnation(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -1195,10 +1163,7 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	// BLOCK 1
-	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[0], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1222,7 +1187,7 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	// BLOCKS 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, eng, blocks[1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 	addrHash = crypto.Keccak256(contractAddress[:])
@@ -1277,7 +1242,6 @@ func TestWrongIncarnation2(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 	var err error
@@ -1317,7 +1281,6 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 	longerBlocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, db, 3, func(i int, block *core.BlockGen) {
@@ -1347,15 +1310,12 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	// BLOCK 1
-	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[:1], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[:1], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCKS 2
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[1:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1377,7 +1337,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal("wrong incarnation")
 	}
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, longerBlocks[1:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerBlocks[1:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1566,7 +1526,6 @@ func TestRecreateAndRewind(t *testing.T) {
 
 	engine := ethash.NewFaker()
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 	var revive *contracts.Revive2
@@ -1634,7 +1593,6 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 	longerBlocks, _, err1 := core.GenerateChain(gspec.Config, genesis, engine, db, 5, func(i int, block *core.BlockGen) {
@@ -1692,10 +1650,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	// BLOCKS 1 and 2
-	exit := make(chan struct{})
-	eng := process.NewConsensusProcess(engine, params.AllEthashProtocolChanges, exit)
-	defer common.SafeClose(exit)
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[:2], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[:2], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1712,7 +1667,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	// Block 3 and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, blocks[2:], true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, blocks[2:], true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1727,7 +1682,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	// Reorg
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, eng, longerBlocks, true /* checkRoot */); err != nil {
+	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerBlocks, true /* checkRoot */); err != nil {
 		t.Fatal(err)
 	}
 

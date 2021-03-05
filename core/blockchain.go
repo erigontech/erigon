@@ -1526,7 +1526,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		var logs []*types.Log
 		if !bc.cacheConfig.DownloadOnly {
 			stateDB = state.New(bc.trieDbState)
-			// API block using the parent state as reference point.
+			// Process block using the parent state as reference point.
 			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig)
 			reuseTrieDbState := true
 			if err != nil {
@@ -1801,9 +1801,7 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	// When transactions get deleted from the database, the receipts that were
 	// created in the fork must also be deleted
 	for _, tx := range types.TxDifference(deletedTxs, addedTxs) {
-		if err := rawdb.DeleteTxLookupEntry(bc.db, tx.Hash()); err != nil {
-			log.Error("can't delete", "tx", tx.Hash().String())
-		}
+		_ = rawdb.DeleteTxLookupEntry(bc.db, tx.Hash())
 	}
 	// Delete any canonical number assignments above the new head
 	number := bc.CurrentBlock().NumberU64()
