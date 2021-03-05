@@ -273,7 +273,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 					delete(snap.Recents, number-limit)
 				}
 				// Discard any previous votes the deauthorized signer cast
-				for j := 0; j < len(snap.Votes); i++ {
+				for j := 0; j < len(snap.Votes); j++ {
 					if snap.Votes[j].Signer == header.Coinbase {
 						// Uncast the vote from the cached tally
 						snap.uncast(snap.Votes[j].Address, snap.Votes[j].Authorize)
