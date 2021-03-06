@@ -294,11 +294,12 @@ func TestExtendUp(t *testing.T) {
 		return nil
 	}, 60, 60,
 	)
+	hd.hardCodedPhaseDone = true
 
 	var currentTime uint64 = 100
 	// single header in the chain segment
 	var h types.Header
-	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h}}, 0, 1, currentTime); err == nil {
+	if err := hd.extendUp(&ChainSegment{Headers: []*types.Header{&h}}, 0, 1, currentTime); err == nil {
 		t.Errorf("extendUp without working tips - expected error")
 	}
 
@@ -316,7 +317,7 @@ func TestExtendUp(t *testing.T) {
 	} else {
 		t.Errorf("setting up h1 (anchor): %v", err)
 	}
-	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h2}}, 0, 1, currentTime); err == nil {
+	if err := hd.extendUp(&ChainSegment{Headers: []*types.Header{&h2}}, 0, 1, currentTime); err == nil {
 		if len(hd.tips) != 2 {
 			t.Errorf("expected 2 tips, got %d", len(hd.tips))
 		}
@@ -332,7 +333,7 @@ func TestExtendUp(t *testing.T) {
 	h4.Number = big.NewInt(4)
 	h4.Difficulty = big.NewInt(3010)
 	h4.ParentHash = h3.Hash()
-	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h4, &h3}}, 0, 2, currentTime); err == nil {
+	if err := hd.extendUp(&ChainSegment{Headers: []*types.Header{&h4, &h3}}, 0, 2, currentTime); err == nil {
 		if len(hd.tips) != 4 {
 			t.Errorf("expected 4 tips, got %d", len(hd.tips))
 		}
@@ -353,7 +354,7 @@ func TestExtendUp(t *testing.T) {
 	h41.Difficulty = big.NewInt(3010)
 	h41.Extra = []byte("Extra")
 	h41.ParentHash = h3.Hash()
-	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h41}}, 0, 1, currentTime); err == nil {
+	if err := hd.extendUp(&ChainSegment{Headers: []*types.Header{&h41}}, 0, 1, currentTime); err == nil {
 		if len(hd.tips) != 5 {
 			t.Errorf("expected 5 tips, got %d", len(hd.tips))
 		}
@@ -380,7 +381,7 @@ func TestExtendUp(t *testing.T) {
 	h6.Number = big.NewInt(6)
 	h6.Difficulty = big.NewInt(5010)
 	h6.ParentHash = h5.Hash()
-	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h6}}, 0, 1, currentTime); err == nil {
+	if err := hd.extendUp(&ChainSegment{Headers: []*types.Header{&h6}}, 0, 1, currentTime); err == nil {
 		t.Errorf("extendUp not connected to tips - expected error")
 	}
 
@@ -392,7 +393,7 @@ func TestExtendUp(t *testing.T) {
 	} else {
 		t.Errorf("setting up h5 (anchor): %v", err)
 	}
-	if err := hd.ExtendUp(&ChainSegment{Headers: []*types.Header{&h6}}, 0, 1, currentTime); err == nil {
+	if err := hd.extendUp(&ChainSegment{Headers: []*types.Header{&h6}}, 0, 1, currentTime); err == nil {
 		if len(hd.tips) != 7 {
 			t.Errorf("expected 7 tips, got %d", len(hd.tips))
 		}
@@ -422,7 +423,7 @@ func TestExtendDown(t *testing.T) {
 
 	// single header in the chain segment
 	var h types.Header
-	if err := hd.ExtendDown(&ChainSegment{HeadersRaw: [][]byte{}, Headers: []*types.Header{&h}}, 0, 1, false /* hardCoded */, uint64(time.Now().Unix())); err == nil {
+	if err := hd.extendDown(&ChainSegment{HeadersRaw: [][]byte{}, Headers: []*types.Header{&h}}, 0, 1, false /* hardCoded */, uint64(time.Now().Unix())); err == nil {
 		t.Errorf("extendDown without working trees - expected error")
 	}
 }
