@@ -45,6 +45,8 @@ Usage
 > ./build/bin/tg
 ```
 
+On Windows please use Docker: see [docker-compose.yml](./docker-compose.yml)
+
 Key features
 ============ 
 

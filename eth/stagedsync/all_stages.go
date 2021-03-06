@@ -353,14 +353,12 @@ func SetHead(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config,
 	return nil
 }
 
-func InsertHeadersInStages(db ethdb.Database, engine consensus.EngineAPI, headers []*types.Header) (bool, bool, uint64, error) {
+func InsertHeadersInStages(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine, headers []*types.Header) (bool, bool, uint64, error) {
 	blockNum := headers[len(headers)-1].Number.Uint64()
-	start := time.Now()
-	if err := VerifyHeaders(db, headers, engine, 1); err != nil {
+	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
 		return false, false, 0, err
 	}
-	verificationTime := time.Since(start)
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", verificationTime, db, headers)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("logPrefix", db, headers)
 	if err != nil {
 		return false, false, 0, err
 	}
@@ -373,7 +371,7 @@ func InsertHeadersInStages(db ethdb.Database, engine consensus.EngineAPI, header
 	return newCanonical, reorg, forkblocknumber, nil
 }
 
-func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, config *params.ChainConfig, vmConfig *vm.Config, cons consensus.Engine, engine consensus.EngineAPI, blocks []*types.Block, checkRoot bool) (bool, error) {
+func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, blocks []*types.Block, checkRoot bool) (bool, error) {
 	if len(blocks) == 0 {
 		return false, nil
 	}
@@ -382,17 +380,15 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 		headers[i] = block.Header()
 	}
 	// Header verification happens outside of the transaction
-	start := time.Now()
-	if err := VerifyHeaders(db, headers, engine, 1); err != nil {
+	if err := VerifyHeaders(db, headers, config, engine, 1); err != nil {
 		return false, err
 	}
-	verificationTime := time.Since(start)
 	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
 		return false, fmt.Errorf("starting transaction for importing the blocks: %v", err1)
 	}
 	defer tx.Rollback()
-	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", verificationTime, tx, headers)
+	newCanonical, reorg, forkblocknumber, err := InsertHeaderChain("Headers", tx, headers)
 	if err != nil {
 		return false, err
 	}
@@ -412,7 +408,7 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 	stageBuilders := createStageBuilders(blocks, blockNum, checkRoot)
 	cc := &core.TinyChainContext{}
 	cc.SetDB(nil)
-	cc.SetEngine(cons)
+	cc.SetEngine(engine)
 	stagedSync := New(stageBuilders, []int{0, 1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 11}, OptionalParameters{})
 	var cache *shards.StateCache // Turn off cache for now
 	syncState, err2 := stagedSync.Prepare(
@@ -443,17 +439,15 @@ func InsertBlocksInStages(db ethdb.Database, storageMode ethdb.StorageMode, conf
 			return false, err
 		}
 	}
-
 	if err = syncState.Run(tx, tx); err != nil {
 		return false, err
 	}
-
-	if _, err = tx.Commit(); err != nil {
+	if _, err1 = tx.Commit(); err1 != nil {
 		return false, fmt.Errorf("committing transaction after importing blocks: %v", err1)
 	}
 	return true, nil
 }
 
-func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, cons consensus.Engine, engine consensus.EngineAPI, block *types.Block, checkRoot bool) (bool, error) {
-	return InsertBlocksInStages(db, ethdb.DefaultStorageMode, config, vmConfig, cons, engine, []*types.Block{block}, checkRoot)
+func InsertBlockInStages(db ethdb.Database, config *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, block *types.Block, checkRoot bool) (bool, error) {
+	return InsertBlocksInStages(db, ethdb.DefaultStorageMode, config, vmConfig, engine, []*types.Block{block}, checkRoot)
 }

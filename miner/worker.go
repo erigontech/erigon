@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -119,7 +118,7 @@ type intervalAdjust struct {
 type worker struct {
 	config      *Config
 	chainConfig *params.ChainConfig
-	engine      *process.RemoteEngine
+	engine      consensus.Engine
 	eth         Backend
 	chain       *core.BlockChain
 
@@ -184,7 +183,7 @@ type hooks struct {
 	resubmitHook func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
 }
 
-func newWorker(config *Config, chainConfig *params.ChainConfig, engine *process.RemoteEngine, eth Backend, mux *event.TypeMux, h hooks, init bool) *worker {
+func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, h hooks, init bool) *worker {
 	worker := &worker{
 		config:             config,
 		chainConfig:        chainConfig,
@@ -657,7 +656,7 @@ func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt tim
 		log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealHash, "hash", block.Hash(),
 			"elapsed", common.PrettyDuration(time.Since(createdAt)), "difficulty", block.Difficulty())
 	} else {
-		if _, err := stagedsync.InsertBlockInStages(w.chain.ChainDb(), w.chain.Config(), &vm.Config{}, w.engine, w.engine, block, true /* checkRoot */); err != nil {
+		if _, err := stagedsync.InsertBlockInStages(w.chain.ChainDb(), w.chain.Config(), &vm.Config{}, w.chain.Engine(), block, true /* checkRoot */); err != nil {
 			log.Error("Failed writing block to chain", "err", err)
 			return
 		}

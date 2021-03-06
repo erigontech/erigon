@@ -27,19 +27,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/stretchr/testify/assert"
 )
 
 const OverwriteBlockCacheItems = 1024
@@ -102,8 +100,7 @@ func newTester() *downloadTester {
 	if err != nil {
 		panic(err)
 	}
-	eng := process.NewRemoteEngine(tester.engine, params.TestChainConfig)
-	tester.downloader = New(uint64(FullSync), tester.stateDb, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode, eng)
+	tester.downloader = New(uint64(FullSync), tester.stateDb, new(event.TypeMux), params.TestChainConfig, tester, nil, tester.dropPeer, ethdb.DefaultStorageMode)
 	return tester
 }
 
@@ -112,7 +109,6 @@ func newTester() *downloadTester {
 func (dl *downloadTester) terminate() {
 	dl.downloader.Terminate()
 	dl.stateDb.Close()
-	dl.engine.Close()
 }
 
 // sync starts synchronizing with a remote peer, blocking until it completes.

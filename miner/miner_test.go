@@ -23,7 +23,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -75,7 +74,6 @@ func (bc *testBlockChain) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent)
 func TestMiner(t *testing.T) {
 	t.Skip("skipped for turbo-geth")
 	miner, mux := createMiner(t)
-	defer miner.Close()
 	miner.Start(common.HexToAddress("0x12345"))
 	waitForMiningState(t, miner, true)
 	// Start the downloader
@@ -158,7 +156,6 @@ func TestMinerStartStopAfterDownloaderEvents(t *testing.T) {
 func TestStartWhileDownload(t *testing.T) {
 	t.Skip("skipped for turbo-geth")
 	miner, mux := createMiner(t)
-	defer miner.Close()
 	waitForMiningState(t, miner, false)
 	miner.Start(common.HexToAddress("0x12345"))
 	waitForMiningState(t, miner, true)
@@ -173,7 +170,6 @@ func TestStartWhileDownload(t *testing.T) {
 func TestStartStopMiner(t *testing.T) {
 	t.Skip("skipped for turbo-geth")
 	miner, _ := createMiner(t)
-	defer miner.Close()
 	waitForMiningState(t, miner, false)
 	miner.Start(common.HexToAddress("0x12345"))
 	waitForMiningState(t, miner, true)
@@ -243,19 +239,16 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux) {
 		t.Fatalf("can't create new chain config: %v", err)
 	}
 	// Create consensus engine
-	engine := clique.New(chainConfig.Clique, params.CliqueSnapshot, chainDB)
+	engine := clique.New(chainConfig.Clique, chainDB)
 	// Create Ethereum backend
 	bc, err := core.NewBlockChain(chainDB, new(core.CacheConfig), chainConfig, engine, vm.Config{}, nil /*isLocalBlock*/, nil)
 	if err != nil {
 		t.Fatalf("can't create new chain %v", err)
 	}
-	db := ethdb.NewMemDatabase()
-	pool := core.NewTxPool(testTxPoolConfig, params.TestChainConfig, db, nil)
+	pool := core.NewTxPool(testTxPoolConfig, params.TestChainConfig, ethdb.NewMemDatabase(), nil)
 	backend := NewMockBackend(bc, pool)
 	// Create event Mux
 	mux := new(event.TypeMux)
 	// Create Miner
-
-	eng := process.NewRemoteEngine(engine, chainConfig)
-	return New(backend, &config, chainConfig, mux, eng, nil), mux
+	return New(backend, &config, chainConfig, mux, engine, nil), mux
 }

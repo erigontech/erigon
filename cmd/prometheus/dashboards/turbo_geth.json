@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1614575995376,
+  "iteration": 1614835325703,
   "links": [],
   "panels": [
     {
@@ -35,7 +35,7 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 4,
+        "h": 5,
         "w": 8,
         "x": 0,
         "y": 0
@@ -69,7 +69,7 @@
       "renderer": "flot",
       "seriesOverrides": [],
       "spaceLength": 10,
-      "stack": true,
+      "stack": false,
       "steppedLine": false,
       "targets": [
         {
@@ -121,7 +121,7 @@
         }
       ],
       "yaxis": {
-        "align": false,
+        "align": true,
         "alignLevel": null
       }
     },
@@ -141,7 +141,7 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 4,
+        "h": 5,
         "w": 8,
         "x": 8,
         "y": 0
@@ -150,7 +150,7 @@
       "id": 158,
       "legend": {
         "alignAsTable": false,
-        "avg": false,
+        "avg": true,
         "current": true,
         "hideEmpty": true,
         "hideZero": true,
@@ -175,7 +175,7 @@
       "renderer": "flot",
       "seriesOverrides": [],
       "spaceLength": 10,
-      "stack": true,
+      "stack": false,
       "steppedLine": false,
       "targets": [
         {
@@ -191,7 +191,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Blocks Execution/sec",
+      "title": "Blocks Execution",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -209,7 +209,7 @@
         {
           "$$hashKey": "object:307",
           "decimals": null,
-          "format": "short",
+          "format": "ops",
           "label": "",
           "logBase": 1,
           "max": null,
@@ -227,7 +227,7 @@
         }
       ],
       "yaxis": {
-        "align": false,
+        "align": true,
         "alignLevel": null
       }
     },
@@ -247,7 +247,7 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 4,
+        "h": 5,
         "w": 8,
         "x": 16,
         "y": 0
@@ -255,11 +255,11 @@
       "hiddenSeries": false,
       "id": 112,
       "legend": {
-        "alignAsTable": true,
+        "alignAsTable": false,
         "avg": true,
         "current": true,
-        "max": true,
-        "min": true,
+        "max": false,
+        "min": false,
         "rightSide": false,
         "show": true,
         "total": false,
@@ -279,7 +279,7 @@
       "renderer": "flot",
       "seriesOverrides": [],
       "spaceLength": 10,
-      "stack": true,
+      "stack": false,
       "steppedLine": false,
       "targets": [
         {
@@ -341,7 +341,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 4
+        "y": 5
       },
       "id": 17,
       "panels": [],
@@ -366,7 +366,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 5
+        "y": 6
       },
       "hiddenSeries": false,
       "id": 141,
@@ -406,7 +406,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Commit/sec",
+      "title": "Commit",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -423,7 +423,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:117",
-          "format": "short",
+          "format": "ops",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -437,7 +437,7 @@
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": true
+          "show": false
         }
       ],
       "yaxis": {
@@ -463,18 +463,18 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 5
+        "y": 6
       },
       "hiddenSeries": false,
       "id": 140,
       "legend": {
-        "avg": false,
-        "current": false,
+        "avg": true,
+        "current": true,
         "max": false,
         "min": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -495,7 +495,7 @@
         {
           "expr": "rate(db_get_count{instance=~\"$instance\"}[1m])",
           "interval": "",
-          "legendFormat": "get/sec: {{instance}}",
+          "legendFormat": "get: {{instance}}",
           "refId": "A"
         }
       ],
@@ -503,7 +503,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "db.Get() calls/sec",
+      "title": "db.Get() calls",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -520,7 +520,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:887",
-          "format": "short",
+          "format": "ops",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -534,7 +534,7 @@
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": true
+          "show": false
         }
       ],
       "yaxis": {
@@ -560,18 +560,18 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 5
+        "y": 6
       },
       "hiddenSeries": false,
       "id": 156,
       "legend": {
-        "avg": false,
-        "current": false,
+        "avg": true,
+        "current": true,
         "max": false,
         "min": false,
         "show": true,
         "total": false,
-        "values": false
+        "values": true
       },
       "lines": true,
       "linewidth": 1,
@@ -646,7 +646,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 9
+        "y": 10
       },
       "id": 134,
       "panels": [],
@@ -672,7 +672,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 10
+        "y": 11
       },
       "hiddenSeries": false,
       "id": 148,
@@ -756,7 +756,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "mem: resident set size (growth per sec)",
+      "title": "mem: resident set size",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -814,7 +814,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 10
+        "y": 11
       },
       "hiddenSeries": false,
       "id": 153,
@@ -919,7 +919,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 10
+        "y": 11
       },
       "hiddenSeries": false,
       "id": 150,
@@ -980,7 +980,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "getrusage: minflt/sec - soft page faults (reclaims), majflt - hard faults",
+      "title": "getrusage: minflt - soft page faults (reclaims), majflt - hard faults",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -997,7 +997,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:226",
-          "format": "short",
+          "format": "ops",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -1011,7 +1011,7 @@
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": true
+          "show": false
         }
       ],
       "yaxis": {
@@ -1037,7 +1037,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 15
+        "y": 16
       },
       "hiddenSeries": false,
       "id": 155,
@@ -1092,7 +1092,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Disk io/sec (same as rusage.inblock/outblock)",
+      "title": "Disk io (same as rusage.inblock/outblock)",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -1109,7 +1109,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:577",
-          "format": "short",
+          "format": "iops",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -1123,7 +1123,7 @@
           "logBase": 1,
           "max": null,
           "min": null,
-          "show": true
+          "show": false
         }
       ],
       "yaxis": {
@@ -1149,7 +1149,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 15
+        "y": 16
       },
       "hiddenSeries": false,
       "id": 85,
@@ -1259,7 +1259,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 15
+        "y": 16
       },
       "hiddenSeries": false,
       "id": 128,
@@ -1365,7 +1365,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 20
+        "y": 21
       },
       "hiddenSeries": false,
       "id": 86,
@@ -1477,7 +1477,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 20
+        "y": 21
       },
       "hiddenSeries": false,
       "id": 154,
@@ -1588,7 +1588,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 20
+        "y": 21
       },
       "hiddenSeries": false,
       "id": 124,
@@ -1686,7 +1686,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 25
+        "y": 26
       },
       "hiddenSeries": false,
       "id": 106,
@@ -1733,14 +1733,6 @@
           "intervalFactor": 1,
           "legendFormat": "iowait: {{instance}}",
           "refId": "B"
-        },
-        {
-          "expr": "system_cpu_procload{instance=\"$instance\"}",
-          "format": "time_series",
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "current process: {{instance}}",
-          "refId": "C"
         }
       ],
       "thresholds": [],
@@ -1793,7 +1785,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 31
       },
       "id": 82,
       "panels": [],
@@ -1819,7 +1811,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 31
+        "y": 32
       },
       "hiddenSeries": false,
       "id": 157,
@@ -1982,7 +1974,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 37
       },
       "id": 146,
       "panels": [
@@ -2561,7 +2553,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 38
       },
       "id": 75,
       "panels": [],
@@ -2586,7 +2578,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 38
+        "y": 39
       },
       "hiddenSeries": false,
       "id": 96,
@@ -2656,6 +2648,7 @@
       },
       "yaxes": [
         {
+          "$$hashKey": "object:424",
           "format": "Bps",
           "label": null,
           "logBase": 1,
@@ -2664,6 +2657,7 @@
           "show": true
         },
         {
+          "$$hashKey": "object:425",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -2695,7 +2689,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 38
+        "y": 39
       },
       "hiddenSeries": false,
       "id": 77,
@@ -2800,7 +2794,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 45
       },
       "id": 4,
       "panels": [],
@@ -2843,7 +2837,7 @@
         "h": 3,
         "w": 4,
         "x": 0,
-        "y": 45
+        "y": 46
       },
       "id": 108,
       "interval": null,
@@ -2921,7 +2915,7 @@
         "h": 3,
         "w": 4,
         "x": 4,
-        "y": 45
+        "y": 46
       },
       "id": 111,
       "interval": null,
@@ -2999,7 +2993,7 @@
         "h": 3,
         "w": 4,
         "x": 8,
-        "y": 45
+        "y": 46
       },
       "id": 109,
       "interval": null,
@@ -3077,7 +3071,7 @@
         "h": 3,
         "w": 4,
         "x": 12,
-        "y": 45
+        "y": 46
       },
       "id": 113,
       "interval": null,
@@ -3155,7 +3149,7 @@
         "h": 3,
         "w": 4,
         "x": 16,
-        "y": 45
+        "y": 46
       },
       "id": 114,
       "interval": null,
@@ -3233,7 +3227,7 @@
         "h": 3,
         "w": 4,
         "x": 20,
-        "y": 45
+        "y": 46
       },
       "id": 115,
       "interval": null,
@@ -3294,7 +3288,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 48
+        "y": 49
       },
       "hiddenSeries": false,
       "id": 110,
@@ -3409,7 +3403,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 48
+        "y": 49
       },
       "hiddenSeries": false,
       "id": 116,
@@ -3524,7 +3518,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 55
       },
       "hiddenSeries": false,
       "id": 117,
@@ -3699,7 +3693,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 61
+        "y": 62
       },
       "id": 138,
       "panels": [
@@ -3960,7 +3954,7 @@
     ]
   },
   "time": {
-    "from": "now-5m",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {
@@ -3990,5 +3984,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 14
+  "version": 27
 }

@@ -17,6 +17,7 @@
 package ethash
 
 import (
+	"encoding/json"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -25,8 +26,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/params"
-
-	json "github.com/json-iterator/go"
 )
 
 type diffTest struct {

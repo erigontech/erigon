@@ -177,10 +177,6 @@ func (env *Env) FD() (uintptr, error) {
 	return fd, nil
 }
 
-func (env *Env) StderrLogger() *C.MDBX_debug_func {
-	return C.mdbxgo_stderr_logger()
-}
-
 // ReaderList dumps the contents of the reader lock table as text.  Readers
 // start on the second line as space-delimited fields described by the first
 // line.

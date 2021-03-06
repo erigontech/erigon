@@ -17,7 +17,6 @@
 package stages
 
 import (
-	"fmt"
 	"math/big"
 	"reflect"
 	"testing"
@@ -25,7 +24,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/consensus/process"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -64,9 +62,6 @@ func TestSetupGenesis(t *testing.T) {
 		oldcustomg = customg
 	)
 	oldcustomg.Config = &params.ChainConfig{HomesteadBlock: big.NewInt(2)}
-
-	fmt.Printf("config-new %p; config-old %p\n", customg.Config, oldcustomg.Config)
-
 	tests := []struct {
 		name       string
 		fn         func(*ethdb.ObjectDatabase) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error)
@@ -137,16 +132,11 @@ func TestSetupGenesis(t *testing.T) {
 				if err != nil {
 					return nil, common.Hash{}, nil, err
 				}
-				exit := make(chan struct{})
-				cons := ethash.NewFaker()
-				eng := process.NewConsensusProcess(cons, oldcustomg.Config, exit)
-				defer common.SafeClose(exit)
-				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, cons, eng, blocks, true /* checkRoot */); err != nil {
+				if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, oldcustomg.Config, &vm.Config{}, ethash.NewFullFaker(), blocks, true /* checkRoot */); err != nil {
 					return nil, common.Hash{}, nil, err
 				}
 				// This should return a compatibility error.
-				conf, hash, state, err := core.SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
-				return conf, hash, state, err
+				return core.SetupGenesisBlock(db, &customg, true /* history */, false /* overwrite */)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,

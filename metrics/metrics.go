@@ -78,7 +78,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 	var (
 		cpuSysLoad    = GetOrRegisterGauge("system/cpu/sysload", DefaultRegistry)
 		cpuSysWait    = GetOrRegisterGauge("system/cpu/syswait", DefaultRegistry)
-		cpuProcLoad   = GetOrRegisterGauge("system/cpu/procload", DefaultRegistry)
 		cpuThreads    = GetOrRegisterGauge("system/cpu/threads", DefaultRegistry)
 		cpuGoroutines = GetOrRegisterGauge("system/cpu/goroutines", DefaultRegistry)
 
@@ -135,10 +134,12 @@ func CollectProcessMetrics(refresh time.Duration) {
 		ReadCPUStats(p, cpuStats[location1])
 		cpuSysLoad.Update((cpuStats[location1].GlobalTime - cpuStats[location2].GlobalTime) / refreshFreq)
 		cpuSysWait.Update((cpuStats[location1].GlobalWait - cpuStats[location2].GlobalWait) / refreshFreq)
-		cpuProcLoad.Update((cpuStats[location1].LocalTime - cpuStats[location2].LocalTime) / refreshFreq)
 
-		ruInblock.Update(cpuStats[location1].RUsage.Inblock)
-		ruOutblock.Update(cpuStats[location1].RUsage.Oublock)
+		inblock, outblokc, nvcsw, nivcsw := getRUsage(p)
+		ruInblock.Update(inblock)
+		ruOutblock.Update(outblokc)
+		ruNvcsw.Update(nvcsw)
+		ruNivcsw.Update(nivcsw)
 
 		cpuThreads.Update(int64(threadCreateProfile.Count()))
 		cpuGoroutines.Update(int64(runtime.NumGoroutine()))
@@ -183,10 +184,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 		if pf, _ := p.PageFaults(); pf != nil {
 			ruMinflt.Update(int64(pf.MinorFaults))
 			ruMajflt.Update(int64(pf.MajorFaults))
-		}
-		if cs, _ := p.NumCtxSwitches(); cs != nil {
-			ruNvcsw.Update(cs.Voluntary)
-			ruNivcsw.Update(cs.Involuntary)
 		}
 
 		runtime.ReadMemStats(memstats[location1])

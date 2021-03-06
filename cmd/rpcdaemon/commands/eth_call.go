@@ -12,12 +12,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
 	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
 )
 
@@ -49,13 +49,6 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
 func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs) (hexutil.Uint64, error) {
-	// TODO: fixme: blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-	hash := rawdb.ReadHeadBlockHash(api.db)
-
-	return api.DoEstimateGas(ctx, args, rpc.BlockNumberOrHash{BlockHash: &hash}, big.NewInt(0).SetUint64(api.GasCap))
-}
-
-func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, gasCap *big.Int) (hexutil.Uint64, error) {
 	dbtx, err := api.db.Begin(ctx, ethdb.RO)
 	if err != nil {
 		return 0, err
@@ -73,11 +66,6 @@ func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blo
 		args.From = new(common.Address)
 	}
 
-	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx)
-	if err != nil {
-		return 0, err
-	}
-
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return 0, err
@@ -88,15 +76,20 @@ func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blo
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		header := rawdb.ReadHeader(dbtx, hash, blockNumber)
+		var blockNumber uint64
+		blockNumber, err = stages.GetStageProgress(dbtx, stages.Execution)
+		if err != nil {
+			return 0, fmt.Errorf("could not get stage progress for Execution: %v", err)
+		}
+		header := rawdb.ReadHeaderByNumber(dbtx, blockNumber)
 		hi = header.GasLimit
 	}
 	// Recap the highest gas limit with account's available balance.
 	if args.GasPrice != nil && args.GasPrice.ToInt().Uint64() != 0 {
-		ds := state.NewPlainDBState(dbtx, blockNumber)
-		state := state.New(ds)
+		stateReader := state.NewPlainStateReader(dbtx)
+		state := state.New(stateReader)
 		if state == nil {
-			return 0, fmt.Errorf("can't get the state for %d", blockNumber)
+			return 0, fmt.Errorf("can't get the current state")
 		}
 
 		balance := state.GetBalance(*args.From) // from can't be nil
@@ -119,17 +112,18 @@ func (api *APIImpl) DoEstimateGas(ctx context.Context, args ethapi.CallArgs, blo
 		}
 	}
 	// Recap the highest gas allowance with specified gascap.
-	if gasCap != nil && gasCap.Sign() > 0 && hi > gasCap.Uint64() {
-		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", gasCap)
-		hi = gasCap.Uint64()
+	if hi > api.GasCap {
+		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", api.GasCap)
+		hi = api.GasCap
 	}
 	cap = hi
+	var lastBlockNum = rpc.LatestBlockNumber
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := transactions.DoCall(ctx, args, dbtx, blockNrOrHash, nil, api.GasCap, chainConfig)
+		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit

@@ -1,42 +1,60 @@
-Integration - tool to run TurboGeth stages in custom way: run single stage, or run all stages but reorg every X blocks, etc...
+Integration - tool to run TurboGeth stages in custom way: run/reset single stage, run all stages but reorg every X blocks, etc...
 
-By examples. 
-All commands require parameter `--chaindata=/path/to/chaindata` - I will skip it for readability.
+## Examples 
+All commands require parameter `--chaindata=<datadir>/tg/chaindata` - I will skip it for readability.
 
 ```
 integration --help
-integration print_stages --block=1_000_000
-
-# run all stages (which do not need internet). 
-integration state_stages --unwind=1 --unwind_every=10  # process 10 blocks, then reorg 1 block, then process 10 blocks, ... 
-integration state_stages --unwind=10 --unwind_every=1  # process 1 block, then reorg 10 blocks, then process 1 blocks, ...
+integration print_stages
 
 # Run single stage 
 integration stage_senders 
 integration stage_exec  
 integration stage_exec --block=1_000_000 # stop at 1M block
 integration stage_hash_state 
-integration stage_ih 
+integration stage_trie
 integration stage_history
 integration stage_tx_lookup
+
+# Unwind single stage 10 blocks backward
+integration stage_exec --unwind=10
 
 # Drop data of single stage 
 integration stage_exec --reset     
 integration stage_history --reset
 ... 
 
-# reset all data after stage_senders
-integration reset_state
-
 # hack which allows to force clear unwind stack of all stages
 clear_unwind_stack
 ```
 
-The way I usually run it: 
-```
-go run -trimpath ./cmd/integration state_stages --chaindata=/path/to/chaindata --unwind=10 --unwind_every=20 --pprof 
-```
+## For testing run all stages in "N blocks forward M blocks re-org" loop
 
 Pre-requirements of `state_stages` command:
-- Headers/Bodies must be downloaded 
+- Headers/Bodies must be downloaded
 - TxSenders stage must be executed
+
+```
+make all
+./build/bin/integration state_stages --chaindata=<datadir>/tg/chaindata --unwind=10 --unwind.every=20 --pprof
+integration reset_state # drops all stages after Senders stage (including it's db tables DB tables)
+```
+
+For example:
+```
+--unwind=1 --unwind.every=10  # 10 blocks forward, 1 block back, 10 blocks forward, ...
+--unwind=10 --unwind.every=1  # 1 block forward, 10 blocks back, 1 blocks forward, ...
+--unwind=10  # 10 blocks back, then stop
+--integrity.fast=false --integrity.slow=false # it performs DB integrity checks each step. You can disable slow or fast checks.
+--block # stop at exact blocks
+--chaindata.reference # When finish all cycles, does comparison to this db file.
+```
+
+## "Wrong trie root" problem - temporary solution  
+
+```
+make all
+./build/bin/integration stage_hash_state --chaindata=<datadir>/tg/chaindata --reset
+./build/bin/integration stage_trie --chaindata=<datadir>/tg/chaindata --reset
+# Then run TurobGeth as usually. It will take 2-3 hours to re-calculate dropped db tables
+```

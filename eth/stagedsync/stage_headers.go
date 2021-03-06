@@ -1,10 +1,9 @@
 package stagedsync
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
-	"math/rand"
+	mrand "math/rand"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -18,8 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
-
-var ErrUnknownParent = errors.New("unknown parent")
 
 func SpawnHeaderDownloadStage(s *StageState, u Unwinder, d DownloaderGlue, headersFetchers []func() error) error {
 	err := d.SpawnHeaderDownloadStage(headersFetchers, s, u)
@@ -73,7 +70,7 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return rawdb.ReadBlock(cr.db, hash, number)
 }
 
-func VerifyHeaders(db ethdb.Database, headers []*types.Header, engine consensus.EngineAPI, checkFreq int) error {
+func VerifyHeaders(db ethdb.Database, headers []*types.Header, config *params.ChainConfig, engine consensus.Engine, checkFreq int) error {
 	// Generate the list of seal verification requests, and start the parallel verifier
 	seals := make([]bool, len(headers))
 	if checkFreq != 0 {
@@ -89,10 +86,20 @@ func VerifyHeaders(db ethdb.Database, headers []*types.Header, engine consensus.
 		seals[len(seals)-1] = true
 	}
 
-	return verifyHeaders(db, engine, headers, seals)
+	cancel, results := engine.VerifyHeaders(ChainReader{config, db}, headers, seals)
+	defer cancel()
+
+	// Iterate over the headers and ensure they all check out
+	for i := 0; i < len(headers); i++ {
+		// Otherwise wait for headers checks and ensure they pass
+		if err := <-results; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func InsertHeaderChain(logPrefix string, verificationTime time.Duration, db ethdb.Database, headers []*types.Header) (bool, bool, uint64, error) {
+func InsertHeaderChain(logPrefix string, db ethdb.Database, headers []*types.Header) (bool, bool, uint64, error) {
 	start := time.Now()
 
 	// ignore headers that we already have
@@ -103,13 +110,13 @@ func InsertHeaderChain(logPrefix string, verificationTime time.Duration, db ethd
 		if err != nil {
 			return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 		}
-		if h.HashCache() == ch {
+		if h.Hash() == ch {
 			alreadyCanonicalIndex++
 		} else {
 			break
 		}
 		// If the header is a banned one, straight out abort
-		if core.BadHashes[h.HashCache()] {
+		if core.BadHashes[h.Hash()] {
 			log.Error(fmt.Sprintf(`[%s]
 ########## BAD BLOCK #########
 
@@ -118,7 +125,7 @@ Hash: 0x%x
 
 Error: %v
 ##############################
-`, logPrefix, h.Number, h.HashCache(), core.ErrBlacklistedHash))
+`, logPrefix, h.Number, h.Hash(), core.ErrBlacklistedHash))
 			return false, false, 0, core.ErrBlacklistedHash
 		}
 	}
@@ -137,7 +144,7 @@ Error: %v
 	externTd := new(big.Int).Set(parentTd)
 	for i, header := range headers {
 		if i > 0 {
-			if header.ParentHash != headers[i-1].HashCache() {
+			if header.ParentHash != headers[i-1].Hash() {
 				return false, false, 0, fmt.Errorf("%s: broken chain", logPrefix)
 			}
 		}
@@ -159,7 +166,8 @@ Error: %v
 		if lastHeader.Number.Uint64() < *headNumber {
 			newCanonical = true
 		} else if lastHeader.Number.Uint64() == *headNumber {
-			newCanonical = rand.Float64() < 0.5 //nolint
+			//nolint:gosec
+			newCanonical = mrand.Float64() < 0.5
 		}
 	}
 
@@ -181,7 +189,7 @@ Error: %v
 		// we always add header difficulty to TD, because next blocks might
 		// be inserted and we need the right value for them
 		td = td.Add(td, header.Difficulty)
-		if !newCanonical && rawdb.ReadHeaderNumber(batch, header.HashCache()) != nil {
+		if !newCanonical && rawdb.ReadHeaderNumber(batch, header.Hash()) != nil {
 			// We cannot ignore blocks if they cause reorg
 			ignored++
 			continue
@@ -191,7 +199,7 @@ Error: %v
 		if err != nil {
 			return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 		}
-		hashesMatch := header.HashCache() == ch
+		hashesMatch := header.Hash() == ch
 		if newCanonical && !deepFork && !fork && !hashesMatch {
 			forkBlockNumber = number - 1
 			fork = true
@@ -200,7 +208,7 @@ Error: %v
 			fork = true
 		}
 		if newCanonical {
-			if err = rawdb.WriteCanonicalHash(batch, header.HashCache(), header.Number.Uint64()); err != nil {
+			if err = rawdb.WriteCanonicalHash(batch, header.Hash(), header.Number.Uint64()); err != nil {
 				return false, false, 0, fmt.Errorf("[%s] %w", logPrefix, err)
 			}
 		}
@@ -208,10 +216,10 @@ Error: %v
 		if err != nil {
 			return false, false, 0, fmt.Errorf("[%s] Failed to RLP encode header: %w", logPrefix, err)
 		}
-		if err := rawdb.WriteTd(batch, header.HashCache(), header.Number.Uint64(), td); err != nil {
+		if err := rawdb.WriteTd(batch, header.Hash(), header.Number.Uint64(), td); err != nil {
 			return false, false, 0, fmt.Errorf("[%s] Failed to WriteTd: %w", logPrefix, err)
 		}
-		if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.HashCache()), data); err != nil {
+		if err := batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, header.Hash()), data); err != nil {
 			return false, false, 0, fmt.Errorf("[%s] Failed to store header: %w", logPrefix, err)
 		}
 	}
@@ -253,22 +261,20 @@ Error: %v
 	if newCanonical {
 		encoded := dbutils.EncodeBlockNumber(lastHeader.Number.Uint64())
 
-		if err := batch.Put(dbutils.HeaderNumberPrefix, lastHeader.HashCache().Bytes(), encoded); err != nil {
-			return false, false, 0, fmt.Errorf("[%s] Failed to store hash to number mapping: %w", logPrefix, err)
+		if err := batch.Put(dbutils.HeaderNumberPrefix, lastHeader.Hash().Bytes(), encoded); err != nil {
+			return false, false, 0, fmt.Errorf("[%s] failed to store hash to number mapping: %w", logPrefix, err)
 		}
-		rawdb.WriteHeadHeaderHash(batch, lastHeader.HashCache())
+		if err := rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash()); err != nil {
+			return false, false, 0, fmt.Errorf("[%s] failed to write head header hash: %w", logPrefix, err)
+		}
 	}
 	if _, err := batch.Commit(); err != nil {
 		return false, false, 0, fmt.Errorf("%s: write header markers into disk: %w", logPrefix, err)
 	}
-
 	// Report some public statistics so the user has a clue what's going on
-	since := time.Since(start)
 	ctx := []interface{}{
-		"count", len(headers), "elapsed", common.PrettyDuration(since),
-		"number", lastHeader.Number, "hash", lastHeader.HashCache(),
-		"verification blk/sec", float64(len(headers)) / verificationTime.Seconds(),
-		"blk/sec", float64(len(headers)) / since.Seconds(),
+		"count", len(headers), "elapsed", common.PrettyDuration(time.Since(start)),
+		"number", lastHeader.Number, "hash", lastHeader.Hash(),
 	}
 	if timestamp := time.Unix(int64(lastHeader.Time), 0); time.Since(timestamp) > time.Minute {
 		ctx = append(ctx, []interface{}{"age", common.PrettyAge(timestamp)}...)
@@ -282,77 +288,4 @@ Error: %v
 
 	log.Info(fmt.Sprintf("[%s] Imported new block headers", logPrefix), ctx...)
 	return newCanonical, reorg, forkBlockNumber, nil
-}
-
-func verifyHeaders(db ethdb.Database, engine consensus.EngineAPI, headers []*types.Header, seals []bool) error {
-	toVerify := len(headers)
-	if toVerify == 0 {
-		return nil
-	}
-
-	id := rand.Uint64() //nolint
-	engine.HeaderVerification() <- consensus.VerifyHeaderRequest{id, headers, seals, nil}
-
-	reqResponses := make(map[common.Hash]struct{}, len(headers))
-
-	for {
-		select {
-		case result := <-engine.VerifyResults():
-			if result.Err != nil {
-				return result.Err
-			}
-
-			if _, ok := reqResponses[result.Hash]; ok {
-				continue
-			}
-
-			reqResponses[result.Hash] = struct{}{}
-			if len(reqResponses) == toVerify {
-				return nil
-			}
-		case result := <-engine.HeaderRequest():
-			var err error
-
-			length := 1
-			if result.Number > 0 {
-				length = int(result.Number)
-			}
-
-			headers := make([]*types.Header, 0, length)
-
-			if result.HighestBlockNumber+1 < result.Number {
-				result.Number = result.HighestBlockNumber + 1
-			}
-
-			parentHash := result.HighestHash
-
-			var parentNumber int
-			for parentNumber = int(result.HighestBlockNumber); parentNumber >= int(result.HighestBlockNumber+1)-int(result.Number); parentNumber-- {
-				h := rawdb.ReadHeader(db, parentHash, uint64(parentNumber))
-				if h == nil {
-					err = fmt.Errorf("%w: block %d %s", ErrUnknownParent, parentNumber, parentHash.String())
-					break
-				}
-
-				parentHash = h.ParentHash
-				headers = append(headers, h)
-			}
-
-			resp := consensus.HeaderResponse{
-				ID:      result.ID,
-				Headers: headers,
-			}
-
-			if err != nil {
-				resp.Headers = nil
-				resp.BlockError = consensus.BlockError{
-					parentHash,
-					uint64(parentNumber + 1),
-					err,
-				}
-			}
-
-			engine.HeaderResponse() <- resp
-		}
-	}
 }

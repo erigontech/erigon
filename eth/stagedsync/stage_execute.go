@@ -60,7 +60,10 @@ func readBlock(blockNum uint64, tx ethdb.Database) (*types.Block, error) {
 	}
 	block := rawdb.ReadBlock(tx, blockHash, blockNum)
 
-	senders := rawdb.ReadSenders(tx, blockHash, blockNum)
+	senders, errSenders := rawdb.ReadSenders(tx, blockHash, blockNum)
+	if errSenders != nil {
+		return nil, errSenders
+	}
 	block.Body().SendersToTxs(senders)
 
 	return block, nil

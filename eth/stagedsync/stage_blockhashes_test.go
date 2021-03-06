@@ -3,13 +3,11 @@ package stagedsync
 import (
 	"context"
 	"testing"
-	"time"
-
-	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestBlockHashStage(t *testing.T) {
@@ -31,7 +29,7 @@ func TestBlockHashStage(t *testing.T) {
 		t.Fatalf("writing canonical hash: %v", err)
 	}
 
-	if _, _, _, err := InsertHeaderChain("logPrefix", time.Duration(0), db, headers); err != nil {
+	if _, _, _, err := InsertHeaderChain("logPrefix", db, headers); err != nil {
 		t.Errorf("inserting header chain: %v", err)
 	}
 	if err := stages.SaveStageProgress(db, stages.Headers, headers[len(headers)-1].Number.Uint64()); err != nil {
@@ -43,4 +41,5 @@ func TestBlockHashStage(t *testing.T) {
 		n := rawdb.ReadHeaderNumber(db, h.Hash())
 		assert.Equal(t, *n, h.Number.Uint64())
 	}
+
 }

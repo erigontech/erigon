@@ -28,7 +28,11 @@ func (e *Events) OnNewHeader(newHeader *types.Header) {
 	for i, sub := range e.headerSubscriptions {
 		if err := sub(newHeader); err != nil {
 			// remove subscription
-			e.headerSubscriptions = append(e.headerSubscriptions[:i], e.headerSubscriptions[i+1:]...)
+			if i == len(e.headerSubscriptions)-1 {
+				e.headerSubscriptions = e.headerSubscriptions[:i]
+			} else {
+				e.headerSubscriptions = append(e.headerSubscriptions[:i], e.headerSubscriptions[i+1:]...)
+			}
 		}
 	}
 }
