@@ -90,6 +90,7 @@ type Tip struct {
 	header               *types.Header
 	verified             bool   // Whether this tip has been verified by the consensus engine
 	next                 []*Tip // Allows iteration over tips in ascending block height order
+	persisted            bool   // Whether this tip comes from the database record
 }
 
 // First item in ChainSegment is the anchor
@@ -123,9 +124,11 @@ type PeerPenalty struct {
 
 // Request for chain segment starting with hash and going to its parent, etc, with length headers in total
 type HeaderRequest struct {
-	Hash   common.Hash
-	Number uint64
-	Length int
+	Hash    common.Hash
+	Number  uint64
+	Length  int
+	Skip    uint64
+	Reverse bool
 }
 
 type VerifySealFunc func(header *types.Header) error
@@ -219,9 +222,6 @@ type HeaderDownload struct {
 	tips                   map[common.Hash]*Tip // Tips by tip hash
 	tipCount               int                  // Total number of tips associated to all anchors
 	tipLimit               int                  // Maximum allowed number of tips
-	initPowDepth           int                  // powDepth assigned to the newly inserted anchor
-	newAnchorFutureLimit   uint64               // How far in the future (relative to current time) the new anchors are allowed to be
-	newAnchorPastLimit     uint64               // How far in the past (relative to current time) the new anchors are allowed to be
 	highestTotalDifficulty uint256.Int
 	requestQueue           *list.List
 	calcDifficultyFunc     CalcDifficultyFunc
@@ -236,6 +236,7 @@ type HeaderDownload struct {
 	tipMap                 *roaring64.Bitmap // Bitmap of tips (bit is set if there is at least one tip on such block height)
 	hardCodedPhaseDone     bool
 	topSeenHeight          uint64
+	insertList             []*Tip // List of non-persisted tips that can be inserted (their parent is persisted)
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -285,31 +286,27 @@ func (rq *RequestQueue) Pop() interface{} {
 func NewHeaderDownload(
 	initialHash common.Hash,
 	filesDir string,
-	bufferLimit, tipLimit, initPowDepth int,
+	bufferLimit, tipLimit int,
 	calcDifficultyFunc CalcDifficultyFunc,
 	verifySealFunc VerifySealFunc,
-	newAnchorFutureLimit, newAnchorPastLimit uint64,
 ) *HeaderDownload {
 	hd := &HeaderDownload{
-		initialHash:          initialHash,
-		filesDir:             filesDir,
-		buffer:               &HeaderBuffer{},
-		anotherBuffer:        &HeaderBuffer{},
-		bufferLimit:          bufferLimit,
-		badHeaders:           make(map[common.Hash]struct{}),
-		anchors:              make(map[common.Hash][]*Anchor),
-		tipLimit:             tipLimit,
-		initPowDepth:         initPowDepth,
-		requestQueue:         list.New(),
-		anchorTree:           llrb.New(),
-		calcDifficultyFunc:   calcDifficultyFunc,
-		verifySealFunc:       verifySealFunc,
-		newAnchorFutureLimit: newAnchorFutureLimit,
-		newAnchorPastLimit:   newAnchorPastLimit,
-		hardTips:             make(map[common.Hash]HeaderRecord),
-		tips:                 make(map[common.Hash]*Tip),
-		stageReadyCh:         make(chan struct{}, 1), // channel needs to have capacity at least 1, so that the signal is not lost
-		hardCodedPhaseCh:     make(chan struct{}, 1),
+		initialHash:        initialHash,
+		filesDir:           filesDir,
+		buffer:             &HeaderBuffer{},
+		anotherBuffer:      &HeaderBuffer{},
+		bufferLimit:        bufferLimit,
+		badHeaders:         make(map[common.Hash]struct{}),
+		anchors:            make(map[common.Hash][]*Anchor),
+		tipLimit:           tipLimit,
+		requestQueue:       list.New(),
+		anchorTree:         llrb.New(),
+		calcDifficultyFunc: calcDifficultyFunc,
+		verifySealFunc:     verifySealFunc,
+		hardTips:           make(map[common.Hash]HeaderRecord),
+		tips:               make(map[common.Hash]*Tip),
+		stageReadyCh:       make(chan struct{}, 1), // channel needs to have capacity at least 1, so that the signal is not lost
+		hardCodedPhaseCh:   make(chan struct{}, 1),
 	}
 	return hd
 }

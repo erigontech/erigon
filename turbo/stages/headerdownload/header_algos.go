@@ -201,6 +201,7 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int, curren
 		newAnchor := attachmentTip.anchor
 		cumulativeDifficulty := attachmentTip.cumulativeDifficulty
 		// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
+		prevTip := attachmentTip
 		for i := end - 1; i >= start; i-- {
 			header := segment.Headers[i]
 			diff, overflow := uint256.FromBig(header.Difficulty)
@@ -208,7 +209,10 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int, curren
 				return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 			}
 			cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, false /* hardCodedTip */); err != nil {
+			if tip, err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, false /* hardCodedTip */, false /* persisted */); err == nil {
+				prevTip.next = append(prevTip.next, tip)
+				prevTip = tip
+			} else {
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
@@ -301,7 +305,7 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int, hard
 				return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 			}
 			cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-			if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, false /* hardCodedTip */); err != nil {
+			if _, err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, false /* hardCodedTip */, false /* pesisted */); err != nil {
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
@@ -362,9 +366,13 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int, current
 			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 		}
 		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-		if err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, false /* hardCodedTip */); err != nil {
+		if _, err := hd.addHeaderAsTip(header, newAnchor, cumulativeDifficulty, false /* hardCodedTip */, false /* persisted */); err != nil {
 			return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
+	}
+	if attachmentTip.persisted {
+		tip := hd.tips[tipHeader.Hash()]
+		hd.insertList = append(hd.insertList, tip)
 	}
 	// If we connect to the hard-coded tip, we remove it. Once there is only one hard-coded tip left, it is clear that everything is connected
 	delete(hd.hardTips, tipHeader.ParentHash)
@@ -400,7 +408,7 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, curre
 			return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 		}
 		cumulativeDifficulty.Add(&cumulativeDifficulty, diff)
-		if err = hd.addHeaderAsTip(header, anchor, cumulativeDifficulty, false /* hardCodeTips */); err != nil {
+		if _, err = hd.addHeaderAsTip(header, anchor, cumulativeDifficulty, false /* hardCodeTips */, false /* persisted */); err != nil {
 			return fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
@@ -752,7 +760,7 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database, currentTime uint64) e
 					return err
 				}
 			}
-			if err = hd.addHeaderAsTip(&h, anchor, *cumulativeDiff, false /* hardCodedTip */); err != nil {
+			if _, err = hd.addHeaderAsTip(&h, anchor, *cumulativeDiff, false /* hardCodedTip */, true /* persisted */); err != nil {
 				return err
 			}
 		}
@@ -834,7 +842,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 			if parentAnchor, found := parentAnchors[parentHash]; found {
 				parentDiff := parentDiffs[parentHash]
 				cumulativeDiff.Add(cumulativeDiff, parentDiff)
-				if err = hd.addHeaderAsTip(header, parentAnchor, *cumulativeDiff, hard); err != nil {
+				if _, err = hd.addHeaderAsTip(header, parentAnchor, *cumulativeDiff, hard, false /* persisted */); err != nil {
 					return fmt.Errorf("add header as tip: %v", err)
 				}
 				childAnchors[hash] = parentAnchor
@@ -851,7 +859,7 @@ func (hd *HeaderDownload) RecoverFromFiles(currentTime uint64, hardTips map[comm
 				anchor.difficulty = *diff
 				anchor.timestamp = header.Time
 				anchor.blockHeight = header.Number.Uint64()
-				if err = hd.addHeaderAsTip(header, anchor, *cumulativeDiff, hard); err != nil {
+				if _, err = hd.addHeaderAsTip(header, anchor, *cumulativeDiff, hard, false /* persisted */); err != nil {
 					return fmt.Errorf("add header as tip: %v", err)
 				}
 				if len(hd.anchors[parentHash]) == 0 {
@@ -900,7 +908,40 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) *Heade
 	if anchors, present := hd.anchors[item.anchorParent]; present {
 		// Anchor still exists after the timeout
 		hd.requestQueue.PushBack(RequestQueueItem{anchorParent: item.anchorParent, waitUntil: currentTime + timeout})
-		return &HeaderRequest{Hash: item.anchorParent, Number: anchors[0].blockHeight - 1, Length: 192}
+		return &HeaderRequest{Hash: item.anchorParent, Number: anchors[0].blockHeight - 1, Length: 192, Skip: 0, Reverse: true}
+	}
+	return nil
+}
+
+func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	if len(hd.anchors) > 4 {
+		return nil // Need to be below anchor threshold to produce skeleton request
+	}
+	length := int(hd.topSeenHeight-hd.highestInDb) / 192
+	if length > 192 {
+		length = 192
+	}
+	if length == 0 {
+		return nil // No need in sketelon request
+	}
+	return &HeaderRequest{Number: hd.highestInDb, Length: length, Skip: 192, Reverse: false}
+}
+
+func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error) error {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	for len(hd.insertList) > 0 {
+		tip := hd.insertList[len(hd.insertList)-1]
+		hd.insertList = hd.insertList[:len(hd.insertList)-1]
+		if err := hf(tip.header, tip.blockHeight); err != nil {
+			return err
+		}
+		tip.persisted = true
+		if len(tip.next) > 0 {
+			hd.insertList = append(hd.insertList, tip.next...)
+		}
 	}
 	return nil
 }
@@ -1009,21 +1050,23 @@ func (hd *HeaderDownload) getTip(tipHash common.Hash) (*Tip, bool) {
 }
 
 // addHeaderAsTip adds given header as a tip belonging to a given anchorParent
-func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, cumulativeDifficulty uint256.Int, hardCodedTip bool) error {
+func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, cumulativeDifficulty uint256.Int, hardCodedTip bool, persisted bool) (*Tip, error) {
 	diff, overflow := uint256.FromBig(header.Difficulty)
 	if overflow {
-		return fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
+		return nil, fmt.Errorf("overflow when converting header.Difficulty to uint256: %s", header.Difficulty)
 	}
 	height := header.Number.Uint64()
 	tipHash := header.Hash()
+	var tip *Tip
 	hd.anchorTree.Delete(anchor)
 	if hd.hardCodedPhaseDone || hardCodedTip {
-		tip := &Tip{
+		tip = &Tip{
 			anchor:               anchor,
 			cumulativeDifficulty: cumulativeDifficulty,
 			difficulty:           *diff,
 			blockHeight:          height,
 			header:               header,
+			persisted:            persisted,
 		}
 		hd.tips[tipHash] = tip
 		heap.Push(anchor.tipQueue, AnchorTipItem{hash: tipHash, height: height, hard: hardCodedTip})
@@ -1034,7 +1077,7 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, anchor *Anchor, c
 	}
 	hd.anchorTree.ReplaceOrInsert(anchor)
 	hd.limitTips()
-	return nil
+	return tip, nil
 }
 
 func (hd *HeaderDownload) addHeaderAsAnchor(header *types.Header, hardCoded bool) (*Anchor, error) {

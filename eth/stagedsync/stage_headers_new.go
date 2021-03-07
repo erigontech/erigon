@@ -17,7 +17,15 @@ import (
 )
 
 // HeadersForward progresses Headers stage in the forward direction
-func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Database, hd *headerdownload.HeaderDownload) error {
+func HeadersForward(
+	s *StageState,
+	u Unwinder,
+	ctx context.Context,
+	db ethdb.Database,
+	hd *headerdownload.HeaderDownload,
+	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
+	wakeUpChan chan struct{},
+) error {
 	var headerProgress uint64
 	var err error
 	var tx ethdb.DbWithPendingMutations
@@ -75,6 +83,31 @@ func HeadersForward(s *StageState, u Unwinder, ctx context.Context, db ethdb.Dat
 		return err1
 	}
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, tx, batch, localTd, headerProgress)
+
+	// var req *headerdownload.HeaderRequest
+	// var peer []byte
+	// stopped := false
+	// timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
+	// for !stopped {
+	// 	currentTime := uint64(time.Now().Unix())
+	// 	req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
+	// 	if req != nil {
+	// 		peer = headerReqSend(ctx, req)
+	// 	}
+	// 	for req != nil && peer != nil {
+	// 		req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
+	// 		if req != nil {
+	// 			peer = headerReqSend(ctx, req)
+	// 		}
+	// 	}
+	// 	// Send skeleton request if required
+	// 	req = hd.RequestSkeleton()
+	// 	if req != nil {
+	// 		peer = headerReqSend(ctx, req)
+	// 	}
+	// 	// Load headers into the database
+	// }
+
 	if err1 = headerdownload.ReadFilesAndBuffer(files, buffer, func(header *types.Header, blockHeight uint64) error {
 		if err = headerInserter.FeedHeader(header, blockHeight); err != nil {
 			return err

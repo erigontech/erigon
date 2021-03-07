@@ -12,13 +12,12 @@ import (
 
 const TestBufferLimit = 32 * 1024
 const TestTipLimit = 10
-const TestInitPowDepth = 16
 
 func TestSplitIntoSegments(t *testing.T) {
-	hd := NewHeaderDownload(common.Hash{}, "", TestBufferLimit, TestTipLimit, TestInitPowDepth, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+	hd := NewHeaderDownload(common.Hash{}, "", TestBufferLimit, TestTipLimit, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
-	}, nil, 60, 60)
+	}, nil)
 
 	// Empty message
 	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{}, []*types.Header{}); err == nil {
@@ -178,10 +177,10 @@ func TestSplitIntoSegments(t *testing.T) {
 }
 
 func TestSingleHeaderAsSegment(t *testing.T) {
-	hd := NewHeaderDownload(common.Hash{}, "", TestBufferLimit, TestTipLimit, TestInitPowDepth, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+	hd := NewHeaderDownload(common.Hash{}, "", TestBufferLimit, TestTipLimit, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
-	}, nil, 60, 60)
+	}, nil)
 	var h types.Header
 	h.Number = big.NewInt(5)
 	if chainSegments, penalty, err := hd.SingleHeaderAsSegment([]byte{}, &h); err == nil {
@@ -287,12 +286,12 @@ func TestFindTip(t *testing.T) {
 }
 
 func TestExtendUp(t *testing.T) {
-	hd := NewHeaderDownload(common.Hash{}, "", TestBufferLimit, TestTipLimit, TestInitPowDepth, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+	hd := NewHeaderDownload(common.Hash{}, "", TestBufferLimit, TestTipLimit, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	}, func(header *types.Header) error {
 		return nil
-	}, 60, 60,
+	},
 	)
 	hd.hardCodedPhaseDone = true
 
@@ -311,7 +310,7 @@ func TestExtendUp(t *testing.T) {
 	h2.Difficulty = big.NewInt(1010)
 	h2.ParentHash = h1.Hash()
 	if anchor, err := hd.addHeaderAsAnchor(&h1, false /* hardCoded */); err == nil {
-		if err1 := hd.addHeaderAsTip(&h1, anchor, *new(uint256.Int).SetUint64(2000), false /* hardCodedTip */); err1 != nil {
+		if _, err1 := hd.addHeaderAsTip(&h1, anchor, *new(uint256.Int).SetUint64(2000), false /* hardCodedTip */, false /* persisted */); err1 != nil {
 			t.Fatalf("setting up h1 (tip): %v", err1)
 		}
 	} else {
@@ -387,7 +386,7 @@ func TestExtendUp(t *testing.T) {
 
 	// Introduce h5 as a tip and prepend h6
 	if anchor, err := hd.addHeaderAsAnchor(&h5, false /* hardCoded */); err == nil {
-		if err1 := hd.addHeaderAsTip(&h5, anchor, *new(uint256.Int).SetUint64(10000), false /* hardCodedTip */); err1 != nil {
+		if _, err1 := hd.addHeaderAsTip(&h5, anchor, *new(uint256.Int).SetUint64(10000), false /* hardCodedTip */, false /* persisted */); err1 != nil {
 			t.Fatalf("setting up h5 (tip): %v", err1)
 		}
 	} else {
@@ -413,12 +412,12 @@ func TestExtendUp(t *testing.T) {
 }
 
 func TestExtendDown(t *testing.T) {
-	hd := NewHeaderDownload(common.Hash{}, "", TestBufferLimit, TestTipLimit, TestInitPowDepth, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
+	hd := NewHeaderDownload(common.Hash{}, "", TestBufferLimit, TestTipLimit, func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int {
 		// To get child difficulty, we just add 1000 to the parent difficulty
 		return big.NewInt(0).Add(parentDifficulty, big.NewInt(1000))
 	}, func(header *types.Header) error {
 		return nil
-	}, 60, 60,
+	},
 	)
 
 	// single header in the chain segment

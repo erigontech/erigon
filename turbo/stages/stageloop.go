@@ -35,11 +35,8 @@ func StageLoop(
 	wakeUpChan chan struct{},
 	timeout int,
 ) error {
-	if _, _, _, err := core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false /* history */, false /* overwrite */); err != nil {
-		return fmt.Errorf("setup genesis block: %w", err)
-	}
 	sync := stagedsync.New(
-		ReplacementStages(ctx, hd, bd, bodyReqSend, penalise, updateHead, wakeUpChan, timeout),
+		ReplacementStages(ctx, hd, bd, headerReqSend, bodyReqSend, penalise, updateHead, wakeUpChan, timeout),
 		ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
@@ -216,6 +213,7 @@ func logProgress(hd *headerdownload.HeaderDownload) {
 func ReplacementStages(ctx context.Context,
 	hd *headerdownload.HeaderDownload,
 	bd *bodydownload.BodyDownload,
+	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
 	updateHead func(context.Context, uint64, common.Hash, *big.Int),
@@ -230,7 +228,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd)
+						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, headerReqSend, wakeUpChan)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return stagedsync.HeadersUnwind(u, s, world.TX)

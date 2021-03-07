@@ -16,6 +16,7 @@ import (
 	proto_sentry "github.com/ledgerwatch/turbo-geth/cmd/headers/sentry"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -296,16 +297,16 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 	verifySealFunc := func(header *types.Header) error {
 		return engine.VerifySeal(cr, header)
 	}
+	if _, _, _, err := core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false /* history */, false /* overwrite */); err != nil {
+		return nil, fmt.Errorf("setup genesis block: %w", err)
+	}
 	hd := headerdownload.NewHeaderDownload(
 		common.Hash{}, /* initialHash */
 		filesDir,
 		bufferSize, /* bufferLimit */
 		16*1024,    /* tipLimit */
-		1024,       /* initPowDepth */
 		calcDiffFunc,
 		verifySealFunc,
-		3600, /* newAnchor future limit */
-		3600, /* newAnchor past limit */
 	)
 	err := hd.RecoverFromDb(db, uint64(time.Now().Unix()))
 	if err != nil {
@@ -754,18 +755,26 @@ func (cs *ControlServerImpl) handleInboundMessage(ctx context.Context, inreq *pr
 
 func (cs *ControlServerImpl) sendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) []byte {
 	//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
-	bytes, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
+	reqData := &eth.GetBlockHeadersData{
 		Amount:  uint64(req.Length),
-		Reverse: true,
-		Skip:    0,
+		Reverse: req.Reverse,
+		Skip:    req.Skip,
 		Origin:  eth.HashOrNumber{Hash: req.Hash},
-	})
+	}
+	if req.Hash == (common.Hash{}) {
+		reqData.Origin.Number = req.Number
+	}
+	bytes, err := rlp.EncodeToBytes(reqData)
 	if err != nil {
 		log.Error("Could not encode header request", "err", err)
 		return nil
 	}
+	minBlock := req.Number
+	if !req.Reverse {
+		minBlock = req.Number + uint64(req.Length)*req.Skip
+	}
 	outreq := proto_sentry.SendMessageByMinBlockRequest{
-		MinBlock: req.Number,
+		MinBlock: minBlock,
 		Data: &proto_sentry.OutboundMessageData{
 			Id:   proto_sentry.MessageId_GetBlockHeaders,
 			Data: bytes,
