@@ -19,37 +19,4 @@ Date:   Sun Mar 7 20:55:01 2021 +0100
 
     tests: update reference tests with 2315 removed from Berlin
 
-commit 44c0bb2b44ca71790ccf8a842eccaa72619a2a02
-Merge: 658cb9fc4 9230ca492
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Sun Mar 7 19:39:11 2021 +0200
-
-    Merge pull request #22426 from ethereum/revert-22413-unship-berlin
-    
-    Revert "core/forkid, params: unset Berlin fork number"
-
-commit 658cb9fc4fc6d3667cf2174ac498390c299794f5
-Merge: dab90e4d4 430f69e01
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Sun Mar 7 19:38:49 2021 +0200
-
-    Merge pull request #22414 from karalabe/unship-2315
-    
-    core, eth: unship EIP 2315
-
-commit dab90e4d42b5ed76b5a2422f87249ebfede2a06c
-Merge: 89026d5d7 5b95453ef
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Mar 4 14:03:54 2021 +0200
-
-    Merge pull request #22432 from karalabe/add-hirsute
-    
-    build: add support for Ubuntu Hirsute Hippo
-
-commit 5b95453ef2a52820147332af2c0d98432f470c0d
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Mar 4 13:57:02 2021 +0200
-
-    build: add support for Ubuntu Hirsute Hippo
-
 
