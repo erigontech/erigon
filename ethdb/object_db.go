@@ -30,11 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
-)
-
-var (
-	dbGetTimer = metrics.NewRegisteredTimer("db/get", nil)
 )
 
 type DbCopier interface {

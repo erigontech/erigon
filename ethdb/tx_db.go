@@ -113,9 +113,9 @@ func (m *TxDb) Last(bucket string) ([]byte, []byte, error) {
 }
 
 func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
-	if metrics.Enabled {
-		defer dbGetTimer.UpdateSince(time.Now())
-	}
+	//if metrics.Enabled {
+	//	defer dbGetTimer.UpdateSince(time.Now())
+	//}
 
 	_, v, err := m.cursor(bucket).SeekExact(key)
 	if err != nil {
