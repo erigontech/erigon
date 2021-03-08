@@ -814,12 +814,19 @@ func (c *AccTrieCursor) _seek(seek []byte, withinPrefix []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if k == nil || !bytes.HasPrefix(k, c.prefix) {
+	if k == nil {
 		c.k[c.lvl] = nil
 		return false, nil
 	}
-	if !bytes.HasPrefix(k, withinPrefix) {
-		return false, nil
+	if len(withinPrefix) > 0 {
+		if !bytes.HasPrefix(k, withinPrefix) {
+			return false, nil
+		}
+	} else {
+		if !bytes.HasPrefix(k, c.prefix) {
+			c.k[c.lvl] = nil
+			return false, nil
+		}
 	}
 	c._unmarshal(k, v)
 	c._nextSiblingInMem()
@@ -1108,7 +1115,7 @@ func (c *StorageTrieCursor) _consume() (bool, error) {
 	return false, nil
 }
 
-func (c *StorageTrieCursor) _seek(seek, prefix []byte) (bool, error) {
+func (c *StorageTrieCursor) _seek(seek, withinPrefix []byte) (bool, error) {
 	var k, v []byte
 	var err error
 	if len(seek) == 40 {
@@ -1124,16 +1131,26 @@ func (c *StorageTrieCursor) _seek(seek, prefix []byte) (bool, error) {
 		//	return false, err
 		//}
 		//if len(k) > c.lvl && c.childID[c.lvl] > int8(bits.TrailingZeros16(c.hasTree[c.lvl])) {
-		//	c.is++
+		c.is++
 		k, v, err = c.c.Seek(seek)
 		//}
 	}
 	if err != nil {
 		return false, err
 	}
-	if k == nil || !bytes.HasPrefix(k, c.accWithInc) || !bytes.HasPrefix(k[40:], prefix) {
+	if k == nil {
 		c.k[c.lvl] = nil
 		return false, nil
+	}
+	if len(withinPrefix) > 0 {
+		if !bytes.HasPrefix(k, c.accWithInc) || !bytes.HasPrefix(k[40:], withinPrefix) {
+			return false, nil
+		}
+	} else {
+		if !bytes.HasPrefix(k, c.accWithInc) {
+			c.k[c.lvl] = nil
+			return false, nil
+		}
 	}
 	c._unmarshal(k, v)
 	if c.lvl > 0 { // root record, firstly storing root hash
