@@ -301,24 +301,16 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		return nil, fmt.Errorf("setup genesis block: %w", err)
 	}
 	hd := headerdownload.NewHeaderDownload(
-		common.Hash{}, /* initialHash */
-		filesDir,
-		bufferSize, /* bufferLimit */
-		16*1024,    /* tipLimit */
+		128*1024, /* tipLimit */
 		calcDiffFunc,
 		verifySealFunc,
 	)
-	err := hd.RecoverFromDb(db, uint64(time.Now().Unix()))
-	if err != nil {
-		log.Error("Recovery from DB failed", "error", err)
+	if err := hd.RecoverFromDb(db); err != nil {
+		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
 	hardTips := headerdownload.InitHardCodedTips("mainnet")
-	if err = hd.RecoverFromFiles(uint64(time.Now().Unix()), hardTips); err != nil {
-		log.Error("Recovery from file failed, will start from scratch", "error", err)
-	}
 
 	hd.SetHardCodedTips(hardTips)
-	log.Info(hd.AnchorState())
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
 	cs := &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}, 1), requestWakeUpBodies: make(chan struct{}, 1), db: db}
 	cs.chainConfig = params.MainnetChainConfig // Hard-coded, needs to be parametrized
@@ -326,6 +318,7 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 	cs.genesisHash = params.MainnetGenesisHash // Hard-coded, needs to be parametrized
 	cs.protocolVersion = uint32(eth.ProtocolVersions[0])
 	cs.networkId = eth.DefaultConfig.NetworkID // Hard-coded, needs to be parametrized
+	var err error
 	cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(db)
 	return cs, err
 }
@@ -466,24 +459,22 @@ func (cs *ControlServerImpl) newBlock(ctx context.Context, inreq *proto_sentry.I
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode NewBlockMsg: %v", err)
 	}
-	if cs.hd.HardCodedPhaseDone() {
-		if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
-			if penalty == headerdownload.NoPenalty {
-				cs.hd.ProcessSegment(segments[0]) // There is only one segment in this case
-			} else {
-				outreq := proto_sentry.PenalizePeerRequest{
-					PeerId:  inreq.PeerId,
-					Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
-				}
-				//nolint:govet
-				callCtx, _ := context.WithCancel(ctx)
-				if _, err1 := cs.sentryClient.PenalizePeer(callCtx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-					log.Error("Could not send penalty", "err", err1)
-				}
-			}
+	if segments, penalty, err := cs.hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
+		if penalty == headerdownload.NoPenalty {
+			cs.hd.ProcessSegment(segments[0]) // There is only one segment in this case
 		} else {
-			return fmt.Errorf("singleHeaderAsSegment failed: %v", err)
+			outreq := proto_sentry.PenalizePeerRequest{
+				PeerId:  inreq.PeerId,
+				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
+			}
+			//nolint:govet
+			callCtx, _ := context.WithCancel(ctx)
+			if _, err1 := cs.sentryClient.PenalizePeer(callCtx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+				log.Error("Could not send penalty", "err", err1)
+			}
 		}
+	} else {
+		return fmt.Errorf("singleHeaderAsSegment failed: %v", err)
 	}
 	outreq := proto_sentry.PeerMinBlockRequest{
 		PeerId:   inreq.PeerId,

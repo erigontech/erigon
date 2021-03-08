@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -44,64 +43,8 @@ func StageLoop(
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
-		var ready bool
-		var height uint64
-		// Keep requesting more headers until there is a heaviest chain
-		timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
-		var req *headerdownload.HeaderRequest
-		var peer []byte
-		if hd.HardCodedPhaseDone() {
-			for ready, height = hd.Ready(); !ready; ready, height = hd.Ready() {
-				currentTime := uint64(time.Now().Unix())
-				req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
-				if req != nil {
-					peer = headerReqSend(ctx, req)
-				}
-				for req != nil && peer != nil {
-					req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
-					if req != nil {
-						peer = headerReqSend(ctx, req)
-					}
-				}
-				timer.Stop()
-				timer = time.NewTimer(1 * time.Second)
-				select {
-				case <-ctx.Done(): // When terminate signal is sent or Ctrl-C is pressed
-					return nil
-				case <-timer.C: // When it is time to check on previously sent requests
-				case <-wakeUpChan: // When new message comes from the sentry
-				case <-hd.StageReadyChannel(): // When heaviest chain is ready
-				case <-logEvery.C:
-					logProgress(hd)
-				}
-			}
-		} else {
-			for !hd.HardCodedPhaseDone() {
-				currentTime := uint64(time.Now().Unix())
-				req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
-				if req != nil {
-					peer = headerReqSend(ctx, req)
-				}
-				for req != nil && peer != nil {
-					req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
-					if req != nil {
-						peer = headerReqSend(ctx, req)
-					}
-				}
-				timer.Stop()
-				timer = time.NewTimer(1 * time.Second)
-				select {
-				case <-ctx.Done(): // When terminate signal is sent or Ctrl-C is pressed
-					return nil
-				case <-timer.C: // When it is time to check on previously sent requests
-				case <-wakeUpChan: // When new message comes from the sentry
-				case <-hd.HardCodedPhaseChannel(): // When hard coded phase done
-				case <-logEvery.C:
-					logProgress(hd)
-				}
-			}
-			height = hd.TopSeenHeight()
-		}
+		// Estimate the current top height seen from the peer
+		height := hd.TopSeenHeight()
 
 		origin, err := stages.GetStageProgress(db, stages.Headers)
 		if err != nil {
@@ -194,20 +137,6 @@ func StageLoop(
 			}
 		}
 	}
-}
-
-// logProgress prints out progress of downloading headers, which happens before every cycle of the staged sync
-func logProgress(hd *headerdownload.HeaderDownload) {
-	files, bufferSize, headersAdded := hd.Progress()
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	log.Info("Downloading block headers",
-		"files flushed", files,
-		"buffer size", common.StorageSize(bufferSize),
-		"headers", headersAdded,
-		"alloc", common.StorageSize(m.Alloc),
-		"sys", common.StorageSize(m.Sys),
-		"numGC", int(m.NumGC))
 }
 
 func ReplacementStages(ctx context.Context,

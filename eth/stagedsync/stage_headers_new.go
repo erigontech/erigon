@@ -3,13 +3,11 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -63,18 +61,11 @@ func HeadersForward(
 		return nil
 	}
 
-	files, buffer := hd.PrepareStageData()
-	if len(files) == 0 && (buffer == nil || buffer.IsEmpty()) {
-		s.Done()
-		return nil
-	}
-
 	log.Info(fmt.Sprintf("[%s] Processing headers...", logPrefix), "from", headerProgress)
 	batch := tx.NewBatch()
 	defer batch.Rollback()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	var logBlock uint64
 
 	headHash := rawdb.ReadHeadHeaderHash(tx)
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
@@ -84,32 +75,30 @@ func HeadersForward(
 	}
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, tx, batch, localTd, headerProgress)
 
-	// var req *headerdownload.HeaderRequest
-	// var peer []byte
-	// stopped := false
-	// timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
-	// for !stopped {
-	// 	currentTime := uint64(time.Now().Unix())
-	// 	req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
-	// 	if req != nil {
-	// 		peer = headerReqSend(ctx, req)
-	// 	}
-	// 	for req != nil && peer != nil {
-	// 		req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
-	// 		if req != nil {
-	// 			peer = headerReqSend(ctx, req)
-	// 		}
-	// 	}
-	// 	// Send skeleton request if required
-	// 	req = hd.RequestSkeleton()
-	// 	if req != nil {
-	// 		peer = headerReqSend(ctx, req)
-	// 	}
-	// 	// Load headers into the database
-	// }
-
-	if err1 = headerdownload.ReadFilesAndBuffer(files, buffer, func(header *types.Header, blockHeight uint64) error {
-		if err = headerInserter.FeedHeader(header, blockHeight); err != nil {
+	var req *headerdownload.HeaderRequest
+	var peer []byte
+	stopped := false
+	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
+	prevProgress := headerProgress
+	for !stopped {
+		currentTime := uint64(time.Now().Unix())
+		req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
+		if req != nil {
+			peer = headerReqSend(ctx, req)
+		}
+		for req != nil && peer != nil {
+			req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
+			if req != nil {
+				peer = headerReqSend(ctx, req)
+			}
+		}
+		// Send skeleton request if required
+		req = hd.RequestSkeleton()
+		if req != nil {
+			peer = headerReqSend(ctx, req)
+		}
+		// Load headers into the database
+		if err = hd.InsertHeaders(headerInserter.FeedHeader); err != nil {
 			return err
 		}
 		if batch.BatchSize() >= batch.IdealBatchSize() {
@@ -122,14 +111,20 @@ func HeadersForward(
 				}
 			}
 		}
+		timer.Stop()
+		timer = time.NewTimer(1 * time.Second)
 		select {
-		default:
+		case <-ctx.Done():
+			stopped = true
 		case <-logEvery.C:
-			logBlock = logProgressHeaders(logPrefix, logBlock, blockHeight, batch)
+			progress := hd.Progress()
+			logProgressHeaders(logPrefix, prevProgress, progress, batch)
+			prevProgress = progress
+		case <-timer.C:
+			log.Debug("RequestQueueTime (header) ticked")
+		case <-wakeUpChan:
+			log.Debug("headerLoop woken up by the incoming request")
 		}
-		return nil
-	}); err1 != nil {
-		return err1
 	}
 	if err := s.Update(tx, headerInserter.GetHighest()); err != nil {
 		return err
@@ -153,11 +148,6 @@ func HeadersForward(
 		}
 	}
 	log.Info("Processed", "highest", headerInserter.GetHighest())
-	for _, file := range files {
-		if err := os.Remove(file); err != nil {
-			log.Error("Could not remove", "file", file, "error", err)
-		}
-	}
 	return nil
 }
 
