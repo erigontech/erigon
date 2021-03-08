@@ -82,15 +82,25 @@ func HeadersForward(
 	prevProgress := headerProgress
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
-		req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
+		req = hd.RequestMoreHeaders(currentTime)
 		if req != nil {
 			peer = headerReqSend(ctx, req)
+			if peer != nil {
+				hd.SentRequest(req, currentTime, 5 /* timeout */)
+				//log.Info("Sent request", "height", req.Number)
+			}
 		}
-		for req != nil && peer != nil {
-			req = hd.RequestMoreHeaders(currentTime, 5 /*timeout */)
+		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
+		for req != nil && peer != nil && maxRequests > 0 {
+			req = hd.RequestMoreHeaders(currentTime)
 			if req != nil {
 				peer = headerReqSend(ctx, req)
+				if peer != nil {
+					hd.SentRequest(req, currentTime, 5 /*timeout */)
+					//log.Info("Sent request", "height", req.Number)
+				}
 			}
+			maxRequests--
 		}
 		// Send skeleton request if required
 		req = hd.RequestSkeleton()

@@ -224,8 +224,10 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) erro
 			timestamp:   0,
 			blockHeight: newAnchorHeader.Number.Uint64(),
 		}
-		hd.anchors[newAnchorHeader.ParentHash] = newAnchor
-		heap.Push(hd.anchorQueue, newAnchor)
+		if newAnchor.blockHeight > 0 {
+			hd.anchors[newAnchorHeader.ParentHash] = newAnchor
+			heap.Push(hd.anchorQueue, newAnchor)
+		}
 
 		delete(hd.anchors, anchor.parentHash)
 		// Add all headers in the segments as tips to this anchor
@@ -505,7 +507,7 @@ func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor) {
 	hd.removeUpwards(anchor.tips)
 }
 
-func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) *HeaderRequest {
+func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) *HeaderRequest {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
@@ -517,9 +519,6 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) *Heade
 		if _, ok := hd.anchors[anchor.parentHash]; ok {
 			if anchor.timestamp <= currentTime {
 				if anchor.timeouts < 10 {
-					anchor.timeouts++
-					anchor.timestamp = currentTime + timeout
-					heap.Fix(hd.anchorQueue, 0)
 					return &HeaderRequest{Hash: anchor.parentHash, Number: anchor.blockHeight - 1, Length: 192, Skip: 0, Reverse: true}
 				} else {
 					// Ancestors of this anchor seem to be unavailable, invalidate and move on
@@ -536,20 +535,33 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime, timeout uint64) *Heade
 	return nil
 }
 
+func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout uint64) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	anchor, ok := hd.anchors[req.Hash]
+	if !ok {
+		return
+	}
+	anchor.timeouts++
+	anchor.timestamp = currentTime + timeout
+	heap.Fix(hd.anchorQueue, 0)
+}
+
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	if len(hd.anchors) > 4 {
+	if len(hd.anchors) > 16 {
 		return nil // Need to be below anchor threshold to produce skeleton request
 	}
-	length := int(hd.topSeenHeight-hd.highestInDb) / 192
+	stride := uint64(8 * 192)
+	length := (hd.topSeenHeight - hd.highestInDb) / stride
 	if length > 192 {
 		length = 192
 	}
 	if length == 0 {
 		return nil // No need in sketelon request
 	}
-	return &HeaderRequest{Number: hd.highestInDb, Length: length, Skip: 192, Reverse: false}
+	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
 }
 
 func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error) error {
@@ -737,11 +749,11 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 	hd.topSeenHeight = segment.Headers[len(segment.Headers)-1].Number.Uint64()
 	if segment.Headers[0].Number.Uint64() > hd.maxHardTipHeight && hd.highestInDb < hd.maxHardTipHeight {
 		//TODO: Change it to log.Debug
-		log.Info("Segment cannot be inserted yet", "height", segment.Headers[0].Number.Uint64(), "maxHardCoded", hd.maxHardTipHeight, "in Db", hd.highestInDb)
+		log.Debug("Segment cannot be inserted yet", "height", segment.Headers[0].Number.Uint64(), "maxHardCoded", hd.maxHardTipHeight, "in Db", hd.highestInDb)
 		return
 	}
 	if hd.tipCount+end-start > hd.tipLimit {
-		log.Warn("Too many tips", "count", hd.tipCount, "tried to add", end-start, "limit", hd.tipLimit)
+		log.Debug("Too many tips", "count", hd.tipCount, "tried to add", end-start, "limit", hd.tipLimit)
 		//return
 	}
 	// There are 4 cases

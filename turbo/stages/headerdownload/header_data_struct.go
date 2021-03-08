@@ -123,7 +123,7 @@ type PeerPenalty struct {
 type HeaderRequest struct {
 	Hash    common.Hash
 	Number  uint64
-	Length  int
+	Length  uint64
 	Skip    uint64
 	Reverse bool
 }
