@@ -231,12 +231,6 @@ func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, wa
 	return err
 }
 
-func (db *ObjectDatabase) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
-	return db.kv.View(context.Background(), func(tx Tx) error {
-		return MultiWalk(tx.Cursor(bucket), startkeys, fixedbits, walker)
-	})
-}
-
 // Delete deletes the key from the queue and database
 func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
 	// Execute the actual operation

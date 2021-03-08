@@ -202,12 +202,6 @@ func (m *mutation) Walk(table string, startkey []byte, fixedbits int, walker fun
 	return m.db.Walk(table, startkey, fixedbits, walker)
 }
 
-// WARNING: Merged mem/DB walk is not implemented
-func (m *mutation) MultiWalk(table string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
-	m.panicOnEmptyDB()
-	return m.db.MultiWalk(table, startkeys, fixedbits, walker)
-}
-
 func (m *mutation) Delete(table string, k, v []byte) error {
 	if v != nil {
 		return m.db.Delete(table, k, v) // TODO: mutation to support DupSort deletes
@@ -391,7 +385,6 @@ type DBCounterStats struct {
 	Has           uint64
 	Walk          uint64
 	WalkAsOf      uint64
-	MultiWalk     uint64
 	MultiWalkAsOf uint64
 	Delete        uint64
 	MultiPut      uint64
@@ -415,10 +408,7 @@ func (d *RWCounterDecorator) Walk(bucket string, startkey []byte, fixedbits int,
 	atomic.AddUint64(&d.DBCounterStats.Walk, 1)
 	return d.Database.Walk(bucket, startkey, fixedbits, walker)
 }
-func (d *RWCounterDecorator) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
-	atomic.AddUint64(&d.DBCounterStats.MultiWalk, 1)
-	return d.Database.MultiWalk(bucket, startkeys, fixedbits, walker)
-}
+
 func (d *RWCounterDecorator) Delete(bucket string, k, v []byte) error {
 	atomic.AddUint64(&d.DBCounterStats.Delete, 1)
 	return d.Database.Delete(bucket, k, v)

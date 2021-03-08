@@ -49,9 +49,6 @@ type Getter interface {
 	// walker is called for each eligible entry.
 	// If walker returns false or an error, the walk stops.
 	Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error
-
-	// MultiWalk is similar to multiple Walk calls folded into one.
-	MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error
 }
 
 type GetterPutter interface {

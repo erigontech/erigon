@@ -272,14 +272,8 @@ func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
 	return nil
 }
 
-func (m *TxDb) MultiWalk(bucket string, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
-	m.panicOnEmptyDB()
-	c := m.tx.Cursor(bucket) // create new cursor, then call other methods of TxDb inside MultiWalk callback will not affect this cursor
-	defer c.Close()
-	return MultiWalk(c, startkeys, fixedbits, walker)
-}
-
-func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error {
+// MultiWalk is similar to multiple Walk calls folded into one.
+func MultiWalk(c Cursor, startkeys [][]byte, fixedbits []int, walker func(int, []byte, []byte) error) error { //nolint
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
