@@ -37,10 +37,6 @@ type Getter interface {
 	// Get returns the value for a given key if it's present.
 	Get(bucket string, key []byte) ([]byte, error)
 
-	// Get returns prober chunk of index or error if index is not created.
-	// Key must contain 8byte inverted block number in the end.
-	GetIndexChunk(bucket string, key []byte, timestamp uint64) ([]byte, error)
-
 	// Has indicates whether a key exists in the database.
 	Has(bucket string, key []byte) (bool, error)
 

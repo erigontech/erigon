@@ -127,13 +127,6 @@ func (m *TxDb) Get(bucket string, key []byte) ([]byte, error) {
 	return v, nil
 }
 
-func (m *TxDb) GetIndexChunk(bucket string, key []byte, timestamp uint64) ([]byte, error) {
-	if m.db != nil {
-		return m.db.GetIndexChunk(bucket, key, timestamp)
-	}
-	return nil, ErrKeyNotFound
-}
-
 func (m *TxDb) Has(bucket string, key []byte) (bool, error) {
 	v, err := m.Get(bucket, key)
 	if err != nil {

@@ -111,13 +111,6 @@ func (m *mutation) Reserve(table string, key []byte, i int) ([]byte, error) {
 	return m.db.(DbWithPendingMutations).Reserve(table, key, i)
 }
 
-func (m *mutation) GetIndexChunk(table string, key []byte, timestamp uint64) ([]byte, error) {
-	if m.db != nil {
-		return m.db.GetIndexChunk(table, key, timestamp)
-	}
-	return nil, ErrKeyNotFound
-}
-
 func (m *mutation) hasMem(table string, key []byte) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
