@@ -67,11 +67,11 @@ func CollectProcessMetrics(refresh time.Duration) {
 
 	// Create the various data collectors
 	cpuStats := make([]*CPUStats, 2)
-	memstats := make([]*runtime.MemStats, 2)
+	//memstats := make([]*runtime.MemStats, 2)
 	diskstats := make([]*DiskStats, 2)
-	for i := 0; i < len(memstats); i++ {
+	for i := 0; i < len(cpuStats); i++ {
 		cpuStats[i] = new(CPUStats)
-		memstats[i] = new(runtime.MemStats)
+		//memstats[i] = new(runtime.MemStats)
 		diskstats[i] = new(DiskStats)
 	}
 	// Define the various metrics to collect
@@ -81,11 +81,12 @@ func CollectProcessMetrics(refresh time.Duration) {
 		cpuThreads    = GetOrRegisterGauge("system/cpu/threads", DefaultRegistry)
 		cpuGoroutines = GetOrRegisterGauge("system/cpu/goroutines", DefaultRegistry)
 
-		memPauses = GetOrRegisterMeter("system/memory/pauses", DefaultRegistry)
-		memAllocs = GetOrRegisterMeter("system/memory/allocs", DefaultRegistry)
-		memFrees  = GetOrRegisterMeter("system/memory/frees", DefaultRegistry)
-		memHeld   = GetOrRegisterGauge("system/memory/held", DefaultRegistry)
-		memUsed   = GetOrRegisterGauge("system/memory/used", DefaultRegistry)
+		// disabled because of performance impact and because this info exists in logs
+		//memPauses = GetOrRegisterMeter("system/memory/pauses", DefaultRegistry)
+		//memAllocs = GetOrRegisterMeter("system/memory/allocs", DefaultRegistry)
+		//memFrees  = GetOrRegisterMeter("system/memory/frees", DefaultRegistry)
+		//memHeld   = GetOrRegisterGauge("system/memory/held", DefaultRegistry)
+		//memUsed   = GetOrRegisterGauge("system/memory/used", DefaultRegistry)
 
 		diskReadBytes  = GetOrRegisterMeter("system/disk/readbytes", DefaultRegistry)
 		diskWriteBytes = GetOrRegisterMeter("system/disk/writebytes", DefaultRegistry)
@@ -186,13 +187,13 @@ func CollectProcessMetrics(refresh time.Duration) {
 			ruMajflt.Update(int64(pf.MajorFaults))
 		}
 
-		runtime.ReadMemStats(memstats[location1])
-		memPauses.Mark(int64(memstats[location1].PauseTotalNs - memstats[location2].PauseTotalNs))
-		memAllocs.Mark(int64(memstats[location1].Mallocs - memstats[location2].Mallocs))
-		memFrees.Mark(int64(memstats[location1].Frees - memstats[location2].Frees))
-		memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
-		memUsed.Update(int64(memstats[location1].Alloc))
-
+		//runtime.ReadMemStats(memstats[location1])
+		//memPauses.Mark(int64(memstats[location1].PauseTotalNs - memstats[location2].PauseTotalNs))
+		//memAllocs.Mark(int64(memstats[location1].Mallocs - memstats[location2].Mallocs))
+		//memFrees.Mark(int64(memstats[location1].Frees - memstats[location2].Frees))
+		//memHeld.Update(int64(memstats[location1].HeapSys - memstats[location1].HeapReleased))
+		//memUsed.Update(int64(memstats[location1].Alloc))
+		//
 		if io, _ := p.IOCounters(); io != nil {
 			diskstats[location1].ReadBytes = int64(io.ReadBytes)
 			diskstats[location1].WriteBytes = int64(io.WriteBytes)
