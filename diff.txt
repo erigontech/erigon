@@ -2437,15 +2437,3 @@ Date:   Tue Dec 8 03:47:56 2020 -0600
     
     Fixes: #20232
 
-commit 581c028d181cc4582c8435ced5c0b104ac63346f
-Author: Guillaume Ballet <gballet@gmail.com>
-Date:   Mon Dec 7 13:04:27 2020 +0000
-
-    les: cosmetic rewrite of the arm64 float bug workaround (#21960)
-    
-    * les: revert arm float bug workaround to check go 1.15
-    
-    * add traces to reproduce outside travis
-    
-    * simpler workaround
-
