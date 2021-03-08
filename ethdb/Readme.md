@@ -120,7 +120,7 @@ for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 ## ethdb.Database design:
 
 - Allows pass multiple implementations 
-- Allows traversal tables by `db.Walk` and `db.MultiWalk` 
+- Allows traversal tables by `db.Walk` 
 
 ## ethdb.TxDb design:
 - holds inside 1 long-running transaction and 1 cursor per table
