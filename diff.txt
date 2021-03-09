@@ -1237,22 +1237,3 @@ Date:   Mon Jan 25 19:46:09 2021 +0800
     go.mod: upgrade github.com/huin/goupnp (#22227)
     
     This updates the goupnp dependency, fixing huin/goupnp#33
-
-commit c0862f4f4c21c0ff54636d5122f09f310133d504
-Author: rene <41963722+renaynay@users.noreply.github.com>
-Date:   Mon Jan 25 11:31:18 2021 +0100
-
-    graphql: change receipt status to decimal instead of hex (#22187)
-    
-    This PR fixes the receipt status field to be decimal instead of a hex string,
-    as called for by the spec.
-    
-    Co-authored-by: Martin Holst Swende <martin@swende.se>
-
-commit 1770fe718af661334391766455c43157e378b9fa
-Author: Marius van der Wijden <m.vanderwijden@live.de>
-Date:   Mon Jan 25 10:42:07 2021 +0100
-
-    go.mod: update dependencies (#22216)
-    
-    This updates go module dependencies as discussed in #22050.
