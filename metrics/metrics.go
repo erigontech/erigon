@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -22,6 +23,25 @@ import (
 // This global kill-switch helps quantify the observer effect and makes
 // for less cluttered pprof profiles.
 var Enabled = false
+
+// callbacks - storing list of callbacks as type []func()
+// use metrics.AddCallback to add your function to metrics collection loop (to avoid multiple goroutines collecting metrics)
+var callbacks atomic.Value
+
+func init() {
+	callbacks.Store([]func(){})
+}
+func AddCallback(collect func()) {
+	list := callbacks.Load().([]func())
+	list = append(list, collect)
+	callbacks.Store(list)
+}
+
+func getCallbacks() []func() {
+	return callbacks.Load().([]func())
+}
+
+// Calling Load method
 
 // EnabledExpensive is a soft-flag meant for external packages to check if costly
 // metrics gathering is allowed or not. The goal is to separate standard metrics
@@ -204,6 +224,9 @@ func CollectProcessMetrics(refresh time.Duration) {
 		n, _ := runtime.ThreadCreateProfile(nil)
 		goThreads.Update(int64(n))
 
+		for _, cb := range getCallbacks() {
+			cb()
+		}
 		time.Sleep(refresh)
 	}
 }

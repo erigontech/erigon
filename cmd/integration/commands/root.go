@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/spf13/cobra"
 )
@@ -81,5 +82,7 @@ func openKV(path string, exclusive bool) ethdb.KV {
 	if freelistReuse > 0 {
 		opts = opts.MaxFreelistReuse(uint(freelistReuse))
 	}
-	return opts.MustOpen()
+	kv := opts.MustOpen()
+	metrics.AddCallback(kv.CollectMetrics)
+	return kv
 }

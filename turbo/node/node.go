@@ -82,6 +82,8 @@ func New(
 
 	ethereum := utils.RegisterEthService(node, ethConfig)
 
+	metrics.AddCallback(ethereum.ChainKV().CollectMetrics)
+
 	return &TurboGethNode{stack: node, backend: ethereum}
 }
 
@@ -184,5 +186,5 @@ func prepare(ctx *cli.Context) {
 	utils.SetupMetrics(ctx)
 
 	// Start system runtime metrics collection
-	go metrics.CollectProcessMetrics(3 * time.Second)
+	go metrics.CollectProcessMetrics(5 * time.Second)
 }

@@ -319,8 +319,15 @@ func (env *Env) Stat() (*Stat, error) {
 //
 // See MDBX_envinfo.
 type EnvInfo struct {
-	MapSize                        int64 // Size of the data memory map
-	LastPNO                        int64 // ID of the last used page
+	MapSize int64 // Size of the data memory map
+	LastPNO int64 // ID of the last used page
+	Geo     struct {
+		Lower   uint64
+		Upper   uint64
+		Current uint64
+		Shrink  uint64
+		Grow    uint64
+	}
 	LastTxnID                      int64 // ID of the last committed transaction
 	MaxReaders                     uint  // maximum number of threads for the environment
 	NumReaders                     uint  // maximum number of threads used in the environment
@@ -349,7 +356,20 @@ func (env *Env) Info() (*EnvInfo, error) {
 		return nil, operrno("mdbx_env_info", ret)
 	}
 	info := EnvInfo{
-		MapSize:        int64(_info.mi_mapsize),
+		MapSize: int64(_info.mi_mapsize),
+		Geo: struct {
+			Lower   uint64
+			Upper   uint64
+			Current uint64
+			Shrink  uint64
+			Grow    uint64
+		}{
+			Lower:   uint64(_info.mi_geo.lower),
+			Upper:   uint64(_info.mi_geo.upper),
+			Current: uint64(_info.mi_geo.current),
+			Shrink:  uint64(_info.mi_geo.shrink),
+			Grow:    uint64(_info.mi_geo.grow),
+		},
 		LastPNO:        int64(_info.mi_last_pgno),
 		LastTxnID:      int64(_info.mi_recent_txnid),
 		MaxReaders:     uint(_info.mi_maxreaders),
