@@ -317,7 +317,10 @@ func (db *MdbxKV) CollectMetrics() {
 	info, _ := db.env.Info()
 	dbSize.Update(int64(info.Geo.Current))
 
-	//stat, _ := db.env.Stat()
+	//stat, err := db.env.Stat()
+	//if err != nil {
+	//	panic(err)
+	//}
 	//dbPagesLeaf.Update(int64(stat.LeafPages))
 	//dbPagesBranch.Update(int64(stat.BranchPages))
 	//dbPagesOverflow.Update(int64(stat.OverflowPages))
