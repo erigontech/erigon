@@ -911,10 +911,7 @@ func (c *AccTrieCursor) _unmarshal(k, v []byte) {
 }
 
 func (c *AccTrieCursor) _deleteCurrent() error {
-	if c.hc == nil {
-		return nil
-	}
-	if c.deleted[c.lvl] {
+	if c.hc == nil || c.deleted[c.lvl] {
 		return nil
 	}
 	if err := c.hc(c.k[c.lvl], 0, 0, 0, nil, nil); err != nil {
@@ -1308,10 +1305,7 @@ func (c *StorageTrieCursor) _unmarshal(k, v []byte) {
 }
 
 func (c *StorageTrieCursor) _deleteCurrent() error {
-	if c.shc == nil {
-		return nil
-	}
-	if c.deleted[c.lvl] {
+	if c.shc == nil || c.deleted[c.lvl] {
 		return nil
 	}
 	if err := c.shc(c.accWithInc, c.k[c.lvl], 0, 0, 0, nil, nil); err != nil {
