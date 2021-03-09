@@ -815,12 +815,19 @@ func (c *AccTrieCursor) _seek(seek []byte, withinPrefix []byte) (bool, error) {
 		return false, err
 	}
 	if len(withinPrefix) > 0 { // seek within given prefix must not terminate overall process, even if k==nil
+		if k == nil {
+			return false, nil
+		}
 		if !bytes.HasPrefix(k, withinPrefix) {
 			return false, nil
 		}
-	} else {
+	} else { // seek over global prefix does terminate overall process
+		if k == nil {
+			c.k[c.lvl] = nil
+			return false, nil
+		}
 		if !bytes.HasPrefix(k, c.prefix) {
-			c.k[c.lvl] = nil // seek over global prefix does terminate overall process
+			c.k[c.lvl] = nil
 			return false, nil
 		}
 	}
@@ -1135,10 +1142,17 @@ func (c *StorageTrieCursor) _seek(seek, withinPrefix []byte) (bool, error) {
 		return false, err
 	}
 	if len(withinPrefix) > 0 { // seek within given prefix must not terminate overall process
+		if k == nil {
+			return false, nil
+		}
 		if !bytes.HasPrefix(k, c.accWithInc) || !bytes.HasPrefix(k[40:], withinPrefix) {
 			return false, nil
 		}
 	} else {
+		if k == nil {
+			c.k[c.lvl] = nil
+			return false, nil
+		}
 		if !bytes.HasPrefix(k, c.accWithInc) {
 			c.k[c.lvl] = nil
 			return false, nil
