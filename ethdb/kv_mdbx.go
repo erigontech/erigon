@@ -313,6 +313,19 @@ func (db *MdbxKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(fileInfo.Size()), nil
 }
 
+func (db *MdbxKV) CollectMetrics() {
+	info, _ := db.env.Info()
+	dbSize.Update(int64(info.Geo.Current))
+
+	//stat, err := db.env.Stat()
+	//if err != nil {
+	//	panic(err)
+	//}
+	//dbPagesLeaf.Update(int64(stat.LeafPages))
+	//dbPagesBranch.Update(int64(stat.BranchPages))
+	//dbPagesOverflow.Update(int64(stat.OverflowPages))
+}
+
 func (db *MdbxKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")

@@ -8,11 +8,17 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
 	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
+
+	dbSize          = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)
+	dbPagesBranch   = metrics.GetOrRegisterGauge("db/pages/branch", metrics.DefaultRegistry)   //nolint
+	dbPagesLeaf     = metrics.GetOrRegisterGauge("db/pages/leaf", metrics.DefaultRegistry)     //nolint
+	dbPagesOverflow = metrics.GetOrRegisterGauge("db/pages/overflow", metrics.DefaultRegistry) //nolint
 )
 
 // KV low-level database interface - main target is - to provide common abstraction over top of LMDB and RemoteKV.
@@ -59,6 +65,8 @@ type KV interface {
 	//	Commit and Rollback while it has active child transactions.
 	Begin(ctx context.Context, flags TxFlags) (Tx, error)
 	AllBuckets() dbutils.BucketsCfg
+
+	CollectMetrics()
 }
 
 type TxFlags uint

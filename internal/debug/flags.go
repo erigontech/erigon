@@ -207,7 +207,7 @@ func SetupCobra(cmd *cobra.Command) error {
 	}
 
 	if metrics.Enabled {
-		go metrics.CollectProcessMetrics(3 * time.Second) // Start system runtime metrics collection
+		go metrics.CollectProcessMetrics(5 * time.Second) // Start system runtime metrics collection
 	}
 
 	if metrics.Enabled && metricsAddr != "" {
@@ -266,7 +266,7 @@ func Setup(ctx *cli.Context) error {
 	}
 
 	if metrics.Enabled {
-		go metrics.CollectProcessMetrics(3 * time.Second) // Start system runtime metrics collection
+		go metrics.CollectProcessMetrics(5 * time.Second) // Start system runtime metrics collection
 	}
 
 	pprofEnabled := ctx.GlobalBool(pprofFlag.Name)

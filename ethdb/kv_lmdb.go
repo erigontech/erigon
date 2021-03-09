@@ -320,6 +320,16 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 	return uint64(fileInfo.Size()), nil
 }
 
+func (db *LmdbKV) CollectMetrics() {
+	fileInfo, _ := os.Stat(path.Join(db.opts.path, "data.mdb"))
+	dbSize.Update(fileInfo.Size())
+
+	//stat, _ := db.env.Stat()
+	//dbPagesLeaf.Update(int64(stat.LeafPages))
+	//dbPagesBranch.Update(int64(stat.BranchPages))
+	//dbPagesOverflow.Update(int64(stat.OverflowPages))
+}
+
 func (db *LmdbKV) Begin(_ context.Context, flags TxFlags) (txn Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
