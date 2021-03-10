@@ -244,11 +244,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			select {
-			case ss.receiveUploadCh <- StreamMsg{b, peerID, "GetBlockHeadersMsg", proto_sentry.MessageId_GetBlockHeaders}:
-			default:
-				// TODO make a warning about dropped messages
-			}
+			ss.receiveUpload(&StreamMsg{b, peerID, "GetBlockHeadersMsg", proto_sentry.MessageId_GetBlockHeaders})
 		case eth.BlockHeadersMsg:
 			// Peer responded or sent message - reset the "back off" timer
 			peerTimeMap.Store(peerID, time.Now().Unix())
@@ -256,21 +252,13 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			select {
-			case ss.receiveCh <- StreamMsg{b, peerID, "BlockHeadersMsg", proto_sentry.MessageId_BlockHeaders}:
-			default:
-				// TODO make a warning about dropped messages
-			}
+			ss.receive(&StreamMsg{b, peerID, "BlockHeadersMsg", proto_sentry.MessageId_BlockHeaders})
 		case eth.GetBlockBodiesMsg:
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			select {
-			case ss.receiveUploadCh <- StreamMsg{b, peerID, "GetBlockBodiesMsg", proto_sentry.MessageId_GetBlockBodies}:
-			default:
-				// TODO make a warning about dropped messages
-			}
+			ss.receiveUpload(&StreamMsg{b, peerID, "GetBlockBodiesMsg", proto_sentry.MessageId_GetBlockBodies})
 		case eth.BlockBodiesMsg:
 			// Peer responded or sent message - reset the "back off" timer
 			peerTimeMap.Store(peerID, time.Now().Unix())
@@ -278,11 +266,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			select {
-			case ss.receiveCh <- StreamMsg{b, peerID, "BlockBodiesMsg", proto_sentry.MessageId_BlockBodies}:
-			default:
-				// TODO make a warning about dropped messages
-			}
+			ss.receive(&StreamMsg{b, peerID, "BlockBodiesMsg", proto_sentry.MessageId_BlockBodies})
 		case eth.GetNodeDataMsg:
 			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
@@ -294,21 +278,13 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			select {
-			case ss.receiveCh <- StreamMsg{b, peerID, "NewBlockHashesMsg", proto_sentry.MessageId_NewBlockHashes}:
-			default:
-				// TODO make a warning about dropped messages
-			}
+			ss.receive(&StreamMsg{b, peerID, "NewBlockHashesMsg", proto_sentry.MessageId_NewBlockHashes})
 		case eth.NewBlockMsg:
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			select {
-			case ss.receiveCh <- StreamMsg{b, peerID, "NewBlockMsg", proto_sentry.MessageId_NewBlock}:
-			default:
-				// TODO make a warning about dropped messages
-			}
+			ss.receive(&StreamMsg{b, peerID, "NewBlockMsg", proto_sentry.MessageId_NewBlock})
 		case eth.NewPooledTransactionHashesMsg:
 			var hashes []common.Hash
 			if err := msg.Decode(&hashes); err != nil {
@@ -615,10 +591,26 @@ func (ss *SentryServerImpl) getStatus() *proto_sentry.StatusData {
 	return ss.statusData
 }
 
-func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveMessagesServer) error {
+func (ss *SentryServerImpl) receive(msg *StreamMsg) {
+	ss.lock.Lock()
+	defer ss.lock.Unlock()
+	select {
+	case ss.receiveCh <- *msg:
+	default:
+		// TODO make a warning about dropped messages
+	}
+}
+
+func (ss *SentryServerImpl) recreateReceive() {
+	ss.lock.Lock()
+	defer ss.lock.Unlock()
 	// Close previous channel and recreate
 	close(ss.receiveCh)
 	ss.receiveCh = make(chan StreamMsg, 1024)
+}
+
+func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveMessagesServer) error {
+	ss.recreateReceive()
 	for streamMsg := range ss.receiveCh {
 		outreq := proto_sentry.InboundMessage{
 			PeerId: []byte(streamMsg.peerID),
@@ -635,10 +627,27 @@ func (ss *SentryServerImpl) ReceiveMessages(_ *emptypb.Empty, server proto_sentr
 	return nil
 }
 
-func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveUploadMessagesServer) error {
+func (ss *SentryServerImpl) receiveUpload(msg *StreamMsg) {
+	ss.lock.Lock()
+	defer ss.lock.Unlock()
+	select {
+	case ss.receiveUploadCh <- *msg:
+	default:
+		// TODO make a warning about dropped messages
+	}
+}
+
+func (ss *SentryServerImpl) recreateReceiveUpload() {
+	ss.lock.Lock()
+	defer ss.lock.Unlock()
 	// Close previous channel and recreate
 	close(ss.receiveUploadCh)
 	ss.receiveUploadCh = make(chan StreamMsg, 1024)
+}
+
+func (ss *SentryServerImpl) ReceiveUploadMessages(_ *emptypb.Empty, server proto_sentry.Sentry_ReceiveUploadMessagesServer) error {
+	// Close previous channel and recreate
+	ss.recreateReceiveUpload()
 	for streamMsg := range ss.receiveUploadCh {
 		outreq := proto_sentry.InboundMessage{
 			PeerId: []byte(streamMsg.peerID),

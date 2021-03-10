@@ -219,11 +219,12 @@ func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool, overwr
 	// are returned to the caller unless we're already at block zero.
 	height := rawdb.ReadHeaderNumber(db, rawdb.ReadHeadHeaderHash(db))
 	if height == nil {
-		return newcfg, stored, stateDB, fmt.Errorf("missing block number for head header hash")
-	}
-	compatErr := storedcfg.CheckCompatible(newcfg, *height)
-	if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
-		return newcfg, stored, stateDB, compatErr
+		//return newcfg, stored, stateDB, fmt.Errorf("missing block number for head header hash")
+	} else {
+		compatErr := storedcfg.CheckCompatible(newcfg, *height)
+		if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
+			return newcfg, stored, stateDB, compatErr
+		}
 	}
 	if err := rawdb.WriteChainConfig(db, stored, newcfg); err != nil {
 		return newcfg, common.Hash{}, nil, err

@@ -330,6 +330,9 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int) error
 	if anchorHeader.Number.Uint64() < hd.highestInDb {
 		return fmt.Errorf("new anchor too far in the past: %d, latest header in db: %d", anchorHeader.Number.Uint64(), hd.highestInDb)
 	}
+	if len(hd.anchors) >= hd.anchorLimit {
+		return fmt.Errorf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit)
+	}
 	anchor := &Anchor{
 		parentHash:  anchorHeader.ParentHash,
 		timestamp:   0,
@@ -483,8 +486,8 @@ func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]HeaderRecord
 func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 	err := db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.HeaderPrefix)
-		// Take hd.persistedTipLimit headers (with the highest heights) as tips
-		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedTipLimit; k, v, err = c.Prev() {
+		// Take hd.persistedLinkLimit headers (with the highest heights) as links
+		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; k, v, err = c.Prev() {
 			if err != nil {
 				return err
 			}
@@ -585,7 +588,6 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		tip := hd.insertList[len(hd.insertList)-1]
 		if tip.blockHeight <= hd.maxHardTipHeight && !tip.preverified {
 			// Header should be preverified, but not yet, try again later
-			fmt.Printf("Header %d <= %d not preverified\n", tip.blockHeight, hd.maxHardTipHeight)
 			break
 		}
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
@@ -611,7 +613,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 			hd.insertList = append(hd.insertList, tip.next...)
 		}
 	}
-	for hd.persistedLinkQueue.Len() > hd.persistedTipLimit {
+	for hd.persistedLinkQueue.Len() > hd.persistedLinkLimit {
 		tip := heap.Pop(hd.persistedLinkQueue).(*Tip)
 		delete(hd.tips, tip.hash)
 	}
@@ -716,6 +718,10 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 		if err = rawdb.WriteHeadHeaderHash(hi.batch, hash); err != nil {
 			return fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
 		}
+		hi.headerProgress = blockHeight
+		if err = stages.SaveStageProgress(hi.batch, stages.Headers, blockHeight); err != nil {
+			return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
+		}
 		// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
 		if forkingPoint < hi.unwindPoint {
 			hi.unwindPoint = forkingPoint
@@ -731,15 +737,10 @@ func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) e
 	if err = hi.batch.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
-	if blockHeight > hi.headerProgress {
-		hi.headerProgress = blockHeight
-		if err = stages.SaveStageProgress(hi.batch, stages.Headers, blockHeight); err != nil {
-			return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
-		}
-	}
 	hi.prevHash = hash
 	if blockHeight > hi.highest {
 		hi.highest = blockHeight
+		hi.highestHash = hash
 	}
 	return nil
 }
@@ -748,8 +749,16 @@ func (hi *HeaderInserter) GetHighest() uint64 {
 	return hi.highest
 }
 
+func (hi *HeaderInserter) GetHighestHash() common.Hash {
+	return hi.highestHash
+}
+
 func (hi *HeaderInserter) UnwindPoint() uint64 {
 	return hi.unwindPoint
+}
+
+func (hi *HeaderInserter) AnythingDone() bool {
+	return hi.newCanonical
 }
 
 //nolint:interfacer
@@ -804,10 +813,12 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 		}
 		log.Debug("NewAnchor", "start", startNum, "end", endNum)
 	}
-	log.Info(hd.anchorState())
+	//log.Info(hd.anchorState())
 	log.Debug("Link queue", "size", hd.linkQueue.Len())
-	for hd.linkQueue.Len() > hd.tipLimit {
-		//log.Debug("Too many tips", "count", hd.linkQueue.Len(), "tried to add", end-start, "limit", hd.tipLimit)
+	if hd.linkQueue.Len() > hd.linkLimit {
+		log.Debug("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", end-start, "limit", hd.linkLimit)
+	}
+	for hd.linkQueue.Len() > hd.linkLimit {
 		tip := heap.Pop(hd.linkQueue).(*Tip)
 		delete(hd.tips, tip.hash)
 		if parentTip, ok := hd.tips[tip.header.ParentHash]; ok {
@@ -841,4 +852,10 @@ func (hd *HeaderDownload) TopSeenHeight() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.topSeenHeight
+}
+
+func (hd *HeaderDownload) NoAnchors() bool {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return len(hd.anchors) == 0 && hd.highestInDb >= hd.maxHardTipHeight
 }

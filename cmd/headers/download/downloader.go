@@ -293,6 +293,7 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 		return nil, fmt.Errorf("setup genesis block: %w", err)
 	}
 	hd := headerdownload.NewHeaderDownload(
+		512,       /* anchorLimit */
 		1024*1024, /* tipLimit */
 		calcDiffFunc,
 		verifySealFunc,

@@ -149,8 +149,9 @@ type HeaderDownload struct {
 	hardTips               map[common.Hash]HeaderRecord // Set of hashes for hard-coded tips
 	maxHardTipHeight       uint64
 	tips                   map[common.Hash]*Tip // Tips by tip hash
-	tipLimit               int                  // Maximum allowed number of tips
-	persistedTipLimit      int                  // Maximum allowed number of persisted tips
+	linkLimit              int                  // Maximum allowed number of links
+	persistedLinkLimit     int                  // Maximum allowed number of persisted tips
+	anchorLimit            int                  // Maximum allowed number of anchors
 	highestTotalDifficulty uint256.Int
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
@@ -173,15 +174,17 @@ type HeaderRecord struct {
 }
 
 func NewHeaderDownload(
-	tipLimit int,
+	anchorLimit int,
+	linkLimit int,
 	calcDifficultyFunc CalcDifficultyFunc,
 	verifySealFunc VerifySealFunc,
 ) *HeaderDownload {
 	hd := &HeaderDownload{
 		badHeaders:         make(map[common.Hash]struct{}),
 		anchors:            make(map[common.Hash]*Anchor),
-		persistedTipLimit:  tipLimit / 2,
-		tipLimit:           tipLimit / 2,
+		persistedLinkLimit: linkLimit / 2,
+		linkLimit:          linkLimit / 2,
+		anchorLimit:        anchorLimit,
 		calcDifficultyFunc: calcDifficultyFunc,
 		verifySealFunc:     verifySealFunc,
 		hardTips:           make(map[common.Hash]HeaderRecord),
@@ -235,6 +238,7 @@ type HeaderInserter struct {
 	newCanonical   bool
 	unwindPoint    uint64
 	highest        uint64
+	highestHash    common.Hash
 	localTd        *big.Int
 	headerProgress uint64
 }

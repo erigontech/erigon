@@ -39,6 +39,7 @@ func StageLoop(
 		ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
+	initialCycle := true
 	for {
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
@@ -74,7 +75,7 @@ func StageLoop(
 		cc := &core.TinyChainContext{}
 		cc.SetDB(tx)
 		//cc.SetEngine(d.blockchain.Engine())
-		st, err1 := sync.Prepare(nil, nil /* chainConfig */, cc, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", nil, 512*1024*1024, make(chan struct{}), nil, nil, func() error { return nil }, nil)
+		st, err1 := sync.Prepare(nil, nil /* chainConfig */, cc, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", nil, 512*1024*1024, make(chan struct{}), nil, nil, func() error { return nil }, nil, initialCycle)
 		if err1 != nil {
 			return fmt.Errorf("prepare staged sync: %w", err1)
 		}
@@ -136,6 +137,7 @@ func StageLoop(
 				}
 			}
 		}
+		initialCycle = false
 	}
 }
 
@@ -157,7 +159,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, headerReqSend, wakeUpChan)
+						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, headerReqSend, world.InitialCycle, wakeUpChan)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return stagedsync.HeadersUnwind(u, s, world.TX)

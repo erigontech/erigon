@@ -50,6 +50,7 @@ type StageParameters struct {
 	stateWriterBuilder    StateWriterBuilder
 	notifier              ChainEventNotifier
 	silkwormExecutionFunc unsafe.Pointer
+	InitialCycle          bool
 }
 
 // StageBuilder represent an object to create a single stage for staged sync

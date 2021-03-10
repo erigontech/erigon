@@ -22,6 +22,7 @@ func HeadersForward(
 	db ethdb.Database,
 	hd *headerdownload.HeaderDownload,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
+	initialCycle bool,
 	wakeUpChan chan struct{},
 ) error {
 	var headerProgress uint64
@@ -48,8 +49,9 @@ func HeadersForward(
 	if err1 != nil {
 		return err1
 	}
+	headHash := rawdb.ReadHeadHeaderHash(tx)
 	if hash == (common.Hash{}) {
-		if err = fixCanonicalChain(logPrefix, headerProgress, tx); err != nil {
+		if err = fixCanonicalChain(logPrefix, headerProgress, headHash, tx); err != nil {
 			return err
 		}
 		if !useExternalTx {
@@ -67,7 +69,6 @@ func HeadersForward(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	headHash := rawdb.ReadHeadHeaderHash(tx)
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
 	localTd, err1 := rawdb.ReadTd(tx, headHash, *headNumber)
 	if err1 != nil {
@@ -122,6 +123,10 @@ func HeadersForward(
 			}
 		}
 		timer.Stop()
+		if !initialCycle && headerInserter.AnythingDone() {
+			// if this is not an initial cycle, we need to react quickly when new headers are coming in
+			break
+		}
 		timer = time.NewTimer(1 * time.Second)
 		select {
 		case <-ctx.Done():
@@ -135,6 +140,9 @@ func HeadersForward(
 		case <-wakeUpChan:
 			log.Debug("headerLoop woken up by the incoming request")
 		}
+		if initialCycle && headerInserter.AnythingDone() && hd.NoAnchors() {
+			stopped = true
+		}
 	}
 	if err := s.Update(tx, headerInserter.GetHighest()); err != nil {
 		return err
@@ -144,7 +152,7 @@ func HeadersForward(
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
 	} else {
-		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), batch); err != nil {
+		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), headerInserter.GetHighestHash(), batch); err != nil {
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
 		}
 		s.Done()
@@ -161,8 +169,8 @@ func HeadersForward(
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, height uint64, tx ethdb.DbWithPendingMutations) error {
-	ancestorHash := rawdb.ReadHeadHeaderHash(tx)
+func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx ethdb.DbWithPendingMutations) error {
+	ancestorHash := hash
 	ancestorHeight := height
 	var ch common.Hash
 	var err error
@@ -171,6 +179,9 @@ func fixCanonicalChain(logPrefix string, height uint64, tx ethdb.DbWithPendingMu
 			return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, ancestorHeight, ancestorHash, err)
 		}
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
+		if ancestor == nil {
+			fmt.Printf("ancestor nil for %d %x\n", ancestorHeight, ancestorHash)
+		}
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--
 	}
