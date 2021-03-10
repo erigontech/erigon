@@ -148,6 +148,7 @@ func CollectProcessMetrics(refresh time.Duration) {
 
 	// Iterate loading the different stats and updating the meters
 	for i := 1; ; i++ {
+		time.Sleep(refresh)
 		location1 := i % 2
 		location2 := (i - 1) % 2
 
@@ -227,6 +228,5 @@ func CollectProcessMetrics(refresh time.Duration) {
 		for _, cb := range getCallbacks() {
 			cb()
 		}
-		time.Sleep(refresh)
 	}
 }
