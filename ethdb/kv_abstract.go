@@ -15,10 +15,19 @@ var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
 	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
 
-	dbSize          = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)
-	dbPagesBranch   = metrics.GetOrRegisterGauge("db/pages/branch", metrics.DefaultRegistry)   //nolint
-	dbPagesLeaf     = metrics.GetOrRegisterGauge("db/pages/leaf", metrics.DefaultRegistry)     //nolint
-	dbPagesOverflow = metrics.GetOrRegisterGauge("db/pages/overflow", metrics.DefaultRegistry) //nolint
+	dbSize             = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)
+	tableScsLeaf       = metrics.GetOrRegisterGauge("table/scs/leaf", metrics.DefaultRegistry)       //nolint
+	tableScsBranch     = metrics.GetOrRegisterGauge("table/scs/branch", metrics.DefaultRegistry)     //nolint
+	tableScsOverflow   = metrics.GetOrRegisterGauge("table/scs/overflow", metrics.DefaultRegistry)   //nolint
+	tableStateLeaf     = metrics.GetOrRegisterGauge("table/state/leaf", metrics.DefaultRegistry)     //nolint
+	tableStateBranch   = metrics.GetOrRegisterGauge("table/state/branch", metrics.DefaultRegistry)   //nolint
+	tableStateOverflow = metrics.GetOrRegisterGauge("table/state/overflow", metrics.DefaultRegistry) //nolint
+	tableLogLeaf       = metrics.GetOrRegisterGauge("table/log/leaf", metrics.DefaultRegistry)       //nolint
+	tableLogBranch     = metrics.GetOrRegisterGauge("table/log/branch", metrics.DefaultRegistry)     //nolint
+	tableLogOverflow   = metrics.GetOrRegisterGauge("table/log/overflow", metrics.DefaultRegistry)   //nolint
+	tableTxLeaf        = metrics.GetOrRegisterGauge("table/tx/leaf", metrics.DefaultRegistry)        //nolint
+	tableTxBranch      = metrics.GetOrRegisterGauge("table/tx/branch", metrics.DefaultRegistry)      //nolint
+	tableTxOverflow    = metrics.GetOrRegisterGauge("table/tx/overflow", metrics.DefaultRegistry)    //nolint
 )
 
 // KV low-level database interface - main target is - to provide common abstraction over top of LMDB and RemoteKV.
