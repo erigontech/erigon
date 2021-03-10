@@ -671,6 +671,27 @@
           "interval": "",
           "legendFormat": "log overflow: {{instance}}",
           "refId": "L"
+        },
+        {
+          "expr": "table_gc_leaf{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "gc leaf: {{instance}}",
+          "refId": "M"
+        },
+        {
+          "expr": "table_gc_branch{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "gc branch: {{instance}}",
+          "refId": "N"
+        },
+        {
+          "expr": "table_gc_overflow{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "gc overflow: {{instance}}",
+          "refId": "O"
         }
       ],
       "thresholds": [],
@@ -789,6 +810,13 @@
           "interval": "",
           "legendFormat": "tx: {{instance}}",
           "refId": "D"
+        },
+        {
+          "expr": "table_gc_entries{instance=~\"$instance\"} / (table_gc_leaf{instance=~\"$instance\"} + table_gc_branch{instance=~\"$instance\"} + table_gc_overflow{instance=~\"$instance\"})",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "tx: {{instance}}",
+          "refId": "E"
         }
       ],
       "thresholds": [],
@@ -4194,7 +4222,7 @@
       "type": "row"
     }
   ],
-  "refresh": "10s",
+  "refresh": false,
   "schemaVersion": 27,
   "style": "dark",
   "tags": [],
@@ -4345,8 +4373,8 @@
     ]
   },
   "time": {
-    "from": "now-5m",
-    "to": "now"
+    "from": "2021-03-10T03:09:59.945Z",
+    "to": "2021-03-10T03:29:59.945Z"
   },
   "timepicker": {
     "refresh_intervals": [
@@ -4375,5 +4403,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 15
+  "version": 17
 }
