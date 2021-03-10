@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1615345878536,
+  "iteration": 1615349256966,
   "links": [],
   "panels": [
     {
@@ -655,21 +655,21 @@
           "expr": "table_tx_leaf{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "log leaf: {{instance}}",
+          "legendFormat": "tx leaf: {{instance}}",
           "refId": "J"
         },
         {
           "expr": "table_tx_branch{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "log branch: {{instance}}",
+          "legendFormat": "tx branch: {{instance}}",
           "refId": "K"
         },
         {
           "expr": "table_tx_overflow{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "log overflow: {{instance}}",
+          "legendFormat": "tx overflow: {{instance}}",
           "refId": "L"
         },
         {
@@ -815,7 +815,7 @@
           "expr": "table_gc_entries{instance=~\"$instance\"} / (table_gc_leaf{instance=~\"$instance\"} + table_gc_branch{instance=~\"$instance\"} + table_gc_overflow{instance=~\"$instance\"})",
           "hide": false,
           "interval": "",
-          "legendFormat": "tx: {{instance}}",
+          "legendFormat": "gc: {{instance}}",
           "refId": "E"
         }
       ],
@@ -4342,9 +4342,14 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
-          "text": "All",
-          "value": "$__all"
+          "selected": true,
+          "tags": [],
+          "text": [
+            "192.168.255.138:6060"
+          ],
+          "value": [
+            "192.168.255.138:6060"
+          ]
         },
         "datasource": "Prometheus",
         "definition": "system_cpu_sysload",
@@ -4373,8 +4378,8 @@
     ]
   },
   "time": {
-    "from": "2021-03-10T03:09:59.945Z",
-    "to": "2021-03-10T03:29:59.945Z"
+    "from": "now-15m",
+    "to": "now"
   },
   "timepicker": {
     "refresh_intervals": [
@@ -4403,5 +4408,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 17
+  "version": 21
 }
