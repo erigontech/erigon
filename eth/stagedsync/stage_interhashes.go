@@ -637,7 +637,7 @@ func storageTrieCollectorForCache(cache *shards.StateCache) trie.StorageHashColl
 func accountTrieCollector(tmpdir string) (*etl.Collector, trie.HashCollector2) {
 	collector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	newV := make([]byte, 0, 1024)
-	return collector, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+	return collector, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, _ []byte) error {
 		if len(keyHex) == 0 {
 			return nil
 		}
@@ -649,7 +649,7 @@ func accountTrieCollector(tmpdir string) (*etl.Collector, trie.HashCollector2) {
 		}
 		assertSubset(hasTree, hasState)
 		assertSubset(hasHash, hasState)
-		newV = trie.MarshalTrieNode(hasState, hasTree, hasHash, hashes, rootHash, newV)
+		newV = trie.MarshalTrieNode(hasState, hasTree, hasHash, hashes, nil, newV)
 		return collector.Collect(keyHex, newV)
 	}
 }
