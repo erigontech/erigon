@@ -186,5 +186,5 @@ func prepare(ctx *cli.Context) {
 	utils.SetupMetrics(ctx)
 
 	// Start system runtime metrics collection
-	go metrics.CollectProcessMetrics(5 * time.Second)
+	go metrics.CollectProcessMetrics(10 * time.Second)
 }

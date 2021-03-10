@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1615271792368,
+  "iteration": 1615345878536,
   "links": [],
   "panels": [
     {
@@ -543,13 +543,333 @@
       }
     },
     {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 10
+      },
+      "hiddenSeries": false,
+      "id": 160,
+      "legend": {
+        "avg": false,
+        "current": true,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "table_scs_leaf{instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "scs(dup) leaf: {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "table_scs_branch{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "scs(dup) branche: {{instance}}",
+          "refId": "B"
+        },
+        {
+          "expr": "table_scs_overflow{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "scs(dup) overflow: {{instance}}",
+          "refId": "C"
+        },
+        {
+          "expr": "table_state_leaf{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "state(dup) leaf: {{instance}}",
+          "refId": "D"
+        },
+        {
+          "expr": "table_state_branch{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "state(dup) branch: {{instance}}",
+          "refId": "E"
+        },
+        {
+          "expr": "table_state_overflow{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "state(dup) overflow: {{instance}}",
+          "refId": "F"
+        },
+        {
+          "expr": "table_log_leaf{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "log leaf: {{instance}}",
+          "refId": "G"
+        },
+        {
+          "expr": "table_log_branch{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "log branch: {{instance}}",
+          "refId": "H"
+        },
+        {
+          "expr": "table_log_overflow{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "log overflow: {{instance}}",
+          "refId": "I"
+        },
+        {
+          "expr": "table_tx_leaf{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "log leaf: {{instance}}",
+          "refId": "J"
+        },
+        {
+          "expr": "table_tx_branch{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "log branch: {{instance}}",
+          "refId": "K"
+        },
+        {
+          "expr": "table_tx_overflow{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "log overflow: {{instance}}",
+          "refId": "L"
+        },
+        {
+          "expr": "table_gc_leaf{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "gc leaf: {{instance}}",
+          "refId": "M"
+        },
+        {
+          "expr": "table_gc_branch{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "gc branch: {{instance}}",
+          "refId": "N"
+        },
+        {
+          "expr": "table_gc_overflow{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "gc overflow: {{instance}}",
+          "refId": "O"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Tables btree - amount of leaf/branch/overflow pages",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:117",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:118",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 10
+      },
+      "hiddenSeries": false,
+      "id": 161,
+      "legend": {
+        "avg": false,
+        "current": true,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.4.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "table_scs_entries{instance=~\"$instance\"} / (table_scs_leaf{instance=~\"$instance\"} + table_scs_branch{instance=~\"$instance\"} + table_scs_overflow{instance=~\"$instance\"})",
+          "interval": "",
+          "legendFormat": "scs(dup): {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "table_state_entries{instance=~\"$instance\"} / (table_state_leaf{instance=~\"$instance\"} + table_state_branch{instance=~\"$instance\"} + table_state_overflow{instance=~\"$instance\"})",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "state(dup): {{instance}}",
+          "refId": "B"
+        },
+        {
+          "expr": "table_log_entries{instance=~\"$instance\"} / (table_log_leaf{instance=~\"$instance\"} + table_log_branch{instance=~\"$instance\"} + table_log_overflow{instance=~\"$instance\"})",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "log: {{instance}}",
+          "refId": "C"
+        },
+        {
+          "expr": "table_tx_entries{instance=~\"$instance\"} / (table_tx_leaf{instance=~\"$instance\"} + table_tx_branch{instance=~\"$instance\"} + table_tx_overflow{instance=~\"$instance\"})",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "tx: {{instance}}",
+          "refId": "D"
+        },
+        {
+          "expr": "table_gc_entries{instance=~\"$instance\"} / (table_gc_leaf{instance=~\"$instance\"} + table_gc_branch{instance=~\"$instance\"} + table_gc_overflow{instance=~\"$instance\"})",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "tx: {{instance}}",
+          "refId": "E"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Tables density - amount keys per page",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:117",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:118",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
       "collapsed": false,
       "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 10
+        "y": 14
       },
       "id": 134,
       "panels": [],
@@ -575,7 +895,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 11
+        "y": 15
       },
       "hiddenSeries": false,
       "id": 148,
@@ -719,7 +1039,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 11
+        "y": 15
       },
       "hiddenSeries": false,
       "id": 153,
@@ -824,7 +1144,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 11
+        "y": 15
       },
       "hiddenSeries": false,
       "id": 150,
@@ -942,7 +1262,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 16
+        "y": 20
       },
       "hiddenSeries": false,
       "id": 155,
@@ -1054,7 +1374,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 16
+        "y": 20
       },
       "hiddenSeries": false,
       "id": 85,
@@ -1164,7 +1484,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 16
+        "y": 20
       },
       "hiddenSeries": false,
       "id": 128,
@@ -1270,7 +1590,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 21
+        "y": 25
       },
       "hiddenSeries": false,
       "id": 86,
@@ -1382,7 +1702,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 21
+        "y": 25
       },
       "hiddenSeries": false,
       "id": 154,
@@ -1493,7 +1813,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 21
+        "y": 25
       },
       "hiddenSeries": false,
       "id": 124,
@@ -1591,7 +1911,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 26
+        "y": 30
       },
       "hiddenSeries": false,
       "id": 106,
@@ -1690,7 +2010,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 35
       },
       "id": 82,
       "panels": [],
@@ -1716,7 +2036,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 32
+        "y": 36
       },
       "hiddenSeries": false,
       "id": 157,
@@ -1879,7 +2199,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 41
       },
       "id": 146,
       "panels": [
@@ -2652,7 +2972,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 42
       },
       "id": 75,
       "panels": [],
@@ -2677,7 +2997,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 39
+        "y": 43
       },
       "hiddenSeries": false,
       "id": 96,
@@ -2788,7 +3108,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 39
+        "y": 43
       },
       "hiddenSeries": false,
       "id": 77,
@@ -2893,7 +3213,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 49
       },
       "id": 4,
       "panels": [],
@@ -2936,7 +3256,7 @@
         "h": 3,
         "w": 4,
         "x": 0,
-        "y": 46
+        "y": 50
       },
       "id": 108,
       "interval": null,
@@ -3014,7 +3334,7 @@
         "h": 3,
         "w": 4,
         "x": 4,
-        "y": 46
+        "y": 50
       },
       "id": 111,
       "interval": null,
@@ -3092,7 +3412,7 @@
         "h": 3,
         "w": 4,
         "x": 8,
-        "y": 46
+        "y": 50
       },
       "id": 109,
       "interval": null,
@@ -3170,7 +3490,7 @@
         "h": 3,
         "w": 4,
         "x": 12,
-        "y": 46
+        "y": 50
       },
       "id": 113,
       "interval": null,
@@ -3248,7 +3568,7 @@
         "h": 3,
         "w": 4,
         "x": 16,
-        "y": 46
+        "y": 50
       },
       "id": 114,
       "interval": null,
@@ -3326,7 +3646,7 @@
         "h": 3,
         "w": 4,
         "x": 20,
-        "y": 46
+        "y": 50
       },
       "id": 115,
       "interval": null,
@@ -3387,7 +3707,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 49
+        "y": 53
       },
       "hiddenSeries": false,
       "id": 110,
@@ -3502,7 +3822,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 49
+        "y": 53
       },
       "hiddenSeries": false,
       "id": 116,
@@ -3617,7 +3937,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 59
       },
       "hiddenSeries": false,
       "id": 117,
@@ -3792,7 +4112,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 62
+        "y": 66
       },
       "id": 138,
       "panels": [
@@ -3902,7 +4222,7 @@
       "type": "row"
     }
   ],
-  "refresh": "10s",
+  "refresh": false,
   "schemaVersion": 27,
   "style": "dark",
   "tags": [],
@@ -4023,14 +4343,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": [
-            "turbogeth16c.weblogix.it:6060",
-            "turbogeth16d.weblogix.it:6060"
-          ],
-          "value": [
-            "turbogeth16c.weblogix.it:6060",
-            "turbogeth16d.weblogix.it:6060"
-          ]
+          "text": "All",
+          "value": "$__all"
         },
         "datasource": "Prometheus",
         "definition": "system_cpu_sysload",
@@ -4059,8 +4373,8 @@
     ]
   },
   "time": {
-    "from": "now-6h",
-    "to": "now"
+    "from": "2021-03-10T03:09:59.945Z",
+    "to": "2021-03-10T03:29:59.945Z"
   },
   "timepicker": {
     "refresh_intervals": [
@@ -4089,5 +4403,5 @@
   "timezone": "",
   "title": "TurboGeth Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 39
+  "version": 17
 }
