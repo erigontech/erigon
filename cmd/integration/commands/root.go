@@ -47,6 +47,7 @@ func openDatabase(path string, applyMigrations bool) *ethdb.ObjectDatabase {
 			db = ethdb.NewObjectDatabase(openKV(path, false))
 		}
 	}
+	metrics.AddCallback(db.KV().CollectMetrics)
 	if err := SetSnapshotKV(db, snapshotDir, snapshotMode); err != nil {
 		panic(err)
 	}

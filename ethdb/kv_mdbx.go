@@ -341,6 +341,12 @@ func (db *MdbxKV) CollectMetrics() {
 		tableTxBranch.Update(int64(stat.BranchPages))
 		tableTxOverflow.Update(int64(stat.OverflowPages))
 		tableTxEntries.Update(int64(stat.Entries))
+
+		stat, _ = tx.(*MdbxTx).BucketStat("gc")
+		tableGcLeaf.Update(int64(stat.LeafPages))
+		tableGcBranch.Update(int64(stat.BranchPages))
+		tableGcOverflow.Update(int64(stat.OverflowPages))
+		tableGcEntries.Update(int64(stat.Entries))
 		return nil
 	}); err != nil {
 		panic(err)

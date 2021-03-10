@@ -32,6 +32,10 @@ var (
 	tableTxBranch      = metrics.GetOrRegisterGauge("table/tx/branch", metrics.DefaultRegistry)      //nolint
 	tableTxOverflow    = metrics.GetOrRegisterGauge("table/tx/overflow", metrics.DefaultRegistry)    //nolint
 	tableTxEntries     = metrics.GetOrRegisterGauge("table/tx/entries", metrics.DefaultRegistry)     //nolint
+	tableGcLeaf        = metrics.GetOrRegisterGauge("table/gc/leaf", metrics.DefaultRegistry)        //nolint
+	tableGcBranch      = metrics.GetOrRegisterGauge("table/gc/branch", metrics.DefaultRegistry)      //nolint
+	tableGcOverflow    = metrics.GetOrRegisterGauge("table/gc/overflow", metrics.DefaultRegistry)    //nolint
+	tableGcEntries     = metrics.GetOrRegisterGauge("table/gc/entries", metrics.DefaultRegistry)     //nolint
 )
 
 // KV low-level database interface - main target is - to provide common abstraction over top of LMDB and RemoteKV.

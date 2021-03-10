@@ -325,29 +325,35 @@ func (db *LmdbKV) CollectMetrics() {
 	dbSize.Update(fileInfo.Size())
 
 	if err := db.View(context.Background(), func(tx Tx) error {
-		stat, _ := tx.(*MdbxTx).BucketStat(dbutils.PlainStorageChangeSetBucket)
+		stat, _ := tx.(*lmdbTx).BucketStat(dbutils.PlainStorageChangeSetBucket)
 		tableScsLeaf.Update(int64(stat.LeafPages))
 		tableScsBranch.Update(int64(stat.BranchPages))
 		tableScsOverflow.Update(int64(stat.OverflowPages))
 		tableScsEntries.Update(int64(stat.Entries))
 
-		stat, _ = tx.(*MdbxTx).BucketStat(dbutils.PlainStateBucket)
+		stat, _ = tx.(*lmdbTx).BucketStat(dbutils.PlainStateBucket)
 		tableStateLeaf.Update(int64(stat.LeafPages))
 		tableStateBranch.Update(int64(stat.BranchPages))
 		tableStateOverflow.Update(int64(stat.OverflowPages))
 		tableStateEntries.Update(int64(stat.Entries))
 
-		stat, _ = tx.(*MdbxTx).BucketStat(dbutils.Log)
+		stat, _ = tx.(*lmdbTx).BucketStat(dbutils.Log)
 		tableLogLeaf.Update(int64(stat.LeafPages))
 		tableLogBranch.Update(int64(stat.BranchPages))
 		tableLogOverflow.Update(int64(stat.OverflowPages))
 		tableLogEntries.Update(int64(stat.Entries))
 
-		stat, _ = tx.(*MdbxTx).BucketStat(dbutils.EthTx)
+		stat, _ = tx.(*lmdbTx).BucketStat(dbutils.EthTx)
 		tableTxLeaf.Update(int64(stat.LeafPages))
 		tableTxBranch.Update(int64(stat.BranchPages))
 		tableTxOverflow.Update(int64(stat.OverflowPages))
 		tableTxEntries.Update(int64(stat.Entries))
+
+		stat, _ = tx.(*lmdbTx).BucketStat("gc")
+		tableGcLeaf.Update(int64(stat.LeafPages))
+		tableGcBranch.Update(int64(stat.BranchPages))
+		tableGcOverflow.Update(int64(stat.OverflowPages))
+		tableGcEntries.Update(int64(stat.Entries))
 		return nil
 	}); err != nil {
 		panic(err)
