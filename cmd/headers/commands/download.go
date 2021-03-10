@@ -6,15 +6,12 @@ import (
 )
 
 var (
-	bufferSizeStr string // Size of buffer
-	combined      bool   // Whether downloader also includes sentry
-	timeout       int    // Timeout for delivery requests
-	window        int    // Size of sliding window for downloading block bodies
+	combined bool // Whether downloader also includes sentry
+	timeout  int  // Timeout for delivery requests
+	window   int  // Size of sliding window for downloading block bodies
 )
 
 func init() {
-	downloadCmd.Flags().StringVar(&filesDir, "filesdir", "", "path to directory where files will be stored")
-	downloadCmd.Flags().StringVar(&bufferSizeStr, "bufferSize", "512M", "size o the buffer")
 	downloadCmd.Flags().StringVar(&sentryAddr, "sentryAddr", "localhost:9091", "sentry address <host>:<port>")
 	downloadCmd.Flags().BoolVar(&combined, "combined", false, "run downloader and sentry in the same process")
 	downloadCmd.Flags().IntVar(&timeout, "timeout", 30, "timeout for devp2p delivery requests, in seconds")
@@ -39,8 +36,8 @@ var downloadCmd = &cobra.Command{
 		db := openDatabase(chaindata)
 		defer db.Close()
 		if combined {
-			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, filesDir, bufferSizeStr, db, timeout, window)
+			return download.Combined(natSetting, port, staticPeers, discovery, netRestrict, db, timeout, window)
 		}
-		return download.Download(filesDir, bufferSizeStr, sentryAddr, coreAddr, db, timeout, window)
+		return download.Download(sentryAddr, coreAddr, db, timeout, window)
 	},
 }

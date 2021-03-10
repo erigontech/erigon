@@ -16,7 +16,6 @@ import (
 )
 
 var (
-	filesDir      string // Directory when the files should be stored
 	sentryAddr    string // Address of the sentry <host>:<port>
 	coreAddr      string // Address of the core <host>:<port>
 	chaindata     string // Path to chaindata

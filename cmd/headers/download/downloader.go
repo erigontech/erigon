@@ -71,7 +71,7 @@ func grpcSentryClient(ctx context.Context, sentryAddr string) (proto_sentry.Sent
 }
 
 // Download creates and starts standalone downloader
-func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr string, db ethdb.Database, timeout, window int) error {
+func Download(sentryAddr string, coreAddr string, db ethdb.Database, timeout, window int) error {
 	ctx := rootContext()
 
 	sentryClient, err := grpcSentryClient(ctx, sentryAddr)
@@ -79,11 +79,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 		return err
 	}
 
-	var bufferSize datasize.ByteSize
-	if err = bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
-		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
-	}
-	controlServer, err1 := NewControlServer(db, filesDir, int(bufferSize), sentryClient, window)
+	controlServer, err1 := NewControlServer(db, sentryClient, window)
 	if err1 != nil {
 		return fmt.Errorf("create core P2P server: %w", err1)
 	}
@@ -174,7 +170,7 @@ func Download(filesDir string, bufferSizeStr string, sentryAddr string, coreAddr
 }
 
 // Combined creates and starts sentry and downloader in the same process
-func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, filesDir string, bufferSizeStr string, db ethdb.Database, timeout, window int) error {
+func Combined(natSetting string, port int, staticPeers []string, discovery bool, netRestrict string, db ethdb.Database, timeout, window int) error {
 	ctx := rootContext()
 
 	sentryServer := &SentryServerImpl{
@@ -188,11 +184,7 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 	}
 	sentryClient := &SentryClientDirect{}
 	sentryClient.SetServer(sentryServer)
-	var bufferSize datasize.ByteSize
-	if err = bufferSize.UnmarshalText([]byte(bufferSizeStr)); err != nil {
-		return fmt.Errorf("parsing bufferSize %s: %w", bufferSizeStr, err)
-	}
-	controlServer, err2 := NewControlServer(db, filesDir, int(bufferSize), sentryClient, window)
+	controlServer, err2 := NewControlServer(db, sentryClient, window)
 	if err2 != nil {
 		return fmt.Errorf("create core P2P server: %w", err2)
 	}
@@ -280,7 +272,7 @@ type ControlServerImpl struct {
 	db                   ethdb.Database
 }
 
-func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentryClient proto_sentry.SentryClient, window int) (*ControlServerImpl, error) {
+func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient, window int) (*ControlServerImpl, error) {
 	//config := eth.DefaultConfig.Ethash
 	engine := ethash.New(ethash.Config{
 		CachesInMem:      1,
@@ -301,7 +293,7 @@ func NewControlServer(db ethdb.Database, filesDir string, bufferSize int, sentry
 		return nil, fmt.Errorf("setup genesis block: %w", err)
 	}
 	hd := headerdownload.NewHeaderDownload(
-		128*1024, /* tipLimit */
+		1024*1024, /* tipLimit */
 		calcDiffFunc,
 		verifySealFunc,
 	)

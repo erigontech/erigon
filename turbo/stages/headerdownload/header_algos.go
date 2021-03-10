@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -142,7 +143,7 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Tip) {
 		removal := toRemove[len(toRemove)-1]
 		toRemove = toRemove[:len(toRemove)-1]
 		delete(hd.tips, removal.header.Hash())
-		hd.tipCount--
+		heap.Remove(hd.linkQueue, removal.idx)
 		toRemove = append(toRemove, removal.next...)
 	}
 }
@@ -171,7 +172,8 @@ func (hd *HeaderDownload) markPreverified(tip *Tip) {
 func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error {
 	// Find attachment tip again
 	tipHeader := segment.Headers[end-1]
-	if attachmentTip, attaching := hd.getTip(tipHeader.ParentHash); attaching {
+	attachmentTip, attaching := hd.getTip(tipHeader.ParentHash)
+	if attaching {
 		if attachmentTip.preverified && len(attachmentTip.next) > 0 {
 			return fmt.Errorf("cannot extendUp from preverified link %d with children", attachmentTip.blockHeight)
 		}
@@ -191,6 +193,10 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 		}
 	} else {
 		return fmt.Errorf("extendUp attachment tip not found for %x", tipHeader.ParentHash)
+	}
+	if attachmentTip.persisted {
+		tip := hd.tips[tipHeader.Hash()]
+		hd.insertList = append(hd.insertList, tip)
 	}
 	return nil
 }
@@ -321,6 +327,9 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int) error {
 	anchorHeader := segment.Headers[end-1]
 
+	if anchorHeader.Number.Uint64() < hd.highestInDb {
+		return fmt.Errorf("new anchor too far in the past: %d, latest header in db: %d", anchorHeader.Number.Uint64(), hd.highestInDb)
+	}
 	anchor := &Anchor{
 		parentHash:  anchorHeader.ParentHash,
 		timestamp:   0,
@@ -349,27 +358,35 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int) error
 	return nil
 }
 
-/*
 func (hd *HeaderDownload) AnchorState() string {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.anchorState()
 }
-*/
 
-/*
 func (hd *HeaderDownload) anchorState() string {
 	//nolint:prealloc
 	var ss []string
 	for anchorParent, anchor := range hd.anchors {
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("{%8d", anchor.blockHeight))
-		end := anchor.maxTipHeight
-		var sbb strings.Builder
+		// Try to figure out end
+		var end uint64
+		var searchList []*Tip
+		searchList = append(searchList, anchor.tips...)
 		var bs []int
-		for _, tipQueueItem := range *anchor.tipQueue {
-			bs = append(bs, int(tipQueueItem.height))
+		for len(searchList) > 0 {
+			tip := searchList[len(searchList)-1]
+			if tip.blockHeight > end {
+				end = tip.blockHeight
+			}
+			searchList = searchList[:len(searchList)-1]
+			if len(tip.next) > 0 {
+				searchList = append(searchList, tip.next...)
+			}
+			bs = append(bs, int(tip.blockHeight))
 		}
+		var sbb strings.Builder
 		sort.Ints(bs)
 		for j, b := range bs {
 			if j == 0 {
@@ -398,18 +415,13 @@ func (hd *HeaderDownload) anchorState() string {
 				}
 			}
 		}
-		if end == 0 {
-			sb.WriteString(fmt.Sprintf(" HardCoded tips=%d tipStretch=%d (%s)}", anchor.tipQueue.Len(), anchor.tipStretch(), sbb.String()))
-		} else {
-			sb.WriteString(fmt.Sprintf("-%d (%d) tips=%d tipStretch=%d (%s)}", end, end-anchor.blockHeight, anchor.tipQueue.Len(), anchor.tipStretch(), sbb.String()))
-		}
+		sb.WriteString(fmt.Sprintf("-%d tips=%d (%s)}", end, len(bs), sbb.String()))
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
 		ss = append(ss, sb.String())
 	}
 	sort.Strings(ss)
 	return strings.Join(ss, "\n")
 }
-*/
 
 func InitHardCodedTips(network string) map[common.Hash]HeaderRecord {
 	var encodings []string
@@ -472,7 +484,7 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 	err := db.(ethdb.HasKV).KV().View(context.Background(), func(tx ethdb.Tx) error {
 		c := tx.Cursor(dbutils.HeaderPrefix)
 		// Take hd.persistedTipLimit headers (with the highest heights) as tips
-		for k, v, err := c.Last(); k != nil && hd.tipQueue.Len() < hd.persistedTipLimit; k, v, err = c.Prev() {
+		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedTipLimit; k, v, err = c.Prev() {
 			if err != nil {
 				return err
 			}
@@ -483,9 +495,7 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 			if err = rlp.DecodeBytes(v, &h); err != nil {
 				return err
 			}
-			if tip, err1 := hd.addHeaderAsTip(&h, true /* persisted */); err1 == nil {
-				heap.Push(hd.tipQueue, tip)
-			} else {
+			if _, err1 := hd.addHeaderAsTip(&h, true /* persisted */); err1 != nil {
 				return err1
 			}
 		}
@@ -512,6 +522,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) *HeaderRequest 
 	defer hd.lock.Unlock()
 
 	if hd.anchorQueue.Len() == 0 {
+		log.Debug("Empty anchor queue")
 		return nil
 	}
 	for hd.anchorQueue.Len() > 0 {
@@ -554,11 +565,14 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 		return nil // Need to be below anchor threshold to produce skeleton request
 	}
 	stride := uint64(8 * 192)
-	length := (hd.topSeenHeight - hd.highestInDb) / stride
+	if hd.topSeenHeight <= hd.highestInDb+stride {
+		return nil
+	}
+	length := (hd.topSeenHeight - hd.highestInDb - stride) / stride
 	if length > 192 {
 		length = 192
 	}
-	if length == 0 {
+	if length <= 0 {
 		return nil // No need in sketelon request
 	}
 	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
@@ -571,10 +585,13 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		tip := hd.insertList[len(hd.insertList)-1]
 		if tip.blockHeight <= hd.maxHardTipHeight && !tip.preverified {
 			// Header should be preverified, but not yet, try again later
+			fmt.Printf("Header %d <= %d not preverified\n", tip.blockHeight, hd.maxHardTipHeight)
 			break
 		}
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
-		hd.tipCount--
+		if _, ok := hd.tips[tip.hash]; ok {
+			heap.Remove(hd.linkQueue, tip.idx)
+		}
 		if !tip.preverified {
 			if err := hd.verifySealFunc(tip.header); err != nil {
 				log.Error("Verification failed for header", "hash", tip.header.Hash(), "height", tip.blockHeight, "error", err)
@@ -589,13 +606,13 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 			hd.highestInDb = tip.blockHeight
 		}
 		tip.persisted = true
-		heap.Push(hd.tipQueue, tip)
+		heap.Push(hd.persistedLinkQueue, tip)
 		if len(tip.next) > 0 {
 			hd.insertList = append(hd.insertList, tip.next...)
 		}
 	}
-	for hd.tipQueue.Len() > hd.persistedTipLimit {
-		tip := heap.Pop(hd.tipQueue).(*Tip)
+	for hd.persistedLinkQueue.Len() > hd.persistedTipLimit {
+		tip := heap.Pop(hd.persistedLinkQueue).(*Tip)
 		delete(hd.tips, tip.hash)
 	}
 	return nil
@@ -634,7 +651,11 @@ func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, persisted bool) (
 		persisted:   persisted,
 	}
 	hd.tips[tipHash] = tip
-	hd.tipCount++
+	if persisted {
+		heap.Push(hd.persistedLinkQueue, tip)
+	} else {
+		heap.Push(hd.linkQueue, tip)
+	}
 	return tip, nil
 }
 
@@ -747,15 +768,8 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 		return
 	}
 	hd.topSeenHeight = segment.Headers[len(segment.Headers)-1].Number.Uint64()
-	if segment.Headers[0].Number.Uint64() > hd.maxHardTipHeight && hd.highestInDb < hd.maxHardTipHeight {
-		//TODO: Change it to log.Debug
-		log.Debug("Segment cannot be inserted yet", "height", segment.Headers[0].Number.Uint64(), "maxHardCoded", hd.maxHardTipHeight, "in Db", hd.highestInDb)
-		return
-	}
-	if hd.tipCount+end-start > hd.tipLimit {
-		log.Debug("Too many tips", "count", hd.tipCount, "tried to add", end-start, "limit", hd.tipLimit)
-		//return
-	}
+	startNum := segment.Headers[start].Number.Uint64()
+	endNum := segment.Headers[end-1].Number.Uint64()
 	// There are 4 cases
 	if foundAnchor {
 		if foundTip {
@@ -764,14 +778,14 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 				log.Error("Connect failed", "error", err)
 				return
 			}
-			log.Debug("Connected", "start", start, "end", end)
+			log.Debug("Connected", "start", startNum, "end", endNum)
 		} else {
 			// ExtendDown
 			if err := hd.extendDown(segment, start, end); err != nil {
 				log.Error("ExtendDown failed", "error", err)
 				return
 			}
-			log.Debug("Extended Down", "start", start, "end", end)
+			log.Debug("Extended Down", "start", startNum, "end", endNum)
 		}
 	} else if foundTip {
 		if end > 0 {
@@ -780,7 +794,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 				log.Error("ExtendUp failed", "error", err)
 				return
 			}
-			log.Debug("Extended Up", "start", start, "end", end)
+			log.Debug("Extended Up", "start", startNum, "end", endNum)
 		}
 	} else {
 		// NewAnchor
@@ -788,9 +802,39 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 			log.Error("NewAnchor failed", "error", err)
 			return
 		}
-		log.Debug("NewAnchor", "start", start, "end", end)
+		log.Debug("NewAnchor", "start", startNum, "end", endNum)
 	}
-	//log.Info(hd.anchorState())
+	log.Info(hd.anchorState())
+	log.Debug("Link queue", "size", hd.linkQueue.Len())
+	for hd.linkQueue.Len() > hd.tipLimit {
+		//log.Debug("Too many tips", "count", hd.linkQueue.Len(), "tried to add", end-start, "limit", hd.tipLimit)
+		tip := heap.Pop(hd.linkQueue).(*Tip)
+		delete(hd.tips, tip.hash)
+		if parentTip, ok := hd.tips[tip.header.ParentHash]; ok {
+			for i, n := range parentTip.next {
+				if n == tip {
+					if i == len(parentTip.next)-1 {
+						parentTip.next = parentTip.next[:i]
+					} else {
+						parentTip.next = append(parentTip.next[:i], parentTip.next[i+1:]...)
+					}
+					break
+				}
+			}
+		}
+		if anchor, ok := hd.anchors[tip.header.ParentHash]; ok {
+			for i, n := range anchor.tips {
+				if n == tip {
+					if i == len(anchor.tips)-1 {
+						anchor.tips = anchor.tips[:i]
+					} else {
+						anchor.tips = append(anchor.tips[:i], anchor.tips[i+1:]...)
+					}
+					break
+				}
+			}
+		}
+	}
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {

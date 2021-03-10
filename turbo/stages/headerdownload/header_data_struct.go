@@ -19,6 +19,7 @@ type Tip struct {
 	next        []*Tip      // Allows iteration over tips in ascending block height order
 	persisted   bool        // Whether this tip comes from the database record
 	preverified bool        // Ancestor of pre-verified header
+	idx         int         // Index in the heap
 }
 
 // TipQueue is the priority queue of persistent tips that exist to limit number of persistent tips
@@ -29,17 +30,24 @@ func (tq TipQueue) Len() int {
 }
 
 func (tq TipQueue) Less(i, j int) bool {
-	return (*tq[i]).blockHeight < (*tq[j]).blockHeight
+	if (*tq[i]).persisted {
+		return (*tq[i]).blockHeight < (*tq[j]).blockHeight
+	}
+	return (*tq[i]).blockHeight > (*tq[j]).blockHeight
 }
 
 func (tq TipQueue) Swap(i, j int) {
+	tq[i].idx = j
+	tq[j].idx = i
 	tq[i], tq[j] = tq[j], tq[i]
 }
 
 func (tq *TipQueue) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
-	*tq = append(*tq, x.(*Tip))
+	t := x.(*Tip)
+	t.idx = len(*tq)
+	*tq = append(*tq, t)
 }
 
 func (tq *TipQueue) Pop() interface{} {
@@ -141,7 +149,6 @@ type HeaderDownload struct {
 	hardTips               map[common.Hash]HeaderRecord // Set of hashes for hard-coded tips
 	maxHardTipHeight       uint64
 	tips                   map[common.Hash]*Tip // Tips by tip hash
-	tipCount               int                  // Total number of tips associated to all anchors
 	tipLimit               int                  // Maximum allowed number of tips
 	persistedTipLimit      int                  // Maximum allowed number of persisted tips
 	highestTotalDifficulty uint256.Int
@@ -154,7 +161,8 @@ type HeaderDownload struct {
 	stageHeight            uint64
 	topSeenHeight          uint64
 	insertList             []*Tip       // List of non-persisted tips that can be inserted (their parent is persisted)
-	tipQueue               *TipQueue    // Priority queue of persistent tips used to limit their number
+	persistedLinkQueue     *TipQueue    // Priority queue of persistent tips used to limit their number
+	linkQueue              *TipQueue    // Priority queue of non-persistent tip used to limit their number
 	anchorQueue            *AnchorQueue // Priority queue of anchor used to sequence the header requests
 }
 
@@ -162,39 +170,6 @@ type HeaderDownload struct {
 type HeaderRecord struct {
 	Raw    []byte
 	Header *types.Header
-}
-
-type RequestQueueItem struct {
-	anchorParent common.Hash
-	waitUntil    uint64
-}
-
-type RequestQueue []RequestQueueItem
-
-func (rq RequestQueue) Len() int {
-	return len(rq)
-}
-
-func (rq RequestQueue) Less(i, j int) bool {
-	return rq[i].waitUntil < rq[j].waitUntil
-}
-
-func (rq RequestQueue) Swap(i, j int) {
-	rq[i], rq[j] = rq[j], rq[i]
-}
-
-func (rq *RequestQueue) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	*rq = append(*rq, x.(RequestQueueItem))
-}
-
-func (rq *RequestQueue) Pop() interface{} {
-	old := *rq
-	n := len(old)
-	x := old[n-1]
-	*rq = old[0 : n-1]
-	return x
 }
 
 func NewHeaderDownload(
@@ -212,10 +187,12 @@ func NewHeaderDownload(
 		hardTips:           make(map[common.Hash]HeaderRecord),
 		tips:               make(map[common.Hash]*Tip),
 		stageReadyCh:       make(chan struct{}, 1), // channel needs to have capacity at least 1, so that the signal is not lost
-		tipQueue:           &TipQueue{},
+		persistedLinkQueue: &TipQueue{},
+		linkQueue:          &TipQueue{},
 		anchorQueue:        &AnchorQueue{},
 	}
-	heap.Init(hd.tipQueue)
+	heap.Init(hd.persistedLinkQueue)
+	heap.Init(hd.linkQueue)
 	heap.Init(hd.anchorQueue)
 	return hd
 }
