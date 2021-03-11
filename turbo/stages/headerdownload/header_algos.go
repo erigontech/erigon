@@ -3,7 +3,6 @@ package headerdownload
 import (
 	"container/heap"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"math/big"
 	"sort"
@@ -183,7 +182,7 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 			if link, err := hd.addHeaderAsLink(header, false /* persisted */); err == nil {
 				prevLink.next = append(prevLink.next, link)
 				prevLink = link
-				if _, hard := hd.hardLinks[header.Hash()]; hard {
+				if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
 					hd.markPreverified(link)
 				}
 			} else {
@@ -247,7 +246,7 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) erro
 				}
 				prevLink = link
 				if !anchorPreverified {
-					if _, hard := hd.hardLinks[header.Hash()]; hard {
+					if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
 						hd.markPreverified(link)
 					}
 				}
@@ -300,7 +299,7 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 			prevLink.next = append(prevLink.next, link)
 			prevLink = link
 			if !anchorPreverified {
-				if _, hard := hd.hardLinks[header.Hash()]; hard {
+				if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
 					hd.markPreverified(link)
 				}
 			}
@@ -318,8 +317,6 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 		link := hd.links[linkHeader.Hash()]
 		hd.insertList = append(hd.insertList, link)
 	}
-	// If we connect to the hard-coded link, we remove it. Once there is only one hard-coded links left, it is clear that everything is connected
-	delete(hd.hardLinks, linkHeader.ParentHash)
 	return nil
 }
 
@@ -350,7 +347,7 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int) error
 				prevLink.next = append(prevLink.next, link)
 			}
 			prevLink = link
-			if _, hard := hd.hardLinks[header.Hash()]; hard {
+			if _, ok := hd.preverifiedHashes[header.Hash()]; ok {
 				hd.markPreverified(link)
 			}
 		} else {
@@ -425,61 +422,37 @@ func (hd *HeaderDownload) anchorState() string {
 	return strings.Join(ss, "\n")
 }
 
-func InitHardCodedLinks(network string) map[common.Hash]HeaderRecord {
+func InitPreverifiedHashes(network string) (map[common.Hash]struct{}, uint64) {
 	var encodings []string
+	var height uint64
 	switch network {
 	case "mainnet":
-		encodings = mainnetHardCodedHeaders
+		encodings = mainnetPreverifiedHashes
+		height = mainnetPreverifiedHeight
 	default:
 		log.Error("Hard coded headers not found for", "network", network)
-		return nil
+		return nil, 0
 	}
 
 	// Insert hard-coded headers if present
-	return DecodeLinks(encodings)
+	return DecodeHashes(encodings), height
 }
 
-func DecodeLinks(encodings []string) map[common.Hash]HeaderRecord {
-	hardLinks := make(map[common.Hash]HeaderRecord, len(encodings))
+func DecodeHashes(encodings []string) map[common.Hash]struct{} {
+	hashes := make(map[common.Hash]struct{}, len(encodings))
 
 	for _, encoding := range encodings {
-		b, err := base64.RawStdEncoding.DecodeString(encoding)
-		if err != nil {
-			log.Error("Parsing hard coded header", "error", err)
-		} else {
-			var h types.Header
-			if err := rlp.DecodeBytes(b, &h); err != nil {
-				log.Error("Parsing hard coded header", "error", err)
-			} else {
-				hardLinks[h.Hash()] = HeaderRecord{Raw: b, Header: &h}
-			}
-		}
+		hashes[common.HexToHash(encoding)] = struct{}{}
 	}
 
-	return hardLinks
+	return hashes
 }
 
-func (hd *HeaderDownload) SetHardCodedLinks(hardLinks map[common.Hash]HeaderRecord) {
+func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash]struct{}, preverifiedHeight uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	var maxHeight uint64
-	for linkHash, headerRecord := range hardLinks {
-		height := headerRecord.Header.Number.Uint64()
-		if height <= hd.highestInDb {
-			// No need for this hard coded header anymore
-			continue
-		}
-		if height <= hd.maxHardTipHeight {
-			continue
-		}
-		if height > maxHeight {
-			maxHeight = height
-		}
-		hd.hardLinks[linkHash] = headerRecord
-	}
-	if maxHeight > hd.maxHardTipHeight {
-		hd.maxHardTipHeight = maxHeight
-	}
+	hd.preverifiedHashes = preverifiedHashes
+	hd.preverifiedHeight = preverifiedHeight
 }
 
 func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
@@ -585,7 +558,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 	defer hd.lock.Unlock()
 	for len(hd.insertList) > 0 {
 		link := hd.insertList[len(hd.insertList)-1]
-		if link.blockHeight <= hd.maxHardTipHeight && !link.preverified {
+		if link.blockHeight <= hd.preverifiedHeight && !link.preverified {
 			// Header should be preverified, but not yet, try again later
 			break
 		}
@@ -852,5 +825,5 @@ func (hd *HeaderDownload) TopSeenHeight() uint64 {
 func (hd *HeaderDownload) NoAnchors() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return len(hd.anchors) == 0 && hd.highestInDb >= hd.maxHardTipHeight
+	return len(hd.anchors) == 0 && hd.highestInDb >= hd.preverifiedHeight
 }

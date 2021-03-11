@@ -305,9 +305,9 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	hardLinks := headerdownload.InitHardCodedLinks("mainnet")
+	preverifiedHashes, preverifiedHeight := headerdownload.InitPreverifiedHashes("mainnet")
 
-	hd.SetHardCodedLinks(hardLinks)
+	hd.SetPreverifiedHashes(preverifiedHashes, preverifiedHeight)
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
 	cs := &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}, 1), requestWakeUpBodies: make(chan struct{}, 1), db: db}
 	cs.chainConfig = params.MainnetChainConfig // Hard-coded, needs to be parametrized

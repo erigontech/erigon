@@ -160,13 +160,13 @@ type HeaderDownload struct {
 	filesDir               string
 	files                  []string
 	badHeaders             map[common.Hash]struct{}
-	anchors                map[common.Hash]*Anchor      // Mapping from parentHash to collection of anchors
-	hardLinks              map[common.Hash]HeaderRecord // Set of hashes for hard-coded links
-	maxHardTipHeight       uint64
-	links                  map[common.Hash]*Link // Links by header hash
-	linkLimit              int                   // Maximum allowed number of links
-	persistedLinkLimit     int                   // Maximum allowed number of persisted links
-	anchorLimit            int                   // Maximum allowed number of anchors
+	anchors                map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
+	preverifiedHashes      map[common.Hash]struct{} // Set of hashes that are known to belong to canonical chain
+	preverifiedHeight      uint64                   // Block height corresponding to the last preverified hash
+	links                  map[common.Hash]*Link    // Links by header hash
+	linkLimit              int                      // Maximum allowed number of links
+	persistedLinkLimit     int                      // Maximum allowed number of persisted links
+	anchorLimit            int                      // Maximum allowed number of anchors
 	highestTotalDifficulty uint256.Int
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
@@ -202,7 +202,7 @@ func NewHeaderDownload(
 		anchorLimit:        anchorLimit,
 		calcDifficultyFunc: calcDifficultyFunc,
 		verifySealFunc:     verifySealFunc,
-		hardLinks:          make(map[common.Hash]HeaderRecord),
+		preverifiedHashes:  make(map[common.Hash]struct{}),
 		links:              make(map[common.Hash]*Link),
 		stageReadyCh:       make(chan struct{}, 1), // channel needs to have capacity at least 1, so that the signal is not lost
 		persistedLinkQueue: &LinkQueue{},
