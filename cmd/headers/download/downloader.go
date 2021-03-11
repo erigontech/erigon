@@ -181,16 +181,15 @@ func Combined(natSetting string, port int, staticPeers []string, discovery bool,
 		receiveCh:       make(chan StreamMsg, 1024),
 		receiveUploadCh: make(chan StreamMsg, 1024),
 	}
-	var err error
-	sentryServer.p2pServer, err = p2pServer(ctx, sentryServer, natSetting, port, staticPeers, discovery, netRestrict)
-	if err != nil {
-		return err
-	}
 	sentryClient := &SentryClientDirect{}
 	sentryClient.SetServer(sentryServer)
-	controlServer, err2 := NewControlServer(db, sentryClient, window)
-	if err2 != nil {
-		return fmt.Errorf("create core P2P server: %w", err2)
+	controlServer, err := NewControlServer(db, sentryClient, window)
+	if err != nil {
+		return fmt.Errorf("create core P2P server: %w", err)
+	}
+	sentryServer.p2pServer, err = p2pServer(ctx, sentryServer, controlServer.genesisHash, natSetting, port, staticPeers, discovery, netRestrict)
+	if err != nil {
+		return err
 	}
 	statusMsg := &proto_sentry.StatusData{
 		NetworkId:       controlServer.networkId,
@@ -293,7 +292,9 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 	verifySealFunc := func(header *types.Header) error {
 		return engine.VerifySeal(cr, header)
 	}
-	if _, _, _, err := core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false /* history */, false /* overwrite */); err != nil {
+	var chainConfig *params.ChainConfig
+	var err error
+	if chainConfig, _, _, err = core.SetupGenesisBlock(db, core.DefaultGenesisBlock(), false /* history */, false /* overwrite */); err != nil {
 		return nil, fmt.Errorf("setup genesis block: %w", err)
 	}
 	hd := headerdownload.NewHeaderDownload(
@@ -302,7 +303,7 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 		calcDiffFunc,
 		verifySealFunc,
 	)
-	if err := hd.RecoverFromDb(db); err != nil {
+	if err = hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
 	preverifiedHashes, preverifiedHeight := headerdownload.InitPreverifiedHashes("mainnet")
@@ -310,12 +311,11 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 	hd.SetPreverifiedHashes(preverifiedHashes, preverifiedHeight)
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
 	cs := &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}, 1), requestWakeUpBodies: make(chan struct{}, 1), db: db}
-	cs.chainConfig = params.MainnetChainConfig // Hard-coded, needs to be parametrized
+	cs.chainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.chainConfig)
 	cs.genesisHash = params.MainnetGenesisHash // Hard-coded, needs to be parametrized
 	cs.protocolVersion = uint32(eth.ProtocolVersions[0])
 	cs.networkId = eth.DefaultConfig.NetworkID // Hard-coded, needs to be parametrized
-	var err error
 	cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(db)
 	return cs, err
 }

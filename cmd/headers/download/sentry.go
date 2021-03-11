@@ -92,10 +92,11 @@ func makeP2PServer(
 	peerRwMap *sync.Map,
 	protocols []string,
 	ss *SentryServerImpl,
+	genesisHash common.Hash,
 ) (*p2p.Server, error) {
 	client := dnsdisc.NewClient(dnsdisc.Config{})
 
-	dns := params.KnownDNSNetwork(params.MainnetGenesisHash, "all")
+	dns := params.KnownDNSNetwork(genesisHash, "all")
 	dialCandidates, err := client.NewIterator(dns)
 	if err != nil {
 		return nil, fmt.Errorf("create discovery candidates: %v", err)
@@ -396,6 +397,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string) (*SentryServerImpl
 
 func p2pServer(ctx context.Context,
 	sentryServer *SentryServerImpl,
+	genesisHash common.Hash,
 	natSetting string, port int, staticPeers []string, discovery bool, netRestrict string,
 ) (*p2p.Server, error) {
 	server, err := makeP2PServer(
@@ -407,6 +409,7 @@ func p2pServer(ctx context.Context,
 		&sentryServer.peerRwMap,
 		[]string{eth.ProtocolName},
 		sentryServer,
+		genesisHash,
 	)
 	if err != nil {
 		return nil, err
@@ -435,11 +438,11 @@ func Sentry(natSetting string, port int, sentryAddr string, coreAddr string, sta
 	if err != nil {
 		return err
 	}
-
-	sentryServer.p2pServer, err = p2pServer(ctx, sentryServer, natSetting, port, staticPeers, discovery, netRestrict)
-	if err != nil {
-		return err
-	}
+	sentryServer.natSetting = natSetting
+	sentryServer.port = port
+	sentryServer.staticPeers = staticPeers
+	sentryServer.discovery = discovery
+	sentryServer.netRestrict = netRestrict
 
 	<-ctx.Done()
 	return nil
@@ -454,6 +457,12 @@ type StreamMsg struct {
 
 type SentryServerImpl struct {
 	proto_sentry.UnimplementedSentryServer
+	ctx             context.Context
+	natSetting      string
+	port            int
+	staticPeers     []string
+	discovery       bool
+	netRestrict     string
 	peerHeightMap   sync.Map
 	peerRwMap       sync.Map
 	peerTimeMap     sync.Map
@@ -576,6 +585,12 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	defer ss.lock.Unlock()
 	init := ss.statusData == nil
 	if init {
+		var err error
+		genesisHash := common.BytesToHash(statusData.ForkData.Genesis)
+		ss.p2pServer, err = p2pServer(ss.ctx, ss, genesisHash, ss.natSetting, ss.port, ss.staticPeers, ss.discovery, ss.netRestrict)
+		if err != nil {
+			return &empty.Empty{}, err
+		}
 		// Add protocol
 		if err := ss.p2pServer.Start(); err != nil {
 			return &empty.Empty{}, fmt.Errorf("could not start server: %w", err)
