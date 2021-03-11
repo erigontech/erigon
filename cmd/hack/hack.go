@@ -1661,7 +1661,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name s
 	fmt.Fprintf(w, "var %sPreverifiedHashes = []string{\n", name)
 
 	b := uint64(0)
-	for {
+	for b <= blockTotal {
 		hash, err := rawdb.ReadCanonicalHash(db, b)
 		if err != nil {
 			return err
@@ -1673,11 +1673,8 @@ func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name s
 
 		fmt.Fprintf(w, "	\"%x\",\n", hash)
 		b += blockStep
-
-		if b > blockTotal {
-			break
-		}
 	}
+	b -= blockStep
 	fmt.Fprintf(w, "}\n")
 	fmt.Fprintf(w, "const %sPreverifiedHeight uint64 = %d\n", name, b)
 	fmt.Printf("Last block is %d\n", b)
