@@ -123,6 +123,8 @@ func Download(sentryAddr string, coreAddr string, db ethdb.Database, timeout, wi
 				}
 			}
 			cancelFn()
+			// Wait before trying to reconnect to prevent log flooding
+			time.Sleep(2 * time.Second)
 		}
 	}()
 	go func() {
@@ -148,6 +150,8 @@ func Download(sentryAddr string, coreAddr string, db ethdb.Database, timeout, wi
 				}
 			}
 			cancelFn()
+			// Wait before trying to reconnect to prevent log flooding
+			time.Sleep(2 * time.Second)
 		}
 	}()
 
@@ -301,9 +305,9 @@ func NewControlServer(db ethdb.Database, sentryClient proto_sentry.SentryClient,
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	hardTips := headerdownload.InitHardCodedTips("mainnet")
+	hardLinks := headerdownload.InitHardCodedLinks("mainnet")
 
-	hd.SetHardCodedTips(hardTips)
+	hd.SetHardCodedLinks(hardLinks)
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */)
 	cs := &ControlServerImpl{hd: hd, bd: bd, sentryClient: sentryClient, requestWakeUpHeaders: make(chan struct{}, 1), requestWakeUpBodies: make(chan struct{}, 1), db: db}
 	cs.chainConfig = params.MainnetChainConfig // Hard-coded, needs to be parametrized
@@ -344,7 +348,7 @@ func (cs *ControlServerImpl) newBlockHashes(ctx context.Context, inreq *proto_se
 		return fmt.Errorf("decode NewBlockHashes: %v", err)
 	}
 	for _, announce := range request {
-		if !cs.hd.HasTip(announce.Hash) {
+		if !cs.hd.HasLink(announce.Hash) {
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
 			b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersData{
 				Amount:  1,

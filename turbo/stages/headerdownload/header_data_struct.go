@@ -12,58 +12,73 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-type Tip struct {
+// Link is a chain link that can be connect to other chain links
+// For a given link, parent link can be found by hd.links[link.header.ParentHash], and child links by link.next (there may be more than one child in case of forks)
+// Links encapsule block headers
+// Links can be either persistent or not. Persistent links encapsule headers that have already been saved to the database, but these links are still
+// present to allow potential reorgs
+type Link struct {
 	blockHeight uint64
 	header      *types.Header
 	hash        common.Hash // Hash of the header
-	next        []*Tip      // Allows iteration over tips in ascending block height order
-	persisted   bool        // Whether this tip comes from the database record
+	next        []*Link     // Allows iteration over links in ascending block height order
+	persisted   bool        // Whether this link comes from the database record
 	preverified bool        // Ancestor of pre-verified header
 	idx         int         // Index in the heap
 }
 
-// TipQueue is the priority queue of persistent tips that exist to limit number of persistent tips
-type TipQueue []*Tip
+// LinkQueue is the priority queue of links. It is instantiated once for persistent links, and once for non-persistent links
+// In other instances, it is used to limit number of links of corresponding type (persistent and non-persistent) in memory
+type LinkQueue []*Link
 
-func (tq TipQueue) Len() int {
-	return len(tq)
+// Len (part of heap.Interface) returns the current size of the link queue
+func (lq LinkQueue) Len() int {
+	return len(lq)
 }
 
-func (tq TipQueue) Less(i, j int) bool {
-	if (*tq[i]).persisted {
-		return (*tq[i]).blockHeight < (*tq[j]).blockHeight
+// Less (part of heap.Interface) compares two links. For persisted links, those with the lower block heights get evicted first. This means that more recently persisted links are preferred.
+// For non-persisted links, those with the highest block heights get evicted first. This is to prevent "holes" in the block heights that may cause inability to
+// insert headers in the ascending order of their block heights.
+func (lq LinkQueue) Less(i, j int) bool {
+	if (*lq[i]).persisted {
+		return (*lq[i]).blockHeight < (*lq[j]).blockHeight
 	}
-	return (*tq[i]).blockHeight > (*tq[j]).blockHeight
+	return (*lq[i]).blockHeight > (*lq[j]).blockHeight
 }
 
-func (tq TipQueue) Swap(i, j int) {
-	tq[i].idx = j
-	tq[j].idx = i
-	tq[i], tq[j] = tq[j], tq[i]
+// Swap (part of heap.Interface) moves two links in the queue into each other's places. Note that each link has idx attribute that is getting adjusted during
+// the swap. The idx attribute allows the removal of links from the middle of the queue (in case if links are getting invalidated due to
+// failed verification of unavailability of parent headers)
+func (lq LinkQueue) Swap(i, j int) {
+	lq[i].idx = j
+	lq[j].idx = i
+	lq[i], lq[j] = lq[j], lq[i]
 }
 
-func (tq *TipQueue) Push(x interface{}) {
+// Push (part of heap.Interface) places a new link onto the end of queue. Note that idx attribute is set to the correct position of the new link
+func (lq *LinkQueue) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
-	t := x.(*Tip)
-	t.idx = len(*tq)
-	*tq = append(*tq, t)
+	l := x.(*Link)
+	l.idx = len(*lq)
+	*lq = append(*lq, l)
 }
 
-func (tq *TipQueue) Pop() interface{} {
-	old := *tq
+// Pop (part of heap.Interface) removes the first link from the queue
+func (lq *LinkQueue) Pop() interface{} {
+	old := *lq
 	n := len(old)
 	x := old[n-1]
-	*tq = old[0 : n-1]
+	*lq = old[0 : n-1]
 	return x
 }
 
 type Anchor struct {
 	parentHash  common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight uint64
-	timestamp   uint64 // Zero when anchor has just been created, otherwise timestamps when timeout on this anchor request expires
-	timeouts    int    // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
-	tips        []*Tip // Tips attached immediately to this anchor
+	timestamp   uint64  // Zero when anchor has just been created, otherwise timestamps when timeout on this anchor request expires
+	timeouts    int     // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
+	links       []*Link // Links attached immediately to this anchor
 }
 
 type AnchorQueue []*Anchor
@@ -146,12 +161,12 @@ type HeaderDownload struct {
 	files                  []string
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash]*Anchor      // Mapping from parentHash to collection of anchors
-	hardTips               map[common.Hash]HeaderRecord // Set of hashes for hard-coded tips
+	hardLinks              map[common.Hash]HeaderRecord // Set of hashes for hard-coded links
 	maxHardTipHeight       uint64
-	tips                   map[common.Hash]*Tip // Tips by tip hash
-	linkLimit              int                  // Maximum allowed number of links
-	persistedLinkLimit     int                  // Maximum allowed number of persisted tips
-	anchorLimit            int                  // Maximum allowed number of anchors
+	links                  map[common.Hash]*Link // Links by header hash
+	linkLimit              int                   // Maximum allowed number of links
+	persistedLinkLimit     int                   // Maximum allowed number of persisted links
+	anchorLimit            int                   // Maximum allowed number of anchors
 	highestTotalDifficulty uint256.Int
 	calcDifficultyFunc     CalcDifficultyFunc
 	verifySealFunc         VerifySealFunc
@@ -161,10 +176,10 @@ type HeaderDownload struct {
 	stageReadyCh           chan struct{}
 	stageHeight            uint64
 	topSeenHeight          uint64
-	insertList             []*Tip       // List of non-persisted tips that can be inserted (their parent is persisted)
-	persistedLinkQueue     *TipQueue    // Priority queue of persistent tips used to limit their number
-	linkQueue              *TipQueue    // Priority queue of non-persistent tip used to limit their number
-	anchorQueue            *AnchorQueue // Priority queue of anchor used to sequence the header requests
+	insertList             []*Link      // List of non-persisted links that can be inserted (their parent is persisted)
+	persistedLinkQueue     *LinkQueue   // Priority queue of persisted links used to limit their number
+	linkQueue              *LinkQueue   // Priority queue of non-persisted links used to limit their number
+	anchorQueue            *AnchorQueue // Priority queue of anchors used to sequence the header requests
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -187,11 +202,11 @@ func NewHeaderDownload(
 		anchorLimit:        anchorLimit,
 		calcDifficultyFunc: calcDifficultyFunc,
 		verifySealFunc:     verifySealFunc,
-		hardTips:           make(map[common.Hash]HeaderRecord),
-		tips:               make(map[common.Hash]*Tip),
+		hardLinks:          make(map[common.Hash]HeaderRecord),
+		links:              make(map[common.Hash]*Link),
 		stageReadyCh:       make(chan struct{}, 1), // channel needs to have capacity at least 1, so that the signal is not lost
-		persistedLinkQueue: &TipQueue{},
-		linkQueue:          &TipQueue{},
+		persistedLinkQueue: &LinkQueue{},
+		linkQueue:          &LinkQueue{},
 		anchorQueue:        &AnchorQueue{},
 	}
 	heap.Init(hd.persistedLinkQueue)

@@ -69,8 +69,7 @@ func HeadersForward(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
-	localTd, err1 := rawdb.ReadTd(tx, headHash, *headNumber)
+	localTd, err1 := rawdb.ReadTd(tx, headHash, headerProgress)
 	if err1 != nil {
 		return err1
 	}

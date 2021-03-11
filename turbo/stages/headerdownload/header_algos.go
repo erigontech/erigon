@@ -111,20 +111,19 @@ func (hd *HeaderDownload) findAnchors(segment *ChainSegment) (found bool, start 
 	return false, 0
 }
 
-// FindTip attempts to find tip of a tree that given chain segment can be attached to
-// the given chain segment may be found invalid relative to a working tree, in this case penalty for peer is returned
-func (hd *HeaderDownload) findTip(segment *ChainSegment, start int) (found bool, end int, penalty Penalty) {
-	if _, duplicate := hd.getTip(segment.Headers[start].Hash()); duplicate {
-		return false, 0, NoPenalty
+// FindLink attempts to find a non-persisted link that given chain segment can be attached to.
+func (hd *HeaderDownload) findLink(segment *ChainSegment, start int) (found bool, end int) {
+	if _, duplicate := hd.getLink(segment.Headers[start].Hash()); duplicate {
+		return false, 0
 	}
 	// Walk the segment from children towards parents
 	for i, header := range segment.Headers[start:] {
-		// Check if the header can be attached to any tips
-		if _, attaching := hd.getTip(header.ParentHash); attaching {
-			return true, start + i + 1, NoPenalty
+		// Check if the header can be attached to any links
+		if _, attaching := hd.getLink(header.ParentHash); attaching {
+			return true, start + i + 1
 		}
 	}
-	return false, len(segment.Headers), NoPenalty
+	return false, len(segment.Headers)
 }
 
 // VerifySeals verifies Proof Of Work for the part of the given chain segment
@@ -138,65 +137,65 @@ func (hd *HeaderDownload) verifySeals(segment *ChainSegment, start, end int) err
 	return nil
 }
 
-func (hd *HeaderDownload) removeUpwards(toRemove []*Tip) {
+func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 	for len(toRemove) > 0 {
 		removal := toRemove[len(toRemove)-1]
 		toRemove = toRemove[:len(toRemove)-1]
-		delete(hd.tips, removal.header.Hash())
+		delete(hd.links, removal.header.Hash())
 		heap.Remove(hd.linkQueue, removal.idx)
 		toRemove = append(toRemove, removal.next...)
 	}
 }
 
-func (hd *HeaderDownload) markPreverified(tip *Tip) {
-	// Go through all parent tips that are not preveried and mark them too
-	var prevTip *Tip
-	for tip != nil && !tip.preverified {
-		tip.preverified = true
-		if prevTip != nil && len(tip.next) > 1 {
-			// Remove all non-canonical tips
-			var toRemove []*Tip
-			for _, n := range tip.next {
-				if n != prevTip {
+func (hd *HeaderDownload) markPreverified(link *Link) {
+	// Go through all parent links that are not preveried and mark them too
+	var prevLink *Link
+	for link != nil && !link.preverified {
+		link.preverified = true
+		if prevLink != nil && len(link.next) > 1 {
+			// Remove all non-canonical links
+			var toRemove []*Link
+			for _, n := range link.next {
+				if n != prevLink {
 					toRemove = append(toRemove, n)
 				}
 			}
 			hd.removeUpwards(toRemove)
-			tip.next = append(tip.next[:0], prevTip)
+			link.next = append(link.next[:0], prevLink)
 		}
-		tip = hd.tips[tip.header.ParentHash]
+		link = hd.links[link.header.ParentHash]
 	}
 }
 
-// ExtendUp extends a working tree up from the tip, using given chain segment
+// ExtendUp extends a working tree up from the link, using given chain segment
 func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error {
-	// Find attachment tip again
-	tipHeader := segment.Headers[end-1]
-	attachmentTip, attaching := hd.getTip(tipHeader.ParentHash)
+	// Find attachment link again
+	linkHeader := segment.Headers[end-1]
+	attachmentLink, attaching := hd.getLink(linkHeader.ParentHash)
 	if attaching {
-		if attachmentTip.preverified && len(attachmentTip.next) > 0 {
-			return fmt.Errorf("cannot extendUp from preverified link %d with children", attachmentTip.blockHeight)
+		if attachmentLink.preverified && len(attachmentLink.next) > 0 {
+			return fmt.Errorf("cannot extendUp from preverified link %d with children", attachmentLink.blockHeight)
 		}
-		// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
-		prevTip := attachmentTip
+		// Iterate over headers backwards (from parents towards children)
+		prevLink := attachmentLink
 		for i := end - 1; i >= start; i-- {
 			header := segment.Headers[i]
-			if tip, err := hd.addHeaderAsTip(header, false /* persisted */); err == nil {
-				prevTip.next = append(prevTip.next, tip)
-				prevTip = tip
-				if _, hard := hd.hardTips[header.Hash()]; hard {
-					hd.markPreverified(tip)
+			if link, err := hd.addHeaderAsLink(header, false /* persisted */); err == nil {
+				prevLink.next = append(prevLink.next, link)
+				prevLink = link
+				if _, hard := hd.hardLinks[header.Hash()]; hard {
+					hd.markPreverified(link)
 				}
 			} else {
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
 	} else {
-		return fmt.Errorf("extendUp attachment tip not found for %x", tipHeader.ParentHash)
+		return fmt.Errorf("extendUp attachment link not found for %x", linkHeader.ParentHash)
 	}
-	if attachmentTip.persisted {
-		tip := hd.tips[tipHeader.Hash()]
-		hd.insertList = append(hd.insertList, tip)
+	if attachmentLink.persisted {
+		link := hd.links[linkHeader.Hash()]
+		hd.insertList = append(hd.insertList, link)
 	}
 	return nil
 }
@@ -212,14 +211,14 @@ func (hd *HeaderDownload) StageReadyChannel() chan struct{} {
 }
 
 // ExtendDown extends some working trees down from the anchor, using given chain segment
-// it creates a new anchor and collects all the tips from the attached anchors to it
+// it creates a new anchor and collects all the links from the attached anchors to it
 func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) error {
 	// Find attachement anchor again
 	anchorHeader := segment.Headers[start]
 	if anchor, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
 		anchorPreverified := false
-		for _, tip := range anchor.tips {
-			if tip.preverified {
+		for _, link := range anchor.links {
+			if link.preverified {
 				anchorPreverified = true
 				break
 			}
@@ -236,31 +235,31 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) erro
 		}
 
 		delete(hd.anchors, anchor.parentHash)
-		// Add all headers in the segments as tips to this anchor
-		var prevTip *Tip
+		// Add all headers in the segments as links to this anchor
+		var prevLink *Link
 		for i := end - 1; i >= start; i-- {
 			header := segment.Headers[i]
-			if tip, err := hd.addHeaderAsTip(header, false /* pesisted */); err == nil {
-				if prevTip == nil {
-					newAnchor.tips = append(newAnchor.tips, tip)
+			if link, err := hd.addHeaderAsLink(header, false /* pesisted */); err == nil {
+				if prevLink == nil {
+					newAnchor.links = append(newAnchor.links, link)
 				} else {
-					prevTip.next = append(prevTip.next, tip)
+					prevLink.next = append(prevLink.next, link)
 				}
-				prevTip = tip
+				prevLink = link
 				if !anchorPreverified {
-					if _, hard := hd.hardTips[header.Hash()]; hard {
-						hd.markPreverified(tip)
+					if _, hard := hd.hardLinks[header.Hash()]; hard {
+						hd.markPreverified(link)
 					}
 				}
 			} else {
 				return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 			}
 		}
-		prevTip.next = anchor.tips
-		anchor.tips = nil
+		prevLink.next = anchor.links
+		anchor.links = nil
 		if anchorPreverified {
 			// Mark the entire segment as preverified
-			hd.markPreverified(prevTip)
+			hd.markPreverified(prevLink)
 		}
 	} else {
 		return fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
@@ -268,59 +267,59 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) erro
 	return nil
 }
 
-// Connect connects some working trees using anchors of some, and a tip of another
+// Connect connects some working trees using anchors of some, and a link of another
 func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
-	// Find attachment tip again
-	tipHeader := segment.Headers[end-1]
+	// Find attachment link again
+	linkHeader := segment.Headers[end-1]
 	// Find attachement anchors again
 	anchorHeader := segment.Headers[start]
-	attachmentTip, ok1 := hd.getTip(tipHeader.ParentHash)
+	attachmentLink, ok1 := hd.getLink(linkHeader.ParentHash)
 	if !ok1 {
-		return fmt.Errorf("connect attachment tip not found for %x", tipHeader.ParentHash)
+		return fmt.Errorf("connect attachment link not found for %x", linkHeader.ParentHash)
 	}
-	if attachmentTip.preverified && len(attachmentTip.next) > 0 {
-		return fmt.Errorf("cannot connect to preverified link %d with children", attachmentTip.blockHeight)
+	if attachmentLink.preverified && len(attachmentLink.next) > 0 {
+		return fmt.Errorf("cannot connect to preverified link %d with children", attachmentLink.blockHeight)
 	}
 	anchor, ok2 := hd.anchors[anchorHeader.Hash()]
 	if !ok2 {
 		return fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
 	}
 	anchorPreverified := false
-	for _, tip := range anchor.tips {
-		if tip.preverified {
+	for _, link := range anchor.links {
+		if link.preverified {
 			anchorPreverified = true
 			break
 		}
 	}
 	delete(hd.anchors, anchor.parentHash)
-	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
-	prevTip := attachmentTip
+	// Iterate over headers backwards (from parents towards children)
+	prevLink := attachmentLink
 	for i := end - 1; i >= start; i-- {
 		header := segment.Headers[i]
-		if tip, err := hd.addHeaderAsTip(header, false /* persisted */); err == nil {
-			prevTip.next = append(prevTip.next, tip)
-			prevTip = tip
+		if link, err := hd.addHeaderAsLink(header, false /* persisted */); err == nil {
+			prevLink.next = append(prevLink.next, link)
+			prevLink = link
 			if !anchorPreverified {
-				if _, hard := hd.hardTips[header.Hash()]; hard {
-					hd.markPreverified(tip)
+				if _, hard := hd.hardLinks[header.Hash()]; hard {
+					hd.markPreverified(link)
 				}
 			}
 		} else {
 			return fmt.Errorf("extendUp addHeaderAsTip for %x: %v", header.Hash(), err)
 		}
 	}
-	prevTip.next = anchor.tips
-	anchor.tips = nil
+	prevLink.next = anchor.links
+	anchor.links = nil
 	if anchorPreverified {
 		// Mark the entire segment as preverified
-		hd.markPreverified(prevTip)
+		hd.markPreverified(prevLink)
 	}
-	if attachmentTip.persisted {
-		tip := hd.tips[tipHeader.Hash()]
-		hd.insertList = append(hd.insertList, tip)
+	if attachmentLink.persisted {
+		link := hd.links[linkHeader.Hash()]
+		hd.insertList = append(hd.insertList, link)
 	}
-	// If we connect to the hard-coded tip, we remove it. Once there is only one hard-coded tip left, it is clear that everything is connected
-	delete(hd.hardTips, tipHeader.ParentHash)
+	// If we connect to the hard-coded link, we remove it. Once there is only one hard-coded links left, it is clear that everything is connected
+	delete(hd.hardLinks, linkHeader.ParentHash)
 	return nil
 }
 
@@ -340,19 +339,19 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int) error
 	}
 	hd.anchors[anchorHeader.ParentHash] = anchor
 	heap.Push(hd.anchorQueue, anchor)
-	// Iterate over headers backwards (from parents towards children), to be able calculate cumulative difficulty along the way
-	var prevTip *Tip
+	// Iterate over headers backwards (from parents towards children)
+	var prevLink *Link
 	for i := end - 1; i >= start; i-- {
 		header := segment.Headers[i]
-		if tip, err1 := hd.addHeaderAsTip(header, false /* persisted */); err1 == nil {
-			if prevTip == nil {
-				anchor.tips = append(anchor.tips, tip)
+		if link, err1 := hd.addHeaderAsLink(header, false /* persisted */); err1 == nil {
+			if prevLink == nil {
+				anchor.links = append(anchor.links, link)
 			} else {
-				prevTip.next = append(prevTip.next, tip)
+				prevLink.next = append(prevLink.next, link)
 			}
-			prevTip = tip
-			if _, hard := hd.hardTips[header.Hash()]; hard {
-				hd.markPreverified(tip)
+			prevLink = link
+			if _, hard := hd.hardLinks[header.Hash()]; hard {
+				hd.markPreverified(link)
 			}
 		} else {
 			return fmt.Errorf("newAnchor addHeaderAsTip for %x: %v", header.Hash(), err1)
@@ -375,19 +374,19 @@ func (hd *HeaderDownload) anchorState() string {
 		sb.WriteString(fmt.Sprintf("{%8d", anchor.blockHeight))
 		// Try to figure out end
 		var end uint64
-		var searchList []*Tip
-		searchList = append(searchList, anchor.tips...)
+		var searchList []*Link
+		searchList = append(searchList, anchor.links...)
 		var bs []int
 		for len(searchList) > 0 {
-			tip := searchList[len(searchList)-1]
-			if tip.blockHeight > end {
-				end = tip.blockHeight
+			link := searchList[len(searchList)-1]
+			if link.blockHeight > end {
+				end = link.blockHeight
 			}
 			searchList = searchList[:len(searchList)-1]
-			if len(tip.next) > 0 {
-				searchList = append(searchList, tip.next...)
+			if len(link.next) > 0 {
+				searchList = append(searchList, link.next...)
 			}
-			bs = append(bs, int(tip.blockHeight))
+			bs = append(bs, int(link.blockHeight))
 		}
 		var sbb strings.Builder
 		sort.Ints(bs)
@@ -418,7 +417,7 @@ func (hd *HeaderDownload) anchorState() string {
 				}
 			}
 		}
-		sb.WriteString(fmt.Sprintf("-%d tips=%d (%s)}", end, len(bs), sbb.String()))
+		sb.WriteString(fmt.Sprintf("-%d links=%d (%s)}", end, len(bs), sbb.String()))
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
 		ss = append(ss, sb.String())
 	}
@@ -426,7 +425,7 @@ func (hd *HeaderDownload) anchorState() string {
 	return strings.Join(ss, "\n")
 }
 
-func InitHardCodedTips(network string) map[common.Hash]HeaderRecord {
+func InitHardCodedLinks(network string) map[common.Hash]HeaderRecord {
 	var encodings []string
 	switch network {
 	case "mainnet":
@@ -437,11 +436,11 @@ func InitHardCodedTips(network string) map[common.Hash]HeaderRecord {
 	}
 
 	// Insert hard-coded headers if present
-	return DecodeTips(encodings)
+	return DecodeLinks(encodings)
 }
 
-func DecodeTips(encodings []string) map[common.Hash]HeaderRecord {
-	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
+func DecodeLinks(encodings []string) map[common.Hash]HeaderRecord {
+	hardLinks := make(map[common.Hash]HeaderRecord, len(encodings))
 
 	for _, encoding := range encodings {
 		b, err := base64.RawStdEncoding.DecodeString(encoding)
@@ -452,19 +451,19 @@ func DecodeTips(encodings []string) map[common.Hash]HeaderRecord {
 			if err := rlp.DecodeBytes(b, &h); err != nil {
 				log.Error("Parsing hard coded header", "error", err)
 			} else {
-				hardTips[h.Hash()] = HeaderRecord{Raw: b, Header: &h}
+				hardLinks[h.Hash()] = HeaderRecord{Raw: b, Header: &h}
 			}
 		}
 	}
 
-	return hardTips
+	return hardLinks
 }
 
-func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]HeaderRecord) {
+func (hd *HeaderDownload) SetHardCodedLinks(hardLinks map[common.Hash]HeaderRecord) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var maxHeight uint64
-	for tipHash, headerRecord := range hardTips {
+	for linkHash, headerRecord := range hardLinks {
 		height := headerRecord.Header.Number.Uint64()
 		if height <= hd.highestInDb {
 			// No need for this hard coded header anymore
@@ -476,7 +475,7 @@ func (hd *HeaderDownload) SetHardCodedTips(hardTips map[common.Hash]HeaderRecord
 		if height > maxHeight {
 			maxHeight = height
 		}
-		hd.hardTips[tipHash] = headerRecord
+		hd.hardLinks[linkHash] = headerRecord
 	}
 	if maxHeight > hd.maxHardTipHeight {
 		hd.maxHardTipHeight = maxHeight
@@ -498,7 +497,7 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 			if err = rlp.DecodeBytes(v, &h); err != nil {
 				return err
 			}
-			if _, err1 := hd.addHeaderAsTip(&h, true /* persisted */); err1 != nil {
+			if _, err1 := hd.addHeaderAsLink(&h, true /* persisted */); err1 != nil {
 				return err1
 			}
 		}
@@ -515,9 +514,9 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.Database) error {
 }
 
 func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor) {
-	fmt.Printf("invalidateAnchor %d\n", anchor.blockHeight)
+	log.Warn("Invalidating anchor for suspected unavailability", "height", anchor.blockHeight)
 	delete(hd.anchors, anchor.parentHash)
-	hd.removeUpwards(anchor.tips)
+	hd.removeUpwards(anchor.links)
 }
 
 func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) *HeaderRequest {
@@ -585,37 +584,37 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	for len(hd.insertList) > 0 {
-		tip := hd.insertList[len(hd.insertList)-1]
-		if tip.blockHeight <= hd.maxHardTipHeight && !tip.preverified {
+		link := hd.insertList[len(hd.insertList)-1]
+		if link.blockHeight <= hd.maxHardTipHeight && !link.preverified {
 			// Header should be preverified, but not yet, try again later
 			break
 		}
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
-		if _, ok := hd.tips[tip.hash]; ok {
-			heap.Remove(hd.linkQueue, tip.idx)
+		if _, ok := hd.links[link.hash]; ok {
+			heap.Remove(hd.linkQueue, link.idx)
 		}
-		if !tip.preverified {
-			if err := hd.verifySealFunc(tip.header); err != nil {
-				log.Error("Verification failed for header", "hash", tip.header.Hash(), "height", tip.blockHeight, "error", err)
-				// skip this tip and its children
+		if !link.preverified {
+			if err := hd.verifySealFunc(link.header); err != nil {
+				log.Error("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
+				// skip this link and its children
 				continue
 			}
 		}
-		if err := hf(tip.header, tip.blockHeight); err != nil {
+		if err := hf(link.header, link.blockHeight); err != nil {
 			return err
 		}
-		if tip.blockHeight > hd.highestInDb {
-			hd.highestInDb = tip.blockHeight
+		if link.blockHeight > hd.highestInDb {
+			hd.highestInDb = link.blockHeight
 		}
-		tip.persisted = true
-		heap.Push(hd.persistedLinkQueue, tip)
-		if len(tip.next) > 0 {
-			hd.insertList = append(hd.insertList, tip.next...)
+		link.persisted = true
+		heap.Push(hd.persistedLinkQueue, link)
+		if len(link.next) > 0 {
+			hd.insertList = append(hd.insertList, link.next...)
 		}
 	}
 	for hd.persistedLinkQueue.Len() > hd.persistedLinkLimit {
-		tip := heap.Pop(hd.persistedLinkQueue).(*Tip)
-		delete(hd.tips, tip.hash)
+		link := heap.Pop(hd.persistedLinkQueue).(*Link)
+		delete(hd.links, link.hash)
 	}
 	return nil
 }
@@ -626,39 +625,39 @@ func (hd *HeaderDownload) Progress() uint64 {
 	return hd.highestInDb
 }
 
-func (hd *HeaderDownload) HasTip(tipHash common.Hash) bool {
+func (hd *HeaderDownload) HasLink(linkHash common.Hash) bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	if _, ok := hd.getTip(tipHash); ok {
+	if _, ok := hd.getLink(linkHash); ok {
 		return true
 	}
 	return false
 }
 
-func (hd *HeaderDownload) getTip(tipHash common.Hash) (*Tip, bool) {
-	if tip, ok := hd.tips[tipHash]; ok {
-		return tip, true
+func (hd *HeaderDownload) getLink(linkHash common.Hash) (*Link, bool) {
+	if link, ok := hd.links[linkHash]; ok {
+		return link, true
 	}
 	return nil, false
 }
 
-// addHeaderAsTip adds given header as a tip belonging to a given anchorParent
-func (hd *HeaderDownload) addHeaderAsTip(header *types.Header, persisted bool) (*Tip, error) {
+// addHeaderAsLink wraps header into a link and adds it to either queue of persisted links or queue of non-persisted links
+func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) (*Link, error) {
 	height := header.Number.Uint64()
-	tipHash := header.Hash()
-	tip := &Tip{
+	linkHash := header.Hash()
+	link := &Link{
 		blockHeight: height,
-		hash:        tipHash,
+		hash:        linkHash,
 		header:      header,
 		persisted:   persisted,
 	}
-	hd.tips[tipHash] = tip
+	hd.links[linkHash] = link
 	if persisted {
-		heap.Push(hd.persistedLinkQueue, tip)
+		heap.Push(hd.persistedLinkQueue, link)
 	} else {
-		heap.Push(hd.linkQueue, tip)
+		heap.Push(hd.linkQueue, link)
 	}
-	return tip, nil
+	return link, nil
 }
 
 func (hi *HeaderInserter) FeedHeader(header *types.Header, blockHeight uint64) error {
@@ -767,11 +766,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	foundAnchor, start := hd.findAnchors(segment)
-	foundTip, end, penalty := hd.findTip(segment, start) // We ignore penalty because we will check it as part of PoW check
-	if penalty != NoPenalty {
-		log.Error(fmt.Sprintf("FindTip penalty %d", penalty))
-		return
-	}
+	foundTip, end := hd.findLink(segment, start) // We ignore penalty because we will check it as part of PoW check
 	if end == 0 {
 		log.Debug("Duplicate segment")
 		return
@@ -819,27 +814,27 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 		log.Debug("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", end-start, "limit", hd.linkLimit)
 	}
 	for hd.linkQueue.Len() > hd.linkLimit {
-		tip := heap.Pop(hd.linkQueue).(*Tip)
-		delete(hd.tips, tip.hash)
-		if parentTip, ok := hd.tips[tip.header.ParentHash]; ok {
-			for i, n := range parentTip.next {
-				if n == tip {
-					if i == len(parentTip.next)-1 {
-						parentTip.next = parentTip.next[:i]
+		link := heap.Pop(hd.linkQueue).(*Link)
+		delete(hd.links, link.hash)
+		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
+			for i, n := range parentLink.next {
+				if n == link {
+					if i == len(parentLink.next)-1 {
+						parentLink.next = parentLink.next[:i]
 					} else {
-						parentTip.next = append(parentTip.next[:i], parentTip.next[i+1:]...)
+						parentLink.next = append(parentLink.next[:i], parentLink.next[i+1:]...)
 					}
 					break
 				}
 			}
 		}
-		if anchor, ok := hd.anchors[tip.header.ParentHash]; ok {
-			for i, n := range anchor.tips {
-				if n == tip {
-					if i == len(anchor.tips)-1 {
-						anchor.tips = anchor.tips[:i]
+		if anchor, ok := hd.anchors[link.header.ParentHash]; ok {
+			for i, n := range anchor.links {
+				if n == link {
+					if i == len(anchor.links)-1 {
+						anchor.links = anchor.links[:i]
 					} else {
-						anchor.tips = append(anchor.tips[:i], anchor.tips[i+1:]...)
+						anchor.links = append(anchor.links[:i], anchor.links[i+1:]...)
 					}
 					break
 				}
