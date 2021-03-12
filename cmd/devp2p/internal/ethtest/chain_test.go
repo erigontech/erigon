@@ -22,8 +22,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/stretchr/testify/assert"
 )
 

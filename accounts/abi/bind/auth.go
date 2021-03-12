@@ -29,7 +29,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 // ErrNoChainID is returned whenever the user failed to specify a chain id.

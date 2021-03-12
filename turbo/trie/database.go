@@ -213,13 +213,6 @@ func NewDatabase(diskdb ethdb.Database) *Database {
 // for nodes loaded from disk.
 func NewDatabaseWithCache(diskdb ethdb.Database, cache int, journal string) *Database {
 	var cleans *fastcache.Cache
-	if config != nil && config.Cache > 0 {
-		if config.Journal == "" {
-			cleans = fastcache.New(config.Cache * 1024 * 1024)
-		} else {
-			cleans = fastcache.LoadFromFileOrNew(config.Journal, config.Cache*1024*1024)
-		}
-	}
 	return &Database{
 		diskdb: diskdb,
 		cleans: cleans,

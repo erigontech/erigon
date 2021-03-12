@@ -3,10 +3,10 @@ package types
 import (
 	"encoding/json"
 	"errors"
-	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -44,25 +44,25 @@ func (t *Transaction) MarshalJSON() ([]byte, error) {
 	case *LegacyTx:
 		enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
 		enc.Gas = (*hexutil.Uint64)(&tx.Gas)
-		enc.GasPrice = (*hexutil.Big)(tx.GasPrice)
-		enc.Value = (*hexutil.Big)(tx.Value)
+		enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
+		enc.Value = (*hexutil.Big)(tx.Value.ToBig())
 		enc.Data = (*hexutil.Bytes)(&tx.Data)
 		enc.To = t.To()
-		enc.V = (*hexutil.Big)(tx.V)
-		enc.R = (*hexutil.Big)(tx.R)
-		enc.S = (*hexutil.Big)(tx.S)
+		enc.V = (*hexutil.Big)(tx.V.ToBig())
+		enc.R = (*hexutil.Big)(tx.R.ToBig())
+		enc.S = (*hexutil.Big)(tx.S.ToBig())
 	case *AccessListTx:
-		enc.ChainID = (*hexutil.Big)(tx.ChainID)
+		enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
 		enc.AccessList = &tx.AccessList
 		enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
 		enc.Gas = (*hexutil.Uint64)(&tx.Gas)
-		enc.GasPrice = (*hexutil.Big)(tx.GasPrice)
-		enc.Value = (*hexutil.Big)(tx.Value)
+		enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
+		enc.Value = (*hexutil.Big)(tx.Value.ToBig())
 		enc.Data = (*hexutil.Bytes)(&tx.Data)
 		enc.To = t.To()
-		enc.V = (*hexutil.Big)(tx.V)
-		enc.R = (*hexutil.Big)(tx.R)
-		enc.S = (*hexutil.Big)(tx.S)
+		enc.V = (*hexutil.Big)(tx.V.ToBig())
+		enc.R = (*hexutil.Big)(tx.R.ToBig())
+		enc.S = (*hexutil.Big)(tx.S.ToBig())
 	}
 	return json.Marshal(&enc)
 }
@@ -90,7 +90,11 @@ func (t *Transaction) UnmarshalJSON(input []byte) error {
 		if dec.GasPrice == nil {
 			return errors.New("missing required field 'gasPrice' in transaction")
 		}
-		itx.GasPrice = (*big.Int)(dec.GasPrice)
+		var overflow bool
+		itx.GasPrice, overflow = uint256.FromBig(dec.GasPrice.ToInt())
+		if overflow {
+			return errors.New("'gasPrice' in transaction does not fit in 256 bits")
+		}
 		if dec.Gas == nil {
 			return errors.New("missing required field 'gas' in transaction")
 		}
@@ -98,7 +102,10 @@ func (t *Transaction) UnmarshalJSON(input []byte) error {
 		if dec.Value == nil {
 			return errors.New("missing required field 'value' in transaction")
 		}
-		itx.Value = (*big.Int)(dec.Value)
+		itx.Value, overflow = uint256.FromBig(dec.Value.ToInt())
+		if overflow {
+			return errors.New("'value' in transaction does not fit in 256 bits")
+		}
 		if dec.Data == nil {
 			return errors.New("missing required field 'input' in transaction")
 		}
@@ -106,15 +113,24 @@ func (t *Transaction) UnmarshalJSON(input []byte) error {
 		if dec.V == nil {
 			return errors.New("missing required field 'v' in transaction")
 		}
-		itx.V = (*big.Int)(dec.V)
+		itx.V, overflow = uint256.FromBig(dec.V.ToInt())
+		if overflow {
+			return errors.New("'v' in transaction does not fit in 256 bits")
+		}
 		if dec.R == nil {
 			return errors.New("missing required field 'r' in transaction")
 		}
-		itx.R = (*big.Int)(dec.R)
+		itx.R, overflow = uint256.FromBig(dec.R.ToInt())
+		if overflow {
+			return errors.New("'r' in transaction does not fit in 256 bits")
+		}
 		if dec.S == nil {
 			return errors.New("missing required field 's' in transaction")
 		}
-		itx.S = (*big.Int)(dec.S)
+		itx.S, overflow = uint256.FromBig(dec.S.ToInt())
+		if overflow {
+			return errors.New("'s' in transaction does not fit in 256 bits")
+		}
 		withSignature := itx.V.Sign() != 0 || itx.R.Sign() != 0 || itx.S.Sign() != 0
 		if withSignature {
 			if err := sanityCheckSignature(itx.V, itx.R, itx.S, true); err != nil {
@@ -132,7 +148,11 @@ func (t *Transaction) UnmarshalJSON(input []byte) error {
 		if dec.ChainID == nil {
 			return errors.New("missing required field 'chainId' in transaction")
 		}
-		itx.ChainID = (*big.Int)(dec.ChainID)
+		var overflow bool
+		itx.ChainID, overflow = uint256.FromBig(dec.ChainID.ToInt())
+		if overflow {
+			return errors.New("'chainId' in transaction does not fit in 256 bits")
+		}
 		if dec.To != nil {
 			itx.To = dec.To
 		}
@@ -143,7 +163,10 @@ func (t *Transaction) UnmarshalJSON(input []byte) error {
 		if dec.GasPrice == nil {
 			return errors.New("missing required field 'gasPrice' in transaction")
 		}
-		itx.GasPrice = (*big.Int)(dec.GasPrice)
+		itx.GasPrice, overflow = uint256.FromBig(dec.GasPrice.ToInt())
+		if overflow {
+			return errors.New("'gasPrice' in transaction does not fit in 256 bits")
+		}
 		if dec.Gas == nil {
 			return errors.New("missing required field 'gas' in transaction")
 		}
@@ -151,7 +174,10 @@ func (t *Transaction) UnmarshalJSON(input []byte) error {
 		if dec.Value == nil {
 			return errors.New("missing required field 'value' in transaction")
 		}
-		itx.Value = (*big.Int)(dec.Value)
+		itx.Value, overflow = uint256.FromBig(dec.Value.ToInt())
+		if overflow {
+			return errors.New("'value' in transaction does not fit in 256 bits")
+		}
 		if dec.Data == nil {
 			return errors.New("missing required field 'input' in transaction")
 		}
@@ -159,15 +185,24 @@ func (t *Transaction) UnmarshalJSON(input []byte) error {
 		if dec.V == nil {
 			return errors.New("missing required field 'v' in transaction")
 		}
-		itx.V = (*big.Int)(dec.V)
+		itx.V, overflow = uint256.FromBig(dec.V.ToInt())
+		if overflow {
+			return errors.New("'v' in transaction does not fit in 256 bits")
+		}
 		if dec.R == nil {
 			return errors.New("missing required field 'r' in transaction")
 		}
-		itx.R = (*big.Int)(dec.R)
+		itx.R, overflow = uint256.FromBig(dec.R.ToInt())
+		if overflow {
+			return errors.New("'r' in transaction does not fit in 256 bits")
+		}
 		if dec.S == nil {
 			return errors.New("missing required field 's' in transaction")
 		}
-		itx.S = (*big.Int)(dec.S)
+		itx.S, overflow = uint256.FromBig(dec.S.ToInt())
+		if overflow {
+			return errors.New("'s' in transaction does not fit in 256 bits")
+		}
 		withSignature := itx.V.Sign() != 0 || itx.R.Sign() != 0 || itx.S.Sign() != 0
 		if withSignature {
 			if err := sanityCheckSignature(itx.V, itx.R, itx.S, false); err != nil {

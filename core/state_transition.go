@@ -24,8 +24,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -189,7 +189,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	gasCost, overflow := uint256.FromBig(mgval)
 	if have, want := st.state.GetBalance(st.msg.From()), mgval; overflow || st.state.GetBalance(st.msg.From()).Lt(gasCost) {
 		if !gasBailout {
-		return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
+			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 		}
 	} else {
 		st.state.SubBalance(st.msg.From(), gasCost)
@@ -265,13 +265,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 
 	// Check clause 6
 	var bailout bool
-	if !msg.Value().IsZero() && !st.evm.CanTransfer(st.state, msg.From(), msg.Value()) {
+	if !msg.Value().IsZero() && !st.evm.Context.CanTransfer(st.state, msg.From(), msg.Value()) {
 		if gasBailout {
 			bailout = true
 		} else {
 			return nil, fmt.Errorf("%w: address %v", ErrInsufficientFundsForTransfer, msg.From().Hex())
 		}
-
+	}
 	// Set up the initial access list.
 	if st.evm.ChainConfig().IsBerlin(st.evm.Context.BlockNumber) {
 		st.state.PrepareAccessList(msg.From(), msg.To(), st.evm.ActivePrecompiles(), msg.AccessList())
@@ -295,7 +295,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	if refunds {
 		st.refundGas()
 	}
-	st.state.AddBalance(st.evm.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.gasPrice))
+	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.gasPrice))
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),

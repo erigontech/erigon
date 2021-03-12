@@ -17,25 +17,24 @@
 package types
 
 import (
-	"math/big"
-
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	Nonce    uint64          // nonce of sender account
-	GasPrice *big.Int        // wei per gas
+	GasPrice *uint256.Int    // wei per gas
 	Gas      uint64          // gas limit
 	To       *common.Address `rlp:"nil"` // nil means contract creation
-	Value    *big.Int        // wei amount
+	Value    *uint256.Int    // wei amount
 	Data     []byte          // contract invocation input data
-	V, R, S  *big.Int        // signature values
+	V, R, S  *uint256.Int    // signature values
 }
 
 // NewTransaction creates an unsigned legacy transaction.
 // Deprecated: use NewTx instead.
-func NewTransaction(nonce uint64, to common.Address, amount *big.Int, gasLimit uint64, gasPrice *big.Int, data []byte) *Transaction {
+func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *Transaction {
 	return NewTx(&LegacyTx{
 		Nonce:    nonce,
 		To:       &to,
@@ -48,7 +47,7 @@ func NewTransaction(nonce uint64, to common.Address, amount *big.Int, gasLimit u
 
 // NewContractCreation creates an unsigned legacy transaction.
 // Deprecated: use NewTx instead.
-func NewContractCreation(nonce uint64, amount *big.Int, gasLimit uint64, gasPrice *big.Int, data []byte) *Transaction {
+func NewContractCreation(nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *Transaction {
 	return NewTx(&LegacyTx{
 		Nonce:    nonce,
 		Value:    amount,
@@ -66,11 +65,11 @@ func (tx *LegacyTx) copy() TxData {
 		Data:  common.CopyBytes(tx.Data),
 		Gas:   tx.Gas,
 		// These are initialized below.
-		Value:    new(big.Int),
-		GasPrice: new(big.Int),
-		V:        new(big.Int),
-		R:        new(big.Int),
-		S:        new(big.Int),
+		Value:    new(uint256.Int),
+		GasPrice: new(uint256.Int),
+		V:        new(uint256.Int),
+		R:        new(uint256.Int),
+		S:        new(uint256.Int),
 	}
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
@@ -93,19 +92,19 @@ func (tx *LegacyTx) copy() TxData {
 // accessors for innerTx.
 
 func (tx *LegacyTx) txType() byte           { return LegacyTxType }
-func (tx *LegacyTx) chainID() *big.Int      { return deriveChainId(tx.V) }
+func (tx *LegacyTx) chainID() *uint256.Int  { return deriveChainId(tx.V) }
 func (tx *LegacyTx) accessList() AccessList { return nil }
 func (tx *LegacyTx) data() []byte           { return tx.Data }
 func (tx *LegacyTx) gas() uint64            { return tx.Gas }
-func (tx *LegacyTx) gasPrice() *big.Int     { return tx.GasPrice }
-func (tx *LegacyTx) value() *big.Int        { return tx.Value }
+func (tx *LegacyTx) gasPrice() *uint256.Int { return tx.GasPrice }
+func (tx *LegacyTx) value() *uint256.Int    { return tx.Value }
 func (tx *LegacyTx) nonce() uint64          { return tx.Nonce }
 func (tx *LegacyTx) to() *common.Address    { return tx.To }
 
-func (tx *LegacyTx) rawSignatureValues() (v, r, s *big.Int) {
+func (tx *LegacyTx) rawSignatureValues() (v, r, s *uint256.Int) {
 	return tx.V, tx.R, tx.S
 }
 
-func (tx *LegacyTx) setSignatureValues(chainID, v, r, s *big.Int) {
+func (tx *LegacyTx) setSignatureValues(chainID, v, r, s *uint256.Int) {
 	tx.V, tx.R, tx.S = v, r, s
 }

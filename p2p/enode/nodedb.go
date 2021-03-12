@@ -21,12 +21,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"github.com/c2h5oh/datasize"
 	"net"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/c2h5oh/datasize"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"

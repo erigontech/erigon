@@ -21,12 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/eth/protocols/eth"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 )
 
 // ethPeerInfo represents a short summary of the `eth` sub-protocol metadata known
@@ -40,7 +35,6 @@ type ethPeerInfo struct {
 // ethPeer is a wrapper around eth.Peer to maintain a few extra metadata.
 type ethPeer struct {
 	*eth.Peer
-	snapExt *snapPeer // Satellite `snap` connection
 
 	syncDrop *time.Timer   // Connection dropper if `eth` sync progress isn't validated in time
 	snapWait chan struct{} // Notification channel for snap connections
@@ -49,45 +43,10 @@ type ethPeer struct {
 
 // info gathers and returns some `eth` protocol metadata known about a peer.
 func (p *ethPeer) info() *ethPeerInfo {
-	hash, td := p.Head()
+	hash, _ := p.Head()
 
 	return &ethPeerInfo{
-		Version:    p.Version(),
-		Difficulty: td,
-		Head:       hash.Hex(),
-	}
-}
-
-// snapPeerInfo represents a short summary of the `snap` sub-protocol metadata known
-// about a connected peer.
-type snapPeerInfo struct {
-	Version uint `json:"version"` // Snapshot protocol version negotiated
-}
-
-// snapPeer is a wrapper around snap.Peer to maintain a few extra metadata.
-type snapPeer struct {
-	*snap.Peer
-
-	// Making sure that we don't announce transactions too early.
-	ethDrop *time.Timer  // Connection dropper if `eth` doesn't connect in time
-	p.HandshakeOrderMux.Lock()
-	// this causes a false-positive SA2001: empty critical section, so we intentionally ignore it
-	//nolint: staticcheck
-	p.HandshakeOrderMux.Unlock()
-
-	for {
-		// If there's no in-flight announce running, check if a new one is needed
-		if done == nil && len(queue) > 0 {
-			// Pile transaction hashes until we reach our allowed network limit
-			var (
-				hashes  []common.Hash
-				pending []common.Hash
-	lock    sync.RWMutex // Mutex protecting the internal fields
-}
-
-// info gathers and returns some `snap` protocol metadata known about a peer.
-func (p *snapPeer) info() *snapPeerInfo {
-	return &snapPeerInfo{
 		Version: p.Version(),
+		Head:    hash.Hex(),
 	}
 }

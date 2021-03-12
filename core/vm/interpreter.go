@@ -164,7 +164,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
 		locStack    = stack.New()
-		stack       = newstack()  // local stack
 		callContext = &callCtx{
 			memory:   mem,
 			stack:    locStack,
@@ -193,9 +192,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		defer func() {
 			if err != nil {
 				if !logged {
-					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, returns, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
+					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
 				} else {
-					_ = in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, returns, contract, in.evm.depth, err)
+					_ = in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, contract, in.evm.depth, err)
 				}
 			}
 		}()
@@ -278,7 +277,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 
 		if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, locStack, returns, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
+			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, locStack, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
 			logged = true
 		}
 

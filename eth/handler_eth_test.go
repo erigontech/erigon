@@ -24,20 +24,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/forkid"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/eth/downloader"
-	"github.com/ethereum/go-ethereum/eth/protocols/eth"
-	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 // testEthHandler is a mock event handler to listen for inbound network requests
@@ -49,7 +48,6 @@ type testEthHandler struct {
 }
 
 func (h *testEthHandler) Chain() *core.BlockChain              { panic("no backing chain") }
-func (h *testEthHandler) StateBloom() *trie.SyncBloom          { panic("no backing state bloom") }
 func (h *testEthHandler) TxPool() eth.TxPool                   { panic("no backing tx pool") }
 func (h *testEthHandler) AcceptTxs() bool                      { return true }
 func (h *testEthHandler) RunPeer(*eth.Peer, eth.Handler) error { panic("not used in tests") }

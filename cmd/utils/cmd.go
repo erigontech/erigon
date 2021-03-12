@@ -27,24 +27,18 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/eth/ethconfig"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/internal/debug"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/node"
-	"github.com/ethereum/go-ethereum/rlp"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/internal/debug"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/node"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -71,7 +65,7 @@ func Fatalf(format string, args ...interface{}) {
 	os.Exit(1)
 }
 
-func StartNode(ctx *cli.Context, stack *node.Node) {
+func StartNode(stack *node.Node) {
 	if err := stack.Start(); err != nil {
 		Fatalf("Error starting protocol stack: %v", err)
 	}
@@ -79,16 +73,6 @@ func StartNode(ctx *cli.Context, stack *node.Node) {
 		sigc := make(chan os.Signal, 1)
 		signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 		defer signal.Stop(sigc)
-
-		minFreeDiskSpace := ethconfig.Defaults.TrieDirtyCache
-		if ctx.GlobalIsSet(MinFreeDiskSpaceFlag.Name) {
-			minFreeDiskSpace = ctx.GlobalInt(MinFreeDiskSpaceFlag.Name)
-		} else if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheGCFlag.Name) {
-			minFreeDiskSpace = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheGCFlag.Name) / 100
-		}
-		if minFreeDiskSpace > 0 {
-			go monitorFreeDiskSpace(sigc, stack.InstanceDir(), uint64(minFreeDiskSpace)*1024*1024)
-		}
 
 		<-sigc
 		log.Info("Got interrupt, shutting down...")
@@ -102,24 +86,6 @@ func StartNode(ctx *cli.Context, stack *node.Node) {
 		debug.Exit() // ensure trace and CPU profile data is flushed.
 		debug.LoudPanic("boom")
 	}()
-}
-
-func monitorFreeDiskSpace(sigc chan os.Signal, path string, freeDiskSpaceCritical uint64) {
-	for {
-		freeSpace, err := getFreeDiskSpace(path)
-		if err != nil {
-			log.Warn("Failed to get free disk space", "path", path, "err", err)
-			break
-		}
-		if freeSpace < freeDiskSpaceCritical {
-			log.Error("Low disk space. Gracefully shutting down Geth to prevent database corruption.", "available", common.StorageSize(freeSpace))
-			sigc <- syscall.SIGTERM
-			break
-		} else if freeSpace < 2*freeDiskSpaceCritical {
-			log.Warn("Disk space is running low. Geth will shutdown if disk space runs below critical level.", "available", common.StorageSize(freeSpace), "critical_level", common.StorageSize(freeDiskSpaceCritical))
-		}
-		time.Sleep(60 * time.Second)
-	}
 }
 
 func ImportChain(chain *core.BlockChain, fn string) error {
@@ -271,81 +237,6 @@ func ExportAppendChain(blockchain *core.BlockChain, fn string, first uint64, las
 		return err
 	}
 	log.Info("Exported blockchain to", "file", fn)
-	return nil
-}
-
-// ImportPreimages imports a batch of exported hash preimages into the database.
-func ImportPreimages(db rawdb.DatabaseWriter, fn string) error {
-	log.Info("Importing preimages", "file", fn)
-
-	// Open the file handle and potentially unwrap the gzip stream
-	fh, err := os.Open(fn)
-	if err != nil {
-		return err
-	}
-	defer fh.Close()
-
-	var reader io.Reader = fh
-	if strings.HasSuffix(fn, ".gz") {
-		if reader, err = gzip.NewReader(reader); err != nil {
-			return err
-		}
-	}
-	stream := rlp.NewStream(reader, 0)
-
-	// Import the preimages in batches to prevent disk trashing
-	preimages := make(map[common.Hash][]byte)
-
-	for {
-		// Read the next entry and ensure it's not junk
-		var blob []byte
-
-		if err := stream.Decode(&blob); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return err
-		}
-		// Accumulate the preimages and flush when enough ws gathered
-		preimages[crypto.Keccak256Hash(blob)] = common.CopyBytes(blob)
-		if len(preimages) > 1024 {
-			rawdb.WritePreimages(db, preimages)
-			preimages = make(map[common.Hash][]byte)
-		}
-	}
-	// Flush the last batch preimage data
-	if len(preimages) > 0 {
-		rawdb.WritePreimages(db, preimages)
-	}
-	return nil
-}
-
-// ExportPreimages exports all known hash preimages into the specified file,
-// truncating any data already present in the file.
-func ExportPreimages(db ethdb.Database, fn string) error {
-	log.Info("Exporting preimages", "file", fn)
-
-	// Open the file handle and potentially wrap with a gzip stream
-	fh, err := os.OpenFile(fn, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
-	if err != nil {
-		return err
-	}
-	defer fh.Close()
-
-	var writer io.Writer = fh
-	if strings.HasSuffix(fn, ".gz") {
-		writer = gzip.NewWriter(writer)
-		defer writer.(*gzip.Writer).Close()
-	}
-	err = db.Walk(dbutils.PreimagePrefix, nil, 0, func(k []byte, v []byte) (bool, error) {
-		_, writeErr := writer.Write(v)
-		return true, writeErr
-	})
-	if err != nil {
-		return err
-	}
-
-	log.Info("Exported preimages", "file", fn)
 	return nil
 }
 

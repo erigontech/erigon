@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -85,6 +86,7 @@ func WriteChainConfig(db DatabaseWriter, hash common.Hash, cfg *params.ChainConf
 	if err := db.Put(dbutils.ConfigPrefix, hash[:], data); err != nil {
 		return fmt.Errorf("failed to store chain config: %w", err)
 	}
+	return nil
 }
 
 // crashList is a list of unclean-shutdown-markers, for rlp-encoding to the
@@ -100,10 +102,10 @@ const crashesToKeep = 10
 // the previous data
 // - a list of timestamps
 // - a count of how many old unclean-shutdowns have been discarded
-func PushUncleanShutdownMarker(db ethdb.KeyValueStore) ([]uint64, uint64, error) {
+func PushUncleanShutdownMarker(db ethdb.Database) ([]uint64, uint64, error) {
 	var uncleanShutdowns crashList
 	// Read old data
-	if data, err := db.Get(uncleanShutdownKey); err != nil {
+	if data, err := db.Get(dbutils.UncleanShutdown, []byte(dbutils.UncleanShutdown)); err != nil {
 		log.Warn("Error reading unclean shutdown markers", "error", err)
 	} else if err := rlp.DecodeBytes(data, &uncleanShutdowns); err != nil {
 		return nil, 0, err
@@ -120,7 +122,7 @@ func PushUncleanShutdownMarker(db ethdb.KeyValueStore) ([]uint64, uint64, error)
 	}
 	// And save it again
 	data, _ := rlp.EncodeToBytes(uncleanShutdowns)
-	if err := db.Put(uncleanShutdownKey, data); err != nil {
+	if err := db.Put(dbutils.UncleanShutdown, []byte(dbutils.UncleanShutdown), data); err != nil {
 		log.Warn("Failed to write unclean-shutdown marker", "err", err)
 		return nil, 0, err
 	}
@@ -128,10 +130,10 @@ func PushUncleanShutdownMarker(db ethdb.KeyValueStore) ([]uint64, uint64, error)
 }
 
 // PopUncleanShutdownMarker removes the last unclean shutdown marker
-func PopUncleanShutdownMarker(db ethdb.KeyValueStore) {
+func PopUncleanShutdownMarker(db ethdb.Database) {
 	var uncleanShutdowns crashList
 	// Read old data
-	if data, err := db.Get(uncleanShutdownKey); err != nil {
+	if data, err := db.Get(dbutils.UncleanShutdown, []byte(dbutils.UncleanShutdown)); err != nil {
 		log.Warn("Error reading unclean shutdown markers", "error", err)
 	} else if err := rlp.DecodeBytes(data, &uncleanShutdowns); err != nil {
 		log.Error("Error decoding unclean shutdown markers", "error", err) // Should mos def _not_ happen
@@ -140,8 +142,7 @@ func PopUncleanShutdownMarker(db ethdb.KeyValueStore) {
 		uncleanShutdowns.Recent = uncleanShutdowns.Recent[:l-1]
 	}
 	data, _ := rlp.EncodeToBytes(uncleanShutdowns)
-	if err := db.Put(uncleanShutdownKey, data); err != nil {
+	if err := db.Put(dbutils.UncleanShutdown, []byte(dbutils.UncleanShutdown), data); err != nil {
 		log.Warn("Failed to clear unclean-shutdown marker", "err", err)
-		}
 	}
 }

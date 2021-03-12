@@ -23,6 +23,12 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/u256"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
+	"github.com/ledgerwatch/turbo-geth/params"
+)
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
 
@@ -147,7 +153,7 @@ type Signer interface {
 	// SignatureValues returns the raw R, S, V values corresponding to the
 	// given signature.
 	SignatureValues(tx *Transaction, sig []byte) (r, s, v *uint256.Int, err error)
-	ChainID() *big.Int
+	ChainID() *uint256.Int
 
 	// Hash returns 'signature hash', i.e. the transaction hash that is signed by the
 	// private key. This hash does not uniquely identify the transaction.
@@ -165,13 +171,13 @@ func NewEIP2930Signer(chainId *big.Int) Signer {
 	return eip2930Signer{NewEIP155Signer(chainId)}
 }
 
-func (s eip2930Signer) ChainID() *big.Int {
-	return s.chainId
+func (s eip2930Signer) ChainID() *uint256.Int {
+	return s.chainID
 }
 
 func (s eip2930Signer) Equal(s2 Signer) bool {
 	x, ok := s2.(eip2930Signer)
-	return ok && x.chainId.Cmp(s.chainId) == 0
+	return ok && x.chainID.Cmp(s.chainID) == 0
 }
 
 func (s eip2930Signer) Sender(tx *Transaction) (common.Address, error) {
@@ -181,37 +187,37 @@ func (s eip2930Signer) Sender(tx *Transaction) (common.Address, error) {
 		if !tx.Protected() {
 			return HomesteadSigner{}.Sender(tx)
 		}
-		V = new(big.Int).Sub(V, s.chainIdMul)
-		V.Sub(V, big8)
+		V = new(uint256.Int).Sub(V, s.chainIDMul)
+		V.Sub(V, u256.Num8)
 	case AccessListTxType:
 		// ACL txs are defined to use 0 and 1 as their recovery id, add
 		// 27 to become equivalent to unprotected Homestead signatures.
-		V = new(big.Int).Add(V, big.NewInt(27))
+		V = new(uint256.Int).Add(V, u256.Num27)
 	default:
 		return common.Address{}, ErrTxTypeNotSupported
 	}
-	if tx.ChainId().Cmp(s.chainId) != 0 {
+	if tx.ChainId().Cmp(s.chainID) != 0 {
 		return common.Address{}, ErrInvalidChainId
 	}
-	return recoverPlain(s.Hash(tx), R, S, V, true)
+	return recoverPlain(secp256k1.DefaultContext, s.Hash(tx), R, S, V, true)
 }
 
-func (s eip2930Signer) SignatureValues(tx *Transaction, sig []byte) (R, S, V *big.Int, err error) {
+func (s eip2930Signer) SignatureValues(tx *Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
 	switch txdata := tx.inner.(type) {
 	case *LegacyTx:
 		R, S, V = decodeSignature(sig)
-		if s.chainId.Sign() != 0 {
-			V = big.NewInt(int64(sig[64] + 35))
-			V.Add(V, s.chainIdMul)
+		if s.chainID.Sign() != 0 {
+			V = uint256.NewInt().SetUint64(uint64(sig[64] + 35))
+			V.Add(V, s.chainIDMul)
 		}
 	case *AccessListTx:
 		// Check that chain ID of tx matches the signer. We also accept ID zero here,
 		// because it indicates that the chain ID was not specified in the tx.
-		if txdata.ChainID.Sign() != 0 && txdata.ChainID.Cmp(s.chainId) != 0 {
+		if txdata.ChainID.Sign() != 0 && txdata.ChainID.Cmp(s.chainID) != 0 {
 			return nil, nil, nil, ErrInvalidChainId
 		}
 		R, S, _ = decodeSignature(sig)
-		V = big.NewInt(int64(sig[64]))
+		V = uint256.NewInt().SetUint64(uint64(sig[64]))
 	default:
 		return nil, nil, nil, ErrTxTypeNotSupported
 	}
@@ -230,13 +236,13 @@ func (s eip2930Signer) Hash(tx *Transaction) common.Hash {
 			tx.To(),
 			tx.Value(),
 			tx.Data(),
-			s.chainId, uint(0), uint(0),
+			s.chainID, uint(0), uint(0),
 		})
 	case AccessListTxType:
 		return prefixedRlpHash(
 			tx.Type(),
 			[]interface{}{
-				s.chainId,
+				s.chainID,
 				tx.Nonce(),
 				tx.GasPrice(),
 				tx.Gas(),
@@ -271,8 +277,8 @@ func NewEIP155Signer(chainId *big.Int) EIP155Signer {
 	}
 }
 
-func (s EIP155Signer) ChainID() *big.Int {
-	return s.chainId
+func (s EIP155Signer) ChainID() *uint256.Int {
+	return s.chainID
 }
 
 func (s EIP155Signer) Equal(s2 Signer) bool {
@@ -286,18 +292,18 @@ func (s EIP155Signer) Sender(tx *Transaction) (common.Address, error) {
 
 func (s EIP155Signer) SenderWithContext(context *secp256k1.Context, tx *Transaction) (common.Address, error) {
 	if tx.Type() != LegacyTxType {
-return common.Address{}, ErrTxTypeNotSupported
-}
+		return common.Address{}, ErrTxTypeNotSupported
+	}
 	if !tx.Protected() {
 		return HomesteadSigner{}.Sender(tx)
 	}
-	if !tx.ChainID().Eq(s.chainID) {
+	if !tx.ChainId().Eq(s.chainID) {
 		return common.Address{}, ErrInvalidChainId
 	}
 	V, R, S := tx.RawSignatureValues()
-	V := new(uint256.Int).Sub(&tx.data.V, s.chainIDMul)
+	V = new(uint256.Int).Sub(V, s.chainIDMul) // It needs to be new(uint256) to make sure we don't modify the tx's value
 	V.Sub(V, u256.Num8)
-	return recoverPlain(context, s.Hash(tx), &tx.data.R, &tx.data.S, V, true)
+	return recoverPlain(context, s.Hash(tx), R, S, V, true)
 }
 
 // SignatureValues returns signature values. This signature
@@ -318,25 +324,21 @@ func (s EIP155Signer) SignatureValues(tx *Transaction, sig []byte) (R, S, V *uin
 // It does not uniquely identify the transaction.
 func (s EIP155Signer) Hash(tx *Transaction) common.Hash {
 	return rlpHash([]interface{}{
-		tx.data.AccountNonce,
-		tx.data.Price,
-		tx.data.GasLimit,
-		tx.data.Recipient,
-		tx.data.Amount,
-		tx.data.Payload,
+		tx.Nonce(),
+		tx.GasPrice(),
+		tx.Gas(),
+		tx.To(),
+		tx.Value(),
+		tx.Data(),
 		s.chainID, uint(0), uint(0),
 	})
-}
-
-func (s EIP155Signer) ChainID() *uint256.Int {
-	return s.chainID
 }
 
 // HomesteadTransaction implements TransactionInterface using the
 // homestead rules.
 type HomesteadSigner struct{ FrontierSigner }
 
-func (s HomesteadSigner) ChainID() *big.Int {
+func (s HomesteadSigner) ChainID() *uint256.Int {
 	return nil
 }
 
@@ -355,12 +357,12 @@ func (hs HomesteadSigner) Sender(tx *Transaction) (common.Address, error) {
 	if tx.Type() != LegacyTxType {
 		return common.Address{}, ErrTxTypeNotSupported
 	}
-	v, r, s := tx.RawSignatureValues()
 	return hs.SenderWithContext(secp256k1.DefaultContext, tx)
 }
 
 func (hs HomesteadSigner) SenderWithContext(context *secp256k1.Context, tx *Transaction) (common.Address, error) {
-	return recoverPlain(context, hs.Hash(tx), &tx.data.R, &tx.data.S, &tx.data.V, true)
+	v, r, s := tx.RawSignatureValues()
+	return recoverPlain(context, hs.Hash(tx), r, s, v, true)
 }
 
 type FrontierSigner struct{}
@@ -375,12 +377,12 @@ func (fs FrontierSigner) Sender(tx *Transaction) (common.Address, error) {
 		return common.Address{}, ErrTxTypeNotSupported
 	}
 	v, r, s := tx.RawSignatureValues()
-	return recoverPlain(fs.Hash(tx), r, s, v, false)
+	return recoverPlain(secp256k1.DefaultContext, fs.Hash(tx), r, s, v, false)
 }
 
 // SignatureValues returns signature values. This signature
 // needs to be in the [R || S || V] format where V is 0 or 1.
-func (fs FrontierSigner) SignatureValues(tx *Transaction, sig []byte) (r, s, v *big.Int, err error) {
+func (fs FrontierSigner) SignatureValues(tx *Transaction, sig []byte) (r, s, v *uint256.Int, err error) {
 	if tx.Type() != LegacyTxType {
 		return nil, nil, nil, ErrTxTypeNotSupported
 	}
@@ -401,18 +403,19 @@ func (fs FrontierSigner) Hash(tx *Transaction) common.Hash {
 	})
 }
 
-func decodeSignature(sig []byte) (r, s, v *big.Int) {
+func decodeSignature(sig []byte) (r, s, v *uint256.Int) {
 	if len(sig) != crypto.SignatureLength {
 		panic(fmt.Sprintf("wrong size for signature: got %d, want %d", len(sig), crypto.SignatureLength))
 	}
-	r = new(big.Int).SetBytes(sig[:32])
-	s = new(big.Int).SetBytes(sig[32:64])
-	v = new(big.Int).SetBytes([]byte{sig[64] + 27})
+	r = new(uint256.Int).SetBytes(sig[:32])
+	s = new(uint256.Int).SetBytes(sig[32:64])
+	v = new(uint256.Int).SetBytes([]byte{sig[64] + 27})
 	return r, s, v
 }
 
 func (fs FrontierSigner) SenderWithContext(context *secp256k1.Context, tx *Transaction) (common.Address, error) {
-	return recoverPlain(context, fs.Hash(tx), &tx.data.R, &tx.data.S, &tx.data.V, false)
+	v, r, s := tx.RawSignatureValues()
+	return recoverPlain(context, fs.Hash(tx), r, s, v, false)
 }
 
 func (fs FrontierSigner) ChainID() *uint256.Int {
@@ -447,7 +450,7 @@ func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uin
 }
 
 // deriveChainID derives the chain id from the given v parameter
-func deriveChainID(v *uint256.Int) *uint256.Int {
+func deriveChainId(v *uint256.Int) *uint256.Int {
 	if v.IsUint64() {
 		v := v.Uint64()
 		if v == 27 || v == 28 {

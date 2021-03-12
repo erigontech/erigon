@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 )
@@ -164,10 +165,10 @@ type chainSyncer struct {
 
 // chainSyncOp is a scheduled sync operation.
 type chainSyncOp struct {
-	mode downloader.SyncMode
-	peer *eth.Peer
-	td   *big.Int
-	head common.Hash
+	mode   downloader.SyncMode
+	peer   *eth.Peer
+	number uint64
+	head   common.Hash
 }
 
 // newChainSyncer creates a chainSyncer.
@@ -203,8 +204,8 @@ func (cs *chainSyncer) loop() {
 	defer cs.handler.downloader.Terminate()
 
 	defer func() {
-		if cs.pm.txFetcher != nil {
-			cs.pm.txFetcher.Stop()
+		if cs.handler.txFetcher != nil {
+			cs.handler.txFetcher.Stop()
 		}
 	}()
 
@@ -258,15 +259,11 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 		return nil
 	}
 	// We have enough peers, check TD
-	peer := cs.handler.peers.peerWithHighestTD()
+	peer := cs.handler.peers.peerWithHighestNumber()
 	if peer == nil {
 		return nil
 	}
 	mode, ourNumber := cs.modeAndLocalHead()
-	if mode == downloader.FastSync && atomic.LoadUint32(&cs.handler.snapSync) == 1 {
-		// Fast sync via the snap protocol
-		mode = downloader.SnapSync
-	}
 	op := peerToSyncOp(mode, peer)
 	if op.number <= ourNumber {
 		return nil // We're in sync.
@@ -275,30 +272,12 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 }
 
 func peerToSyncOp(mode downloader.SyncMode, p *eth.Peer) *chainSyncOp {
-	peerHead, peerTD := p.Head()
-	return &chainSyncOp{mode: mode, peer: p, td: peerTD, head: peerHead}
+	peerHead, peerNumber := p.Head()
+	return &chainSyncOp{mode: mode, peer: p, number: peerNumber, head: peerHead}
 }
 
 func (cs *chainSyncer) modeAndLocalHead() (downloader.SyncMode, uint64) {
-	// If we're in fast sync mode, return that directly
-	if atomic.LoadUint32(&cs.handler.fastSync) == 1 {
-		block := cs.handler.chain.CurrentFastBlock()
-		td := cs.handler.chain.GetTdByHash(block.Hash())
-		return downloader.FastSync, td
-	}
-	// We are probably in full sync, but we might have rewound to before the
-	// fast sync pivot, check if we should reenable
-	if pivot := rawdb.ReadLastPivotNumber(cs.handler.database); pivot != nil {
-		if head := cs.handler.chain.CurrentBlock(); head.NumberU64() < *pivot {
-			block := cs.handler.chain.CurrentFastBlock()
-			td := cs.handler.chain.GetTdByHash(block.Hash())
-	return cs.pm.mode, atomic.LoadUint64(&cs.pm.currentHeight)
-		}
-	}
-	// Nope, we're really full syncing
-	head := cs.handler.chain.CurrentHeader()
-	td := cs.handler.chain.GetTd(head.Hash(), head.Number.Uint64())
-	return downloader.FullSync, td
+	return downloader.StagedSync, atomic.LoadUint64(&cs.handler.currentHeight)
 }
 
 // startSync launches doSync in a new goroutine.
@@ -309,31 +288,9 @@ func (cs *chainSyncer) startSync(op *chainSyncOp) {
 
 // doSync synchronizes the local blockchain with a remote peer.
 func (h *handler) doSync(op *chainSyncOp) error {
-	/*
-		if op.mode == downloader.FastSync {
-				Turbo-Geth doesn't support fast sync mode.
-
-				// Before launch the fast sync, we have to ensure user uses the same
-				// txlookup limit.
-				// The main concern here is: during the fast sync Geth won't index the
-				// block(generate tx indices) before the HEAD-limit. But if user changes
-				// the limit in the next fast sync(e.g. user kill Geth manually and
-				// restart) then it will be hard for Geth to figure out the oldest block
-				// has been indexed. So here for the user-experience wise, it's non-optimal
-				// that user can't change limit during the fast sync. If changed, Geth
-				// will just blindly use the original one.
-				limit := pm.blockchain.TxLookupLimit()
-				if stored := rawdb.ReadFastTxLookupLimit(pm.chaindb); stored == nil {
-					rawdb.WriteFastTxLookupLimit(pm.chaindb, limit)
-				} else if *stored != limit {
-					pm.blockchain.SetTxLookupLimit(*stored)
-					log.Warn("Update txLookup limit", "provided", limit, "updated", *stored)
-				}
-		}
-	*/
 	// Run the sync cycle, and disable fast sync if we're past the pivot block
-	txPool, _ := pm.txpool.(*core.TxPool)
-	err := pm.downloader.Synchronise(op.peer.id, op.head, op.number, op.mode, txPool, func() error { return pm.StartTxPool() })
+	txPool, _ := h.txpool.(*core.TxPool)
+	err := h.downloader.Synchronise(op.peer.ID(), op.head, op.number, op.mode, txPool, func() error { return nil })
 	if err != nil {
 		return err
 	}
@@ -347,11 +304,11 @@ func (h *handler) doSync(op *chainSyncOp) error {
 	}
 	// If we've successfully finished a sync cycle and passed any required checkpoint,
 	// enable accepting transactions from the network.
-	headHash := rawdb.ReadHeadHeaderHash(pm.chaindb)
-	headNumber := rawdb.ReadHeaderNumber(pm.chaindb, headHash)
-	atomic.StoreUint64(&pm.currentHeight, *headNumber) // this will be read by the block fetcher when required
-	head := rawdb.ReadBlock(pm.chaindb, headHash, *headNumber)
-	if *headNumber >= pm.checkpointNumber && head != nil {
+	headHash := rawdb.ReadHeadHeaderHash(h.database)
+	headNumber := rawdb.ReadHeaderNumber(h.database, headHash)
+	atomic.StoreUint64(&h.currentHeight, *headNumber) // this will be read by the block fetcher when required
+	head := rawdb.ReadBlock(h.database, headHash, *headNumber)
+	if *headNumber >= h.checkpointNumber && head != nil {
 		// Checkpoint passed, sanity check the timestamp to have a fallback mechanism
 		// for non-checkpointed (number = 0) private networks.
 		if head.Time() >= uint64(time.Now().AddDate(0, -1, 0).Unix()) {

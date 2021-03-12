@@ -19,7 +19,6 @@ package eth
 import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/rlp"

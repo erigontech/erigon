@@ -19,17 +19,25 @@
 package metrics
 
 import (
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
 func ReadCPUStats(p *process.Process, stats *CPUStats) {
-	if m, _ := p.Times(); m != nil {
-		// requesting all cpu times will always return an array with only one time stats entry
-		stats.GlobalTime = int64((m.User + m.Nice + m.System) * cpu.ClocksPerSec)
-		stats.GlobalWait = int64((m.Iowait) * cpu.ClocksPerSec)
+	// passing false to request all cpu times
+	timeStats, err := cpu.Times(false)
+	if err != nil {
+		log.Error("Could not read cpu stats", "err", err)
+		return
+	}
 	if len(timeStats) == 0 {
 		log.Error("Empty cpu stats")
 		return
 	}
+	// requesting all cpu times will always return an array with only one time stats entry
+	timeStat := timeStats[0]
+	stats.GlobalTime = int64((timeStat.User + timeStat.Nice + timeStat.System) * cpu.ClocksPerSec)
+	stats.GlobalWait = int64((timeStat.Iowait) * cpu.ClocksPerSec)
+	stats.LocalTime = getProcessCPUTime()
 }

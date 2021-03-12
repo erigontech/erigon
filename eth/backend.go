@@ -33,34 +33,41 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
+	ethereum "github.com/ledgerwatch/turbo-geth"
+	"github.com/ledgerwatch/turbo-geth/accounts"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/etl"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/consensus/clique"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/bloombits"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
+	"github.com/ledgerwatch/turbo-geth/eth/filters"
+	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/miner"
+	"github.com/ledgerwatch/turbo-geth/node"
+	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/consensus"
-	"github.com/ethereum/go-ethereum/consensus/clique"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/bloombits"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state/pruner"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/eth/downloader"
-	"github.com/ethereum/go-ethereum/eth/ethconfig"
-	"github.com/ethereum/go-ethereum/eth/filters"
-	"github.com/ethereum/go-ethereum/eth/gasprice"
-	"github.com/ethereum/go-ethereum/eth/protocols/eth"
-	"github.com/ethereum/go-ethereum/eth/protocols/snap"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/internal/ethapi"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/miner"
-	"github.com/ethereum/go-ethereum/node"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
-	"github.com/ethereum/go-ethereum/rpc"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -92,7 +99,7 @@ type Ethereum struct {
 	APIBackend *EthAPIBackend
 
 	miner     *miner.Miner
-	gasPrice  *big.Int
+	gasPrice  *uint256.Int
 	etherbase common.Address
 
 	networkID     uint64
@@ -147,7 +154,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
-	chainConfig, genesisHash, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.OverrideBerlin)
+	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.OverrideBerlin, config.StorageMode.History, false /* overwrite */)
 
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
@@ -280,14 +287,14 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		accountManager: stack.AccountManager(),
 		engine:         ethconfig.CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
 		networkID:      config.NetworkID,
-		gasPrice:       config.Miner.GasPrice,
 		etherbase:      config.Miner.Etherbase,
 		bloomRequests:  make(chan chan *bloombits.Retrieval),
 		p2pServer:      stack.Server(),
 		torrentClient:  torrentClient,
 	}
+	eth.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
-	log.Info("Initialising Ethereum protocol", "versions", ProtocolVersions, "network", config.NetworkID)
+	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
 	bcVersion := rawdb.ReadDatabaseVersion(chainDb)
 	var dbVer = "<nil>"
@@ -420,26 +427,20 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		Database:   chainDb,
 		Chain:      eth.blockchain,
 		TxPool:     eth.txPool,
-		Network:    config.NetworkId,
+		Network:    config.NetworkID,
 		Sync:       config.SyncMode,
-		BloomCache: uint64(cacheLimit),
 		EventMux:   eth.eventMux,
 		Checkpoint: checkpoint,
 
-		Whitelist:  config.Whitelist,
+		Whitelist: config.Whitelist,
 	}); err != nil {
 		return nil, err
 	}
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-	eth.protocolManager.SetTmpDir(tmpdir)
-	eth.protocolManager.SetBatchSize(config.CacheSize, config.BatchSize)
+	eth.handler.SetTmpDir(tmpdir)
+	eth.handler.SetBatchSize(config.CacheSize, config.BatchSize)
 
-	if config.SyncMode != downloader.StagedSync {
-		if err = eth.StartTxPool(); err != nil {
-			return nil, err
-		}
-	}
-	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), eth, nil}
+	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 	gpoParams := config.GPO
 	if gpoParams.Default == nil {
 		gpoParams.Default = config.Miner.GasPrice
@@ -448,16 +449,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.ethDialCandidates, err = setupDiscovery(eth.config.EthDiscoveryURLs)
 	if err != nil {
 		return nil, err
-}
+	}
 	if config.SyncMode != downloader.StagedSync {
 		eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
 		_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
-}
-	eth.snapDialCandidates, err = setupDiscovery(eth.config.SnapDiscoveryURLs)
+		eth.snapDialCandidates, err = setupDiscovery(eth.config.SnapDiscoveryURLs)
 	}
 
 	if config.SyncMode != downloader.StagedSync {
-		eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), eth, nil}
+		eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 		gpoParams := config.GPO
 		if gpoParams.Default == nil {
 			gpoParams.Default = config.Miner.GasPrice
@@ -465,7 +465,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	}
 
-	eth.dialCandidates, err = eth.setupDiscovery()
+	eth.ethDialCandidates, err = setupDiscovery(eth.config.EthDiscoveryURLs)
 	if err != nil {
 		return nil, err
 	}
@@ -483,6 +483,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	stack.RegisterProtocols(eth.Protocols())
 	stack.RegisterLifecycle(eth)
 	// Check for unclean shutdown
+	return eth, nil
 }
 
 func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig) {
@@ -490,7 +491,6 @@ func BlockchainRuntimeConfig(config *Config) (vm.Config, *core.CacheConfig) {
 		vmConfig = vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
 			EWASMInterpreter:        config.EWASMInterpreter,
-		if discards > 0 {
 			EVMInterpreter:          config.EVMInterpreter,
 			NoReceipts:              !config.StorageMode.Receipts,
 		}
@@ -758,28 +758,16 @@ func (s *Ethereum) ChainKV() ethdb.KV                  { return s.chainKV }
 func (s *Ethereum) IsListening() bool                  { return true } // Always listening
 func (s *Ethereum) Downloader() *downloader.Downloader { return s.handler.downloader }
 func (s *Ethereum) NetVersion() (uint64, error)        { return s.networkID, nil }
-func (s *Ethereum) Synced() bool                       { return atomic.LoadUint32(&s.handler.acceptTxs) == 1 }
 func (s *Ethereum) SyncProgress() ethereum.SyncProgress {
-	return s.protocolManager.downloader.Progress()
+	return s.handler.downloader.Progress()
 }
-func (s *Ethereum) Synced() bool      { return atomic.LoadUint32(&s.protocolManager.acceptTxs) == 1 }
+func (s *Ethereum) Synced() bool      { return atomic.LoadUint32(&s.handler.acceptTxs) == 1 }
 func (s *Ethereum) ArchiveMode() bool { return !s.config.Pruning }
 
 // Protocols returns all the currently configured
 // network protocols to start.
 func (s *Ethereum) Protocols() []p2p.Protocol {
 	protos := eth.MakeProtocols((*ethHandler)(s.handler), s.networkID, s.ethDialCandidates)
-	for i, vsn := range ProtocolVersions {
-		protos[i] = s.protocolManager.makeProtocol(vsn)
-		protos[i].Attributes = []enr.Entry{s.currentEthEntry()}
-		protos[i].DialCandidates = s.dialCandidates
-	}
-
-	if s.config.EnableDebugProtocol {
-		// Debug
-		protos = append(protos, s.protocolManager.makeDebugProtocol())
-	}
-
 	return protos
 }
 
@@ -790,38 +778,8 @@ func (s *Ethereum) Start() error {
 
 	// Figure out a max peers count based on the server limits
 	maxPeers := s.p2pServer.MaxPeers
-	withTxPool := s.config.SyncMode != downloader.StagedSync
 	// Start the networking layer and the light server if requested
-	return s.protocolManager.Start(maxPeers, withTxPool)
-}
-
-func (s *Ethereum) StartTxPool() error {
-	if s.txPoolStarted {
-		return errors.New("transaction pool is already started")
-	}
-	headHash := rawdb.ReadHeadHeaderHash(s.chainDb)
-	headNumber := rawdb.ReadHeaderNumber(s.chainDb, headHash)
-	head := rawdb.ReadHeader(s.chainDb, headHash, *headNumber)
-	if err := s.txPool.Start(head.GasLimit, *headNumber); err != nil {
-		return err
-	}
-	if err := s.protocolManager.StartTxPool(); err != nil {
-		s.txPool.Stop()
-		return err
-	}
-
-	s.txPoolStarted = true
-	return nil
-}
-
-func (s *Ethereum) StopTxPool() error {
-	if !s.txPoolStarted {
-		return errors.New("transaction pool is already stopped")
-	}
-	s.protocolManager.StopTxPool()
-	s.txPool.Stop()
-
-	s.txPoolStarted = false
+	s.handler.Start(maxPeers)
 	return nil
 }
 
@@ -843,10 +801,6 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
-	// Then stop everything else.
-	if err := s.StopTxPool(); err != nil {
-		log.Warn("error while stopping transaction pool", "err", err)
-	}
 	s.miner.Stop()
 	s.blockchain.Stop()
 	s.engine.Close()

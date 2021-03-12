@@ -26,7 +26,7 @@ import (
 	"path"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -34,7 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/tests"
 
 	"github.com/urfave/cli"

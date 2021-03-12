@@ -21,7 +21,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Genesis                 *core.Genesis `toml:",omitempty"`
 		NetworkID               uint64
 		SyncMode                downloader.SyncMode
-		EthDiscoveryURLs           []string
+		EthDiscoveryURLs        []string
 		Pruning                 bool
 		NoPrefetch              bool
 		TxLookupLimit           uint64                 `toml:",omitempty"`
@@ -29,8 +29,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		LightIngress            int                    `toml:",omitempty"`
 		LightEgress             int                    `toml:",omitempty"`
 		StorageMode             string
-		LightNoPrune            bool                   `toml:",omitempty"`
-		LightNoSyncServe        bool                   `toml:",omitempty"`
+		LightNoPrune            bool `toml:",omitempty"`
+		LightNoSyncServe        bool `toml:",omitempty"`
 		ArchiveSyncInterval     int
 		LightServ               int `toml:",omitempty"`
 		LightPeers              int `toml:",omitempty"`
@@ -63,7 +63,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Genesis = c.Genesis
 	enc.NetworkID = c.NetworkID
 	enc.SyncMode = c.SyncMode
-	enc.DiscoveryURLs = c.EthDiscoveryURLs
+	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
 	enc.Pruning = c.Pruning
 	enc.NoPrefetch = c.NoPrefetch
 	enc.TxLookupLimit = c.TxLookupLimit
@@ -106,7 +106,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Genesis                 *core.Genesis `toml:",omitempty"`
 		NetworkID               *uint64
 		SyncMode                *downloader.SyncMode
-		EthDiscoveryURLs           []string
+		EthDiscoveryURLs        []string
 		Pruning                 *bool
 		NoPrefetch              *bool
 		TxLookupLimit           *uint64                `toml:",omitempty"`
@@ -114,8 +114,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		LightIngress            *int                   `toml:",omitempty"`
 		LightEgress             *int                   `toml:",omitempty"`
 		Mode                    *string
-		LightNoPrune            *bool                  `toml:",omitempty"`
-		LightNoSyncServe        *bool                  `toml:",omitempty"`
+		LightNoPrune            *bool `toml:",omitempty"`
+		LightNoSyncServe        *bool `toml:",omitempty"`
 		ArchiveSyncInterval     *int
 		LightServ               *int `toml:",omitempty"`
 		LightPeers              *int `toml:",omitempty"`

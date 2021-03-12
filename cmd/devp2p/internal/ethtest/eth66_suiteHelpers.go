@@ -20,11 +20,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/eth/protocols/eth"
-	"github.com/ethereum/go-ethereum/internal/utesting"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/internal/utesting"
+	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/stretchr/testify/assert"
 )
 

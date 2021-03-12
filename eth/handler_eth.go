@@ -23,22 +23,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/eth/protocols/eth"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/protocols/eth"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 )
 
 // ethHandler implements the eth.Backend interface to handle the various network
 // packets that are sent as replies or broadcasts.
 type ethHandler handler
 
-func (h *ethHandler) Chain() *core.BlockChain     { return h.chain }
-func (h *ethHandler) StateBloom() *trie.SyncBloom { return h.stateBloom }
-func (h *ethHandler) TxPool() eth.TxPool          { return h.txpool }
+func (h *ethHandler) Chain() *core.BlockChain { return h.chain }
+func (h *ethHandler) TxPool() eth.TxPool      { return h.txpool }
 
 // RunPeer is invoked when a peer joins on the `eth` protocol.
 func (h *ethHandler) RunPeer(peer *eth.Peer, hand eth.Handler) error {
@@ -72,9 +70,6 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
 		return h.handleBodies(peer, txset, uncleset)
 
 	case *eth.NodeDataPacket:
-		if err := h.downloader.DeliverNodeData(peer.ID(), *packet); err != nil {
-			log.Debug("Failed to deliver node state data", "err", err)
-		}
 		return nil
 
 	case *eth.ReceiptsPacket:
@@ -207,11 +202,10 @@ func (h *ethHandler) handleBlockBroadcast(peer *eth.Peer, block *types.Block, td
 	// calculate the head hash and TD that the peer truly must have.
 	var (
 		trueHead = block.ParentHash()
-		trueTD   = new(big.Int).Sub(td, block.Difficulty())
 	)
 	// Update the peer's total difficulty if better than the previous
-	if _, td := peer.Head(); trueTD.Cmp(td) > 0 {
-		peer.SetHead(trueHead, trueTD)
+	if _, headNumber := peer.Head(); block.NumberU64() > headNumber {
+		peer.SetHead(trueHead, block.NumberU64())
 		h.chainSync.handlePeerEvent(peer)
 	}
 	return nil

@@ -17,80 +17,15 @@
 package utils
 
 import (
-	"fmt"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/ethconfig"
+	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
 	"github.com/ledgerwatch/turbo-geth/node"
 
 	"github.com/urfave/cli"
 )
 
-var ShowDeprecated = cli.Command{
-	Action:      showDeprecated,
-	Name:        "show-deprecated-flags",
-	Usage:       "Show flags that have been deprecated",
-	ArgsUsage:   " ",
-	Category:    "MISCELLANEOUS COMMANDS",
-	Description: "Show flags that have been deprecated and will soon be removed",
-}
-
-var DeprecatedFlags = []cli.Flag{
-	LegacyTestnetFlag,
-	LegacyLightServFlag,
-	LegacyLightPeersFlag,
-	LegacyMinerThreadsFlag,
-	LegacyMinerGasTargetFlag,
-	LegacyMinerGasPriceFlag,
-	LegacyMinerEtherbaseFlag,
-	LegacyMinerExtraDataFlag,
-}
-
 var (
-	// (Deprecated April 2018)
-	LegacyMinerThreadsFlag = cli.IntFlag{
-		Name:  "minerthreads",
-		Usage: "Number of CPU threads to use for mining (deprecated, use --miner.threads)",
-		Value: 0,
-	}
-	LegacyMinerGasTargetFlag = cli.Uint64Flag{
-		Name:  "targetgaslimit",
-		Usage: "Target gas floor for mined blocks (deprecated, use --miner.gastarget)",
-		Value: ethconfig.Defaults.Miner.GasFloor,
-	}
-	LegacyMinerGasPriceFlag = BigFlag{
-		Name:  "gasprice",
-		Usage: "Minimum gas price for mining a transaction (deprecated, use --miner.gasprice)",
-		Value: ethconfig.Defaults.Miner.GasPrice,
-	}
-	LegacyMinerEtherbaseFlag = cli.StringFlag{
-		Name:  "etherbase",
-		Usage: "Public address for block mining rewards (default = first account, deprecated, use --miner.etherbase)",
-		Value: "0",
-	}
-	LegacyMinerExtraDataFlag = cli.StringFlag{
-		Name:  "extradata",
-		Usage: "Block extra data set by the miner (default = client version, deprecated, use --miner.extradata)",
-	}
-
-	// (Deprecated June 2019)
-	LegacyLightServFlag = cli.IntFlag{
-		Name:  "lightserv",
-		Usage: "Maximum percentage of time allowed for serving LES requests (deprecated, use --light.serve)",
-		Value: ethconfig.Defaults.LightServ,
-	}
-	LegacyLightPeersFlag = cli.IntFlag{
-		Name:  "lightpeers",
-		Usage: "Maximum number of light clients to serve, or light servers to attach to  (deprecated, use --light.maxpeers)",
-		Value: ethconfig.Defaults.LightPeers,
-	}
-
-	// (Deprecated April 2020)
-	LegacyTestnetFlag = cli.BoolFlag{ // TODO(q9f): Remove after Ropsten is discontinued.
-		Name:  "testnet",
-		Usage: "Pre-configured test network (Deprecated: Please choose one of --goerli, --rinkeby, or --ropsten.)",
-	}
-
 	// (Deprecated May 2020, shown in aliased flags section)
 	LegacyRPCEnabledFlag = cli.BoolFlag{
 		Name:  "rpc",
@@ -173,15 +108,3 @@ var (
 		Value: node.DefaultHTTPPort,
 	}
 )
-
-// showDeprecated displays deprecated flags that will be soon removed from the codebase.
-func showDeprecated(*cli.Context) {
-	fmt.Println("--------------------------------------------------------------------")
-	fmt.Println("The following flags are deprecated and will be removed in the future!")
-	fmt.Println("--------------------------------------------------------------------")
-	fmt.Println()
-
-	for _, flag := range DeprecatedFlags {
-		fmt.Println(flag.String())
-	}
-}

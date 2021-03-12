@@ -190,12 +190,16 @@ var (
 	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
 	HeadFastBlockKey = "LastFast"
 
+	InvalidBlock    = "InvalidBlock"     // Inherited from go-ethereum, not used in turbo-geth yet
+	UncleanShutdown = "unclean-shutdown" // Inherited from go-ethereum, not used in turbo-geth yet
+
 	// migrationName -> serialized SyncStageProgress and SyncStageUnwind buckets
 	// it stores stages progress to understand in which context was executed migration
 	// in case of bug-report developer can ask content of this bucket
 	Migrations = "migrations"
 
 	Sequence = "sequence" // tbl_name -> seq_u64
+
 )
 
 // Keys

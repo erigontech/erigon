@@ -20,16 +20,19 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/turbo/rlphacks"
 	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"golang.org/x/crypto/sha3"
 )
 
 type DerivableList interface {
 	Len() int
-	GetRlp(i int) []byte
+	EncodeIndex(i int, w *bytes.Buffer)
 }
 
 func DeriveSha(list DerivableList) common.Hash {
@@ -67,7 +70,7 @@ func DeriveSha(list DerivableList) common.Hash {
 		value.Reset()
 
 		if curr.Len() > 0 {
-			value.Write(list.GetRlp(i))
+			list.EncodeIndex(i, &value)
 			leafData.Value = rlphacks.RlpEncodedBytes(value.Bytes())
 			groups, branches, hashes, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &leafData, groups, branches, hashes, false)
 		}
@@ -155,4 +158,32 @@ func intsize(i uint) (size int) {
 			return size
 		}
 	}
+}
+
+// hasherPool holds LegacyKeccak hashers.
+var hasherPool = sync.Pool{
+	New: func() interface{} {
+		return sha3.NewLegacyKeccak256()
+	},
+}
+
+func rlpHash(x interface{}) (h common.Hash) {
+	sha := hasherPool.Get().(crypto.KeccakState)
+	defer hasherPool.Put(sha)
+	sha.Reset()
+	rlp.Encode(sha, x) //nolint:errcheck
+	sha.Read(h[:])     //nolint:errcheck
+	return h
+}
+
+// prefixedRlpHash writes the prefix into the hasher before rlp-encoding the
+// given interface. It's used for typed transactions.
+func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
+	sha := hasherPool.Get().(crypto.KeccakState)
+	defer hasherPool.Put(sha)
+	sha.Reset()
+	sha.Write([]byte{prefix})
+	rlp.Encode(sha, x)
+	sha.Read(h[:])
+	return h
 }

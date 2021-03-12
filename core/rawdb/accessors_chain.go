@@ -759,8 +759,8 @@ func (s badBlockList) Less(i, j int) bool {
 func (s badBlockList) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
 // ReadBadBlock retrieves the bad block with the corresponding block hash.
-func ReadBadBlock(db ethdb.Reader, hash common.Hash) *types.Block {
-	blob, err := db.Get(badBlockKey)
+func ReadBadBlock(db ethdb.Database, hash common.Hash) *types.Block {
+	blob, err := db.Get(dbutils.InvalidBlock, []byte(dbutils.InvalidBlock))
 	if err != nil {
 		return nil
 	}
@@ -778,8 +778,8 @@ func ReadBadBlock(db ethdb.Reader, hash common.Hash) *types.Block {
 
 // ReadAllBadBlocks retrieves all the bad blocks in the database.
 // All returned blocks are sorted in reverse order by number.
-func ReadAllBadBlocks(db ethdb.Reader) []*types.Block {
-	blob, err := db.Get(badBlockKey)
+func ReadAllBadBlocks(db ethdb.Database) []*types.Block {
+	blob, err := db.Get(dbutils.InvalidBlock, []byte(dbutils.InvalidBlock))
 	if err != nil {
 		return nil
 	}
@@ -796,8 +796,8 @@ func ReadAllBadBlocks(db ethdb.Reader) []*types.Block {
 
 // WriteBadBlock serializes the bad block into the database. If the cumulated
 // bad blocks exceeds the limitation, the oldest will be dropped.
-func WriteBadBlock(db ethdb.KeyValueStore, block *types.Block) {
-	blob, err := db.Get(badBlockKey)
+func WriteBadBlock(db ethdb.Database, block *types.Block) {
+	blob, err := db.Get(dbutils.InvalidBlock, []byte(dbutils.InvalidBlock))
 	if err != nil {
 		log.Warn("Failed to load old bad blocks", "error", err)
 	}
@@ -825,14 +825,14 @@ func WriteBadBlock(db ethdb.KeyValueStore, block *types.Block) {
 	if err != nil {
 		log.Crit("Failed to encode bad blocks", "err", err)
 	}
-	if err := db.Put(badBlockKey, data); err != nil {
+	if err := db.Put(dbutils.InvalidBlock, []byte(dbutils.InvalidBlock), data); err != nil {
 		log.Crit("Failed to write bad blocks", "err", err)
 	}
 }
 
 // DeleteBadBlocks deletes all the bad blocks from the database
-func DeleteBadBlocks(db ethdb.KeyValueWriter) {
-	if err := db.Delete(badBlockKey); err != nil {
+func DeleteBadBlocks(db ethdb.Database) {
+	if err := db.Delete(dbutils.InvalidBlock, []byte(dbutils.InvalidBlock), nil); err != nil {
 		log.Crit("Failed to delete bad blocks", "err", err)
 	}
 }

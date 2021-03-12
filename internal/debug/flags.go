@@ -18,6 +18,7 @@ package debug
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -29,6 +30,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/metrics/exp"
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 )
@@ -145,7 +148,7 @@ func SetupCobra(cmd *cobra.Command) error {
 		return err
 	}
 
-	ostream, glogger = log.SetupDefaultTerminalLogger(log.Lvl(lvl), vmodule, backtrace)
+	_, glogger = log.SetupDefaultTerminalLogger(log.Lvl(lvl), vmodule, backtrace)
 	log.PrintOrigins(dbg)
 
 	memprofilerate, err := flags.GetInt(memprofilerateFlag.Name)

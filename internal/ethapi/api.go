@@ -685,15 +685,15 @@ func (s *PublicBlockChainAPI) GetStorageAt(ctx context.Context, address common.A
 
 // CallArgs represents the arguments for a call.
 type CallArgs struct {
-	From       *common.Address   `json:"from"`
-	To         *common.Address   `json:"to"`
-	Gas        *hexutil.Uint64   `json:"gas"`
-	GasPrice   *hexutil.Big      `json:"gasPrice"`
-	Value      *hexutil.Big      `json:"value"`
+	From     *common.Address `json:"from"`
+	To       *common.Address `json:"to"`
+	Gas      *hexutil.Uint64 `json:"gas"`
+	GasPrice *hexutil.Big    `json:"gasPrice"`
+	Value    *hexutil.Big    `json:"value"`
 	// We accept "data" and "input" for backwards-compatibility reasons. "input" is the
 	// newer name and should be preferred by clients.
-	Data  *hexutil.Bytes `json:"data"`
-	Input *hexutil.Bytes `json:"input"`
+	Data       *hexutil.Bytes    `json:"data"`
+	Input      *hexutil.Bytes    `json:"input"`
 	AccessList *types.AccessList `json:"accessList"`
 }
 
@@ -728,7 +728,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64) types.Message {
 	var accessList types.AccessList
 	if args.AccessList != nil {
 		accessList = *args.AccessList
-    }
+	}
 	var input []byte
 	if args.Input != nil {
 		input = *args.Input
@@ -736,7 +736,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64) types.Message {
 		input = *args.Data
 	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, input, data, accessList, false)
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, input, accessList, false)
 	return msg
 }
 
@@ -1175,7 +1175,7 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 	// because the return value of ChainId is zero for those transactions.
 	var signer types.Signer
 	if tx.Protected() {
-		signer = types.LatestSignerForChainID(tx.ChainId())
+		signer = types.LatestSignerForChainID(tx.ChainId().ToBig())
 	} else {
 		signer = types.HomesteadSigner{}
 	}
@@ -1204,7 +1204,7 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 	if tx.Type() == types.AccessListTxType {
 		al := tx.AccessList()
 		result.Accesses = &al
-		result.ChainID = (*hexutil.Big)(tx.ChainId())
+		result.ChainID = (*hexutil.Big)(tx.ChainId().ToBig())
 	}
 	return result
 }
@@ -1534,23 +1534,26 @@ func (args *SendTxArgs) toTransaction() *types.Transaction {
 	}
 
 	var data types.TxData
+	gasPrice, _ := uint256.FromBig((*big.Int)(args.GasPrice))
+	value, _ := uint256.FromBig((*big.Int)(args.Value))
 	if args.AccessList == nil {
 		data = &types.LegacyTx{
 			To:       args.To,
 			Nonce:    uint64(*args.Nonce),
 			Gas:      uint64(*args.Gas),
-			GasPrice: (*big.Int)(args.GasPrice),
-			Value:    (*big.Int)(args.Value),
+			GasPrice: gasPrice,
+			Value:    value,
 			Data:     input,
 		}
 	} else {
+		chainId, _ := uint256.FromBig((*big.Int)(args.ChainID))
 		data = &types.AccessListTx{
 			To:         args.To,
-			ChainID:    (*big.Int)(args.ChainID),
+			ChainID:    chainId,
 			Nonce:      uint64(*args.Nonce),
 			Gas:        uint64(*args.Gas),
-			GasPrice:   (*big.Int)(args.GasPrice),
-			Value:      (*big.Int)(args.Value),
+			GasPrice:   gasPrice,
+			Value:      value,
 			Data:       input,
 			AccessList: *args.AccessList,
 		}

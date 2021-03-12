@@ -110,7 +110,7 @@ func init() {
 		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "tg-ethash")
 		}
-		DefaultConfig.Ethash.DatasetDir = filepath.Join(home, ".local/share/tg-ethash")
+		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/tg-ethash")
 	}
 }
 
@@ -225,8 +225,8 @@ type Config struct {
 	CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
 
 	// Berlin block override (TODO: remove after the fork)
-	StagedSync *stagedsync.StagedSync `toml:"-"`
-	OverrideBerlin *big.Int `toml:",omitempty"`
+	StagedSync     *stagedsync.StagedSync `toml:"-"`
+	OverrideBerlin *big.Int               `toml:",omitempty"`
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.
@@ -248,9 +248,7 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 		return ethash.NewShared()
 	default:
 		engine := ethash.New(ethash.Config{
-			CacheDir:         stack.ResolvePath(config.CacheDir),
 			CachesInMem:      config.CachesInMem,
-			CachesOnDisk:     config.CachesOnDisk,
 			CachesLockMmap:   config.CachesLockMmap,
 			DatasetDir:       config.DatasetDir,
 			DatasetsInMem:    config.DatasetsInMem,

@@ -1178,12 +1178,6 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 			return NonStatTy, err
 		}
 	}
-	// Write the positional metadata for transaction/receipt lookups and preimages
-
-	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
-		rawdb.WritePreimages(bc.db, stateDb.Preimages())
-	}
-
 	status = CanonStatTy
 
 	// Set new head.
@@ -1879,7 +1873,6 @@ func (bc *BlockChain) HeaderChain() *HeaderChain {
 // of the header retrieval mechanisms already need to verify nonces, as well as
 // because nonces can be verified sparsely, not needing to check each.
 func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (int, error) {
-	start := time.Now()
 	if i, err := bc.hc.ValidateHeaderChain(chain, checkFreq); err != nil {
 		return i, err
 	}
@@ -1893,8 +1886,7 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 	}
 	defer bc.doneJob()
 
-	_, err := bc.hc.InsertHeaderChain(chain, start)
-	return 0, err
+	return 0, nil
 }
 
 // CurrentHeader retrieves the current head header of the canonical chain. The

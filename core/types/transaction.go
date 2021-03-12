@@ -21,13 +21,13 @@ import (
 	"container/heap"
 	"errors"
 	"io"
-	"math/big"
 	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 var (
@@ -69,17 +69,17 @@ type TxData interface {
 	txType() byte // returns the type ID
 	copy() TxData // creates a deep copy and initializes all fields
 
-	chainID() *big.Int
+	chainID() *uint256.Int
 	accessList() AccessList
 	data() []byte
 	gas() uint64
-	gasPrice() *big.Int
-	value() *big.Int
+	gasPrice() *uint256.Int
+	value() *uint256.Int
 	nonce() uint64
 	to() *common.Address
 
-	rawSignatureValues() (v, r, s *big.Int)
-	setSignatureValues(chainID, v, r, s *big.Int)
+	rawSignatureValues() (v, r, s *uint256.Int)
+	setSignatureValues(chainID, v, r, s *uint256.Int)
 }
 
 // EncodeRLP implements rlp.Encoder
@@ -88,9 +88,7 @@ func (tx *Transaction) EncodeRLP(w io.Writer) error {
 		return rlp.Encode(w, tx.inner)
 	}
 	// It's an EIP-2718 typed TX envelope.
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
-	buf.Reset()
+	buf := new(bytes.Buffer)
 	if err := tx.encodeTyped(buf); err != nil {
 		return err
 	}
@@ -191,7 +189,7 @@ func (tx *Transaction) setDecoded(inner TxData, size int) {
 	}
 }
 
-func sanityCheckSignature(v *big.Int, r *big.Int, s *big.Int, maybeProtected bool) error {
+func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
 	if isProtectedV(v) && !maybeProtected {
 		return ErrUnexpectedProtection
 	}
@@ -217,7 +215,7 @@ func sanityCheckSignature(v *big.Int, r *big.Int, s *big.Int, maybeProtected boo
 	return nil
 }
 
-func isProtectedV(V *big.Int) bool {
+func isProtectedV(V *uint256.Int) bool {
 	if V.BitLen() <= 8 {
 		v := V.Uint64()
 		return v != 27 && v != 28 && v != 1 && v != 0
@@ -244,7 +242,7 @@ func (tx *Transaction) Type() uint8 {
 // ChainId returns the EIP155 chain ID of the transaction. The return value will always be
 // non-nil. For legacy transactions which are not replay-protected, the return value is
 // zero.
-func (tx *Transaction) ChainId() *big.Int {
+func (tx *Transaction) ChainId() *uint256.Int {
 	return tx.inner.chainID()
 }
 
@@ -258,10 +256,10 @@ func (tx *Transaction) AccessList() AccessList { return tx.inner.accessList() }
 func (tx *Transaction) Gas() uint64 { return tx.inner.gas() }
 
 // GasPrice returns the gas price of the transaction.
-func (tx *Transaction) GasPrice() *big.Int { return new(big.Int).Set(tx.inner.gasPrice()) }
+func (tx *Transaction) GasPrice() *uint256.Int { return new(uint256.Int).Set(tx.inner.gasPrice()) }
 
 // Value returns the ether amount of the transaction.
-func (tx *Transaction) Value() *big.Int { return new(big.Int).Set(tx.inner.value()) }
+func (tx *Transaction) Value() *uint256.Int { return new(uint256.Int).Set(tx.inner.value()) }
 
 // Nonce returns the sender account nonce of the transaction.
 func (tx *Transaction) Nonce() uint64 { return tx.inner.nonce() }
@@ -279,15 +277,15 @@ func (tx *Transaction) To() *common.Address {
 }
 
 // Cost returns gas * gasPrice + value.
-func (tx *Transaction) Cost() *big.Int {
-	total := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas()))
+func (tx *Transaction) Cost() *uint256.Int {
+	total := new(uint256.Int).Mul(tx.GasPrice(), new(uint256.Int).SetUint64(tx.Gas()))
 	total.Add(total, tx.Value())
 	return total
 }
 
 // RawSignatureValues returns the V, R, S signature values of the transaction.
 // The return values should not be modified by the caller.
-func (tx *Transaction) RawSignatureValues() (v, r, s *big.Int) {
+func (tx *Transaction) RawSignatureValues() (v, r, s *uint256.Int) {
 	return tx.inner.rawSignatureValues()
 }
 
@@ -295,15 +293,11 @@ func (tx *Transaction) RawSignatureValues() (v, r, s *big.Int) {
 func (tx *Transaction) GasPriceCmp(other *Transaction) int {
 	return tx.inner.gasPrice().Cmp(other.GasPrice())
 }
-func (tx *Transaction) GasPriceIntCmp(other *uint256.Int) int {
-	return tx.data.Price.Cmp(other)
-}
-func (tx *Transaction) Value() *uint256.Int { return new(uint256.Int).Set(&tx.data.Amount) }
-func (tx *Transaction) Nonce() uint64       { return tx.data.AccountNonce }
-func (tx *Transaction) CheckNonce() bool    { return true }
+
+func (tx *Transaction) CheckNonce() bool { return true }
 
 // GasPriceIntCmp compares the gas price of the transaction against the given price.
-func (tx *Transaction) GasPriceIntCmp(other *big.Int) int {
+func (tx *Transaction) GasPriceIntCmp(other *uint256.Int) int {
 	return tx.inner.gasPrice().Cmp(other)
 }
 
@@ -497,7 +491,7 @@ type Message struct {
 	checkNonce bool
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *big.Int, gasLimit uint64, gasPrice *big.Int, data []byte, accessList AccessList, checkNonce bool) Message {
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte, accessList AccessList, checkNonce bool) Message {
 	return Message{
 		from:       from,
 		to:         to,
@@ -516,9 +510,9 @@ func (tx *Transaction) AsMessage(s Signer) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce(),
 		gasLimit:   tx.Gas(),
-		gasPrice:   new(big.Int).Set(tx.GasPrice()),
+		gasPrice:   *tx.GasPrice(),
 		to:         tx.To(),
-		amount:     tx.Value(),
+		amount:     *tx.Value(),
 		data:       tx.Data(),
 		accessList: tx.AccessList(),
 		checkNonce: true,

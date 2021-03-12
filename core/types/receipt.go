@@ -123,7 +123,6 @@ type v3StoredReceiptRLP struct {
 func NewReceipt(failed bool, cumulativeGasUsed uint64) *Receipt {
 	r := &Receipt{
 		Type:              LegacyTxType,
-		PostState:         common.CopyBytes(root),
 		CumulativeGasUsed: cumulativeGasUsed,
 	}
 	if failed {
@@ -145,9 +144,7 @@ func (r *Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type != AccessListTxType {
 		return ErrTxTypeNotSupported
 	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
-	buf.Reset()
+	buf := new(bytes.Buffer)
 	buf.WriteByte(r.Type)
 	if err := rlp.Encode(buf, data); err != nil {
 		return err
@@ -356,8 +353,6 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
 func (r Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
-	signer := MakeSigner(config, new(big.Int).SetUint64(number))
-
 	logIndex := uint(0) // logIdx is unique within the block and starts from 0
 	if len(txs) != len(r) {
 		return errors.New("transaction and receipt count mismatch")

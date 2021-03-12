@@ -19,7 +19,6 @@ package core
 import (
 	"container/heap"
 	"math"
-	"math/big"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -251,8 +250,8 @@ type txList struct {
 	strict bool         // Whether nonces are strictly continuous or not
 	txs    *txSortedMap // Heap indexed sorted hash map of the transactions
 
-	costcap *big.Int // Price of the highest costing transaction (reset only if exceeds balance)
-	gascap  uint64   // Gas limit of the highest spending transaction (reset only if exceeds block limit)
+	costcap *uint256.Int // Price of the highest costing transaction (reset only if exceeds balance)
+	gascap  uint64       // Gas limit of the highest spending transaction (reset only if exceeds block limit)
 }
 
 // newTxList create a new transaction list for maintaining nonce-indexable fast,
@@ -261,7 +260,7 @@ func newTxList(strict bool) *txList {
 	return &txList{
 		strict:  strict,
 		txs:     newTxSortedMap(),
-		costcap: new(big.Int),
+		costcap: new(uint256.Int),
 	}
 }
 
@@ -319,12 +318,12 @@ func (l *txList) Forward(threshold uint64) types.Transactions {
 // a point in calculating all the costs or if the balance covers all. If the threshold
 // is lower than the costgas cap, the caps will be reset to a new high after removing
 // the newly invalidated transactions.
-func (l *txList) Filter(costLimit *big.Int, gasLimit uint64) (types.Transactions, types.Transactions) {
+func (l *txList) Filter(costLimit *uint256.Int, gasLimit uint64) (types.Transactions, types.Transactions) {
 	// If all transactions are below the threshold, short circuit
 	if l.costcap.Cmp(costLimit) <= 0 && l.gascap <= gasLimit {
 		return nil, nil
 	}
-	l.costcap = new(big.Int).Set(costLimit) // Lower the caps to the thresholds
+	l.costcap = new(uint256.Int).Set(costLimit) // Lower the caps to the thresholds
 	l.gascap = gasLimit
 
 	// Filter out all the transactions above the account's funds
@@ -481,7 +480,7 @@ func (l *txPricedList) Removed(count int) {
 // from the priced list and returns them for further removal from the entire pool.
 //
 // Note: only remote transactions will be considered for eviction.
-func (l *txPricedList) Cap(threshold *big.Int) types.Transactions {
+func (l *txPricedList) Cap(threshold *uint256.Int) types.Transactions {
 	drop := make(types.Transactions, 0, 128) // Remote underpriced transactions to drop
 	for len(*l.remotes) > 0 {
 		// Discard stale transactions if found during cleanup

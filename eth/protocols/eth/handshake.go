@@ -21,9 +21,9 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/forkid"
-	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
+	"github.com/ledgerwatch/turbo-geth/p2p"
 )
 
 const (
@@ -65,11 +65,11 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 			return p2p.DiscReadTimeout
 		}
 	}
-	p.td, p.head = status.TD, status.Head
+	p.headHash = status.Head
 
 	// TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
 	// larger, it will still fit within 100 bits
-	if tdlen := p.td.BitLen(); tdlen > 100 {
+	if tdlen := status.TD.BitLen(); tdlen > 100 {
 		return fmt.Errorf("too large total difficulty: bitlen %d", tdlen)
 	}
 	return nil

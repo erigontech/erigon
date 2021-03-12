@@ -70,9 +70,6 @@ func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint
 		}
 		log.Stack = logstack
 	}
-	if !l.cfg.DisableReturnData {
-		log.ReturnStack = rStack.Data()
-	}
 	return l.encoder.Encode(log)
 }
 

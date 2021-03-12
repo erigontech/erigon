@@ -162,7 +162,7 @@ func (l *StructLogger) CaptureStart(depth int, from common.Address, to common.Ad
 // CaptureState logs a new structured log message and pushes it out to the environment
 //
 // CaptureState also tracks SLOAD/SSTORE ops to track storage change.
-func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack,  rData []byte, contract *Contract, depth int, err error) error {
+func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rData []byte, contract *Contract, depth int, err error) error {
 	// check if already accumulated the specified number of logs
 	if l.cfg.Limit != 0 && l.cfg.Limit <= len(l.logs) {
 		return errTraceLimitReached
@@ -215,7 +215,7 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 		copy(rdata, rData)
 	}
 	// create a new snapshot of the EVM.
-	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, rstack, rdata, storage, depth, env.IntraBlockState.GetRefund(), err}
+	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, rdata, storage, depth, env.IntraBlockState.GetRefund(), err}
 	l.logs = append(l.logs, log)
 	return nil
 }

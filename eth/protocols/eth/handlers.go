@@ -20,11 +20,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // handleGetBlockHeaders handles Block header query, collect the requested headers and reply
@@ -195,32 +194,7 @@ func handleGetNodeData66(backend Backend, msg Decoder, peer *Peer) error {
 }
 
 func answerGetNodeDataQuery(backend Backend, query GetNodeDataPacket, peer *Peer) [][]byte {
-	// Gather state data until the fetch or network limits is reached
-	var (
-		bytes int
-		nodes [][]byte
-	)
-	for lookups, hash := range query {
-		if bytes >= softResponseLimit || len(nodes) >= maxNodeDataServe ||
-			lookups >= 2*maxNodeDataServe {
-			break
-		}
-		// Retrieve the requested state entry
-		if bloom := backend.StateBloom(); bloom != nil && !bloom.Contains(hash[:]) {
-			// Only lookup the trie node if there's chance that we actually have it
-			continue
-		}
-		entry, err := backend.Chain().TrieNode(hash)
-		if len(entry) == 0 || err != nil {
-			// Read the contract code with prefix only to save unnecessary lookups.
-			entry, err = backend.Chain().ContractCodeWithPrefix(hash)
-		}
-		if err == nil && len(entry) > 0 {
-			nodes = append(nodes, entry)
-			bytes += len(entry)
-		}
-	}
-	return nodes
+	return nil
 }
 
 func handleGetReceipts(backend Backend, msg Decoder, peer *Peer) error {
@@ -296,7 +270,7 @@ func handleNewBlock(backend Backend, msg Decoder, peer *Peer) error {
 		log.Warn("Propagated block has invalid uncles", "have", hash, "exp", ann.Block.UncleHash())
 		return nil // TODO(karalabe): return error eventually, but wait a few releases
 	}
-	if hash := types.DeriveSha(ann.Block.Transactions(), trie.NewStackTrie(nil)); hash != ann.Block.TxHash() {
+	if hash := types.DeriveSha(ann.Block.Transactions()); hash != ann.Block.TxHash() {
 		log.Warn("Propagated block has invalid body", "have", hash, "exp", ann.Block.TxHash())
 		return nil // TODO(karalabe): return error eventually, but wait a few releases
 	}

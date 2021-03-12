@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -214,7 +215,7 @@ type TxPool struct {
 	config       TxPoolConfig
 	chainconfig  *params.ChainConfig
 	chaindb      ethdb.Database
-	gasPrice     *big.Int
+	gasPrice     *uint256.Int
 	txFeed       event.Feed
 	scope        event.SubscriptionScope
 	chainHeadCh  chan ChainHeadEvent
@@ -263,22 +264,21 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb eth
 
 	// Create the transaction pool with its initial settings
 	pool := &TxPool{
-		config:         config,
-		chainconfig:    chainconfig,
-		chain:          chain,
-		signer:         types.LatestSigner(chainconfig),
-		pending:        make(map[common.Address]*txList),
-		queue:          make(map[common.Address]*txList),
-		beats:          make(map[common.Address]time.Time),
-		all:            newTxLookup(),
-		chainHeadCh:    make(chan ChainHeadEvent, chainHeadChanSize),
-		reqResetCh:     make(chan *txpoolResetRequest),
-		reqPromoteCh:   make(chan *accountSet),
-		queueTxEventCh: make(chan *types.Transaction),
-		reorgDoneCh:    make(chan chan struct{}),
+		config:          config,
+		chainconfig:     chainconfig,
+		signer:          types.LatestSigner(chainconfig),
+		pending:         make(map[common.Address]*txList),
+		queue:           make(map[common.Address]*txList),
+		beats:           make(map[common.Address]time.Time),
+		all:             newTxLookup(),
+		chainHeadCh:     make(chan ChainHeadEvent, chainHeadChanSize),
+		reqResetCh:      make(chan *txpoolResetRequest),
+		reqPromoteCh:    make(chan *accountSet),
+		queueTxEventCh:  make(chan *types.Transaction),
+		reorgDoneCh:     make(chan chan struct{}),
 		reorgShutdownCh: make(chan struct{}),
-		gasPrice:       new(big.Int).SetUint64(config.PriceLimit),
-		stopCh:         make(chan struct{}),
+		gasPrice:        new(uint256.Int).SetUint64(config.PriceLimit),
+		stopCh:          make(chan struct{}),
 	}
 
 	return pool
@@ -395,7 +395,11 @@ func (pool *TxPool) resetHead(blockGasLimit uint64, blockNumber uint64) {
 	pool.currentState = state.New(state.NewPlainStateReader(pool.chaindb))
 	pool.pendingNonces = newTxNoncer(pool.currentState)
 	pool.currentMaxGas = blockGasLimit
-	pool.istanbul = pool.chainconfig.IsIstanbul(big.NewInt(int64(blockNumber + 1)))
+
+	// Update all fork indicator by next pending block number.
+	next := big.NewInt(int64(blockNumber + 1))
+	pool.istanbul = pool.chainconfig.IsIstanbul(next)
+	pool.eip2718 = pool.chainconfig.IsBerlin(next)
 }
 
 func (pool *TxPool) ResetHead(blockGasLimit uint64, blockNumber uint64) {
@@ -430,22 +434,22 @@ func (pool *TxPool) SubscribeNewTxsEvent(ch chan<- NewTxsEvent) event.Subscripti
 }
 
 // GasPrice returns the current gas price enforced by the transaction pool.
-func (pool *TxPool) GasPrice() *big.Int {
+func (pool *TxPool) GasPrice() *uint256.Int {
 	pool.mu.RLock()
 	defer pool.mu.RUnlock()
 
-	return new(big.Int).Set(pool.gasPrice)
+	return new(uint256.Int).Set(pool.gasPrice)
 }
 
 // SetGasPrice updates the minimum price required by the transaction pool for a
 // new transaction, and drops all transactions below this threshold.
-func (pool *TxPool) SetGasPrice(price *big.Int) {
+func (pool *TxPool) SetGasPrice(price *uint256.Int) {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
 	pool.gasPrice = price
 	for _, tx := range pool.priced.Cap(price) {
-		pool.removeTx(tx.Hash(), false)
+		pool.RemoveTx(tx.Hash(), false)
 	}
 	log.Info("Transaction pool price threshold updated", "price", price)
 }
@@ -565,7 +569,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		return ErrInvalidSender
 	}
 	// Drop non-local transactions under our own minimal accepted gas price
-	if !local && pool.gasPrice.Cmp(tx.GasPrice().ToBig()) > 0 {
+	if !local && pool.gasPrice.Cmp(tx.GasPrice()) > 0 {
 		return ErrUnderpriced
 	}
 	// Ensure the transaction adheres to nonce ordering
@@ -574,7 +578,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	}
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
-	if pool.currentState.GetBalance(from).ToBig().Cmp(tx.Cost()) < 0 {
+	if pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
 		return ErrInsufficientFunds
 	}
 	// Ensure the transaction has more gas than the basic tx fee.
@@ -609,10 +613,10 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 
 	// If the transaction fails basic validation, discard it
 	if pool.currentState != nil {
-	if err := pool.validateTx(tx, isLocal); err != nil {
-		log.Trace("Discarding invalid transaction", "hash", hash, "err", err)
-		invalidTxMeter.Mark(1)
-		return false, err
+		if err := pool.validateTx(tx, isLocal); err != nil {
+			log.Trace("Discarding invalid transaction", "hash", hash, "err", err)
+			invalidTxMeter.Mark(1)
+			return false, err
 		}
 	}
 	// If the transaction pool is full, discard underpriced transactions
@@ -765,11 +769,6 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx *types.T
 	} else {
 		// Nothing was replaced, bump the pending counter
 		pendingGauge.Inc(1)
-	}
-	// Failsafe to work around direct pending inserts (tests)
-	if pool.all.Get(hash) == nil {
-		pool.all.Add(tx)
-		pool.priced.Put(tx)
 	}
 	// Set the potentially new pending nonce and notify any subsystems of the new tx
 	pool.pendingNonces.set(addr, tx.Nonce()+1)
@@ -1143,96 +1142,6 @@ func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, even
 	}
 }
 
-// reset retrieves the current state of the blockchain and ensures the content
-// of the transaction pool is valid with regard to the chain state.
-func (pool *TxPool) reset(oldHead, newHead *types.Header) {
-	// If we're reorging an old state, reinject all dropped transactions
-	var reinject types.Transactions
-
-	if oldHead != nil && oldHead.Hash() != newHead.ParentHash {
-		// If the reorg is too deep, avoid doing it (will happen during fast sync)
-		oldNum := oldHead.Number.Uint64()
-		newNum := newHead.Number.Uint64()
-
-		if depth := uint64(math.Abs(float64(oldNum) - float64(newNum))); depth > 64 {
-			log.Debug("Skipping deep transaction reorg", "depth", depth)
-		} else {
-			// Reorg seems shallow enough to pull in all transactions into memory
-			var discarded, included types.Transactions
-			var (
-				rem = pool.chain.GetBlock(oldHead.Hash(), oldHead.Number.Uint64())
-				add = pool.chain.GetBlock(newHead.Hash(), newHead.Number.Uint64())
-			)
-			if rem == nil {
-				// This can happen if a setHead is performed, where we simply discard the old
-				// head from the chain.
-				// If that is the case, we don't have the lost transactions any more, and
-				// there's nothing to add
-				if newNum >= oldNum {
-					// If we reorged to a same or higher number, then it's not a case of setHead
-					log.Warn("Transaction pool reset with missing oldhead",
-						"old", oldHead.Hash(), "oldnum", oldNum, "new", newHead.Hash(), "newnum", newNum)
-					return
-				}
-				// If the reorg ended up on a lower number, it's indicative of setHead being the cause
-				log.Debug("Skipping transaction reset caused by setHead",
-					"old", oldHead.Hash(), "oldnum", oldNum, "new", newHead.Hash(), "newnum", newNum)
-				// We still need to update the current state s.th. the lost transactions can be readded by the user
-			} else {
-				for rem.NumberU64() > add.NumberU64() {
-					discarded = append(discarded, rem.Transactions()...)
-					if rem = pool.chain.GetBlock(rem.ParentHash(), rem.NumberU64()-1); rem == nil {
-						log.Error("Unrooted old chain seen by tx pool", "block", oldHead.Number, "hash", oldHead.Hash())
-						return
-					}
-				}
-				for add.NumberU64() > rem.NumberU64() {
-					included = append(included, add.Transactions()...)
-					if add = pool.chain.GetBlock(add.ParentHash(), add.NumberU64()-1); add == nil {
-						log.Error("Unrooted new chain seen by tx pool", "block", newHead.Number, "hash", newHead.Hash())
-						return
-					}
-				}
-				for rem.Hash() != add.Hash() {
-					discarded = append(discarded, rem.Transactions()...)
-					if rem = pool.chain.GetBlock(rem.ParentHash(), rem.NumberU64()-1); rem == nil {
-						log.Error("Unrooted old chain seen by tx pool", "block", oldHead.Number, "hash", oldHead.Hash())
-						return
-					}
-					included = append(included, add.Transactions()...)
-					if add = pool.chain.GetBlock(add.ParentHash(), add.NumberU64()-1); add == nil {
-						log.Error("Unrooted new chain seen by tx pool", "block", newHead.Number, "hash", newHead.Hash())
-						return
-					}
-				}
-				reinject = types.TxDifference(discarded, included)
-			}
-		}
-	}
-	// Initialize the internal state to the current head
-	if newHead == nil {
-		newHead = pool.chain.CurrentBlock().Header() // Special case during testing
-	}
-	statedb, err := pool.chain.StateAt(newHead.Root)
-	if err != nil {
-		log.Error("Failed to reset txpool state", "err", err)
-		return
-	}
-	pool.currentState = statedb
-	pool.pendingNonces = newTxNoncer(statedb)
-	pool.currentMaxGas = newHead.GasLimit
-
-	// Inject any transactions discarded due to reorgs
-	log.Debug("Reinjecting stale transactions", "count", len(reinject))
-	senderCacher.recover(pool.signer, reinject)
-	pool.addTxsLocked(reinject, false)
-
-	// Update all fork indicator by next pending block number.
-	next := new(big.Int).Add(newHead.Number, big.NewInt(1))
-	pool.istanbul = pool.chainconfig.IsIstanbul(next)
-	pool.eip2718 = pool.chainconfig.IsBerlin(next)
-}
-
 // promoteExecutables moves transactions that have become processable from the
 // future queue to the set of pending transactions. During this process, all
 // invalidated transactions (low nonce, low balance) are deleted.
@@ -1254,7 +1163,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 		}
 		log.Trace("Removed old queued transactions", "count", len(forwards))
 		// Drop all transactions that are too costly (low balance or out of gas)
-		drops, _ := list.Filter(pool.currentState.GetBalance(addr).ToBig(), pool.currentMaxGas)
+		drops, _ := list.Filter(pool.currentState.GetBalance(addr), pool.currentMaxGas)
 		for _, tx := range drops {
 			hash := tx.Hash()
 			pool.all.Remove(hash)
@@ -1447,7 +1356,7 @@ func (pool *TxPool) demoteUnexecutables() {
 			log.Trace("Removed old pending transaction", "hash", hash)
 		}
 		// Drop all transactions that are too costly (low balance or out of gas), and queue any invalids back for later
-		drops, invalids := list.Filter(pool.currentState.GetBalance(addr).ToBig(), pool.currentMaxGas)
+		drops, invalids := list.Filter(pool.currentState.GetBalance(addr), pool.currentMaxGas)
 		for _, tx := range drops {
 			hash := tx.Hash()
 			log.Trace("Removed unpayable pending transaction", "hash", hash)

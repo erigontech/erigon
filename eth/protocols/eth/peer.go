@@ -22,10 +22,10 @@ import (
 	"sync"
 
 	mapset "github.com/deckarep/golang-set"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 const (
@@ -72,8 +72,8 @@ type Peer struct {
 	rw        p2p.MsgReadWriter // Input/output streams for snap
 	version   uint              // Protocol version negotiated
 
-	head common.Hash // Latest advertised head block hash
-	td   *big.Int    // Latest advertised head block total difficulty
+	headHash   common.Hash // Latest advertised head block hash
+	headNumber uint64      // Latest advertised head number
 
 	knownBlocks     mapset.Set             // Set of block hashes known to be known by this peer
 	queuedBlocks    chan *blockPropagation // Queue of blocks to broadcast to the peer
@@ -132,21 +132,21 @@ func (p *Peer) Version() uint {
 }
 
 // Head retrieves the current head hash and total difficulty of the peer.
-func (p *Peer) Head() (hash common.Hash, td *big.Int) {
+func (p *Peer) Head() (hash common.Hash, number uint64) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
-	copy(hash[:], p.head[:])
-	return hash, new(big.Int).Set(p.td)
+	copy(hash[:], p.headHash[:])
+	return hash, p.headNumber
 }
 
 // SetHead updates the head hash and total difficulty of the peer.
-func (p *Peer) SetHead(hash common.Hash, td *big.Int) {
+func (p *Peer) SetHead(hash common.Hash, number uint64) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	copy(p.head[:], hash[:])
-	p.td.Set(td)
+	copy(p.headHash[:], hash[:])
+	p.headNumber = number
 }
 
 // KnownBlock returns whether peer is known to already have a block.

@@ -42,11 +42,11 @@ import (
 
 // Ethash proof-of-work protocol constants.
 var (
-	FrontierBlockReward       = uint256.NewInt().SetUint64(5e+18) // Block reward in wei for successfully mining a block
-	ByzantiumBlockReward      = uint256.NewInt().SetUint64(3e+18) // Block reward in wei for successfully mining a block upward from Byzantium
-	ConstantinopleBlockReward = uint256.NewInt().SetUint64(2e+18) // Block reward in wei for successfully mining a block upward from Constantinople
-	maxUncles                 = 2                                 // Maximum number of uncles allowed in a single block
-	allowedFutureBlockTime    = 15 * time.Second                  // Max time from current time allowed for blocks, before they're considered future blocks
+	FrontierBlockReward           = uint256.NewInt().SetUint64(5e+18) // Block reward in wei for successfully mining a block
+	ByzantiumBlockReward          = uint256.NewInt().SetUint64(3e+18) // Block reward in wei for successfully mining a block upward from Byzantium
+	ConstantinopleBlockReward     = uint256.NewInt().SetUint64(2e+18) // Block reward in wei for successfully mining a block upward from Constantinople
+	maxUncles                     = 2                                 // Maximum number of uncles allowed in a single block
+	allowedFutureBlockTimeSeconds = int64(15)                         // Max seconds from current time allowed for blocks, before they're considered future blocks
 
 	// calcDifficultyEip2384 is the difficulty adjustment algorithm as specified by EIP 2384.
 	// It offsets the bomb 4M blocks from Constantinople, so in total 9M blocks.
@@ -195,8 +195,8 @@ func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, head
 	}
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
-	return ethash.verifyHeader(chain, headers[index], parent, false, seals[index], unixNow)
 	}
+	return ethash.verifyHeader(chain, headers[index], parent, false, seals[index], unixNow)
 }
 
 // VerifyUncles verifies that the given block's uncles conform to the consensus
@@ -592,7 +592,7 @@ func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header,
 func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
 
 	// Finalize block
-	ethash.Finalize(chain, header, state, txs, uncles)
+	ethash.Finalize(chainConfig, header, state, txs, uncles)
 	// Header seems complete, assemble into a block and return
 	return types.NewBlock(header, txs, uncles, receipts), nil
 }

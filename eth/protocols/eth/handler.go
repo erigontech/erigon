@@ -21,14 +21,13 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/enr"
-	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/p2p/enr"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 const (
@@ -67,9 +66,6 @@ type Handler func(peer *Peer) error
 type Backend interface {
 	// Chain retrieves the blockchain object to serve data.
 	Chain() *core.BlockChain
-
-	// StateBloom retrieves the bloom filter - if any - for state trie nodes.
-	StateBloom() *trie.SyncBloom
 
 	// TxPool retrieves the transaction pool object to serve data.
 	TxPool() TxPool
