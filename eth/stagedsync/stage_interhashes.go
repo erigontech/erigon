@@ -151,14 +151,10 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 			"root hash", hash.Hex(),
 			"gen AccTrie", generationIHTook,
 		)
-		load := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return next(k, k, value)
-		}
-
-		if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
+		if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
-		if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
+		if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
 	}
