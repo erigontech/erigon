@@ -83,7 +83,7 @@ func (stagedSync *StagedSync) Prepare(
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
 			d:                     d,
-			chainConfig:           chainConfig,
+			ChainConfig:           chainConfig,
 			chainContext:          chainContext,
 			vmConfig:              vmConfig,
 			DB:                    db,

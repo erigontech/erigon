@@ -8,6 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -168,8 +169,8 @@ type HeaderDownload struct {
 	persistedLinkLimit     int                      // Maximum allowed number of persisted links
 	anchorLimit            int                      // Maximum allowed number of anchors
 	highestTotalDifficulty uint256.Int
-	calcDifficultyFunc     CalcDifficultyFunc
-	verifySealFunc         VerifySealFunc
+	engine                 consensus.Engine
+	headerReader           consensus.ChainHeaderReader
 	highestInDb            uint64 // Height of the highest block header in the database
 	initialHash            common.Hash
 	stageReady             bool
@@ -191,8 +192,7 @@ type HeaderRecord struct {
 func NewHeaderDownload(
 	anchorLimit int,
 	linkLimit int,
-	calcDifficultyFunc CalcDifficultyFunc,
-	verifySealFunc VerifySealFunc,
+	engine consensus.Engine,
 ) *HeaderDownload {
 	hd := &HeaderDownload{
 		badHeaders:         make(map[common.Hash]struct{}),
@@ -200,8 +200,7 @@ func NewHeaderDownload(
 		persistedLinkLimit: linkLimit / 2,
 		linkLimit:          linkLimit / 2,
 		anchorLimit:        anchorLimit,
-		calcDifficultyFunc: calcDifficultyFunc,
-		verifySealFunc:     verifySealFunc,
+		engine:             engine,
 		preverifiedHashes:  make(map[common.Hash]struct{}),
 		links:              make(map[common.Hash]*Link),
 		stageReadyCh:       make(chan struct{}, 1), // channel needs to have capacity at least 1, so that the signal is not lost
@@ -246,7 +245,6 @@ func (pp PeerPenalty) String() string {
 // The headers are "fed" by repeatedly calling the FeedHeader function.
 type HeaderInserter struct {
 	logPrefix      string
-	tx             ethdb.DbWithPendingMutations
 	batch          ethdb.DbWithPendingMutations
 	prevHash       common.Hash // Hash of previously seen header - to filter out potential duplicates
 	prevHeight     uint64
@@ -258,10 +256,9 @@ type HeaderInserter struct {
 	headerProgress uint64
 }
 
-func NewHeaderInserter(logPrefix string, tx, batch ethdb.DbWithPendingMutations, localTd *big.Int, headerProgress uint64) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, batch ethdb.DbWithPendingMutations, localTd *big.Int, headerProgress uint64) *HeaderInserter {
 	return &HeaderInserter{
 		logPrefix:      logPrefix,
-		tx:             tx,
 		batch:          batch,
 		localTd:        localTd,
 		headerProgress: headerProgress,

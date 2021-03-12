@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
@@ -27,6 +28,7 @@ func StageLoop(
 	db ethdb.Database,
 	hd *headerdownload.HeaderDownload,
 	bd *bodydownload.BodyDownload,
+	chainConfig *params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []byte),
@@ -75,7 +77,7 @@ func StageLoop(
 		cc := &core.TinyChainContext{}
 		cc.SetDB(tx)
 		//cc.SetEngine(d.blockchain.Engine())
-		st, err1 := sync.Prepare(nil, nil /* chainConfig */, cc, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", nil, 512*1024*1024, make(chan struct{}), nil, nil, func() error { return nil }, nil, initialCycle)
+		st, err1 := sync.Prepare(nil, chainConfig, cc, &vm.Config{}, db, writeDB, "downloader", ethdb.DefaultStorageMode, ".", nil, 512*1024*1024, make(chan struct{}), nil, nil, func() error { return nil }, nil, initialCycle)
 		if err1 != nil {
 			return fmt.Errorf("prepare staged sync: %w", err1)
 		}
@@ -159,7 +161,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Headers,
 					Description: "Download headers",
 					ExecFunc: func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, headerReqSend, world.InitialCycle, wakeUpChan)
+						return stagedsync.HeadersForward(s, u, ctx, world.TX, hd, world.ChainConfig, headerReqSend, world.InitialCycle, wakeUpChan)
 					},
 					UnwindFunc: func(u *stagedsync.UnwindState, s *stagedsync.StageState) error {
 						return stagedsync.HeadersUnwind(u, s, world.TX)

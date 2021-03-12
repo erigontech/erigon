@@ -8,9 +8,11 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/turbo/stages/headerdownload"
 )
 
@@ -21,6 +23,7 @@ func HeadersForward(
 	ctx context.Context,
 	db ethdb.Database,
 	hd *headerdownload.HeaderDownload,
+	chainConfig *params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	initialCycle bool,
 	wakeUpChan chan struct{},
@@ -73,7 +76,8 @@ func HeadersForward(
 	if err1 != nil {
 		return err1
 	}
-	headerInserter := headerdownload.NewHeaderInserter(logPrefix, tx, batch, localTd, headerProgress)
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, batch, localTd, headerProgress)
+	hd.SetHeaderReader(&chainReader{config: chainConfig, batch: batch})
 
 	var req *headerdownload.HeaderRequest
 	var peer []byte
@@ -139,7 +143,8 @@ func HeadersForward(
 		case <-wakeUpChan:
 			log.Debug("headerLoop woken up by the incoming request")
 		}
-		if initialCycle && headerInserter.AnythingDone() && hd.NoAnchors() {
+		if initialCycle && hd.InSync() {
+			fmt.Printf("Top seen height: %d\n", hd.TopSeenHeight())
 			stopped = true
 		}
 	}
@@ -240,3 +245,16 @@ func logProgressHeaders(logPrefix string, prev, now uint64, batch ethdb.DbWithPe
 
 	return now
 }
+
+type chainReader struct {
+	config *params.ChainConfig
+	batch  ethdb.DbWithPendingMutations
+}
+
+func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
+func (cr chainReader) CurrentHeader() *types.Header { panic("") }
+func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return rawdb.ReadHeader(cr.batch, hash, number)
+}
+func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header  { panic("") }
+func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header { panic("") }

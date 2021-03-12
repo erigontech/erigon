@@ -281,7 +281,7 @@ func New(stack *node.Node, config *Config) (*Ethereum, error) {
 		chainKV:        chainDb.(ethdb.HasKV).KV(),
 		eventMux:       stack.EventMux(),
 		accountManager: stack.AccountManager(),
-		engine:         CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
+		engine:         CreateConsensusEngine(chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
 		networkID:      config.NetworkID,
 		gasPrice:       config.Miner.GasPrice,
 		etherbase:      config.Miner.Etherbase,
@@ -516,7 +516,7 @@ func makeExtraData(extra []byte) []byte {
 }
 
 // CreateConsensusEngine creates the required type of consensus engine instance for an Ethereum service
-func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) consensus.Engine {
 	// If proof-of-authority is requested, set it up
 	if chainConfig.Clique != nil {
 		return clique.New(chainConfig.Clique, db)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
@@ -123,17 +124,6 @@ func (hd *HeaderDownload) findLink(segment *ChainSegment, start int) (found bool
 		}
 	}
 	return false, len(segment.Headers)
-}
-
-// VerifySeals verifies Proof Of Work for the part of the given chain segment
-// It reports first verification error, or returns nil
-func (hd *HeaderDownload) verifySeals(segment *ChainSegment, start, end int) error {
-	for _, header := range segment.Headers[start:end] {
-		if err := hd.verifySealFunc(header); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
@@ -422,19 +412,17 @@ func (hd *HeaderDownload) anchorState() string {
 	return strings.Join(ss, "\n")
 }
 
-func InitPreverifiedHashes(network string) (map[common.Hash]struct{}, uint64) {
+func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
 	var encodings []string
 	var height uint64
-	switch network {
+	switch chain {
 	case "mainnet":
 		encodings = mainnetPreverifiedHashes
 		height = mainnetPreverifiedHeight
 	default:
-		log.Error("Hard coded headers not found for", "network", network)
+		log.Error("Preverified hashes not found for", "chain", chain)
 		return nil, 0
 	}
-
-	// Insert hard-coded headers if present
 	return DecodeHashes(encodings), height
 }
 
@@ -567,7 +555,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 			heap.Remove(hd.linkQueue, link.idx)
 		}
 		if !link.preverified {
-			if err := hd.verifySealFunc(link.header); err != nil {
+			if err := hd.engine.VerifySeal(hd.headerReader, link.header); err != nil {
 				log.Error("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
 				// skip this link and its children
 				continue
@@ -734,7 +722,7 @@ func (hi *HeaderInserter) AnythingDone() bool {
 }
 
 //nolint:interfacer
-func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
+func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool) {
 	log.Debug("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -744,7 +732,12 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment) {
 		log.Debug("Duplicate segment")
 		return
 	}
-	hd.topSeenHeight = segment.Headers[len(segment.Headers)-1].Number.Uint64()
+	if newBlock {
+		height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
+		if height > hd.topSeenHeight {
+			hd.topSeenHeight = segment.Headers[len(segment.Headers)-1].Number.Uint64()
+		}
+	}
 	startNum := segment.Headers[start].Number.Uint64()
 	endNum := segment.Headers[end-1].Number.Uint64()
 	// There are 4 cases
@@ -822,8 +815,14 @@ func (hd *HeaderDownload) TopSeenHeight() uint64 {
 	return hd.topSeenHeight
 }
 
-func (hd *HeaderDownload) NoAnchors() bool {
+func (hd *HeaderDownload) InSync() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return len(hd.anchors) == 0 && hd.highestInDb >= hd.preverifiedHeight
+	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight
+}
+
+func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderReader) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.headerReader = headerReader
 }

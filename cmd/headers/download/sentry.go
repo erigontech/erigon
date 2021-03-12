@@ -114,7 +114,7 @@ func makeP2PServer(
 	p2pConfig.Logger = log.New()
 	p2pConfig.MaxPeers = 100
 	p2pConfig.Protocols = []p2p.Protocol{}
-	p2pConfig.NodeDatabase = "downloader_nodes"
+	p2pConfig.NodeDatabase = fmt.Sprintf("nodes_%x", genesisHash)
 	p2pConfig.ListenAddr = fmt.Sprintf(":%d", port)
 	pMap := map[string]p2p.Protocol{
 		eth.ProtocolName: {
