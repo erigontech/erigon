@@ -145,7 +145,7 @@ func HeadersForward(
 		}
 		if initialCycle && hd.InSync() {
 			fmt.Printf("Top seen height: %d\n", hd.TopSeenHeight())
-			stopped = true
+			break
 		}
 	}
 	if err := s.Update(tx, headerInserter.GetHighest()); err != nil {
@@ -159,7 +159,10 @@ func HeadersForward(
 		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), headerInserter.GetHighestHash(), batch); err != nil {
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
 		}
-		s.Done()
+		if !stopped {
+			// Do not switch to the next stage if the headers stage was interrupted
+			s.Done()
+		}
 	}
 	if _, err := batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
