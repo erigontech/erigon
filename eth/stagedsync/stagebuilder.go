@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -51,6 +52,8 @@ type StageParameters struct {
 	notifier              ChainEventNotifier
 	silkwormExecutionFunc unsafe.Pointer
 	InitialCycle          bool
+	miningBlock           *types.Block
+	miningStateRoot       common.Hash
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -227,7 +230,8 @@ func DefaultStages() StageBuilders {
 					ID:          stages.IntermediateHashes,
 					Description: "Generate intermediate hashes and computing state root",
 					ExecFunc: func(s *StageState, u Unwinder) error {
-						return SpawnIntermediateHashesStage(s, world.TX, true /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
+						_, err := SpawnIntermediateHashesStage(s, world.TX, true /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
+						return err
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState) error {
 						return UnwindIntermediateHashesStage(u, s, world.TX, world.cache, world.TmpDir, world.QuitCh)
@@ -373,6 +377,133 @@ func DefaultStages() StageBuilders {
 						}
 						return s.DoneAndUpdate(world.TX, executionAt)
 					},
+				}
+			},
+		},
+	}
+}
+
+func MiningStages() StageBuilders {
+	return []StageBuilder{
+		{
+			ID: stages.MiningCreateBlock,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.MiningCreateBlock,
+					Description: "Mining: construct new block from tx pool",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnMiningExecuteBlockStage(s, world.TX,
+							world.chainConfig, world.chainContext, world.vmConfig, world.miningBlock,
+							world.QuitCh,
+							ExecuteBlockStageParams{
+								WriteReceipts:         world.storageMode.Receipts,
+								Cache:                 world.cache,
+								BatchSize:             world.batchSize,
+								ChangeSetHook:         world.changeSetHook,
+								ReaderBuilder:         world.stateReaderBuilder,
+								WriterBuilder:         world.stateWriterBuilder,
+								SilkwormExecutionFunc: world.silkwormExecutionFunc,
+							})
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						return nil
+					},
+				}
+			},
+		},
+		{
+			ID: stages.MiningExecution,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.MiningExecution,
+					Description: "Mining: execute new block",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnMiningExecuteBlockStage(s, world.TX,
+							world.chainConfig, world.chainContext, world.vmConfig, world.miningBlock,
+							world.QuitCh,
+							ExecuteBlockStageParams{
+								WriteReceipts:         world.storageMode.Receipts,
+								Cache:                 world.cache,
+								BatchSize:             world.batchSize,
+								ChangeSetHook:         world.changeSetHook,
+								ReaderBuilder:         world.stateReaderBuilder,
+								WriterBuilder:         world.stateWriterBuilder,
+								SilkwormExecutionFunc: world.silkwormExecutionFunc,
+							})
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						return nil
+					},
+				}
+			},
+		},
+		{
+			ID: stages.MiningExecution,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.MiningExecution,
+					Description: "Execute blocks w/o hash checks",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnMiningExecuteBlockStage(s, world.TX,
+							world.chainConfig, world.chainContext, world.vmConfig, world.miningBlock,
+							world.QuitCh,
+							ExecuteBlockStageParams{
+								WriteReceipts:         world.storageMode.Receipts,
+								Cache:                 world.cache,
+								BatchSize:             world.batchSize,
+								ChangeSetHook:         world.changeSetHook,
+								ReaderBuilder:         world.stateReaderBuilder,
+								WriterBuilder:         world.stateWriterBuilder,
+								SilkwormExecutionFunc: world.silkwormExecutionFunc,
+							})
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error {
+						return nil
+					},
+				}
+			},
+		},
+		{
+			ID: stages.HashState,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.HashState,
+					Description: "Hash the key in the state",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnHashStateStage(s, world.TX, world.cache, world.TmpDir, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
+				}
+			},
+		},
+		{
+			ID: stages.IntermediateHashes,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.IntermediateHashes,
+					Description: "Generate intermediate hashes and computing state root",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						stateRoot, err := SpawnIntermediateHashesStage(s, world.TX, true /* checkRoot */, world.cache, world.TmpDir, world.QuitCh)
+						if err != nil {
+							return err
+						}
+						world.miningStateRoot = stateRoot
+						return nil
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
+				}
+			},
+		},
+		{
+			ID: stages.MiningFinish,
+			Build: func(world StageParameters) *Stage {
+				return &Stage{
+					ID:          stages.MiningFinish,
+					Description: "Mining: create and propagate valid block",
+					ExecFunc: func(s *StageState, u Unwinder) error {
+						return SpawnMiningFinalStage(s, world.TX, world.miningBlock, world.miningStateRoot, world.QuitCh)
+					},
+					UnwindFunc: func(u *UnwindState, s *StageState) error { return nil },
 				}
 			},
 		},

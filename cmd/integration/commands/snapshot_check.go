@@ -175,7 +175,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		expectedRootHash := syncHeadHeader.Root
 
 		tt := time.Now()
-		err = stagedsync.RegenerateIntermediateHashes("", tx, true, nil, tmpDir, expectedRootHash, ctx.Done())
+		_, err = stagedsync.RegenerateIntermediateHashes("", tx, true, nil, tmpDir, expectedRootHash, ctx.Done())
 		if err != nil {
 			tx.Rollback()
 			return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
@@ -274,7 +274,7 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 		stage6 := progress(stages.IntermediateHashes)
 		stage6.BlockNumber = blockNumber - 1
 		log.Info("Stage6", "progress", stage6.BlockNumber)
-		if err = stagedsync.SpawnIntermediateHashesStage(stage5, tx, true, nil, tmpDir, ch); err != nil {
+		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, tx, true, nil, tmpDir, ch); err != nil {
 			log.Error("Error on ih", "err", err, "block", blockNumber)
 			return fmt.Errorf("spawnIntermediateHashesStage %w", err)
 		}

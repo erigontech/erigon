@@ -439,7 +439,7 @@ func stageTrie(db ethdb.Database, ctx context.Context) error {
 			return err
 		}
 	} else {
-		if err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, true /* checkRoot */, cache, tmpdir, ch); err != nil {
+		if _, err := stagedsync.SpawnIntermediateHashesStage(stage5, tx, true /* checkRoot */, cache, tmpdir, ch); err != nil {
 			return err
 		}
 	}

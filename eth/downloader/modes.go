@@ -38,6 +38,8 @@ const (
 	MgrSyncName    = "mgr"
 )
 
+const MiningEnabled = true
+
 func (mode SyncMode) IsValid() bool {
 	return mode == StagedSync || mode == FullSync // needed for some (turbo-geth/console) tests
 }

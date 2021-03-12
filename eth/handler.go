@@ -130,6 +130,7 @@ type handler struct {
 	cacheSize     datasize.ByteSize
 	batchSize     datasize.ByteSize
 	stagedSync    *stagedsync.StagedSync
+	mining        *stagedsync.StagedSync
 	currentHeight uint64 // Atomic variable to contain chain height
 }
 

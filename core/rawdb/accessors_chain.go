@@ -585,7 +585,7 @@ func WriteReceipts(tx DatabaseWriter, number uint64, receipts types.Receipts) er
 }
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
-func AppendReceipts(tx ethdb.DbWithPendingMutations, blockNumber uint64, receipts types.Receipts) error {
+func AppendReceipts(tx ethdb.Database, blockNumber uint64, receipts types.Receipts) error {
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 	for txId, r := range receipts {
 		if len(r.Logs) == 0 {

@@ -36,6 +36,9 @@ var (
 	Bodies              SyncStage = []byte("Bodies")              // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders             SyncStage = []byte("Senders")             // "From" recovered from signatures, bodies re-written
 	Execution           SyncStage = []byte("Execution")           // Executing each block w/o buildinf a trie
+	MiningCreateBlock   SyncStage = []byte("MiningCreateBlock")   // Executing each block w/o buildinf a trie
+	MiningExecution     SyncStage = []byte("MiningExecution")     // Executing each block w/o buildinf a trie
+	MiningFinish        SyncStage = []byte("MiningFinish")        // Executing each block w/o buildinf a trie
 	IntermediateHashes  SyncStage = []byte("IntermediateHashes")  // Generate intermediate hashes, calculate the state root hash
 	HashState           SyncStage = []byte("HashState")           // Apply Keccak256 to all the keys in the state
 	AccountHistoryIndex SyncStage = []byte("AccountHistoryIndex") // Generating history index for accounts

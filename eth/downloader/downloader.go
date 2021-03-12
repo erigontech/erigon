@@ -178,7 +178,9 @@ type Downloader struct {
 	bodiesUnwinder stagedsync.Unwinder
 
 	stagedSyncState *stagedsync.State
+	miningState     *stagedsync.State
 	stagedSync      *stagedsync.StagedSync
+	mining          *stagedsync.StagedSync
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -647,6 +649,42 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, blockNumb
 				log.Info("Commit cycle", "in", time.Since(commitStart))
 			}
 			return errTx
+		}
+
+		if !MiningEnabled { // TODO: replace with logic of like "if we are far from chain head, then no reason for mining, yet"
+			return nil
+		}
+
+		tx, err = d.stateDB.Begin(context.Background(), ethdb.RW)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		d.miningState, err = d.mining.Prepare(
+			d,
+			d.chainConfig,
+			cc,
+			d.blockchain.GetVMConfig(),
+			nil,
+			tx,
+			p.id,
+			d.storageMode,
+			d.tmpdir,
+			cache,
+			d.batchSize,
+			d.quitCh,
+			fetchers,
+			txPool,
+			poolStart,
+			nil,
+		)
+		if err != nil {
+			return err
+		}
+		err = d.miningState.Run(tx, tx)
+		if err != nil {
+			return err
 		}
 
 		return nil

@@ -381,6 +381,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
+	mining := stagedsync.New(stagedsync.MiningStages(), stagedsync.UnwindOrder{}, stagedsync.OptionalParameters{})
+
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
 			// load peer cert/key, ca cert
@@ -446,6 +448,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.handler.SetTmpDir(tmpdir)
 	eth.handler.SetBatchSize(config.CacheSize, config.BatchSize)
 	eth.handler.SetStagedSync(stagedSync)
+	eth.handler.SetMiningStage(mining)
 
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 	gpoParams := config.GPO
