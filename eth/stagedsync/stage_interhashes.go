@@ -92,7 +92,7 @@ func SpawnIntermediateHashesStage(s *StageState, db ethdb.Database, checkRoot bo
 }
 
 func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot bool, cache *shards.StateCache, tmpdir string, expectedRootHash common.Hash, quit <-chan struct{}) error {
-	log.Info(fmt.Sprintf("[%s] Regeneration intermediate hashes started", logPrefix))
+	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes started", logPrefix))
 	_ = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.TrieOfAccountsBucket, dbutils.TrieOfStorageBucket)
 
 	if cache != nil {
@@ -147,7 +147,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.Database, checkRoot
 		if checkRoot && hash != expectedRootHash {
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
-		log.Debug("Collection finished",
+		log.Info("Collection finished",
 			"root hash", hash.Hex(),
 			"gen AccTrie", generationIHTook,
 		)
@@ -270,7 +270,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	} else {
 		changeSetBucket = dbutils.PlainAccountChangeSetBucket
 	}
-	log.Info(fmt.Sprintf("[%s] Unwinding of intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
+	log.Info(fmt.Sprintf("[%s] Unwinding of trie hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeBlockNumber(to + 1)
 
