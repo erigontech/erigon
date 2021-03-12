@@ -405,10 +405,10 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.Datab
 			return next(k, k, value)
 		}
 
-		if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
+		if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
-		if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
+		if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
 	}
@@ -525,13 +525,10 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 			return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 		}
 		log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(), "in", time.Since(calcStart))
-		load := func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return next(k, k, value)
-		}
-		if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
+		if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
-		if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, load, etl.TransformArgs{Quit: quit}); err != nil {
+		if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
 	}
